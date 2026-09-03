@@ -522,18 +522,25 @@ def check_output_dir(path):
 
 
 # ---- the manifest ---------------------------------------------------------------------------
-def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_VOLUME, sources=None):
+def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_VOLUME,
+                   sources=None, sound_move_source=None, sound_confirm_source=None):
     """images = [(art|None, anim|None, music|None[, confirm|None]), ...] -> the media.json
     dict.  A row's fourth field is the image's OWN confirm sound; null (or a 3-field row)
     means it falls back to the menu-wide sound_confirm.
-    sources = [(art_spec, anim_spec[, confirm_spec]), ...] (one per image) adds
-    'art_source' / 'anim_source' / 'confirm_source' - the spec strings the GUI
-    round-trips; a 2-field row leaves confirm_source null."""
+    sources = [(art_spec, anim_spec[, confirm_spec[, music_spec]]), ...] (one per image)
+    adds 'art_source' / 'anim_source' / 'confirm_source' / 'music_source' - the spec
+    strings the GUI round-trips; a shorter row leaves the rest null.
+    sound_move_source / sound_confirm_source are the specs the two MENU sounds were
+    rendered from, so a set whose sound was CHANGED (its file is still there, but from
+    a different source) reads as stale rather than ready - see the GUI's
+    _sounds_missing (David: "i changed the move sound, but it's not playing")."""
     vol = int(volume)
     if not (0 <= vol <= 100):
         raise Refused("volume must be 0..100")
     out = {"images": [], "sound_move": sound_move or None,
-           "sound_confirm": sound_confirm or None, "volume": vol}
+           "sound_confirm": sound_confirm or None, "volume": vol,
+           "sound_move_source": sound_move_source or None,
+           "sound_confirm_source": sound_confirm_source or None}
     if sources is not None and len(sources) != len(images):
         raise Refused("build_manifest: %d sources for %d images" % (len(sources), len(images)))
     for i, row_in in enumerate(images):
@@ -548,6 +555,7 @@ def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_V
             src = tuple(sources[i])
             row["art_source"], row["anim_source"] = src[0], src[1]
             row["confirm_source"] = src[2] if len(src) > 2 else None
+            row["music_source"] = src[3] if len(src) > 3 else None
         out["images"].append(row)
     return out
 
@@ -567,12 +575,13 @@ def validate_manifest(m):
                 if not isinstance(v, str):
                     raise Refused("media.json: images[%d].%s must be a name or null" % (i, k))
                 check_media_name(v)
-        for k in ("art_source", "anim_source", "confirm_source"):
+        for k in ("art_source", "anim_source", "confirm_source", "music_source"):
             v = im.get(k)
             if v is not None and not isinstance(v, str):
                 raise Refused("media.json: images[%d].%s must be a spec string or null" % (i, k))
         extra = set(im) - {"art", "anim", "music", "confirm",
-                           "art_source", "anim_source", "confirm_source"}
+                           "art_source", "anim_source", "confirm_source",
+                           "music_source"}
         if extra:
             raise Refused("media.json: images[%d] has unknown keys %s" % (i, sorted(extra)))
     for k in ("sound_move", "sound_confirm"):
@@ -581,6 +590,10 @@ def validate_manifest(m):
             if not isinstance(v, str):
                 raise Refused("media.json: %s must be a name or null" % k)
             check_media_name(v)
+    for k in ("sound_move_source", "sound_confirm_source"):
+        v = m.get(k)
+        if v is not None and not isinstance(v, str):
+            raise Refused("media.json: %s must be a spec string or null" % k)
     vol = m.get("volume", DEFAULT_VOLUME)
     if not isinstance(vol, int) or isinstance(vol, bool) or not (0 <= vol <= 100):
         raise Refused("media.json: volume must be an integer 0..100")
@@ -1785,7 +1798,8 @@ def cmd_prepare(a):
                        else "%.4g s" % (whole or seconds)))
                 music = os.path.basename(music_out)
             rows.append([art, anim, music, None])
-            specs.append((arts[i]["spec"], anims[i]["spec"], confirm_each[i]))
+            specs.append((arts[i]["spec"], anims[i]["spec"], confirm_each[i],
+                          musics[i]))
         if visual_only:
             move = confirm = None
             say("  sounds: skipped (--visual-only)")
@@ -1800,7 +1814,12 @@ def cmd_prepare(a):
         for s in sources.values():
             s.close()
         shutil.rmtree(work, ignore_errors=True)
-    m = build_manifest(rows, move, confirm, a.volume, sources=specs)
+    # The two menu sounds' own sources, so a set whose sound was CHANGED (the
+    # file is still there, from a different source) reads as stale.  None on a
+    # --visual-only run, which renders no menu sound at all.
+    m = build_manifest(rows, move, confirm, a.volume, sources=specs,
+                       sound_move_source=(None if visual_only else a.sound_move),
+                       sound_confirm_source=(None if visual_only else confirm_wide))
     with open(os.path.join(out, "media.json"), "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
         f.write("\n")

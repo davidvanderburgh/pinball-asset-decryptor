@@ -6612,19 +6612,34 @@ class MultibootPanel:
         which the manifest cannot tell you and the directory can."""
         media = self.media_dir()
         manifest = self._manifest(media) if media else {}
+        _UNSET = object()
 
-        def gone(asked, name):
+        def gone(asked, name, was=_UNSET, now=None):
+            """Whether a sound the form asks for is not ready: not asked for
+            is never missing; asked but no file (or no manifest) is; and a
+            file that IS there but was rendered from a DIFFERENT source than
+            the form now asks for is STALE, which counts as missing (David:
+            "i changed the move sound, but it's not playing... had to press
+            redraw").  A manifest too old to record the source (``was`` is
+            None) cannot be judged stale - the file's presence stands."""
             if not asked:
                 return False
             if not (media and name):
                 return True
-            return not os.path.isfile(os.path.join(media, name))
+            if not os.path.isfile(os.path.join(media, name)):
+                return True
+            if was is not _UNSET and was is not None and was != now:
+                return True
+            return False
 
         missing = []
-        if gone(_media_value(self._move_var.get().strip() or "none") != "none",
-                manifest.get("sound_move")):
+        move_now = _media_value(self._move_var.get().strip() or "none")
+        if gone(move_now != "none", manifest.get("sound_move"),
+                manifest.get("sound_move_source"), move_now):
             missing.append("the move sound")
-        if gone(self._menu_confirm() != "none", manifest.get("sound_confirm")):
+        confirm_now = _media_value(self._confirm_var.get().strip() or "none")
+        if gone(self._menu_confirm() != "none", manifest.get("sound_confirm"),
+                manifest.get("sound_confirm_source"), confirm_now):
             missing.append("the confirm sound")
         rows = manifest.get("images") or []
         for i, row in enumerate(self._rows):
@@ -6632,10 +6647,13 @@ class MultibootPanel:
                 else {}
             # The images are numbered the way the picture numbers them, from
             # one, because this is said to a person (see _image_label).
-            if gone(_media_value(row.music) not in ("", "none"),
-                    entry.get("music")):
+            music_now = _media_value(row.music)
+            if gone(music_now not in ("", "none"), entry.get("music"),
+                    entry.get("music_source"), music_now):
                 missing.append("image %d's music" % (i + 1))
-            if gone(confirm_spec(row) != "none", entry.get("confirm")):
+            confirm_now = confirm_spec(row)
+            if gone(confirm_now != "none", entry.get("confirm"),
+                    entry.get("confirm_source"), confirm_now):
                 missing.append("image %d's confirm sound" % (i + 1))
         return missing
 

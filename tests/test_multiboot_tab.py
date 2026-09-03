@@ -2951,6 +2951,56 @@ def test_the_rendered_gif_is_what_the_preview_reads_its_rate_from(tmp_path):
 # the preview's sound
 # --------------------------------------------------------------------------
 
+def test_a_changed_menu_sound_reads_as_stale(tmp_path):
+    """David: 'i changed the move sound, but it's not playing... i had to
+    manually press redraw'.  The old move.wav is still on disk, so its
+    file is there - but media.json now records the SOURCE each sound was
+    rendered from, and a sound the form asks for from a DIFFERENT source
+    reads as missing, so the set is re-prepared rather than the stale WAV
+    replayed.  A manifest too old to record the source falls back to the
+    file's mere presence (below)."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = panel.media_dir()
+        os.makedirs(media, exist_ok=True)
+        for nm in ("move.wav", "confirm.wav"):
+            open(os.path.join(media, nm), "wb").close()
+        manifest = {
+            "images": [{"art": None, "anim": None, "music": None,
+                        "confirm": None, "music_source": "none"},
+                       {"art": None, "anim": None, "music": None,
+                        "confirm": None, "music_source": "none"}],
+            "sound_move": "move.wav", "sound_confirm": "confirm.wav",
+            "sound_move_source": "synth", "sound_confirm_source": "synth",
+            "volume": 50}
+        with open(os.path.join(media, "media.json"), "w") as f:
+            json.dump(manifest, f)
+        for r in panel._rows:
+            r.music = "none"
+        # the form asks for the same sounds the set was rendered from: ready
+        panel._move_var.set("synth")
+        panel._confirm_var.set("synth")
+        assert panel._sounds_missing() == []
+        assert panel._sounds_ready() is True
+        # change ONLY the move sound to a file: move.wav is still there, but
+        # from a different source now, so it is stale and the set is not ready
+        panel._move_var.set(str(tmp_path / "click.wav"))
+        assert "the move sound" in panel._sounds_missing()
+        assert "the confirm sound" not in panel._sounds_missing()
+        assert panel._sounds_ready() is False
+        # a manifest with no recorded source cannot be judged stale - the
+        # file's presence stands (older sets keep working)
+        del manifest["sound_move_source"]
+        with open(os.path.join(media, "media.json"), "w") as f:
+            json.dump(manifest, f)
+        panel._manifest_at = (None, None)      # drop the mtime cache
+        assert "the move sound" not in panel._sounds_missing()
+    finally:
+        root.destroy()
+
+
 def test_the_menus_sounds_come_off_the_manifest(tmp_path):
     """WHICH WAV the menu plays is media.json's answer, not the form's: the
     form holds specs ('auto', 'synth', a path here), and what the selector

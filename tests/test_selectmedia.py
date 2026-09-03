@@ -33,6 +33,19 @@ def sm():
     return selectmedia
 
 
+def _no_src(m):
+    """A manifest copy without the sound-SOURCE keys (sound_move_source /
+    sound_confirm_source top-level, music_source per image), so a test can
+    assert the media SHAPE against the pre-source expected dict and check
+    the sources separately (item 90's changed-sound staleness)."""
+    m = dict(m)
+    m.pop("sound_move_source", None)
+    m.pop("sound_confirm_source", None)
+    m["images"] = [{k: v for k, v in im.items() if k != "music_source"}
+                   for im in m["images"]]
+    return m
+
+
 # ---- helpers that build tiny media by hand ---------------------------------------------------
 def _chunk(ctype, body):
     return struct.pack(">I", len(body)) + ctype + body + struct.pack(">I", zlib.crc32(ctype + body) & 0xFFFFFFFF)
@@ -251,9 +264,12 @@ def test_media_names_refused(sm, name):
 def test_manifest_shape_round_trips(sm):
     m = sm.build_manifest([("art0.png", None, None), ("art1.png", "anim1.gif", "music1.wav")],
                           "move.wav", "confirm.wav", 50)
-    assert m == {"images": [{"art": "art0.png", "anim": None, "music": None, "confirm": None},
-                            {"art": "art1.png", "anim": "anim1.gif", "music": "music1.wav", "confirm": None}],
-                 "sound_move": "move.wav", "sound_confirm": "confirm.wav", "volume": 50}
+    assert _no_src(m) == {
+        "images": [{"art": "art0.png", "anim": None, "music": None, "confirm": None},
+                   {"art": "art1.png", "anim": "anim1.gif", "music": "music1.wav", "confirm": None}],
+        "sound_move": "move.wav", "sound_confirm": "confirm.wav", "volume": 50}
+    # no sources were given, so the SOURCE keys are all null
+    assert m["sound_move_source"] is None and m["sound_confirm_source"] is None
     assert sm.validate_manifest(json.loads(json.dumps(m))) == m
     assert sm.manifest_files(m) == ["art0.png", "art1.png", "anim1.gif", "music1.wav", "move.wav", "confirm.wav"]
     none = sm.build_manifest([(None, None, None)], None, None, 0)
@@ -268,8 +284,11 @@ def test_manifest_carries_a_per_image_confirm(sm):
     m = sm.build_manifest([("art0.png", None, None, "confirm0.wav"), ("art1.png", None, None)],
                           "move.wav", "confirm.wav", 50,
                           sources=[("auto", "none", "auto@350"), ("auto", "none")])
-    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None, "confirm": "confirm0.wav",
-                              "art_source": "auto", "anim_source": "none", "confirm_source": "auto@350"}
+    got = {k: v for k, v in m["images"][0].items() if k != "music_source"}
+    assert got == {
+        "art": "art0.png", "anim": None, "music": None, "confirm": "confirm0.wav",
+        "art_source": "auto", "anim_source": "none", "confirm_source": "auto@350"}
+    assert m["images"][0]["music_source"] is None    # a 3-field source row
     assert m["images"][1]["confirm"] is None and m["images"][1]["confirm_source"] is None
     assert sm.validate_manifest(json.loads(json.dumps(m))) == m
     assert sm.manifest_files(m) == ["art0.png", "confirm0.wav", "art1.png", "move.wav", "confirm.wav"]
@@ -436,10 +455,14 @@ def test_prepare_from_loose_files_without_a_card(sm, tmp_path, capsys):
     assert rc == 0, text
     with open(os.path.join(out, "media.json")) as f:
         m = json.load(f)
-    assert m == {"images": [{"art": None, "anim": None, "music": None, "confirm": None,
-                             "art_source": "none", "anim_source": "none",
-                             "confirm_source": None}] * 2,
-                 "sound_move": "move.wav", "sound_confirm": "confirm.wav", "volume": 35}
+    assert _no_src(m) == {
+        "images": [{"art": None, "anim": None, "music": None, "confirm": None,
+                    "art_source": "none", "anim_source": "none",
+                    "confirm_source": None}] * 2,
+        "sound_move": "move.wav", "sound_confirm": "confirm.wav", "volume": 35}
+    # the menu sounds were rendered from 'synth', recorded so a change is seen
+    assert m["sound_move_source"] == "synth" and m["sound_confirm_source"] == "synth"
+    assert all(im["music_source"] == "none" for im in m["images"])
     assert sm.wav_contract_error(sm.wav_info(os.path.join(out, "move.wav"))) is None
     assert not os.path.exists(os.path.join(out, "art5.png")), "stale media swept"
     assert "removed stale art5.png" in text
@@ -676,11 +699,15 @@ def test_prepare_caches_art_and_anim_by_sidecar(sm, tmp_path, capsys, monkeypatc
     assert side["params"] == {"kind": "file", "clip": None, "size": [64, 36], "start": 12.0, "seconds": 2.5, "fps": 8}
     with open(os.path.join(out, "media.json")) as f:
         m = json.load(f)
-    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None, "confirm": None,
-                              "art_source": str(still), "anim_source": "none", "confirm_source": None}
-    assert m["images"][1] == {"art": None, "anim": "anim1.gif", "music": None, "confirm": None,
-                              "art_source": "none", "anim_source": "%s@12:2.5:8" % clip,
-                              "confirm_source": None}
+    got = {k: v for k, v in m["images"][0].items() if k != "music_source"}
+    assert got == {
+        "art": "art0.png", "anim": None, "music": None, "confirm": None,
+        "art_source": str(still), "anim_source": "none", "confirm_source": None}
+    got = {k: v for k, v in m["images"][1].items() if k != "music_source"}
+    assert got == {
+        "art": None, "anim": "anim1.gif", "music": None, "confirm": None,
+        "art_source": "none", "anim_source": "%s@12:2.5:8" % clip,
+        "confirm_source": None}
     assert m["sound_move"] is None and m["sound_confirm"] is None
     assert sm.validate_manifest(m) == m
     # run 2: everything cached, no encoder called
@@ -715,11 +742,17 @@ def test_prepare_visual_only_skips_sounds_but_keeps_music(sm, tmp_path, capsys):
     assert "sounds: skipped (--visual-only)" in text and "(visual only)" in text
     with open(os.path.join(out, "media.json")) as f:
         m = json.load(f)
-    assert m == {"images": [{"art": None, "anim": None, "music": None, "confirm": None,
-                             "art_source": "none", "anim_source": "none", "confirm_source": None},
-                            {"art": None, "anim": None, "music": "music1.wav", "confirm": None,
-                             "art_source": "none", "anim_source": "none", "confirm_source": None}],
-                 "sound_move": None, "sound_confirm": None, "volume": 50}
+    assert _no_src(m) == {
+        "images": [{"art": None, "anim": None, "music": None, "confirm": None,
+                    "art_source": "none", "anim_source": "none", "confirm_source": None},
+                   {"art": None, "anim": None, "music": "music1.wav", "confirm": None,
+                    "art_source": "none", "anim_source": "none", "confirm_source": None}],
+        "sound_move": None, "sound_confirm": None, "volume": 50}
+    # a --visual-only run renders no menu sound, so their sources are null too;
+    # image 1's music DID render, so its source is recorded
+    assert m["sound_move_source"] is None and m["sound_confirm_source"] is None
+    assert m["images"][0]["music_source"] == "none"
+    assert m["images"][1]["music_source"] not in (None, "none")
     assert not os.path.exists(os.path.join(out, "move.wav"))
     assert not os.path.exists(os.path.join(out, "confirm.wav"))
     assert sm.wav_contract_error(sm.wav_info(os.path.join(out, "music1.wav"))) is None
@@ -727,8 +760,11 @@ def test_prepare_visual_only_skips_sounds_but_keeps_music(sm, tmp_path, capsys):
 
 def test_manifest_accepts_sources_and_refuses_bad_ones(sm):
     m = sm.build_manifest([("art0.png", None, None)], sources=[("auto", "none")])
-    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None, "confirm": None,
-                              "art_source": "auto", "anim_source": "none", "confirm_source": None}
+    got = {k: v for k, v in m["images"][0].items() if k != "music_source"}
+    assert got == {
+        "art": "art0.png", "anim": None, "music": None, "confirm": None,
+        "art_source": "auto", "anim_source": "none", "confirm_source": None}
+    assert m["images"][0]["music_source"] is None
     assert sm.validate_manifest(m) == m
     assert sm.manifest_files(m) == ["art0.png"]
     with pytest.raises(sm.Refused):
@@ -838,8 +874,10 @@ def test_prepare_gives_one_image_its_own_confirm_and_falls_back_for_the_rest(sm,
     assert rc == 0, text
     with open(os.path.join(out, "media.json")) as f:
         m = json.load(f)
-    assert m["images"][1] == {"art": None, "anim": None, "music": None, "confirm": None,
-                              "art_source": "none", "anim_source": "none", "confirm_source": "none"}
+    got = {k: v for k, v in m["images"][1].items() if k != "music_source"}
+    assert got == {
+        "art": None, "anim": None, "music": None, "confirm": None,
+        "art_source": "none", "anim_source": "none", "confirm_source": "none"}
     assert "removed stale confirm1.wav" in text and "removed stale confirm1.wav.src.json" in text
     assert not os.path.exists(os.path.join(out, "confirm1.wav"))
     assert os.path.isfile(os.path.join(out, "confirm.wav")), "the menu-wide one is untouched"

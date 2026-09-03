@@ -134,6 +134,14 @@ class _FakeAudio:
         return [p for k, p in self.calls if k == kind]
 
 
+@pytest.fixture(autouse=True)
+def _own_preview_knob(tmp_path, monkeypatch):
+    """The preview's volume/mute file is the USER's (beside settings.json);
+    a test must neither read the knob David left the app at nor move it."""
+    monkeypatch.setattr(multiboot_tab, "PREVIEW_AUDIO_CTL_FILE",
+                        str(tmp_path / "preview_audio_ctl.json"))
+
+
 def _fake_audio(monkeypatch):
     """Every player the tab makes from now on is a :class:`_FakeAudio`."""
     made = []
@@ -2798,6 +2806,128 @@ def test_the_previews_volume_and_mute_scale_the_menus_volume(tmp_path,
         again = multiboot_tab.MultibootPanel(other, log=lambda m: None)
         assert float(again._pv_gain_var.get()) == 50.0
         assert again._pv_mute_var.get() is False
+    finally:
+        root.destroy()
+
+
+def test_the_ticks_say_the_frame_on_the_strip_and_not_in_the_log(tmp_path):
+    """David's Log filled with a 'frame N of 150' line per tick.  The
+    caption is the strip's readout; the Log keeps the lines worth
+    reading back."""
+    root, panel = _panel()
+    ppm = _ppm(tmp_path / "f.ppm")
+    clock = [10.0]
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._rows[1].anim = "auto"
+        panel._default_var.set("1")
+        media = panel.media_dir()
+        os.makedirs(media, exist_ok=True)
+        _gif(os.path.join(media, "anim1.gif"), frames=3)
+        fp = preview_fingerprint(panel.form())
+        panel._pv_fp, panel._pv_media = fp, media
+        panel._pv_totals[(fp, 1)] = 3
+        panel._pv_rects[(fp, 1)] = {1: (10, 10, 32, 8)}
+        panel._pv_cache[(fp, 1, 0)] = ppm
+        panel._play_clock = lambda: clock[0]
+        panel._play_t0 = None
+        panel._play_toggled()
+        before = len(panel.log_lines())
+        for _ in range(4):
+            clock[0] += 0.1
+            _tick(root, panel)
+        assert "frame 1 of 3" in panel._pv_status.cget("text")
+        assert len(panel.log_lines()) == before
+        assert "frame 1 of 3" not in _pane(panel)
+    finally:
+        root.destroy()
+
+
+def test_a_music_or_confirm_change_is_heard_at_once(tmp_path, monkeypatch):
+    """David: 'when I change it through the menu, it doesn't immediately
+    stop or update to the new music selection if I choose none'.  The bed
+    stops the moment the row says none; a NEW choice goes quiet until it
+    is rendered, because the file on disk is the old one (the manifest
+    says what it was rendered from)."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = _media_set(panel)
+        old_bed = str(tmp_path / "old.wav")
+        open(old_bed, "wb").close()
+        # the manifest records what music1.wav was rendered from
+        path = os.path.join(media, "media.json")
+        with open(path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        manifest["images"][1]["music_source"] = multiboot_tab.wsl(old_bed)
+        manifest["sound_move_source"] = "auto"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        panel._manifest_at = (None, {})
+        panel._rows[1].music = old_bed
+        panel._pv_fp = "a-render-has-happened"
+        panel._table.select(1)
+        root.update()
+        assert panel._sound_follow() is True
+        assert made[0].looping == os.path.join(media, "music1.wav")
+        # 'none' in the editor: the bed stops NOW, no render in between
+        panel._ed_music.set("none")
+        assert panel._rows[1].music == "none"
+        assert made[0].looping is None
+        # a different bed: quiet until rendered - the old file is not it
+        new_bed = str(tmp_path / "new.wav")
+        open(new_bed, "wb").close()
+        panel._ed_music.set(new_bed)
+        assert panel.menu_sounds()["music"] == ""
+        assert made[0].looping is None
+        # ...and back to the one on disk plays it again
+        panel._ed_music.set(old_bed)
+        assert made[0].looping == os.path.join(media, "music1.wav")
+        # the menu-wide move sound: a changed choice is not the file on disk
+        assert panel.menu_sounds()["move"] == os.path.join(media, "move.wav")
+        panel._move_var.set("synth")
+        assert panel.menu_sounds()["move"] == ""
+        assert panel._sound_click() is False
+    finally:
+        root.destroy()
+
+
+def test_a_sound_only_change_renders_the_sounds_without_a_frame(
+        tmp_path, monkeypatch):
+    """David: 'when I changed the confirm sound, it is not regenerating
+    the preview'.  A confirm or music change moves nothing on the frame,
+    so it never reached a render - and the render was the only thing
+    that asked for the audio half.  The debounce now runs the audio step
+    on its own when a sound is missing or stale."""
+    root, panel = _panel(auto=True)
+    seen = _stand_ins(monkeypatch, tmp_path, frames=3)
+    calls = []
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._default_var.set("1")
+        real = panel._run_commands
+        panel._run_commands = lambda cmds, **kw: calls.append(
+            [label for label, _ in cmds]) or real(cmds, **kw)
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert calls == [["selector", "video", "frame 0"], ["audio"]]
+        # the menu-wide confirm changes: the picture is cached, the sounds
+        # are rendered again on their own
+        panel._confirm_var.set("synth")
+        job, panel._pv_debounce_job = panel._pv_debounce_job, None
+        if job is not None:
+            root.after_cancel(job)
+        assert panel._auto_render() is False
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert calls[-1] == ["audio"]
+        assert len([c for c in calls if "frame 0" in c]) == 1
+        assert len(seen["audio"]) == 2
+        # the clips were never stopped for it
+        assert panel._play_var.get() is True
     finally:
         root.destroy()
 

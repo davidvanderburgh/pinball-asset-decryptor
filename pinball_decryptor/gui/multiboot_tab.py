@@ -4726,11 +4726,19 @@ class MultibootPanel:
                 setattr(row, flag, False)
         row.title = self._ed_title.get()
         row.subtitle = self._ed_sub.get()
+        was = (row.music, row.confirm)
         row.music = self._ed_music.get()
         # "menu" is what the box says and "" is what the row keeps, so a row
         # that inherits compares equal however the dialog spelled it
         conf_v = self._ed_confirm.get()
         row.confirm = "" if conf_v.strip().lower() == "menu" else conf_v
+        if (row.music, row.confirm) != was and self._pv_fp is not None:
+            # HEARD NOW, not after the next render: 'none' stops the bed
+            # this instant, and a new choice goes quiet until it is
+            # rendered (menu_sounds judges the file on disk stale).  Only
+            # once the preview is up (_pv_fp): before a frame there is no
+            # sound to follow, and no device to open for one.
+            self._sound_follow()
         if media:
             self._apply_media(i, row)
         table = getattr(self, "_table", None)
@@ -5428,6 +5436,8 @@ class MultibootPanel:
         self._update_menu_summary()
         self._refresh_sound_cells()
         self._push_volume()
+        if self._pv_fp is not None:
+            self._sound_follow()        # a changed menu sound, heard now
 
     def _update_menu_summary(self):
         """What Menu settings… holds, beside its button.  Clipped to the
@@ -6769,6 +6779,32 @@ class MultibootPanel:
             name = manifest.get("sound_confirm")
             sounds["confirm"] = os.path.join(media, name) \
                 if name and media and self._menu_confirm() != "none" else ""
+        # A SOUND THE FORM HAS MOVED AWAY FROM IS NOT THE SOUND TO PLAY.
+        # The manifest records what each WAV was rendered FROM; when that
+        # is no longer what the form asks for, the file on disk is the OLD
+        # choice, and playing it (David: "it doesn't immediately stop or
+        # update to the new music selection") describes a card nobody is
+        # going to build.  Silence until the new one is rendered - the
+        # audio step follows a change by itself (see _auto_render).
+        rows = manifest.get("images") or []
+        entry = rows[hl] if 0 <= hl < len(rows) and isinstance(rows[hl], dict) else {}
+        if row is not None and sounds["music"]:
+            was = entry.get("music_source")
+            if was is not None and was != _media_value(row.music):
+                sounds["music"] = ""
+        if row is not None and sounds["confirm"] and confirm_spec(row) != "none":
+            was = entry.get("confirm_source")
+            if was is not None and was != confirm_spec(row):
+                sounds["confirm"] = ""
+        if sounds["confirm"] and (row is None or confirm_spec(row) == "none"):
+            was = manifest.get("sound_confirm_source")
+            if was is not None and was != self._menu_confirm():
+                sounds["confirm"] = ""
+        if sounds["move"]:
+            was = manifest.get("sound_move_source")
+            now = _media_value(self._move_var.get().strip() or "none")
+            if was is not None and was != now:
+                sounds["move"] = ""
         return sounds
 
     def _menu_confirm(self):
@@ -6956,7 +6992,7 @@ class MultibootPanel:
             return False                # nothing to play: open nothing
         audio = self._audio_player()
         audio.set_volume(self._effective_volume())
-        audio.loop(music)
+        audio.loop(music or None)
         return True
 
     def _effective_volume(self):
@@ -7576,6 +7612,14 @@ class MultibootPanel:
             if not self._on_screen(key):
                 self.load_frame(self._pv_cache[key], hl, n,
                                 self._pv_totals.get(key[:2]))
+            # THE SOUNDS CAN MOVE WITHOUT THE PICTURE.  A music or confirm
+            # change is not in the picture's fingerprint (nothing on the
+            # frame changes), so it never reached a render - and the
+            # render was the only thing that asked for the audio half
+            # (David: "when I changed the confirm sound, it is not
+            # regenerating the preview").  Ask for it here, on its own.
+            if self._pv_visual is not None and self._sounds_missing():
+                self._prepare_sounds()
             return False
         return self._render_frames(form, hl, [n])
 
@@ -8043,7 +8087,9 @@ class MultibootPanel:
         others = len(clips) - (1 if own else 0)
         if others:
             what += ", %d other clip%s playing" % (others, "" if others == 1 else "s")
-        self._pv_say("%s: %s" % (self._image_label(hl), what))
+        # NOT into the Log: this is said thirty times a second (David's Log
+        # filled with 'frame N of 150' lines).  The strip is the readout.
+        self._pv_say("%s: %s" % (self._image_label(hl), what), log=False)
         return True
 
     def _anim_delay_ms(self, hl):

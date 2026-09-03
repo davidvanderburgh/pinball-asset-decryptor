@@ -3890,16 +3890,39 @@ def test_ticking_sound_renders_the_menus_sounds(tmp_path, monkeypatch):
         panel._sound_var.set(True)
         panel._sound_toggled()
         assert calls == []
-        # ...nor is a menu whose move sound is 'none': there is nothing to
-        # render, whatever the media set has in it
+        # ...nor is a menu that asks for NO sound at all: there is nothing
+        # to render, whatever the media set has in it.  It takes both menu
+        # sounds off, not just the move one - the move sound used to stand
+        # for the pair, and standing for the pair is what let a bed added
+        # afterwards go unrendered.
         _media_set(panel, sounds=False, music=False)
         panel._move_var.set("none")
+        panel._confirm_var.set("none")
         assert panel._sounds_ready() is True
         panel._sound_var.set(False)
         panel._sound_toggled()
         panel._sound_var.set(True)
         panel._sound_toggled()
         assert calls == []
+        # ...AND THE BUG THIS REPLACED: give an image music and the set is
+        # not ready any more, however long move.wav has been sitting there
+        # (David: "i tried adding music to a second image and it's not
+        # sounding when hovering over that").
+        _media_set(panel, sounds=True, music=False)
+        panel._move_var.set("auto")
+        panel._confirm_var.set("auto")
+        assert panel._sounds_ready() is True
+        bed = tmp_path / "bed.wav"
+        bed.write_bytes(b"RIFF")      # a real file, or the form refuses
+        panel._rows[1].music = str(bed)
+        assert panel._sounds_missing() == ["image 2's music"]
+        assert panel._sounds_ready() is False
+        calls[:] = []
+        panel._sound_var.set(False)
+        panel._sound_toggled()
+        panel._sound_var.set(True)
+        panel._sound_toggled()
+        assert [label for label, _ in calls[0]] == ["prepare"]
     finally:
         root.destroy()
 

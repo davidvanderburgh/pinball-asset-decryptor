@@ -5828,19 +5828,57 @@ class MultibootPanel:
         self._pv_say("Rendering the menu's sounds…")
         return True
 
-    def _sounds_ready(self):
-        """Whether the media set ON DISK already has the menu's sounds.
+    def _sounds_missing(self):
+        """Every sound the FORM asks the menu to play that this media set has
+        not got, named, in the order the menu uses them.
 
-        Asked of the manifest rather than of who prepared it: a set a load
-        extracted off a card has them, a set an earlier full prepare left
-        has them, and the half-set the preview renders for itself does not
-        (``--visual-only`` writes no move and no confirm sound).  The FORM
-        says whether there is supposed to be one at all, so a menu whose
-        move sound is 'none' is not missing anything - and the move sound
-        is the marker for the pair, because one prepare writes both."""
-        if _media_value(self._move_var.get().strip() or "none") == "none":
-            return True
-        return bool(self.menu_sounds()["move"])
+        THE MOVE SOUND USED TO STAND FOR ALL OF THEM - "the marker for the
+        pair, because one prepare writes both" - and it cannot.  One prepare
+        writes the two menu sounds AND every image's own music and confirm,
+        so a set that had move.wav counted as ready however many beds were
+        added afterwards, and the bed never got rendered (David: "i tried
+        adding music to a second image and it's not sounding when hovering
+        over that").
+
+        ASKED OF THE FILES, not of who wrote them or of the manifest alone.
+        A set a load extracted off a card has its sounds, an earlier full
+        prepare's has them, and the half-set the preview renders for itself
+        (``--visual-only``: the pictures and the music, no menu sounds) does
+        not - but so does a set whose prepare was REFUSED half way through,
+        which the manifest cannot tell you and the directory can."""
+        media = self.media_dir()
+        manifest = self._manifest(media) if media else {}
+
+        def gone(asked, name):
+            if not asked:
+                return False
+            if not (media and name):
+                return True
+            return not os.path.isfile(os.path.join(media, name))
+
+        missing = []
+        if gone(_media_value(self._move_var.get().strip() or "none") != "none",
+                manifest.get("sound_move")):
+            missing.append("the move sound")
+        if gone(self._menu_confirm() != "none", manifest.get("sound_confirm")):
+            missing.append("the confirm sound")
+        rows = manifest.get("images") or []
+        for i, row in enumerate(self._rows):
+            entry = rows[i] if i < len(rows) and isinstance(rows[i], dict) \
+                else {}
+            # The images are numbered the way the picture numbers them, from
+            # one, because this is said to a person (see _image_label).
+            if gone(_media_value(row.music) not in ("", "none"),
+                    entry.get("music")):
+                missing.append("image %d's music" % (i + 1))
+            if gone(confirm_spec(row) != "none", entry.get("confirm")):
+                missing.append("image %d's confirm sound" % (i + 1))
+        return missing
+
+    def _sounds_ready(self):
+        """Whether every sound the form asks for is on disk (see
+        :meth:`_sounds_missing`)."""
+        return not self._sounds_missing()
 
     def _sound_follow(self):
         """Play what the menu would be playing NOW: the highlighted image's

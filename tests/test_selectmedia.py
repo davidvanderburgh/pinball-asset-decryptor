@@ -845,6 +845,38 @@ def test_sweep_never_removes_what_the_manifest_names(sm, tmp_path):
         assert os.path.exists(os.path.join(d, fn)), fn
 
 
+def test_a_stale_file_that_will_not_go_is_a_warning_not_the_end(sm, tmp_path,
+                                                                monkeypatch):
+    """The media directory lives on a Windows drive and the preview plays what
+    is in it, so a stale file can still be held open when the next prepare
+    sweeps.  It used to raise straight out of `prepare`, which left the picture
+    as it was - deleting an image stopped the preview from redrawing at all.
+
+    Nothing stages an unreferenced file (`plan_media` reads media.json), so the
+    leftover costs nothing and the run goes on."""
+    d = str(tmp_path / "set")
+    os.makedirs(d)
+    for fn in ("art0.png", "anim0.gif", "anim2.gif", "art2.png", "media.json"):
+        with open(os.path.join(d, fn), "wb") as f:
+            f.write(b"x")
+    real = os.remove
+
+    def stubborn(path):
+        if os.path.basename(path) == "anim2.gif":
+            raise PermissionError(13, "Permission denied")
+        return real(path)
+    monkeypatch.setattr(sm.os, "remove", stubborn)
+    said = []
+    m = sm.build_manifest([("art0.png", "anim0.gif", None)], None, None)
+    removed = sm.sweep_stale(d, m, visual_only=True, log=said.append)
+    assert removed == ["art2.png"]                  # the one that could go, went
+    assert os.path.exists(os.path.join(d, "anim2.gif"))
+    joined = "\n".join(said)
+    assert "anim2.gif could not be removed" in joined
+    assert "nothing stages it" in joined
+    assert "1 stale file(s) left behind: anim2.gif" in joined
+
+
 def test_check_ignores_sidecars(sm, tmp_path):
     d = str(tmp_path / "set")
     m = _valid_set(sm, d)

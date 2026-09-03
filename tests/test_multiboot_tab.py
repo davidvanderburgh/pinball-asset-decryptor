@@ -3257,6 +3257,24 @@ def _gif(path, frames=4, delay_ms=100):
     return str(path)
 
 
+def test_a_playing_clip_does_not_hold_its_file_open(tmp_path):
+    """THE PREVIEW MUST NOT PIN THE MEDIA IT IS PLAYING.  Every card animates
+    all the time, and the media directory is on a Windows drive - so a handle
+    held here is a file the next `selectmedia prepare` cannot unlink, which is
+    what stopped the preview redrawing after David deleted an image."""
+    pytest.importorskip("PIL.Image")
+    path = _gif(tmp_path / "anim2.gif", frames=3)
+    clip = multiboot_tab.ClipFrames(path, (8, 4))
+    assert clip.frame(0) is not None
+    os.remove(path)                 # EACCES on Windows if a handle is open
+    assert not os.path.exists(path)
+    # ...and it goes on playing from the bytes it read
+    assert clip.n == 3
+    assert clip.frame(2).size == (8, 4)
+    assert clip.loop_ms() > 0
+    clip.close()
+
+
 def test_an_animation_plays_at_the_rate_it_was_rendered_at(tmp_path):
     """THE GIF'S OWN DELAY IS THE RATE - the machine ticks on
     ``a->delay_ms[frame]`` - and until the GIF is there, the contract's
@@ -3950,8 +3968,13 @@ def test_parse_inspect_finds_the_report_and_the_refusal():
     assert parse_inspect('hello\n{"a": [1, 2]}\n') == {"a": [1, 2]}
     assert parse_inspect("not json at all") is None
     assert parse_inspect("") is None
+    # the spelling the tool REALLY uses, which is why a failed load used to
+    # say "see the tool output" and never the reason
+    assert parse_refusal(
+        "reading\n[card] error: no /usr/local/codeselect on its p2\n") == \
+        "no /usr/local/codeselect on its p2"
     assert parse_refusal("reading\nrefused: not a multi card\n") == \
-        "refused: not a multi card"
+        "not a multi card"
     assert parse_refusal("all fine") == ""
 
 
@@ -4797,12 +4820,17 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("refuse_at", ["inspect", INSPECT_JSON])
+@pytest.mark.parametrize("prefix", ["refused:", "[card] error:"])
 def test_a_refused_inspect_says_why_and_leaves_the_form_alone(tmp_path,
                                                               monkeypatch,
-                                                              refuse_at):
+                                                              refuse_at,
+                                                              prefix):
+    """BOTH spellings, because the one the tool really uses is the second -
+    and reading only for the first is why every failed load on this tab said
+    'see the tool output' and never the reason it had just been given."""
     card = _card_file(tmp_path)
     _inspect_stand_in(monkeypatch, tmp_path, _rich_report(tmp_path),
-                      refusal="refused: p2 holds no /usr/local/codeselect",
+                      refusal="%s p2 holds no /usr/local/codeselect" % prefix,
                       refuse_at=refuse_at)
     root, panel = _panel()
     try:
@@ -4812,7 +4840,9 @@ def test_a_refused_inspect_says_why_and_leaves_the_form_alone(tmp_path,
         assert panel.load_card(card) is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         hint = panel._hint.cget("text")
-        assert "refused: p2 holds no /usr/local/codeselect" in hint
+        # the reason, without the tool's prefix
+        assert "p2 holds no /usr/local/codeselect" in hint
+        assert prefix not in hint
         assert os.path.basename(card) in hint
         assert panel._loaded_card == ""
         assert panel._loaded_form is None
@@ -4824,7 +4854,7 @@ def test_a_refused_inspect_says_why_and_leaves_the_form_alone(tmp_path,
         # verb only becomes 'Reload card' once a card really is in the form.
         # ...and what the tool said is in the pane either way: a quiet step
         # that FAILS prints everything it printed.
-        assert "refused: p2 holds no" in _pane(panel)
+        assert "%s p2 holds no" % prefix in _pane(panel)
     finally:
         root.destroy()
 

@@ -1810,17 +1810,33 @@ def sweep_stale(out, manifest, visual_only=False, log=say):
     """Remove media files (and their sidecars) an earlier, bigger run left behind: files
     matching the media naming that the manifest does not reference.  Called AFTER the
     targets are decided, so a file this run kept or regenerated is never touched.  A
-    visual-only run sweeps only art/anim leftovers (it says nothing about sounds)."""
+    visual-only run sweeps only art/anim leftovers (it says nothing about sounds).
+
+    A FILE THAT WILL NOT GO IS A WARNING, NOT THE END OF THE RUN.  The media directory is
+    usually on a Windows drive, where a file something else still has open cannot be
+    unlinked - and the thing holding it is often the very preview this prepare is feeding.
+    The leftover costs nothing: `plan_media` stages what media.json REFERENCES, so a
+    stranded anim2.gif never reaches a card.  Dying here, on the other hand, took the whole
+    prepare with it and left the picture as it was (David, having deleted an image: "the
+    preview didn't regen")."""
     referenced = set(manifest_files(manifest))
     pat = STALE_VISUAL_RE if visual_only else STALE_FULL_RE
-    removed = []
+    removed, kept = [], []
     for fn in sorted(os.listdir(out)):
         base = fn[:-len(SIDECAR_SUFFIX)] if fn.endswith(SIDECAR_SUFFIX) else fn
         if base == "media.json" or base in referenced or not pat.match(base):
             continue
-        os.remove(os.path.join(out, fn))
+        try:
+            os.remove(os.path.join(out, fn))
+        except OSError as exc:
+            kept.append(fn)
+            log("  stale %s could not be removed (%s) - left where it is; it is not "
+                "referenced, so nothing stages it" % (fn, exc.strerror or exc))
+            continue
         removed.append(fn)
         log("  removed stale %s" % fn)
+    if kept:
+        log("  %d stale file(s) left behind: %s" % (len(kept), ", ".join(kept)))
     return removed
 
 

@@ -176,6 +176,7 @@ busy until the run has said PASS or FAIL.
 import bisect
 import errno
 import hashlib
+import io
 import json
 import os
 import queue
@@ -1156,12 +1157,25 @@ class ClipFrames(object):
     A 5 s clip is 150 frames, and 150 PPMs at 3 MB each per Play - per
     highlight change - was the alternative.  Pillow composes each frame
     onto the last as the file's disposal says, the same way stb does on
-    the machine."""
+    the machine.
+
+    THE FILE IS READ INTO MEMORY AND CLOSED, and Pillow decodes out of the
+    bytes.  ``Image.open(path)`` keeps the handle open for as long as the
+    image lives, and these live for as long as the picture is playing -
+    which is all the time, on every card.  A Windows handle on a file WSL
+    is about to unlink is an ``EACCES``, and that is exactly what happened:
+    delete an image and the next prepare died on
+    ``os.remove(.../anim2.gif)``, so the preview never redrew (David:
+    "i deleted an image and the preview didn't regen").  A GIF here is
+    capped at 10 MB by the tool that writes it, and the decoded frames this
+    object keeps are far bigger, so the copy costs nothing worth having."""
 
     def __init__(self, path, size):
         self.path = path
         self.size = (max(1, int(size[0])), max(1, int(size[1])))
-        self._img = Image.open(path)
+        with open(path, "rb") as f:
+            self._data = f.read()
+        self._img = Image.open(io.BytesIO(self._data))
         self._img.load()
         self.n = max(1, int(getattr(self._img, "n_frames", 1)))
         self._frames = {}
@@ -1245,6 +1259,7 @@ class ClipFrames(object):
             self._img.close()
         except Exception:                               # noqa: BLE001
             pass
+        self._data = b""
         self._frames = {}
 
 
@@ -1780,13 +1795,23 @@ def parse_inspect(text):
     return None
 
 
+#: How a tool spells a refusal.  ``[card] error:`` is what mkmulticard really
+#: prints when it will not act (its ``Refused`` handler, on stderr, which the
+#: worker merges into the same stream); ``refused:`` is the older spelling and
+#: is still what its selftest and the ball tools use.  BOTH, because reading
+#: only for the second one is why every failed load on this tab said "see the
+#: tool output" and never the reason - the tool had printed the reason.
+_REFUSAL_PREFIXES = ("[card] error:", "refused:")
+
+
 def parse_refusal(text):
-    """The tool's own ``refused: ...`` line, or ''.  What a failed load says
-    on the tab instead of an exit code."""
+    """The tool's own refusal line, without the prefix, or ''.  What a failed
+    load says on the tab instead of an exit code."""
     for line in reversed((text or "").splitlines()):
         s = line.strip()
-        if s.lower().startswith("refused:"):
-            return s
+        for prefix in _REFUSAL_PREFIXES:
+            if s.lower().startswith(prefix):
+                return s[len(prefix):].strip() or s
     return ""
 
 
@@ -7323,12 +7348,13 @@ class MultibootPanel:
             else:
                 # NOT a failure of the preview: the picture is up and
                 # playing.  The strip's Audio readout carries the reason
-                # (the tool's own 'refused: ...' when it gave one - a cold
-                # Extract-time cache is the usual one).
+                # (the tool's own refusal line when it gave one - a cold
+                # Extract-time cache is the usual one).  parse_refusal has
+                # already taken the prefix off, whichever of the two the
+                # tool used.
                 why = parse_refusal(texts.get(AUDIO_LABEL, ""))
                 self._media_say("audio", "unavailable - %s"
-                                % (why[len("refused:"):].strip()
-                                   if why else "exit %d, see the Log" % rc))
+                                % (why or "exit %d, see the Log" % rc))
                 self._write("[preview] the menu's sounds could not be "
                             "rendered (exit %d) - see the lines above" % rc)
         if not self._run_commands(audio_prepare_commands(form, media),

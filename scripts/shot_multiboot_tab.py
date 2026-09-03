@@ -448,8 +448,7 @@ def measure(label, collect=False):
         % (len(panel._tree.get_children()),
            panel._table_box.winfo_reqheight(),
            panel._table_box.winfo_reqwidth()))
-    for btn, name in ((panel._load_btn, "the card verb"),
-                      (panel._out_entry, "Card image"),
+    for btn, name in ((panel._out_entry, "Multi-boot card image"),
                       (panel._browse_btn, "Browse…"),
                       (panel._new_btn, "New card"),
                       (panel._apply_btn, "Apply to card"),
@@ -658,12 +657,11 @@ def s_load():
     log("editing %s" % panel._loaded_card)
     log("status: %r" % panel._edit_lbl.cget("text"))
     log("Apply to card: %s" % panel._apply_btn.cget("state"))
-    # The row's one verb: after a load it reads 'Reload card', which is the
-    # whole of how the picture shows that the tab is in editing mode.
-    log("verb %r state=%s mapped=%s  Apply mapped=%s"
-        % (panel._load_btn.cget("text"), panel._load_btn.cget("state"),
-           panel._load_btn.winfo_ismapped(),
-           panel._apply_btn.winfo_ismapped()))
+    # The row has no verb button any more (Browse… reads a card it picks,
+    # and <Return> reads a typed path), so editing mode shows in the
+    # sentence above and in Apply being live.
+    log("can_read=%s  Apply mapped=%s"
+        % (panel._can_read, panel._apply_btn.winfo_ismapped()))
     log("output: %s" % panel._out_var.get())
     log("hint: %r" % panel._hint.cget("text"))
     log("menu summary: %r" % panel._menu_lbl.cget("text"))

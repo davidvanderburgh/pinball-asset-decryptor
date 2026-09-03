@@ -15680,6 +15680,15 @@ class MainWindow:
             self._write_phases_frame.pack_forget()
             self._multiboot_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
+            # A card restored from a project is a PATH, not a reading of it:
+            # the restore deliberately runs no tools, because the app must
+            # not start a WSL run merely by launching, and the rig is a
+            # mutex between David's sessions.  Opening the tab is the
+            # deliberate act that asks for the answer, and the person is
+            # here to see it - so the card is read now, once.
+            panel = getattr(self, "_multiboot_panel", None)
+            if panel is not None:
+                panel.on_shown()
         elif text == "Default Settings":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()

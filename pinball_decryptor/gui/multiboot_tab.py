@@ -1690,8 +1690,6 @@ def edit_status_text(card, menu, rebuild):
 #: The two labels the row's one verb ever wears.  No ellipsis on either:
 #: that is the signal it no longer asks a question - it acts on the path
 #: already in the box.
-LOAD_VERB = "Load card"
-RELOAD_VERB = "Reload card"
 
 
 def path_root(path):
@@ -1814,7 +1812,13 @@ EMPTY_PATH_TEXT = ("No card yet. Add the images below - the path fills "
 def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
                     rebuild=()):
     """What the card path is pointing at, in one sentence:
-    ``(kind, sentence, tone, verb_on, verb_text)``.
+    ``(kind, sentence, tone, can_read)`` - ``can_read`` being whether there
+    is a card at this path that reading would make sense of.  It used to
+    carry the WORD a verb button would wear as well; that button is gone
+    (David: "shouldn't we have just a browse and a new button?") and the
+    decision outlived it, because <Return> in the path box still has to
+    know, and the sentence beside the box and the key that acts on it must
+    never disagree about whether there is anything there to read.
 
     PURE, and deliberately so: every word the row can say is decided here,
     with no Tk and no disk, from the box's text, the facts a
@@ -1854,19 +1858,19 @@ def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
 
     if not field:
         if loaded_card:
-            return ("strayed", strayed(), "fg", False, LOAD_VERB)
-        return ("empty", EMPTY_PATH_TEXT, "gray", False, LOAD_VERB)
+            return ("strayed", strayed(), "fg", False)
+        return ("empty", EMPTY_PATH_TEXT, "gray", False)
     if under_library(field, resolve=False):
         return ("library",
                 "That path is in the card library, which nothing here may "
-                "write into — copy it out first.", "error", False, LOAD_VERB)
+                "write into — copy it out first.", "error", False)
     here = _plain(field)
     for i, row in enumerate(rows or ()):
         if here and _plain(getattr(row, "path", "")) == here:
             return ("is_image",
                     "That file is image %d in the list below — the card "
                     "must be written somewhere else." % i,
-                    "error", False, LOAD_VERB)
+                    "error", False)
     # TWO SPELLINGS OF ONE CARD ARE ONE CARD.  The text match answers at
     # once and costs no disk, which is what a per-keystroke sentence needs;
     # the probe's ``loaded`` is the same question asked with the links
@@ -1876,27 +1880,26 @@ def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
     if loaded_card and (_plain(loaded_card) == here
                         or (facts or {}).get("loaded")):
         return ("loaded", edit_status_text(loaded_card, menu, rebuild),
-                "error" if rebuild else "fg", True, RELOAD_VERB)
+                "error" if rebuild else "fg", True)
 
     kind = (facts or {}).get("kind") or "unknown"
     if kind == "badname":
         state = ("badname",
                  "That is not a name a card can be written to — take the "
                  "? * | < > \" out of it, or shorten the path.",
-                 "error", False, LOAD_VERB)
+                 "error", False)
     elif kind == "unreachable":
         sentence = ("%s is not there right now — plug the drive in, or pick "
                     "another folder." % ((facts or {}).get("root") or name))
-        state = ("unreachable", sentence, "error", False, LOAD_VERB)
+        state = ("unreachable", sentence, "error", False)
     elif kind == "looking":
-        state = ("looking", "Looking at %s…" % name, "gray", False, LOAD_VERB)
+        state = ("looking", "Looking at %s…" % name, "gray", False)
     elif kind == "dir":
-        state = ("dir", "That path is a folder, not a card.", "error", False,
-                 LOAD_VERB)
+        state = ("dir", "That path is a folder, not a card.", "error", False)
     elif kind == "file":
         state = ("file",
                  "%s is on disk — Load card reads it into the form; Build & "
-                 "verify would write over it." % name, "fg", True, LOAD_VERB)
+                 "verify would write over it." % name, "fg", True)
     elif kind == "missing":
         if (facts or {}).get("parent"):
             sentence = "Build & verify will write a new card at %s." % name
@@ -1905,19 +1908,20 @@ def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
                 os.path.dirname(os.path.abspath(field))) or "the folder"
             sentence = ("Build & verify will write a new card at %s, "
                         "creating %s." % (name, folder))
-        state = ("missing", sentence, "gray", False, LOAD_VERB)
+        state = ("missing", sentence, "gray", False)
     else:
         # NOTHING HAS BEEN ASKED YET (the probe is off, or it has not come
         # back).  Saying nothing is the honest answer, and the verb stays
         # live: pressing it asks the tool, whose refusal is better than a
         # guess this app would have to make to grey the button.
-        state = ("unknown", "", "gray", True, LOAD_VERB)
+        state = ("unknown", "", "gray", True)
     if loaded_card:
         # The box has been typed away from the card in the form.  NOTHING IS
         # THROWN AWAY by that (see MultibootPanel._update_edit_status) - only
         # what the tab claims changes - so the sentence is about the way
-        # back, while the verb still describes the path now in the box.
-        return ("strayed", strayed(), "fg", state[3], state[4])
+        # back, while ``can_read`` still describes the path now in the box:
+        # straying does not stop <Return> reading whatever it now names.
+        return ("strayed", strayed(), "fg", state[3])
     return state
 
 
@@ -2620,6 +2624,9 @@ class MultibootPanel:
         #: whether any games tree is still un-bypassed.  ``_loaded_card`` is
         #: "" for the ordinary build-a-new-card flow.
         self._loaded_card = ""
+        #: A restored card path that has not been read yet - :meth:`on_shown`
+        #: reads it the first time the tab is opened.
+        self._pending_read = False
         self._loaded_form = None
         self._loaded_info = None
         self._armed = False
@@ -2956,7 +2963,12 @@ class MultibootPanel:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X)
         self._src_row = row
-        ttk.Label(row, text="Card image:").pack(side=tk.LEFT, padx=(0, 6))
+        # "Multi-boot card image", not "Card image": every other tab in this
+        # app has a card image too, and this one is a particular kind - the
+        # one carrying several games and a menu (David: "let's also label the
+        # thing multiboot card image").
+        ttk.Label(row, text="Multi-boot card image:").pack(
+            side=tk.LEFT, padx=(0, 6))
         # The tab's own "what is this" lives here rather than in a
         # paragraph across the top: the picture below is the subject, and
         # the ? button carries the rest.
@@ -2973,14 +2985,25 @@ class MultibootPanel:
         # already in the box.  The width holds the longer of its two labels
         # so the row does not twitch when a load turns it into 'Reload
         # card', and it is never the green one - _primary_button owns that.
-        self._load_btn = ttk.Button(row, text=LOAD_VERB, width=13,
-                                    command=self._load_or_reload)
-        self._load_btn.pack(side=tk.RIGHT, padx=(0, 6))
-        self._load_tip = _Tooltip(self._load_btn, self.VERB_TIP,
-                                  self._theme_fn)
         self._out_entry = ttk.Entry(row, textvariable=self._out_var)
         self._out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True,
                              padx=(0, 6))
+        # THE VERB BUTTON IS GONE (David: "shouldn't we have just a browse
+        # and a new button? So, like, when we browse to an existing card, it
+        # loads it").  He is right, and Browse… already did exactly that -
+        # picking a card that exists in a file dialog IS choosing it, so a
+        # second button asking "yes, really?" was the same redundancy that
+        # started this row's rewrite, moved along by one.
+        #
+        # WHAT THE BUTTON WAS COVERING, and where each part went: a path you
+        # TYPED or pasted is read by <Return> below, because pressing it is
+        # as deliberate as picking a file; and a path RESTORED from a project
+        # is read when the tab is opened (see :meth:`on_shown`), which is the
+        # moment the answer is wanted and a moment the person is present for.
+        # Neither is a keystroke: on the way to typing 'x.raw.bak' you pass
+        # through 'x.raw', which exists.
+        self._out_entry.bind("<Return>", self._path_committed)
+        self._out_entry.bind("<KP_Enter>", self._path_committed)
         self._out_tip = _Tooltip(self._out_entry, self.PATH_TIP,
                                  self._theme_fn)
 
@@ -3554,7 +3577,7 @@ class MultibootPanel:
         self._menu_tip = _Tooltip(self._menu_lbl, "", self._theme_fn)
         self._action_btns = [
             self._apply_btn, self._build_btn, self._flash_btn, self._emu_btn,
-            self._load_btn, self._menu_btn, self._browse_btn, self._new_btn]
+            self._menu_btn, self._browse_btn, self._new_btn]
 
     def _build_status(self, parent, th):
         """The status under the bar: what just happened, and what the two
@@ -4244,7 +4267,59 @@ class MultibootPanel:
                    name))
         return True
 
-    def _load_or_reload(self):
+    def on_shown(self):
+        """The Multi-boot tab has just been opened.
+
+        THIS IS WHERE A RESTORED CARD IS READ.  :meth:`restore_state` puts
+        the form back but deliberately reads nothing: the app must not start
+        a WSL run merely by being launched, and the rig is a mutex between
+        David's sessions, so a startup inspect can collide with a live one.
+        That left the tab holding a card it had not read - the state the row
+        calls 'there is a card here, and this tab has not looked inside it'
+        - which is honest but half a job, and it is why the green button was
+        Build & verify, aimed at overwriting the very card that was being
+        edited last night.
+
+        Opening the tab is the deliberate act that asks the question, and
+        the person who asked is sitting in front of it. So the read happens
+        once, here, and only when there is nothing to lose by it: a path
+        with a real file at it, no card already read, no run in flight, and
+        no unsaved edits (there are none - the form has just come back from
+        disk, unchanged since).
+
+        ONCE. The flag is cleared whatever happens, so a card that cannot be
+        read is not re-read on every visit to the tab."""
+        if not getattr(self, "_pending_read", False):
+            return False
+        self._pending_read = False
+        if self._busy or self._loaded_card:
+            return False
+        path = self._out_var.get().strip().strip('"')
+        if not path or not os.path.isfile(path):
+            return False
+        return bool(self._load_or_reload(confirm=False))
+
+    def _path_committed(self, _event=None):
+        """<Return> in the path box: read the card it names.
+
+        The row has no verb button any more, so this is how a TYPED or
+        PASTED path is read - and pressing Return is the same kind of act as
+        picking a file, which is why it may do what Browse… does.  A path
+        that has nothing at it is not an error here: Return on the way to
+        building a new card should do nothing at all, quietly."""
+        if not self._out_var.get().strip().strip('"'):
+            return "break"          # on the way to a new card: say nothing
+        if getattr(self, "_can_read", False):
+            self._load_or_reload()
+        elif self._row_kind == "looking":
+            # The probe answers on a worker so a dead drive cannot freeze
+            # the tab, and Return can beat it. Silence would read as a key
+            # that does nothing.
+            self._ok("Still looking at what is at that path - press Return "
+                     "again in a moment.")
+        return "break"
+
+    def _load_or_reload(self, confirm=True):
         """The row's one verb: read the card the path box names.
 
         A LOAD IS A CLICK AND NEVER A KEYSTROKE - there is no <Return> and
@@ -4261,7 +4336,13 @@ class MultibootPanel:
             self._error("Type the card to read into 'Card image', or press "
                         "Browse… to pick one.")
             return False
-        if not self._confirm_discard(path):
+        # ``confirm=False`` for the restore's own read (see on_shown):
+        # nothing is being discarded there. The form came off disk a moment
+        # ago and reading the card it NAMES is the second half of putting
+        # the tab back, not the replacement of work someone did by hand -
+        # asking "discard your changes?" about changes nobody made is the
+        # kind of question that teaches people to click through questions.
+        if confirm and not self._confirm_discard(path):
             return False
         return self.load_card(path)
 
@@ -4675,9 +4756,13 @@ class MultibootPanel:
             # path is usually the card that was being EDITED last night,
             # because the box is that card's identity.  The row's own
             # sentence, one line below, says what is actually at it.
-            self._ok("%d image%s and the menu came back from last time - "
-                     "nothing has been read from a card yet."
+            self._ok("%d image%s and the menu came back from last time."
                      % (len(self._rows), "" if len(self._rows) == 1 else "s"))
+        # ...and if that path has a card at it, reading it is what makes the
+        # tab REALLY be as it was left - editing mode, with Apply live
+        # instead of a green Build aimed at the card it would overwrite.
+        # Not here, though: see :meth:`on_shown`.
+        self._pending_read = bool(card)
         return restored
 
     def _error(self, msg):
@@ -5288,7 +5373,7 @@ class MultibootPanel:
         menu, rebuild = [], []
         if self._loaded_card and self._loaded_form is not None:
             menu, rebuild = diff_forms(self._loaded_form, self.form())
-        kind, text, tone, verb_on, verb_text = card_path_state(
+        kind, text, tone, can_read = card_path_state(
             field, self._facts_now(field), self._rows, self._loaded_card,
             menu, rebuild)
         editing = kind == "loaded"
@@ -5313,22 +5398,11 @@ class MultibootPanel:
                           else tk.NORMAL)
         except tk.TclError:
             pass
-        self._verb_button(verb_on, verb_text)
+        self._can_read = bool(can_read)
+        #: What the probe last said about the path, so <Return> can tell
+        #: "there is nothing there" from "the answer has not come back".
+        self._row_kind = kind
         self._primary_button(build=bool(rebuild) or not editing)
-
-    def _verb_button(self, on, text):
-        """The row's one verb: 'Load card' for a path that has something at
-        it, 'Reload card' for the card already in the form.  The busy guard
-        still wins - this runs at the end of :meth:`_set_busy` too, and a
-        run in flight greys every action control."""
-        btn = getattr(self, "_load_btn", None)
-        if btn is None:
-            return
-        try:
-            btn.configure(text=text, state=tk.NORMAL
-                          if (on and not self._busy) else tk.DISABLED)
-        except tk.TclError:                             # pragma: no cover
-            pass
 
     def _primary_button(self, build):
         """Exactly one green button: the one that would actually be pressed."""

@@ -663,10 +663,13 @@ def test_the_table_cells_and_the_menu_summary_say_it_in_a_phrase():
     assert list_title(ImageRow("", device="/dev/mmcblk0p3"), 2) == \
         "image 2  [no source recorded]"
     form = MultibootForm(images=[], volume=35, timeout=0, default=1,
-                         bypass=False, sound_move="D:/a b/click.wav")
+                         bypass=False, sound_move="D:/a b/click.wav",
+                         machine_volume=False)
     assert menu_summary(form) == (
         "sounds click.wav / auto  ·  volume 35  ·  wait for START  ·  "
         "default 1  ·  bypass off  ·  theme midnight")
+    form.machine_volume = True
+    assert "volume 35 (the machine's own on the card)" in menu_summary(form)
     assert "15 s countdown" in menu_summary(MultibootForm(images=[]))
     assert "bypass on" in menu_summary(MultibootForm(images=[]))
 
@@ -4246,6 +4249,7 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                             "default": 2, "bypass": False})
     assert menu == {"move": "auto", "confirm": "auto", "volume": 50,
                     "timeout": 15, "default": 2, "bypass": False,
+                    "machine_volume": True,
                     "theme": "midnight", "colors": {}}
     assert menu_from_state(None)["bypass"] is True
     assert menu_from_state({"volume": 900})["volume"] == 100
@@ -6583,5 +6587,60 @@ def test_a_loaded_cards_theme_change_is_a_menu_change(tmp_path):
         words = _tool_words(inject)
         assert words[words.index("--theme") + 1] == "arcade"
         assert "--color" not in words
+    finally:
+        root.destroy()
+
+
+# ---- the machine's own volume (David, 2026-09-03) -----------------------------
+def test_the_menu_follows_the_machines_own_volume_by_default(tmp_path):
+    """David: 'we need to be considerate of what volume level it will play at
+    on the actual machine. it should follow the set volume of the actual
+    machine.'  The form follows by default, build and inject pass the flag,
+    and the number stays the preview's own."""
+    from pinball_decryptor.gui.multiboot_tab import inject_args, form_from_inspect
+    form = _form(tmp_path, 2, volume=35)
+    assert form.machine_volume is True
+    build = _tool_words(build_commands(form)[1][1])
+    assert "--machine-volume" in build
+    assert build[build.index("--volume") + 1] == "35"
+    assert "--machine-volume" in inject_args(form, "D:/card.raw")
+    form.machine_volume = False
+    assert "--machine-volume" not in _tool_words(build_commands(form)[1][1])
+    assert "--machine-volume" not in inject_args(form, "D:/card.raw")
+    # a card read back: volume=machine is the tick, a number is not
+    f2, _w = form_from_inspect({"images": [], "volume": "machine"}, "D:/card.raw")
+    assert f2.machine_volume is True and f2.volume == 50
+    f3, _w = form_from_inspect({"images": [], "volume": 35}, "D:/card.raw")
+    assert f3.machine_volume is False and f3.volume == 35
+
+
+def test_the_machine_volume_tick_lives_in_the_menu_settings_and_the_state():
+    from pinball_decryptor.gui.multiboot_tab import menu_from_state
+    root, panel = _panel()
+    try:
+        assert panel.form().machine_volume is True
+        assert panel.state()["menu"]["machine_volume"] is True
+        menu = panel.open_menu_settings()
+        root.update()
+        panel._machine_vol_var.set(False)
+        menu.cancel()
+        root.update()
+        assert panel._machine_vol_var.get() is True      # Cancel restores it
+        menu = panel.open_menu_settings()
+        root.update()
+        panel._machine_vol_var.set(False)
+        menu.ok()
+        root.update()
+        assert panel.form().machine_volume is False
+        assert "the machine's own" not in panel._menu_lbl.cget("text")
+        doc = panel.state()
+        assert doc["menu"]["machine_volume"] is False
+        panel._machine_vol_var.set(True)
+        assert "the machine's own" in panel._menu_lbl.cget("text")
+        panel.restore_state(doc)
+        root.update()
+        assert panel.form().machine_volume is False
+        assert menu_from_state({})["machine_volume"] is True
+        assert menu_from_state({"machine_volume": False})["machine_volume"] is False
     finally:
         root.destroy()

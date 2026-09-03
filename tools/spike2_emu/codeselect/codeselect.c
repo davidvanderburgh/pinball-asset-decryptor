@@ -43,6 +43,7 @@
 #include "input.h"
 #include "art.h"
 #include "audio.h"
+#include "nvm.h"
 #include "log.h"
 
 #define VERSION "2.2"
@@ -59,6 +60,10 @@
 #define HEADLESS_W   1360
 #define HEADLESS_H   768
 #define MAX_VISIBLE  4              /* cards in a row; more = carousel */
+/* the title + subtitle block under a card's picture, at 768 px: what the
+ * picture must leave room for (selectmedia.py's TEXT_BLOCK - the two must
+ * agree, it is how the tools know the panel's size) */
+#define TEXT_BLOCK   118
 /* the most frames an animation is read for: 5 s at 30 fps (selectmedia.py's
  * GIF_MAX_FRAMES - the two must agree); frames are decoded on demand, so
  * this bounds a file walk and a --frames run, not memory */
@@ -342,12 +347,24 @@ static void layout_compute(struct layout *L, const struct gfx *g, const struct c
     L->vis = L->carousel ? 3 : c->n;
     L->margin = (int)(60 * s);
     L->gap = (int)(36 * s);
-    L->top = (int)(150 * s);
-    L->ch = (int)(420 * s);
+    L->top = (int)(140 * s);
+    L->ch = (int)(460 * s);
     L->cw = (g->w - 2 * L->margin - (L->vis - 1) * L->gap) / L->vis;
-    L->pad = (int)(28 * s);
+    L->pad = (int)(24 * s);
     L->inner = L->cw - 2 * L->pad;
-    L->art_h = conf_has_art(c) ? (int)(0.40f * L->ch) : 0;
+    /* THE PICTURE IS THE CARD (David, 2026-09-03: "the most important
+     * information is the image / video display, so let's maximize the
+     * space used for that"): a 16:9 panel as wide as the card allows,
+     * capped so the title + subtitle block below it still fits; the text
+     * is then centred in what is left (draw_card).  selectmedia.py
+     * mirrors this arithmetic (panel_geometry) to render clips at exactly
+     * the size shown. */
+    L->art_h = 0;
+    if (conf_has_art(c)) {
+        int by_width = L->inner * 9 / 16;
+        int by_height = L->ch - 2 * L->pad - (int)(TEXT_BLOCK * s);
+        L->art_h = by_width < by_height ? by_width : by_height;
+    }
     L->th_set = theme_resolve(&L->th, c->theme, c->color, c->color_set, &L->th_known);
 }
 
@@ -605,7 +622,7 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     float s = L->s;
     int x = card_x(L, slot), top = L->top, cw = L->cw, ch = L->ch, inner = L->inner;
     float tpx, spx;
-    int base, tl, sub_y, nl, k, max_lines, line_h;
+    int base, tl, sub_y, nl, k, line_h;
     /* every line below is drawn through gfx_ellipsize() into cut[]: wrapping
      * splits on spaces, so ONE long word (or a title with none) is still wider
      * than the card, and gfx_fit_px() bottoms out before it shrinks that far */
@@ -649,32 +666,38 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     /* the art layout: the panel on top, the text packed below it */
     draw_panel(g, L, m, i, slot, on);
     {
-        /* where the text starts under the art - the 'IMAGE N' caption used
-         * to sit here and the title 58 px below it; with the caption gone
-         * the title moves UP into that row (David: reclaim the space). */
-        int text_top = top + L->pad + L->art_h + (int)(30 * s);
+        /* THE TEXT IS CENTRED IN WHAT THE PICTURE LEAVES (David: "the rest
+         * needs to be better vertically centered to look more
+         * professional"): the title (one or two lines) and the subtitle (up
+         * to two) are measured first, then the block is placed in the middle
+         * of the zone between the panel and the card's bottom edge. */
+        int zone_top = top + L->pad + L->art_h;
+        int zone_h = (top + ch - L->pad) - zone_top;
+        int title_h, sub_h, block_h, y0, gap = (int)(14 * s);
         tpx = gfx_fit_px(f, im->title, inner, 48 * s, 26 * s);
         if (gfx_text_width(f, tpx, im->title) <= inner) {
             tl = 1;
             snprintf(tlines[0], CONF_STR, "%s", im->title);
-            base = text_top + (int)(28 * s);
         } else {
             tl = gfx_wrap(f, tpx, im->title, inner, &tlines[0][0], CONF_STR, 2);
             for (k = 0; k < tl; k++) tpx = gfx_fit_px(f, tlines[k], inner, tpx, 20 * s);
-            base = text_top + (int)(20 * s);
         }
+        spx = gfx_fit_px(f, im->subtitle, inner * 2, 26 * s, 20 * s);
+        line_h = (int)(32 * s);
+        nl = *im->subtitle ? gfx_wrap(f, spx, im->subtitle, inner, &lines[0][0], CONF_STR, 2) : 0;
+        title_h = (int)(tl * tpx * 1.15f);
+        sub_h = nl ? gap + nl * line_h : 0;
+        block_h = title_h + sub_h;
+        y0 = zone_top + (zone_h - block_h) / 2;
+        if (y0 < zone_top) y0 = zone_top;
+        /* baselines: a line's ascent is ~0.93 of its size in this face */
+        base = y0 + (int)(tpx * 0.93f);
         for (k = 0; k < tl; k++) {
             gfx_ellipsize(f, tpx, tlines[k], inner, cut, sizeof cut);
             gfx_text_center(g, f, tpx, x + cw / 2, base + (int)(k * tpx * 1.15f), cut,
                             on ? TH(L, TITLE_HL) : TH(L, TITLE));
         }
-        sub_y = base + (int)((tl - 1) * tpx * 1.15f) + (int)(44 * s);
-        spx = gfx_fit_px(f, im->subtitle, inner * 2, 26 * s, 20 * s);
-        line_h = (int)(32 * s);
-        max_lines = (top + ch - (int)(12 * s) - sub_y) / line_h + 1;
-        if (max_lines < 1) max_lines = 1;
-        if (max_lines > 4) max_lines = 4;
-        nl = gfx_wrap(f, spx, im->subtitle, inner, &lines[0][0], CONF_STR, max_lines);
+        sub_y = y0 + title_h + gap + (int)(spx * 0.93f);
         for (k = 0; k < nl; k++) {
             gfx_ellipsize(f, spx, lines[k], inner, cut, sizeof cut);
             gfx_text_center(g, f, spx, x + cw / 2, sub_y + k * line_h, cut,
@@ -707,7 +730,7 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
     }
     if (L->carousel) {
         snprintf(buf, sizeof buf, "<   %d / %d   >", hl + 1, L->n);
-        gfx_text_center(g, f, 26 * s, W / 2, (int)(602 * s), buf, TH(L, FOOTER));
+        gfx_text_center(g, f, 26 * s, W / 2, (int)(626 * s), buf, TH(L, FOOTER));
     }
 
     /* Both bottom lines are SHRUNK and then CUT to the glass. Shrinking alone
@@ -729,7 +752,7 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         const int wmax = W - (int)(80 * s);
         float fpx = gfx_fit_px(f, foot, wmax, 30 * s, 20 * s), cpx;
         gfx_ellipsize(f, fpx, foot, wmax, cut, sizeof cut);
-        gfx_text_center(g, f, fpx, W / 2, (int)(648 * s), cut, TH(L, FOOTER));
+        gfx_text_center(g, f, fpx, W / 2, (int)(662 * s), cut, TH(L, FOOTER));
         snprintf(widest, sizeof widest, "%s%s", action ? PRESS_ACTION : PRESS_START,
                  c->img[hl].title);
         if (remain >= 0)
@@ -907,6 +930,7 @@ int main(int argc, char **argv)
     struct audio *au = NULL;
     char err[300], fontpath[300], tables[400], padsw[400];
     int headless, snapshot, invert, timeout, n, hl, chosen = -1, w, h, volume, pinned;
+    int machine_v = -1;       /* volume=machine: the machine's own 0-63, else -1 */
     int action;                       /* this title has a lockdown-bar ACTION button */
     int music_voice = -1;
     const struct audio_clip *music_clip = NULL;
@@ -1010,8 +1034,39 @@ int main(int argc, char **argv)
 
     /* sound first (the FIFO handshake takes a moment), then the pictures */
     fmt_path = o.audio_fmt ? o.audio_fmt : getenv("PAD_AUDIO_FMT");
+    /* THE MACHINE'S OWN VOLUME (volume=machine): the MASTER VOLUME SETTING
+     * the owner set on the coin door, read off the card's /data/nv mirror
+     * (nvm.h); the title's factory level when the machine has no store yet;
+     * the plain default when the conf names neither.  --volume still wins.
+     * On the hardware the number goes to the codec's mixer exactly as the
+     * game hands it over and the mix runs at 100; a sink with no mixer (the
+     * emulator's fifo, a dump) gets the same curve as a software gain.
+     * David, 2026-09-03: "it should follow the set volume of the actual
+     * machine". */
+    if (c.volume_machine && o.volume >= 0) {
+        sel_log("audio: --volume %d overrides volume=machine", o.volume);
+    } else if (c.volume_machine) {
+        char why[400] = "", from[600] = "";
+        int live = -1;
+        if (c.mv_store[0] && c.mv_key_set
+            && nvm_read_value(c.mv_store, c.mv_key, &live, from, sizeof from, why, sizeof why) == 0) {
+            machine_v = live > 63 ? 63 : live < 0 ? 0 : live;
+            sel_log("audio: volume follows the machine: %d/63 (%s)", machine_v, from);
+        } else if (c.mv_default >= 0) {
+            machine_v = c.mv_default;
+            sel_log("audio: volume follows the machine: no setting read (%s); the title's factory %d/63",
+                    why[0] ? why : "no store named", machine_v);
+        } else {
+            sel_log("audio: volume follows the machine: no setting read (%s) and no factory level; %d%%",
+                    why[0] ? why : "no store named", volume);
+        }
+        if (machine_v >= 0) volume = audio_machine_gain(machine_v);
+    }
     au = audio_open(o.audio, fmt_path, volume, o.audio_dump);
-    if (c.mixer_volume >= 0) {
+    if (machine_v >= 0 && !strcmp(audio_sink_name(au), "alsa")) {
+        audio_alsa_mixer(machine_v);     /* the machine's own curve, on its own mixer */
+        audio_set_volume(au, 100);
+    } else if (machine_v < 0 && c.mixer_volume >= 0) {
         if (!strcmp(audio_sink_name(au), "alsa")) audio_alsa_mixer(c.mixer_volume);
         else sel_log("audio: mixer_volume=%d ignored (sink %s)", c.mixer_volume, audio_sink_name(au));
     }

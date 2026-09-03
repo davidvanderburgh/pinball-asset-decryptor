@@ -23,6 +23,8 @@
 #   sound_confirm=<wav>  played to completion on START / Select, under LOADING,
 #                        for every card that names no <confirm> of its own
 #   volume=0-100         software mix gain (default 50)
+#   volume=machine       follow the machine's own MASTER VOLUME SETTING instead (with
+#                        machine_volume=<store>|<sha1 key>|<factory 0-63>; mkmulticard --machine-volume)
 #   mixer_volume=0-63    optional, hardware only: the game's codec volume curve
 #                        on the ALSA 'PCM' control (untouched when absent)
 #   theme=NAME           the menu's colours: midnight (the default), arcade, neon,

@@ -218,6 +218,30 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
     return a;
 }
 
+/* round(100 * (v/63)^0.2) for v = 0..63: the codec curve the game applies
+ * (audio_alsa_mixer), as a percentage of the mix, with 0 = silent */
+static const unsigned char machine_gain_pct[64] = {
+    0, 44, 50, 54, 58, 60, 62, 64, 66, 68, 69, 71, 72, 73, 74, 75,
+    76, 77, 78, 79, 79, 80, 81, 82, 82, 83, 84, 84, 85, 86, 86, 87,
+    87, 88, 88, 89, 89, 90, 90, 91, 91, 92, 92, 93, 93, 93, 94, 94,
+    95, 95, 95, 96, 96, 97, 97, 97, 98, 98, 98, 99, 99, 99, 100, 100 };
+
+int audio_machine_gain(int v63)
+{
+    if (v63 < 0) v63 = 0;
+    if (v63 > 63) v63 = 63;
+    return machine_gain_pct[v63];
+}
+
+void audio_set_volume(struct audio *a, int volume)
+{
+    if (!a) return;
+    if (volume < 0) volume = 0;
+    if (volume > 100) volume = 100;
+    a->gain_q8 = volume * 256 / 100;
+    if (a->sink) sel_log("audio: volume %d (gain %d/256)", volume, a->gain_q8);
+}
+
 int audio_active(const struct audio *a)
 {
     return a && a->sink != NULL;

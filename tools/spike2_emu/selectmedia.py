@@ -112,8 +112,9 @@ MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 #: GIF_MAX_SECONDS long and plays at the source's own rate up to
 #: GIF_MAX_NATIVE_FPS, so the frame cap is the product of the two; the byte
 #: cap leaves room for an explicit --size up to the 512x288 ceiling (a busy
-#: attract loop measures 7.65 MB there, ~2.8 MB at the panel's own
-#: 298x168, which is what prepare renders at).  The selector
+#: attract loop measures 7.65 MB there, ~5 MB at the two-card panel's own
+#: 522x294, ~2.8 MB at three cards' 338x190 - what prepare renders at).
+#: The selector
 #: decodes a GIF ON DEMAND, one frame per tick, so the count costs it no
 #: memory - only the card's storage, which is why there is a length cap at
 #: all.  (Before: 30 frames / 1.5 MB, which turned a 13 s clip into 2 fps.)
@@ -129,18 +130,28 @@ GIF_MAX_BYTES = 10 << 20                    # 10 MB
 GIF_MAX_W, GIF_MAX_H = 512, 288
 GIF_DEFAULT_DELAY_MS = 100                  # what the selector uses when a frame says 0
 WAV_RATE = 44100
-#: THE SELECTOR'S OWN PANEL, at the 1360x768 LCD (codeselect.c
-#: layout_compute): cards are 420 px tall with a 40 % art panel = 168 px,
-#: so a 16:9 picture is 299x168 whatever the card count - except FOUR
-#: cards, whose 227 px inner width bounds it to 227x128 (five and more
-#: are a carousel of three).  A picture rendered at or under that size
-#: is blitted 1:1 by art.c's fit_size (it never upscales, only fits a
-#: bigger one down), so nothing is resampled per frame on the machine
-#: and nothing is stored that is never shown: the old 384x216 was 1.65x
-#: the pixels of the same picture, box-filtered on EVERY tick, and
-#: measured 20 ms a frame under qemu.  Even sides, for ffmpeg.
-PANEL_FULL = (298, 168)
-PANEL_FOUR = (226, 128)
+#: THE SELECTOR'S OWN CARD GEOMETRY at the 1360x768 LCD (codeselect.c
+#: layout_compute), mirrored here so a clip is rendered at EXACTLY the
+#: size the panel shows it: art.c's fit_size never upscales and only fits
+#: a bigger picture down, so a clip at (or under) the panel is blitted 1:1
+#: - nothing resampled per frame on the machine (the old 384x216 was
+#: box-filtered on every tick: 20 ms a frame under qemu against 1 ms),
+#: nothing stored that is never shown.  The panel is the widest 16:9 the
+#: card allows, capped so the title + subtitle block (TEXT_BLOCK px, the
+#: C's TEXT_BLOCK) still fits under it (David, 2026-09-03: the picture is
+#: the most important thing on the card).  Even sides, for ffmpeg.
+LCD_W = 1360
+CARD_MARGIN, CARD_GAP, CARD_H, CARD_PAD, TEXT_BLOCK = 60, 36, 460, 24, 118
+
+
+def panel_geometry(n_images):
+    """``(inner, art_h)`` of a card's picture panel for an n-image menu -
+    layout_compute's numbers at scale 1."""
+    vis = 3 if n_images > 4 else max(1, int(n_images))
+    cw = (LCD_W - 2 * CARD_MARGIN - (vis - 1) * CARD_GAP) // vis
+    inner = cw - 2 * CARD_PAD
+    art_h = min(inner * 9 // 16, CARD_H - 2 * CARD_PAD - TEXT_BLOCK)
+    return inner, art_h
 DEFAULT_VOLUME = 50
 # Where the sound defaults come from (turtles_pro 1.59 catalog; the art report):
 MOVE_IDX = 1717                 # 0.079 s stereo transient
@@ -205,9 +216,12 @@ def parse_size(s):
 
 
 def panel_size_for(n_images):
-    """The art panel (still and animation) for an n-image menu: the size
-    the selector shows it at, 298x168 for every count but four (226x128)."""
-    return PANEL_FOUR if n_images == 4 else PANEL_FULL
+    """The picture (still and animation) for an n-image menu: the largest
+    even 16:9 that fits the panel - 522x294 for one or two cards, 338x190
+    for three (and the carousel of five and more), 234x132 for four."""
+    inner, art_h = panel_geometry(n_images)
+    w = min(inner, art_h * 16 // 9)
+    return w - w % 2, art_h - art_h % 2
 
 
 def is_png(data):

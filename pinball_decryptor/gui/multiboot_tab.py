@@ -449,6 +449,12 @@ class MultibootForm:
     sound_move: str = "auto"       # auto | synth | none | <wav>
     sound_confirm: str = "auto"
     volume: int = 50
+    #: On the machine, play at ITS OWN volume setting - the coin-door MASTER
+    #: VOLUME the owner set, read off the card's /data/nv mirror by the
+    #: selector - rather than the number above (David, 2026-09-03: "it
+    #: should follow the set volume of the actual machine").  The number
+    #: is then only how loud the preview plays here.
+    machine_volume: bool = True
     timeout: int = 15              # 0 = wait for START
     default: int = 0
     bypass: bool = True
@@ -1336,6 +1342,9 @@ def build_args(form):
         # with no prepared media still carries it.
         "--volume", str(int(form.volume)),
     ] + theme_args(form)
+    if form.machine_volume:
+        # ...and on the machine the menu plays at ITS setting, not that number
+        args.append("--machine-volume")
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     if form.bypass:
@@ -1383,6 +1392,8 @@ def inject_args(form, card):
             "--timeout", str(int(form.timeout)),
             "--default", str(int(form.default)),
             "--volume", str(int(form.volume))] + theme_args(form)
+    if form.machine_volume:
+        args.append("--machine-volume")
     if form.media_dir:
         args += ["--media-dir", wsl(form.media_dir)]
     return args
@@ -1963,6 +1974,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
     form = MultibootForm(
         images=rows, out=card, sound_move=move, sound_confirm=confirm,
         volume=_int_of("volume", 50), timeout=_int_of("timeout", 15),
+        machine_volume=(info.get("volume") == "machine"),
         default=_int_of("default", 0), bypass=ticked,
         theme=theme, colors=colors,
         media_dir=media_dir if (media_dir and os.path.isfile(
@@ -2011,6 +2023,8 @@ def _menu_fields(before, after):
     if _media_value(before.sound_confirm) != _media_value(after.sound_confirm):
         changed.add("confirm sound")
     for name, b, a in (("volume", before.volume, after.volume),
+                       ("machine volume", before.machine_volume,
+                        after.machine_volume),
                        ("countdown", before.timeout, after.timeout),
                        ("default", before.default, after.default)):
         if int(b) != int(a):
@@ -2392,6 +2406,7 @@ def menu_from_state(menu):
     return {"move": str(menu.get("move") or "auto"),
             "confirm": str(menu.get("confirm") or "auto"),
             "volume": max(0, min(100, _as_int("volume", 50))),
+            "machine_volume": bool(menu.get("machine_volume", True)),
             "timeout": max(0, _as_int("timeout", 15)),
             "default": max(0, _as_int("default", 0)),
             "bypass": bool(menu.get("bypass", True)),
@@ -2684,10 +2699,12 @@ def menu_summary(form):
     def sound(v):
         v = (v or "").strip() or "none"
         return v if v.lower() in _WORDS else os.path.basename(v)
-    return ("sounds %s / %s  ·  volume %d  ·  %s  ·  default %d  ·  "
+    return ("sounds %s / %s  ·  volume %d%s  ·  %s  ·  default %d  ·  "
             "bypass %s  ·  theme %s" % (
                 sound(form.sound_move), sound(form.sound_confirm),
                 int(form.volume),
+                " (the machine's own on the card)" if form.machine_volume
+                else "",
                 "wait for START" if int(form.timeout) == 0
                 else "%d s countdown" % int(form.timeout),
                 int(form.default), "on" if form.bypass else "off",
@@ -2980,11 +2997,18 @@ class MenuSettingsDialog(_Modal):
                     textvariable=panel._volume_var).pack(side=tk.LEFT)
         ttk.Label(vol, text="0-100", foreground=th["gray"]).pack(
             side=tk.LEFT, padx=(6, 0))
+        ttk.Checkbutton(g, text="On the machine, play at its own volume "
+                                "setting (recommended)",
+                        variable=panel._machine_vol_var).grid(
+            row=3, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
         ttk.Label(g, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
                   text="auto = a click and a stinger pulled from the primary "
                        "image; synth = generated tones. The confirm sound "
-                       "plays to the end before the game starts.").grid(
-            row=3, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
+                       "plays to the end before the game starts. With the "
+                       "box ticked the menu follows the machine's MASTER "
+                       "VOLUME (the coin-door setting) and the number above "
+                       "is only how loud the preview plays here.").grid(
+            row=4, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
         g.columnconfigure(1, weight=1)
 
         look = ttk.LabelFrame(b, text="Look")
@@ -3378,6 +3402,7 @@ class MultibootPanel:
         self._move_var = tk.StringVar(value="auto")
         self._confirm_var = tk.StringVar(value="auto")
         self._volume_var = tk.StringVar(value="50")
+        self._machine_vol_var = tk.BooleanVar(value=True)
         self._timeout_var = tk.StringVar(value="15")
         self._default_var = tk.StringVar(value="0")
         # THE VALIDATOR BYPASS IS ALWAYS ON (David: "it should always be
@@ -3430,7 +3455,8 @@ class MultibootPanel:
         # ...and the menu's own fields, so the 'what would Apply write' line
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
-                    self._timeout_var, self._default_var, self._bypass_var):
+                    self._machine_vol_var, self._timeout_var,
+                    self._default_var, self._bypass_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
         self._theme_var.trace_add("write", lambda *_a: self._theme_changed())
         for var in self._color_vars.values():
@@ -4876,6 +4902,7 @@ class MultibootPanel:
             self._move_var.set("auto")
             self._confirm_var.set("auto")
             self._volume_var.set("50")
+            self._machine_vol_var.set(True)
             self._timeout_var.set("15")
             self._default_var.set("0")
             self._bypass_var.set(True)
@@ -5283,7 +5310,9 @@ class MultibootPanel:
         if self._menu_dialog is not None:
             return self._menu_dialog
         self._menu_backup = (self._move_var.get(), self._confirm_var.get(),
-                             self._volume_var.get(), self._timeout_var.get(),
+                             self._volume_var.get(),
+                             self._machine_vol_var.get(),
+                             self._timeout_var.get(),
                              self._default_var.get(), self._bypass_var.get(),
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
@@ -5299,12 +5328,13 @@ class MultibootPanel:
     def _menu_settings_cancel(self):
         self._forget_menu_dialog()
         if self._menu_backup is not None:
-            (move, confirm, vol, timeout, default, bypass,
+            (move, confirm, vol, machine, timeout, default, bypass,
              selector, theme, colors) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
             self._confirm_var.set(confirm)
             self._volume_var.set(vol)
+            self._machine_vol_var.set(machine)
             self._timeout_var.set(timeout)
             self._default_var.set(default)
             self._bypass_var.set(bypass)
@@ -5508,6 +5538,7 @@ class MultibootPanel:
             sound_move=self._move_var.get().strip() or "none",
             sound_confirm=self._confirm_var.get().strip() or "none",
             volume=_int(self._volume_var, 50),
+            machine_volume=bool(self._machine_vol_var.get()),
             timeout=_int(self._timeout_var, 15),
             default=_int(self._default_var, 0),
             bypass=bool(self._bypass_var.get()),
@@ -5564,6 +5595,7 @@ class MultibootPanel:
             "menu": {"move": self._move_var.get().strip(),
                      "confirm": self._confirm_var.get().strip(),
                      "volume": _int(self._volume_var, 50),
+                     "machine_volume": bool(self._machine_vol_var.get()),
                      "timeout": _int(self._timeout_var, 15),
                      "default": _int(self._default_var, 0),
                      "bypass": bool(self._bypass_var.get()),
@@ -5677,6 +5709,7 @@ class MultibootPanel:
             self._move_var.set(menu["move"])
             self._confirm_var.set(menu["confirm"])
             self._volume_var.set(str(menu["volume"]))
+            self._machine_vol_var.set(bool(menu.get("machine_volume", True)))
             self._timeout_var.set(str(menu["timeout"]))
             self._default_var.set(str(menu["default"]))
             self._bypass_var.set(True)      # always on (David); see __init__
@@ -6128,6 +6161,7 @@ class MultibootPanel:
             self._move_var.set(form.sound_move)
             self._confirm_var.set(form.sound_confirm)
             self._volume_var.set(str(int(form.volume)))
+            self._machine_vol_var.set(bool(form.machine_volume))
             self._timeout_var.set(str(int(form.timeout)))
             self._default_var.set(str(int(form.default)))
             # The LIVE form's bypass is always on (David); the card's own

@@ -131,7 +131,10 @@ plus `default=`, `timeout=` (0 = wait for START/ACTION), an optional
 `font=`, `media=` (default
 `/usr/local/codeselect/media`), `sound_move=`, `sound_confirm=` (the confirm
 sound for every image that names no `<confirm>` of its own), `volume=`
-(0-100 software gain, default 50) and the optional hardware-only
+(0-100 software gain, default 50 - or `machine`: the machine's own MASTER
+VOLUME SETTING, read off the card's `/data/nv/<title>/NVM` mirror by nvm.c,
+with `machine_volume=<store>|<sha1 key>|<factory 0-63>` saying where and
+what; `--volume` still wins) and the optional hardware-only
 `mixer_volume=` (0-63, the game's codec curve on the ALSA `PCM` control;
 untouched when absent). `<device>` is `/dev/mmcblk0p3`, `/dev/mmcblk0p7`
 (the parts layout) or `/dev/mmcblk0p7:img2` (the multi layout: a partition
@@ -206,7 +209,9 @@ full CLI, the log lines and the test list). What it is:
   with the highlighted one in the middle, its neighbours beside it
   (wrap-around), the neighbours-but-one peeking in from the edges and a
   `<  n / N  >` line under the cards. When any image has art or an
-  animation every card gets an art panel across its top 40 % (the picture
+  animation every card gets a picture panel across its top - the widest
+  16:9 the card allows, capped so the text block fits, the text centred
+  in what is left (the picture
   aspect-fitted and centred, never upscaled) above the label, and the text
   packs below; with no media the picture is the v1 layout byte for byte.
   EVERY card's GIF plays on the file's own frame delays, all the time
@@ -232,7 +237,8 @@ full CLI, the log lines and the test list). What it is:
   succeeds (the game's device, `snd_pcm_set_params` S16_LE / interleaved /
   2 ch / 44100 / 500 ms, non-blocking `writei` in 1764-frame chunks,
   `snd_pcm_recover` on -EPIPE, drain + close before the choice file; the
-  mixer untouched unless `mixer_volume=` asks for the game's codec curve on
+  mixer untouched unless `mixer_volume=` (or `volume=machine`, the machine's
+  own number) asks for the game's codec curve on
   `backbox` + `cabinet`), else the rig's FIFO when `PAD_AUDIO_PLAY` is set
   (`44100 2` into the fmt file first, `O_WRONLY|O_NONBLOCK` with ENXIO
   retries, 200 ms lead, silence while idle, EAGAIN dropped and counted,

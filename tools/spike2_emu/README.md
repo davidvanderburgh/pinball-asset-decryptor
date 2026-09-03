@@ -121,14 +121,16 @@ GIF <= 1.5 MB / 512x288 / 30 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the set
 <= 20 MB - a wrong file refuses the build before a byte is copied). The
 `images.conf` it writes carries the six-field image lines
 (`image=<device>|<title>|<subtitle>|<art>|<anim>|<music>`) and the
-`sound_move=` / `sound_confirm=` / `volume=` / `mixer_volume=` keys; `inject`
+`sound_move=` / `sound_confirm=` / `volume=` (a number, or `machine` plus a
+`machine_volume=` line with `--machine-volume`: the menu then follows the
+machine's own MASTER VOLUME SETTING) / `mixer_volume=` keys; `inject`
 without `--media-dir` carries an existing media directory and those fields
 through, with it the media directory is replaced.
 
 In the rig, `run_game.sh` pulls the card's media out of its rootfs with
 `parts.py --rootfs-dir /usr/local/codeselect/media` (debugfs, no mount) into
 `$ROOT/dump/media` before the selector runs, forwards the card's
-`sound_move`/`sound_confirm`/`volume`/`mixer_volume` keys into
+`sound_move`/`sound_confirm`/`volume`/`machine_volume`/`mixer_volume` keys into
 `dump/codeselect.conf`, and passes `--media /dump/media`.
 **`PAD_SELECT_MEDIA=<host dir>`** hands the selector a directory of your own
 instead (art and sounds without rebuilding a card). Every media failure
@@ -228,7 +230,7 @@ opened by the selector - `build` and `inject` stage two small JSON files into
 - **`build.json`** `{"tool", "version", "written", "layout", "images":
   [{"device", "source", "title", "subtitle", "art", "anim", "music",
   "title_dir", "version", "node_fw_version"}], "timeout", "default", "volume",
-  "mixer_volume", "sound_move", "sound_confirm"}`. `source` is the absolute path of the `.raw` that image was
+  "machine_volume", "mixer_volume", "sound_move", "sound_confirm"}`. `source` is the absolute path of the `.raw` that image was
   built from - the one thing `images.conf` cannot hold and a rebuild needs. An
   `inject` given no `--primary`/`--extra` reads the card's own `build.json`
   first and carries the old sources through, **by device**: an inject must

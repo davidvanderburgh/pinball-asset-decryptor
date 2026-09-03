@@ -264,6 +264,28 @@ These have each been violated at least once and each cost a run or a window:
       tab's Volume slider + Mute at the right of the strip, its own file
       (`preview_audio_ctl.json`), scaling the menu's volume rather than
       changing it.
+      **2026-09-03 LATER STILL (item/90): LIVE SOUND** - a menu/editor
+      sound change is heard at once ('none' stops the bed now; a new choice
+      goes quiet until rendered) and a sound-only change re-runs the audio
+      half by itself. **CARD LAYOUT** - the picture panel is the widest
+      16:9 the card allows (TEXT_BLOCK 118, cards top 140 / 460 tall),
+      title + subtitle centred below it. **THE MACHINE'S OWN VOLUME**
+      (David: "it should follow the set volume of the actual machine") -
+      images.conf `volume=machine` + `machine_volume=<store>|<sha1
+      key>|<factory>`: the selector reads MASTER VOLUME SETTING off the
+      card's /data/nv/<title>/NVM mirror (nvm.c: newest hex-named
+      generation, .crc32 sidecars skipped, 44-byte records keyed by SHA1
+      of the caption), hands it to the codec mixer on the hardware (mix at
+      100) or applies the same (v/63)^0.2 curve as a software gain on the
+      emulator's FIFO; falls back to the title's factory level
+      (factory_volume) and then the plain number; `--volume` (the app's
+      preview) still wins. mkmulticard `--machine-volume` (the default
+      image's title names the store + factory level; a card on `machine`
+      stays so unless `--volume N`); the tab's Menu settings tick "On the
+      machine, play at its own volume setting" (default ON). PROVEN on the
+      rig's real stores: TMNT 18/63, Godzilla 10/63 (= their factory
+      levels).
+
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

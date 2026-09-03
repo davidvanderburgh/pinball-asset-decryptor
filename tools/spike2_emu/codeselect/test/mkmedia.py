@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """mkmedia.py make DIR        - write the test media set into DIR
+mkmedia.py nvm DIR VALUE   - a settings store (two generations) holding MASTER VOLUME SETTING = VALUE
    mkmedia.py pix PPM X Y [RRGGBB [TOL]]  - print (or assert) one pixel of a P6 PPM
    mkmedia.py band PPM X0 Y0 X1 Y1 RRGGBB [TOL]  - assert the rectangle (inclusive)
                               holds at least one pixel within TOL of RRGGBB (text
@@ -156,6 +157,41 @@ def band(args):
     print("mkmedia band: %s %s holds %d px of %s ok" % (os.path.basename(path), where, n, want))
 
 
+def nvm(args):
+    """nvm DIR VALUE [KEYHEX]: the machine's settings store as codeselect's nvm.c reads it
+    (/data/nv/<title>/NVM/<generation>): 'MAP0', u16 counts at 0x3c/0x3e, 40-byte audit
+    records from 208, then 44-byte adjustment records SHA1(caption)|default|min|max|id|VALUE|
+    check.  TWO generations: the older one (the lower name) holds a different volume, so a
+    read that picks the wrong file is caught."""
+    import hashlib
+    import struct
+    d, value = args[0], int(args[1])
+    key = bytes.fromhex(args[2]) if len(args) > 2 else hashlib.sha1(b"MASTER VOLUME SETTING").digest()
+
+    def rec(k, default, lo, hi, ident, v):
+        return k + struct.pack("<6I", default, lo, hi, ident, v, 0xff - (v & 0xff))
+
+    def store(v):
+        hdr = bytearray(208)
+        hdr[0:4] = b"MAP0"
+        struct.pack_into("<HH", hdr, 0x3c, 1, 3)          # 1 audit, 3 adjustments
+        return (bytes(hdr) + bytes(40)
+                + rec(hashlib.sha1(b"BALL SAVE TIME").digest(), 10, 0, 60, 3, 12)
+                + rec(key, 64, 0, 64, 17, v)
+                + rec(hashlib.sha1(b"FREE PLAY").digest(), 0, 0, 1, 5, 1))
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "00000001"), "wb") as f:
+        f.write(store((value + 7) % 64))
+    with open(os.path.join(d, "00000002"), "wb") as f:
+        f.write(store(value))
+    # the machine writes a 4-byte <name>.crc32 beside every generation; it sorts AFTER the
+    # store it belongs to, so a reader that takes the greatest name blindly reads 4 bytes
+    for name in ("00000001", "00000002"):
+        with open(os.path.join(d, name + ".crc32"), "wb") as f:
+            f.write(bytes(4))
+    print("mkmedia nvm: %s holds MASTER VOLUME SETTING = %d in generation 00000002" % (d, value))
+
+
 def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "make":
         make(sys.argv[2])
@@ -163,6 +199,8 @@ def main():
         pix(sys.argv[2:])
     elif len(sys.argv) >= 8 and sys.argv[1] == "band":
         band(sys.argv[2:])
+    elif len(sys.argv) >= 4 and sys.argv[1] == "nvm":
+        nvm(sys.argv[2:])
     else:
         raise SystemExit(__doc__)
 

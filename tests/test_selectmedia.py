@@ -271,14 +271,22 @@ def test_apply_fade_ends_at_silence(sm):
 
 # ============================================================================ names, sizes, manifest
 def test_panel_size_defaults(sm):
-    # the selector's own panel at 1360x768: 168 px tall, 16:9 -> 299 wide
-    # (298 even) for every count but four cards (227 px inner -> 226x128)
-    assert sm.panel_size_for(2) == (298, 168)
-    assert sm.panel_size_for(3) == (298, 168)
-    assert sm.panel_size_for(4) == (226, 128)
-    assert sm.panel_size_for(7) == (298, 168)
-    assert sm.panel_size_for(1) == (298, 168)
-    assert sm.panel_size_for(5) == (298, 168)
+    # the selector's own card at 1360x768 (layout_compute mirrored): the
+    # widest 16:9 the card allows, capped by the text block under it
+    assert sm.panel_geometry(2) == (554, 294)
+    assert sm.panel_geometry(3) == (341, 191)
+    assert sm.panel_geometry(4) == (235, 132)
+    assert sm.panel_size_for(2) == (522, 294)
+    assert sm.panel_size_for(3) == (338, 190)
+    assert sm.panel_size_for(4) == (234, 132)
+    assert sm.panel_size_for(7) == (338, 190)
+    assert sm.panel_size_for(1) == (522, 294)
+    assert sm.panel_size_for(5) == (338, 190)
+    for n in (1, 2, 3, 4, 5, 9):
+        w, h = sm.panel_size_for(n)
+        inner, art_h = sm.panel_geometry(n)
+        assert w <= inner and h <= art_h and w % 2 == 0 and h % 2 == 0
+        assert abs(w / float(h) - 16 / 9.0) < 0.03
 
 
 def test_parse_size(sm):

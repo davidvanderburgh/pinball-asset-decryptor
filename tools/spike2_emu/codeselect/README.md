@@ -172,9 +172,12 @@ which is the case wrapping cannot help with.
   is still wider than the card. A title too long for its two lines is cut
   there by the wrap, with no marker - only the over-wide single line gets a
   visible `...`.
-* **Any image with art or an animation**: every card gets an art panel across
-  the top 40 % of the card (546x168 for two cards, 333x168 for three,
-  227x168 for four) above the label; the title shrinks to 48 px and the
+* **Any image with art or an animation**: every card gets a picture panel
+  across its top - the widest 16:9 the card allows, capped so the text
+  still fits under it (554x294 for two cards, 341x191 for three, 235x132
+  for four; the tools render clips at 522x294 / 338x190 / 234x132 so they
+  are blitted 1:1) - and the title and subtitle centred in what is left
+  (David: the picture is the most important thing on the card); the title shrinks to 48 px and the
   subtitle to 26 px with the lines that still fit (two or three). A card's
   picture is aspect-fitted into its panel and centred (never upscaled; the
   tools pre-scale). EVERY card plays its GIF, all the time, on the GIF's
@@ -195,7 +198,7 @@ which is the case wrapping cannot help with.
 The canvas is redrawn in full only on a state change (highlight, countdown
 second, carousel move); an animation tick repaints just the highlighted
 panel. Every drawing call grows a dirty rectangle, and the frame uploads only
-that rectangle, tightly packed, with one `glTexSubImage2D` (a 546x168 panel
+that rectangle, tightly packed, with one `glTexSubImage2D` (a 554x294 panel
 tick = 367 KB instead of the 4.18 MB canvas); `eglSwapBuffers` runs every
 frame regardless (the bridge paces to 60 Hz).
 
@@ -227,7 +230,7 @@ the card renders without its picture). stdout carries one line a caller can
 parse:
 
 ```
-[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf, media /some/dir, footer "LEFT / RIGHT FLIPPER: choose      START: boot", pictures 1:899,206,200,112
+[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf, media /some/dir, footer "LEFT / RIGHT FLIPPER: choose      START: boot", pictures 1:899,255,200,112
 ```
 
 `frame F of N` is the frame shown and the highlighted card's frame count
@@ -393,6 +396,8 @@ image=/dev/mmcblk0p7:img2|HEISEI|a games tree inside a shared partition
 sound_move=move.wav
 sound_confirm=confirm.wav
 volume=50          # software mix gain 0-100 (default 50)
+#volume=machine    # ...or the machine's own MASTER VOLUME SETTING (machine_volume= says where)
+#machine_volume=/data/nv/turtles_pro/NVM|73fa9f7f0223dfa965f070fa2d0d49ed0efaec62|18
 #mixer_volume=32   # hardware only: the codec 'PCM' volume, game curve, 0-63
 #media=/usr/local/codeselect/media
 default=0          # highlight when there is no usable last-choice file
@@ -413,6 +418,21 @@ the seventh field is ignored. `<device>` is the block device on hardware -
 partition - and an opaque token in the emulator (`p3`, `p7`, `p7:img2`). Up
 to 16 images (`CONF_MAX_IMAGES`). `volume` is clamped to 0-100,
 `mixer_volume` to 0-63. Unknown keys are ignored so the file can grow.
+
+**The machine's own volume.** `volume=machine` makes the menu play at the
+MASTER VOLUME SETTING the owner set on the coin door instead of at a number.
+`machine_volume=<store>|<sha1 key>|<factory>` says where that is read from:
+the card's `/data/nv/<title>/NVM/` mirror of the machine's settings (a ring
+of generation files; the highest hex name is the newest, and the `.crc32`
+sidecars beside them are skipped), the record's key (SHA1 of the caption
+`MASTER VOLUME SETTING`, the same on every version of a title) and the
+title's built-in level for a machine with no store yet (`nvm.c`; the record
+is `SHA1(caption)[20] | default | min | max | id | LIVE VALUE | check`, all
+u32 LE, check = 0xFF - (value & 0xFF)). On the hardware the number goes to
+the codec mixer exactly as the game hands it over and the mix runs at 100;
+a sink with no mixer (the emulator's FIFO, a dump) gets the same
+`(v/63)^0.2` curve as a software gain. `--volume` still overrides it (that
+is the app's preview). `mkmulticard.py --machine-volume` writes both keys.
 
 ### stdout lines (the rig forwards `[select]` to its event pane)
 

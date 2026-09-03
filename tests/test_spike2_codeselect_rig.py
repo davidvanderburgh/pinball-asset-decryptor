@@ -621,7 +621,7 @@ def test_list_games_is_read_with_the_fifth_field_and_tokens_carry_the_subdir():
 def test_the_cards_sound_and_volume_keys_reach_the_emulator_conf_but_media_does_not():
     outer = _select_outer()
     assert ("grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|"
-            "mixer_volume)[[:space:]]*='") in outer
+            "machine_volume|mixer_volume)[[:space:]]*='") in outer
     assert "media=" not in outer.replace("image=", ""), "media= is the card's path; the rig passes --media"
 
 
@@ -1087,6 +1087,7 @@ EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  "egl_stern.c", "egl_stern.h", "input.c", "input.h",
                  "input_hw.c", "input_padsw.c", "log.c", "log.h",
                  "art.c", "art.h", "audio.c", "audio.h", "audio_fifo.c", "audio_alsa.c",
+                 "nvm.c", "nvm.h",
                  "Makefile", "select.sh", "images.conf.example",
                  "third_party/stb_truetype.h", "third_party/stb_image.h"]
 

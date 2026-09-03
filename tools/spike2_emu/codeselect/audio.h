@@ -44,6 +44,10 @@ struct audio_sink *audio_fifo_open(const char *path, const char *fmt_path);
 struct audio_sink *audio_alsa_open(char *err, int errlen);
 /* the game's codec curve on selem 'PCM' of ctl backbox + cabinet; 0 ok */
 int  audio_alsa_mixer(int v63);
+/* THE MACHINE'S OWN VOLUME as a software gain (0-100): the codec's
+ * 192*(v/63)^0.2 curve, for a sink with no mixer to hand the number to
+ * (the emulator's fifo, a dump); 0 stays silent */
+int  audio_machine_gain(int v63);
 
 struct audio;
 
@@ -53,6 +57,7 @@ struct audio;
  * 'audio: alsa <dev> ok' | 'audio: fifo <path> open' | 'audio: none (<reason>)'. */
 struct audio *audio_open(const char *mode, const char *fmt_path, int volume, const char *dump_path);
 int  audio_active(const struct audio *a);            /* 1 when a sink or a dump is live */
+void audio_set_volume(struct audio *a, int volume);  /* the mix gain 0-100, after open */
 const char *audio_sink_name(const struct audio *a);  /* "alsa" | "fifo" | "dump" | "none" */
 /* start a clip on a free voice; loop = restart at the end. Voice id or -1. */
 int  audio_play(struct audio *a, const struct audio_clip *c, int loop);

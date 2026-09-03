@@ -213,7 +213,7 @@ if [ -n "${PAD_CARD:-}" ]; then
             # the card's sound and volume keys, verbatim (media= is NOT
             # copied: the media directory is handed over with --media below).
             # Spacing tolerated on the same rule as the image lines above.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|mixer_volume)[[:space:]]*=' || true
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume)[[:space:]]*=' || true
         } > "$R/dump/codeselect.conf"
         echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after $SEL_TIMEOUT s"
         # THE MEDIA (item 90 v2): the card's /usr/local/codeselect/media,

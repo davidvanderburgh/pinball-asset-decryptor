@@ -901,7 +901,8 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     # it is JSON, and exactly the keys contract A names
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
-                      "volume", "mixer_volume", "sound_move", "sound_confirm", "theme", "colors"}
+                      "volume", "machine_volume", "mixer_volume", "sound_move", "sound_confirm", "theme",
+                      "colors"}
     # a card with no media at all: the fields are null, not absent
     plain = mk.build_manifest(plan, mk.parse_images_conf(_menu_conf(mk, plan)), None)
     assert [im["art"] for im in plain["images"]] == [None, None]
@@ -1593,3 +1594,56 @@ def test_the_selftests_check_recorder_names_the_line_that_failed(mk, capsys):
     ok &= True
     assert not bool(ok)
     assert "PASS" if ok else "FAIL" == "FAIL"
+
+
+# ---- the machine's own volume: volume=machine + machine_volume= (David, 2026-09-03) ---------
+def test_images_conf_can_follow_the_machines_own_volume(mk):
+    """volume=machine + machine_volume=<store>|<key>|<factory>: what the selector reads to play
+    at the MASTER VOLUME SETTING the owner set (David: 'it should follow the set volume of the
+    actual machine')."""
+    import hashlib
+    assert mk.MACHINE_VOLUME_KEY == hashlib.sha1(b"MASTER VOLUME SETTING").hexdigest()
+    mv = {"store": "/data/nv/turtles_pro/NVM", "key": mk.MACHINE_VOLUME_KEY, "default": 18}
+    text = mk.render_images_conf(["/dev/mmcblk0p3", "/dev/mmcblk0p7"], ["A", "B"], volume=35, machine_volume=mv)
+    lines = [l for l in text.splitlines() if not l.startswith("#")]
+    assert "volume=machine" in lines and "volume=35" not in lines
+    assert "machine_volume=/data/nv/turtles_pro/NVM|73fa9f7f0223dfa965f070fa2d0d49ed0efaec62|18" in lines
+    conf = mk.parse_images_conf(text)
+    assert conf["volume"] == "machine"
+    assert conf["machine_volume"] == {"store": "/data/nv/turtles_pro/NVM", "key": mk.MACHINE_VOLUME_KEY,
+                                      "default": 18}
+    # no store known (the title could not be read) and no factory level: the fields are empty
+    text = mk.render_images_conf(["/dev/mmcblk0p3"],
+                                 machine_volume={"store": None, "key": mk.MACHINE_VOLUME_KEY, "default": None})
+    assert "machine_volume=|%s|" % mk.MACHINE_VOLUME_KEY in text
+    assert mk.parse_images_conf(text)["machine_volume"] == {"store": None, "key": mk.MACHINE_VOLUME_KEY,
+                                                             "default": None}
+    # a number is still a number, the key must be a SHA1 and the factory level 0-63
+    plain = mk.parse_images_conf("image=p3|A|a\nvolume=40\n")
+    assert plain["volume"] == 40 and plain["machine_volume"] is None
+    with pytest.raises(mk.Refused):
+        mk.render_images_conf(["/dev/mmcblk0p3"], machine_volume={"store": "/x", "key": "nope", "default": 1})
+    with pytest.raises(mk.Refused):
+        mk.parse_images_conf("image=p3|A|a\nmachine_volume=/x|%s|64\n" % mk.MACHINE_VOLUME_KEY)
+
+
+def test_conf_for_plan_keeps_a_machine_following_card_and_the_flag_reads_the_title(mk, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    _out, _srcs, plan = _loaded_card(mk, tmp_path, monkeypatch)
+    ex = mk.parse_images_conf("image=/dev/mmcblk0p3|A|a\nimage=/dev/mmcblk0p7|B|b\nvolume=machine\n"
+                              "machine_volume=/data/nv/turtles_pro/NVM|%s|18\n" % mk.MACHINE_VOLUME_KEY)
+    # no flags: a card that follows its machine keeps doing so, byte for byte
+    text = mk.conf_for_plan(plan, SimpleNamespace(), existing=ex)
+    assert "volume=machine" in text
+    assert "machine_volume=/data/nv/turtles_pro/NVM|%s|18" % mk.MACHINE_VOLUME_KEY in text
+    # --volume N takes it off the machine's setting...
+    text = mk.conf_for_plan(plan, SimpleNamespace(volume=40), existing=ex)
+    assert "volume=40" in text and "machine" not in text
+    # ...and --machine-volume puts it on: here the fixture's card has no readable games tree, so
+    # there is no store and no factory level, the usual key stands, and nothing raised
+    text = mk.conf_for_plan(plan, SimpleNamespace(machine_volume=True, volume=40), existing=ex)
+    assert "volume=machine" in text and "volume=40" not in text
+    assert "machine_volume=|%s|" % mk.MACHINE_VOLUME_KEY in text
+    mv = mk.machine_volume_for(str(tmp_path / "nowhere.raw"), None)
+    assert mv["store"] is None and mv["default"] is None and mv["key"] == mk.MACHINE_VOLUME_KEY
+    assert mv["notes"] and "could not be read" in mv["notes"][0]

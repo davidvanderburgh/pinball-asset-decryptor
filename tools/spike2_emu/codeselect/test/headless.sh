@@ -202,7 +202,7 @@ pix "$T/snap_1_2.ppm" 999 262 0000FF                 # card 1 (highlighted): GIF
 band "$T/snap_1_2.ppm" 300 684 1060 722 FFC42D       # 'booting TMNT 1987 in 1 s'
 grep -qF "snapshot: $T/snap_1_2.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 1 s, invert 0, font $FONT, media $T/media" "$T/snap.out" || {
     echo "headless: FAIL snapshot stdout line"; cat "$T/snap.out"; exit 1; }
-grep -qF ", pictures 1:899,206,200,112" "$T/snap.out" || {
+grep -qF ", pictures 1:899,255,200,112" "$T/snap.out" || {
     echo "headless: FAIL snapshot pictures field (highlighted)"; cat "$T/snap.out"; exit 1; }
 grep -q "media: 2 art, 1 anim (4 frames), 0 music, 0 card confirm, move=n confirm=n" "$T/snap.log" || {
     echo "headless: FAIL the snapshot touched the sounds"; grep media "$T/snap.log"; exit 1; }
@@ -217,7 +217,7 @@ pix "$T/snap_0_2.ppm" 361 262 C03040
 pix "$T/snap_0_2.ppm" 999 262 0000FF
 grep -qF "highlight 0 (STERN STOCK) from --highlight, frame 0 of 0," "$T/snap.out" || {
     echo "headless: FAIL snapshot frame count without an animation"; cat "$T/snap.out"; exit 1; }
-grep -qF ", pictures 1:899,206,200,112" "$T/snap.out" || {
+grep -qF ", pictures 1:899,255,200,112" "$T/snap.out" || {
     echo "headless: FAIL snapshot pictures field"; cat "$T/snap.out"; exit 1; }
 # a frame past the end wraps (6 of 4 -> 2)
 snap "$T/snap_wrap.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --anim-frame 6
@@ -411,6 +411,30 @@ python3 "$HERE/ppm2png.py" "$T/run_3.ppm" "$T/codeselect_frames_3.png"
 python3 "$HERE/ppm2png.py" "$T/snap_1_2.ppm" "$T/codeselect_snapshot.png"
 python3 "$HERE/ppm2png.py" "$T/snap_nomedia.ppm" "$T/codeselect_snapshot_nomedia.png"
 python3 "$HERE/ppm2png.py" "$T/menu.ppm" "$T/codeselect_menu.png"
+# 13. volume=machine: the MASTER VOLUME SETTING off the card's /data/nv mirror
+#     (nvm.h) - the newest generation wins, a missing store falls back to the
+#     title's factory level, and --volume still overrides both
+python3 "$HERE/mkmedia.py" nvm "$T/nv/NVM" 33
+cat > "$T/machine.conf" <<EOF
+image=p3|A|a
+image=p7|B|b
+volume=machine
+machine_volume=$T/nv/NVM|73fa9f7f0223dfa965f070fa2d0d49ed0efaec62|18
+default=0
+timeout=1
+EOF
+run "$T/menu_machine.ppm" "$T/machine.conf" --log "$T/machine.log"
+grep -q "audio: volume follows the machine: 33/63 ($T/nv/NVM/00000002)" "$T/machine.log" \
+    || { echo "headless: FAIL volume=machine did not read 33/63 from the newest generation"; grep audio "$T/machine.log"; exit 1; }
+rm -rf "$T/nv"
+run "$T/menu_machine.ppm" "$T/machine.conf" --log "$T/machine.log"
+grep -q "no setting read (no store in $T/nv/NVM); the title's factory 18/63" "$T/machine.log" \
+    || { echo "headless: FAIL volume=machine without a store did not fall back to the factory level"; grep audio "$T/machine.log"; exit 1; }
+run "$T/menu_machine.ppm" "$T/machine.conf" --log "$T/machine.log" --volume 70
+grep -q "audio: --volume 70 overrides volume=machine" "$T/machine.log" \
+    || { echo "headless: FAIL --volume did not override volume=machine"; grep audio "$T/machine.log"; exit 1; }
+expect "$T/choice" 0
+
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"
 python3 "$HERE/ppm2png.py" "$T/menu_invert.ppm" "$T/codeselect_menu_invert.png" --rot180-of "$T/menu.ppm"

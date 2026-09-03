@@ -11,7 +11,12 @@
  *   sound_move=<wav>         played on every LEFT/RIGHT/-/+ edge
  *   sound_confirm=<wav>      played to completion on START/Select, for every
  *                            image that does not name a <confirm> of its own
- *   volume=<0-100>           software mix gain (default 50)
+ *   volume=<0-100>|machine   software mix gain (default 50), or 'machine' = the
+ *                            machine's own MASTER VOLUME SETTING, read off the
+ *                            card's /data/nv mirror (nvm.h); --volume still wins
+ *   machine_volume=<dir>|<sha1 hex>|<0-63>  with volume=machine: the store
+ *                            (/data/nv/<title>/NVM), the record's key, and the
+ *                            title's factory level for a machine with no store yet
  *   mixer_volume=<0-63>      optional: apply the game's codec curve to the
  *                            ALSA 'PCM' selem (hardware only; untouched when absent)
  *   theme=<name>             the menu's colours: a built-in theme (themes.json;
@@ -56,6 +61,11 @@ struct conf {
     char sound_move[CONF_STR];     /* "" when absent */
     char sound_confirm[CONF_STR];  /* "" when absent */
     int volume;        /* volume= 0..100 (-1 when absent; the program defaults to 50) */
+    int volume_machine;            /* volume=machine: follow the machine's own setting */
+    char mv_store[CONF_STR];       /* machine_volume= the store dir ("" when absent)... */
+    unsigned char mv_key[20];      /* ...the record's SHA1 key... */
+    int mv_key_set;                /* ...(1 when a valid one was given)... */
+    int mv_default;                /* ...and the title's factory level (-1 when absent) */
     int mixer_volume;  /* mixer_volume= 0..63 (-1 when absent = leave the mixer alone) */
     char theme[CONF_STR];          /* theme= ("" when absent = the default) */
     unsigned color[TH_N];          /* color_<role>= overrides... */

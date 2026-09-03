@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include "conf.h"
+#include "nvm.h"
 
 static char *trim(char *s)
 {
@@ -47,6 +48,10 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     c->def = -1;
     c->timeout = -1;
     c->volume = -1;
+    c->volume_machine = 0;
+    c->mv_store[0] = 0;
+    c->mv_key_set = 0;
+    c->mv_default = -1;
     c->mixer_volume = -1;
     f = fopen(path, "r");
     if (!f) {
@@ -112,7 +117,23 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
         } else if (!strcmp(key, "sound_confirm")) {
             copy_field(c->sound_confirm, val);
         } else if (!strcmp(key, "volume")) {
-            if (*val) c->volume = clamp_int(val, 0, 100);
+            if (!strcmp(val, "machine")) c->volume_machine = 1;
+            else if (*val) c->volume = clamp_int(val, 0, 100);
+        } else if (!strcmp(key, "machine_volume")) {
+            /* <store>|<sha1 hex>|<default> - a field this cannot read is
+             * dropped, never fatal: the worst case is the plain volume */
+            char tmp[CONF_STR * 3], *p = tmp, *q;
+            snprintf(tmp, sizeof tmp, "%s", val);
+            q = strchr(p, '|');
+            if (q) *q++ = 0;
+            copy_field(c->mv_store, p);
+            if (q) {
+                p = q;
+                q = strchr(p, '|');
+                if (q) *q++ = 0;
+                c->mv_key_set = nvm_parse_key(p, c->mv_key) == 0;
+                if (q && *q) c->mv_default = clamp_int(q, 0, 63);
+            }
         } else if (!strcmp(key, "mixer_volume")) {
             if (*val) c->mixer_volume = clamp_int(val, 0, 63);
         } else if (!strcmp(key, "theme")) {

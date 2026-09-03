@@ -95,7 +95,7 @@ record decoder) are tested on Windows.
                              [--layout auto|parts|multi] [--media-dir DIR] [--bypass-validation]
                              [--allow-version-mismatch]
                              [--titles "T0;T1;..."] [--subtitles "S0;S1;..."] [--timeout N]
-                             [--default N] [--volume V] [--mixer-volume M] [--conf FILE]
+                             [--default N] [--volume V] [--machine-volume] [--mixer-volume M] [--conf FILE]
                              [--theme NAME] [--color ROLE=RRGGBB ...]
                              [--no-inject] [--dd] [--force] [--workdir DIR] [--allow-unreachable]
         write the sparse OUT (partition ranges copied, MBR entries + EBR chain regenerated; for
@@ -242,7 +242,18 @@ P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
 MAX_IMAGES = 16
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
 CONF_KEYS = ("default", "timeout", "font", "sound_move", "sound_confirm", "volume", "mixer_volume", "media",
-             "theme")
+             "theme", "machine_volume")
+
+#: THE MACHINE'S OWN VOLUME (images.conf volume=machine + machine_volume=<store>|<key>|<default>):
+#: the selector plays at the MASTER VOLUME SETTING the owner set on the coin door, read off the
+#: card's /data/nv/<title>/NVM mirror of the machine's settings (a ring of generation files of
+#: 44-byte records keyed by SHA1 of the menu caption - the same key on every version of a title,
+#: checked on TMNT and Godzilla).  The default is the title's built-in level (factory_volume) for
+#: a machine that has no store yet.  David, 2026-09-03: "it should follow the set volume of the
+#: actual machine".
+MACHINE_VOLUME_CAPTION = "MASTER VOLUME SETTING"
+MACHINE_VOLUME_KEY = hashlib.sha1(MACHINE_VOLUME_CAPTION.encode("ascii")).hexdigest()
+MACHINE_VOLUME_STORE = "/data/nv/%s/NVM"
 
 #: THE MENU'S COLOUR THEMES: codeselect/themes.json is the one definition - the selector compiles
 #: it in (gen_themes.py -> theme_table.h at build time) and this tool and the app read it as is.
@@ -832,9 +843,29 @@ def _int_range(val, key, lo, hi):
     return v
 
 
+def check_machine_volume(mv):
+    """The machine_volume contract for images.conf, validated: None, or {"store": str|None,
+    "key": 40 hex, "default": 0-63|None} (extra keys - title, notes - are kept as given)."""
+    if not mv:
+        return None
+    if not isinstance(mv, dict):
+        raise Refused("machine_volume must be a dict with store/key/default, not %r" % (mv,))
+    out = dict(mv)
+    store = out.get("store") or None
+    if store and ("|" in store or "\n" in store):
+        raise Refused("machine_volume: the store %r may not contain '|' or a newline" % store)
+    key = str(out.get("key") or MACHINE_VOLUME_KEY).lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", key):
+        raise Refused("machine_volume: the key must be 40 hex digits (SHA1 of the caption), not %r" % key)
+    default = out.get("default")
+    out.update(store=store, key=key,
+               default=None if default in (None, "") else _int_range(default, "machine_volume default", 0, 63))
+    return out
+
+
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None,
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
-                       media_dir=None, theme=None, colors=None):
+                       media_dir=None, theme=None, colors=None, machine_volume=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -876,6 +907,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         raise Refused("images.conf: timeout must be >= 0")
     if volume is not None:
         volume = _int_range(volume, "volume", 0, 100)
+    machine_volume = check_machine_volume(machine_volume)
     if mixer_volume is not None:
         mixer_volume = _int_range(mixer_volume, "mixer_volume", 0, 63)
     if media_dir and ("|" in media_dir or "\n" in media_dir):
@@ -901,7 +933,11 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append("sound_move=%s" % sound_move)
     if sound_confirm:
         out.append("sound_confirm=%s" % sound_confirm)
-    if volume is not None:
+    if machine_volume:
+        out.append("volume=machine")
+        out.append("machine_volume=%s|%s|%s" % (machine_volume["store"] or "", machine_volume["key"],
+                                              "" if machine_volume["default"] is None else machine_volume["default"]))
+    elif volume is not None:
         out.append("volume=%d" % volume)
     if mixer_volume is not None:
         out.append("mixer_volume=%d" % mixer_volume)
@@ -932,7 +968,7 @@ def parse_images_conf(text):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "default": 0, "timeout": 15, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
-            "theme": None, "colors": {}}
+            "theme": None, "colors": {}, "machine_volume": None}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -961,7 +997,13 @@ def parse_images_conf(text):
         elif key in ("sound_move", "sound_confirm"):
             conf[key] = _media_name_ok(val.strip(), key) or None
         elif key == "volume":
-            conf["volume"] = _int_range(val.strip(), key, 0, 100)
+            conf["volume"] = "machine" if val.strip().lower() == "machine" else _int_range(val.strip(), key, 0, 100)
+        elif key == "machine_volume":
+            store, _sep, rest = val.strip().partition("|")
+            hexkey, _sep, default = rest.partition("|")
+            conf["machine_volume"] = check_machine_volume({"store": store.strip() or None,
+                                                           "key": hexkey.strip() or MACHINE_VOLUME_KEY,
+                                                           "default": default.strip() or None})
         elif key == "mixer_volume":
             conf["mixer_volume"] = _int_range(val.strip(), key, 0, 63)
         elif key == "media":
@@ -1732,6 +1774,64 @@ def tree_source_title(plan, part, sub):
     return default_title(part.src)
 
 
+def plan_tree_source(plan, index):
+    """(path, part, subdir) to read games tree `index` from: at build the SOURCE image (the card
+    does not exist yet), at inject the card itself (plan_from_card lists the card as every
+    source).  A part that cannot be located is None; the reader says why."""
+    srcs = [plan.primary] + list(plan.extras)
+    path = srcs[index] if index < len(srcs) else plan.primary
+    if index > 0 and path == plan.primary and index < len(plan.trees):
+        part, sub = plan.trees[index]
+        return path, part, sub
+    try:
+        return path, source_part(path), None
+    except Exception:
+        return path, None, None
+
+
+def machine_volume_for(path, part, subdir=None):
+    """images.conf's machine_volume contract for the games tree at (path, part, subdir): the
+    store the machine mirrors its settings to (/data/nv/<title>/NVM), the MASTER VOLUME SETTING
+    record's key (SHA1 of the caption) and the title's built-in level for a machine that has no
+    store yet (:mod:`plugins.stern.factory_volume`).  Nothing here raises: a tree or an ELF this
+    cannot read leaves the store or the default None with the reason in "notes"."""
+    _v, _s, ext4, adjustments = _stern_plugins()
+    out = {"store": None, "key": MACHINE_VOLUME_KEY, "default": None, "title": None, "notes": []}
+    try:
+        if part is None:
+            raise Refused("no games partition located")
+        with open(path, "rb") as f:
+            r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+            root = tree_root_inode(r, subdir)
+            title, _gpath, _gino, gnode = tree_game(r, root)
+            elf = r.read_file_bytes(gnode)
+    except Exception as e:
+        out["notes"].append("%s could not be read (%s: %s); no store, no factory level"
+                            % (path, type(e).__name__, e))
+        return out
+    out["title"] = title
+    out["store"] = MACHINE_VOLUME_STORE % title
+    try:
+        from pinball_decryptor.plugins.stern import factory_volume
+        table = adjustments.AdjustmentTable(elf)
+        idx = table.by_name.get(factory_volume.ADJUSTMENT)
+        if idx is not None:
+            caption = adjustments.menu_label(table, idx)
+            if caption and caption.strip().upper() != MACHINE_VOLUME_CAPTION:
+                out["notes"].append("this build captions the volume %r, not %r; the record is looked up "
+                                    "under the usual caption" % (caption, MACHINE_VOLUME_CAPTION))
+        spot = factory_volume.find(table)
+        if spot is not None:
+            out["default"] = int(spot["value"])
+        else:
+            out["notes"].append("the title's built-in volume was not located in %s's game ELF; a machine "
+                                "with no settings store plays at the plain volume" % title)
+    except Exception as e:
+        out["notes"].append("%s's game ELF has no adjustment table this reads (%s: %s); a machine with "
+                            "no settings store plays at the plain volume" % (title, type(e).__name__, e))
+    return out
+
+
 def conf_for_plan(plan, args, existing=None, media=None):
     """images.conf text for the card: --conf verbatim, else generated from the layout with the
     flags, falling back to `existing` (a parsed conf already on the card) then to defaults.
@@ -1775,6 +1875,22 @@ def conf_for_plan(plan, args, existing=None, media=None):
         volume, mixer = ex.get("volume"), ex.get("mixer_volume")
     if getattr(args, "volume", None) is not None:
         volume = args.volume
+    # THE MACHINE'S OWN VOLUME: --machine-volume reads the default image's title for the store
+    # and the factory level; without the flag a card already following its machine keeps doing
+    # so unless --volume names a number
+    mv = None
+    if getattr(args, "machine_volume", False):
+        k = int(default) if 0 <= int(default) < n else 0
+        mv = machine_volume_for(*plan_tree_source(plan, k))
+        for note in mv["notes"]:
+            say("note: machine volume: %s" % note)
+        say("machine volume: the menu follows %s (key %s..., factory %s)"
+            % (mv["store"] or "no store (no title read)", mv["key"][:8],
+               "unknown" if mv["default"] is None else "%d/63" % mv["default"]))
+    elif ex.get("volume") == "machine" and getattr(args, "volume", None) is None:
+        mv = ex.get("machine_volume") or {"store": None, "key": MACHINE_VOLUME_KEY, "default": None}
+    if volume == "machine":
+        volume = None
     if getattr(args, "mixer_volume", None) is not None:
         mixer = args.mixer_volume
     theme = check_theme(getattr(args, "theme", None))
@@ -1787,7 +1903,8 @@ def conf_for_plan(plan, args, existing=None, media=None):
         if not colors:
             colors = dict(ex.get("colors") or {})
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
-                              rows, move, confirm, volume, mixer, theme=theme, colors=colors)
+                              rows, move, confirm, volume, mixer, theme=theme, colors=colors,
+                              machine_volume=mv)
 
 
 # ============================================================================= the JSON sidecars
@@ -1835,7 +1952,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("images", rows),
         ("timeout", conf["timeout"]),
         ("default", conf["default"]),
-        ("volume", conf["volume"]),
+        ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
         ("mixer_volume", conf["mixer_volume"]),
         ("sound_move", conf["sound_move"]),
         ("sound_confirm", conf["sound_confirm"]),
@@ -2994,7 +3111,8 @@ def inspect_card(card, media_out=None):
         ("layout", plan.layout if plan else ("multi" if any(":" in d for (d, _t, _s) in conf["images"]) else "parts")),
         ("partitions", parts), ("images", images),
         ("timeout", conf["timeout"]), ("default", conf["default"]),
-        ("volume", conf["volume"]), ("mixer_volume", conf["mixer_volume"]),
+        ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
+        ("mixer_volume", conf["mixer_volume"]),
         ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
         ("font", conf["font"]), ("media_dir", conf["media_dir"]),
         ("theme", conf.get("theme")), ("colors", dict(conf.get("colors") or {})),
@@ -3644,6 +3762,10 @@ def _add_conf_flags(s):
     s.add_argument("--default", type=int, help="images.conf default index (default 0)")
     s.add_argument("--volume", type=int, help="images.conf volume 0-100 (software mix gain; overrides media.json)")
     s.add_argument("--mixer-volume", type=int, help="images.conf mixer_volume 0-63 (the game's codec curve on selem PCM; only when set)")
+    s.add_argument("--machine-volume", action="store_true",
+                   help="images.conf volume=machine: the menu plays at the machine's own MASTER VOLUME SETTING, "
+                        "read off the card's /data/nv mirror (the default image's title names the store and the "
+                        "factory level for a machine with no store yet); --volume is then only the preview's")
     s.add_argument("--theme", help="the menu's colours: one of codeselect/themes.json's names, or custom "
                                    "(the default theme plus --color overrides); an existing card's is kept when absent")
     s.add_argument("--color", action="append", metavar="ROLE=RRGGBB",

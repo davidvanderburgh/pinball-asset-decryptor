@@ -49,8 +49,8 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 # in the rootfs). Hand prototypes in audio_alsa.c: no headers on the box.
 AUDLIBS   = -l:libasound.so.2
 
-SRCS = codeselect.c conf.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c log.c art.c audio.c audio_fifo.c audio_alsa.c
-HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c log.c art.c audio.c audio_fifo.c audio_alsa.c nvm.c
+HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h nvm.h $(BUILD)/theme_table.h
 OBJS = $(SRCS:%.c=$(BUILD)/%.o)
 BIN  = $(BUILD)/codeselect
 

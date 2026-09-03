@@ -543,6 +543,10 @@ def s_fill():
         log("frame from --frame: %s" % frame)
     log("load_frame -> %s"
         % panel.load_frame(frame, HIGHLIGHT, FRAME_INDEX, FRAMES))
+    # ...and the strip's two readouts as a rendered preview shows them
+    # (a render sets them; this stand-in frame came through load_frame).
+    panel._media_say("video", "ready (1 clip)")
+    panel._media_say("audio", "ready")
     # ROOM FOR IT.  The notebook was measured when the tab was selected
     # and the table has grown a row since; the status block is the LAST
     # thing packed, and short of its height the notebook clips it.  This

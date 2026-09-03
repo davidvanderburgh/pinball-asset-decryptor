@@ -429,8 +429,12 @@ pad_glguest_hash() { pad_src_hash "${1:-$RIG}" $PAD_GLGUEST_SRCS; }
 # missing file (tests/test_spike2_codeselect_rig.py checks the two agree).
 # images.conf.example is on it because `make install` installs it. art.c
 # (PNG/GIF decode + blit) and audio.c / audio_fifo.c / audio_alsa.c (the WAV
-# mixer and its two sinks) are item 90's media pass.
-PAD_SELECT_SRCS="codeselect/codeselect.c codeselect/conf.c codeselect/conf.h codeselect/gfx.c codeselect/gfx.h codeselect/egl_stern.c codeselect/egl_stern.h codeselect/input.c codeselect/input.h codeselect/input_hw.c codeselect/input_padsw.c codeselect/log.c codeselect/log.h codeselect/art.c codeselect/art.h codeselect/audio.c codeselect/audio.h codeselect/audio_fifo.c codeselect/audio_alsa.c codeselect/Makefile codeselect/select.sh codeselect/images.conf.example codeselect/third_party/stb_truetype.h codeselect/third_party/stb_image.h"
+# mixer and its two sinks) are item 90's media pass; theme.c/.h, themes.json
+# and gen_themes.py are its colour themes (the Makefile generates
+# theme_table.h from the JSON at build time - the LIST left them out for a
+# day and the staged build died on `No such file` after the digest had
+# said the selector was current).
+PAD_SELECT_SRCS="codeselect/codeselect.c codeselect/conf.c codeselect/conf.h codeselect/theme.c codeselect/theme.h codeselect/themes.json codeselect/gen_themes.py codeselect/gfx.c codeselect/gfx.h codeselect/egl_stern.c codeselect/egl_stern.h codeselect/input.c codeselect/input.h codeselect/input_hw.c codeselect/input_padsw.c codeselect/log.c codeselect/log.h codeselect/art.c codeselect/art.h codeselect/audio.c codeselect/audio.h codeselect/audio_fifo.c codeselect/audio_alsa.c codeselect/Makefile codeselect/select.sh codeselect/images.conf.example codeselect/third_party/stb_truetype.h codeselect/third_party/stb_image.h"
 export PAD_SELECT_SRCS
 
 #: The installed selector, and what it was built from - stamped beside it,

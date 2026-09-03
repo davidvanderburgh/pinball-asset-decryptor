@@ -1081,7 +1081,9 @@ def _srcs(var):
 #: input.c/h, log.c/h, conf.h and the example conf that `make install` ships;
 #: the media pass (item 90 v2) added art.c/h (PNG + GIF decode, blit) and
 #: audio.c/h + audio_fifo.c + audio_alsa.c (the WAV mixer and its two sinks).
-EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h", "gfx.c", "gfx.h",
+EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
+                 "theme.c", "theme.h", "themes.json", "gen_themes.py",
+                 "gfx.c", "gfx.h",
                  "egl_stern.c", "egl_stern.h", "input.c", "input.h",
                  "input_hw.c", "input_padsw.c", "log.c", "log.h",
                  "art.c", "art.h", "audio.c", "audio.h", "audio_fifo.c", "audio_alsa.c",
@@ -1184,6 +1186,12 @@ def test_every_source_the_makefile_compiles_or_installs_is_on_the_list():
     needed.update(re.findall(r"install -m \d+ ([A-Za-z0-9_.]+) ", mk))
     needed.update(os.path.basename(p) for p in
                   re.findall(r"third_party/[A-Za-z0-9_.]+", mk))
+    # A header the build GENERATES ($(BUILD)/theme_table.h) is not staged,
+    # but what it is generated FROM is: the prerequisites of its rule.
+    for rule in re.findall(r"^\$\(BUILD\)/[A-Za-z0-9_.%]+:\s*(.*?)\s*(?:\|.*)?$", mk, re.M):
+        needed.update(os.path.basename(t) for t in rule.split()
+                      if not t.startswith("$") and "%" not in t)
+    needed = {n for n in needed if not n.startswith("$(")}
     missing = sorted(needed - listed)
     assert not missing, "the Makefile needs %s and PAD_SELECT_SRCS does not stage them" % missing
 

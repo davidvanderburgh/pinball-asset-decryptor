@@ -1426,8 +1426,8 @@ HELP_CONTENT = {
          "window, and it never greys the tab while it is drawing. "
          "Selecting a row in the table points it at that image. It is the "
          "same media the build will use, so the card carries exactly what "
-         "you previewed. Right-click the picture to redraw it now, or to "
-         "stop it following the form."),
+         "you previewed. It draws itself when you open the tab and after "
+         "every change, so there is nothing to press."),
         ("The flippers, the animation and the sound",
          "The two flipper buttons under the picture are the machine's: "
          "they move the highlight one card and wrap round at the ends, "

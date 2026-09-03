@@ -2297,10 +2297,12 @@ def test_a_stepper_on_a_frame_that_is_not_drawn_yet_says_so(tmp_path):
         panel._auto_preview.set(False)
         panel._frame_var.set("4")
         assert "not been drawn yet" in panel._pv_status.cget("text")
-        assert "right-click" in panel._pv_status.cget("text")
+        # ...and it names no control: the picture redraws itself, so a
+        # frame nobody is drawing is a fact rather than an instruction
+        assert "right-click" not in panel._pv_status.cget("text")
         panel._auto_preview.set(True)
         panel._frame_var.set("5")
-        assert "drawing it" in panel._pv_status.cget("text")
+        assert "is being drawn" in panel._pv_status.cget("text")
         assert panel._pv_debounce_job is not None
     finally:
         root.destroy()
@@ -2840,9 +2842,8 @@ def test_the_confirm_sound_can_be_heard_before_a_card_is_written(
             panel.add_image(p)
         media = _media_set(panel, own_confirm="confirm1.wav")
         panel._set_var(panel._hl_var, 1)
-        # it is on the picture's own menu, at the index the popup greys
-        assert panel._pv_menu.entrycget(panel.PV_MENU_CONFIRM, "label") == \
-            "Play this image's confirm sound"
+        # it is the Select button now - START, on the picture
+        assert panel._select_btn.cget("text") == "Select"
         assert panel.play_confirm() is True
         assert made[0].played("play") == [os.path.join(media,
                                                        "confirm1.wav")]
@@ -2949,12 +2950,7 @@ def test_a_confirm_the_form_has_turned_off_is_not_offered_or_played(
         assert panel.play_confirm() is False
         assert made == []                       # no device opened for it
         assert "no confirm sound" in panel._pv_status.cget("text")
-        # the right-click entry greys with it, the way it does for a media
-        # set with nothing prepared (asked through the popup's own seam:
-        # tk_popup itself takes a grab and never returns in a test)
-        assert panel.sync_preview_menu() is True
-        assert str(panel._pv_menu.entrycget(panel.PV_MENU_CONFIRM,
-                                            "state")) == "disabled"
+        # ...and Select says so rather than playing something else
         # an image with a confirm of its OWN still has one, whatever the
         # menu says - that is the selector's fallback, not a veto
         panel._rows[1].confirm = os.path.join(media, "confirm1.wav")
@@ -3046,8 +3042,7 @@ def test_nothing_the_strip_says_is_cut_in_half_by_its_own_bottom_edge(
         for line in ("This image has music - tick Sound to hear it.",
                      "No move sound in this media set.",
                      "Rendering the menu's sounds…",
-                     "Image 2 frame 7 has not been drawn yet - right-click "
-                     "the preview to redraw.",
+                     "Image 2 frame 7 has not been drawn yet.",
                      "Image 2: frame 12 of 24 - playing",
                      "The form changed - redrawing…"):
             panel._pv_say(line)
@@ -3768,11 +3763,11 @@ def test_the_more_menu_is_gone_and_so_is_every_entry_in_it(tmp_path):
         # 5. 'Bypass an existing card...' is Apply to card with Bypass
         #    ticked - but the tool's own subcommand stays where it is.
         assert multiboot_tab.bypass_commands("D:/x.raw")[0][0] == "bypass"
-        # 6. ...and the preview's automatic redraw is on the preview's menu.
-        labels = [panel._pv_menu.entrycget(i, "label")
-                  for i in range(panel._pv_menu.index("end") + 1)
-                  if panel._pv_menu.type(i) != "separator"]
-        assert "Update the preview automatically" in labels
+        # 6. ...and the PICTURE'S menu has gone the same way, for the same
+        #    reason: the preview draws itself when the tab opens and after
+        #    every change, so there is nothing to ask it for.
+        assert not hasattr(panel, "_pv_menu")
+        assert not hasattr(panel, "sync_preview_menu")
     finally:
         root.destroy()
 
@@ -5613,5 +5608,36 @@ def test_what_the_tab_says_sits_above_the_images_it_talks_about(tmp_path):
         assert "below" in panel._edit_lbl.cget("text")
         # the actions stay at the foot, after the table
         assert order.index(str(panel._table_box)) <             order.index(str(panel._action_row))
+    finally:
+        root.destroy()
+
+
+def test_select_plays_the_confirm_sound_and_blacks_the_screen(tmp_path,
+                                                              monkeypatch):
+    """David: a Select button between the flippers that "plays the
+    confirmation sound of that selected image and blacks the screen for a
+    second (to simulate the game loading)".  That is what the machine does
+    when you press START, and it is the only way to hear that sound - and
+    see that beat - before a card is written."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = _media_set(panel, own_confirm="confirm1.wav")
+        panel._set_var(panel._hl_var, 1)
+        # it sits BETWEEN the flippers, the way START sits between them on
+        # the lockdown bar
+        strip = [str(w) for w in panel._pv_strip.pack_slaves()]
+        assert strip.index(str(panel._flip_l)) <             strip.index(str(panel._select_btn)) <             strip.index(str(panel._flip_r))
+        assert panel.press_select() is True
+        assert made[0].played("play") == [os.path.join(media,
+                                                       "confirm1.wav")]
+        # ...and the picture goes black while it plays
+        assert panel._black_job is not None
+        assert panel._pv_canvas.find_all() == ()
+        # ...and comes back by itself, to the frame that was on it
+        panel._blackout_over()
+        assert panel._black_job is None
     finally:
         root.destroy()

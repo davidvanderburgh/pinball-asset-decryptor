@@ -2537,6 +2537,12 @@ class MultibootPanel:
                    "redraw now, to hear the highlighted image's confirm "
                    "sound, or to turn the automatic redraw off.")
 
+    SELECT_TIP = ("START, on the picture: the highlighted image's confirm "
+                  "sound, and the screen black for a moment while it plays "
+                  "- what the machine does when you choose a card. It is "
+                  "the only way to hear that sound, and see that beat, "
+                  "before a card is written, and it plays whether or not "
+                  "Sound is ticked, because pressing it is the asking.")
     FLIPPER_TIP = ("The machine's own flipper buttons: they move the "
                    "highlight one card and wrap round at the ends, exactly "
                    "as the flippers on the lockdown bar do - and they play "
@@ -3161,6 +3167,17 @@ class MultibootPanel:
         self._flip_l = ttk.Button(strip, text="◀ Left flipper", width=14,
                                   command=self.flip_left)
         self._flip_l.pack(side=tk.LEFT)
+        # BETWEEN THE FLIPPERS, because that is where it is on the machine:
+        # the lockdown bar has the two flipper buttons at the sides and START
+        # in the middle, and this row is that row.  Pressing it does what
+        # pressing START does - the chosen card's confirm sound, then the
+        # screen going black while the game loads - which is the only way to
+        # hear that sound, and see that beat, before a card is written.
+        self._select_btn = ttk.Button(strip, text="Select", width=8,
+                                      command=self.press_select)
+        self._select_btn.pack(side=tk.LEFT, padx=(4, 0))
+        self._select_btn.tip = _Tooltip(self._select_btn, self.SELECT_TIP,
+                                        self._theme_fn)
         self._flip_r = ttk.Button(strip, text="Right flipper ▶", width=15,
                                   command=self.flip_right)
         self._flip_r.pack(side=tk.LEFT, padx=(4, 0))
@@ -3202,7 +3219,19 @@ class MultibootPanel:
         for widget in (self._pv_canvas, self._flip_l, self._flip_r):
             widget.bind("<Left>", self._key_flip_left)
             widget.bind("<Right>", self._key_flip_right)
-        self._build_preview_menu()
+        # NO RIGHT-CLICK MENU ON THE PICTURE (David: "in total, we don't
+        # need a context menu above the preview at all now).  It had three
+        # things and each has gone somewhere better: 'Redraw the preview
+        # now' is not something anyone should have to ask for, so the
+        # picture draws itself when the tab is opened (:meth:`on_shown`);
+        # 'Update the preview automatically' was a setting about whether
+        # the tab does its job; and 'Play this image's confirm sound' is
+        # the Select button, where it reads as what it is - pressing START.
+        #
+        # ``_auto_preview`` outlives its menu entry: it is how the tests
+        # and the screenshot rig keep a photograph from starting tools
+        # (PAD_MULTIBOOT_AUTO=0), which is a developer's switch and was
+        # never worth a line in a menu.
         self._sync_flippers()
 
     def _focus_preview(self, _event=None):
@@ -3221,71 +3250,7 @@ class MultibootPanel:
         self.flip_right()
         return "break"
 
-    #: The picture's right-click menu, by index: the redraw, the automatic
-    #: update, and the two sound entries.  There is no Render now BUTTON -
-    #: the preview follows the form by itself, and a manual redraw is a
-    #: once-a-session thing - and the confirm sound is here because it is
-    #: the ONE sound that has no other way of being heard: an image's own
-    #: confirm plays when that image is CHOSEN and at no other time.
-    PV_MENU_REDRAW, PV_MENU_CONFIRM = 0, 4
 
-    def _build_preview_menu(self):
-        menu = tk.Menu(self._pv_canvas, tearoff=0)
-        menu.add_command(label="Redraw the preview now",
-                         command=self.render_preview)
-        menu.add_checkbutton(label="Update the preview automatically",
-                             variable=self._auto_preview,
-                             command=self.schedule_preview)
-        menu.add_separator()
-        menu.add_checkbutton(label="Play the menu's sounds",
-                             variable=self._sound_var,
-                             command=self._sound_toggled)
-        menu.add_command(label="Play this image's confirm sound",
-                         command=self.play_confirm)
-        self._pv_menu = menu
-        for widget in (self._pv_canvas, self._pv_strip):
-            widget.bind("<Button-3>", self._popup_preview_menu)
-
-    def sync_preview_menu(self):
-        """Which of the picture's right-click entries are live right now.
-
-        Its own method rather than three lines inside the popup, because
-        ``tk_popup`` takes a grab and does not come back until somebody
-        dismisses the menu - so this is the only part of it a test can ask
-        about at all."""
-        menu = getattr(self, "_pv_menu", None)
-        if menu is None:
-            return False
-        try:
-            menu.entryconfigure(self.PV_MENU_REDRAW,
-                                state=tk.DISABLED if self._busy
-                                else tk.NORMAL)
-            # Greyed rather than hidden when this media set has no confirm
-            # sound in it yet: the entry is where it always is, and what is
-            # missing is said on the caption when it is pressed.
-            menu.entryconfigure(self.PV_MENU_CONFIRM,
-                                state=tk.NORMAL
-                                if self.menu_sounds()["confirm"]
-                                else tk.DISABLED)
-        except tk.TclError:                             # pragma: no cover
-            return False
-        return True
-
-    def _popup_preview_menu(self, event=None):
-        menu = getattr(self, "_pv_menu", None)
-        if menu is None:
-            return None
-        self.sync_preview_menu()
-        x = getattr(event, "x_root", self._pv_canvas.winfo_rootx() + 20)
-        y = getattr(event, "y_root", self._pv_canvas.winfo_rooty() + 20)
-        try:
-            menu.tk_popup(int(x), int(y))
-        finally:
-            try:
-                menu.grab_release()
-            except tk.TclError:                         # pragma: no cover
-                pass
-        return "break"
 
     # -- 3. the images table --------------------------------------------
 
@@ -4316,6 +4281,11 @@ class MultibootPanel:
 
         ONCE. The flag is cleared whatever happens, so a card that cannot be
         read is not re-read on every visit to the tab."""
+        # THE PICTURE DRAWS ITSELF (David: "we shouldn't have to 'redraw
+        # the preview' manually. if we're on this tab after we load the app,
+        # it should fire off that event for us").  Opening the tab is the
+        # deliberate act; the app still starts no tool merely by launching.
+        self.schedule_preview()
         if not getattr(self, "_pending_read", False):
             return False
         self._pending_read = False
@@ -5816,7 +5786,6 @@ class MultibootPanel:
         def done(rc, _failed, _texts):
             if rc == 0:
                 self._sound_follow()
-                self.sync_preview_menu()
                 self._say_sound(None)   # ...so the next miss is said again
                 self._pv_say("The menu's sounds are ready.")
             else:
@@ -5918,6 +5887,66 @@ class MultibootPanel:
             self._sound_aside("No move sound in this media set.")
             return False
         self._audio_player().play(move)
+        return True
+
+    #: How long the screen stays black after Select.  The machine's own
+    #: gap is however long the game takes to come up, which is far longer;
+    #: this is a beat, enough to read as "and then it goes".
+    LOADING_MS = 1000
+
+    def press_select(self):
+        """START, on the picture: the chosen image's confirm sound, and the
+        screen black while it plays.
+
+        The machine draws a LOADING frame, plays that card's confirm sound
+        to completion and boots - so the black is not decoration, it is the
+        moment the menu hands over.  Hearing the sound against the picture
+        it belongs to is the whole point of being able to press this before
+        a card exists."""
+        self.play_confirm()
+        self._blackout()
+        return True
+
+    def _blackout(self):
+        """Black the canvas for :data:`LOADING_MS`, then put the frame back.
+
+        The picture on screen is not thrown away - it is re-shown from the
+        file it was drawn from - so this costs no render and cannot leave
+        the preview empty if the tab is torn down mid-beat."""
+        canvas = getattr(self, "_pv_canvas", None)
+        if canvas is None:                              # pragma: no cover
+            return False
+        self._cancel_blackout()
+        try:
+            canvas.delete("all")
+        except tk.TclError:                             # pragma: no cover
+            return False
+        try:
+            self._black_job = self._timer().after(self.LOADING_MS,
+                                                  self._blackout_over)
+        except tk.TclError:                             # pragma: no cover
+            self._blackout_over()
+        return True
+
+    def _cancel_blackout(self):
+        job = getattr(self, "_black_job", None)
+        self._black_job = None
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except tk.TclError:                         # pragma: no cover
+                pass
+
+    def _blackout_over(self):
+        """The beat is over: put back the frame that was on screen."""
+        self._black_job = None
+        if self._stopped:
+            return False
+        src = self._pv_src
+        if not src:
+            self._pv_placeholder()
+            return False
+        self.load_frame(src[0], src[1], src[2], src[3])
         return True
 
     def play_confirm(self):
@@ -6122,10 +6151,13 @@ class MultibootPanel:
         # first render after a restore is held (see _pv_idle), so an ask
         # that is about to be swallowed must not be reported as a promise.
         coming = self.schedule_preview() and not self._pv_idle
-        self._pv_say("%s frame %d has not been drawn yet - %s"
+        # SHORT WHEN IT IS NOT COMING.  There is no menu to send anyone to
+        # any more, and the strip is one line: a frame nobody is drawing is
+        # a fact, not an instruction.
+        self._pv_say("%s frame %d %s"
                      % (self._image_label(key[1]), key[2],
-                        "drawing it…" if coming else
-                        "right-click the preview to redraw."))
+                        "is being drawn…" if coming else
+                        "has not been drawn yet."))
 
     def _highlight(self, form):
         """The highlighted image as an index into the form, or None (said)."""
@@ -6797,12 +6829,11 @@ class MultibootPanel:
 
         Not an error - editing while an animation runs is an ordinary thing
         to do - and never a dead end: the redraw is asked for here, so the
-        picture follows the form again by itself.  (It used to name a
-        'Render preview' button that does not exist; the redraw is on the
-        picture's right-click menu.)"""
+        picture follows the form again by itself.  It names no control,
+        because there is none to name: the picture redraws itself."""
         self._stop_play("The form changed - %s"
                         % ("redrawing…" if self.schedule_preview()
-                           else "right-click the preview to redraw."),
+                           else "the picture is out of date."),
                         error=False)
 
     def _stop_play(self, msg, error=True):

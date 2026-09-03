@@ -2639,6 +2639,17 @@ class ImageEditorDialog(_Modal):
     FILETYPES = {"picture": [("Pictures", "*.png *.jpg *.jpeg")],
                  "video": [("Videos", "*.mp4 *.mov *.mkv *.avi *.gif")]}
 
+    #: What a video shows, STATED rather than offered as controls (David:
+    #: "remove the 'start', 'Length' and 'FPS' controls... just state [the
+    #: limits]").  It loops a short slice from the start AT THE VIDEO'S OWN
+    #: FRAME RATE (David: "10fps sucks... make it the original fps"), cut to
+    #: about a second so it stays smooth within the menu's frame budget. Any
+    #: common video works - it is re-encoded - so there is no codec to get
+    #: right either.
+    CLIP_NOTE = ("Shown as a short loop from the start, at the video's own "
+                 "frame rate (about a second, kept smooth). Any common video "
+                 "works - it is re-encoded.")
+
     def __init__(self, panel, index, row):
         _Modal.__init__(
             self, panel._parent,
@@ -2686,24 +2697,19 @@ class ImageEditorDialog(_Modal):
                     row=r, column=2, sticky=tk.W, padx=(4, 0), pady=3)
             r += 1
             if kind == "video":
-                # The clip fields: under the two videos they serve, live
-                # for either.
-                ttk.Label(g, text="Clip:").grid(
-                    row=r, column=0, sticky=tk.E, pady=3, padx=(0, 10))
-                clip = ttk.Frame(g)
-                clip.grid(row=r, column=1, columnspan=2, sticky=tk.W,
-                          pady=3)
-                for label, var, width in (
-                        ("Start (s):", panel._ed_anim_start, 6),
-                        ("Length (s):", panel._ed_anim_seconds, 5),
-                        ("FPS:", panel._ed_anim_fps, 4)):
-                    ttk.Label(clip, text=label).pack(
-                        side=tk.LEFT,
-                        padx=(0 if not panel._clip_widgets else 10, 4))
-                    sp = ttk.Spinbox(clip, from_=0, to=36000, width=width,
-                                     textvariable=var)
-                    sp.pack(side=tk.LEFT)
-                    panel._clip_widgets.append(sp)
+                # NO Start / Length / FPS CONTROLS (David: "remove the
+                # 'start', 'Length' and 'FPS' controls here since they are
+                # misleading. We obviously have limits on what we show here,
+                # so just state them instead").  A boot-menu clip is a short
+                # loop drawn frame by frame, so it is a fixed slice at a
+                # fixed rate - the numbers were a request the renderer then
+                # clamped anyway - and it is STATED, not offered.  The
+                # ``_ed_anim_*`` vars stay (a card loaded with an older
+                # custom clip keeps its own values, and the render reads
+                # them), they are simply not editable here any more.
+                ttk.Label(g, foreground=th["gray"], wraplength=440,
+                          justify=tk.LEFT, text=self.CLIP_NOTE).grid(
+                    row=r, column=1, columnspan=2, sticky=tk.W, pady=(0, 3))
                 r += 1
         names = [val for what, val in on_card_fields(row)
                  if what in ("art", "animation")]
@@ -2715,9 +2721,8 @@ class ImageEditorDialog(_Modal):
         ttk.Label(box, foreground=th["gray"], wraplength=500,
                   justify=tk.LEFT,
                   text="A video is the still too: the frame it starts on "
-                       "shows while the image is not highlighted. Clip "
-                       "fields left blank mean from 0 s, 3 s long, 10 "
-                       "fps.").pack(anchor=tk.W, padx=8, pady=(0, 6))
+                       "shows while the image is not highlighted.").pack(
+            anchor=tk.W, padx=8, pady=(0, 6))
 
         soundbox = ttk.LabelFrame(b, text="Sounds")
         soundbox.pack(fill=tk.X, pady=(10, 0))
@@ -2856,29 +2861,18 @@ class MenuSettingsDialog(_Modal):
         ttk.Label(di, text="highlighted at power-up (the last choice wins "
                            "once one was made)",
                   foreground=th["gray"]).pack(side=tk.LEFT, padx=(6, 0))
-        byp = ttk.Frame(g2)
-        byp.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
-        panel._bypass_chk = ttk.Checkbutton(
-            byp, text="Bypass game validation on every image",
-            variable=panel._bypass_var)
-        panel._bypass_chk.pack(side=tk.LEFT)
-        panel._bypass_badge = panel._info_badge(byp, panel.BYPASS_TIP)
-        panel._bypass_badge.pack(side=tk.LEFT, padx=(6, 0))
         g2.columnconfigure(1, weight=1)
-
-        adv = ttk.LabelFrame(b, text="Advanced")
-        adv.pack(fill=tk.X, pady=(10, 0))
-        g3 = ttk.Frame(adv)
-        g3.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Label(g3, text="Selector build:", width=15).grid(
-            row=0, column=0, sticky=tk.W, pady=3)
-        ttk.Entry(g3, textvariable=panel._selector_var, width=40).grid(
-            row=0, column=1, sticky=tk.EW, pady=3)
-        ttk.Label(g3, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
-                  text="WSL path of the built selector (the rig installs it "
-                       "there on the first Boot-selector run)").grid(
-            row=1, column=1, sticky=tk.W)
-        g3.columnconfigure(1, weight=1)
+        # NO 'Bypass game validation' TICK (David: "why is this even an
+        # option? it should always be on") - an unpatched image shows the
+        # validation error on the machine, so the bypass is not a choice.
+        # ``_bypass_var`` stays pinned True (see MultibootPanel.__init__) and
+        # the machinery behind it - bypass_commands, bypass_state, Apply's
+        # bypass step - is untouched; only the tick is gone.
+        #
+        # NO 'Advanced' SECTION EITHER (David: "people are likely to mess it
+        # up").  The Selector build path is DEFAULT_SELECTOR_DIR, overridable
+        # by the PAD_MULTIBOOT_SELECTOR env var (see MultibootPanel.__init__)
+        # rather than an entry box nobody but the rig should touch.
 
 
 class BuildFlashDialog(_Modal):
@@ -3185,8 +3179,20 @@ class MultibootPanel:
         self._volume_var = tk.StringVar(value="50")
         self._timeout_var = tk.StringVar(value="15")
         self._default_var = tk.StringVar(value="0")
+        # THE VALIDATOR BYPASS IS ALWAYS ON (David: "it should always be
+        # on") - an unpatched image fails the game's own validator on the
+        # machine.  The var stays, so every diff, command line and test
+        # still reads one truth, but it is pinned True: nothing in the UI
+        # unticks it, and the loaders below (load_inspect / restore_state)
+        # re-pin it after they run so a card saved unpatched, or an older
+        # anchor with bypass:false, is brought up to patched.
         self._bypass_var = tk.BooleanVar(value=True)
-        self._selector_var = tk.StringVar(value=DEFAULT_SELECTOR_DIR)
+        # THE SELECTOR BUILD PATH is no longer an entry box (David: the
+        # Advanced section - "people are likely to mess it up").  It is the
+        # default, overridable only by an env var for the rig.
+        self._selector_var = tk.StringVar(
+            value=os.environ.get("PAD_MULTIBOOT_SELECTOR")
+            or DEFAULT_SELECTOR_DIR)
         #: The menu's colours: the theme's name, what the picker shows for
         #: it, and one var per colour role - the "make your own" grid, which
         #: also shows a chosen built-in's colours (and is what a custom
@@ -5395,7 +5401,7 @@ class MultibootPanel:
             self._volume_var.set(str(menu["volume"]))
             self._timeout_var.set(str(menu["timeout"]))
             self._default_var.set(str(menu["default"]))
-            self._bypass_var.set(menu["bypass"])
+            self._bypass_var.set(True)      # always on (David); see __init__
             self._theme_var.set(menu["theme"])
             # a built-in comes back as the file spells it today; a custom
             # theme as it was saved, the default under any role it lacks
@@ -5846,7 +5852,11 @@ class MultibootPanel:
             self._volume_var.set(str(int(form.volume)))
             self._timeout_var.set(str(int(form.timeout)))
             self._default_var.set(str(int(form.default)))
-            self._bypass_var.set(bool(form.bypass))
+            # The LIVE form's bypass is always on (David); the card's own
+            # state stays in _loaded_form (form_from_inspect above), so an
+            # image loaded unpatched shows a 'bypass' change and Update
+            # patches it.
+            self._bypass_var.set(True)
             self._theme_var.set(form.theme)
             self._seed_colors(form.colors if form.theme == CUSTOM_THEME
                               else theme_colors(form.theme) or {})
@@ -6093,18 +6103,10 @@ class MultibootPanel:
         kind, text, tone, can_read = card_path_state(
             field, self._facts_now(field), self._rows, self._loaded_card,
             menu, rebuild)
-        editing = kind == "loaded"
-        # THE BASELINE IS TESTED, NOT ASSUMED.  ``editing`` comes from
-        # card_path_state, which decides it from _loaded_card and the path
-        # alone and has never seen _loaded_form - so the pair (a card set,
-        # its baseline not yet) reached ``.bypass`` on None.  It is a narrow
-        # window today (inside load_inspect, which pumps no loop), but the
-        # guard the old expression carried is cheap and this line is called
-        # after every keystroke.
-        if (editing and self._loaded_form is not None
-                and self._loaded_form.bypass and not self.form().bypass):
-            text += ("  (Unticking the bypass cannot un-patch a card - "
-                     "build a fresh one for that.)")
+        # (The 'unticking the bypass cannot un-patch a card' note is gone
+        # with the bypass tick itself - the bypass is always on now, so it
+        # can never be untied.  The Apply-vs-Build decision that used to
+        # live here is _write_plan's now, off the same card_path_state.)
         line = "  ·  ".join(p for p in (text, self._plan_text) if p)
         try:
             lbl.configure(text=self._status_line(line), foreground=th[tone])

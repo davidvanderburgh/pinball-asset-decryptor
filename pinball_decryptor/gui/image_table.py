@@ -285,10 +285,10 @@ class ImageTable(ttk.Frame):
         self.canvas = tk.Canvas(mid, bd=0, highlightthickness=0,
                                 bg=th["bg"], height=self._min_rows * ROW_PX)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.scroll = ttk.Scrollbar(mid, orient=tk.VERTICAL,
-                                    command=self.canvas.yview)
-        self.scroll.pack(side=tk.LEFT, fill=tk.Y)
-        self.canvas.configure(yscrollcommand=self.scroll.set)
+        # NO SCROLLBAR (David: "remove... the scrollbar").  Cards run to a
+        # handful of images and the table shows up to max_rows of them; the
+        # rare card with more is reached with the mouse wheel (bound below),
+        # so the scrollregion stays live - there is just no bar drawn for it.
         self.body = tk.Frame(self.canvas, bd=0, highlightthickness=0,
                              bg=th["bg"])
         self._window = self.canvas.create_window((0, 0), window=self.body,
@@ -584,14 +584,17 @@ class ImageTable(ttk.Frame):
             pass
 
     def _repaint(self):
+        # NO SELECTED-ROW HIGHLIGHT (David: "remove the blue highlight").
+        # Every row is on the panel background; the selection still exists
+        # (the flippers, the editor and the preview's amber card all read
+        # it), it is just not painted as a blue bar - a click on any cell
+        # opens that row's editor regardless, so the bar was saying little.
         th = self.colors
+        bg = th["bg"]
         for i, row in enumerate(self._rows):
-            on = i == self._sel
-            bg = th["select_bg"] if on else th["bg"]
-            fg = "#ffffff" if on else th["fg"]
             for cell in row.cells:
                 try:
-                    cell.configure(bg=bg, fg=fg, font=self.font)
+                    cell.configure(bg=bg, fg=th["fg"], font=self.font)
                 except tk.TclError:                     # pragma: no cover
                     pass
             last = len(self._rows) - 1

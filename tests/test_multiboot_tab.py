@@ -985,12 +985,12 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
         assert sorted(panel._media_entries) == ["picture", "video"]
         assert all(str(w.cget("state")) == "disabled"
                    for w in panel._media_entries.values())
-        assert all(str(w.cget("state")) == "disabled"
-                   for w in panel._clip_widgets)
-        # the attract clip: the clip fields wake, the entries stay asleep
+        # NO clip Start / Length / FPS controls any more (David): the video
+        # options carry only a stated note, and the render still reads the
+        # fixed anim vars (set below to prove the spec is built from them)
+        assert panel._clip_widgets == []
+        # the attract clip: the entries stay asleep, the note states the loop
         panel._ed_media.set("attract")
-        assert all(str(w.cget("state")) == "normal"
-                   for w in panel._clip_widgets)
         assert all(str(w.cget("state")) == "disabled"
                    for w in panel._media_entries.values())
         panel._ed_anim_start.set("20")
@@ -1017,8 +1017,6 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
         panel._ed_media.set("picture")
         assert str(panel._media_entries["picture"].cget("state")) == \
             "normal"
-        assert all(str(w.cget("state")) == "disabled"
-                   for w in panel._clip_widgets)
         panel._ed_picture.set(str(still))
         row = panel.form().images[1]
         assert (row.art, row.anim, row.art_time, row.anim_start) == \
@@ -3367,11 +3365,14 @@ def test_a_sound_poll_does_not_wipe_what_the_strip_was_saying(tmp_path,
 # loading a card back into the form (Load card… / Apply to card)
 # --------------------------------------------------------------------------
 
-def _rich_report(tmp_path, clip=None):
+def _rich_report(tmp_path, clip=None, armed=True):
     """What ``inspect --json`` prints for a v2 card built by this tab: two
     images whose .raw sources are on this machine, art from a source spec
     (one 'auto', one a frame of a video), a clip with its own start / length
-    / fps, no music, and a second tree still waiting for the bypass."""
+    / fps, no music.  *armed* leaves the second tree waiting for the bypass
+    (the card the tool builds is fully patched; ``armed=False`` is that
+    realistic state, which is what :func:`_loaded` uses so a plain load has
+    no pending change - the bypass is always on now)."""
     a, b = _images(tmp_path, 2)
     clip = clip or str(tmp_path / "attract.mov")
     if not os.path.isfile(clip):
@@ -3394,7 +3395,7 @@ def _rich_report(tmp_path, clip=None):
              "art_source": multiboot_tab.wsl(clip) + "@21",
              "anim_source": "auto@20:2:8", "source": multiboot_tab.wsl(b),
              "source_exists": True, "title_dir": "turtles",
-             "bypass": "armed"}],
+             "bypass": "armed" if armed else "bypassed"}],
         "timeout": 20, "default": 1, "volume": 35, "mixer_volume": None,
         "sound_move": "synth", "sound_confirm": "none",
         "font": "/usr/local/codeselect/font.ttf",
@@ -3458,7 +3459,7 @@ def _loaded(tmp_path, report=None, media_json=True):
             f.write("{}")
     root, panel = _panel()
     panel.load_inspect(report if report is not None
-                       else _rich_report(tmp_path), card, media)
+                       else _rich_report(tmp_path, armed=False), card, media)
     return root, panel, card, media
 
 
@@ -4351,7 +4352,9 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
         assert panel._default_var.get() == "1"
         assert panel._volume_var.get() == "35"
         assert panel._move_var.get() == "synth"
-        assert panel._bypass_var.get() is False          # image 1 is armed
+        # the LIVE form's bypass is always on now; the card's own state
+        # (image 1 armed) is what _armed tracks, so an Update patches it
+        assert panel._bypass_var.get() is True
         assert panel._armed is True
         assert panel._loaded_card == card
         # the card's own default is the row the load lands on, so the
@@ -4544,23 +4547,23 @@ def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
 
 
 def test_the_bypass_rides_along_while_a_tree_is_still_armed(tmp_path):
-    root, panel, card, _media = _loaded(tmp_path)
+    """The bypass is always on (David: "it should always be on").  The
+    baseline a load takes includes bypass=on, so an armed card shows no
+    'bypass' menu change - but because the tree is still armed, an Update
+    runs the bypass step anyway (bypass = form.bypass AND _armed), so the
+    card is patched whether or not anything else changed."""
+    root, panel, card, _media = _loaded(
+        tmp_path, report=_rich_report(tmp_path, armed=True))
     calls = _recorder(panel)
     try:
-        assert panel._armed is True and panel._bypass_var.get() is False
-        panel._bypass_var.set(True)
-        assert "1 menu change (bypass)" in panel._edit_lbl.cget("text")
+        assert panel._armed is True and panel._bypass_var.get() is True
+        # nothing to un-tick and nothing to set: an Update patches the armed
+        # tree by itself
         assert panel.apply_to_card() is True
         assert [label for label, _ in calls[0]] == [
             "inject", "bypass", "inspect", INSPECT_JSON]
         byp = _tool_words(calls[0][1][1])
         assert byp[1:4] == ["bypass", "--card", multiboot_tab.wsl(card)]
-        # untick it again and the tab says what unticking cannot do
-        panel._bypass_var.set(False)
-        panel._loaded_form = multiboot_tab.replace(panel._loaded_form,
-                                                   bypass=True)
-        panel._update_edit_status()
-        assert "cannot un-patch" in panel._edit_lbl.cget("text")
     finally:
         root.destroy()
 
@@ -5165,7 +5168,7 @@ def test_the_form_survives_a_restart(tmp_path):
         assert panel._rows[1].anim == "auto"
         assert panel._timeout_var.get() == "8"
         assert panel._volume_var.get() == "70"
-        assert panel._bypass_var.get() is False
+        assert panel._bypass_var.get() is True     # always on now (David)
         assert panel.form().out == out
         # OUT OF EDITING MODE, on purpose: the baseline is not restored, so
         # Apply cannot inject a diff computed against a stale one.  One

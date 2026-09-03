@@ -909,7 +909,7 @@ def test_editor_writes_back_to_the_selected_row(tmp_path):
         panel._tree.selection_set("1")
         root.update()
         panel._ed_title.set("TMNT 1987")
-        panel._ed_anim.set("auto")
+        panel._ed_media.set("attract")
         form = panel.form()
         assert form.images[1].title == "TMNT 1987"
         assert form.images[1].anim == "auto"
@@ -918,12 +918,110 @@ def test_editor_writes_back_to_the_selected_row(tmp_path):
         root.destroy()
 
 
-def test_editor_video_frame_and_clip_fields_write_back(tmp_path):
-    """The per-row fields, now inside the Edit image… modal: the clip's
-    start / length / fps live only while an animation is set, the
-    video-frame file and time only for the 'video frame' art; every one
-    lands in the row, the list cell says so, and a re-selected row loads
-    them back."""
+def _radios(widget):
+    """Every ttk.Radiobutton under *widget*, in creation order."""
+    out = []
+    for w in widget.winfo_children():
+        if w.winfo_class() == "TRadiobutton":
+            out.append(w)
+        out.extend(_radios(w))
+    return out
+
+
+def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
+    """The Edit image… modal's Picture section is one flat radio list
+    (logo / picture file / attract video / video file / nothing): each
+    option's fields live only while it is the choice, a video writes BOTH
+    halves of the row (the clip, and the frame it starts on as the still),
+    the merged table cell says so, and a re-selected row loads it back."""
+    root, panel = _panel()
+    try:
+        a, b = _images(tmp_path, 2)
+        clip = tmp_path / "intro.mp4"
+        clip.write_bytes(bytes(4))
+        still = tmp_path / "logo.png"
+        still.write_bytes(bytes(4))
+        panel.add_image(a)
+        panel.add_image(b)
+        panel._tree.selection_set("1")
+        root.update()
+        dlg = panel.edit_image()
+        root.update()
+        assert dlg is panel._image_dialog
+        assert panel._ed_media.get() == "logo"
+        assert [w.cget("value") for w in _radios(dlg.body)] == \
+            ["logo", "picture", "attract", "video", "none"]
+        assert sorted(panel._media_entries) == ["picture", "video"]
+        assert all(str(w.cget("state")) == "disabled"
+                   for w in panel._media_entries.values())
+        assert all(str(w.cget("state")) == "disabled"
+                   for w in panel._clip_widgets)
+        # the attract clip: the clip fields wake, the entries stay asleep
+        panel._ed_media.set("attract")
+        assert all(str(w.cget("state")) == "normal"
+                   for w in panel._clip_widgets)
+        assert all(str(w.cget("state")) == "disabled"
+                   for w in panel._media_entries.values())
+        panel._ed_anim_start.set("20")
+        panel._ed_anim_seconds.set("2")
+        panel._ed_anim_fps.set("8")
+        row = panel.form().images[1]
+        assert (row.art, row.anim) == ("auto", "auto")
+        assert anim_spec(row) == "auto@20:2:8"
+        # a video file: its entry wakes, and it is the still as well
+        panel._ed_media.set("video")
+        assert str(panel._media_entries["video"].cget("state")) == "normal"
+        assert str(panel._media_entries["picture"].cget("state")) == \
+            "disabled"
+        panel._ed_video.set(str(clip))
+        row = panel.form().images[1]
+        assert (row.art, row.art_time, row.anim) == \
+            (str(clip), "20", str(clip))
+        assert (row.anim_start, row.anim_seconds, row.anim_fps) == \
+            ("20", "2", "8")
+        assert art_spec(row) == multiboot_tab.wsl(str(clip)) + "@20"
+        assert anim_spec(row) == multiboot_tab.wsl(str(clip)) + "@20:2:8"
+        assert multiboot_tab.cell_media(row) == "intro.mp4 @20s 2s 8fps"
+        # a picture file: a still and nothing moving
+        panel._ed_media.set("picture")
+        assert str(panel._media_entries["picture"].cget("state")) == \
+            "normal"
+        assert all(str(w.cget("state")) == "disabled"
+                   for w in panel._clip_widgets)
+        panel._ed_picture.set(str(still))
+        row = panel.form().images[1]
+        assert (row.art, row.anim, row.art_time, row.anim_start) == \
+            (str(still), "none", "", "")
+        assert multiboot_tab.cell_media(row) == "logo.png"
+        # ...and back to the video, whose path the dialog kept
+        panel._ed_media.set("video")
+        assert panel._ed_video.get() == str(clip)
+        assert panel.form().images[1].anim == str(clip)
+        dlg.ok()
+        root.update()
+        assert panel._image_dialog is None
+        assert panel._media_entries == {}         # the widgets went with it
+        assert panel._clip_widgets == ()
+        assert panel._tree.item("1")["values"][3] == \
+            "intro.mp4 @20s 2s 8fps"
+        assert panel.form().images[0].anim_start == ""        # untouched
+        # re-select: row 0 shows the logo and blanks, row 1 comes back whole
+        panel._tree.selection_set("0")
+        root.update()
+        assert panel._ed_media.get() == "logo"
+        assert panel._ed_anim_start.get() == "" and panel._ed_video.get() == ""
+        panel._tree.selection_set("1")
+        root.update()
+        assert panel._ed_media.get() == "video"
+        assert panel._ed_anim_fps.get() == "8"
+        assert panel._ed_video.get() == str(clip)
+    finally:
+        root.destroy()
+
+
+def test_browse_picks_the_option_it_browsed_for(tmp_path, monkeypatch):
+    """The Browse… buttons are live whichever option is chosen - picking a
+    file IS picking the option - and a cancelled picker changes nothing."""
     root, panel = _panel()
     try:
         a, b = _images(tmp_path, 2)
@@ -935,54 +1033,173 @@ def test_editor_video_frame_and_clip_fields_write_back(tmp_path):
         root.update()
         dlg = panel.edit_image()
         root.update()
-        assert dlg is panel._image_dialog
-        assert str(panel._video_entry.cget("state")) == "disabled"
-        assert all(str(w.cget("state")) == "disabled"
-                   for w in panel._clip_widgets)
-        panel._ed_anim.set("auto")
-        assert all(str(w.cget("state")) == "normal"
-                   for w in panel._clip_widgets)
-        panel._ed_anim_start.set("20")
-        panel._ed_anim_seconds.set("2")
-        panel._ed_anim_fps.set("8")
-        panel._ed_art.set("video frame")
-        assert str(panel._video_entry.cget("state")) == "normal"
-        assert str(panel._video_time.cget("state")) == "normal"
-        panel._ed_art_video.set(str(clip))
-        panel._ed_art_time.set("3")
+        picks = [""]
+        monkeypatch.setattr(multiboot_tab.filedialog, "askopenfilename",
+                            lambda **_kw: picks.pop())
+        dlg._browse("video")
+        assert panel._ed_media.get() == "logo"           # cancelled: as was
+        picks.append(str(clip))
+        dlg._browse("video")
+        assert panel._ed_media.get() == "video"
         row = panel.form().images[1]
-        assert (row.anim, row.anim_start, row.anim_seconds, row.anim_fps) == \
-            ("auto", "20", "2", "8")
-        assert (row.art, row.art_video, row.art_time) == \
-            ("video frame", str(clip), "3")
-        assert anim_spec(row) == "auto@20:2:8"
-        assert art_spec(row) == multiboot_tab.wsl(str(clip)) + "@3"
-        # a typed video path in Art enables the time alone
-        panel._ed_art.set(str(clip))
-        assert str(panel._video_entry.cget("state")) == "disabled"
-        assert str(panel._video_time.cget("state")) == "normal"
-        panel._ed_art.set("video frame")
-        dlg.ok()
+        assert (row.art, row.anim) == (str(clip), str(clip))
+        assert str(panel._media_entries["video"].cget("state")) == "normal"
+        dlg.cancel()
         root.update()
-        assert panel._image_dialog is None
-        assert panel._video_entry is None          # the widgets went with it
-        # the full detail is still what the row says, and the list carries
-        # the short version of it
-        assert multiboot_tab.cell_art(row) == "intro.mp4 @3s"
-        assert multiboot_tab.cell_anim(row) == "auto @20s 2s 8fps"
-        assert panel._tree.item("1")["values"][3] == "intro.mp4 @3s"
-        assert panel._tree.item("1")["values"][4] == "auto @20s 2s 8fps"
-        assert panel.form().images[0].anim_start == ""        # untouched
-        # re-select: row 0 shows blanks, row 1 comes back whole
-        panel._tree.selection_set("0")
-        root.update()
-        assert panel._ed_anim_start.get() == "" and panel._ed_art_video.get() == ""
-        panel._tree.selection_set("1")
-        root.update()
-        assert panel._ed_anim_fps.get() == "8"
-        assert panel._ed_art_video.get() == str(clip)
     finally:
         root.destroy()
+
+
+def test_a_title_edit_leaves_a_pair_the_choice_cannot_spell(tmp_path):
+    """A row whose still and animation disagree (an older form, or a card)
+    is not on the flat list.  It reads honestly in the table, a title edit
+    leaves it exactly as it was, and the first edit to what the image
+    SHOWS replaces both halves with the one choice."""
+    root, panel = _panel()
+    try:
+        a, b = _images(tmp_path, 2)
+        panel.add_image(a)
+        panel.add_image(b)
+        row = panel._rows[1]
+        row.art, row.anim, row.anim_fps = "D:/art/logo.png", "auto", "8"
+        panel._refresh_tree(select=1)
+        root.update()
+        assert multiboot_tab.media_kind(row) == "attract"
+        assert multiboot_tab.cell_media(row) == \
+            "logo.png + attract video @0s 3s 8fps"
+        assert panel._tree.item("1")["values"][3] == \
+            "logo.png + attract video @0s 3s 8fps"
+        assert panel._ed_media.get() == "attract"
+        panel._ed_title.set("Still the same pair")
+        assert (row.art, row.anim, row.anim_fps) == \
+            ("D:/art/logo.png", "auto", "8")
+        panel._ed_anim_fps.set("12")
+        assert (row.art, row.anim, row.anim_fps) == ("auto", "auto", "12")
+        assert multiboot_tab.cell_media(row) == "attract video @0s 3s 12fps"
+    finally:
+        root.destroy()
+
+
+def test_a_loaded_rows_own_files_are_an_option_of_their_own(tmp_path):
+    """A row a load read off the card with no source recorded starts on a
+    sixth option - keep the card's own files - and comes back to it whole
+    after another choice was tried in the same sitting."""
+    root, panel, _card, _media = _loaded(
+        tmp_path, _degraded_report(tmp_path), media_json=False)
+    try:
+        panel._tree.selection_set("0")
+        root.update()
+        row = panel._rows[0]
+        assert (row.art, row.art_on_card) == ("art0.png", True)
+        assert multiboot_tab.media_kind(row) == "card"
+        assert panel._tree.item("0")["values"][3] == "art0.png (on the card)"
+        dlg = panel.edit_image()
+        root.update()
+        assert panel._ed_media.get() == "card"
+        radios = _radios(dlg.body)
+        assert [w.cget("value") for w in radios][-1] == "card"
+        assert radios[-1].cget("text") == "Keep the card's own art0.png"
+        panel._ed_media.set("logo")
+        assert (row.art, row.art_on_card, row.anim) == ("auto", False, "none")
+        assert panel._tree.item("0")["values"][3] == "logo"
+        panel._ed_media.set("card")
+        assert (row.art, row.art_on_card) == ("art0.png", True)
+        assert multiboot_tab.on_card_fields(row) == [
+            ("art", "art0.png"), ("music", "music0.wav")]
+        assert panel._tree.item("0")["values"][3] == "art0.png (on the card)"
+        dlg.ok()
+        root.update()
+        # a row with nothing on the card offers no such option
+        panel._tree.selection_set("1")
+        root.update()
+        dlg = panel.edit_image()
+        root.update()
+        assert [w.cget("value") for w in _radios(dlg.body)] == \
+            ["logo", "picture", "attract", "video", "none"]
+        dlg.cancel()
+        root.update()
+    finally:
+        root.destroy()
+
+
+def test_media_kind_and_cell_media_read_every_row_shape():
+    """The dialog's one choice, derived from any row the builders can read -
+    the pairs the flat list cannot make included."""
+    Row = ImageRow
+    kind, cell, file_ = (multiboot_tab.media_kind, multiboot_tab.cell_media,
+                         multiboot_tab.media_file)
+    assert (kind(Row("x")), cell(Row("x")), file_(Row("x"))) == \
+        ("logo", "logo", "")
+    r = Row("x", art="none")
+    assert (kind(r), cell(r)) == ("none", "none")
+    r = Row("x", art="D:/a/logo.png")
+    assert (kind(r), cell(r), file_(r)) == \
+        ("picture", "logo.png", "D:/a/logo.png")
+    r = Row("x", anim="auto", anim_start="20", anim_seconds="2",
+            anim_fps="8")
+    assert (kind(r), cell(r), file_(r)) == \
+        ("attract", "attract video @20s 2s 8fps", "")
+    r = Row("x", art="D:/c/intro.mp4", art_time="3", anim="D:/c/intro.mp4",
+            anim_start="3")
+    assert (kind(r), cell(r), file_(r)) == \
+        ("video", "intro.mp4 @3s 3s 10fps", "D:/c/intro.mp4")
+    # the still at another second than the clip's start: both halves
+    r.art_time = "5"
+    assert cell(r) == "intro.mp4 @5s + intro.mp4 @3s 3s 10fps"
+    # a still off a video with no clip yet (an older form): 'video', and
+    # the cell says what there is, not what an edit would make of it
+    r = Row("x", art="video frame", art_video="D:/c/intro.mp4",
+            art_time="3")
+    assert (kind(r), cell(r), file_(r)) == \
+        ("video", "intro.mp4 @3s", "D:/c/intro.mp4")
+    r = Row("x", art="D:/c/intro.mp4")
+    assert (kind(r), cell(r), file_(r)) == \
+        ("video", "intro.mp4 @0s", "D:/c/intro.mp4")
+    # a logo still with a file animation (the dropped pair): both halves
+    r = Row("x", anim="D:/c/intro.mp4")
+    assert (kind(r), cell(r), file_(r)) == \
+        ("video", "logo + intro.mp4", "D:/c/intro.mp4")
+    r = Row("x", art="D:/a/logo.png", anim="auto")
+    assert (kind(r), cell(r)) == ("attract", "logo.png + attract video")
+    # the card's own files
+    r = Row("x", art="art0.png", art_on_card=True)
+    assert (kind(r), cell(r), file_(r)) == \
+        ("card", "art0.png (on the card)", "")
+    r.anim, r.anim_on_card = "anim0.gif", True
+    assert cell(r) == "art0.png (on the card) + anim0.gif (on the card)"
+    r = Row("x", anim="anim0.gif", anim_on_card=True)
+    assert (kind(r), cell(r)) == ("card", "logo + anim0.gif (on the card)")
+
+
+def test_set_media_writes_the_pair_each_choice_means():
+    set_media = multiboot_tab.set_media
+    r = set_media(ImageRow("x", art="D:/a.png", anim="auto", anim_fps="8"),
+                  "logo")
+    assert (r.art, r.anim, r.anim_fps) == ("auto", "none", "")
+    r = set_media(ImageRow("x"), "none")
+    assert (r.art, r.anim) == ("none", "none")
+    r = set_media(ImageRow("x"), "picture", " D:/a.png ")
+    assert (r.art, r.anim) == ("D:/a.png", "none")
+    r = set_media(ImageRow("x"), "attract", "D:/ignored.mp4", "20", "2", "8")
+    assert (r.art, r.anim, r.anim_start, r.anim_seconds, r.anim_fps) == \
+        ("auto", "auto", "20", "2", "8")
+    assert anim_spec(r) == "auto@20:2:8"
+    r = set_media(ImageRow("x"), "video", "D:/c/intro.mp4", "3", "", "")
+    assert (r.art, r.art_time, r.anim, r.anim_start) == \
+        ("D:/c/intro.mp4", "3", "D:/c/intro.mp4", "3")
+    assert art_spec(r).endswith("intro.mp4@3")
+    assert anim_spec(r).endswith("intro.mp4@3:3:10")
+    # the card's own files are left exactly alone...
+    r = ImageRow("x", art="art0.png", art_on_card=True, anim="anim0.gif",
+                 anim_on_card=True)
+    assert set_media(r, "card", "D:/x.png") is r
+    assert (r.art, r.art_on_card, r.anim, r.anim_on_card) == \
+        ("art0.png", True, "anim0.gif", True)
+    # ...and any other choice clears the flags
+    set_media(r, "logo")
+    assert (r.art_on_card, r.anim_on_card) == (False, False)
+    with pytest.raises(ValueError):
+        set_media(ImageRow("x"), "hologram")
 
 
 def test_the_modals_write_on_ok_and_change_nothing_on_cancel(tmp_path):
@@ -998,7 +1215,7 @@ def test_the_modals_write_on_ok_and_change_nothing_on_cancel(tmp_path):
         dlg = panel.edit_image()
         root.update()
         panel._ed_title.set("TMNT 1987")
-        panel._ed_anim.set("auto")
+        panel._ed_media.set("attract")
         dlg.cancel()
         root.update()
         after = panel.form().images[1]
@@ -1051,7 +1268,7 @@ def test_an_image_can_have_a_confirm_sound_of_its_own(tmp_path):
         panel.add_image(b)
         panel._confirm_var.set("auto")
         # both inherit to start with
-        assert [panel._tree.item(str(i))["values"][6] for i in (0, 1)] == \
+        assert [panel._tree.item(str(i))["values"][5] for i in (0, 1)] == \
             ["(auto)", "(auto)"]
         # give row 1 its own through the editor, the way the dialog does
         panel._tree.selection_set("1")
@@ -1059,15 +1276,15 @@ def test_an_image_can_have_a_confirm_sound_of_its_own(tmp_path):
         assert panel._ed_confirm.get() == "menu"
         panel._ed_confirm.set("synth")
         assert panel._rows[1].confirm == "synth"
-        assert panel._tree.item("1")["values"][6] == "synth"
+        assert panel._tree.item("1")["values"][5] == "synth"
         # the menu's sound changing moves the inheriting row and not the other
         panel._confirm_var.set("none")
-        assert [panel._tree.item(str(i))["values"][6] for i in (0, 1)] == \
+        assert [panel._tree.item(str(i))["values"][5] for i in (0, 1)] == \
             ["(none)", "synth"]
         # ...and "menu" in the box is "" on the row, so it inherits again
         panel._ed_confirm.set("menu")
         assert panel._rows[1].confirm == ""
-        assert panel._tree.item("1")["values"][6] == "(none)"
+        assert panel._tree.item("1")["values"][5] == "(none)"
     finally:
         root.destroy()
 
@@ -1081,24 +1298,23 @@ def test_the_table_carries_each_images_settings_in_columns(tmp_path):
         a, b = _images(tmp_path, 2)
         panel.add_image(a)
         panel.add_image(b)
-        assert panel._tree.item("0")["values"][:8] == [
-            0, "turtles_pro-1_59_0", "Release", "auto", "none", "none",
-            "(auto)", ""]
+        assert panel._tree.item("0")["values"][:7] == [
+            0, "turtles_pro-1_59_0", "Release", "logo", "none", "(auto)", ""]
         panel._rows[1].anim = "auto"
         panel._rows[1].music = str(tmp_path / "bed.wav")
         panel._rows[1].version = "1.59.0"
         panel._refresh_tree(select=1)
-        assert panel._tree.item("1")["values"][3:8] == [
-            "auto", "auto", "bed.wav", "(auto)", "1.59.0"]
+        assert panel._tree.item("1")["values"][3:7] == [
+            "attract video", "bed.wav", "(auto)", "1.59.0"]
         # a row with no confirm of its own shows the MENU's, in brackets,
         # and follows it
         panel._confirm_var.set("synth")
-        assert panel._tree.item("1")["values"][6] == "(synth)"
+        assert panel._tree.item("1")["values"][5] == "(synth)"
         # the icons: the first row cannot go up, the last cannot go down,
         # and the arrow says so instead of silently doing nothing
-        assert panel._tree.item("0")["values"][8:] == ["✎", "−",
+        assert panel._tree.item("0")["values"][7:] == ["✎", "−",
                                                        "△", "▼"]
-        assert panel._tree.item("1")["values"][8:] == ["✎", "−",
+        assert panel._tree.item("1")["values"][7:] == ["✎", "−",
                                                        "▲", "▽"]
         # ...and the template row is the last one, dim, with the '+'
         assert panel._tree.get_children()[-1] == panel.ADD_ROW
@@ -3994,7 +4210,7 @@ def test_the_whole_tab_fits_a_1024x768_desktop(tmp_path):
         root.update()
         panel._ed_title.set("TMNT 1987")
         panel._ed_sub.set("1987 cartoon upscale")
-        panel._ed_anim.set("auto")
+        panel._ed_media.set("attract")
         panel._plan_step("plan", 0,
                          "image: 28755968 sectors = 14723055616 bytes\n"
                          "  fits Stern 16G image size 15494807552: YES "
@@ -4107,8 +4323,8 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
         assert panel._tree.selection() == ("1",)
         assert panel._tree.get_children() == ("0", "1", panel.ADD_ROW)
         assert panel._tree.item("1")["values"][:5] == [
-            1, "TMNT 1987", "1987 cartoon upscale", "attract.mov @21s",
-            "auto @20s 2s 8fps"]
+            1, "TMNT 1987", "1987 cartoon upscale",
+            "attract.mov @21s + attract video @20s 2s 8fps", "none"]
         assert multiboot_tab.cell_anim(panel.form().images[1]) == \
             "auto @20s 2s 8fps"
         assert str(panel._apply_btn.cget("state")) == "normal"
@@ -4206,7 +4422,7 @@ def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
     try:
         panel._tree.selection_set("0")
         root.update()
-        panel._ed_anim.set("auto")
+        panel._ed_media.set("attract")
         assert "1 menu change (animation)" in panel._edit_lbl.cget("text")
         assert panel.apply_to_card() is True
         assert [label for label, _ in calls[0]] == [
@@ -4324,7 +4540,7 @@ def test_a_rebuild_is_blocked_by_media_only_the_card_has(
         assert "art0.png" in pane and "on the loaded card" in pane
         # the table says which fields those are, and which image is missing
         assert panel._tree.item("0")["values"][3] == "art0.png (on the card)"
-        assert panel._tree.item("0")["values"][5] == "music0.wav"
+        assert panel._tree.item("0")["values"][4] == "music0.wav"
         assert "no source recorded" in panel._tree.item("0")["values"][1]
         assert "not on this machine" in panel._tree.item("1")["values"][1]
         # ...and an apply that would have to re-render them says so too -
@@ -4334,7 +4550,7 @@ def test_a_rebuild_is_blocked_by_media_only_the_card_has(
         assert panel._out_var.get() == card
         panel._tree.selection_set("0")
         root.update()
-        panel._ed_anim.set("auto")
+        panel._ed_media.set("attract")
         assert panel.apply_to_card() is False
         pane = _pane(panel)
         assert "music0.wav" in pane and "no source recorded" in pane
@@ -4394,7 +4610,7 @@ def test_the_preview_after_a_load_draws_the_cards_own_media(tmp_path,
         # change the art and the media must be rendered again
         panel._tree.selection_set("0")
         root.update()
-        panel._ed_art.set("auto")
+        panel._ed_media.set("logo")
         assert panel.needs_prepare() is True
     finally:
         root.destroy()
@@ -4562,7 +4778,7 @@ def test_a_mismatched_card_raises_a_strip_above_the_picture(tmp_path):
         assert report["version_mismatch"] in panel._alarm_tip.text
         assert any("Image 0 is 1.59.0" in ln for ln in panel.log_lines())
         # ...and the version the tool read is in the table, never typed
-        assert [panel._tree.item(str(i))["values"][7] for i in (0, 1)] == \
+        assert [panel._tree.item(str(i))["values"][6] for i in (0, 1)] == \
             ["1.59.0", "1.58.0"]
         # a card whose images agree takes the strip away again
         clean = dict(report, version_mismatch=None)
@@ -4817,7 +5033,7 @@ def test_the_form_survives_a_restart(tmp_path):
         panel._tree.selection_set("1")
         root.update()
         panel._ed_title.set("Second")
-        panel._ed_anim.set("auto")
+        panel._ed_media.set("attract")
         panel._timeout_var.set("8")
         panel._volume_var.set("70")
         panel._bypass_var.set(False)

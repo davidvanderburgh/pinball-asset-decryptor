@@ -237,8 +237,9 @@ MAX_IMAGES = 16
 LIST_MIN_ROWS, LIST_MAX_ROWS = 4, 8
 
 #: The non-file choices each media field accepts.  Anything else is a path.
-ART_CHOICES = ("auto", "none", "video frame")
-ANIM_CHOICES = ("none", "auto")
+#: The art and the animation have no list of their own any more: the Edit
+#: image… dialog offers them as ONE choice (:data:`MEDIA_KINDS`), and the
+#: words 'auto' / 'none' are what that choice writes into the row.
 MUSIC_CHOICES = ("none",)
 SOUND_CHOICES = ("auto", "synth", "none")
 #: An IMAGE'S OWN confirm sound.  'menu' is the default and means "whatever
@@ -777,8 +778,8 @@ def rebuild_blockers(form):
         for what, val in on_card_fields(row):
             errs.append(
                 "Image %d: the %s (%s) is a file on the loaded card, not on "
-                "this machine - choose auto, none or a file for it before "
-                "building a new card." % (i, what, val))
+                "this machine - pick something else for it in Edit image… "
+                "before building a new card." % (i, what, val))
     return errs
 
 
@@ -1555,8 +1556,8 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
         warnings.append(
             "Some media on this card has no source recorded (the rows above "
             "mark it '(on the card)'): it is kept and drawn as it is, and "
-            "can be replaced - choose auto, none or a file - but not re-made "
-            "from what made it.")
+            "can be replaced in Edit image… but not re-made from what made "
+            "it.")
     move, why = split_sound_source(info.get("sound_move"), "move sound")
     if why:
         warnings.append(why)
@@ -2110,6 +2111,17 @@ def cell_art(row):
     return _cell(v)
 
 
+def _clip_suffix(row):
+    """`` @20s 2s 8fps`` when any clip field is set, else ''."""
+    start, secs, fps = (_num(row.anim_start), _num(row.anim_seconds),
+                        _num(row.anim_fps))
+    if start or secs or fps:
+        return " @%ss %ss %sfps" % (start or ANIM_DEFAULTS[0],
+                                    secs or ANIM_DEFAULTS[1],
+                                    fps or ANIM_DEFAULTS[2])
+    return ""
+
+
 def cell_anim(row):
     """The row's animation in full: the word or the clip's name, and the clip
     parameters when any is set (``auto @20s 2s 8fps``)."""
@@ -2117,13 +2129,150 @@ def cell_anim(row):
     if row.anim_on_card:
         return v + " (on the card)"
     if v and v.lower() != "none":
-        start, secs, fps = (_num(row.anim_start), _num(row.anim_seconds),
-                            _num(row.anim_fps))
-        if start or secs or fps:
-            v += " @%ss %ss %sfps" % (start or ANIM_DEFAULTS[0],
-                                      secs or ANIM_DEFAULTS[1],
-                                      fps or ANIM_DEFAULTS[2])
+        v += _clip_suffix(row)
     return v
+
+
+#: THE ONE CHOICE the Edit image… dialog offers for what an image shows
+#: (David, 2026-09-02: "we really only have two options here - art or
+#: video").  Each kind is a pair of the art / animation specs the builders
+#: already speak, so nothing under the dialog changed:
+#:
+#:   logo     the game's own logo, pulled off the .raw          auto / none
+#:   picture  a picture file                                    file / none
+#:   attract  the game's own attract clip while highlighted,
+#:            its logo as the still                             auto / auto
+#:   video    a video file: the clip while highlighted, and
+#:            the frame it starts on as the still         file@T / file@T:S:F
+#:   none     text only                                         none / none
+#:   card     what a LOAD read off the card with no source recorded:
+#:            kept as it is, drawn from the media dir, never re-made
+#:            (see :func:`on_card_fields`)
+#:
+#: A still from file A with an animation from file B is not on the list
+#: (nobody had made one).  A row that carries such a pair - an older form,
+#: or a card - still reads honestly (:func:`cell_media`) and keeps it until
+#: its media is edited, when the dialog's one choice replaces both halves.
+MEDIA_KINDS = ("logo", "picture", "attract", "video", "none", "card")
+
+
+def _has_anim(row):
+    return (row.anim or "").strip().strip('"').lower() not in ("", "none")
+
+
+def media_kind(row):
+    """Which of :data:`MEDIA_KINDS` a row's art + animation amount to.  A
+    still taken off a video with no clip yet is 'video' too: it animates
+    the moment it is edited, which is the one thing the flat list dropped."""
+    if row.art_on_card or row.anim_on_card:
+        return "card"
+    art = (row.art or "").strip().strip('"')
+    if _has_anim(row):
+        anim = (row.anim or "").strip().strip('"').lower()
+        return "attract" if anim == "auto" else "video"
+    a = art.lower()
+    if a == "video frame" or is_video(art):
+        return "video"
+    if a == "none":
+        return "none"
+    if a in ("", "auto"):
+        return "logo"
+    return "picture"
+
+
+def media_file(row):
+    """The file a 'picture' or 'video' row uses; '' for every other kind."""
+    kind = media_kind(row)
+    art = (row.art or "").strip().strip('"')
+    if kind == "picture":
+        return art
+    if kind != "video":
+        return ""
+    anim = (row.anim or "").strip().strip('"')
+    if anim and anim.lower() not in _WORDS:
+        return anim
+    if art.lower() == "video frame":
+        return (row.art_video or "").strip().strip('"')
+    return art
+
+
+def set_media(row, kind, path="", start="", seconds="", fps=""):
+    """The dialog's choice -> the row: only the fields :func:`art_spec` and
+    :func:`anim_spec` read.  'card' writes nothing (the row keeps the
+    card's own files and the flags that say so); a video is written to
+    BOTH halves, its still the frame at *start*."""
+    if kind == "card":
+        return row
+    if kind not in MEDIA_KINDS:
+        raise ValueError("not a media kind: %r" % (kind,))
+    row.art_on_card = row.anim_on_card = False
+    row.art_video = row.art_time = ""
+    row.anim_start = row.anim_seconds = row.anim_fps = ""
+    path = (path or "").strip()
+    if kind == "logo":
+        row.art, row.anim = "auto", "none"
+    elif kind == "none":
+        row.art, row.anim = "none", "none"
+    elif kind == "picture":
+        row.art, row.anim = path, "none"
+    else:
+        row.anim_start = (start or "").strip()
+        row.anim_seconds = (seconds or "").strip()
+        row.anim_fps = (fps or "").strip()
+        if kind == "attract":
+            row.art, row.anim = "auto", "auto"
+        else:
+            row.art = row.anim = path
+            row.art_time = row.anim_start
+    return row
+
+
+def _same_file(a, b):
+    a, b = (a or "").strip().strip('"'), (b or "").strip().strip('"')
+    return bool(a) and bool(b) and _norm(a) == _norm(b)
+
+
+def _moving_word(row):
+    """The animation half of :func:`cell_media`."""
+    if row.anim_on_card:
+        return cell_anim(row)
+    anim = (row.anim or "").strip().strip('"')
+    if anim.lower() == "auto":
+        return "attract video" + _clip_suffix(row)
+    return os.path.basename(anim) + _clip_suffix(row)
+
+
+def cell_media(row):
+    """The table's one Picture cell: what the image shows, in the dialog's
+    own words - ``logo``, ``attract video @20s 2s 8fps``, ``intro.mp4 @3s
+    3s 10fps``, ``logo.png``, ``none`` - and, when the still is not the one
+    its animation implies (a pair an older form made, or a card carries),
+    both halves: ``attract.mov @21s + attract video @20s 2s 8fps``."""
+    kind = media_kind(row)
+    if kind == "logo":
+        return "logo"
+    if kind == "none":
+        return "none"
+    art = (row.art or "").strip().strip('"')
+    if kind == "picture":
+        return os.path.basename(art)
+    if not row.art_on_card and art.lower() in ("", "auto"):
+        still = "logo"
+    else:
+        still = cell_art(row)
+    if not _has_anim(row):
+        return still                    # a still off a video, no clip yet
+    moving = _moving_word(row)
+    if kind == "attract":
+        implied = still == "logo"
+    elif kind == "video":
+        video = media_file(row)
+        source = row.art_video if art.lower() == "video frame" else art
+        implied = _same_file(source, video) and \
+            _num(row.art_time, "0") == _num(row.anim_start, "0")
+    else:
+        implied = False
+    return moving if implied else still + " + " + moving
 
 
 def list_title(row, index=0):
@@ -2270,11 +2419,33 @@ class _Modal:
 
 
 class ImageEditorDialog(_Modal):
-    """'Edit image…': one image's menu text and its three media fields.
+    """'Edit image…': one image's menu text, what it shows, and its sounds.
 
-    Everything that used to be a permanent editor strip under the list -
-    title, subtitle, art (including the 'video frame' pair), animation
-    (including the clip's start / length / fps) and music."""
+    WHAT IT SHOWS IS ONE FLAT CHOICE (David, 2026-09-02: "the modality here
+    is poor. i have to first select 'art: video' to be able to interact
+    with the video frame options. it needs to be a 'radio button' type
+    choice... why do we have a separate animation section?"): the game's
+    own logo, a picture file, the game's own attract clip, a video file, or
+    nothing - every option in view, each one's fields live only while it is
+    the choice, and no box that quietly unlocks a row beneath it.  A video
+    is the animation AND the still (the frame it starts on shows while the
+    image is not highlighted), so the Animation section had nothing left
+    to say and is gone.  A row a load read off a card with no source
+    recorded gets a sixth option, the card's own files, which is where it
+    starts (see MEDIA_KINDS)."""
+
+    #: The choices, in the order they are offered: ``(kind, label)``.  The
+    #: two stills, then the two videos - so the clip fields sit under the
+    #: pair they serve.
+    KINDS = (("logo", "The game's own logo"),
+             ("picture", "A picture file"),
+             ("attract", "The game's own attract video"),
+             ("video", "A video file"),
+             ("none", "Nothing - text only"))
+
+    #: What the two file rows browse for.
+    FILETYPES = {"picture": [("Pictures", "*.png *.jpg *.jpeg")],
+                 "video": [("Videos", "*.mp4 *.mov *.mkv *.avi *.gif")]}
 
     def __init__(self, panel, index, row):
         _Modal.__init__(
@@ -2283,6 +2454,7 @@ class ImageEditorDialog(_Modal):
                 (row.path or "").strip()) or row.device or "no source"),
             panel._theme_fn, on_ok=panel._image_editor_ok,
             on_cancel=panel._image_editor_cancel)
+        self._panel = panel
         b = self.body
         th = THEMES.get(panel._theme_fn()) or THEMES["dark"]
         ttk.Label(b, text=_cell_image(row), foreground=th["gray"],
@@ -2300,57 +2472,60 @@ class ImageEditorDialog(_Modal):
             row=1, column=1, sticky=tk.EW, pady=3)
         text.columnconfigure(1, weight=1)
 
-        art = ttk.LabelFrame(b, text="Picture")
-        art.pack(fill=tk.X, pady=(12, 0))
-        g = ttk.Frame(art)
+        box = ttk.LabelFrame(b, text="Picture")
+        box.pack(fill=tk.X, pady=(12, 0))
+        g = ttk.Frame(box)
         g.pack(fill=tk.X, padx=8, pady=6)
-        _media_row(g, 0, 0, "Art:", panel._ed_art, ART_CHOICES,
-                   [("Pictures", "*.png *.jpg *.jpeg"),
-                    ("Videos", "*.mp4 *.mov *.mkv *.avi")])
-        # 13, not 12: "Video frame:" is twelve characters and a 12-wide ttk
-        # label clips the colon.
-        ttk.Label(g, text="Video frame:", width=13).grid(
-            row=1, column=0, sticky=tk.W, pady=3)
-        panel._video_entry = ttk.Entry(g, textvariable=panel._ed_art_video,
-                                       width=26)
-        panel._video_entry.grid(row=1, column=1, sticky=tk.EW, pady=3)
-        panel._video_btn = ttk.Button(
-            g, text="Browse…", width=9,
-            command=lambda: _browse_into(
-                panel._ed_art_video,
-                [("Videos", "*.mp4 *.mov *.mkv *.avi")]))
-        panel._video_btn.grid(row=1, column=2, sticky=tk.W, padx=(4, 0),
-                              pady=3)
-        vt = ttk.Frame(g)
-        vt.grid(row=2, column=1, sticky=tk.W, pady=3)
-        ttk.Label(vt, text="frame at (s):").pack(side=tk.LEFT)
-        panel._video_time = ttk.Spinbox(vt, from_=0, to=36000, increment=0.5,
-                                        width=7,
-                                        textvariable=panel._ed_art_time)
-        panel._video_time.pack(side=tk.LEFT, padx=(6, 0))
-        g.columnconfigure(1, weight=1)
-
-        clipbox = ttk.LabelFrame(b, text="Animation")
-        clipbox.pack(fill=tk.X, pady=(10, 0))
-        g2 = ttk.Frame(clipbox)
-        g2.pack(fill=tk.X, padx=8, pady=6)
-        _media_row(g2, 0, 0, "Animation:", panel._ed_anim, ANIM_CHOICES,
-                   [("Animations", "*.gif *.mp4 *.mov *.mkv *.avi")])
-        ttk.Label(g2, text="Clip:", width=13).grid(row=1, column=0,
-                                                   sticky=tk.W, pady=3)
-        clip = ttk.Frame(g2)
-        clip.grid(row=1, column=1, columnspan=2, sticky=tk.W, pady=3)
+        panel._media_entries = {}
         panel._clip_widgets = []
-        for label, var, width in (("Start (s):", panel._ed_anim_start, 6),
-                                  ("Length (s):", panel._ed_anim_seconds, 5),
-                                  ("FPS:", panel._ed_anim_fps, 4)):
-            ttk.Label(clip, text=label).pack(
-                side=tk.LEFT, padx=(0 if not panel._clip_widgets else 10, 4))
-            sp = ttk.Spinbox(clip, from_=0, to=36000, width=width,
-                             textvariable=var)
-            sp.pack(side=tk.LEFT)
-            panel._clip_widgets.append(sp)
-        g2.columnconfigure(1, weight=1)
+        r = 0
+        for kind, label in self.KINDS:
+            ttk.Radiobutton(g, text=label, value=kind,
+                            variable=panel._ed_media).grid(
+                row=r, column=0, sticky=tk.W, pady=3, padx=(0, 10))
+            if kind in self.FILETYPES:
+                var = panel._ed_picture if kind == "picture" \
+                    else panel._ed_video
+                entry = ttk.Entry(g, textvariable=var, width=26)
+                entry.grid(row=r, column=1, sticky=tk.EW, pady=3)
+                panel._media_entries[kind] = entry
+                ttk.Button(g, text="Browse…", width=9,
+                           command=lambda k=kind: self._browse(k)).grid(
+                    row=r, column=2, sticky=tk.W, padx=(4, 0), pady=3)
+            r += 1
+            if kind == "video":
+                # The clip fields: under the two videos they serve, live
+                # for either.
+                ttk.Label(g, text="Clip:").grid(
+                    row=r, column=0, sticky=tk.E, pady=3, padx=(0, 10))
+                clip = ttk.Frame(g)
+                clip.grid(row=r, column=1, columnspan=2, sticky=tk.W,
+                          pady=3)
+                for label, var, width in (
+                        ("Start (s):", panel._ed_anim_start, 6),
+                        ("Length (s):", panel._ed_anim_seconds, 5),
+                        ("FPS:", panel._ed_anim_fps, 4)):
+                    ttk.Label(clip, text=label).pack(
+                        side=tk.LEFT,
+                        padx=(0 if not panel._clip_widgets else 10, 4))
+                    sp = ttk.Spinbox(clip, from_=0, to=36000, width=width,
+                                     textvariable=var)
+                    sp.pack(side=tk.LEFT)
+                    panel._clip_widgets.append(sp)
+                r += 1
+        names = [val for what, val in on_card_fields(row)
+                 if what in ("art", "animation")]
+        if names:
+            ttk.Radiobutton(g, text="Keep the card's own " + ", ".join(names),
+                            value="card", variable=panel._ed_media).grid(
+                row=r, column=0, columnspan=3, sticky=tk.W, pady=3)
+        g.columnconfigure(1, weight=1)
+        ttk.Label(box, foreground=th["gray"], wraplength=500,
+                  justify=tk.LEFT,
+                  text="A video is the still too: the frame it starts on "
+                       "shows while the image is not highlighted. Clip "
+                       "fields left blank mean from 0 s, 3 s long, 10 "
+                       "fps.").pack(anchor=tk.W, padx=8, pady=(0, 6))
 
         soundbox = ttk.LabelFrame(b, text="Sounds")
         soundbox.pack(fill=tk.X, pady=(10, 0))
@@ -2365,12 +2540,18 @@ class ImageEditorDialog(_Modal):
                    label_w=15)
         snd.columnconfigure(1, weight=1)
         ttk.Label(b, foreground=th["gray"], wraplength=520, justify=tk.LEFT,
-                  text="auto = this image's own logo and attract clip, pulled "
-                       "off the .raw; none = text only. Clip fields left "
-                       "blank use the tool's defaults (from 0 s, 3 s long, "
-                       "10 fps). The confirm sound is what plays when THIS "
-                       "image is chosen; menu = the one the whole menu "
-                       "uses.").pack(anchor=tk.W, pady=(10, 0))
+                  text="The confirm sound is what plays when THIS image is "
+                       "chosen; menu = the one the whole menu uses.").pack(
+            anchor=tk.W, pady=(10, 0))
+
+    def _browse(self, kind):
+        """Browse… for a picture or a video.  Live whichever option is
+        chosen: picking a file IS picking the option."""
+        panel = self._panel
+        var = panel._ed_picture if kind == "picture" else panel._ed_video
+        _browse_into(var, self.FILETYPES[kind])
+        if var.get().strip():
+            panel._ed_media.set(kind)
 
 
 class MenuSettingsDialog(_Modal):
@@ -2631,8 +2812,9 @@ class MultibootPanel:
         self._menu_dialog = None
         self._edit_backup = None        # the row a cancelled edit restores
         self._menu_backup = None
-        #: Widgets that live only while a dialog is up.
-        self._video_entry = self._video_btn = self._video_time = None
+        #: Widgets that live only while a dialog is up: the Edit image…
+        #: dialog's picture / video entries by kind, and its clip fields.
+        self._media_entries = {}
         self._clip_widgets = ()
         self._default_spin = None
         self._bypass_chk = None
@@ -2667,21 +2849,29 @@ class MultibootPanel:
         self._selector_var = tk.StringVar(value=DEFAULT_SELECTOR_DIR)
         self._ed_title = tk.StringVar()
         self._ed_sub = tk.StringVar()
-        self._ed_art = tk.StringVar(value="auto")
-        self._ed_anim = tk.StringVar(value="none")
+        #: What the image shows, as the Edit image… dialog asks it: one of
+        #: MEDIA_KINDS, the file the 'picture' / 'video' kinds use (each
+        #: keeps its own, so switching back and forth loses nothing), and
+        #: the clip fields either video kind uses.
+        self._ed_media = tk.StringVar(value="logo")
+        self._ed_picture = tk.StringVar()
+        self._ed_video = tk.StringVar()
         self._ed_music = tk.StringVar(value="none")
         self._ed_confirm = tk.StringVar(value="menu")
-        self._ed_art_video = tk.StringVar()
-        self._ed_art_time = tk.StringVar()
         self._ed_anim_start = tk.StringVar()
         self._ed_anim_seconds = tk.StringVar()
         self._ed_anim_fps = tk.StringVar()
-        for var in (self._ed_title, self._ed_sub, self._ed_art,
-                    self._ed_anim, self._ed_music, self._ed_confirm,
-                    self._ed_art_video, self._ed_art_time,
-                    self._ed_anim_start, self._ed_anim_seconds,
-                    self._ed_anim_fps):
+        self._ed_media_vars = (self._ed_media, self._ed_picture,
+                               self._ed_video, self._ed_anim_start,
+                               self._ed_anim_seconds, self._ed_anim_fps)
+        for var in (self._ed_title, self._ed_sub, self._ed_music,
+                    self._ed_confirm):
             var.trace_add("write", lambda *_a: self._editor_changed())
+        # ...and a write to what the image SHOWS is the one time the row's
+        # art and animation are derived again from the dialog's choice.
+        for var in self._ed_media_vars:
+            var.trace_add("write",
+                          lambda *_a: self._editor_changed(media=True))
         # ...and the menu's own fields, so the 'what would Apply write' line
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
@@ -2796,10 +2986,8 @@ class MultibootPanel:
         self._frame_var.trace_add("write",
                                   lambda *_a: self._frame_changed(typed=True))
         # ...and everything that changes the picture asks for a re-render.
-        for var in (self._ed_title, self._ed_sub, self._ed_art, self._ed_anim,
-                    self._ed_music, self._ed_confirm, self._ed_art_video,
-                    self._ed_art_time, self._ed_anim_start,
-                    self._ed_anim_seconds, self._ed_anim_fps,
+        for var in (self._ed_title, self._ed_sub, self._ed_music,
+                    self._ed_confirm) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._default_var,
                     self._out_var, self._selector_var):
@@ -3264,8 +3452,7 @@ class MultibootPanel:
         ("idx", "#", 30, 30, False),
         ("title", "Title", 150, 70, True),
         ("sub", "Subtitle", 160, 60, True),
-        ("art", "Picture", 110, 60, True),
-        ("anim", "Animation", 130, 60, True),
+        ("media", "Picture", 200, 60, True),
         ("music", "Music", 90, 50, True),
         ("sound", "Confirm", 80, 50, False),
         ("code", "Code", 90, 50, False),
@@ -3757,6 +3944,7 @@ class MultibootPanel:
     _cell_image = staticmethod(_cell_image)
     _cell_art = staticmethod(cell_art)
     _cell_anim = staticmethod(cell_anim)
+    _cell_media = staticmethod(cell_media)
 
     #: What the last row of the table says.  Dim, with a '+': an empty card
     #: shows only this, which is both the way in and the lesson.
@@ -3765,7 +3953,7 @@ class MultibootPanel:
     def _values(self, i, row):
         """ONE ROW OF THE TABLE, in the column order of TABLE_COLUMNS: the
         index, the title (with what is wrong with its .raw when something
-        is), the subtitle, this image's picture / animation / music, the
+        is), the subtitle, what this image shows and its music, the
         sound that plays when it is chosen, the game code version if
         anything has reported one - and then the four icons that act on
         this row.
@@ -3780,7 +3968,7 @@ class MultibootPanel:
                 not (name == "down" and i >= last)
             icons.append(glyph if live else dim)
         return (i, list_title(row, i), (row.subtitle or "").strip(),
-                cell_art(row), cell_anim(row), _cell(row.music),
+                cell_media(row), _cell(row.music),
                 self._confirm_cell(row), (row.version or "").strip(),
                 ) + tuple(icons)
 
@@ -3878,23 +4066,30 @@ class MultibootPanel:
         self._loading = True
         try:
             row = self._rows[i] if i is not None else ImageRow("")
+            kind, path = media_kind(row), media_file(row)
             self._ed_title.set(row.title)
             self._ed_sub.set(row.subtitle)
-            self._ed_art.set(row.art)
-            self._ed_anim.set(row.anim)
+            self._ed_media.set(kind)
+            self._ed_picture.set(path if kind == "picture" else "")
+            self._ed_video.set(path if kind == "video" else "")
             self._ed_music.set(row.music)
             self._ed_confirm.set(row.confirm or "menu")
-            self._ed_art_video.set(row.art_video)
-            self._ed_art_time.set(row.art_time)
-            self._ed_anim_start.set(row.anim_start)
+            # A still taken off a video with no clip yet (an older form)
+            # keeps its second as the clip's start.
+            self._ed_anim_start.set(row.anim_start or (
+                row.art_time if kind == "video" else ""))
             self._ed_anim_seconds.set(row.anim_seconds)
             self._ed_anim_fps.set(row.anim_fps)
         finally:
             self._loading = False
         self._sync_editor_states()
 
-    def _editor_changed(self):
-        """The selected row <- the editor, on every keystroke."""
+    def _editor_changed(self, media=False):
+        """The selected row <- the editor, on every keystroke.  *media*
+        says the write was to one of the vars that decide what the image
+        shows, which is the one time the row's art and animation are
+        derived again from the dialog's choice: a title edit leaves a pair
+        the choice cannot spell (see MEDIA_KINDS) exactly as it was."""
         if self._loading:
             return
         self._sync_editor_states()
@@ -3904,27 +4099,20 @@ class MultibootPanel:
         row = self._rows[i]
         # A media field typed over is no longer the card's own file: the
         # value is a spec again, and the tools may render it.
-        for attr, flag, var in (("art", "art_on_card", self._ed_art),
-                                ("anim", "anim_on_card", self._ed_anim),
-                                ("music", "music_on_card", self._ed_music),
+        for attr, flag, var in (("music", "music_on_card", self._ed_music),
                                 ("confirm", "confirm_on_card",
                                  self._ed_confirm)):
             if getattr(row, flag) and getattr(row, attr) != var.get():
                 setattr(row, flag, False)
         row.title = self._ed_title.get()
         row.subtitle = self._ed_sub.get()
-        row.art = self._ed_art.get()
-        row.anim = self._ed_anim.get()
         row.music = self._ed_music.get()
         # "menu" is what the box says and "" is what the row keeps, so a row
         # that inherits compares equal however the dialog spelled it
         conf_v = self._ed_confirm.get()
         row.confirm = "" if conf_v.strip().lower() == "menu" else conf_v
-        row.art_video = self._ed_art_video.get()
-        row.art_time = self._ed_art_time.get()
-        row.anim_start = self._ed_anim_start.get()
-        row.anim_seconds = self._ed_anim_seconds.get()
-        row.anim_fps = self._ed_anim_fps.get()
+        if media:
+            self._apply_media(i, row)
         try:
             self._tree.item(str(i), values=self._values(i, row))
         except tk.TclError:
@@ -3932,26 +4120,39 @@ class MultibootPanel:
         self._update_edit_status()
         self._update_row_label()
 
-    def _sync_editor_states(self):
-        """The video-frame fields live only for the 'video frame' art (the
-        time also for a typed video); the clip fields for any animation."""
-        widgets = (getattr(self, "_video_entry", None),
-                   getattr(self, "_video_btn", None),
-                   getattr(self, "_video_time", None))
-        if any(w is None for w in widgets):
+    def _apply_media(self, i, row):
+        """Row *i*'s art and animation <- the dialog's one choice.  'card'
+        puts back what the load read (the dialog's own backup of the row),
+        so a choice tried and untried in one sitting costs nothing."""
+        kind = self._ed_media.get().strip() or "logo"
+        if kind == "card":
+            if self._edit_backup is not None and self._edit_backup[0] == i:
+                was = self._edit_backup[1]
+                for name in ("art", "anim", "art_video", "art_time",
+                             "anim_start", "anim_seconds", "anim_fps",
+                             "art_on_card", "anim_on_card"):
+                    setattr(row, name, getattr(was, name))
             return
-        art = self._ed_art.get().strip().lower()
-        pick = art == "video frame"
-        timed = pick or is_video(art)
-        for w, on in zip(widgets, (pick, pick, timed)):
+        path = {"picture": self._ed_picture,
+                "video": self._ed_video}.get(kind)
+        set_media(row, kind, path.get() if path is not None else "",
+                  self._ed_anim_start.get(), self._ed_anim_seconds.get(),
+                  self._ed_anim_fps.get())
+
+    def _sync_editor_states(self):
+        """Each option's fields live only while it is the choice: the
+        picture entry for 'picture', the video entry for 'video', the clip
+        fields for either video.  (The Browse… buttons stay live: picking a
+        file is picking the option.)"""
+        kind = self._ed_media.get().strip()
+        for name, w in getattr(self, "_media_entries", {}).items():
             try:
-                w.configure(state=tk.NORMAL if on else tk.DISABLED)
+                w.configure(state=tk.NORMAL if kind == name else tk.DISABLED)
             except tk.TclError:
                 pass
-        anim = self._ed_anim.get().strip().lower()
         for w in getattr(self, "_clip_widgets", ()):
             try:
-                w.configure(state=tk.NORMAL if anim not in ("", "none")
+                w.configure(state=tk.NORMAL if kind in ("attract", "video")
                             else tk.DISABLED)
             except tk.TclError:
                 pass
@@ -4428,7 +4629,7 @@ class MultibootPanel:
 
     def _forget_image_dialog(self):
         self._image_dialog = None
-        self._video_entry = self._video_btn = self._video_time = None
+        self._media_entries = {}
         self._clip_widgets = ()
 
     def open_menu_settings(self):
@@ -5230,8 +5431,9 @@ class MultibootPanel:
                     if prepare:
                         errs.append(
                             "Image %d: the %s (%s) is the card's own file, "
-                            "with no source recorded - choose auto, none or "
-                            "a file for it before changing any media."
+                            "with no source recorded - pick something else "
+                            "for it in Edit image… before changing any "
+                            "media."
                             % (i, what, val))
                 elif is_file_choice(val) and not os.path.isfile(val.strip()):
                     errs.append("Image %d: %s file not found: %s"

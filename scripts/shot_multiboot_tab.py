@@ -155,7 +155,7 @@ IMAGES = [
 VERSIONS = ["1.59.0", "1.59.0", "1.59.0"]
 
 #: The second image's animation: its attract clip, 20 s in, 2 s at 8 fps.
-CLIP = ("auto", "20", "2", "8")
+CLIP = ("attract", "20", "2", "8")
 
 #: The preview: image 1 highlighted, frame 3 of the 16-frame clip.
 HIGHLIGHT, FRAME_INDEX, FRAMES = 1, 3, 16
@@ -519,8 +519,8 @@ def s_fill():
     # The second image animates: its attract clip, through the clip fields.
     panel._tree.selection_set("1")
     root.update()
-    anim, start, seconds, fps = CLIP
-    panel._ed_anim.set(anim)
+    kind, start, seconds, fps = CLIP
+    panel._ed_media.set(kind)
     panel._ed_anim_start.set(start)
     panel._ed_anim_seconds.set(seconds)
     panel._ed_anim_fps.set(fps)

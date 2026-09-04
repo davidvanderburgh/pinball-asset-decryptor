@@ -6819,6 +6819,78 @@ These have each been violated at least once and each cost a run or a window:
       marker pads — no measured misattribution, and the report was the
       schematic. If a marker ever hovers wrong, that is where to look.
 
+- [ ] **94. A one-file change to a multi-boot image is written in about a
+      minute, not a rebuild.** `S2 D3` *(David, 2026-09-04: "if we have small
+      updates to just one of the images for, say, a new video asset, we should
+      be able to update it without having to reprocess so much and just target
+      that specific file. to rebuild the multi group image, it should be very
+      performant.")* Every change to a multi-boot card used to be a full
+      rebuild: `debugfs rdump` of each extra onto D: at ~13 MB/s, `mke2fs -d`
+      back into p7, a range copy into the card - tens of minutes for one
+      video. **SHIPPED on `item/94` (2026-09-05), awaiting /finish:** `build`
+      records every tree (`trees.json` on p2 beside `build.json`: sha256, size,
+      mode, owner of every file, every symlink and directory, the source's
+      size+mtime+UUID stamp); `mkmulticard.py update --card OUT` writes ONLY
+      what changed - stamps against the record, a diff per tree, ONE loop
+      mount per touched partition as root (`--direct-io=on`: measured
+      ~150 MB/s into a .raw on D:, 30 buffered, 13 through debugfs), tmp +
+      rename writes with adds before removals, the validator bypass through
+      the mount, the record last, `verify --touched` after. Refuses before a
+      byte: a card in use (fuse2fs mount, the card cache's copier), a held
+      lock, a foreign loop mount, a parts-layout list change, a primary that
+      is another build (p1 bytes + p2 tree minus the menu's files, never a
+      range md5), no room for the update's PEAK. p2 backed up to `<card>.p2.bak`,
+      a DIRTY flag while it runs; a killed update is repaired by the next one
+      (stale loop detached, `e2fsck -fy`, sweep, converge). `plan` prints
+      `image-size free N`; `inspect --json` a `trees` block; the tab's Build /
+      flash modal offers "Update the loaded card in place" from a `--dry-run`
+      it runs with the size check, and draws the free room as a hollow band.
+      Facts that shaped it: 4 of 16 files identical in path/size/mtime differed
+      in content (an in-place radium edit), so metadata is never identity; a rw
+      mount stamps the superblock, so a synced partition is held to the record.
+      **Oracle:** `wsl -u root python3 tools/spike2_emu/mkmulticard.py selftest DIR`
+      part 5 (root; CI runs it on Linux) - and on David's cards: one video into
+      the 1987 pro card, `update` on the existing 2-image TMNT card writes
+      about that video's bytes in about a minute, both images boot in the
+      emulator. **Not yet done:** one flash of an UPDATED card to the TMNT
+      (item 94 is the first thing to rw-mount Stern's own p3 under a 6.x
+      kernel; the feature-word assertion guards it, the machine proves it).
+      — S2: it costs runs on every multi-card change. D3: rig runs and one
+      flash confirm it.
+
+- [ ] **95. An OPT-IN compact multi-boot layout stores what the images share
+      once (default off).** `S3 D4` *(David, 2026-09-04: "compact opt-in
+      multi-boot images", after "if we're only saving 3gb for three images, i
+      don't know if the juice is worth the squeeze" - and then "one store on
+      p3" chosen when the numbers said ~10 GB.)* Three TMNT 1.59 images (stock
+      pro, 1987 pro, 1987 LE) are 18.06 GB on the card - a 32 GB card - while
+      their unique content, by sha256, is 6.59 GB (pro87 and le87 share
+      2.43 GB at DIFFERENT paths, `turtles_pro/` vs `turtles_le/`; stock and
+      pro87 share 2.37 GB). **The shape (approved plan, C:\Users\david\.claude\plans\for-multiboot-spike-2-ticklish-pine.md, "Item 94" there = this):**
+      `build --layout store`, root-only: copy the primary's p3 verbatim, grow it
+      to the Stern size class with `resize2fs` on the loop device (proven: the
+      filesystem keeps its identity), `mkdir .blobs`, hardlink every primary
+      file into `.blobs/<sha256>.<mode>.<uid>.<gid>` (zero bytes rewritten -
+      proven: the inode is kept), sync each extra into `imgK/` writing only
+      blobs the store lacks; the card ≈ 8 GB on a 16G card. Device form
+      `/dev/mmcblk0p3:img1`; `select.sh` needs NO change (its `<dev>:<sub>`
+      branch already handles it; `umount /games` is the path the parts card
+      proved on the TMNT); `parts.py --list-games` and `multi_subdirs_on` must
+      list `imgN` subtrees under a root that has `spk` (both return [] today).
+      The tab: a tick "Compact card: store files the images share only once
+      (experimental)", default OFF, `--layout store` only when ticked, the
+      shared bytes as a hatched band. Stands on item 94's engine (treesync's
+      diff/apply become a stat-walk converge with `blobs_add` deduplicated
+      across trees; the bypass through the mount already refreshes a .sidx
+      whenever its record disagrees with the ELF - the shared-blob hazard).
+      **Hardware-only proofs, until which the tick says experimental:** Stern's
+      `update`/spk layer tolerating `.blobs/` and `img1/` at the primary's
+      `/games` root, and the same-device remount. **Rule to document:** never
+      USB-update a store card (a Stern update writes through hardlinked blobs
+      into every tree sharing them); rebuild with the tool.
+      — S3: a workaround exists (a 32 GB card). D4: a new on-card layout whose
+      hardware proof is one flash away.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

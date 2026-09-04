@@ -258,6 +258,8 @@ def cache_dir_candidates(extra=None):
         out.append(extra)
     if os.environ.get(CACHE_ENV):
         out.append(os.environ[CACHE_ENV])
+    if out:
+        return out          # an asked-for directory is THE cache: nothing else is searched
     users = "/mnt/c/Users"
     if os.path.isdir(users):
         for u in sorted(os.listdir(users)):

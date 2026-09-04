@@ -1035,6 +1035,22 @@ def rebuild_blockers(form):
 # command lines (pure)
 # ---------------------------------------------------------------------------
 
+#: THE NAMES THE CONTROLS REALLY WEAR.  Every sentence in this tab that
+#: tells someone what to press says one of these, because 'Apply to card'
+#: and 'Build & verify' were buttons that became ONE green button and a
+#: modal (see MultibootPanel._build_actions) - and the sentences went on
+#: naming the buttons for months afterwards (David: "there is no 'apply to
+#: card' option anywhere in the gui. how do i do that?").
+#:
+#: A sentence that sends someone looking for a control which is not there is
+#: worse than one that says only what is true - the rule this tab's own
+#: 'strayed' sentence was already rewritten for.  Constants, so the next
+#: rename moves them once.
+WRITE_BUTTON = "Build / flash card\u2026"
+APPLY_TICK = "Build / flash card\u2026 \u25b8 Update the loaded card in place"
+READ_VERB = "Browse\u2026 to it (or press Enter in the path box)"
+
+
 def _media_value(value):
     """A media field for the tools: the word as is, a path in WSL form."""
     v = (value or "").strip().strip('"')
@@ -2140,27 +2156,28 @@ def media_specs_changed(before, after):
 
 
 def edit_status_text(card, menu, rebuild):
-    """The tab's one line about a loaded card: what Apply to card would
-    write, or why only a rebuild can.
+    """The tab's one line about a loaded card: what updating it would write,
+    or why only a fresh card can.
 
     ONE BRANCH of :func:`card_path_state` rather than a second opinion: the
     row's verb and the sentence under it are derived from the same call, so
     they cannot come to disagree about which card is being edited."""
     name = os.path.basename(card) or card
     if rebuild:
-        msg = ("The image list changed (%s) - Build & verify writes a new "
-               "card; Apply to card only rewrites the menu of %s."
-               % ("; ".join(rebuild), name))
+        msg = ("The image list changed (%s) - only a fresh card can carry "
+               "that; %s rewrites the menu of %s and nothing else."
+               % ("; ".join(rebuild), APPLY_TICK, name))
         if menu:
             msg += "  %d menu change%s would ride along: %s." % (
                 len(menu), "" if len(menu) == 1 else "s", ", ".join(menu))
         return msg
     if not menu:
         return ("Editing %s: no changes yet. Every field above came off the "
-                "card; change one and Apply to card writes it back in "
-                "seconds." % name)
-    return "Apply to card: %d menu change%s (%s) -> %s, no rebuild." % (
-        len(menu), "" if len(menu) == 1 else "s", ", ".join(menu), name)
+                "card; change one and %s writes it back in seconds."
+                % (name, APPLY_TICK))
+    return "%d menu change%s (%s) -> %s: %s writes it, no rebuild." % (
+        len(menu), "" if len(menu) == 1 else "s", ", ".join(menu), name,
+        APPLY_TICK)
 
 
 # ---------------------------------------------------------------------------
@@ -2412,8 +2429,8 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
     elif card == "file":
         out.append(("built", "Built", "no",
                     "There is a file at that path, but nothing has looked "
-                    "inside it - Load card reads it, and Build / flash "
-                    "card... writes over it."))
+                    "inside it - %s reads it, and %s writes over it."
+                    % (READ_VERB, WRITE_BUTTON)))
     else:
         out.append(("built", "Built", "no",
                     "Nothing at that path yet - Build / flash card... "
@@ -2549,16 +2566,18 @@ def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
                      % (name, why), "fg", True)
         else:
             state = ("file",
-                     "%s is on disk — Load card reads it into the form; "
-                     "Build & verify would write over it." % name, "fg", True)
+                     "%s is on disk — %s to read it into the form; %s would "
+                     "write over it." % (name, READ_VERB, WRITE_BUTTON),
+                     "fg", True)
     elif kind == "missing":
         if (facts or {}).get("parent"):
-            sentence = "Build & verify will write a new card at %s." % name
+            sentence = "%s will write a new card at %s." % (WRITE_BUTTON,
+                                                             name)
         else:
             folder = os.path.basename(
                 os.path.dirname(os.path.abspath(field))) or "the folder"
-            sentence = ("Build & verify will write a new card at %s, "
-                        "creating %s." % (name, folder))
+            sentence = ("%s will write a new card at %s, creating %s."
+                        % (WRITE_BUTTON, name, folder))
         state = ("missing", sentence, "gray", False)
     else:
         # NOTHING HAS BEEN ASKED YET (the probe is off, or it has not come
@@ -4195,15 +4214,17 @@ class MultibootPanel:
     #: two dead buttons' tooltips carried, because it is now the only thing
     #: in the row that names both of the tab's modes.
     PATH_TIP = ("The card this tab is pointing at. A path with a card "
-                "already at it is one you can read: Load card fills every "
+                "already at it is one you can read: reading it fills every "
                 "field from it - images, titles, subtitles, art, animation, "
                 "music, sounds, volume, countdown, default and bypass - and "
-                "Apply to card then writes your changes back into it in "
-                "seconds. A path with nothing at it yet is where Build & "
-                "verify will write a new card. Browse… does both: it takes "
-                "a card that exists and a name that does not. Picking an "
-                "existing card in Browse… reads it; a typed path never "
-                "does, because a half-typed one names the wrong card.")
+                "'Update the loaded card in place', in the green button's "
+                "dialog, then writes your changes back into it in seconds. "
+                "A path with nothing at it yet is where that same button "
+                "writes a new card. Browse… does both: it takes a card that "
+                "exists and a name that does not. Picking an existing card "
+                "in Browse… reads it, and so does Enter in this box; a "
+                "typed path never does by itself, because a half-typed one "
+                "names the wrong card.")
 
     VERB_TIP = ("Reads the card at the path above with the tool's own "
                 "inspect: its table into the Log, its menu and images into "
@@ -6720,11 +6741,11 @@ class MultibootPanel:
         # else, or press Apply.
         if self._loaded_card and _norm(form.out) == _norm(self._loaded_card):
             self._error(
-                "Build & verify writes a NEW card, and 'Card image' names "
-                "the card you loaded (%s). Point it at a different path to "
-                "build a copy - typing this one back goes on editing it - "
-                "or press Apply to card, which rewrites the menu of this "
-                "one in seconds." % self._loaded_card)
+                "Building writes a NEW card, and 'Card image' names the "
+                "card you loaded (%s). Point it at a different path to build "
+                "a copy - typing this one back goes on editing it - or tick "
+                "'%s', which rewrites the menu of this one in seconds."
+                % (self._loaded_card, APPLY_TICK))
             return
         # Every reason at once: the form's own, and the media a loaded card
         # carries that nothing here can render into a new one.
@@ -6796,7 +6817,7 @@ class MultibootPanel:
             pass
         return messagebox.askyesno(
             "Overwrite that card?",
-            "%s already exists%s.\n\nBuild & verify writes a NEW card over "
+            "%s already exists%s.\n\nBuilding writes a NEW card over "
             "it - every image is copied again, and whatever is on it now is "
             "gone. Overwrite it?" % (path, what))
 
@@ -6870,8 +6891,8 @@ class MultibootPanel:
             return False
         if under_library(path):
             self._error("That card is in the library (%s); copy it out "
-                        "first - Apply to card writes into the card it "
-                        "read." % LIBRARY_PREFIXES[0])
+                        "first - updating a loaded card writes into the very "
+                        "card it read." % LIBRARY_PREFIXES[0])
             return False
         if self._busy:
             self._error("A run is already in progress.")
@@ -7021,7 +7042,7 @@ class MultibootPanel:
         # (an image whose .raw is elsewhere, a sound with no provenance) has
         # still loaded, so the line stays the ordinary colour and says them.
         self._ok(head + ("\n" + "\n".join(warnings) if warnings
-                         else " Edit the menu, then Apply to card."),
+                         else " Edit the menu, then %s." % APPLY_TICK),
                  extra=False)
         for line in warnings:
             self._write("[load] " + line)
@@ -7094,8 +7115,8 @@ class MultibootPanel:
         that reads the card back.  Seconds, not a rebuild.  False when the
         tab refused."""
         if not self._loaded_card:
-            self._error("Load a card first - Apply to card writes into the "
-                        "card the form was read from.")
+            self._error("Read a card first - updating in place writes into "
+                        "the card the form was read from.")
             return False
         # THE INVARIANT, ENFORCED AND NOT ONLY DRAWN.  The button is already
         # grey when the path box has been typed away from the loaded card,
@@ -7105,9 +7126,9 @@ class MultibootPanel:
         if not self._on_loaded_path():
             self._error(
                 "'Card image' no longer names %s, the card this form was "
-                "read from, so there is nothing to apply to. Nothing was "
-                "lost: type that path back and Apply to card is live "
-                "again." % self._loaded_card)
+                "read from, so there is nothing to update. Nothing was "
+                "lost: type that path back and '%s' is offered again."
+                % (self._loaded_card, APPLY_TICK))
             return False
         if self._busy:
             self._error("A run is already in progress.")
@@ -7116,12 +7137,13 @@ class MultibootPanel:
         menu, rebuild = diff_forms(self._loaded_form, form)
         if rebuild:
             self._error(
-                "The image list changed (%s). Apply to card only rewrites "
-                "the menu of %s; adding, removing, reordering or replacing "
-                "an image means copying the images again - point 'Card "
-                "image' at a new path (which leaves editing mode) and press "
-                "Build & verify."
-                % ("; ".join(rebuild), os.path.basename(self._loaded_card)))
+                "The image list changed (%s). Updating in place only "
+                "rewrites the menu of %s; adding, removing, reordering or "
+                "replacing an image means copying the images again - point "
+                "'Card image' at a new path (which leaves editing mode) and "
+                "build a fresh card with %s."
+                % ("; ".join(rebuild), os.path.basename(self._loaded_card),
+                   WRITE_BUTTON))
             return False
         prepare = media_specs_changed(self._loaded_form, form)
         errs = self._apply_blockers(form, prepare)
@@ -7154,13 +7176,13 @@ class MultibootPanel:
         def done(rc, failed, _texts):
             if rc != 0:
                 if self.run_cancelled():
-                    self._ok("Apply cancelled at %s. The card's menu may be "
-                             "half written - press Build / flash card again "
-                             "to finish it." % (failed or "the start"))
+                    self._ok("The update was cancelled at %s. The card's "
+                             "menu may be half written - %s again to finish "
+                             "it." % (failed or "the start", WRITE_BUTTON))
                 else:
-                    self._error("Apply to card failed at %s (exit %d) - see "
-                                "the tool output." % (failed or "the start",
-                                                      rc))
+                    self._error("Updating the card failed at %s (exit %d) - "
+                                "see the tool output."
+                                % (failed or "the start", rc))
                 self._update_edit_status()
                 return
             # The card now says what the form says: the tools wrote it and
@@ -7271,8 +7293,10 @@ class MultibootPanel:
                           % "; ".join(menu))
             else:
                 detail = ("No change pending - ticking this re-writes the "
-                          "same menu into %s (the images are never touched)."
-                          % name)
+                          "same menu into %s, AND the boot selector itself, "
+                          "which is how a newer selector reaches a card you "
+                          "have already built (the images are never "
+                          "touched)." % name)
             return {
                 "action": "apply",
                 "can_write": not self._busy,

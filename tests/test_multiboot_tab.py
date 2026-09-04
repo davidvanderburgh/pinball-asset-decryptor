@@ -21,6 +21,8 @@ import sys
 import time
 from types import SimpleNamespace
 
+import ast
+
 import pytest
 
 from tests.conftest import HAS_DISPLAY
@@ -32,6 +34,7 @@ from pinball_decryptor.gui.multiboot_tab import (
     PREVIEW_BUILD_DIR, PREVIEW_MAX_FRAMES,
     ImageRow, MultibootForm, anim_period_ms, anim_spec, apply_commands,
     art_spec, build_commands, bypass_commands, card_path_state,
+    APPLY_TICK, WRITE_BUTTON,
     card_size_view, cell_anim, split_music_source, split_sound_source,
     status_checks,
     cell_art, default_output_path, diff_forms, frame_pattern,
@@ -4121,13 +4124,14 @@ def test_the_status_line_names_what_will_happen(tmp_path):
     card = "D:/Pinball/multi/card.multi.raw"
     assert "no changes yet" in edit_status_text(card, [], [])
     one = edit_status_text(card, ["title"], [])
-    assert one.startswith("Apply to card: 1 menu change (title)")
+    assert one.startswith("1 menu change (title)")
+    assert APPLY_TICK in one, "it names the control that really writes it"
     assert "card.multi.raw" in one and "no rebuild" in one
     three = edit_status_text(card, ["title", "art", "volume"], [])
     assert "3 menu changes (title, art, volume)" in three
     listed = edit_status_text(card, ["title"], ["3 images -> 2"])
     assert listed.startswith("The image list changed (3 images -> 2)")
-    assert "Build & verify" in listed and "1 menu change would ride" in listed
+    assert WRITE_BUTTON in listed and "1 menu change would ride" in listed
 
 
 # --------------------------------------------------------------------------
@@ -4167,7 +4171,8 @@ def test_a_file_that_is_there_is_the_one_a_load_reads():
 def test_a_path_with_nothing_at_it_is_where_a_build_would_write():
     kind, text, tone, on = _state(CARD, kind="missing", parent=True)
     assert (kind, tone, on) == ("missing", "gray", False)
-    assert text == "Build & verify will write a new card at card.multi.raw."
+    assert text == "%s will write a new card at card.multi.raw." \
+        % WRITE_BUTTON
     _k, text, _t, _on = _state(CARD, kind="missing", parent=False)
     assert text.endswith("creating multi.")
 
@@ -4345,7 +4350,8 @@ def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
         assert "no changes yet" in panel.check_detail("card")
         panel._timeout_var.set("8")
         assert panel.check_detail("card").startswith(
-            "Apply to card: 1 menu change (countdown)")
+            "1 menu change (countdown)")
+        assert APPLY_TICK in panel.check_detail("card")
         # 3. ...and why only a rebuild can, once the image LIST moved
         panel._table.select(1)
         root.update()
@@ -4900,7 +4906,8 @@ def test_a_menu_change_is_injected_into_the_loaded_card(tmp_path):
         panel._ed_sub.set("1987 cartoon, upscaled")
         panel._timeout_var.set("8")
         text = panel.check_detail("card")
-        assert "Apply to card: 2 menu changes (subtitle, countdown)" in text
+        assert "2 menu changes (subtitle, countdown)" in text
+        assert APPLY_TICK in text
         assert _apply_live(panel)
         assert panel.apply_to_card() is True
         labels = [label for label, _ in calls[0]]
@@ -5050,12 +5057,13 @@ def test_an_image_list_change_refuses_the_apply(tmp_path, how):
             panel._refresh_tree(select=1)
         text = panel.check_detail("card")
         assert text.startswith("The image list changed")
-        assert "Build & verify writes a new card" in text
+        assert "only a fresh card can carry that" in text
+        assert APPLY_TICK in text
         assert not _apply_live(panel)
         assert panel.apply_to_card() is False
         assert calls == []
         assert "image list changed" in panel.message()
-        assert "Build & verify" in panel.message()
+        assert WRITE_BUTTON in panel.message()
     finally:
         root.destroy()
 
@@ -5076,7 +5084,7 @@ def test_build_and_verify_will_not_write_over_the_loaded_card(tmp_path,
         assert calls == []
         hint = panel.message()
         assert "writes a NEW card" in hint and card in hint
-        assert "Apply to card" in hint
+        assert APPLY_TICK in hint
         # a different path builds as usual (the loaded card is untouched)
         out = str(tmp_path / "multi" / "copy.multi.raw")
         panel._out_var.set(out)
@@ -7407,3 +7415,48 @@ def test_a_sound_really_changed_is_still_stale(tmp_path, monkeypatch):
         assert "the move sound" in panel._sounds_missing()
     finally:
         root.destroy()
+
+
+#: Control names this tab USED to have.  Every one of them is now part of
+#: one green button and its modal (see MultibootPanel._build_actions).
+GONE_CONTROLS = ("Apply to card", "Build & verify", "Load card")
+
+
+def test_no_sentence_names_a_control_that_is_not_there(tmp_path):
+    """A SENTENCE THAT SENDS SOMEONE LOOKING FOR A BUTTON WHICH IS NOT THERE
+    is worse than one that says only what is true - this tab's own rule,
+    written when the 'More' menu went, and then broken by the consolidation
+    that followed it.  Three buttons became one green button and a modal;
+    the sentences went on naming the three for months, until David asked
+    "there is no 'apply to card' option anywhere in the gui. how do i do
+    that?"
+
+    Docstrings and comments are exempt: 'the Apply to card run' is what the
+    code calls that run and always will be.  This is about the strings a
+    person READS."""
+    with open(multiboot_tab.__file__, encoding="utf-8") as f:
+        src = f.read()
+    tree = ast.parse(src)
+    docs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            body = getattr(node, "body", [])
+            if body and isinstance(body[0], ast.Expr) and \
+                    isinstance(body[0].value, ast.Constant) and \
+                    isinstance(body[0].value.value, str):
+                docs.add(id(body[0].value))
+    bad = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and id(node) not in docs:
+            for gone in GONE_CONTROLS:
+                if gone in node.value:
+                    bad.append("line %d names %r: %s"
+                               % (node.lineno, gone,
+                                  node.value.strip()[:70]))
+    assert bad == [], "\n".join(bad)
+    # ...and the names it DOES use are the ones the controls wear
+    assert WRITE_BUTTON == multiboot_tab.MultibootPanel.BUILD_FLASH_TEXT
+    assert WRITE_BUTTON in APPLY_TICK
+    assert "Update the loaded card in place" in APPLY_TICK

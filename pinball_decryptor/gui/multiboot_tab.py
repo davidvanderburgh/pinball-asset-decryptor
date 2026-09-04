@@ -3534,11 +3534,22 @@ class BuildFlashDialog(_Modal):
             gf, text="Write the card onto an SD card", variable=self._flash_var,
             command=self._sync)
         self._flash_chk.pack(anchor=tk.W)
+        # ...AND IT NAMES THE FAST PATH, because this is where someone
+        # about to wait an hour is standing (David, twice: "flashing the
+        # whole thing takes over an hour with my slow sd card").  The
+        # menu-only write lives one dialog further on, and a fast option
+        # nobody can find is a fast option nobody has.
         ttk.Label(gf, foreground=th["gray"], wraplength=460, justify=tk.LEFT,
-                  text="Flashing erases and replaces the whole SD card, and "
-                       "needs Administrator (approved when the write starts). "
-                       "Tick this with 'Write the card' above to build and "
-                       "flash in one step.").pack(
+                  text="Flashing the whole image erases and replaces the "
+                       "whole SD card, and needs Administrator (approved "
+                       "when the write starts). Tick this with the write "
+                       "above to build and flash in one step.\n\n"
+                       "CHANGED ONLY THE MENU? The next dialog offers "
+                       "'Only the boot menu' - it writes the menu partition "
+                       "and nothing else, which is about a minute instead of "
+                       "the whole image, and the machine keeps its settings "
+                       "and scores. It checks the card first and refuses if "
+                       "this image was not the one flashed onto it.").pack(
             anchor=tk.W, padx=(20, 0), pady=(2, 0))
         if not (plan["can_write"] or plan["have_card"]):
             self._flash_chk.configure(state=tk.DISABLED)

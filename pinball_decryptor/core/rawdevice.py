@@ -1349,7 +1349,7 @@ def menu_write_plan(image_path):
                 "not a Stern card image. Flash the whole image instead."
                 % os.path.basename(image_path))
         _i, _t, r_lba, r_count = rootfs[0]
-        prove = [(0, 512, "the partition table")]
+        prove = [(0, 512, "the card's partition table")]
         for idx, ptype, lba, _count in prim:
             if idx == _ROOTFS_INDEX:
                 continue            # it is what we are about to overwrite
@@ -1357,13 +1357,19 @@ def menu_write_plan(image_path):
                 for n, (ebr, ltype, lstart, _lc) in enumerate(
                         _ebr_chain(read_at, lba)):
                     part = 5 + n
-                    prove.append((ebr * 512, 512, "the p%d table entry" % part))
+                    prove.append((ebr * 512, 512,
+                                  "the card's p%d table entry" % part))
                     if ltype == 0x83 and part not in _MACHINE_OWNED:
+                        # NAMED FOR WHAT IT IS TO A PERSON.  "p7's filesystem
+                        # does not match" is true and useless; what it means
+                        # is that the games on the card are not the games in
+                        # this image, which is the one thing worth knowing.
                         prove.append((lstart * 512, _IDENT_BYTES,
-                                      "p%d's filesystem" % part))
+                                      "the games on p%d" % part))
                 continue
             prove.append((lba * 512, _IDENT_BYTES,
-                          "p%d's filesystem" % (idx + 1)))
+                          "the games on p%d" % (idx + 1) if idx == 2
+                          else "the card's p%d" % (idx + 1)))
     return {"write": [(r_lba * 512, r_count * 512, "the menu partition (p2)")],
             "prove": prove, "sector": 512}
 
@@ -1429,9 +1435,12 @@ def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
                 ok, what = _ranges_match(dev, src, plan["prove"], log=log)
                 if not ok:
                     raise FlashError(
-                        "This card was not flashed from %s - %s does not "
-                        "match. Untick 'Only the boot menu' and write the "
-                        "whole image."
+                        "This card does not hold the images in %s: %s does "
+                        "not match, so writing only the menu would leave a "
+                        "menu pointing at games that are not there. Nothing "
+                        "was written. Untick 'Only the boot menu' and write "
+                        "the whole image - or put in the card this image was "
+                        "flashed onto."
                         % (os.path.basename(image_path), what))
                 if log is not None:
                     log("This is that card. Writing the menu partition only "

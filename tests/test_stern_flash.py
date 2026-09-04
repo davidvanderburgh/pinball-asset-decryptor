@@ -705,17 +705,18 @@ def test_the_menu_plan_is_p2_and_a_proof_of_everything_else(tmp_path):
     assert plan["write"] == [(128 * _SEC, 128 * _SEC,
                               "the menu partition (p2)")]
     what = [w for _o, _l, w in plan["prove"]]
-    assert what[0] == "the partition table"
+    assert what[0] == "the card's partition table"
     # every games tree is identified, and so is the boot partition...
-    assert "p1's filesystem" in what and "p3's filesystem" in what
-    assert "p7's filesystem" in what
+    # named for what they are to a person, not for a partition number
+    assert "the card's p1" in what and "the games on p3" in what
+    assert "the games on p7" in what
     # ...the logical chain is walked...
-    assert ["the p%d table entry" % n for n in (5, 6, 7)] == \
+    assert ["the card's p%d table entry" % n for n in (5, 6, 7)] == \
         [w for w in what if "table entry" in w]
     # ...and /data and /dump are DELIBERATELY not compared: the machine
     # writes them, so they differ on any card that has ever booted
-    assert "p5's filesystem" not in what
-    assert "p6's filesystem" not in what
+    assert "the games on p5" not in what
+    assert "the games on p6" not in what
     # nothing outside the image is read
     assert all(o + l <= os.path.getsize(img)
                for o, l, _w in plan["prove"] + plan["write"])
@@ -755,19 +756,20 @@ def test_a_menu_write_refuses_a_card_it_was_not_flashed_onto(tmp_path):
     before = open(other, "rb").read()
     with pytest.raises(rd.FlashError) as e:
         rd.flash_menu_to_device(img, other)
-    assert "was not flashed from" in str(e.value)
-    assert "p3's filesystem" in str(e.value)
+    assert "does not hold the images in" in str(e.value)
+    assert "the games on p3" in str(e.value)
+    assert "Nothing was written" in str(e.value)
     assert "Untick" in str(e.value)
     assert open(other, "rb").read() == before, "it refused BEFORE writing"
     # a different EXTRA image is caught too, and so is a different table
     other2 = _spike_image(tmp_path / "o2.raw", 0xA1B2C3D4, extra=b"OTHER")
     with pytest.raises(rd.FlashError) as e:
         rd.flash_menu_to_device(img, other2)
-    assert "p7's filesystem" in str(e.value)
+    assert "the games on p7" in str(e.value)
     other3 = _spike_image(tmp_path / "o3.raw", 0x99999999)
     with pytest.raises(rd.FlashError) as e:
         rd.flash_menu_to_device(img, other3)
-    assert "the partition table" in str(e.value)
+    assert "the card's partition table" in str(e.value)
 
 
 def test_a_menu_write_refuses_an_image_that_is_not_a_card(tmp_path):

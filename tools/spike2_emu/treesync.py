@@ -432,8 +432,9 @@ def room_needed(changes, old, new, margin=ROOM_MARGIN):
 
 
 # ============================================================================ trees on a card
-TreeAction = collections.namedtuple("TreeAction", "index device old_sub new_sub action")
-# action: keep (same tree, same place), rename (same tree, moved), new (no tree yet), remove
+TreeAction = collections.namedtuple("TreeAction", "index device old_sub new_sub action old_index")
+# action: keep (same tree, same place), rename (same tree, moved), new (no tree yet), remove;
+# old_index names the recorded image the request matched (None for new)
 
 
 def match_trees(card, new_sources, subdir_for):
@@ -463,14 +464,21 @@ def match_trees(card, new_sources, subdir_for):
                     if stamps_equal(im.stamp, stamp):
                         found = im
                         break
+            if found is None:
+                # a tree recorded without a stamp (hashed off a card built before the record)
+                # can only be matched by its position
+                im = card.image(index)
+                if im is not None and im.index not in used and not im.stamp:
+                    found = im
         if found is None:
-            out.append(TreeAction(index, device, None, want, "new"))
+            out.append(TreeAction(index, device, None, want, "new", None))
         else:
             used.add(found.index)
-            out.append(TreeAction(index, device, found.sub, want, "keep" if found.sub == want else "rename"))
+            out.append(TreeAction(index, device, found.sub, want, "keep" if found.sub == want else "rename",
+                                  found.index))
     for im in card.images:
         if im.index != 0 and im.index not in used:
-            out.append(TreeAction(im.index, im.device, im.sub, None, "remove"))
+            out.append(TreeAction(im.index, im.device, im.sub, None, "remove", im.index))
     return out
 
 

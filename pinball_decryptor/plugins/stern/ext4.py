@@ -86,7 +86,7 @@ class Ext4Reader:
                 runs = self._runs(node)
                 if runs:
                     jsb = self._read(runs[0][1] * self.block_size, 0x30)
-                    jc, ji, jr = struct.unpack_from("<III", jsb, 0x24)
+                    jc, ji, jr = struct.unpack_from(">III", jsb, 0x24)      # jbd2 is big-endian
             except Exception:
                 pass
         return (compat, incompat, ro, jc, ji, jr)

@@ -215,10 +215,10 @@ def test_tree_actions_remove_first_then_rename_in_two_phases_then_create():
     for sub, payload in (("img1", b"one"), ("img2", b"two"), ("img3", b"three")):
         ops.mkdir(sub, 0o755, 0, 0)
         ops.write_stream(sub + "/f", [payload], 0o644, 0, 0, 1)
-    actions = [ts.TreeAction(1, "p7:img1", "img2", "img1", "rename"),
-               ts.TreeAction(2, "p7:img2", "img1", "img2", "rename"),
-               ts.TreeAction(3, "p7:img3", None, "img3", "new"),
-               ts.TreeAction(9, "p7:img3", "img3", None, "remove")]
+    actions = [ts.TreeAction(1, "p7:img1", "img2", "img1", "rename", 2),
+               ts.TreeAction(2, "p7:img2", "img1", "img2", "rename", 1),
+               ts.TreeAction(3, "p7:img3", None, "img3", "new", None),
+               ts.TreeAction(9, "p7:img3", "img3", None, "remove", 9)]
     done = ts.apply_tree_actions(ops, actions, tmp_tag="t")
     assert done[0] == ("remove", "img3", None)
     assert ops.read("img1/f") == b"two" and ops.read("img2/f") == b"one"
@@ -243,6 +243,7 @@ def test_match_trees_by_path_then_stamp_else_new_and_unclaimed_removed():
     acts = ts.match_trees(card, new, sub)
     assert [(a.index, a.old_sub, a.new_sub, a.action) for a in acts] == [
         (0, "", "", "keep"), (1, "img2", "img1", "rename"), (2, "img1", "img2", "rename"), (3, None, "img3", "new")]
+    assert [a.old_index for a in acts] == [0, 2, 1, None]
     fewer = [(0, "/dev/mmcblk0p3", new[0][2]),
              (1, "/dev/mmcblk0p7:img1", {"path": "/p/b.raw", "size": 30, "mtime_ns": 3})]
     acts = ts.match_trees(card, fewer, sub)

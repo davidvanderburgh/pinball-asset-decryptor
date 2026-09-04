@@ -115,3 +115,86 @@ def test_read_trees_reads_the_record_off_p2(mk, ts, monkeypatch):
 def test_trees_manifest_is_a_known_sidecar(mk):
     assert mk.TREES_MANIFEST in mk.SIDECAR_MANIFESTS
     assert json.loads(json.dumps({"x": mk.TREES_MANIFEST}))["x"] == "trees.json"
+
+
+# ------------------------------------------------------------------ update: the pure parts
+def test_update_rows_are_the_pinned_contract(mk, capsys):
+    u = {"card": "/mnt/d/x.raw", "layout": "multi", "dirty": [7], "unrecorded": False,
+         "sources": [(0, "/dev/mmcblk0p3", "unchanged", "a.raw"), (1, "/dev/mmcblk0p7:img1", "rehashed", "b.raw"),
+                     (2, "/dev/mmcblk0p7:img2", "removed", None)],
+         "files": [(0, "/dev/mmcblk0p3", 0, 0, "keep", "a.raw"),
+                   (1, "/dev/mmcblk0p7:img1", 1, 65011712, "sync", "b.raw"),
+                   (2, "/dev/mmcblk0p7:img2", 1385, 0, "remove", None)],
+         "inject": True, "size": 65011712, "peak": 65011712 + (64 << 20), "free_after": 4100000000,
+         "grow": (7, 1 << 30), "fits": True, "notes": ["image 2 removed"]}
+    mk._print_update_rows(u)
+    out = capsys.readouterr().out.splitlines()
+    assert out == [
+        "update-card /mnt/d/x.raw layout multi dirty",
+        "update-source 0 /dev/mmcblk0p3 unchanged a.raw",
+        "update-source 1 /dev/mmcblk0p7:img1 rehashed b.raw",
+        "update-source 2 /dev/mmcblk0p7:img2 removed -",
+        "update-files 0 /dev/mmcblk0p3 0 0 keep a.raw",
+        "update-files 1 /dev/mmcblk0p7:img1 1 65011712 sync b.raw",
+        "update-files 2 /dev/mmcblk0p7:img2 1385 0 remove -",
+        "update-inject yes",
+        "update-size 65011712",
+        "update-peak %d" % (65011712 + (64 << 20)),
+        "update-free 4100000000",
+        "update-grow p7 1073741824",
+        "update-fits YES",
+        "update-note image 2 removed",
+    ]
+    u["grow"] = None
+    u["dirty"] = []
+    u["unrecorded"] = True
+    mk._print_update_rows(u)
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "update-card /mnt/d/x.raw layout multi unrecorded" and "update-grow none" in out
+
+
+def test_bypass_tree_bytes_leaves_a_game_without_a_validator_alone(mk):
+    elf = b"\x7fELF" + bytes(64)
+    state, new_elf, new_sidx, notes = mk.bypass_tree_bytes(elf, b"not a manifest\n", "t/game", "t")
+    assert state in ("absent", "unlocated") and new_elf is None and new_sidx is None
+    assert notes and "t/game" in notes[0]
+
+
+def test_update_refuses_a_directory_a_missing_card_and_a_host_without_loop(mk, tmp_path, capsys):
+    rc = mk.main(["update", "--card", str(tmp_path)])
+    assert rc == 2 and "not a regular file" in capsys.readouterr().err
+    rc = mk.main(["update", "--card", str(tmp_path / "nope.raw")])
+    assert rc == 2 and "does not exist" in capsys.readouterr().err
+    card = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    if os.name != "posix":
+        rc = mk.main(["update", "--card", card])
+        assert rc == 2 and "loop mount" in capsys.readouterr().err
+
+
+def test_update_dry_run_needs_no_root_but_a_readable_card(mk, tmp_path, capsys, monkeypatch):
+    """A dry-run never asks for root or the lock; on a host without debugfs it stops at the
+    first read with the tool's own sentence, never a traceback."""
+    card = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    monkeypatch.setattr(mk, "loop_available", lambda: (False, "not root"))
+    rc = mk.main(["update", "--card", card, "--dry-run"])
+    err = capsys.readouterr().err
+    assert rc == 2 and "[card] error:" in err and "loop mount" not in err
+
+
+def test_p2_skip_and_slack_constants(mk):
+    assert mk.P2_SKIP == ("usr/local/codeselect", "etc/init.d/game")
+    assert mk.UPDATE_SLACK == 0.10 and mk.UPDATE_SLACK_BYTES == 64 << 20
+
+
+def test_selector_manifests_carry_trees_json_through(mk, ts, tmp_path):
+    from tests.test_mkmulticard import _two_image_plan, _menu_conf
+    plan = _two_image_plan(mk)
+    conf = _menu_conf(mk, plan)
+    man, _ = ts.mem_source_from({"t/game": b"g"})
+    rec = ts.CardTrees([ts.ImageTrees(0, "/dev/mmcblk0p3", "", man)], layout="parts", version="1.2")
+    out = mk.selector_manifests(plan, conf, None, None, None, None, trees=rec)
+    assert out[mk.TREES_MANIFEST] == rec.to_json()
+    out = mk.selector_manifests(plan, conf, None, None, None, None, existing_trees=b"{carried}")
+    assert out[mk.TREES_MANIFEST] == b"{carried}"
+    out = mk.selector_manifests(plan, conf, None, None, None, None)
+    assert mk.TREES_MANIFEST not in out

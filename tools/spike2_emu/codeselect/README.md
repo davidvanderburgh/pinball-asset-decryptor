@@ -343,15 +343,21 @@ iteration and mixes exactly what the sink can take right now - never blocks:
   table that powers VAG, DAC, headphone and line-out (`CHIP_ANA_POWER`
   0x40f9), clears every analog mute (`CHIP_ANA_CTRL` 0x0020/0x0022) and sets
   the line-out bias and reference - the same table, byte for byte, in every
-  title checked. So once `snd_pcm_set_params` is done (the kernel's own
-  hw_params and DAPM writes behind us), the same table goes onto both chips,
-  minus what the kernel owns for the running stream (clock, I2S format, the
-  DAC and headphone volumes the mixer controls set) and with the two power
-  registers ORed rather than overwritten (the kernel's regulator bits stay);
-  every register changed is logged (`codec 0x0a reg 0030 4068 -> 40f9`) and
-  put back at close. Nothing is written unless both chips answer `CHIP_ID`
-  0xA0xx; `--codec off` leaves them alone. Both chips' registers are logged
-  as found before the menu touches anything (`codec 0x0a before the menu`).
+  title checked. **And it keeps doing it** - the game's health check
+  reprograms the codec whenever DAPM has pulled it back, which is continuous,
+  because the routing never leaves LINE_OUT powered on its own. The menu does
+  the same: `codec_power_up` once after `snd_pcm_set_params` (the table,
+  minus what the kernel owns for the running stream - clock, I2S format, the
+  DAC and headphone volumes the mixer controls set - with the two power
+  registers ORed so the kernel's regulator bits stay), then **`codec_keep`
+  re-asserts it every 400 ms from the menu loop** - a one-shot write before
+  the stream starts is undone the moment it does, which is why the 2.3/2.4
+  boots that wrote the table once were still silent. `codec 0x0a reg 0030
+  4060 -> 40f9 (the kernel had pulled it back)` is that fight, and the proof
+  the keep is working; the kernel's original values are put back at close.
+  Nothing is written unless both chips answer `CHIP_ID` 0xA0xx; `--codec off`
+  leaves them alone. Both chips' registers are logged as found before the
+  menu touches anything (`codec 0x0a before the menu`).
   The kernel's own `Line Out Mute` switch on ctl `backbox`/`cabinet` is set
   ON as well (the game's mute helper `0x1faad4` does), and back OFF at close
   where it was found OFF - on David's card it was already ON, so it was never
@@ -841,8 +847,9 @@ egl: initialised 1.4 / egl: display 1360x768  Vivante came up
 egl: up after N attempt(s)                    N > 1 = boot_display was still releasing the LCD
 codec 0x0a before the menu (1/2): 0002=0060 0004=0008 ...   both SGTL5000s answered; their registers as the kernel left them
 audio: alsa default ok (2 ch, 44100 Hz)       the codec took the stream (else 'audio: none (no alsa: ...)')
-codec: 0 register(s) set on the two chips (0 failure(s))   the kernel already powered the codec for the stream (nothing to add)
-spi: /dev/spidev1.0 open (100 kHz, mode 3, 8-byte transfers, amp enable tx[7]=0x03)   THE AMPS ARE ENABLED - this is what makes sound
+codec: 0 register(s) set on the two chips: line-out, VAG, DAC powered   at open the kernel had just powered it; the KEEP passes below are what hold it
+codec 0x0a reg 0030 4060 -> 40f9 (the kernel had pulled it back)   the DAPM undo the game/menu fight - this line proves the fix is working
+spi: /dev/spidev1.0 open (100 kHz, mode 3, 8-byte transfers, amp enable tx[7]=0x03)   the amps are enabled (confirmed = the game's own value, read from its memory)
 media: 2 art, 1 anim (30 frames), 1 music, 0 card confirm, move=y confirm=y
 [select] key: left / [select] chose 1 TMNT 1987
 confirm: menu sound confirm.wav, 1540 ms under the LOADING frame

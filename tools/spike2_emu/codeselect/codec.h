@@ -45,9 +45,18 @@ void codec_configure(const char *mode);
  * names the moment.  The first call decides whether the codecs are there. */
 void codec_snapshot(const char *when);
 /* the game's full-power table onto both chips; the number of registers
- * changed (0 = nothing done, for whatever reason the log says) */
+ * changed (0 = nothing done, for whatever reason the log says).  Records
+ * the kernel's original values so codec_restore can put them back. */
 int  codec_power_up(void);
-/* put back what codec_power_up changed */
+/* RE-ASSERT the table, at most every KEEP_MS - call it from the menu loop.
+ * The kernel's device tree routes only the headphone jack, so its DAPM
+ * powers the headphone path for the running stream and pulls the LINE_OUT
+ * block (the amplifiers' feed) back down after codec_power_up ran; the game
+ * fights this by reprogramming the codec continuously (its health check),
+ * and so does this.  Every register it finds drifted is written back and
+ * logged, which is also the proof of what the kernel undoes. */
+void codec_keep(long long now_ms);
+/* put back what codec_power_up first found (power bits only ever removed) */
 void codec_restore(void);
 
 #endif

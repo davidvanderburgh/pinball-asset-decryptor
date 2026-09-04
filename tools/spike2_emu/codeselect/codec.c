@@ -175,18 +175,20 @@ void codec_snapshot(const char *when)
     close(fd);
 }
 
-int codec_power_up(void)
+/* write the full-power table to both chips.  record = 1 saves the kernel's
+ * value into changed[] the first time (for restore); reassert = 1 logs each
+ * register it had to put back (the drift the kernel's DAPM caused) rather
+ * than every write.  Returns registers changed. */
+static int apply(int fd, int record, int reassert)
 {
-    int fd = open_bus(), i, k, total = 0, bad = 0;
-    if (fd < 0) return 0;
-    nchanged = 0;
+    int i, k, total = 0, bad = 0;
     for (i = 0; i < 2; i++) {
         const unsigned short *want = i == 0 ? PLAY_MAIN : PLAY_CENTER;
         for (k = 0; k < NREG; k++) {
             unsigned reg = REGS[k], cur = 0, to, back = 0;
             if (kernel_owned(reg)) continue;
             if (rd(fd, ADDRS[i], reg, &cur) < 0) {
-                sel_log("codec 0x%02x reg %04x: unreadable, skipped", ADDRS[i], reg);
+                if (!reassert) sel_log("codec 0x%02x reg %04x: unreadable, skipped", ADDRS[i], reg);
                 bad++;
                 continue;
             }
@@ -197,22 +199,44 @@ int codec_power_up(void)
                 bad++;
                 continue;
             }
-            if (nchanged < (int)(sizeof changed / sizeof *changed)) {
+            if (record && nchanged < (int)(sizeof changed / sizeof *changed)) {
                 changed[nchanged].addr = ADDRS[i];
                 changed[nchanged].reg = (unsigned short)reg;
                 changed[nchanged].was = (unsigned short)cur;
                 nchanged++;
             }
             total++;
-            sel_log("codec 0x%02x reg %04x %04x -> %04x%s%s", ADDRS[i], reg, cur, to,
-                    back == to ? "" : " (reads back ", back == to ? "" : "differently)");
+            sel_log("codec 0x%02x reg %04x %04x -> %04x%s", ADDRS[i], reg, cur, to,
+                    reassert ? " (the kernel had pulled it back)" : "");
             if (back != to) sel_log("codec 0x%02x reg %04x reads back %04x", ADDRS[i], reg, back);
         }
     }
+    return bad ? -total - 1 : total;   /* <0 encodes "had failures"; caller only logs the first time */
+}
+
+int codec_power_up(void)
+{
+    int fd = open_bus(), r, total;
+    if (fd < 0) return 0;
+    nchanged = 0;
+    r = apply(fd, 1, 0);
     close(fd);
-    sel_log("codec: %d register(s) set on the two chips (%d failure(s)): line-out, VAG, DAC powered, analog mutes cleared",
-            total, bad);
+    total = r < 0 ? -r - 1 : r;
+    sel_log("codec: %d register(s) set on the two chips: line-out, VAG, DAC powered, analog mutes cleared", total);
     return total;
+}
+
+#define KEEP_MS 400
+void codec_keep(long long now_ms)
+{
+    static long long due;
+    int fd;
+    if (now_ms < due) return;
+    due = now_ms + KEEP_MS;
+    fd = open_bus();                 /* cheap no-op once `gone` is set (no bus / not this board) */
+    if (fd < 0) return;
+    apply(fd, 0, 1);                 /* re-assert; logs only the registers the kernel pulled back */
+    close(fd);
 }
 
 void codec_restore(void)

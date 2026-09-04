@@ -341,6 +341,22 @@ These have each been violated at least once and each cost a run or a window:
       diagnostics + defence for a kernel that does not pre-power the codec.
       Built, check + check-hw green, injected, menu-written to the card.
       PROOF ON THE NEXT BOOT: `spi: ... amp enable tx[7]=0x03` and sound.
+      **2026-09-04 ROUND 4 - EMPIRICAL: SPI tx[7]=0x03 CONFIRMED CORRECT, the
+      real gate is CONTINUOUS codec re-assert.** Ran the real godzilla_pro
+      under the emulator (MUTED) and read its live cabinet output word from
+      guest memory: `SPI tx (0x84214c) = 00 00 00 00 00 00 00 03` - the game
+      drives exactly the tx[7]=0x03 the selector now sends, so SPI is not the
+      gap. The difference is that the game reprograms the codec CONTINUOUSLY
+      (its health check re-writes the full-power table whenever the kernel's
+      DAPM pulls LINE_OUT back down - the device tree routes only the
+      headphone jack, so DAPM never leaves LINE_OUT, the amps' feed, powered).
+      A one-shot codec write before the stream starts (2.2-2.4) is undone the
+      moment it does. FIX (selector 2.5): codec_keep() re-asserts the
+      full-power table every 400 ms from the menu loop; `codec 0x0a reg 0030
+      4060 -> 40f9 (the kernel had pulled it back)` is that fight and the
+      proof. Built, check + check-hw green, injected, menu-written to the
+      card. If STILL silent, the re-assert log shows exactly what the kernel
+      is doing to the codec during playback.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

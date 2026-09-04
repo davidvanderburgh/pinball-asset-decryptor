@@ -47,7 +47,7 @@
 #include "codec.h"
 #include "log.h"
 
-#define VERSION "2.4"
+#define VERSION "2.5"
 
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
 #define DEF_OUT      "/var/volatile/codeselect.choice"
@@ -1129,6 +1129,12 @@ int main(int argc, char **argv)
         long long now = sel_now_ms();
         int ev, remain, old_hl = hl;
 
+        /* hold the codecs' line-out on: the kernel routes only the headphone
+         * jack, so its DAPM pulls LINE_OUT (the amps' feed) back down once the
+         * stream is running - the game reprograms the codec continuously for
+         * the same reason (codec.h). A no-op where there is no codec bus. */
+        codec_keep(now);
+
         while ((ev = input_poll(in, now)) != EV_NONE) {
             sel_say("key: %s", input_event_name(ev));
             switch (ev) {
@@ -1239,6 +1245,7 @@ int main(int argc, char **argv)
             if (cc) cv = audio_play(au, cc, 0);
             while (!g_stop) {
                 long long now = sel_now_ms();
+                codec_keep(now);        /* keep line-out up while the confirm sound plays */
                 audio_pump(au, now);
                 if (!done_at && (cv < 0 || !audio_playing(au, cv))) done_at = now + audio_lead_ms(au);
                 if (done_at && now >= done_at) break;

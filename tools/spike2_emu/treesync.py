@@ -599,7 +599,8 @@ class MemOps(FsOps):
         self._tick("symlink " + rel)
         if rel in self.entries:
             raise OSError(errno.EEXIST, "exists", rel)
-        self.entries[rel] = {"kind": "symlink", "target": target, "uid": uid, "gid": gid, "mode": 0o777, "ino": self.next_ino}
+        self.entries[rel] = {"kind": "symlink", "target": target, "uid": uid, "gid": gid, "mode": 0o777,
+                             "ino": self.next_ino}
         self.next_ino += 1
 
     def unlink(self, rel):
@@ -614,7 +615,8 @@ class MemOps(FsOps):
         self._tick("rename %s -> %s" % (a, b))
         e = self.entries.pop(a)
         old = self.entries.pop(b, None)
-        if old is not None and old["kind"] == "file" and not any(x.get("ino") == old["ino"] for x in self.entries.values()):
+        gone = old is not None and old["kind"] == "file"
+        if gone and not any(x.get("ino") == old["ino"] for x in self.entries.values()):
             self.free += len(old["data"])
         self.entries[b] = e
         if e["kind"] == "dir":

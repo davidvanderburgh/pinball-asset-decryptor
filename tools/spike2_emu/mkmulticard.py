@@ -233,7 +233,11 @@ MEDIA_MANIFEST = "media.json"                 # selectmedia.py writes it; --medi
 #: media: they never go into MEDIA_DIR (where the selector scans), never count against
 #: MEDIA_BUDGET and are never subject to the "only what media.json names is staged" rule.
 BUILD_MANIFEST = "build.json"
-SIDECAR_MANIFESTS = (BUILD_MANIFEST, MEDIA_MANIFEST)
+#: trees.json (item 93): what is on every games tree - every file's sha256/size/mode/owner,
+#: the source's stamp, which partitions were written in place, a DIRTY flag while an update
+#: runs.  Beside build.json; carried through every inject byte for byte like media.json.
+TREES_MANIFEST = "trees.json"
+SIDECAR_MANIFESTS = (BUILD_MANIFEST, MEDIA_MANIFEST, TREES_MANIFEST)
 #: 'codeselect 2.1 - Spike 2 boot-time code selector' lives in the binary's .rodata
 SELECTOR_VERSION_RE = re.compile(rb"codeselect (\d+(?:\.\d+)+)")
 SELECTOR_VERSION_MAX = 8 << 20                # do not read a huge file just to sniff a version
@@ -2232,6 +2236,523 @@ def parse_manifest(raw, what, warnings=None):
         raise Refused(msg)
     warnings.append(msg)
     return None
+
+
+# ============================================================================= item 93: writing into a card in place
+# `update` changes ONLY what changed: it loop-mounts one partition of the card image (root,
+# --direct-io=on: measured ~150 MB/s into a .raw on a Windows drive, 30 MB/s buffered, 13 MB/s
+# through debugfs), lets the kernel's ext4 do the file work through treesync.DirOps, and keeps
+# the record of what is on each tree in trees.json on p2 beside build.json.  Everything a
+# reader needs (plan --quick, update --dry-run, verify, inspect) goes through the pure-Python
+# ext4 reader and debugfs and never mounts, so those stay ordinary-user runs.
+MOUNT_PREFIX = "/var/tmp/mkmulticard_mnt_"
+LOCK_SUFFIX = ".lock"
+P2_BACKUP_SUFFIX = ".p2.bak"
+
+
+def _treesync():
+    """The treesync module (beside this file), imported when first needed."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import treesync
+    return treesync
+
+
+def read_trees(card, ref=None):
+    """The card's trees.json as a CardTrees, or None when the card carries none (built before
+    item 93 - `update` then hashes the card's own trees once and records them)."""
+    ts = _treesync()
+    raw = read_select_file(ref or select_ref(card), TREES_MANIFEST)
+    if raw is None:
+        return None
+    try:
+        return ts.CardTrees.from_json(raw)
+    except ts.TreesError as e:
+        raise Refused("%s on %s cannot be read: %s" % (TREES_MANIFEST, card, e))
+
+
+def loop_available():
+    """(ok, why): can this process attach a loop device and mount it?  Root plus util-linux
+    plus a kernel with loop support (WSL2 has it; a container may not)."""
+    if os.name != "posix" or not hasattr(os, "geteuid"):
+        return False, "not a Linux host"
+    if os.geteuid() != 0:
+        return False, "not root (run under 'wsl -u root')"
+    missing = [n for n in ("losetup", "mount", "umount", "findmnt", "fuser", "e2fsck") if shutil.which(n) is None]
+    if missing:
+        return False, "missing tool(s): " + ", ".join(missing)
+    if not os.path.exists("/dev/loop-control"):
+        return False, "no /dev/loop-control (the kernel has no loop device support)"
+    return True, "root, losetup and /dev/loop-control present"
+
+
+def _run(argv, ok_rc=(0,)):
+    r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out = r.stdout.decode("utf-8", "replace")
+    if r.returncode not in ok_rc:
+        raise Refused("%s failed (rc=%d): %s" % (" ".join(argv), r.returncode, out.strip()))
+    return out
+
+
+def parse_losetup_j(text):
+    """`losetup -j FILE` lines -> [(loop device, offset)].  Format: '/dev/loop3: [2049]:1234
+    (/path/to/file), offset 364904448' (the offset field is absent for offset 0)."""
+    out = []
+    for line in text.splitlines():
+        m = re.match(r"^(/dev/loop\d+):.*?(?:,\s*offset\s+(\d+))?\s*$", line.strip())
+        if m:
+            out.append((m.group(1), int(m.group(2) or 0)))
+    return out
+
+
+def loop_mountpoint(loop):
+    """Where a loop device is mounted, or None."""
+    r = subprocess.run(["findmnt", "-rn", "-S", loop, "-o", "TARGET"], stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL)
+    tgt = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    return tgt[0] if tgt else None
+
+
+def mount_in_use(mountpoint):
+    """True when a process holds something under the mountpoint (fuser -m says so)."""
+    r = subprocess.run(["fuser", "-m", mountpoint], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return bool(r.stdout.strip())
+
+
+def sweep_stale_loops(card):
+    """Detach loop devices an earlier, killed run of THIS tool left on `card`: only those
+    mounted under this tool's own mountpoint prefix and held by nobody.  A loop of the same
+    file mounted anywhere else (the app's video grow at /var/tmp/pad_grow_*, or a run still
+    writing) is a refusal that names the mountpoint - never something to unmount blind.
+    -> the number detached."""
+    real = os.path.realpath(card)
+    r = subprocess.run(["losetup", "-j", real], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    n = 0
+    for loop, _off in parse_losetup_j(r.stdout.decode("utf-8", "replace")):
+        mp = loop_mountpoint(loop)
+        if mp is None:
+            _run(["losetup", "-d", loop])
+            say("detached a stale loop %s of %s (attached, not mounted)" % (loop, os.path.basename(card)))
+            n += 1
+            continue
+        if not mp.startswith(MOUNT_PREFIX):
+            raise Refused("%s is already mounted at %s (loop %s) by something else - not this tool's mount; "
+                          "unmount it first" % (os.path.basename(card), mp, loop))
+        if mount_in_use(mp):
+            raise Refused("%s is mounted at %s (loop %s) and a process still holds it - an earlier update is "
+                          "still running" % (os.path.basename(card), mp, loop))
+        say("unmounting a stale mount %s (loop %s) an interrupted run left" % (mp, loop))
+        _run(["umount", mp])
+        _run(["losetup", "-d", loop])
+        try:
+            os.rmdir(mp)
+        except OSError:
+            pass
+        n += 1
+    return n
+
+
+def partition_feature_words(card, offset, length):
+    _v, _s, ext4, _a = _stern_plugins()
+    with open(card, "rb") as f:
+        return ext4.Ext4Reader(f, offset, length).feature_words()
+
+
+def drop_page_cache(card):
+    """After a loop device wrote around the page cache (O_DIRECT), make sure no buffered page
+    of the card is stale: sync, then tell the kernel to forget what it cached of the file."""
+    os.sync()
+    try:
+        fd = os.open(card, os.O_RDONLY)
+        try:
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        finally:
+            os.close(fd)
+    except (OSError, AttributeError):
+        pass
+
+
+class LoopMount:
+    """One partition of a card image, attached to a loop device and (unless mount=False)
+    mounted rw for the duration of a `with` block -> the mountpoint (or the loop device).
+
+    Order of business: the stale sweep, `losetup --find --show --direct-io=on -o OFF
+    --sizelimit LEN` (a retry without direct-io when the kernel or the filesystem refuses,
+    with a warning: it is the 5x slower path), the partition's feature words recorded, the
+    mount at a fresh /var/tmp/mkmulticard_mnt_* directory.  On the way out, whatever
+    happened: umount, losetup -d, rmdir, sync + fadvise, the feature words asserted (a
+    foreign kernel must leave nothing the card's 3.14 kernel has never seen), e2fsck -fn.
+    SIGTERM/SIGINT become KeyboardInterrupt while inside so the block's finally clauses run.
+    """
+
+    def __init__(self, card, offset, length, direct_io=True, mount=True, options="rw,noatime"):
+        self.card, self.offset, self.length = card, offset, length
+        self.direct_io, self.mount, self.options = direct_io, mount, options
+        self.loop = self.mountpoint = None
+        self.words = None
+        self._old = {}
+
+    def __enter__(self):
+        ok, why = loop_available()
+        if not ok:
+            raise Refused("cannot loop-mount %s: %s" % (self.card, why))
+        sweep_stale_loops(self.card)
+        self.words = partition_feature_words(self.card, self.offset, self.length)
+        base = ["losetup", "--find", "--show", "-o", str(self.offset), "--sizelimit", str(self.length)]
+        argv = base[:3] + (["--direct-io=on"] if self.direct_io else []) + base[3:] + [self.card]
+        r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if r.returncode != 0 and self.direct_io:
+            say("WARNING: losetup --direct-io=on refused (%s); attaching without it - writes will be slower"
+                % r.stdout.decode("utf-8", "replace").strip())
+            r = subprocess.run(base + [self.card], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if r.returncode != 0:
+            raise Refused("losetup %s failed: %s" % (self.card, r.stdout.decode("utf-8", "replace").strip()))
+        self.loop = r.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
+        import signal
+
+        def interrupt(signum, _frame):
+            raise KeyboardInterrupt("signal %d" % signum)
+        for sig in (signal.SIGTERM, signal.SIGINT, getattr(signal, "SIGHUP", None)):
+            if sig is not None:
+                try:
+                    self._old[sig] = signal.signal(sig, interrupt)
+                except (ValueError, OSError):
+                    pass
+        if not self.mount:
+            return self.loop
+        self.mountpoint = tempfile.mkdtemp(prefix=MOUNT_PREFIX)
+        try:
+            _run(["mount", "-t", "ext4", "-o", self.options, self.loop, self.mountpoint])
+        except Refused:
+            self._detach()
+            raise
+        return self.mountpoint
+
+    def _detach(self):
+        problems = []
+        if self.mountpoint:
+            os.sync()
+            for attempt in range(5):
+                r = subprocess.run(["umount", self.mountpoint], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                if r.returncode == 0:
+                    break
+                time.sleep(0.5 * (attempt + 1))
+            else:
+                problems.append("umount %s: %s" % (self.mountpoint, r.stdout.decode("utf-8", "replace").strip()))
+            try:
+                os.rmdir(self.mountpoint)
+            except OSError:
+                pass
+        if self.loop:
+            r = subprocess.run(["losetup", "-d", self.loop], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            if r.returncode != 0:
+                problems.append("losetup -d %s: %s" % (self.loop, r.stdout.decode("utf-8", "replace").strip()))
+        import signal
+        for sig, old in self._old.items():
+            try:
+                signal.signal(sig, old)
+            except (ValueError, OSError):
+                pass
+        self._old = {}
+        drop_page_cache(self.card)
+        return problems
+
+    def __exit__(self, exc_type, exc, tb):
+        problems = self._detach()
+        if problems:
+            raise Refused("releasing %s: %s" % (self.card, "; ".join(problems)))
+        after = partition_feature_words(self.card, self.offset, self.length)
+        if after != self.words:
+            raise Refused("the mount CHANGED the filesystem's feature words on %s (%r -> %r): a kernel newer "
+                          "than the card's may have added a feature it cannot read; the card is left as "
+                          "it is for a look" % (os.path.basename(self.card), self.words, after))
+        rc, txt = e2fsck(fs_ref(self.card, self.offset))
+        if rc != 0:
+            raise Refused("e2fsck -fn is not clean after the mount of %s@%d (rc=%d):\n%s"
+                          % (os.path.basename(self.card), self.offset, rc, txt.strip()[-800:]))
+        return False
+
+
+class DirOps(object):
+    """treesync.FsOps over a directory - the mounted partition.  Paths are relative to it."""
+
+    def __init__(self, root):
+        self.root = root
+        self._base = _treesync().FsOps
+
+    def _p(self, rel):
+        return os.path.join(self.root, rel) if rel else self.root
+
+    def lstat(self, rel):
+        try:
+            st = os.lstat(self._p(rel))
+        except FileNotFoundError:
+            return None
+        if statmod.S_ISDIR(st.st_mode):
+            kind = "dir"
+        elif statmod.S_ISREG(st.st_mode):
+            kind = "file"
+        elif statmod.S_ISLNK(st.st_mode):
+            kind = "symlink"
+        else:
+            kind = "other"
+        d = {"kind": kind, "mode": st.st_mode & 0o7777, "uid": st.st_uid, "gid": st.st_gid, "ino": st.st_ino,
+             "size": st.st_size, "nlink": st.st_nlink, "mtime": int(st.st_mtime)}
+        if kind == "symlink":
+            d["target"] = os.readlink(self._p(rel))
+        return d
+
+    def listdir(self, rel):
+        return os.listdir(self._p(rel))
+
+    def _own(self, p, uid, gid):
+        if hasattr(os, "chown"):
+            os.chown(p, uid, gid)
+
+    def mkdir(self, rel, mode, uid, gid):
+        os.mkdir(self._p(rel))
+        self._own(self._p(rel), uid, gid)
+        os.chmod(self._p(rel), mode)
+
+    def rmdir(self, rel):
+        os.rmdir(self._p(rel))
+
+    def symlink(self, rel, target, uid, gid):
+        os.symlink(target, self._p(rel))
+        try:
+            os.lchown(self._p(rel), uid, gid)
+        except (OSError, AttributeError):
+            pass
+
+    def unlink(self, rel):
+        os.unlink(self._p(rel))
+
+    def rename(self, a, b):
+        os.replace(self._p(a), self._p(b))
+
+    def write_stream(self, rel, chunks, mode, uid, gid, mtime):
+        p = self._p(rel)
+        with open(p, "wb") as f:
+            for c in chunks:
+                f.write(c)
+            f.flush()
+            os.fsync(f.fileno())
+        self._own(p, uid, gid)
+        os.chmod(p, mode)
+        os.utime(p, (mtime, mtime))
+
+    def set_attrs(self, rel, mode=None, uid=None, gid=None):
+        p = self._p(rel)
+        if (uid is not None or gid is not None) and hasattr(os, "chown"):
+            st = os.lstat(p)
+            os.chown(p, st.st_uid if uid is None else uid, st.st_gid if gid is None else gid)
+        if mode is not None:
+            os.chmod(p, mode)
+
+    def free_bytes(self):
+        return shutil.disk_usage(self.root).free
+
+    def commit(self):
+        os.sync()
+
+    # the FsOps helpers, borrowed
+    def exists(self, rel):
+        return self.lstat(rel) is not None
+
+    def walk_files(self, rel=""):
+        return self._base.walk_files(self, rel)
+
+    def rmtree(self, rel):
+        return self._base.rmtree(self, rel)
+
+
+class CardLock:
+    """`with CardLock(card):` - one update of a card at a time.  A non-blocking flock on
+    <card>.lock; a held lock is a LIVE run, never a stale one (the stale-loop sweep runs
+    after this, so it can only ever find a dead run's leftovers)."""
+
+    def __init__(self, card):
+        self.path = card + LOCK_SUFFIX
+        self.fd = None
+
+    def __enter__(self):
+        import fcntl
+        self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            holder = ""
+            try:
+                holder = os.read(self.fd, 64).decode("utf-8", "replace").strip()
+            except OSError:
+                pass
+            os.close(self.fd)
+            self.fd = None
+            raise Refused("another update of %s is still running%s (%s is locked)"
+                          % (os.path.basename(self.path[:-len(LOCK_SUFFIX)]), (" - pid " + holder) if holder else "",
+                             os.path.basename(self.path)))
+        os.ftruncate(self.fd, 0)
+        os.write(self.fd, ("%d\n" % os.getpid()).encode("utf-8"))
+        return self
+
+    def __exit__(self, *exc):
+        if self.fd is not None:
+            try:
+                os.ftruncate(self.fd, 0)
+            except OSError:
+                pass
+            os.close(self.fd)
+            self.fd = None
+        return False
+
+
+def lock_held(card):
+    """True when another process holds the card's update lock (a reader then says 'busy')."""
+    path = card + LOCK_SUFFIX
+    if os.name != "posix" or not os.path.exists(path):
+        return False
+    import fcntl
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        return False
+    except OSError:
+        return True
+    finally:
+        os.close(fd)
+
+
+def p2_backup(card):
+    """<card>.p2.bak = the card's p2 as it is now (the rootfs: the one partition an interrupted
+    write could leave unbootable; `dd` it back).  -> the path."""
+    off, length = p2_range(card)
+    bak = card + P2_BACKUP_SUFFIX
+    with open(bak, "wb") as f:
+        f.truncate(length)
+    copy_range(card, off, bak, 0, length, "p2 backup", sparse=False, progress=None)
+    return bak
+
+
+def select_write_commands(items, remove=()):
+    """The debugfs -w script that puts `items` = [(staged native path, name)] into SELECT_DIR
+    IN PLACE (rm + write + mode/uid/gid) and removes `remove` names.  Pure."""
+    cmds = []
+    for _staged, name in items:
+        cmds.append("rm " + dq(SELECT_DIR + "/" + name))
+    for name in remove:
+        cmds.append("rm " + dq(SELECT_DIR + "/" + name))
+    for staged, name in items:
+        cmds.append("write %s %s" % (dq(staged), dq(SELECT_DIR + "/" + name)))
+    for _staged, name in items:
+        card = dq(SELECT_DIR + "/" + name)
+        cmds.append("set_inode_field %s mode 0100644" % card)
+        cmds.append("set_inode_field %s uid 0" % card)
+        cmds.append("set_inode_field %s gid 0" % card)
+    return cmds
+
+
+def write_select_files(card, files, remove=(), workdir=None):
+    """Write small files into the card's p2 SELECT_DIR without extracting the partition: a
+    debugfs -w script straight into the card (rm + write + mode/uid/gid), e2fsck -fn, the p2
+    md5 sidecar rewritten.  `files` = {name: bytes}; names must be selector sidecars.  A kill
+    mid-script leaves at worst one small file half written, which e2fsck -fy reconciles - the
+    rootfs stays bootable, which the 352 MB extract/write-back of inject_card cannot promise.
+    -> the names written."""
+    need_tools("debugfs", "e2fsck")
+    off, length = p2_range(card)
+    ref = fs_ref(card, off)
+    if not debugfs_exists(ref, SELECT_DIR):
+        raise Refused("%s has no %s on its p2 (not a multi-boot card)" % (card, SELECT_DIR))
+    rc, txt = e2fsck(ref)
+    if rc != 0:
+        raise Refused("p2 of %s is not clean before the write (e2fsck rc=%d):\n%s" % (card, rc, txt.strip()[-600:]))
+    used, total = e2fsck_blocks(txt)
+    bs = ext_block_size(card, off)
+    free = (total - used) * bs
+    need = sum(len(b) for b in files.values())
+    reclaim = 0
+    for e in debugfs_ls(ref, SELECT_DIR):
+        if e[4] in files or e[4] in remove:
+            reclaim += e[5]
+    if need > free + reclaim - min(P2_FREE_MARGIN, total * bs // 20):
+        raise Refused("p2 has %d KB free (+ %d KB the rewrite frees) and %s needs %d KB"
+                      % (free >> 10, reclaim >> 10, ", ".join(sorted(files)), need >> 10))
+    stage = tempfile.mkdtemp(prefix="mkmulticard.p2w.", dir=workdir)
+    try:
+        items = []
+        for name in sorted(files):
+            p = os.path.join(stage, name)
+            with open(p, "wb") as f:
+                f.write(files[name])
+            items.append((p, name))
+        present = {e[4] for e in debugfs_ls(ref, SELECT_DIR)}
+        items_present = [(p, n) for (p, n) in items if n in present]
+        items_new = [(p, n) for (p, n) in items if n not in present]
+        # rm only what is there (debugfs reports a missing rm as an error line)
+        cmds = select_write_commands(items_present, [n for n in remove if n in present])
+        cmds = [c for c in cmds if not c.startswith("write ")]
+        cmds += ["write %s %s" % (dq(p), dq(SELECT_DIR + "/" + n)) for (p, n) in items]
+        for _p, n in items:
+            c = dq(SELECT_DIR + "/" + n)
+            cmds += ["set_inode_field %s mode 0100644" % c, "set_inode_field %s uid 0" % c,
+                     "set_inode_field %s gid 0" % c]
+        debugfs_write_script(ref, cmds)
+        del items_new
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    rc, txt = e2fsck(ref)
+    if rc != 0:
+        raise Refused("p2 of %s is not clean after the write (e2fsck rc=%d):\n%s" % (card, rc, txt.strip()[-600:]))
+    for name, data in files.items():
+        back = debugfs_cat(ref, SELECT_DIR + "/" + name)
+        if back != data:
+            raise Refused("%s read back from p2 differs from what was written" % name)
+    write_p2_sidecar(card)
+    return sorted(files)
+
+
+def write_trees(card, trees, build_json=None, workdir=None):
+    """Record `trees` (a CardTrees) on the card's p2 - and, when given, the new build.json -
+    through write_select_files."""
+    files = {TREES_MANIFEST: trees.to_json()}
+    if build_json is not None:
+        files[BUILD_MANIFEST] = build_json if isinstance(build_json, bytes) else build_json.encode("utf-8")
+    return write_select_files(card, files, workdir=workdir)
+
+
+def plan_with_p7_sectors(card, new_sectors):
+    """The card's own Plan (plan_from_card) with the multi p7 given `new_sectors` - what
+    write_tables needs to grow the last partition in place."""
+    G = Geometry.from_file(card)
+    subs = multi_subdirs_on(card, 7)
+    if not subs or len(G.logical) != 3:
+        raise Refused("%s is not a multi-layout card with a p7 to grow" % card)
+    base = Geometry(G.size, G.mbr, G.prim, G.ext, G.logical[:2], G.ebr_raw, card)
+    return Plan(base, [], card, [], "multi", multi_sectors=int(new_sectors), multi_subdirs=subs, multi_src=None)
+
+
+def grow_last_partition(card, new_sectors):
+    """Grow the multi layout's p7 (the last partition) IN PLACE to `new_sectors`: the image
+    file is extended, the extended container's and p7's table entries rewritten, then
+    resize2fs runs on the loop device (unmounted) and e2fsck -fn checks the result.  The
+    filesystem keeps its identity; only its block count moves.  -> the new Plan."""
+    need_tools("resize2fs", "e2fsck", "losetup")
+    plan = plan_with_p7_sectors(card, new_sectors)
+    p7 = plan.multi_part
+    old_total = os.path.getsize(card)
+    if plan.total_bytes < old_total:
+        raise Refused("p7 can only grow (%d -> %d sectors would shrink the image)" % (old_total // SECTOR, plan.total))
+    say("growing p%d of %s to %d sectors (%s); the image becomes %s"
+        % (p7.num, os.path.basename(card), p7.count, _gb(p7.count * SECTOR), _gb(plan.total_bytes)))
+    with open(card, "r+b") as f:
+        f.truncate(plan.total_bytes)
+    write_tables(plan, card)
+    with LoopMount(card, p7.start * SECTOR, p7.count * SECTOR, mount=False) as loop:
+        _run(["e2fsck", "-fp", loop], ok_rc=(0, 1))
+        out = _run(["resize2fs", loop])
+        say("resize2fs: " + " ".join(line.strip() for line in out.splitlines() if "now" in line))
+    return plan
 
 
 # ============================================================================= reading a card back

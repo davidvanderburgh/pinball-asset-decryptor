@@ -47,7 +47,8 @@ def test_card_trees_round_trip_with_format_check():
     card = ts.CardTrees([ts.ImageTrees(0, "/dev/mmcblk0p3", "", man, {"path": "a", "size": 1, "mtime_ns": 2},
                                        "u" * 32),
                          ts.ImageTrees(1, "/dev/mmcblk0p7:img1", "img1", man, None, None, {"game": "g", "sidx": "s"})],
-                        primary={"p1_md5": "m", "p2_tree": "t"}, synced=[7], dirty=[3, 7], layout="multi", version="1.2")
+                        primary={"p1_md5": "m", "p2_tree": "t"}, synced=[7], dirty=[3, 7], layout="multi",
+                        version="1.2")
     raw = card.to_json()
     back = ts.CardTrees.from_json(raw)
     assert [i.index for i in back.images] == [0, 1]

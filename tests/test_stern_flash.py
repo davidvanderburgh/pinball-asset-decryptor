@@ -579,3 +579,55 @@ def test_flash_eject_can_be_disabled(tmp_path, monkeypatch):
                         lambda dp, log=None: ejected.append(dp))
     rd.flash_image_to_device(str(img), str(card), eject=False)
     assert ejected == []
+
+
+# ---- what a flash tells you while it runs -------------------------------------------
+def test_the_flash_says_how_fast_it_is_going_and_how_long_is_left():
+    """A flash is an elapsed clock and a crawling bar without this, and
+    finding out at minute forty that the CARD is the bottleneck is finding
+    out too late (David, on a 14.72 GB card image: "writing to my sd card is
+    pretty slow... is there anything we can do in software to speed it up?
+    or do i just need to get a faster sd card?" - it was 6 MB/s)."""
+    total = 14_723_055_616
+    hist = []
+    # one sample is not a rate
+    assert rd._rate_note(hist, 0, total, now=0.0) == ""
+    assert rd._rate_note(hist, 60_000_000, total, now=10.0) == \
+        " - 6.0 MB/s, about 41 minutes left"
+    # THE RECENT RATE, not the average since the start: a card that takes its
+    # first gigabyte at SLC speed and then falls off must not go on quoting
+    # the number nobody will live with
+    fast = [(0.0, 0), (10.0, 900_000_000)]
+    assert rd._rate_note(fast, 960_000_000, total, now=11.0) == \
+        " - 87.3 MB/s, about 3 minutes left"
+    slow = fast + [(41.0, 1_000_000_000)]
+    note = rd._rate_note(slow, 1_006_000_000, total, now=42.0)
+    assert note.startswith(" - 6.0 MB/s")          # the old samples aged out
+    assert "about" in note
+
+
+def test_the_time_left_is_coarse_or_silent():
+    assert rd._time_left(None) == "" and rd._time_left(-1) == ""
+    assert rd._time_left(10 ** 6) == ""            # not an estimate any more
+    assert rd._time_left(30) == "less than a minute left"
+    assert rd._time_left(60) == "about 1 minute left"
+    assert rd._time_left(90) == "about 2 minutes left"
+    assert rd._time_left(3600) == "about 1 hour left"
+    assert rd._time_left(2 * 3600 + 300) == "about 2h 5m left"
+
+
+def test_the_write_and_the_read_back_both_carry_the_rate(tmp_path):
+    """Both halves of a flash are long, and the verify is the half nobody
+    expects - so it says the same thing."""
+    img = tmp_path / "card.img"
+    img.write_bytes(b"\xa5" * (1 << 20))
+    dev = tmp_path / "dev.img"
+    dev.write_bytes(b"\x00" * (1 << 20))
+    seen = []
+    rd.flash_image_to_device(
+        str(img), str(dev), progress=lambda d, t, desc: seen.append(desc),
+        verify=True)
+    assert dev.read_bytes() == img.read_bytes()
+    said = " ".join(seen)
+    assert "Writing image to SD card" in said
+    assert "Verifying flashed card" in said

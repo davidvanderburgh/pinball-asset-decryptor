@@ -375,6 +375,55 @@ def _open_backend(path, writable):
     return _FdIO(path, writable)
 
 
+#: How long a window the flash's speed readout averages over.  Long enough
+#: that a chunk boundary does not swing it, short enough that it follows a
+#: card falling off its SLC cache within a few seconds.
+_RATE_WINDOW_S = 30.0
+
+
+def _time_left(seconds):
+    """``'about 41 minutes left'``, coarse - or ``''`` when there is no
+    honest answer.  A card's write rate is nowhere near steady enough to
+    quote seconds at anyone."""
+    if seconds is None or seconds != seconds or seconds < 0:    # NaN included
+        return ""
+    if seconds > 24 * 3600:
+        return ""
+    if seconds < 60:
+        return "less than a minute left"
+    mins = int(round(seconds / 60.0))
+    if mins < 60:
+        return "about %d minute%s left" % (mins, "" if mins == 1 else "s")
+    hours, mins = divmod(mins, 60)
+    if not mins:
+        return "about %d hour%s left" % (hours, "" if hours == 1 else "s")
+    return "about %dh %dm left" % (hours, mins)
+
+
+def _rate_note(hist, done, total, now=None):
+    """``' - 6.1 MB/s, about 41 minutes left'`` from the RECENT rate, or ''.
+
+    RECENT, and not the average since the start.  A cheap card takes its
+    first gigabyte at the speed of its SLC cache and then falls to a fifth
+    of that for the rest, so an average is a number nobody will live with;
+    the one worth putting in front of a person is the one they are on now.
+    Without it a flash is an elapsed clock and a crawling bar, and finding
+    out at minute forty that the CARD is the problem is finding out too
+    late.  *hist* is the caller's own list, kept across calls."""
+    now = time.monotonic() if now is None else now
+    hist.append((now, done))
+    while len(hist) > 2 and now - hist[0][0] > _RATE_WINDOW_S:
+        del hist[0]
+    if len(hist) < 2:
+        return ""
+    span, moved = now - hist[0][0], done - hist[0][1]
+    if span <= 0 or moved <= 0:
+        return ""
+    rate = moved / span
+    left = _time_left((total - done) / rate)
+    return " - %.1f MB/s%s" % (rate / 1e6, (", " + left) if left else "")
+
+
 class RawDeviceFile:
     """A seekable byte stream over a raw block device with aligned underlying I/O.
 
@@ -520,6 +569,7 @@ class RawDeviceFile:
         # bulk write is sector-aligned; never let it collapse to zero.
         step = max((chunk // sec) * sec, sec)
         written = 0
+        rate = []
         self._io.seek(0)
         while written < total:
             if cancel is not None and cancel():
@@ -544,7 +594,8 @@ class RawDeviceFile:
                 self.write(buf)
             written += len(buf)
             if progress is not None:
-                progress(written, total, "Writing image to SD card…")
+                progress(written, total, "Writing image to SD card…"
+                         + _rate_note(rate, written, total))
         return written
 
     def flush(self):
@@ -1103,6 +1154,7 @@ def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
     if log is not None:
         log("Verifying the flashed card (reading it back)…", "info")
     checked = 0
+    rate = []
     with RawDeviceFile(device_path, writable=False) as dev, \
             open(image_path, "rb") as src:
         while checked < img_size:
@@ -1128,6 +1180,7 @@ def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
                     % f"{checked + off:,}")
             checked += len(exp)
             if progress is not None:
-                progress(checked, img_size, "Verifying flashed card…")
+                progress(checked, img_size, "Verifying flashed card…"
+                         + _rate_note(rate, checked, img_size))
     if log is not None:
         log("Card verified: it matches the image byte-for-byte.", "success")

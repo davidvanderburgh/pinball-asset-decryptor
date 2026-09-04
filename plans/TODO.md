@@ -324,6 +324,23 @@ These have each been violated at least once and each cost a run or a window:
       PROOF ON THE NEXT BOOT: `codec: N register(s) set` with `0030 ...
       -> 40f9` on both chips, and sound. Memory:
       reference_spike2_amp_gate_line_out_mute (table + the 0x0111 risk).
+      **2026-09-04 ROUND 3 - THE ACTUAL FIX: THE AMPLIFIER ENABLE IS SPI
+      tx[7].** The 2.3 boot proved the codec was a red herring: the log
+      showed `codec: 0 register(s) set` (the kernel already powers the
+      codec for the stream) and still silence. The one thing left that the
+      game does and the menu did not is the cabinet SPI OUTPUT byte tx[7].
+      The game drives bit 0 (0x5a5580, which then opens the amp's
+      iio:device0/in_power monitor = the amplifier enable) and bit 1 (main
+      init 0x4f0720), and clears its mute bits 2/5 once audio is primed, so
+      its steady playing value is 0x03; the selector sent 0x00, leaving
+      both amp channels OFF - a perfect ALSA stream into dead speakers, and
+      the speakers David hears 'turn on' during game startup are the game
+      asserting these bits. FIX (selector 2.4, input_hw.c): tx[7] =
+      SPI_TX7_AMP (0x03) every SPI poll while the menu is up;
+      PAD_SPI_TX7=<hex> overrides (0 = the old word). codec.c kept as
+      diagnostics + defence for a kernel that does not pre-power the codec.
+      Built, check + check-hw green, injected, menu-written to the card.
+      PROOF ON THE NEXT BOOT: `spi: ... amp enable tx[7]=0x03` and sound.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

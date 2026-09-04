@@ -114,10 +114,10 @@ static const char *const ALSA_DEVICES[] = {
  * that never hears it.  The emulator could not show any of this: with no
  * sound card there the ALSA open fails and the rig's fifo takes over.
  *
- * (The game's other mute stage is byte 7 of the cabinet SPI word - its
- * 0x5a9eac(4 | 32, mute) sets a bit to mute and clears it to play - and
- * input_hw.c has always sent that word as zeros, the unmuted value, from
- * the moment the SPI opens.  That gate was open all along.)
+ * (The real gate turned out to be neither this switch nor the codec: it is
+ * tx[7] of the cabinet SPI word, the AMPLIFIER ENABLE - see input_hw.c.
+ * This switch is kept ON regardless because the game keeps it ON and it
+ * costs nothing; on David's machine it read `on (was on)`, never the fault.)
  *
  * So: once the device is open, the switch goes ON on both controls and what
  * it read first is kept; at close, after the drain, a switch that was OFF

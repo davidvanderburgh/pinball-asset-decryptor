@@ -32,6 +32,31 @@
 #define SPI_MS        10
 #define LOG_EXCHANGES 40       /* hex-log this many exchanges, then only changes */
 
+/* THE AMPLIFIER ENABLE - tx[7] of the cabinet SPI word, and why the menu was
+ * silent while the codec, the ALSA mixer and the SPI mute bits were all fine.
+ *
+ * The 8-byte SPI transfer to /dev/spidev1.0 is full duplex: rx is the service
+ * buttons, tx is a cabinet OUTPUT byte the game drives.  Only tx[7] is ever
+ * non-zero, and the game sets exactly two bits of it in normal running
+ * (godzilla_pro):
+ *   bit 0  set by 0x5a5580, which then opens
+ *          /sys/bus/iio/devices/iio:device0/in_power... - the amplifier's
+ *          own power/current monitor.  This is the amp (one channel) ENABLE.
+ *   bit 1  set by the main init (0x4f0720 -> 0x4f0a10): the second channel.
+ * Its mute bits 2 and 5 are SET during the codec bring-up and CLEARED once
+ * audio is primed (0x1fb2a8), and bits 3,4,6,7 are cleared at init - so the
+ * game's steady PLAYING value of tx[7] is 0x03: both amps enabled, unmuted.
+ *
+ * The selector sent tx[7] = 0, which leaves both amplifier channels OFF.
+ * That is why David's Godzilla played the menu into dead speakers with a
+ * perfect ALSA stream, and why the speakers "turn on" a moment into the
+ * game's own startup - that is the game asserting these two bits.  We drive
+ * the same 0x03 the whole time the menu is up.  PAD_SPI_TX7=<hex> overrides
+ * it (0 restores the old all-zero word) for a machine that answers to a
+ * different bit, so a variant can be tried without a rebuild.
+ */
+#define SPI_TX7_AMP   0x03
+
 struct hw {
     struct input base;
     int fd, spi;
@@ -44,6 +69,7 @@ struct hw {
     unsigned char cab[8];
     int cab_valid;
     int spi_logged;
+    unsigned char tx7;                     /* the cabinet output byte: SPI_TX7_AMP, or PAD_SPI_TX7 */
 };
 
 static const struct input_ops hw_ops;
@@ -298,18 +324,26 @@ static void spi_setup(struct hw *h, const char *dev)
 {
     unsigned hz = 100000;
     unsigned char mode = SPI_MODE_3;
+    const char *e = getenv("PAD_SPI_TX7");
     h->spi = -1;
+    h->tx7 = SPI_TX7_AMP;
+    if (e && *e) {
+        char *end;
+        long v = strtol(e, &end, 0);
+        if (end != e && v >= 0 && v <= 0xff) h->tx7 = (unsigned char)v;
+        else sel_log("spi: PAD_SPI_TX7='%s' ignored (want 0..0xff)", e);
+    }
     if (!dev || !*dev || !strcmp(dev, "none")) return;
     h->spi = open(dev, O_RDWR);
     if (h->spi < 0) {
-        sel_log("spi: open %s failed: %s (no service buttons)", dev, strerror(errno));
+        sel_log("spi: open %s failed: %s (no service buttons, amp not enabled)", dev, strerror(errno));
         return;
     }
     if (ioctl(h->spi, SPI_IOC_WR_MAX_SPEED_HZ, &hz) < 0)
         sel_log("spi: SPI_IOC_WR_MAX_SPEED_HZ: %s (tolerated)", strerror(errno));
     if (ioctl(h->spi, SPI_IOC_WR_MODE, &mode) < 0)
         sel_log("spi: SPI_IOC_WR_MODE: %s (tolerated)", strerror(errno));
-    sel_log("spi: %s open (100 kHz, mode 3, 8-byte transfers)", dev);
+    sel_log("spi: %s open (100 kHz, mode 3, 8-byte transfers, amp enable tx[7]=0x%02x)", dev, h->tx7);
 }
 
 static void spi_poll(struct hw *h)
@@ -318,6 +352,9 @@ static void spi_poll(struct hw *h)
     struct spi_ioc_transfer x;
     memset(tx, 0, sizeof tx);
     memset(rx, 0, sizeof rx);
+    /* tx[7] enables the cabinet amplifiers (SPI_TX7_AMP above); the other
+     * seven bytes are zero, as the game leaves them */
+    tx[7] = h->tx7;
     memset(&x, 0, sizeof x);
     x.tx_buf = (unsigned long)tx;
     x.rx_buf = (unsigned long)rx;

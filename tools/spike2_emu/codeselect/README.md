@@ -551,10 +551,19 @@ What the game does, from the godzilla_pro 1.15.0 ELF (read_nodebus.md A-F):
   menu stays responsive when a board does not answer (and the audio sink's
   0.5 s buffer rides through such a stall; a longer one is a gap, not a crash).
 * SPI: `SPI_IOC_WR_MAX_SPEED_HZ 100000`, `SPI_IOC_WR_MODE 3`, an 8-byte
-  `SPI_IOC_MESSAGE(1)` with tx zeros every 10 ms; rx[1] bits 0-3 = Service
-  Select/Plus/Minus/Back, active low. tx[7] = 0 is the game's UNMUTED value
-  for the backbox/cabinet amplifier bits, so the selector's sound is not
-  muted by its own SPI traffic.
+  `SPI_IOC_MESSAGE(1)` every 10 ms; rx[1] bits 0-3 = Service
+  Select/Plus/Minus/Back, active low. **tx[7] is a cabinet OUTPUT byte, and
+  it is what turns the speakers on.** The game drives bit 0 (0x5a5580, which
+  then opens the amplifier's `iio:device0/in_power...` monitor) and bit 1
+  (main init 0x4f0720) - the two amplifier channel ENABLES - and clears its
+  mute bits 2 and 5 once audio is primed, so its steady playing value is
+  `0x03`. The selector sent tx[7] = 0, which left both amps OFF: a perfect
+  ALSA stream into dead speakers (David's Godzilla, 2026-09-04; the speakers
+  "turn on" a moment into the game's own startup, which is the game
+  asserting these bits). `input_hw.c` now sends `SPI_TX7_AMP` (0x03) the
+  whole time the menu is up; `PAD_SPI_TX7=<hex>` overrides it (0 = the old
+  all-zero word) so a machine wired to a different bit can be tried without
+  a rebuild. The other seven tx bytes stay zero, as the game leaves them.
 
 The first 40 exchanges are logged in hex (`nb <tag>: tx ... rx ...`), then
 only changes and failures; the SPI logs its first 5 words and every change.
@@ -830,11 +839,10 @@ nb: node 8 switches 00 ff 1f fb 40 00 00 00   the first 0x11 answer (at rest)
 spi: rx ff 0f 0f 00 00 00 00 00               the cabinet word at rest
 egl: initialised 1.4 / egl: display 1360x768  Vivante came up
 egl: up after N attempt(s)                    N > 1 = boot_display was still releasing the LCD
-codec 0x0a before the menu (1/2): 0002=0060 0004=0004 ...   both SGTL5000s answered; their registers as the kernel left them
+codec 0x0a before the menu (1/2): 0002=0060 0004=0008 ...   both SGTL5000s answered; their registers as the kernel left them
 audio: alsa default ok (2 ch, 44100 Hz)       the codec took the stream (else 'audio: none (no alsa: ...)')
-codec 0x0a reg 0030 4068 -> 40f9              the line-out powered (one line per register changed, both chips)
-codec: 12 register(s) set on the two chips (0 failure(s)): line-out, VAG, DAC powered, analog mutes cleared
-audio: mixer backbox 'Line Out Mute' switch on (was on)   the kernel's switch, kept ON
+codec: 0 register(s) set on the two chips (0 failure(s))   the kernel already powered the codec for the stream (nothing to add)
+spi: /dev/spidev1.0 open (100 kHz, mode 3, 8-byte transfers, amp enable tx[7]=0x03)   THE AMPS ARE ENABLED - this is what makes sound
 media: 2 art, 1 anim (30 frames), 1 music, 0 card confirm, move=y confirm=y
 [select] key: left / [select] chose 1 TMNT 1987
 confirm: menu sound confirm.wav, 1540 ms under the LOADING frame
@@ -848,11 +856,11 @@ bus is not answering (try `--preamble full`, then a hardware capture);
 boots the primary); `select.sh: umount /games failed` = something held
 `/games` (the primary boots, still mounted); `audio: none (no alsa: ...)` on
 the machine = no device could be opened (the menu is silent, the boot is
-unaffected); `codec: /dev/i2c-1: ...` or `codec: 0x0a: CHIP_ID ... not an
-SGTL5000` under a silent machine = the line-out was never powered (this
-board is not the one the recipe knows; the `before the menu` lines say
-what the kernel left); `codec: N register(s) set` with `0030 ... -> 40f9`
-on both chips and still silence = look past the codec: the SPI mute bits
-are byte 7 of the cabinet word (the game SETS bits 2 and 5 to mute, clears
-them to play) and input_hw.c sends zeros from the moment `spi:` opens, so
-check that line is there; after that it is the amplifier supply.
+unaffected); **`spi: open ... failed` under a silent machine = the amps were
+never enabled** (the whole game's sound rides on tx[7], so no SPI = no amp);
+`spi: ... amp enable tx[7]=0x03` present and still silent = the codec was
+never powered (rare - the `codec:` and `before the menu` lines say what the
+kernel left) or this machine wants a different tx[7] bit (`PAD_SPI_TX7=<hex>`
+to try one). The `codec:` lines are diagnostics; a `codec: N register(s)
+set` with `N > 0` just means this kernel did not pre-power the codec and the
+menu did it the game's way.

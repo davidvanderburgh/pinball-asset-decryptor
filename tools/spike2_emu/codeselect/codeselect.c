@@ -47,7 +47,7 @@
 #include "codec.h"
 #include "log.h"
 
-#define VERSION "2.3"
+#define VERSION "2.4"
 
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
 #define DEF_OUT      "/var/volatile/codeselect.choice"

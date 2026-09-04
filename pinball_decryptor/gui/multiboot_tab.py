@@ -2256,6 +2256,148 @@ EMPTY_PATH_TEXT = ("No card yet. Add the images below - the path fills "
                    "should be written.")
 
 
+#: THE STATUS ROW'S CHECKS, in the order the work happens.  ``(key, label)``;
+#: :func:`status_checks` decides each one's state and the sentence behind it.
+#: Four, because these are the four things that have to be true before an SD
+#: card can be written and there is nothing else a person has to know: where
+#: the card goes, what is going on it, whether it exists, and whether what
+#: exists is what the form says.
+STATUS_CHECKS = (("card", "Card image"),
+                 ("images", "Images"),
+                 ("built", "Built"),
+                 ("ready", "Ready to flash"))
+
+#: The mark each state wears, and the THEMES colour it wears it in - the
+#: footer's own progress chips speak this language already (``set_phase``:
+#: filled and green for done, filled and blue for the one running, hollow and
+#: grey for pending), so the row reads as the same kind of thing rather than
+#: a second vocabulary to learn.  A blocked check is the app's destructive
+#: colour, which is the one colour in here that means "this will not work".
+CHECK_MARKS = {"ok": "\u2713", "now": "\u25cf", "no": "\u25cb",
+               "bad": "\u00d7"}
+CHECK_TONES = {"ok": "success", "now": "accent", "no": "gray", "bad": "error"}
+
+
+def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
+                  have_card=False, built_changes=None, running=""):
+    """THE WHOLE OF THE STATUS ROW, decided here: ``[(key, label, state,
+    detail)]`` in :data:`STATUS_CHECKS` order.
+
+    *state* is ``"ok"`` (done), ``"now"`` (happening), ``"no"`` (not yet) or
+    ``"bad"`` (this will not work); *detail* is the sentence behind the mark,
+    which the row carries as that check's tooltip.
+
+    The two lines this replaces said the same thing twice in different words
+    (David: "we should consolidate these two, they are almost the same
+    thing... make the status something more easily legible with some quick
+    check marks") - a live message and a consequence, both about what the
+    green button would do, both clipped to one line, and between them they
+    still could not say what a person actually wants to know at a glance,
+    which is how far along they are.
+
+    PURE, like :func:`card_path_state`, whose sentence it carries for the
+    first check: no Tk, no disk, no form validation of its own beyond what
+    the caller has already worked out.  THIS IS A DESCRIBER, NOT A GATE -
+    ``validate_form``, ``rebuild_blockers`` and the overwrite confirmation
+    still decide everything, at press time, on the real paths.
+
+    *built_changes* is ``None`` when this session did not build the card at
+    this path, and the ``(menu, rebuild)`` pair from the form it was built
+    with when it did - which is the only way to know whether a card nobody
+    has read back still matches the form."""
+    kind, sentence, _tone, _can_read = path_state
+    out = []
+
+    # 1. WHERE THE CARD GOES.  Not keyed off the sentence's tone: a loaded
+    # card with an image change is drawn in the error colour by
+    # card_path_state, and that is a fact about the CARD, not about the path
+    # being a place a card may be written.
+    if kind == "empty":
+        out.append(("card", "Card image", "no", sentence))
+    elif kind in ("library", "is_image", "badname", "unreachable", "dir"):
+        out.append(("card", "Card image", "bad", sentence))
+    else:
+        out.append(("card", "Card image", "ok", sentence))
+
+    # 2. WHAT GOES ON IT.  A card that was LOADED names sources that may
+    # live on another machine (the same reason validate_form takes
+    # ``sources=False`` for one), so their files are not looked for here.
+    n = len(rows or ())
+    label = "Images" if not n else "%d image%s" % (n, "" if n == 1 else "s")
+    if not n:
+        out.append(("images", label, "no",
+                    "Add the images below - the first one is the primary, "
+                    "and the card path fills itself in from it."))
+    elif n < 2:
+        out.append(("images", label, "bad",
+                    "Add at least two images: the primary (stock) and one "
+                    "more. One image is a card, but it is not a menu."))
+    else:
+        why = ""
+        seen = set()
+        for i, row in enumerate(rows):
+            p = (getattr(row, "path", "") or "").strip().strip('"')
+            if not p:
+                why = "Image %d has no file." % i
+            elif not loaded_card and not os.path.isfile(p):
+                why = "Image %d is not on this machine: %s" % (i, p)
+            elif _norm(p) in seen:
+                why = "Image %d is listed twice: %s" % (i, p)
+            else:
+                seen.add(_norm(p))
+                continue
+            break
+        out.append(("images", label, "bad" if why else "ok",
+                    why or "%d images, in the order the menu offers them."
+                    % n))
+
+    # 3. WHETHER IT EXISTS.
+    name = os.path.basename(loaded_card) or "the card"
+    if running in ("build", "apply"):
+        out.append(("built", "Built", "now", "Writing the card now."))
+    elif have_card:
+        out.append(("built", "Built", "ok",
+                    "There is a card at that path."))
+    else:
+        out.append(("built", "Built", "no",
+                    "Nothing at that path yet - Build / flash card... "
+                    "writes it."))
+
+    # 4. WHETHER WHAT EXISTS IS WHAT THE FORM SAYS.  The one check that is
+    # about the card rather than about the tab, and the one worth a glance
+    # before reaching for an SD card.
+    changes = list(menu or ()) + list(rebuild or ())
+    if not have_card:
+        out.append(("ready", "Ready to flash", "no",
+                    "Build the card first."))
+    elif kind == "unreadable":
+        out.append(("ready", "Ready to flash", "bad", sentence))
+    elif loaded_card and kind in ("loaded", "strayed"):
+        if changes:
+            out.append(("ready", "Ready to flash", "no",
+                        "%d change%s not on %s yet: %s."
+                        % (len(changes), "" if len(changes) == 1 else "s",
+                           name, "; ".join(changes))))
+        else:
+            out.append(("ready", "Ready to flash", "ok",
+                        "%s was read back and matches this form." % name))
+    elif built_changes is not None:
+        since = list(built_changes[0] or ()) + list(built_changes[1] or ())
+        if since:
+            out.append(("ready", "Ready to flash", "no",
+                        "%d change%s since it was built: %s."
+                        % (len(since), "" if len(since) == 1 else "s",
+                           "; ".join(since))))
+        else:
+            out.append(("ready", "Ready to flash", "ok",
+                        "Built and verified in this session."))
+    else:
+        out.append(("ready", "Ready to flash", "no",
+                    "There is a card there, but nothing has looked inside "
+                    "it - Load card reads it into the form."))
+    return out
+
+
 def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
                     rebuild=()):
     """What the card path is pointing at, in one sentence:
@@ -3592,6 +3734,15 @@ class MultibootPanel:
         #: names something else, and after any run that writes (a build
         #: makes that very path into a card).
         self._unreadable = None
+        #: ``(path, form)`` for a card THIS SESSION built and verified - the
+        #: only way to know whether a card nobody has read back still matches
+        #: the form (a build does not put the tab into editing mode, so there
+        #: is no ``_loaded_form`` to diff against).  See :func:`status_checks`.
+        self._built = None
+        #: What the run in flight IS - "build" / "apply" / "load" / "" - so
+        #: the Built check can show it happening rather than guessing from
+        #: ``_busy``, which a load takes too.
+        self._run_kind = ""
         self._loaded_form = None
         self._loaded_info = None
         self._armed = False
@@ -4786,33 +4937,107 @@ class MultibootPanel:
             tip.text = self.CANCEL_TIP if self._busy else self.BUILD_FLASH_TIP
 
     def _build_status(self, parent, th):
-        """The status under the bar: what just happened, and what the two
-        writing buttons would do about it.
+        """The status: FOUR CHECKS AND A MESSAGE, on ONE line.
 
-        TWO LINES, of a pinned height.  One is the live message - the state
-        and the errors, which is what the eye wants next to the buttons -
-        and the second is the consequence: what Apply to card would write,
-        or why only a rebuild can, with the card's size beside it.  The
-        height is pinned to what those lines really MEASURE (56 px over
-        three ~19 px labels was a pixel short in every state, and a box a
-        pixel short unmaps the last thing packed into it), and each label
-        is clipped to one line - a message that wrapped used to take its
-        neighbour's row with it and lose 'what Apply to card would write'
-        exactly when there was most to say.  Every word of every message is
-        in the app's Log at the foot of the window."""
+        It was two lines - a live message, and under it a 'consequence'
+        saying what the writing button would do - and they were the same
+        thing said twice in different words, each clipped to one line, with
+        neither of them answering the question a person actually has, which
+        is how far along they are (David: "we should consolidate these two,
+        they are almost the same thing. also, just make the status something
+        more easily legible with some quick check marks... use color
+        coordination on these checks like we do on the progress bar. keep it
+        a compacted view (preferably one line across)").
+
+        So: Card image, Images, Built, Ready to flash, each with a mark in
+        the footer chips' own colours (:data:`CHECK_MARKS` /
+        :data:`CHECK_TONES`), and the live message on the same line after
+        them.  The sentence each check stands for - every word the two lines
+        used to carry - is that check's TOOLTIP, which is where a sentence
+        belongs when the answer is usually just "yes".
+
+        :func:`status_checks` decides all of it; this places it.  The height
+        is pinned to what the labels really MEASURE, because a box a pixel
+        short unmaps the last thing packed into it."""
         wrap = ttk.Frame(parent)
         wrap.pack(fill=tk.X, pady=(8, 0))
         wrap.pack_propagate(False)
         self._status_wrap = wrap
+        self._check_lbls = {}
+        self._check_tips = {}
+        for key, label in STATUS_CHECKS:
+            lbl = ttk.Label(wrap, text=CHECK_MARKS["no"] + " " + label,
+                            anchor=tk.W)
+            lbl.pack(side=tk.LEFT, padx=(0, 14))
+            self._check_lbls[key] = lbl
+            self._check_tips[key] = _Tooltip(lbl, "", self._theme_fn)
+        # PACKED LAST AND EXPANDING, so the MESSAGE is what gives way when
+        # the row runs out of width: this app unmaps the last widget of a
+        # row it cannot fit, and of everything here the message is the one
+        # thing kept somewhere else (the app's Log, in full).
         self._hint = ttk.Label(wrap, justify=tk.LEFT, anchor=tk.W, text="",
                                foreground=th["gray"])
-        self._hint.pack(fill=tk.X)
-        self._edit_lbl = ttk.Label(wrap, justify=tk.LEFT, anchor=tk.W,
-                                   text="")
-        self._edit_lbl.pack(fill=tk.X)
-        self._status_lines = (self._hint, self._edit_lbl)
+        self._hint.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
+        self._status_lines = (self._hint,)
         self._status_h = 0
         self._fit_status_height()
+        self._draw_checks()
+
+    def checks(self):
+        """The status row as :func:`status_checks` decided it - the seam the
+        tests read, and what :meth:`_draw_checks` paints."""
+        field = self._out_var.get().strip().strip('"')
+        menu, rebuild = [], []
+        if self._loaded_card and self._loaded_form is not None:
+            menu, rebuild = diff_forms(self._loaded_form, self.form())
+        facts = self._facts_now(field)
+        state = card_path_state(field, facts, self._rows, self._loaded_card,
+                                menu, rebuild)
+        # WHETHER THERE IS A CARD THERE comes off the same probe the sentence
+        # does - never a stat per keystroke - and a card that was LOADED is
+        # one whatever the probe has got round to saying.
+        have_card = (facts.get("kind") == "file"
+                     or bool(self._loaded_card
+                             and _plain(self._loaded_card) == _plain(field)))
+        built = None
+        if self._built is not None and _plain(self._built[0]) == _plain(field):
+            built = diff_forms(self._built[1], self.form())
+        return status_checks(self._rows, state, self._loaded_card, menu,
+                             rebuild, have_card, built,
+                             self._run_kind if self._busy else "")
+
+    def check_detail(self, key):
+        """The sentence behind one check - what the row's second line used to
+        say out loud, and what its tooltip says now."""
+        for k, _label, _state, detail in self.checks():
+            if k == key:
+                return detail
+        return ""
+
+    def check_state(self, key):
+        """One check's state: ok / now / no / bad."""
+        for k, _label, state, _detail in self.checks():
+            if k == key:
+                return state
+        return ""
+
+    def _draw_checks(self):
+        """Paint the row from :meth:`checks`."""
+        if not getattr(self, "_check_lbls", None):
+            return
+        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
+        for key, label, state, detail in self.checks():
+            lbl = self._check_lbls.get(key)
+            if lbl is None:                             # pragma: no cover
+                continue
+            try:
+                lbl.configure(text="%s %s" % (CHECK_MARKS[state], label),
+                              foreground=th[CHECK_TONES[state]])
+            except tk.TclError:                         # pragma: no cover
+                pass
+            tip = self._check_tips.get(key)
+            if tip is not None:
+                tip.text = detail
 
     #: What one status line is worth when the labels cannot be measured yet
     #: (a headless build, a font that has not been laid out).
@@ -5325,6 +5550,8 @@ class MultibootPanel:
         over."""
         self._rows = []
         self._loaded_card = ""
+        self._built = None
+        self._unreadable = None
         self._loaded_form = None
         self._loaded_info = None
         self._armed = False
@@ -6453,6 +6680,11 @@ class MultibootPanel:
 
         def done(rc, failed, _text):
             if rc == 0:
+                # WHAT WAS BUILT, kept against the path: a build does not put
+                # the tab into editing mode, so this is the only way the
+                # Ready check can tell a card that still matches the form
+                # from one the form has moved on from.
+                self._built = (form.out, form)
                 self._ok("Card built and verified: %s%s" % (
                     form.out, "" if form.media_dir else
                     " (no prepared media - text-only menu)"))
@@ -6468,6 +6700,7 @@ class MultibootPanel:
             else:
                 self._error("%s failed (exit %d) - see the tool output."
                             % (failed or "the build", rc))
+        self._run_kind = "build"
         return self._run_commands(cmds, on_step=self._plan_step, on_done=done)
 
     def _confirm_overwrite(self, path):
@@ -6588,6 +6821,7 @@ class MultibootPanel:
             self._error("Cannot create %s: %s" % (media, exc))
             return False
         self._ok("Reading %s…" % path)
+        self._run_kind = "load"
         seen = {}
 
         def step(label, rc, text):
@@ -6875,45 +7109,37 @@ class MultibootPanel:
             self._update_edit_status()
             if after is not None:
                 after()
+        self._run_kind = "apply"
         return self._run_commands(cmds, on_step=step, on_done=done,
                                   quiet=(INSPECT_JSON,))
 
     def _update_edit_status(self):
-        """THE CONSEQUENCE LINE - the status block's second line: what the
-        card path is pointing at and what Apply to card would write (or why
-        only a rebuild can).  Called after every keystroke.
+        """EVERYTHING THE STATUS ROW AND THE SIZE STRIP SAY, re-decided.
+        Called after every keystroke.
 
-        THE SIZE IS NO LONGER HALF OF IT.  It used to share this line, and
-        being half of one clipped sentence is how three images went onto a
-        16 GB card that could not hold them; it has the strip under the
-        table now (:meth:`_build_size`), and this redraws it because this is
-        what runs when the thing it measures may have moved.
+        There is no consequence LINE any more: what the card path points at,
+        what Apply to card would write, and why only a rebuild can, are the
+        sentences behind the four checks (:func:`status_checks`), and the
+        card's size is the strip under the table (:meth:`_build_size`).
+        Both are redrawn from here because this is what runs when the things
+        they describe may have moved.
 
-        They share one line because they are one question - what would the
-        button under them do - and the block has room for one line each.
-        THIS IS ALSO WHERE THE MODE IS SHOWN.  The row lost its two labelled
-        buttons, which stated the tab's two modes for free; a sentence here
-        states them instead, and costs no pixels because the line was
-        already there and empty in every state but editing.
-
-        It also settles what the row's verb says and whether it is live.
-        The writing side is one green button now (Build / flash card…) whose
-        modal decides Apply-vs-Build for itself (:meth:`_write_plan`), so
-        this no longer greens or greys a pair - it only writes the sentence
-        and keeps ``_can_read`` / ``_row_kind`` current for the path box."""
-        lbl = getattr(self, "_edit_lbl", None)
-        if lbl is None:
+        It also settles whether the path box's <Return> has anything to
+        read.  The writing side is one green button (Build / flash card…)
+        whose modal decides Apply-vs-Build for itself (:meth:`_write_plan`),
+        so this greens or greys nothing - it keeps ``_can_read`` and
+        ``_row_kind`` current, and paints the row."""
+        if not getattr(self, "_check_lbls", None):
             return
         # FIRST, because it is what decides whether the size on screen is
         # still about this list: asking after the strip had been drawn left
         # the stale number up until something else redrew it.
         self._maybe_plan()
-        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
         field = self._out_var.get().strip().strip('"')
         menu, rebuild = [], []
         if self._loaded_card and self._loaded_form is not None:
             menu, rebuild = diff_forms(self._loaded_form, self.form())
-        kind, text, tone, can_read = card_path_state(
+        kind, _text, _tone, can_read = card_path_state(
             field, self._facts_now(field), self._rows, self._loaded_card,
             menu, rebuild)
         # (The 'unticking the bypass cannot un-patch a card' note is gone
@@ -6921,10 +7147,7 @@ class MultibootPanel:
         # can never be untied.  The Apply-vs-Build decision that used to
         # live here is _write_plan's now, off the same card_path_state.)
         self._draw_size()       # the size the plan found, under the images
-        try:
-            lbl.configure(text=self._status_line(text), foreground=th[tone])
-        except tk.TclError:
-            pass
+        self._draw_checks()     # ...and the four marks above them
         self._can_read = bool(can_read)
         #: What the probe last said about the path, so <Return> can tell
         #: "there is nothing there" from "the answer has not come back".
@@ -8777,6 +9000,7 @@ class MultibootPanel:
                 except tk.TclError:
                     pass
         if not busy:
+            self._run_kind = ""
             # THE RUN MAY HAVE MOVED THE DISK UNDER THE ROW.  A build writes
             # the card the row was calling missing, an apply changes it, a
             # load that failed may have taken a directory away - and the row

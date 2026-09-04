@@ -568,7 +568,8 @@ def s_fill():
     log("output: %s" % form.out)
     log("card size: %r / %r" % (panel._size_need.cget("text"),
                                 panel._size_detail.cget("text")))
-    log("consequence: %r" % panel._edit_lbl.cget("text"))
+    log("checks: %s" % " ".join(
+        "%s=%s" % (k, st) for k, _l, st, _d in panel.checks()))
     log("preview status: %r" % panel._pv_status.cget("text"))
     log("menu summary: %r" % panel._menu_lbl.cget("text"))
     log("table rows:")
@@ -659,7 +660,8 @@ def s_load():
     win._resize_notebook_to_current_tab()
     root.update_idletasks()
     log("editing %s" % panel._loaded_card)
-    log("status: %r" % panel._edit_lbl.cget("text"))
+    log("checks: %s" % " ".join(
+        "%s=%s" % (k, st) for k, _l, st, _d in panel.checks()))
     plan = panel._write_plan()
     log("write plan: action=%s can_write=%s -> %r"
         % (plan["action"], plan["can_write"], plan["write_label"]))

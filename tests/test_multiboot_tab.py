@@ -32,7 +32,7 @@ from pinball_decryptor.gui.multiboot_tab import (
     PREVIEW_BUILD_DIR, PREVIEW_MAX_FRAMES,
     ImageRow, MultibootForm, anim_period_ms, anim_spec, apply_commands,
     art_spec, build_commands, bypass_commands, card_path_state,
-    card_size_view, cell_anim,
+    card_size_view, cell_anim, status_checks,
     cell_art, default_output_path, diff_forms, frame_pattern,
     manifest_sounds, menu_from_state, parse_snapshot_frames, path_root,
     probe_card_path, rows_from_state,
@@ -4328,10 +4328,9 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
 
 
 def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
-    """Two lines under the bar: what just happened, and what the writing
-    button would do about it.  The card's SIZE is not one of them any more -
-    it has the strip under the table (see the size tests), because half of a
-    clipped line is where it was missed."""
+    """ONE line under the bar now: four checks and the live message.  What
+    the two lines used to say out loud is the sentence behind each check -
+    and the card's SIZE is neither, it has the strip under the table."""
     root, panel, card, _media = _loaded(tmp_path)
     try:
         # 1. the size goes to the strip and stays out of this line
@@ -4340,22 +4339,22 @@ def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
                          "  fits Stern 16G image size 15494807552: YES "
                          "(spare 771751936)\n")
         assert panel._size_need.cget("text") == "16 GB"
-        assert "16 GB" not in panel._edit_lbl.cget("text")
+        assert "16 GB" not in panel.check_detail("card")
         # 2. what Apply to card would write has the line to itself
-        assert "no changes yet" in panel._edit_lbl.cget("text")
+        assert "no changes yet" in panel.check_detail("card")
         panel._timeout_var.set("8")
-        assert panel._edit_lbl.cget("text").startswith(
+        assert panel.check_detail("card").startswith(
             "Apply to card: 1 menu change (countdown)")
         # 3. ...and why only a rebuild can, once the image LIST moved
         panel._table.select(1)
         root.update()
         panel._remove_image()
-        assert panel._edit_lbl.cget("text").startswith(
+        assert panel.check_detail("card").startswith(
             "The image list changed")
         # ...and the size sentence beside it goes with the list it was
         # about: that number is now a claim about a card nobody has, and
         # the tab asks for a new one by itself (_maybe_plan).
-        assert "Fits a 16 GB card" not in panel._edit_lbl.cget("text")
+        assert "Fits a 16 GB card" not in panel.check_detail("card")
         # 4. and the live line, which an error paints red and the app's Log
         # keeps in full
         panel._ok("Reading the card…")
@@ -4369,16 +4368,17 @@ def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
             "first reason  (+1 more - see the Log below)"
         pane = _pane(panel)
         assert "first reason" in pane and "second reason" in pane
-        # ...and the line under it is still there, still saying what it said
-        assert panel._edit_lbl.cget("text").startswith("The image list")
-        for lbl in (panel._hint, panel._edit_lbl):
+        # ...and the checks beside it still say what they said
+        assert panel.check_detail("card").startswith("The image list")
+        lbls = [panel._hint] + list(panel._check_lbls.values())
+        for lbl in lbls:
             assert lbl.winfo_ismapped(), str(lbl)
             assert "\n" not in lbl.cget("text")
-        # the block is as tall as its lines really are - 56 px over three
-        # ~19 px labels was a pixel short in EVERY state
+        # ONE ROW, as tall as its own labels really are - a box a pixel
+        # short unmaps the last thing packed into it
         h = panel._status_wrap.winfo_reqheight()
-        assert h >= sum(lbl.winfo_reqheight() for lbl in
-                        (panel._hint, panel._edit_lbl))
+        assert h >= max(lbl.winfo_reqheight() for lbl in lbls)
+        assert h < 2 * max(lbl.winfo_reqheight() for lbl in lbls)
         # ...and it never moves, however long the message
         panel._error("\n".join("reason %d" % i for i in range(20)))
         root.update()
@@ -4657,7 +4657,7 @@ def test_new_card_clears_the_form_and_leaves_editing_mode(tmp_path):
         assert panel._plan_info is None
         # The line under the buttons never goes blank any more: it is where
         # the mode is said now that the row has one control instead of two.
-        assert panel._edit_lbl.cget("text") == multiboot_tab.EMPTY_PATH_TEXT
+        assert panel.check_detail("card") == multiboot_tab.EMPTY_PATH_TEXT
         assert not _apply_live(panel)
         assert not panel._can_read
         assert panel._pv_cache == {} and panel._pv_photo is None
@@ -4815,7 +4815,7 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
         assert multiboot_tab.cell_anim(panel.form().images[1]) == \
             "auto @20s"
         assert _apply_live(panel)
-        assert "no changes yet" in panel._edit_lbl.cget("text")
+        assert "no changes yet" in panel.check_detail("card")
     finally:
         root.destroy()
 
@@ -4892,7 +4892,7 @@ def test_a_menu_change_is_injected_into_the_loaded_card(tmp_path):
         root.update()
         panel._ed_sub.set("1987 cartoon, upscaled")
         panel._timeout_var.set("8")
-        text = panel._edit_lbl.cget("text")
+        text = panel.check_detail("card")
         assert "Apply to card: 2 menu changes (subtitle, countdown)" in text
         assert _apply_live(panel)
         assert panel.apply_to_card() is True
@@ -4986,7 +4986,7 @@ def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
         panel._table.select(0)
         root.update()
         panel._ed_media.set("attract")
-        assert "1 menu change (animation)" in panel._edit_lbl.cget("text")
+        assert "1 menu change (animation)" in panel.check_detail("card")
         assert panel.apply_to_card() is True
         assert [label for label, _ in calls[0]] == [
             "prepare", "inject", "inspect", INSPECT_JSON]
@@ -5041,7 +5041,7 @@ def test_an_image_list_change_refuses_the_apply(tmp_path, how):
         else:
             panel._rows[1].path = _images(tmp_path, 3)[2]
             panel._refresh_tree(select=1)
-        text = panel._edit_lbl.cget("text")
+        text = panel.check_detail("card")
         assert text.startswith("The image list changed")
         assert "Build & verify writes a new card" in text
         assert not _apply_live(panel)
@@ -5403,16 +5403,16 @@ def test_the_verb_and_the_line_follow_what_the_probe_found(tmp_path):
         panel._out_var.set(card)
         panel._probe_done(card, {"kind": "missing", "parent": True})
         assert not panel._can_read
-        assert "will write a new card" in panel._edit_lbl.cget("text")
+        assert "will write a new card" in panel.check_detail("card")
         panel._probe_done(card, {"kind": "file"})
         assert panel._can_read
-        assert "is on disk" in panel._edit_lbl.cget("text")
+        assert "is on disk" in panel.check_detail("card")
         panel._probe_done(card, {"kind": "unreachable", "root": "W:\\"})
         assert not panel._can_read
-        assert "W:\\ is not there right now" in panel._edit_lbl.cget("text")
+        assert "W:\\ is not there right now" in panel.check_detail("card")
         # an answer about OTHER text is not shown against this path
         panel._probe_done(str(tmp_path / "elsewhere.raw"), {"kind": "file"})
-        assert panel._edit_lbl.cget("text") == ""
+        assert panel.check_detail("card") == ""
         # ...and a path that is there is one <Return> would read
         panel._probe_done(card, {"kind": "file"})
         assert panel._can_read
@@ -5523,8 +5523,8 @@ def test_the_path_box_is_the_cards_identity(tmp_path):
         panel._out_var.set(str(tmp_path / "multi" / "copy.multi.raw"))
         # ...and now the tab stops claiming to be editing it
         assert not _apply_live(panel)
-        assert "no longer names" in panel._edit_lbl.cget("text")
-        assert "type that path back" in panel._edit_lbl.cget("text")
+        assert "no longer names" in panel.check_detail("card")
+        assert "type that path back" in panel.check_detail("card")
         assert _write_action(panel) == "build"
         # the greying is a claim; this is the guarantee behind it
         assert panel.apply_to_card() is False
@@ -5536,7 +5536,7 @@ def test_the_path_box_is_the_cards_identity(tmp_path):
         assert len(panel._rows) == 2
         panel._out_var.set(card)                # the way back IS the path
         assert _apply_live(panel)
-        assert "no longer names" not in panel._edit_lbl.cget("text")
+        assert "no longer names" not in panel.check_detail("card")
     finally:
         root.destroy()
 
@@ -5554,7 +5554,7 @@ def test_the_probe_has_its_own_off_switch(tmp_path, monkeypatch):
         _wait(root, lambda: False, seconds=0.8)
         assert panel._probe_for is None
         assert panel._probe_busy is False
-        assert panel._edit_lbl.cget("text") == ""
+        assert panel.check_detail("card") == ""
         assert panel._can_read
     finally:
         root.destroy()
@@ -5571,14 +5571,14 @@ def test_the_probe_answers_on_a_worker_and_the_row_follows(tmp_path):
         _wait(root, lambda: panel._probe_for == card, seconds=10)
         assert panel._probe_facts["kind"] == "file"
         assert panel._probe_busy is False
-        assert "is on disk" in panel._edit_lbl.cget("text")
+        assert "is on disk" in panel.check_detail("card")
         assert panel._can_read
         # ...and a path with nothing at it comes back the other way
         fresh = str(tmp_path / "multi" / "not-yet.multi.raw")
         panel._out_var.set(fresh)
         _wait(root, lambda: panel._probe_for == fresh, seconds=10)
         assert panel._probe_facts["kind"] == "missing"
-        assert "will write a new card" in panel._edit_lbl.cget("text")
+        assert "will write a new card" in panel.check_detail("card")
         assert not panel._can_read
     finally:
         root.destroy()
@@ -5734,7 +5734,7 @@ def test_a_restore_leaves_the_previous_projects_card_behind(tmp_path):
         assert panel._pv_ready is None and panel._plan_info is None
         # ...so there is no way back to it - the row says nothing about a
         # card being edited, and Apply refuses even past the button.
-        assert "editing" not in panel._edit_lbl.cget("text")
+        assert "editing" not in panel.check_detail("card")
         assert panel._out_var.get() == other
         assert panel.apply_to_card() is False
     finally:
@@ -5847,7 +5847,7 @@ def test_the_probe_asks_again_when_the_answer_can_have_changed(tmp_path):
         panel._set_busy(False)
         _wait(root, lambda: panel._probe_facts.get("kind") == "file",
               seconds=10)
-        assert "is on disk" in panel._edit_lbl.cget("text")
+        assert "is on disk" in panel.check_detail("card")
         assert panel._can_read
         # 2. so does the tab coming back on screen, and the box being
         #    clicked into - the two things a person does after plugging the
@@ -5859,12 +5859,12 @@ def test_the_probe_asks_again_when_the_answer_can_have_changed(tmp_path):
         assert not panel._can_read
         # ...and an unreachable verdict does not latch either
         panel._probe_done(card, {"kind": "unreachable", "root": "Z:\\"})
-        assert "not there right now" in panel._edit_lbl.cget("text")
+        assert "not there right now" in panel.check_detail("card")
         open(card, "wb").close()
         panel._refresh_facts()
         _wait(root, lambda: panel._probe_facts.get("kind") == "file",
               seconds=10)
-        assert "is on disk" in panel._edit_lbl.cget("text")
+        assert "is on disk" in panel.check_detail("card")
     finally:
         root.destroy()
 
@@ -5984,7 +5984,7 @@ def test_the_consequence_line_survives_a_card_with_no_baseline(tmp_path):
         panel._loaded_form = None
         panel._out_var.set(card)
         panel._update_edit_status()             # no AttributeError
-        assert "Editing card.multi.raw" in panel._edit_lbl.cget("text")
+        assert "Editing card.multi.raw" in panel.check_detail("card")
     finally:
         root.destroy()
 
@@ -6002,10 +6002,10 @@ def test_two_spellings_of_the_loaded_card_are_one_card(tmp_path):
         # answer the way _probe_done does
         panel._out_var.set(link)
         panel._probe_done(link, {"kind": "file", "loaded": False})
-        assert "no longer names" in panel._edit_lbl.cget("text")
+        assert "no longer names" in panel.check_detail("card")
         assert not _apply_live(panel)
         panel._probe_done(link, {"kind": "file", "loaded": True})
-        assert "Editing card.multi.raw" in panel._edit_lbl.cget("text")
+        assert "Editing card.multi.raw" in panel.check_detail("card")
         assert _apply_live(panel)
         # ...and the worker really does answer that question
         facts = multiboot_tab.probe_card_path(card, card)
@@ -6387,7 +6387,7 @@ def test_what_the_tab_says_sits_above_the_images_it_talks_about(tmp_path):
         order = [str(w) for w in panel._outer.pack_slaves()]
         assert order.index(str(panel._status_wrap)) <             order.index(str(panel._table_box))
         # ...and the sentence really does point downwards from there
-        assert "below" in panel._edit_lbl.cget("text")
+        assert "below" in panel.check_detail("card")
         # the actions stay at the foot, after the table
         assert order.index(str(panel._table_box)) <             order.index(str(panel._action_row))
     finally:
@@ -6667,9 +6667,9 @@ def test_a_loaded_cards_theme_change_is_a_menu_change(tmp_path):
     calls = _recorder(panel)
     try:
         assert panel._theme_var.get() == "midnight"
-        assert "no changes yet" in panel._edit_lbl.cget("text")
+        assert "no changes yet" in panel.check_detail("card")
         panel._theme_var.set("arcade")
-        assert "1 menu change (theme)" in panel._edit_lbl.cget("text")
+        assert "1 menu change (theme)" in panel.check_detail("card")
         assert panel.apply_to_card() is True
         inject = [c for c in calls[0] if c[0] == "inject"][0][1]
         words = _tool_words(inject)
@@ -6912,7 +6912,7 @@ def test_a_cancelled_build_names_the_half_written_card(tmp_path):
         assert said and said[0] is not None
         panel._cancelled = True                  # as the worker leaves it
         said[0](137, "build", {})
-        assert out in panel._edit_lbl.cget("text") + panel._hint.cget("text")
+        assert out in panel.check_detail("card") + panel._hint.cget("text")
         assert "unfinished" in panel._hint.cget("text")
     finally:
         root.destroy()
@@ -7014,7 +7014,7 @@ def test_a_read_nobody_asked_for_does_not_paint_the_tab_red(tmp_path,
         panel._probe_for = card
         panel._probe_facts = {"kind": "file"}
         panel._update_edit_status()
-        line = panel._edit_lbl.cget("text")
+        line = panel.check_detail("card")
         assert "is not a multi-boot card" in line
         assert "Load card reads it into the form" not in line
         # a run that writes makes that stale: a build at that path has just
@@ -7056,3 +7056,167 @@ def test_a_refusal_drops_the_path_the_sentence_already_carries():
     assert parse_refusal("[card] error: /mnt/c/x.raw: no selector") == \
         "/mnt/c/x.raw: no selector"
     assert parse_refusal("[card] error: no selector", about) == "no selector"
+
+
+# ---- the status row: four checks and a message, on one line --------------------------
+def _state_of(checks, key):
+    return dict((k, st) for k, _l, st, _d in checks)[key]
+
+
+def _detail_of(checks, key):
+    return dict((k, d) for k, _l, _st, d in checks)[key]
+
+
+def test_the_checks_walk_the_work_in_order(tmp_path):
+    """An empty tab, then one filled in, then built: the row is the four
+    things that have to be true before an SD card can be written."""
+    rows = [ImageRow(path=p) for p in _images(tmp_path, 2)]
+    empty = ("empty", multiboot_tab.EMPTY_PATH_TEXT, "gray", False)
+    got = status_checks([], empty, "")
+    assert [k for k, _l, _st, _d in got] == \
+        [k for k, _l in multiboot_tab.STATUS_CHECKS]
+    assert [st for _k, _l, st, _d in got] == ["no", "no", "no", "no"]
+    assert _detail_of(got, "images").startswith("Add the images below")
+    # a path and two images: the first two tick, and nothing is built
+    missing = ("missing", "Build & verify will write a new card at x.", "gray",
+               False)
+    got = status_checks(rows, missing, "")
+    assert [st for _k, _l, st, _d in got] == ["ok", "ok", "no", "no"]
+    assert [l for _k, l, _st, _d in got][1] == "2 images"
+    assert _detail_of(got, "built").startswith("Nothing at that path yet")
+    # ...and once a card is there but nothing has looked inside it
+    ondisk = ("file", "x is on disk - ...", "fg", True)
+    got = status_checks(rows, ondisk, "", have_card=True)
+    assert [st for _k, _l, st, _d in got] == ["ok", "ok", "ok", "no"]
+    assert "nothing has looked inside" in _detail_of(got, "ready")
+
+
+def test_a_check_that_cannot_work_is_marked_bad(tmp_path):
+    rows = [ImageRow(path=p) for p in _images(tmp_path, 2)]
+    # the path is somewhere no card may be written
+    lib = ("library", "That path is in the card library...", "error", False)
+    got = status_checks(rows, lib, "")
+    assert _state_of(got, "card") == "bad"
+    assert _detail_of(got, "card") == lib[1]
+    # one image is a card, but it is not a menu
+    ok = ("missing", "will write", "gray", False)
+    got = status_checks(rows[:1], ok, "")
+    assert _state_of(got, "images") == "bad"
+    assert "at least two images" in _detail_of(got, "images")
+    # ...and an image whose .raw is not on this machine
+    gone = [ImageRow(path=rows[0].path),
+            ImageRow(path=str(tmp_path / "gone.raw"))]
+    got = status_checks(gone, ok, "")
+    assert _state_of(got, "images") == "bad"
+    assert "not on this machine" in _detail_of(got, "images")
+    # ...but a LOADED card names sources that may live on another machine,
+    # and neither drawing its menu nor injecting one opens them
+    loaded = ("loaded", "Editing x: no changes yet.", "fg", True)
+    got = status_checks(gone, loaded, "x.raw", have_card=True)
+    assert _state_of(got, "images") == "ok"
+
+
+def test_ready_to_flash_is_about_the_card_and_not_the_tab(tmp_path):
+    rows = [ImageRow(path=p) for p in _images(tmp_path, 2)]
+    loaded = ("loaded", "Editing card.raw: no changes yet.", "fg", True)
+    # read back, and the form has not moved since
+    got = status_checks(rows, loaded, "card.raw", have_card=True)
+    assert _state_of(got, "ready") == "ok"
+    assert "read back and matches this form" in _detail_of(got, "ready")
+    # ...and the moment it has
+    got = status_checks(rows, loaded, "card.raw", menu=["countdown"],
+                        have_card=True)
+    assert _state_of(got, "ready") == "no"
+    assert "1 change not on card.raw yet: countdown" in \
+        _detail_of(got, "ready")
+    # a card BUILT in this session counts, because a build leaves no
+    # baseline to diff against
+    ondisk = ("file", "x is on disk", "fg", True)
+    got = status_checks(rows, ondisk, "", have_card=True,
+                        built_changes=([], []))
+    assert _state_of(got, "ready") == "ok"
+    assert "Built and verified" in _detail_of(got, "ready")
+    got = status_checks(rows, ondisk, "", have_card=True,
+                        built_changes=(["volume"], ["image 2"]))
+    assert _state_of(got, "ready") == "no"
+    assert "2 changes since it was built" in _detail_of(got, "ready")
+    # a file that turned out not to be a multi-boot card cannot be flashed
+    bad = ("unreadable", "x is on disk but is not a multi-boot card: no "
+           "selector", "fg", True)
+    got = status_checks(rows, bad, "", have_card=True)
+    assert _state_of(got, "ready") == "bad"
+    assert _detail_of(got, "ready") == bad[1]
+
+
+def test_a_run_in_flight_shows_on_the_built_check(tmp_path):
+    rows = [ImageRow(path=p) for p in _images(tmp_path, 2)]
+    ok = ("missing", "will write", "gray", False)
+    for kind in ("build", "apply"):
+        got = status_checks(rows, ok, "", running=kind)
+        assert _state_of(got, "built") == "now"
+    # a LOAD is a run too, and it builds nothing
+    got = status_checks(rows, ok, "", running="load")
+    assert _state_of(got, "built") == "no"
+
+
+def test_the_status_row_paints_the_checks_in_the_footers_colours(tmp_path):
+    """The same vocabulary as the progress chips - filled and green for
+    done, hollow and grey for pending, the destructive colour for a check
+    that cannot work - so the row reads as the same kind of thing."""
+    root, panel = _panel()
+    th = multiboot_tab.THEMES[panel._theme_fn()]
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._update_edit_status()
+        lbl = panel._check_lbls["images"]
+        assert lbl.cget("text") == "%s 2 images" % multiboot_tab.CHECK_MARKS["ok"]
+        assert str(lbl.cget("foreground")) == th["success"]
+        # ...and the sentence the second status line used to say out loud is
+        # the tooltip, which is where it belongs when the answer is "yes"
+        assert panel._check_tips["images"].text == panel.check_detail("images")
+        assert "2 images" in panel._check_tips["images"].text
+        # a check that cannot work is the app's destructive colour
+        panel._out_var.set(str(tmp_path / "a?b.raw"))
+        panel._probe_for = panel._out_var.get()
+        panel._probe_facts = {"kind": "badname"}
+        panel._update_edit_status()
+        card = panel._check_lbls["card"]
+        assert card.cget("text").startswith(multiboot_tab.CHECK_MARKS["bad"])
+        assert str(card.cget("foreground")) == th["error"]
+        # ONE ROW, and the message shares it
+        assert panel._hint.winfo_ismapped()
+        assert panel._hint.winfo_y() == card.winfo_y()
+    finally:
+        root.destroy()
+
+
+def test_a_build_in_this_session_is_what_ready_knows(tmp_path):
+    """A build does not put the tab into editing mode, so without this the
+    Ready check would never tick for a card the person just made."""
+    root, panel = _panel()
+    said = []
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        out = str(tmp_path / "out.multi.raw")
+        panel._out_var.set(out)
+        panel._probe_for = out
+        panel._probe_facts = {"kind": "file"}
+        panel._run_commands = lambda cmds, **kw: (
+            said.append(kw.get("on_done")) or True)
+        panel._build_card()
+        assert panel._run_kind == "build"
+        said[0](0, None, {})
+        assert panel._built[0] == out
+        assert panel.check_state("ready") == "ok"
+        # ...and it stops being true the moment the form moves on
+        panel._timeout_var.set("8")
+        panel._update_edit_status()
+        assert panel.check_state("ready") == "no"
+        assert "since it was built" in panel.check_detail("ready")
+        # a new card has never been built
+        panel.new_card()
+        assert panel._built is None
+    finally:
+        root.destroy()

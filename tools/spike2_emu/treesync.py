@@ -276,13 +276,19 @@ def cache_dir_candidates(extra=None):
 
 
 def cache_dir_for_write(extra=None):
-    for d in cache_dir_candidates(extra):
+    """Where a new manifest goes: the directory ASKED FOR (--cache-dir, $MULTIBOOT_CACHE),
+    created if need be - an explicit choice is never passed over for a directory that merely
+    exists - else the first candidate that exists, else the first candidate, created."""
+    asked = extra or os.environ.get(CACHE_ENV)
+    if asked:
+        os.makedirs(asked, exist_ok=True)
+        return asked
+    cands = cache_dir_candidates(extra)
+    for d in cands:
         if os.path.isdir(d):
             return d
-    cands = cache_dir_candidates(extra)
-    d = cands[0]
-    os.makedirs(d, exist_ok=True)
-    return d
+    os.makedirs(cands[0], exist_ok=True)
+    return cands[0]
 
 
 def load_cached(stamp, uuid, sub="", cache_dir=None):

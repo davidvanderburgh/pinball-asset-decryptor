@@ -303,6 +303,27 @@ These have each been violated at least once and each cost a run or a window:
       injected into David's Godzilla two-image card image and menu-written
       to the card. PROOF ON THE NEXT BOOT: `audio: mixer backbox 'Line Out
       Mute' switch on (was off)` in codeselect.log.
+      **2026-09-04 ROUND 2 (item/90): STILL SILENT - THE KERNEL NEVER POWERS
+      THE CODEC'S LINE_OUT.** The next machine log said the 'Line Out
+      Mute' switch was already ON (`switch on (was on)`), and David heard
+      the speakers come on only during the GAME's own startup. The device
+      tree routes each codec as "Headphone Jack"/"HP_OUT" and nothing
+      else, so ALSA powers the headphone path for a stream and never the
+      LINE_OUT block - which feeds the amplifiers. The game programs both
+      SGTL5000s itself over /dev/i2c-1 (slaves 0x0a/0x2a: hwshim's
+      item-17 "two i2c MCUs" are the codecs) with a 50-register table
+      that is byte-identical across titles; its recovery path writes the
+      full-power set (CHIP_ANA_POWER 0x40f9 = VAG+HP+DAC+LINEOUT, all
+      analog mutes clear, line-out bias + reference) over a running
+      stream. SELECTOR 2.3, codec.c: after snd_pcm_set_params the same
+      set goes onto both chips (kernel-owned clock/format/volume regs
+      left alone, power regs ORed so the kernel's regulator bits stay),
+      both chips' registers logged as found, every change logged, all
+      put back at close; gated on both CHIP_IDs = 0xA0xx; --codec off.
+      Built, check + check-hw green, injected, menu-written to the card.
+      PROOF ON THE NEXT BOOT: `codec: N register(s) set` with `0030 ...
+      -> 40f9` on both chips, and sound. Memory:
+      reference_spike2_amp_gate_line_out_mute (table + the 0x0111 risk).
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

@@ -28,6 +28,7 @@
 #include <errno.h>
 #include <math.h>
 #include "audio.h"
+#include "codec.h"
 #include "log.h"
 
 typedef struct snd_pcm snd_pcm_t;
@@ -199,7 +200,9 @@ static void alsa_close(struct audio_sink *s)
     if (rc < 0) sel_log("audio: alsa drain: %s", snd_strerror(rc));
     rc = snd_pcm_close(a->pcm);
     sel_log("audio: alsa closed (%s), %d recover(s)", rc < 0 ? snd_strerror(rc) : "ok", a->recovered);
-    /* the amplifier gate back as it was found - only where it was shut */
+    /* the codecs back as found (after the kernel's own close-time writes),
+     * and the kernel's switch back where it was shut */
+    codec_restore();
     {
         int i;
         for (i = 0; i < NCTL; i++)
@@ -255,7 +258,13 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
     a->base.lead_ms = LEAD_MS;
     a->pcm = pcm;
     sel_log("audio: alsa %s ok (%d ch, %d Hz)", dev, AUDIO_CH, AUDIO_RATE);
-    /* the amplifier gate: the stream is accepted, now let it be heard */
+    /* THE LINE-OUT, over i2c, the way the game does it (codec.h): after
+     * snd_pcm_set_params, so the kernel's own hw_params and DAPM writes are
+     * done and cannot undo it.  The kernel powers only the headphone path
+     * for a stream (the device tree routes nothing else); the amplifiers
+     * hang off LINE_OUT, which only this powers. */
+    codec_power_up();
+    /* and the kernel's own 'Line Out Mute' switch, kept ON either way */
     for (i = 0; i < (size_t)NCTL; i++)
         a->lo_was[i] = lineout_switch(MIXER_CTLS[i], 1, "");
     return &a->base;

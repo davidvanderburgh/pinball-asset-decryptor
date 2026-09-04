@@ -44,9 +44,10 @@
 #include "art.h"
 #include "audio.h"
 #include "nvm.h"
+#include "codec.h"
 #include "log.h"
 
-#define VERSION "2.2"
+#define VERSION "2.3"
 
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
 #define DEF_OUT      "/var/volatile/codeselect.choice"
@@ -83,7 +84,7 @@
 struct opts {
     const char *conf, *out, *input, *nodebus, *spi, *padsw, *tables, *last, *log,
                *headless, *font, *preamble, *media, *audio, *audio_fmt, *audio_dump,
-               *snapshot;
+               *snapshot, *codec;
     int timeout;      /* -1 = from conf */
     int def;          /* -1 = from conf */
     int invert;       /* -1 = auto */
@@ -131,6 +132,8 @@ static void usage(FILE *f)
         "  --media DIR        where the conf's media names live (default conf media=, " DEF_MEDIA ")\n"
         "  --audio auto|alsa|fifo:PATH|none  sound sink (default auto: alsa, else $PAD_AUDIO_PLAY, else none)\n"
         "  --audio-fmt PATH   the rig's fmt file, gets '44100 2' (default $PAD_AUDIO_FMT)\n"
+        "  --codec auto|off   auto = power the machine's codecs' line-out over i2c the way the game\n"
+        "                     does, put back at exit (only when both SGTL5000s answer); off = leave them\n"
         "  --volume 0-100     software mix gain (overrides conf volume=, default %d)\n"
         "  --anim-frame N     hold every animation at frame N instead of playing them (headless tests);\n"
         "                     with --snapshot: the highlighted card's frame (wraps), and the\n"
@@ -188,6 +191,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
     o->last = DEF_LAST;
     o->preamble = "min";
     o->audio = "auto";
+    o->codec = "auto";
     o->timeout = -1;
     o->def = -1;
     o->invert = -1;
@@ -216,6 +220,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
         ARG("--audio", audio)
         ARG("--audio-fmt", audio_fmt)
         ARG("--audio-dump", audio_dump)
+        ARG("--codec", codec)
 #undef ARG
         if (!strcmp(a, "--timeout")) { if (!v) goto missing; o->timeout = atoi(v); i++; continue; }
         if (!strcmp(a, "--default")) { if (!v) goto missing; o->def = atoi(v); i++; continue; }
@@ -235,6 +240,10 @@ missing:
     }
     if (strcmp(o->input, "hw") && strcmp(o->input, "padsw") && strcmp(o->input, "none")) {
         fprintf(stderr, "codeselect: --input must be hw, padsw or none\n");
+        return -1;
+    }
+    if (strcmp(o->codec, "auto") && strcmp(o->codec, "off")) {
+        fprintf(stderr, "codeselect: --codec must be auto or off\n");
         return -1;
     }
     if (strcmp(o->preamble, "min") && strcmp(o->preamble, "full")) {
@@ -1062,6 +1071,13 @@ int main(int argc, char **argv)
         }
         if (machine_v >= 0) volume = audio_machine_gain(machine_v);
     }
+    /* THE CODECS (codec.h): what the two SGTL5000s hold before the menu
+     * touches anything goes in the log - it is the whole diagnosis when a
+     * machine stays silent - and the ALSA sink powers their line-out after
+     * its own open (audio_alsa.c), the way the game does over i2c.  Not on
+     * the emulator: there is no /dev/i2c-1 there, and the first call says so. */
+    codec_configure(o.codec);
+    if (strcmp(o.audio, "none")) codec_snapshot("before the menu");
     au = audio_open(o.audio, fmt_path, volume, o.audio_dump);
     if (machine_v >= 0 && !strcmp(audio_sink_name(au), "alsa")) {
         audio_alsa_mixer(machine_v);     /* the machine's own curve, on its own mixer */

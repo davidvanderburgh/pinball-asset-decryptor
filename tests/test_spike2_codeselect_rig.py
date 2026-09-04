@@ -1087,6 +1087,7 @@ EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  "egl_stern.c", "egl_stern.h", "input.c", "input.h",
                  "input_hw.c", "input_padsw.c", "log.c", "log.h",
                  "art.c", "art.h", "audio.c", "audio.h", "audio_fifo.c", "audio_alsa.c",
+                 "codec.c", "codec.h",
                  "nvm.c", "nvm.h",
                  "Makefile", "select.sh", "images.conf.example",
                  "third_party/stb_truetype.h", "third_party/stb_image.h"]

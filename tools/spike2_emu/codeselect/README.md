@@ -331,19 +331,35 @@ iteration and mixes exactly what the sink can take right now - never blocks:
   asserts on it); `snd_pcm_set_params(S16_LE, RW_INTERLEAVED, 2, 44100,
   resample 1, 500 ms)`, non-blocking; `snd_pcm_avail_update` says how much
   fits, `snd_pcm_writei` in <= 1764-frame chunks (the game's period),
-  `-EPIPE` -> `snd_pcm_recover`. **The amplifier gate:** once the device is
-  open, simple mixer element `Line Out Mute` on ctl `backbox` and ctl
-  `cabinet` has its playback switch set ON, exactly as the game's own mute
-  helper does (godzilla_pro `0x1faad4`, `!mute` into
-  `snd_mixer_selem_set_playback_switch_all`); a boot leaves that control at
-  the driver's muted power-up value - alsactl's asound.state never names it -
-  which is why a stream the codec accepted without a dropped frame made no
-  sound on David's Godzilla (2026-09-04). What each switch read before is
-  kept, and one that was OFF goes back OFF at close. The volume is untouched
-  unless `mixer_volume=` or `volume=machine` asks: then the game's own recipe
-  puts `192*(v/63)^0.2` into `PCM Playback Volume` on the same two controls.
-  At exit: blocking `snd_pcm_drain` + close, BEFORE the choice file and
-  before the EGL teardown, so the game finds hw:0 free.
+  `-EPIPE` -> `snd_pcm_recover`. **The line-out (codec.c):** the card's
+  device tree routes each codec as `"Headphone Jack", "HP_OUT"` and nothing
+  else, so under ALSA the kernel powers the headphone path for a stream and
+  never the LINE_OUT block - and the amplifiers hang off LINE_OUT. That is
+  why a stream the kernel played without a dropped frame made no sound on
+  David's Godzilla (2026-09-04, twice). The game does not rely on the kernel
+  for it: it programs both SGTL5000s itself over `/dev/i2c-1`
+  (`I2C_SLAVE_FORCE` + `I2C_RDWR`, godzilla_pro `0x1fa724`/`0x1fa7b8`), and
+  its recovery path (`0x1fb38c` -> `0x1fa8c0(0)`) writes a 50-register
+  table that powers VAG, DAC, headphone and line-out (`CHIP_ANA_POWER`
+  0x40f9), clears every analog mute (`CHIP_ANA_CTRL` 0x0020/0x0022) and sets
+  the line-out bias and reference - the same table, byte for byte, in every
+  title checked. So once `snd_pcm_set_params` is done (the kernel's own
+  hw_params and DAPM writes behind us), the same table goes onto both chips,
+  minus what the kernel owns for the running stream (clock, I2S format, the
+  DAC and headphone volumes the mixer controls set) and with the two power
+  registers ORed rather than overwritten (the kernel's regulator bits stay);
+  every register changed is logged (`codec 0x0a reg 0030 4068 -> 40f9`) and
+  put back at close. Nothing is written unless both chips answer `CHIP_ID`
+  0xA0xx; `--codec off` leaves them alone. Both chips' registers are logged
+  as found before the menu touches anything (`codec 0x0a before the menu`).
+  The kernel's own `Line Out Mute` switch on ctl `backbox`/`cabinet` is set
+  ON as well (the game's mute helper `0x1faad4` does), and back OFF at close
+  where it was found OFF - on David's card it was already ON, so it was never
+  the gate. The volume is untouched unless `mixer_volume=` or
+  `volume=machine` asks: then the game's own recipe puts `192*(v/63)^0.2`
+  into `PCM Playback Volume` on the same two controls. At exit: blocking
+  `snd_pcm_drain` + close, BEFORE the choice file and before the EGL
+  teardown, so the game finds hw:0 free.
 * `fifo:PATH` (the emulator): writes `44100 2\n` to `--audio-fmt` first
   (playaudio.sh waits on it), opens the FIFO `O_WRONLY|O_NONBLOCK` (ENXIO =
   no reader yet, retried every 100 ms from the loop; a missing FIFO every
@@ -814,8 +830,11 @@ nb: node 8 switches 00 ff 1f fb 40 00 00 00   the first 0x11 answer (at rest)
 spi: rx ff 0f 0f 00 00 00 00 00               the cabinet word at rest
 egl: initialised 1.4 / egl: display 1360x768  Vivante came up
 egl: up after N attempt(s)                    N > 1 = boot_display was still releasing the LCD
+codec 0x0a before the menu (1/2): 0002=0060 0004=0004 ...   both SGTL5000s answered; their registers as the kernel left them
 audio: alsa default ok (2 ch, 44100 Hz)       the codec took the stream (else 'audio: none (no alsa: ...)')
-audio: mixer backbox 'Line Out Mute' switch on (was off)   the amplifier hears it (cabinet follows)
+codec 0x0a reg 0030 4068 -> 40f9              the line-out powered (one line per register changed, both chips)
+codec: 12 register(s) set on the two chips (0 failure(s)): line-out, VAG, DAC powered, analog mutes cleared
+audio: mixer backbox 'Line Out Mute' switch on (was on)   the kernel's switch, kept ON
 media: 2 art, 1 anim (30 frames), 1 music, 0 card confirm, move=y confirm=y
 [select] key: left / [select] chose 1 TMNT 1987
 confirm: menu sound confirm.wav, 1540 ms under the LOADING frame
@@ -829,9 +848,11 @@ bus is not answering (try `--preamble full`, then a hardware capture);
 boots the primary); `select.sh: umount /games failed` = something held
 `/games` (the primary boots, still mounted); `audio: none (no alsa: ...)` on
 the machine = no device could be opened (the menu is silent, the boot is
-unaffected); `audio: mixer backbox: no 'Line Out Mute' switch` under a
-silent machine = this rootfs names the amplifier gate differently (list the
-controls with `amixer -c 0 scontrols` on the machine); a silent machine
-with `audio: alsa ... ok` AND the switch reported `on` = something past the
-codec (the SPI mute bits are byte 7 of the cabinet word and input_hw.c
-sends zeros = unmuted; check `spi:` opened).
+unaffected); `codec: /dev/i2c-1: ...` or `codec: 0x0a: CHIP_ID ... not an
+SGTL5000` under a silent machine = the line-out was never powered (this
+board is not the one the recipe knows; the `before the menu` lines say
+what the kernel left); `codec: N register(s) set` with `0030 ... -> 40f9`
+on both chips and still silence = look past the codec: the SPI mute bits
+are byte 7 of the cabinet word (the game SETS bits 2 and 5 to mute, clears
+them to play) and input_hw.c sends zeros from the moment `spi:` opens, so
+check that line is there; after that it is the amplifier supply.

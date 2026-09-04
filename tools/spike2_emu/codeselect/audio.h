@@ -4,8 +4,10 @@
  *
  *   alsa       the machine: the game's own device (`default` = both speaker
  *              sets, then the raw card) through the rootfs libasound
- *              (audio_alsa.c, hand prototypes), with the 'Line Out Mute'
- *              amplifier gate switched ON while the sink is open
+ *              (audio_alsa.c, hand prototypes); once it is open the two
+ *              SGTL5000s get the game's own line-out power-up over i2c
+ *              (codec.h - the kernel never powers LINE_OUT, and that is
+ *              what the amplifiers hang off), put back at close
  *   fifo:PATH  the emulator: raw s16le into the rig's audio FIFO after
  *              declaring '44100 2' in the fmt file (audio_fifo.c)
  *   none       silence (still mixes into --audio-dump when one is given)

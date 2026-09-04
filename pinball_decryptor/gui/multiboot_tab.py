@@ -7985,23 +7985,19 @@ class MultibootPanel:
             key = self._current_key()
             if key is not None:
                 self._pv_totals[key[:2]] = total
-        if total is None:
-            what = "frame %d" % frame
-        elif total < 2:
-            what = "a still (no animation on this image)"
-        else:
-            what = "frame %d of %d" % (frame, total)
-        # ...and the card in the picture is the card in the words: the
-        # amber frame above says IMAGE 2, so this says Image 2 (see
-        # :meth:`_image_label`).
-        caption = "Image ?: %s" % what if highlight is None \
-            else "%s: %s" % (self._image_label(highlight), what)
-        # Not while Play is running: the caption is rewritten at the clip's
-        # own rate there, a note riding one of those frames would flash past
-        # unread, and working out whether there is one to say costs a look
-        # at media.json.  It waits for the animation to stop.
-        self._pv_say(caption, note=("" if self._play_var.get()
-                                    else self._sound_suffix()))
+        # NO CAPTION.  The strip used to name the card and count the frame
+        # ("Image 1: frame 139 of 150, 1 other clip playing"), which was
+        # developer telemetry from when a frame was something you asked for
+        # one at a time; now that every card animates all the time it is a
+        # number changing thirty times a second under a picture that is
+        # already showing you what it says (David: "this feedback here for
+        # image playing is super distracting and unnecessary. remove it").
+        #
+        # The strip is still the preview's status line - a render that
+        # FAILED, a form that has changed under the picture, a cache miss,
+        # and the sound note below all still land here.  Writing the empty
+        # caption is what CLEARS one of those when the picture comes good.
+        self._pv_say("", note=self._sound_suffix())
         return True
 
     def _redraw_shown(self):
@@ -8616,16 +8612,11 @@ class MultibootPanel:
         self._pv_shown = (hl, k)
         self._composite = (base_path, hl, own[0].n if own else 1)
         self._set_var(self._frame_var, k)
-        if own:
-            what = "frame %d of %d" % (k, own[0].n)
-        else:
-            what = "a still"
-        others = len(clips) - (1 if own else 0)
-        if others:
-            what += ", %d other clip%s playing" % (others, "" if others == 1 else "s")
-        # NOT into the Log: this is said thirty times a second (David's Log
-        # filled with 'frame N of 150' lines).  The strip is the readout.
-        self._pv_say("%s: %s" % (self._image_label(hl), what), log=False)
+        # AND SAYS NOTHING.  This runs at the clip's own rate, so whatever it
+        # wrote was a line flickering thirty times a second; it also meant a
+        # real message on the strip - a failed render, a stale form - lived
+        # exactly one frame.  Now the strip keeps what it was told and the
+        # picture speaks for itself (see :meth:`load_frame`).
         return True
 
     def _anim_delay_ms(self, hl):

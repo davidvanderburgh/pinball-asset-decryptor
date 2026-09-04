@@ -1919,7 +1919,10 @@ def test_load_frame_shows_a_ppm_scaled_into_the_box(tmp_path):
         assert (panel._pv_photo.width(), panel._pv_photo.height()) == box
         assert panel._pv_canvas.find_all()                  # one image item
         assert panel._pv_canvas.type(panel._pv_canvas.find_all()[0]) == "image"
-        assert panel._pv_status.cget("text") == "Image 2: frame 3 of 24"
+        # the strip says NOTHING about the frame any more (it is telemetry
+        # under a picture that shows it); what it stood for is here
+        assert panel._pv_status.cget("text") == ""
+        assert panel._pv_shown == (1, 3)
         assert panel._hl_var.get() == "1" and panel._frame_var.get() == "3"
         assert panel._hl_touched is False       # programmatic, not typed
         small = _ppm(tmp_path / "small.ppm", 136, 77)
@@ -1929,7 +1932,7 @@ def test_load_frame_shows_a_ppm_scaled_into_the_box(tmp_path):
         # it and leave a quarter of the box empty.
         assert (panel._pv_photo.width(), panel._pv_photo.height()) == \
             multiboot_tab.scaled_size(136, 77, *box)
-        assert "a still" in panel._pv_status.cget("text")
+        assert panel._pv_shown == (0, 0)
         assert panel.load_frame(str(tmp_path / "missing.ppm")) is False
         assert "Cannot load" in panel._pv_status.cget("text")
         assert "Cannot load" in _pane(panel)
@@ -2052,10 +2055,10 @@ def test_the_caption_numbers_images_the_way_the_picture_does(tmp_path):
             panel.add_image(p)
         ppm = _ppm(tmp_path / "f.ppm")
         assert panel.load_frame(ppm, 0, 0, 4) is True
-        assert panel._pv_status.cget("text") == "Image 1: frame 0 of 4"
+        assert panel._pv_status.cget("text") == ""      # no frame caption
         assert panel._hl_var.get() == "0"       # ...and the index is not
         assert panel.load_frame(ppm, 2, 1, 4) is True
-        assert panel._pv_status.cget("text") == "Image 3: frame 1 of 4"
+        assert panel._pv_shown == (2, 1)
         # the cache miss a flipper press finds, and the two sound lines,
         # count the same way
         panel.flip_right()                      # to image 0, undrawn
@@ -2123,7 +2126,7 @@ def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
             _tick(root, panel)
             assert panel._frame_var.get() == want
         assert rendered == []                    # nothing rendered by the ticks
-        assert "frame 1 of 3" in panel._pv_status.cget("text")
+        assert panel._pv_shown == (1, 1)
         # a moment where nothing moves draws nothing
         drawn = panel._pv_photo
         clock[0] += 0.01
@@ -2327,7 +2330,8 @@ def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,
             "/fake/codeselect", os.path.join(pv, "images.conf"), media,
             frame0, 1, 0, 1)]
         assert os.path.isfile(frame0)
-        assert panel._pv_status.cget("text") == "Image 2: frame 0 of 3"
+        assert panel._pv_status.cget("text") == ""
+        assert panel._pv_shown == (1, 0)
         assert panel._pv_photo is not None
         assert panel._pv_cache == {(fp, 1, 0): frame0}
         assert panel._pv_totals == {(fp, 1): 3}
@@ -2352,7 +2356,7 @@ def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls == [["frame 0"]]
-        assert panel._pv_status.cget("text") == "Image 2: frame 0 of 3"
+        assert panel._pv_status.cget("text") == ""
         assert panel._pv_shown == (1, 0)
     finally:
         root.destroy()
@@ -2806,7 +2810,6 @@ def test_a_flipper_press_draws_the_new_highlights_frame(tmp_path,
         assert (fp, 1, 0) in panel._pv_cache
         assert calls[-1] == ["frame 0"]
         assert panel._pv_shown[0] == 1
-        assert panel._pv_status.cget("text").startswith("Image 2: ")
         # ...and the ticks were never stopped for it: the form stood still
         assert panel._play_var.get() is True
         # the same card again: nothing to draw
@@ -2888,7 +2891,7 @@ def test_the_ticks_say_the_frame_on_the_strip_and_not_in_the_log(tmp_path):
         for _ in range(4):
             clock[0] += 0.1
             _tick(root, panel)
-        assert "frame 1 of 3" in panel._pv_status.cget("text")
+        assert panel._pv_shown == (1, 1)
         assert len(panel.log_lines()) == before
         assert "frame 1 of 3" not in _pane(panel)
     finally:
@@ -3002,7 +3005,7 @@ def test_a_refused_audio_half_leaves_the_picture_playing_and_says_why(
         assert seen["audio"]                       # it was tried
         fp = preview_fingerprint(panel.form())
         assert (fp, 1, 0) in panel._pv_cache
-        assert panel._pv_status.cget("text") == "Image 2: frame 0 of 3"
+        assert panel._pv_status.cget("text") == ""
         assert panel._pv_error is False
         assert panel._media_state["video"] == "ready (1 clip)"
         assert panel._media_state["audio"] == \
@@ -3173,8 +3176,7 @@ def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):
             _tick(root, panel)
             assert panel._frame_var.get() == str((first + k) % 4)
             assert panel._pv_shown == (1, (first + k) % 4)
-        assert "frame %d of 4" % ((first + 5) % 4) in \
-            panel._pv_status.cget("text")
+        assert panel._pv_shown == (1, (first + 5) % 4)
         assert calls == [["selector", "video", "frame 0"], ["audio"]]
         assert len(seen["snapshot"]) == 1
         # the clip is read once and kept, scaled to the picture's box
@@ -3182,11 +3184,10 @@ def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):
         assert key[0] == os.path.join(media, "anim1.gif") and clip.n == 4
         assert key[3][2:] == clip.size
         # stopping the ticks (a redraw does) leaves the picture on the
-        # RENDERED frame, and the caption says so
+        # RENDERED frame
         panel._stop_play(None)
         assert panel._pv_shown == (1, 0)
         assert panel._frame_var.get() == "0"
-        assert panel._pv_status.cget("text") == "Image 2: frame 0 of 4"
         # ...and the SAME name reaches the photo cache, so a frame the
         # selector has just written again is decoded AGAIN (a single-frame
         # render shows itself the moment it lands, so the entry is a new
@@ -3441,8 +3442,7 @@ def test_the_preview_starts_with_sound_on_and_opens_nothing_until_there_is_a_sou
         ppm = _ppm(tmp_path / "f.ppm")
         panel._set_var(panel._hl_var, 1)
         assert panel.load_frame(ppm, 1, 0, 1) is True
-        assert panel._pv_status.cget("text") == "Image 2: a still (no " \
-            "animation on this image)"
+        assert panel._pv_status.cget("text") == ""
         assert "tick Sound" not in _pane(panel)
         # what the menu plays, the moment the sound follows the frame
         panel._sound_toggled()
@@ -3586,9 +3586,10 @@ def test_a_machine_with_no_sound_says_so_once_and_goes_on_drawing(
         assert "sounddevice is not installed" in panel._pv_status.cget("text")
         assert "[preview] No sound:" in _pane(panel)
         # the picture still draws, and says it once
+        # ...and the draw CLEARS what the strip was saying: an empty
+        # caption is how a picture that came good takes a stale message down
         assert panel.load_frame(_ppm(tmp_path / "f.ppm"), 1, 0, 1) is True
-        assert panel._pv_status.cget("text") == "Image 2: a still (no " \
-            "animation on this image)"
+        assert panel._pv_status.cget("text") == ""
     finally:
         root.destroy()
 

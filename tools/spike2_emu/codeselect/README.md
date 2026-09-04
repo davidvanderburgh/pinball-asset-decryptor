@@ -847,9 +847,9 @@ egl: initialised 1.4 / egl: display 1360x768  Vivante came up
 egl: up after N attempt(s)                    N > 1 = boot_display was still releasing the LCD
 codec 0x0a before the menu (1/2): 0002=0060 0004=0008 ...   both SGTL5000s answered; their registers as the kernel left them
 audio: alsa default ok (2 ch, 44100 Hz)       the codec took the stream (else 'audio: none (no alsa: ...)')
-codec: 0 register(s) set on the two chips: line-out, VAG, DAC powered   at open the kernel had just powered it; the KEEP passes below are what hold it
-codec 0x0a reg 0030 4060 -> 40f9 (the kernel had pulled it back)   the DAPM undo the game/menu fight - this line proves the fix is working
-spi: /dev/spidev1.0 open (100 kHz, mode 3, 8-byte transfers, amp enable tx[7]=0x03)   the amps are enabled (confirmed = the game's own value, read from its memory)
+codec: 0 register(s) set on the two chips: line-out, VAG, DAC powered   the kernel had already powered it for the stream (David's machine: nothing ever pulled back)
+gpio75: raised to 1 (was 0) - the CPU-board line the game raises before the node bus   THE AMPLIFIER LINE - the one thing the menu had never done (input_hw.c)
+spi: /dev/spidev1.0 open (100 kHz, mode 3, 8-byte transfers, amp enable tx[7]=0x03)   the cabinet word, identical to the game's (read live from its memory)
 media: 2 art, 1 anim (30 frames), 1 music, 0 card confirm, move=y confirm=y
 [select] key: left / [select] chose 1 TMNT 1987
 confirm: menu sound confirm.wav, 1540 ms under the LOADING frame

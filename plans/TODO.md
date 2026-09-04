@@ -357,6 +357,22 @@ These have each been violated at least once and each cost a run or a window:
       proof. Built, check + check-hw green, injected, menu-written to the
       card. If STILL silent, the re-assert log shows exactly what the kernel
       is doing to the codec during playback.
+      **2026-09-04 ROUND 5 - GPIO 75, the line the game raises before it opens
+      the node bus (selector 2.6).** The 2.5 boot log settled the codec for
+      good: codec_keep found NOTHING pulled back in the whole run (the kernel
+      keeps the codec fully powered for the stream), still silent, and David
+      pinned the click to the END of the game's audio bring-up. The game's
+      device list (missed earlier under the AD_*CHAMPION noise) has
+      /sys/class/gpio/gpio75/{direction,value}: 0x5a4eb8 (node-bus module
+      init) calls 0x5a4dc0(1) = export 75, direction out, value "1" - right
+      before it opens /dev/ttymxc1, beside the LPC1111 netbridge and the iio
+      amp power monitor strings. GPIO3_IO11 has no device-tree consumer:
+      application-owned, the game alone drives it. FIX: input_hw.c
+      cpu_gpio_raise() does the same before tty_setup, gated on the real
+      node-bus device name + /sys/class/gpio existing (check-hw's pty never
+      trips it); PAD_GPIO75=0|skip for experiments. Left high (the game
+      writes 1 itself). Built, check + check-hw green, injected, menu-written.
+      PROOF ON THE NEXT BOOT: `gpio75: raised to 1 (was 0)` and sound.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

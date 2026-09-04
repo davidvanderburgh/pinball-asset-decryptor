@@ -443,6 +443,75 @@ static void hw_close(struct input *in)
 
 static const struct input_ops hw_ops = { hw_poll, hw_close };
 
+/* GPIO 75 (i.MX6 GPIO3_IO11) - THE LINE THE GAME RAISES BEFORE IT OPENS THE
+ * NODE BUS, and the one hardware action on the audio path the menu had never
+ * taken.
+ *
+ * godzilla_pro 0x5a4eb8 (the node-bus module's init) calls 0x5a4dc0(1) and
+ * then opens /dev/ttymxc1: if /sys/class/gpio/gpio75 is absent it writes
+ * "75" to /sys/class/gpio/export and "out" to gpio75/direction, then "1" to
+ * gpio75/value.  The strings sit between the iio amplifier power monitor
+ * and "/dev/ttymxc1" / "LPC1111FHN33" (the CPU board's netbridge MCU) in
+ * the same module.  The device tree names no consumer for GPIO3_IO11: it is
+ * application-owned, driven only by the game.  Every other audio control -
+ * the codec registers (logged, nothing pulled back), the ALSA switches, the
+ * SPI cabinet word (read live from the game's memory, identical) - matched
+ * the game and the menu stayed silent, and the speakers come on exactly
+ * where the game's bring-up runs.  This line is what the menu was missing.
+ *
+ * Done the game's way, once, and left high: the game writes 1 itself a
+ * moment later, so the state it finds is the state it creates.  GATED: only
+ * for the machine's own node-bus device (/dev/ttymxc1 - the check-hw test
+ * passes a pty and must never export a GPIO on a developer's box) and only
+ * where /sys/class/gpio exists.  PAD_GPIO75=0 writes 0 instead, PAD_GPIO75=skip
+ * leaves it alone (experiments without a rebuild). */
+#define CPU_GPIO_PATH   "/sys/class/gpio/gpio75"
+#define CPU_GPIO_EXPORT "/sys/class/gpio/export"
+#define CPU_GPIO_NUM    "75\n"
+
+static int sysfs_write(const char *path, const char *s, char *err, int errlen)
+{
+    int fd = open(path, O_WRONLY);
+    ssize_t n;
+    if (fd < 0) { snprintf(err, errlen, "%s: %s", path, strerror(errno)); return -1; }
+    n = write(fd, s, strlen(s));
+    if (n < 0) snprintf(err, errlen, "%s: write: %s", path, strerror(errno));
+    close(fd);
+    return n < 0 ? -1 : 0;
+}
+
+static void cpu_gpio_raise(const char *nodebus)
+{
+    const char *e = getenv("PAD_GPIO75");
+    const char *val = "1\n";
+    char err[200] = "", was[8] = "?";
+    int fd;
+    if (e && !strcmp(e, "skip")) { sel_log("gpio75: left alone (PAD_GPIO75=skip)"); return; }
+    if (e && !strcmp(e, "0")) val = "0\n";
+    if (!nodebus || strcmp(nodebus, "/dev/ttymxc1")) return;      /* not the machine */
+    if (access("/sys/class/gpio", F_OK) < 0) return;               /* no gpio sysfs: not the machine */
+    if (access(CPU_GPIO_PATH, F_OK) < 0) {
+        if (sysfs_write(CPU_GPIO_EXPORT, CPU_GPIO_NUM, err, sizeof err) < 0 && access(CPU_GPIO_PATH, F_OK) < 0) {
+            sel_log("gpio75: export failed: %s (amplifier line not raised)", err);
+            return;
+        }
+        if (sysfs_write(CPU_GPIO_PATH "/direction", "out\n", err, sizeof err) < 0)
+            sel_log("gpio75: direction: %s (continuing)", err);
+    }
+    fd = open(CPU_GPIO_PATH "/value", O_RDONLY);
+    if (fd >= 0) {
+        ssize_t n = read(fd, was, sizeof was - 1);
+        if (n > 0) { was[n] = 0; if (was[n - 1] == '\n') was[n - 1] = 0; }
+        close(fd);
+    }
+    if (sysfs_write(CPU_GPIO_PATH "/value", val, err, sizeof err) < 0) {
+        sel_log("gpio75: value: %s (amplifier line not raised)", err);
+        return;
+    }
+    sel_log("gpio75: %s (was %s) - the CPU-board line the game raises before the node bus",
+            val[0] == '1' ? "raised to 1" : "written 0", was);
+}
+
 struct input *input_hw_open(const struct input_cfg *cfg)
 {
     struct hw *h = calloc(1, sizeof *h);
@@ -450,6 +519,7 @@ struct input *input_hw_open(const struct input_cfg *cfg)
     input_base_init(&h->base, &hw_ops);
     h->fd = -1;
     h->spi = -1;
+    cpu_gpio_raise(cfg->nodebus ? cfg->nodebus : "/dev/ttymxc1");
     tty_setup(h, cfg->nodebus ? cfg->nodebus : "/dev/ttymxc1");
     preamble(h, cfg->preamble_full);
     spi_setup(h, cfg->spi ? cfg->spi : "/dev/spidev1.0");

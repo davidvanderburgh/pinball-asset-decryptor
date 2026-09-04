@@ -3275,9 +3275,17 @@ def _update_locked(a, ts, card, dry):
         images = []
         for i, (part, sub) in enumerate(plan.trees):
             man, how = card_tree(card, part, sub, a.cache_dir)
-            images.append(ts.ImageTrees(i, device_name(part.num, sub), sub or "", man.tree, None, man.uuid))
-            say("image %d %s: %d files, %s (%s)"
-                % (i, device_name(part.num, sub), len(man.tree.files), _gb(man.tree.bytes()), how))
+            # a tree the bypass already patched keeps its bypass through an update: without
+            # this a source's stock game would be written over it and the machine would show
+            # GAME VALIDATION ERROR again
+            try:
+                carried = {"carried": True} if tree_state(card, part, sub)[0] == "bypassed" else None
+            except Exception:                            # noqa: BLE001 - an unreadable tree carries nothing
+                carried = None
+            images.append(ts.ImageTrees(i, device_name(part.num, sub), sub or "", man.tree, None, man.uuid, carried))
+            say("image %d %s: %d files, %s (%s%s)"
+                % (i, device_name(part.num, sub), len(man.tree.files), _gb(man.tree.bytes()), how,
+                   "; validator bypassed - kept" if carried else ""))
         rec = ts.CardTrees(images, primary=None, layout=plan.layout, version=VERSION)
     if dirty:
         say("WARNING: %s is dirty (%s) - an earlier update was interrupted; its partitions get e2fsck -fy first"

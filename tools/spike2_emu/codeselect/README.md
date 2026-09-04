@@ -322,16 +322,28 @@ master gain from `volume=` (256 * v/100), a 20 ms fade when a voice is
 stopped so nothing clicks. `audio_pump()` runs from the main loop every
 iteration and mixes exactly what the sink can take right now - never blocks:
 
-* `alsa` (the machine): `snd_lib_error_set_handler(quiet)`,
-  `snd_pcm_open("sysdefault:CARD=sgtl5000main", PLAYBACK, 0)` - any failure
-  is "no alsa" (never the `null` device: alsa-lib 1.0.28 asserts on it),
-  `snd_pcm_set_params(S16_LE, RW_INTERLEAVED, 2, 44100, resample 1, 500 ms)`,
-  non-blocking; `snd_pcm_avail_update` says how much fits, `snd_pcm_writei`
-  in <= 1764-frame chunks (the game's period), `-EPIPE` -> `snd_pcm_recover`.
-  The mixer is untouched unless `mixer_volume=` is set: then the game's own
-  recipe puts `192*(v/63)^0.2` into `PCM Playback Volume` on ctl `backbox`
-  and `cabinet`. At exit: blocking `snd_pcm_drain` + close, BEFORE the choice
-  file and before the EGL teardown, so the game finds hw:0 free.
+* `alsa` (the machine): `snd_lib_error_set_handler(quiet)`, then
+  `snd_pcm_open(dev, PLAYBACK, 0)` for `default` (the machine's asound.conf
+  makes it a plug over `cabinet_and_backbox` = dmix on BOTH cards, the way
+  the game reaches the cabinet speaker too), `cabinet_and_backbox`, the raw
+  `sysdefault:CARD=sgtl5000main` (backbox only), `plughw:0,0` - each miss is
+  logged, all four = "no alsa" (never the `null` device: alsa-lib 1.0.28
+  asserts on it); `snd_pcm_set_params(S16_LE, RW_INTERLEAVED, 2, 44100,
+  resample 1, 500 ms)`, non-blocking; `snd_pcm_avail_update` says how much
+  fits, `snd_pcm_writei` in <= 1764-frame chunks (the game's period),
+  `-EPIPE` -> `snd_pcm_recover`. **The amplifier gate:** once the device is
+  open, simple mixer element `Line Out Mute` on ctl `backbox` and ctl
+  `cabinet` has its playback switch set ON, exactly as the game's own mute
+  helper does (godzilla_pro `0x1faad4`, `!mute` into
+  `snd_mixer_selem_set_playback_switch_all`); a boot leaves that control at
+  the driver's muted power-up value - alsactl's asound.state never names it -
+  which is why a stream the codec accepted without a dropped frame made no
+  sound on David's Godzilla (2026-09-04). What each switch read before is
+  kept, and one that was OFF goes back OFF at close. The volume is untouched
+  unless `mixer_volume=` or `volume=machine` asks: then the game's own recipe
+  puts `192*(v/63)^0.2` into `PCM Playback Volume` on the same two controls.
+  At exit: blocking `snd_pcm_drain` + close, BEFORE the choice file and
+  before the EGL teardown, so the game finds hw:0 free.
 * `fifo:PATH` (the emulator): writes `44100 2\n` to `--audio-fmt` first
   (playaudio.sh waits on it), opens the FIFO `O_WRONLY|O_NONBLOCK` (ENXIO =
   no reader yet, retried every 100 ms from the loop; a missing FIFO every
@@ -447,7 +459,8 @@ is the app's preview). `mkmulticard.py --machine-volume` writes both keys.
 ### log lines (stderr and --log)
 
 ```
-audio: alsa sysdefault:CARD=sgtl5000main ok       the machine sink is up
+audio: alsa default ok (2 ch, 44100 Hz)           the machine sink is up (each device that would not open is logged before it)
+audio: mixer backbox 'Line Out Mute' switch on (was off)   the amplifier gate opened (or: no 'Line Out Mute' switch)
 audio: fifo /dump/audio.fifo open                 the rig's reader took the FIFO
 audio: fifo reader went away, reopening           EPIPE: the relay closed the read end (its player died)
 audio: no fifo reader for 3 s (it went away; ...) still none 3 s later: dropping, said once
@@ -801,7 +814,8 @@ nb: node 8 switches 00 ff 1f fb 40 00 00 00   the first 0x11 answer (at rest)
 spi: rx ff 0f 0f 00 00 00 00 00               the cabinet word at rest
 egl: initialised 1.4 / egl: display 1360x768  Vivante came up
 egl: up after N attempt(s)                    N > 1 = boot_display was still releasing the LCD
-audio: alsa sysdefault:CARD=sgtl5000main ok   the codec took the stream (else 'audio: none (no alsa: ...)')
+audio: alsa default ok (2 ch, 44100 Hz)       the codec took the stream (else 'audio: none (no alsa: ...)')
+audio: mixer backbox 'Line Out Mute' switch on (was off)   the amplifier hears it (cabinet follows)
 media: 2 art, 1 anim (30 frames), 1 music, 0 card confirm, move=y confirm=y
 [select] key: left / [select] chose 1 TMNT 1987
 confirm: menu sound confirm.wav, 1540 ms under the LOADING frame
@@ -814,7 +828,10 @@ bus is not answering (try `--preamble full`, then a hardware capture);
 `egl: giving up after 6 attempts` = the display never came free (the hook
 boots the primary); `select.sh: umount /games failed` = something held
 `/games` (the primary boots, still mounted); `audio: none (no alsa: ...)` on
-the machine = the codec device could not be opened (the menu is silent, the
-boot is unaffected); a silent machine with `audio: alsa ... ok` = the
-kernel-driven stream does not reach the amplifiers at the boot-time codec
-state (try `mixer_volume=`, then the `aplay` test from the audio report).
+the machine = no device could be opened (the menu is silent, the boot is
+unaffected); `audio: mixer backbox: no 'Line Out Mute' switch` under a
+silent machine = this rootfs names the amplifier gate differently (list the
+controls with `amixer -c 0 scontrols` on the machine); a silent machine
+with `audio: alsa ... ok` AND the switch reported `on` = something past the
+codec (the SPI mute bits are byte 7 of the cabinet word and input_hw.c
+sends zeros = unmuted; check `spi:` opened).

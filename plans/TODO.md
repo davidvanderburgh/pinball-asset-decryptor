@@ -286,6 +286,23 @@ These have each been violated at least once and each cost a run or a window:
       rig's real stores: TMNT 18/63, Godzilla 10/63 (= their factory
       levels).
 
+      **2026-09-04 (item/90): THE MENU WAS SILENT ON THE MACHINE - THE
+      AMPLIFIER GATE, NOT THE DEVICE.** The card's own /dump/log/
+      codeselect.log (p6 read off the SD card) said `alsa ... ok`, PCM
+      mixer set, `1007616 frames written, 0 dropped` over 23 s: the codec
+      ate the stream and the speakers stayed dead, so the device walk
+      (bff476c) was never the cause. The game's mute helper (godzilla_pro
+      0x1faad4, from its bring-up 0x1fb2a8) sets the playback switch of
+      simple mixer element "Line Out Mute" ON on ctl backbox + cabinet;
+      asound.state never names it, so a boot leaves it muted and only the
+      game opens it (its other mute stage, SPI tx[7] bits 2/5, the selector
+      already sends as zeros = playing; Stern's own spike_menu carries the
+      same string). FIX: audio_alsa.c switches it ON once the device is
+      open, remembers what it read, and puts a switch that was OFF back at
+      close; README / DESIGN / audio.h say so; make check + check-hw green;
+      injected into David's Godzilla two-image card image and menu-written
+      to the card. PROOF ON THE NEXT BOOT: `audio: mixer backbox 'Line Out
+      Mute' switch on (was off)` in codeselect.log.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

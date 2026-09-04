@@ -2,8 +2,10 @@
  * mixer (4 voices, saturating, master gain from volume=) paced to the wall
  * clock from the main loop, feeding ONE sink:
  *
- *   alsa       the machine: the game's own device, sysdefault:CARD=sgtl5000main
- *              through the rootfs libasound (audio_alsa.c, hand prototypes)
+ *   alsa       the machine: the game's own device (`default` = both speaker
+ *              sets, then the raw card) through the rootfs libasound
+ *              (audio_alsa.c, hand prototypes), with the 'Line Out Mute'
+ *              amplifier gate switched ON while the sink is open
  *   fifo:PATH  the emulator: raw s16le into the rig's audio FIFO after
  *              declaring '44100 2' in the fmt file (audio_fifo.c)
  *   none       silence (still mixes into --audio-dump when one is given)

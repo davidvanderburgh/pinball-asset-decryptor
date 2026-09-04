@@ -4,17 +4,21 @@
  * readelf --dyn-syms; the game itself uses the same entry points).
  *
  *   snd_lib_error_set_handler(quiet)      alsa-lib's stderr chain stays out of the console log
- *   snd_pcm_open("sysdefault:CARD=sgtl5000main", PLAYBACK, 0)
+ *   snd_pcm_open(<ALSA_DEVICES[] in order>, PLAYBACK, 0)
  *       any failure = 'no alsa' (-19 in the emulator chroot). NEVER the
  *       'null' device: alsa-lib 1.0.28 asserts inside hw_params on it.
  *   snd_pcm_set_params(S16_LE=2, RW_INTERLEAVED=3, 2 ch, 44100, resample 1, 500 ms)
  *   snd_pcm_nonblock(1); avail_update says how much fits; writei in
  *       <= 1764-frame chunks (the game's period); -EPIPE -> snd_pcm_recover
+ *   the amplifier gate: 'Line Out Mute' switched ON on ctl backbox and
+ *       cabinet (LINEOUT_SWITCH below) - without it the codec plays into a
+ *       muted amplifier and the machine is silent
  *   close: nonblock(0), drain, close - BEFORE the choice file is written and
- *       before the EGL teardown, so the game's later open finds hw:0 free.
+ *       before the EGL teardown, so the game's later open finds hw:0 free -
+ *       then a 'Line Out Mute' that was OFF goes back OFF.
  *
- * The mixer is untouched unless mixer_volume= is set: then the game's own
- * recipe (function 0x1fa490 of the godzilla_pro ELF) puts
+ * The volume is untouched unless mixer_volume= or volume=machine asks: then
+ * the game's own recipe (function 0x1fa490 of the godzilla_pro ELF) puts
  * 192*(v/63)^0.2 into 'PCM Playback Volume' on ctl backbox and cabinet.
  */
 #define _GNU_SOURCE
@@ -55,6 +59,9 @@ extern void snd_mixer_selem_id_set_name(snd_mixer_selem_id_t *, const char *);
 extern snd_mixer_elem_t *snd_mixer_find_selem(snd_mixer_t *, const snd_mixer_selem_id_t *);
 extern int  snd_mixer_selem_get_playback_volume_range(snd_mixer_elem_t *, long *, long *);
 extern int  snd_mixer_selem_set_playback_volume_all(snd_mixer_elem_t *, long);
+extern int  snd_mixer_selem_has_playback_switch(snd_mixer_elem_t *);
+extern int  snd_mixer_selem_get_playback_switch(snd_mixer_elem_t *, int channel, int *value);
+extern int  snd_mixer_selem_set_playback_switch_all(snd_mixer_elem_t *, int value);
 
 #define SND_PCM_STREAM_PLAYBACK      0
 #define SND_PCM_FORMAT_S16_LE        2
@@ -89,11 +96,46 @@ static const char *const ALSA_DEVICES[] = {
 #define LEAD_MS       500
 #define CHUNK_FRAMES  1764          /* the game's period size */
 
+/* THE AMPLIFIER GATE - why a stream the codec accepted made no sound.
+ *
+ * David's Godzilla, 2026-09-04, /dump/log/codeselect.log: `audio: alsa
+ * sysdefault:CARD=sgtl5000main ok`, the PCM volume set on both controls,
+ * 1,007,616 frames written over 23 s with 0 dropped - and silence from the
+ * speakers.  The game ELF does one more thing the menu never did.  Its
+ * audio bring-up (godzilla_pro 0x1fb2a8: open both cards, PCM volume, prime
+ * 18 buffers of silence, clear SPI bits, 80 ms, unmute) ends in its mute
+ * helper 0x1faad4, which on ctl `backbox` and ctl `cabinet` finds the simple
+ * mixer element "Line Out Mute" and sets its PLAYBACK SWITCH to !mute: ON to
+ * play, OFF when the headphone kit says mute the speakers.  Stern's own
+ * spike_menu binary on the rootfs carries the same string.  Nothing in
+ * alsactl's asound.state names that control, so a boot leaves it at the
+ * driver's power-up value - muted - and the codec plays into an amplifier
+ * that never hears it.  The emulator could not show any of this: with no
+ * sound card there the ALSA open fails and the rig's fifo takes over.
+ *
+ * (The game's other mute stage is byte 7 of the cabinet SPI word - its
+ * 0x5a9eac(4 | 32, mute) sets a bit to mute and clears it to play - and
+ * input_hw.c has always sent that word as zeros, the unmuted value, from
+ * the moment the SPI opens.  That gate was open all along.)
+ *
+ * So: once the device is open, the switch goes ON on both controls and what
+ * it read first is kept; at close, after the drain, a switch that was OFF
+ * goes back OFF, so the game boots from the state a stock card gives it (its
+ * own bring-up switches it ON again, unconditionally).  A rootfs whose
+ * driver has no such element logs that once per control and plays as before.
+ */
+#define LINEOUT_SWITCH "Line Out Mute"
+static const char *const MIXER_CTLS[] = { "backbox", "cabinet" };
+#define NCTL ((int)(sizeof MIXER_CTLS / sizeof *MIXER_CTLS))
+
 struct alsa {
     struct audio_sink base;
     snd_pcm_t *pcm;
     int err_logged, recovered;
+    int lo_was[NCTL];         /* LINEOUT_SWITCH per MIXER_CTLS before we touched it: 1/0, -1 = none/unknown */
 };
+
+static int lineout_switch(const char *ctl, int on, const char *note);
 
 static void quiet(const char *file, int line, const char *function, int err, const char *fmt, ...)
 {
@@ -157,6 +199,12 @@ static void alsa_close(struct audio_sink *s)
     if (rc < 0) sel_log("audio: alsa drain: %s", snd_strerror(rc));
     rc = snd_pcm_close(a->pcm);
     sel_log("audio: alsa closed (%s), %d recover(s)", rc < 0 ? snd_strerror(rc) : "ok", a->recovered);
+    /* the amplifier gate back as it was found - only where it was shut */
+    {
+        int i;
+        for (i = 0; i < NCTL; i++)
+            if (a->lo_was[i] == 0) lineout_switch(MIXER_CTLS[i], 0, ", back as found");
+    }
     free(a);
 }
 
@@ -207,31 +255,77 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
     a->base.lead_ms = LEAD_MS;
     a->pcm = pcm;
     sel_log("audio: alsa %s ok (%d ch, %d Hz)", dev, AUDIO_CH, AUDIO_RATE);
+    /* the amplifier gate: the stream is accepted, now let it be heard */
+    for (i = 0; i < (size_t)NCTL; i++)
+        a->lo_was[i] = lineout_switch(MIXER_CTLS[i], 1, "");
     return &a->base;
 }
 
-static int mixer_set(const char *ctl, int v63)
+/* open ctl and look for simple mixer element `name` (index 0): the open
+ * mixer in *mp when the attach worked (the caller closes it once, element
+ * or not), the element or NULL.  Every failure is a log line naming the
+ * step, never a fatal one. */
+static snd_mixer_elem_t *mixer_find(const char *ctl, const char *name, snd_mixer_t **mp)
 {
     snd_mixer_t *m = NULL;
     snd_mixer_selem_id_t *id;
     snd_mixer_elem_t *e;
+    int rc;
+
+    *mp = NULL;
+    rc = snd_mixer_open(&m, 0);
+    if (rc < 0) { sel_log("audio: mixer %s: open: %s", ctl, snd_strerror(rc)); return NULL; }
+    rc = snd_mixer_attach(m, ctl);
+    if (rc < 0) { sel_log("audio: mixer %s: attach: %s", ctl, snd_strerror(rc)); snd_mixer_close(m); return NULL; }
+    rc = snd_mixer_selem_register(m, NULL, NULL);
+    if (rc < 0) { sel_log("audio: mixer %s: register: %s", ctl, snd_strerror(rc)); snd_mixer_close(m); return NULL; }
+    rc = snd_mixer_load(m);
+    if (rc < 0) { sel_log("audio: mixer %s: load: %s", ctl, snd_strerror(rc)); snd_mixer_close(m); return NULL; }
+    id = calloc(1, snd_mixer_selem_id_sizeof());
+    if (!id) { snd_mixer_close(m); return NULL; }
+    snd_mixer_selem_id_set_index(id, 0);
+    snd_mixer_selem_id_set_name(id, name);
+    e = snd_mixer_find_selem(m, id);
+    free(id);
+    *mp = m;
+    return e;
+}
+
+/* LINEOUT_SWITCH on ctl: on = 1 / 0, the way the game's 0x1faad4 does it.
+ * Returns what the switch read BEFORE (1/0), or -1 when the control has no
+ * such switch, could not be read, or refused the write - the caller then
+ * leaves it alone at close.  `note` ends the log line. */
+static int lineout_switch(const char *ctl, int on, const char *note)
+{
+    snd_mixer_t *m;
+    snd_mixer_elem_t *e = mixer_find(ctl, LINEOUT_SWITCH, &m);
+    int was = -1, rc;
+
+    if (!m) return -1;
+    if (!e || !snd_mixer_selem_has_playback_switch(e)) {
+        sel_log("audio: mixer %s: no '%s' switch (nothing to %s)", ctl, LINEOUT_SWITCH,
+                on ? "unmute" : "restore");
+        snd_mixer_close(m);
+        return -1;
+    }
+    if (snd_mixer_selem_get_playback_switch(e, 0, &was) < 0) was = -1;
+    rc = snd_mixer_selem_set_playback_switch_all(e, on ? 1 : 0);
+    sel_log("audio: mixer %s '%s' switch %s (was %s)%s%s%s", ctl, LINEOUT_SWITCH, on ? "on" : "off",
+            was < 0 ? "unreadable" : was ? "on" : "off", note,
+            rc < 0 ? ": " : "", rc < 0 ? snd_strerror(rc) : "");
+    snd_mixer_close(m);
+    if (rc < 0) return -1;
+    return was < 0 ? -1 : (was ? 1 : 0);
+}
+
+static int mixer_set(const char *ctl, int v63)
+{
+    snd_mixer_t *m;
+    snd_mixer_elem_t *e = mixer_find(ctl, "PCM", &m);
     long lo = 0, hi = 0, value;
     int rc;
 
-    rc = snd_mixer_open(&m, 0);
-    if (rc < 0) { sel_log("audio: mixer %s: open: %s", ctl, snd_strerror(rc)); return -1; }
-    rc = snd_mixer_attach(m, ctl);
-    if (rc < 0) { sel_log("audio: mixer %s: attach: %s", ctl, snd_strerror(rc)); snd_mixer_close(m); return -1; }
-    rc = snd_mixer_selem_register(m, NULL, NULL);
-    if (rc < 0) { sel_log("audio: mixer %s: register: %s", ctl, snd_strerror(rc)); snd_mixer_close(m); return -1; }
-    rc = snd_mixer_load(m);
-    if (rc < 0) { sel_log("audio: mixer %s: load: %s", ctl, snd_strerror(rc)); snd_mixer_close(m); return -1; }
-    id = calloc(1, snd_mixer_selem_id_sizeof());
-    if (!id) { snd_mixer_close(m); return -1; }
-    snd_mixer_selem_id_set_index(id, 0);
-    snd_mixer_selem_id_set_name(id, "PCM");
-    e = snd_mixer_find_selem(m, id);
-    free(id);
+    if (!m) return -1;
     if (!e) { sel_log("audio: mixer %s: no 'PCM' selem", ctl); snd_mixer_close(m); return -1; }
     snd_mixer_selem_get_playback_volume_range(e, &lo, &hi);
     /* the game's curve: 127*(v/63)^0.2 on a 0..127 scale, mapped onto the range */

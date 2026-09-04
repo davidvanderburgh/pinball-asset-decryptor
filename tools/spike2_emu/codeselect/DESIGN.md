@@ -233,13 +233,18 @@ full CLI, the log lines and the test list). What it is:
   `sound_confirm`. The log names which sound played and how long the exit
   waited for it. One single-threaded s16 44100 Hz stereo mixer (4 voices,
   saturating, `volume=` gain) pumped from the main loop into ONE sink:
-  `--audio auto` = ALSA when `snd_pcm_open("sysdefault:CARD=sgtl5000main")`
-  succeeds (the game's device, `snd_pcm_set_params` S16_LE / interleaved /
-  2 ch / 44100 / 500 ms, non-blocking `writei` in 1764-frame chunks,
-  `snd_pcm_recover` on -EPIPE, drain + close before the choice file; the
-  mixer untouched unless `mixer_volume=` (or `volume=machine`, the machine's
-  own number) asks for the game's codec curve on
-  `backbox` + `cabinet`), else the rig's FIFO when `PAD_AUDIO_PLAY` is set
+  `--audio auto` = ALSA when `snd_pcm_open` succeeds on `default` (the
+  machine's asound.conf: dmix on both the backbox and the cabinet card),
+  `cabinet_and_backbox`, `sysdefault:CARD=sgtl5000main` or `plughw:0,0`, in
+  that order (`snd_pcm_set_params` S16_LE / interleaved / 2 ch / 44100 /
+  500 ms, non-blocking `writei` in 1764-frame chunks, `snd_pcm_recover` on
+  -EPIPE, drain + close before the choice file; **the `Line Out Mute`
+  playback switch on ctl `backbox` + `cabinet` set ON while the sink is
+  open - the game's own amplifier gate, muted at power-up, the reason a
+  perfectly streamed menu was silent on the machine - and put back at close
+  where it was OFF**; the volume untouched unless `mixer_volume=` (or
+  `volume=machine`, the machine's own number) asks for the game's codec
+  curve on `backbox` + `cabinet`), else the rig's FIFO when `PAD_AUDIO_PLAY` is set
   (`44100 2` into the fmt file first, `O_WRONLY|O_NONBLOCK` with ENXIO
   retries, 200 ms lead, silence while idle, EAGAIN dropped and counted,
   EPIPE reopened through the same retries with the fmt file re-asserted

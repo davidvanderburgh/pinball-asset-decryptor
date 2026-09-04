@@ -1287,6 +1287,48 @@ _IDENT_BYTES = 4096
 _MACHINE_OWNED = (1, 5, 6)
 
 
+def _ext_identity(block):
+    """WHAT IDENTIFIES AN ext2/3/4 FILESYSTEM, out of the first 4 KiB of it -
+    or None when there is no superblock there.
+
+    THE SUPERBLOCK CANNOT BE COMPARED BYTE FOR BYTE.  Most of it MOVES on a
+    card that is being used for the thing it is for: the machine's fstab
+    gives the games partitions ``pass 2``, so it runs e2fsck on them at every
+    boot, and a check rewrites s_lastcheck, s_state and the mount count -
+    read-only mount or not.  Comparing the raw block refused a card that WAS
+    the right card (David, on his own: "still failed").
+
+    So this takes only the fields that a filesystem is BORN with and never
+    changes: the UUID (set once, at mkfs), its size in blocks and inodes,
+    its block size, and its label.  Free counts, timestamps, mount counts
+    and the clean/dirty state are all left out on purpose - none of them
+    says anything about WHICH games are on the card, and every one of them
+    moves.
+
+    WHAT THIS DOES AND DOES NOT PROVE, plainly.  It proves the card holds
+    the same FILESYSTEMS this image was built from, which is what catches
+    the case that matters: a menu written over somebody else's card, naming
+    games that are not there.  It does NOT tell two trees derived from the
+    same original card apart - a Standard and an Orchestral cut of one
+    Godzilla dump share a UUID, because both were copied from it rather than
+    made fresh.  That residual case costs a menu whose labels name the wrong
+    cut of the same game: visible the moment it boots, and nothing on the
+    card is damaged, because the games are never written.  Weighed against
+    refusing the right card - which a stricter check did, twice - that is
+    the better failure."""
+    if len(block) < 2048:
+        return None
+    sb = block[1024:2048]
+    if sb[0x38:0x3A] != b"\x53\xef":               # s_magic, 0xEF53 LE
+        return None
+    return (sb[0x68:0x78],                          # s_uuid
+            struct.unpack_from("<I", sb, 0x00)[0],  # s_inodes_count
+            struct.unpack_from("<I", sb, 0x04)[0],  # s_blocks_count_lo
+            struct.unpack_from("<I", sb, 0x14)[0],  # s_first_data_block
+            struct.unpack_from("<I", sb, 0x18)[0],  # s_log_block_size
+            sb[0x78:0x88])                          # s_volume_name
+
+
 def _mbr_primaries(mbr):
     """``[(index, type, lba, sectors)]`` from a 512-byte MBR, empty if it is
     not one.  Kept here rather than borrowed from the Stern plugin: core does
@@ -1367,7 +1409,7 @@ def menu_write_plan(image_path):
                 "not a Stern card image. Flash the whole image instead."
                 % os.path.basename(image_path))
         _i, _t, r_lba, r_count = rootfs[0]
-        prove = [(0, 512, "the card's partition table")]
+        prove = [(0, 512, "the card's partition table", "bytes")]
         for idx, ptype, lba, _count in prim:
             if idx == _ROOTFS_INDEX:
                 continue            # it is what we are about to overwrite
@@ -1376,19 +1418,20 @@ def menu_write_plan(image_path):
                         _ebr_chain(read_at, lba)):
                     part = 5 + n
                     prove.append((ebr * 512, 512,
-                                  "the card's p%d table entry" % part))
+                                  "the card's p%d table entry" % part,
+                                  "bytes"))
                     if ltype == 0x83 and part not in _MACHINE_OWNED:
                         # NAMED FOR WHAT IT IS TO A PERSON.  "p7's filesystem
                         # does not match" is true and useless; what it means
                         # is that the games on the card are not the games in
                         # this image, which is the one thing worth knowing.
                         prove.append((lstart * 512, _IDENT_BYTES,
-                                      "the games on p%d" % part))
+                                      "the games on p%d" % part, "ext"))
                 continue
             if (idx + 1) in _MACHINE_OWNED or ptype != 0x83:
                 continue        # p1 is FAT and the machine writes it
             prove.append((lba * 512, _IDENT_BYTES,
-                          "the games on p%d" % (idx + 1)))
+                          "the games on p%d" % (idx + 1), "ext"))
     return {"write": [(r_lba * 512, r_count * 512, "the menu partition (p2)")],
             "prove": prove, "sector": 512}
 
@@ -1396,12 +1439,23 @@ def menu_write_plan(image_path):
 def _ranges_match(dev, src, ranges, log=None):
     """Every range the same on the device and in the image?  -> (ok, what).
 
+    TWO KINDS OF SAME.  A partition table or an EBR sector is compared BYTE
+    FOR BYTE - nothing rewrites those.  A filesystem is compared by its
+    IDENTITY (:func:`_ext_identity`), because a card that has been used has
+    had its superblocks rewritten by e2fsck at boot, and refusing over a
+    changed check-time is refusing the right card.
+
     Reads the DEVICE through the aligned reader, so a 4096-sector card is
     read the way it insists on being read."""
-    for off, length, what in ranges:
+    for off, length, what, kind in ranges:
         want = _read_file_range(src, off, length)
-        got = dev._aligned_read(off, len(want))
-        if got[:len(want)] != want:
+        got = dev._aligned_read(off, len(want))[:len(want)]
+        if kind == "ext":
+            mine, theirs = _ext_identity(want), _ext_identity(got)
+            same = mine is not None and mine == theirs
+        else:
+            same = got == want
+        if not same:
             return False, what
         if log is not None:
             log("  %s matches" % what, "info")

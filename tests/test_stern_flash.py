@@ -645,6 +645,27 @@ def _entry(ptype, lba, count):
             + struct.pack("<II", lba, count))
 
 
+def _ext_sb(marker):
+    """A minimal ext4 superblock whose IDENTITY comes from *marker*, plus
+    mutable fields set to something.  1024 bytes, to be laid at offset 1024
+    of a partition - where a real one lives."""
+    sb = bytearray(1024)
+    struct.pack_into("<I", sb, 0x00, 419328)            # s_inodes_count
+    struct.pack_into("<I", sb, 0x04, 1675263)           # s_blocks_count_lo
+    struct.pack_into("<I", sb, 0x0C, 532955)            # s_free_blocks (moves)
+    struct.pack_into("<I", sb, 0x14, 0)                 # s_first_data_block
+    struct.pack_into("<I", sb, 0x18, 2)                 # s_log_block_size
+    struct.pack_into("<I", sb, 0x2C, 1788276185)        # s_mtime (moves)
+    struct.pack_into("<I", sb, 0x30, 1788276216)        # s_wtime (moves)
+    struct.pack_into("<H", sb, 0x34, 2)                 # s_mnt_count (moves)
+    sb[0x38:0x3A] = b"\x53\xef"                         # s_magic
+    struct.pack_into("<H", sb, 0x3A, 1)                 # s_state (moves)
+    struct.pack_into("<I", sb, 0x40, 1662358379)        # s_lastcheck (moves)
+    sb[0x68:0x78] = (marker * 16)[:16]                  # s_uuid - the identity
+    sb[0x78:0x88] = (marker * 16)[:16]                  # s_volume_name
+    return bytes(sb)
+
+
 def _fill(marker, size):
     """*marker*, repeated, EXACTLY *size* bytes long.  Slice-assigning a
     shorter bytes into a bytearray resizes it, which silently shifts every
@@ -671,6 +692,8 @@ def _spike_image(path, disk_id, games=b"GAMES", extra=b"EXTRA", menu=b"MENU"):
     for i, (ptype, lba, count, fill) in enumerate(parts):
         mbr[446 + i * 16:446 + (i + 1) * 16] = _entry(ptype, lba, count)
         img[lba * _SEC:(lba + count) * _SEC] = _fill(fill, count * _SEC)
+        if ptype == 0x83:               # ...with a superblock where one lives
+            img[lba * _SEC + 1024:lba * _SEC + 2048] = _ext_sb(fill)
     ext_lba, ext_count = 384, 384
     mbr[446 + 3 * 16:446 + 4 * 16] = _entry(0x0F, ext_lba, ext_count)
     mbr[510:512] = b"\x55\xaa"
@@ -678,6 +701,7 @@ def _spike_image(path, disk_id, games=b"GAMES", extra=b"EXTRA", menu=b"MENU"):
     logical = [(386, 100, b"DATA"), (514, 100, b"DUMP"), (642, 100, extra)]
     for n, (lba, count, fill) in enumerate(logical):
         ebr_lba = ext_lba + n * 128
+        sb_at = lba
         ebr = bytearray(_SEC)
         ebr[446:462] = _entry(0x83, lba - ebr_lba, count)
         if n + 1 < len(logical):
@@ -686,6 +710,7 @@ def _spike_image(path, disk_id, games=b"GAMES", extra=b"EXTRA", menu=b"MENU"):
         ebr[510:512] = b"\x55\xaa"
         img[ebr_lba * _SEC:(ebr_lba + 1) * _SEC] = ebr
         img[lba * _SEC:(lba + count) * _SEC] = _fill(fill, count * _SEC)
+        img[sb_at * _SEC + 1024:sb_at * _SEC + 2048] = _ext_sb(fill)
     with open(str(path), "wb") as f:
         f.write(img)
     return str(path)
@@ -704,7 +729,12 @@ def test_the_menu_plan_is_p2_and_a_proof_of_everything_else(tmp_path):
     # and images.conf live
     assert plan["write"] == [(128 * _SEC, 128 * _SEC,
                               "the menu partition (p2)")]
-    what = [w for _o, _l, w in plan["prove"]]
+    what = [w for _o, _l, w, _k in plan["prove"]]
+    # a filesystem is proved by its IDENTITY, a table by its bytes
+    assert dict((w, k) for _o, _l, w, k in plan["prove"])["the games on p3"] \
+        == "ext"
+    assert dict((w, k) for _o, _l, w, k in
+                plan["prove"])["the card's partition table"] == "bytes"
     assert what[0] == "the card's partition table"
     # every games tree is identified, and so is the boot partition...
     # named for what they are to a person, not for a partition number
@@ -723,7 +753,8 @@ def test_the_menu_plan_is_p2_and_a_proof_of_everything_else(tmp_path):
     assert not [w for w in what if "p1" in w]
     # nothing outside the image is read
     assert all(o + l <= os.path.getsize(img)
-               for o, l, _w in plan["prove"] + plan["write"])
+               for o, l, _w, *_k in
+               [p[:3] + ("",) for p in plan["prove"]] + plan["write"])
 
 
 def test_a_menu_write_replaces_the_menu_and_nothing_else(tmp_path):
@@ -900,12 +931,19 @@ def test_a_slow_flash_says_so_in_the_log(tmp_path, monkeypatch):
 
 
 def test_the_check_ignores_everything_the_machine_writes(tmp_path):
-    """A card that has BOOTED is still the card.  Its FAT boot partition has
-    been mounted (so its dirty flag moved), its /data holds settings and
-    scores and its /dump holds logs - and none of that says anything about
-    which games are on it.  Comparing them refuses the right card, which is
-    exactly what happened (David: "why is the write failing? this is the
-    exact raw image that I wrote onto the attached sd card")."""
+    """A card that has BOOTED is still the card, and everything it did to
+    itself on the way is not evidence about which games are on it.
+
+    Each of these refused the right card in turn (David, twice: "why is the
+    write failing? this is the exact raw image that I wrote onto the
+    attached sd card", and then "still failed"):
+
+      * p1 is FAT, and FAT is rewritten by being MOUNTED;
+      * /data and /dump are what the machine writes for a living;
+      * and the games partitions get e2fsck'd at EVERY boot - the fstab
+        gives them ``pass 2`` - which rewrites the superblock's check time,
+        state and mount count even though the mount itself is read-only.
+    """
     img = _spike_image(tmp_path / "img.raw", 0xA1B2C3D4)
     card = tmp_path / "card.raw"
     card.write_bytes((tmp_path / "img.raw").read_bytes())
@@ -913,18 +951,53 @@ def test_the_check_ignores_everything_the_machine_writes(tmp_path):
     # the machine mounted /mnt/boot: FAT's dirty flag and FSInfo moved
     raw[64 * _SEC + 0x25] = 0x01
     raw[65 * _SEC:65 * _SEC + 8] = b"FSINFOxx"
-    # ...and it has been played
+    # ...it has been played
     raw[386 * _SEC:386 * _SEC + 8] = b"SCORES!!"
     raw[514 * _SEC:514 * _SEC + 8] = b"LOGLINES"
+    # ...and e2fsck has been over both games trees at boot: check time, state,
+    # mount count and the free counts all move, the UUID does not
+    for lba in (256, 642):
+        sb = lba * _SEC + 1024
+        struct.pack_into("<I", raw, sb + 0x40, 1799999999)   # s_lastcheck
+        struct.pack_into("<H", raw, sb + 0x3A, 2)            # s_state
+        struct.pack_into("<H", raw, sb + 0x34, 47)           # s_mnt_count
+        struct.pack_into("<I", raw, sb + 0x2C, 1799999000)   # s_mtime
+        struct.pack_into("<I", raw, sb + 0x30, 1799999001)   # s_wtime
+        struct.pack_into("<I", raw, sb + 0x0C, 1)            # s_free_blocks
     card.write_bytes(bytes(raw))
     # ...and the menu still goes on, because none of that is a game
     n = rd.flash_menu_to_device(img, str(card), verify=True)
     assert n == 128 * _SEC
     assert _at(str(card), 386, 8) == b"SCORES!!", "and they are still there"
     assert _at(str(card), 514, 8) == b"LOGLINES"
-    assert _at(str(card), 64 * 1, 1) is not None
-    # the games ARE still checked, so a different card is still refused
+    # ...and e2fsck's marks are still on the card: nothing put them back
+    import struct as _s
+    assert _s.unpack_from("<I", card.read_bytes(),
+                          256 * _SEC + 1024 + 0x40)[0] == 1799999999
+    # THE GAMES ARE STILL CHECKED, by the one thing that does not move: a
+    # filesystem's UUID is set once, at mkfs, so two builds never share one
     other = _spike_image(tmp_path / "other.raw", 0xA1B2C3D4, games=b"OTHER")
     with pytest.raises(rd.FlashError) as e:
         rd.flash_menu_to_device(img, other)
     assert "the games on p3" in str(e.value)
+
+
+def test_a_filesystem_is_identified_by_what_it_is_born_with(tmp_path):
+    """The fields a filesystem never changes, against the ones it does."""
+    born = rd._ext_identity(b"\x00" * 1024 + _ext_sb(b"A"))
+    assert born is not None
+    same = bytearray(b"\x00" * 1024 + _ext_sb(b"A"))
+    for off, fmt, val in ((0x40, "<I", 1799999999),   # s_lastcheck
+                          (0x3A, "<H", 2),            # s_state
+                          (0x34, "<H", 47),           # s_mnt_count
+                          (0x2C, "<I", 1799999000),   # s_mtime
+                          (0x30, "<I", 1799999001),   # s_wtime
+                          (0x0C, "<I", 1)):           # s_free_blocks_count
+        struct.pack_into(fmt, same, 1024 + off, val)
+    assert rd._ext_identity(bytes(same)) == born, "these all move on a card"
+    # ...and the ones that do not
+    other = b"\x00" * 1024 + _ext_sb(b"B")
+    assert rd._ext_identity(other) != born
+    # anything that is not a filesystem is not identified at all
+    assert rd._ext_identity(b"\x00" * 2048) is None
+    assert rd._ext_identity(b"short") is None

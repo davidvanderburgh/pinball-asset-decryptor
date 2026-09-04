@@ -546,7 +546,7 @@ class RawDeviceFile:
         return length
 
     def copy_image_onto(self, src, total, *, progress=None, cancel=None,
-                        chunk=_FLASH_CHUNK):
+                        chunk=None):
         """Bulk-copy ``total`` bytes from file object *src* onto this device,
         starting at offset 0 (a dd-style flash).
 
@@ -565,6 +565,10 @@ class RawDeviceFile:
         if not self.writable:
             raise OSError("device opened read-only")
         sec = self.sector
+        # None, not the constant as a default argument: a default is bound
+        # at def time, so a test that wants a smaller chunk could not get
+        # one by patching the constant.
+        chunk = _FLASH_CHUNK if chunk is None else chunk
         # Round the read buffer down to a whole number of sectors so every
         # bulk write is sector-aligned; never let it collapse to zero.
         step = max((chunk // sec) * sec, sec)
@@ -938,6 +942,108 @@ def _locked_volumes(device_path, log=None):
             _CloseHandle(handle)
 
 
+#: Below this, a card is worth replacing rather than waiting for.  Every
+#: current card clears it several times over: the U3 / V30 marking IS a
+#: guaranteed 30 MB/s sustained write, and a real A2 card does 60-90.  A
+#: card under 10 MB/s is an old, a counterfeit, or a worn one.
+SLOW_CARD_MB_S = 10.0
+
+#: ...and how much has to have been written before saying so.  A cheap card
+#: takes its first gigabyte at the speed of its SLC cache; judging it inside
+#: that burst calls a good card slow, and judging it too late is no use at
+#: all.  256 MB and 20 s is past the burst on every card measured.
+_SLOW_AFTER_BYTES = 256 << 20
+_SLOW_AFTER_S = 20.0
+
+#: What to say about it - said ONCE per run, and only with a number in hand.
+#: Concrete, because "get a faster card" is not an instruction: these are the
+#: current A2/V30 families, the marking to look for, and the two other things
+#: that cap a write (the reader and the cable, not just the port).
+SLOW_CARD_ADVICE = (
+    "This card is writing at {rate:.1f} MB/s, which is slow enough to be "
+    "worth replacing: {whole} at this rate, against about {fast} on a "
+    "current card.\n"
+    "  * Look for A2 and V30 (or U3) on the card - V30 is a GUARANTEED "
+    "30 MB/s sustained write, and a real A2 card does 60-90 MB/s. SanDisk "
+    "Extreme, Samsung PRO Plus or EVO Select, Kingston Canvas Go! Plus and "
+    "Lexar Professional 1066x all qualify.\n"
+    "  * Buy 32 GB or bigger, and from a seller you trust. Small cards tend "
+    "to be old stock with old controllers, and fake cards are common - they "
+    "report a big size and write at a few MB/s, exactly like this.\n"
+    "  * Samsung PRO Endurance is the one built for a machine that writes "
+    "logs and scores every time it runs.\n"
+    "  * Check the READER and the CABLE, not just the port: a USB 2.0 reader "
+    "caps the whole path at about 35 MB/s however fast the card is.")
+
+#: ...and the one line that beats all of it where it applies: the fastest
+#: write is the one you do not do.
+SLOW_CARD_MENU_HINT = (
+    "\n  * You do not need this wait to change the MENU: tick 'Only the boot "
+    "menu' in the flash dialog and it writes one partition instead of the "
+    "whole image - about a minute, even on this card, and the machine keeps "
+    "its settings and scores.")
+
+
+def slow_card_advice(rate, total, menu_only=False):
+    """The advice, with this card's own numbers in it - or '' when the rate
+    is not one worth complaining about.
+
+    A message that quotes what the wait IS and what it WOULD BE is one
+    someone can act on; "your card is slow" is not.  *menu_only* adds the
+    line that beats a new card outright where it applies."""
+    if not rate or rate >= SLOW_CARD_MB_S * 1e6:
+        return ""
+    whole = _time_left(total / rate) if total else ""
+    fast = _time_left(total / (60 * 1e6)) if total else ""
+    text = SLOW_CARD_ADVICE.format(
+        rate=rate / 1e6,
+        whole=whole.replace("left", "for this write").strip() or "a long time",
+        fast=fast.replace(" left", "").replace("about ", "").strip()
+        or "a few minutes")
+    return text + (SLOW_CARD_MENU_HINT if menu_only else "")
+
+
+def _has_menu_partition(image_path):
+    """Could this image be written menu-only?  512 bytes of partition table,
+    so it is free to ask before offering the advice that says so."""
+    try:
+        menu_write_plan(image_path)
+        return True
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def _slow_card_watch(log, progress, menu_only=False):
+    """Wrap a progress callback so a slow card SAYS SO, once, while there is
+    still time to do something about it.
+
+    In the loop rather than at the end on purpose: finding out that the card
+    was the problem after the forty minutes is finding out too late (David:
+    "we should put some helpful information like this in the gui for when
+    users complain of slow speeds writing")."""
+    if log is None:
+        return progress
+    state = {"said": False, "t0": None, "b0": 0}
+
+    def wrapped(done, total, desc=""):
+        if progress is not None:
+            progress(done, total, desc)
+        if state["said"]:
+            return
+        now = time.monotonic()
+        if state["t0"] is None:
+            state["t0"], state["b0"] = now, done
+            return
+        span, moved = now - state["t0"], done - state["b0"]
+        if span < _SLOW_AFTER_S or moved < _SLOW_AFTER_BYTES:
+            return
+        state["said"] = True
+        note = slow_card_advice(moved / span, total, menu_only)
+        if note:
+            log(note, "warning")
+    return wrapped
+
+
 def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
                           cancel=None, verify=True, on_verify_start=None,
                           eject=True):
@@ -989,7 +1095,10 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
             with RawDeviceFile(device_path, writable=True) as dev:
                 with open(image_path, "rb") as src:
                     written = dev.copy_image_onto(
-                        src, img_size, progress=progress, cancel=cancel)
+                        src, img_size,
+                        progress=_slow_card_watch(
+                            log, progress, _has_menu_partition(image_path)),
+                        cancel=cancel)
                 dev.flush()
             # Read the card back and confirm it byte-for-byte matches the
             # image.  A raw flash has no other integrity check, and a

@@ -807,3 +807,87 @@ def test_the_pipeline_carries_menu_only_through(tmp_path, monkeypatch):
         lambda ok, summary: done.update(ok=ok, summary=summary))
     p2.run()
     assert done["ok"] is True and "Flashed" in done["summary"]
+
+
+# ---- telling someone their card is the problem, while it still helps -----------------
+def test_a_slow_card_is_named_with_numbers_and_what_to_buy():
+    """"Your card is slow" is not an instruction.  The advice quotes what the
+    wait IS and what it WOULD BE, and names cards and markings (David: "if
+    their speed is <10MB/s for example, propose that they update to a better
+    card with actual suggestions")."""
+    note = rd.slow_card_advice(6.0e6, 14_723_055_616)
+    assert "6.0 MB/s" in note
+    assert "about 41 minutes for this write" in note   # what it costs now
+    assert "against about 4 minutes" in note           # ...and what it need not
+    # the marking to look for, and cards that carry it
+    assert "A2" in note and "V30" in note
+    for card in ("SanDisk Extreme", "Samsung PRO Plus", "Kingston Canvas Go",
+                 "Lexar Professional"):
+        assert card in note
+    # the two things that are not the card
+    assert "READER" in note and "CABLE" in note
+    assert "fake cards" in note                        # the 6 MB/s classic
+    # ...and the software answer, only where it applies
+    assert "Only the boot menu" not in note
+    assert "Only the boot menu" in rd.slow_card_advice(
+        6.0e6, 14_723_055_616, menu_only=True)
+
+
+def test_a_card_that_is_fast_enough_is_not_lectured():
+    assert rd.slow_card_advice(rd.SLOW_CARD_MB_S * 1e6, 1 << 30) == ""
+    assert rd.slow_card_advice(90e6, 1 << 30) == ""
+    assert rd.slow_card_advice(0, 1 << 30) == ""
+    assert rd.slow_card_advice(None, 1 << 30) == ""
+
+
+def test_the_slow_card_note_waits_for_the_slc_burst_and_is_said_once():
+    """A cheap card takes its first gigabyte at cache speed, so judging it
+    inside that burst calls a good card slow - and judging it at the end is
+    no use to anyone."""
+    said = []
+    clock = [1000.0]
+    real = rd.time.monotonic
+    rd.time.monotonic = lambda: clock[0]
+    try:
+        seen = []
+        wrapped = rd._slow_card_watch(lambda t, k="info": said.append(t),
+                                      lambda d, t, desc="": seen.append(d))
+        total = 14_723_055_616
+        wrapped(0, total)                       # the first sample only starts it
+        assert said == []
+        clock[0] += 10.0
+        wrapped(60_000_000, total)              # 6 MB/s, but only 10 s in
+        assert said == []
+        clock[0] += 15.0
+        wrapped(150_000_000, total)             # 25 s, but under 256 MB
+        assert said == []
+        clock[0] += 30.0
+        wrapped(330_000_000, total)             # past both: now it says so
+        assert len(said) == 1 and "MB/s" in said[0]
+        clock[0] += 30.0
+        wrapped(500_000_000, total)             # ...and only once
+        assert len(said) == 1
+        # the wrapped progress callback still did its own job throughout
+        assert seen == [0, 60_000_000, 150_000_000, 330_000_000, 500_000_000]
+    finally:
+        rd.time.monotonic = real
+
+
+def test_a_slow_flash_says_so_in_the_log(tmp_path, monkeypatch):
+    """End to end: the note reaches the log the flash writes to."""
+    monkeypatch.setattr(rd, "_FLASH_CHUNK", 64 << 10)
+    monkeypatch.setattr(rd, "_SLOW_AFTER_BYTES", 4096)
+    monkeypatch.setattr(rd, "_SLOW_AFTER_S", 0.0)
+    monkeypatch.setattr(rd, "slow_card_advice",
+                        lambda rate, total, menu_only=False:
+                        "SLOW %.1f %s" % (rate / 1e6, menu_only))
+    img = _spike_image(tmp_path / "img.raw", 0xA1B2C3D4)
+    dev = tmp_path / "dev.raw"
+    dev.write_bytes(b"\x00" * os.path.getsize(img))
+    said = []
+    rd.flash_image_to_device(img, str(dev), verify=False,
+                             log=lambda t, k="info": said.append((k, t)))
+    notes = [t for k, t in said if t.startswith("SLOW")]
+    assert len(notes) == 1
+    # ...and it knows this image has a menu partition, so it offers that too
+    assert notes[0].endswith("True")

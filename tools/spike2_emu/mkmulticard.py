@@ -3295,6 +3295,13 @@ def inspect_card(card, media_out=None):
             # this image's OWN confirm sound; null = it plays the menu-wide one
             ("confirm", confirm or None), ("confirm_source", m.get("confirm_source")),
             ("art_source", m.get("art_source")), ("anim_source", m.get("anim_source")),
+            # ...and the music's, which media.json has always recorded and this
+            # report used to drop.  A loader that cannot see what a sound was
+            # MADE from has to compare a card's file name against a source path
+            # and can only conclude "stale", which is how a loaded card's sounds
+            # came back as "not rendered" with every one of them right there in
+            # the media directory.
+            ("music_source", m.get("music_source")),
             ("source", src), ("source_exists", exists),
             ("title_dir", title_dir), ("bypass", state),
             # what game code this image actually is, read off the card (item 90's version gate);
@@ -3348,6 +3355,12 @@ def inspect_card(card, media_out=None):
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
         ("mixer_volume", conf["mixer_volume"]),
         ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
+        # The SPECS those two were rendered from (media.json's, not the conf's -
+        # the conf only knows the file name that landed).  Same reason as
+        # music_source above: without them a load cannot tell a sound that is
+        # already right from one that needs re-rendering.
+        ("sound_move_source", (media_man or {}).get("sound_move_source")),
+        ("sound_confirm_source", (media_man or {}).get("sound_confirm_source")),
         ("font", conf["font"]), ("media_dir", conf["media_dir"]),
         ("theme", conf.get("theme")), ("colors", dict(conf.get("colors") or {})),
         ("media", media), ("media_out", out),

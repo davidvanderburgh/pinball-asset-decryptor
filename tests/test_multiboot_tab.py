@@ -32,7 +32,8 @@ from pinball_decryptor.gui.multiboot_tab import (
     PREVIEW_BUILD_DIR, PREVIEW_MAX_FRAMES,
     ImageRow, MultibootForm, anim_period_ms, anim_spec, apply_commands,
     art_spec, build_commands, bypass_commands, card_path_state,
-    card_size_view, cell_anim, status_checks,
+    card_size_view, cell_anim, split_music_source, split_sound_source,
+    status_checks,
     cell_art, default_output_path, diff_forms, frame_pattern,
     manifest_sounds, menu_from_state, parse_snapshot_frames, path_root,
     probe_card_path, rows_from_state,
@@ -7288,3 +7289,121 @@ def test_a_flash_takes_the_footer_and_gives_it_back(app):       # noqa: F811
     assert w._borrowed_row is None
     assert w._multiboot_phases_frame.winfo_manager() == "pack"
     assert w._write_phases_frame.winfo_manager() == ""
+
+
+# ---- a loaded card's sounds are the sounds it has ------------------------------------
+def test_a_sound_reads_back_as_the_spec_that_made_it():
+    """WHAT MADE IT, not what it made.  media.json has recorded the source of
+    every sound since they learned to re-render; inspect hands it over now,
+    and a field holding it can be compared with the manifest.  A field
+    holding the FILE NAME instead can only ever look stale."""
+    src = "/mnt/c/x/gz/audio/idx1369 - Look.wav"
+    assert split_sound_source("move.wav", "move sound", src) == \
+        ("C:/x/gz/audio/idx1369 - Look.wav", "")
+    # the words come back as words
+    assert split_sound_source("move.wav", "move sound", "auto") == ("auto", "")
+    assert split_sound_source("x.wav", "move sound", "synth") == ("synth", "")
+    assert split_sound_source("x.wav", "move sound", "auto@1717") == \
+        ("auto@1717", "")
+    # ...and a card built before media.json carried them still says so
+    val, why = split_sound_source("move.wav", "move sound", None)
+    assert val == "auto" and "not recorded" in why
+    assert split_sound_source("", "move sound", None) == ("none", "")
+    # music reads the same way
+    assert split_music_source("/mnt/c/a/b.wav") == "C:/a/b.wav"
+    assert split_music_source("auto") == "auto"
+    assert split_music_source("") == "none"
+    assert split_music_source("none") == "none"
+
+
+def _sounded_report(tmp_path):
+    """A report shaped like a real card's: every sound present, and every
+    source recorded beside it."""
+    rep = _rich_report(tmp_path)
+    rep["sound_move"] = "move.wav"
+    rep["sound_move_source"] = "/mnt/c/snd/look.wav"
+    rep["sound_confirm"] = "confirm.wav"
+    rep["sound_confirm_source"] = "auto"
+    for i, im in enumerate(rep["images"]):
+        im["music"] = "music%d.wav" % i
+        im["music_source"] = "/mnt/c/snd/bed%d.wav" % i
+        im["confirm"] = "confirm%d.wav" % i
+        im["confirm_source"] = "/mnt/c/snd/hit%d.wav" % i
+    return rep
+
+
+def test_a_loaded_cards_sounds_are_not_called_stale(tmp_path, monkeypatch):
+    """THE BUG THIS IS ABOUT: a load put the card's FILE NAMES in the form
+    and the staleness check compared them against media.json's SOURCES, so
+    every sound on a card just read came back "not rendered" with the wavs
+    sitting in the media directory (David: "the project that i am working on
+    right now is not even playing audio anymore... the audio music and
+    confirms are set")."""
+    _win(monkeypatch)
+    card = _card_file(tmp_path)
+    media = loaded_media_dir(card)
+    os.makedirs(media, exist_ok=True)
+    rep = _sounded_report(tmp_path)
+    man = {"images": [{"art": "art0.png", "anim": None,
+                       "music": "music0.wav",
+                       "music_source": "/mnt/c/snd/bed0.wav",
+                       "confirm": "confirm0.wav",
+                       "confirm_source": "/mnt/c/snd/hit0.wav"},
+                      {"art": "art1.png", "anim": "anim1.gif",
+                       "music": "music1.wav",
+                       "music_source": "/mnt/c/snd/bed1.wav",
+                       "confirm": "confirm1.wav",
+                       "confirm_source": "/mnt/c/snd/hit1.wav"}],
+           "sound_move": "move.wav",
+           "sound_move_source": "/mnt/c/snd/look.wav",
+           "sound_confirm": "confirm.wav", "sound_confirm_source": "auto"}
+    with open(os.path.join(media, "media.json"), "w", encoding="utf-8") as f:
+        json.dump(man, f)
+    for name in ("art0.png", "art1.png", "anim1.gif", "move.wav",
+                 "confirm.wav", "music0.wav", "music1.wav", "confirm0.wav",
+                 "confirm1.wav"):
+        with open(os.path.join(media, name), "wb") as f:
+            f.write(b"x")
+    root, panel = _panel()
+    try:
+        panel.load_inspect(rep, card)
+        # the FORM carries the specs that made the sounds...
+        assert panel._move_var.get() == "C:/snd/look.wav"
+        assert panel._confirm_var.get() == "auto"
+        assert [r.music for r in panel._rows] == \
+            ["C:/snd/bed0.wav", "C:/snd/bed1.wav"]
+        # ...so nothing is stale, and the preview does not re-render a thing
+        assert panel._sounds_missing() == []
+        # a card with no sources recorded still degrades to the old answer
+        old = _rich_report(tmp_path)
+        old["sound_move"] = "move.wav"
+        panel.load_inspect(old, card)
+        assert panel._move_var.get() == "auto"
+    finally:
+        root.destroy()
+
+
+def test_a_sound_really_changed_is_still_stale(tmp_path, monkeypatch):
+    """The staleness check has to keep working: the point was never to stop
+    noticing, it was to stop crying wolf."""
+    _win(monkeypatch)
+    card = _card_file(tmp_path)
+    media = loaded_media_dir(card)
+    os.makedirs(media, exist_ok=True)
+    man = {"images": [{"music": "music0.wav",
+                       "music_source": "/mnt/c/snd/bed0.wav"}],
+           "sound_move": "move.wav",
+           "sound_move_source": "/mnt/c/snd/look.wav"}
+    with open(os.path.join(media, "media.json"), "w", encoding="utf-8") as f:
+        json.dump(man, f)
+    for name in ("move.wav", "music0.wav"):
+        with open(os.path.join(media, name), "wb") as f:
+            f.write(b"x")
+    rep = _sounded_report(tmp_path)
+    root, panel = _panel()
+    try:
+        panel.load_inspect(rep, card)
+        panel._move_var.set("C:/snd/a-different-click.wav")
+        assert "the move sound" in panel._sounds_missing()
+    finally:
+        root.destroy()

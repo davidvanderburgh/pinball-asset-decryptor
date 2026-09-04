@@ -1239,3 +1239,50 @@ def test_padvidhost_reads_the_override_per_clip():
     body = text[text.index("def host_path(p):"):]
     assert "root = host_root()" in body
     assert "os.path.join(HOST_ROOT, p)" not in body, "host_path must not bypass the override"
+
+
+def test_the_menu_plays_to_the_machines_own_output_not_the_raw_card():
+    """THE DEVICE ORDER IS A CONTRACT WITH THE MACHINE'S /etc/asound.conf,
+    read off a Godzilla card:
+
+        pcm.!default -> plug -> cabinet_and_backbox
+                              -> route -> multi { dmixer_backbox (card 0),
+                                                  dmixer_cabinet  (card 1) }
+
+    Two things follow, and opening `sysdefault:CARD=sgtl5000main` got both
+    of them wrong.  dmix is what lets more than one program hold the card,
+    so the raw device can fail with EBUSY - and a failed open is silence
+    with a line in a log nobody reads (David, after a card that plays
+    perfectly in the emulator: "it's not playing audio through the speakers
+    at all").  And hw:0 is the BACKBOX ONLY: the cabinet speaker is a second
+    card that only `cabinet_and_backbox` feeds.
+
+    So `default` first, and the raw card kept last for a machine whose
+    asound.conf does not define it.  This is a source test on purpose:
+    nothing else can catch a well-meaning tidy-up putting the raw card back,
+    and the machine is the only place the difference shows."""
+    src = _read("codeselect/audio_alsa.c")
+    order = re.search(r"ALSA_DEVICES\[\]\s*=\s*\{(.*?)\}", src, re.S)
+    assert order, "the device list is what this test is about"
+    devs = re.findall(r'"([^"]+)"', order.group(1))
+    assert devs[0] == "default", "the machine's own output comes first"
+    assert "cabinet_and_backbox" in devs, "both speakers, by name"
+    assert devs.index("cabinet_and_backbox") < \
+        devs.index("sysdefault:CARD=sgtl5000main")
+    assert devs[-1] == "plughw:0,0", "the crudest thing that can work, last"
+    # ...and the open really walks the list rather than taking the first
+    assert "for (i = 0; i < sizeof ALSA_DEVICES" in src
+    # every failure is kept, because which devices a machine has NOT got is
+    # the whole diagnosis when a card comes back silent
+    assert 'sel_log("audio: alsa %s: %s", ALSA_DEVICES[i]' in src
+    assert 'sel_log("audio: alsa %s ok' in src
+
+
+def test_the_mixer_uses_the_control_names_the_card_defines():
+    """`ctl.backbox` (card 0) and `ctl.cabinet` (card 1) are defined by the
+    machine's asound.conf - so attaching a mixer to those names is right,
+    and they are NOT the sound cards' own names (sgtl5000main /
+    sgtl5000center / wm8962audio), which is what makes this worth pinning."""
+    src = _read("codeselect/audio_alsa.c")
+    assert 'mixer_set("backbox"' in src and 'mixer_set("cabinet"' in src
+    assert 'snd_mixer_selem_id_set_name(id, "PCM")' in src

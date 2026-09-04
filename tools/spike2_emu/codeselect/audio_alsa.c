@@ -59,7 +59,32 @@ extern int  snd_mixer_selem_set_playback_volume_all(snd_mixer_elem_t *, long);
 #define SND_PCM_STREAM_PLAYBACK      0
 #define SND_PCM_FORMAT_S16_LE        2
 #define SND_PCM_ACCESS_RW_INTERLEAVED 3
-#define ALSA_DEVICE   "sysdefault:CARD=sgtl5000main"
+/* THE DEVICES TO TRY, IN ORDER - and "default" is first for a reason.
+ *
+ * The machine's own /etc/asound.conf (read off a Godzilla card) makes
+ * `default` a plug over `cabinet_and_backbox`: a route over a multi of
+ * dmixer_backbox (card 0) and dmixer_cabinet (card 1), which is how the
+ * game reaches BOTH the backbox pair and the cabinet speaker.  Two things
+ * follow, and the menu was getting both of them wrong by opening the raw
+ * card instead:
+ *
+ *   1. dmix means SHARED.  `sysdefault:CARD=sgtl5000main` is a plug over
+ *      hw:0 with no mixing, so anything else holding card 0 when the menu
+ *      starts makes the open fail outright - and a failed open is silence
+ *      with a line in the log nobody reads (David, after a card that plays
+ *      fine in the emulator: "it's not playing audio through the speakers
+ *      at all").  The emulator never showed it: with no sound card there,
+ *      the ALSA open fails anyway and the rig's fifo takes over.
+ *   2. hw:0 is the BACKBOX ONLY.  The cabinet speaker is a second card, and
+ *      only `cabinet_and_backbox` feeds it.
+ *
+ * The raw card stays last so a machine without that asound.conf still gets
+ * sound, and `plughw:0,0` after it as the crudest thing that can work.
+ */
+static const char *const ALSA_DEVICES[] = {
+    "default", "cabinet_and_backbox", "sysdefault:CARD=sgtl5000main",
+    "plughw:0,0",
+};
 #define LATENCY_US    500000
 #define LEAD_MS       500
 #define CHUNK_FRAMES  1764          /* the game's period size */
@@ -139,18 +164,35 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
 {
     struct alsa *a;
     snd_pcm_t *pcm = NULL;
-    int rc;
+    const char *dev = NULL;
+    size_t i;
+    int rc = -1;
 
     snd_lib_error_set_handler(quiet);
-    rc = snd_pcm_open(&pcm, ALSA_DEVICE, SND_PCM_STREAM_PLAYBACK, 0);
-    if (rc < 0) {
-        snprintf(err, errlen, "snd_pcm_open(%s): %s", ALSA_DEVICE, snd_strerror(rc));
-        return NULL;
+    err[0] = 0;
+    for (i = 0; i < sizeof ALSA_DEVICES / sizeof *ALSA_DEVICES; i++) {
+        rc = snd_pcm_open(&pcm, ALSA_DEVICES[i], SND_PCM_STREAM_PLAYBACK, 0);
+        if (rc >= 0) { dev = ALSA_DEVICES[i]; break; }
+        /* every failure is kept: which devices a machine HAS NOT got is the
+         * whole diagnosis when a card comes back silent */
+        sel_log("audio: alsa %s: %s", ALSA_DEVICES[i], snd_strerror(rc));
+        if (err[0]) {
+            size_t n = strlen(err);
+            snprintf(err + n, (size_t)errlen > n ? errlen - n : 0, "; ");
+        }
+        {
+            size_t n = strlen(err);
+            snprintf(err + n, (size_t)errlen > n ? errlen - n : 0, "%s: %s",
+                     ALSA_DEVICES[i], snd_strerror(rc));
+        }
+        pcm = NULL;
     }
+    if (!pcm) return NULL;
     rc = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
                             AUDIO_CH, AUDIO_RATE, 1, LATENCY_US);
     if (rc < 0) {
-        snprintf(err, errlen, "snd_pcm_set_params: %s", snd_strerror(rc));
+        snprintf(err, errlen, "%s: snd_pcm_set_params: %s", dev,
+                 snd_strerror(rc));
         snd_pcm_close(pcm);
         return NULL;
     }
@@ -164,7 +206,7 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
     a->base.close = alsa_close;
     a->base.lead_ms = LEAD_MS;
     a->pcm = pcm;
-    sel_log("audio: alsa %s ok", ALSA_DEVICE);
+    sel_log("audio: alsa %s ok (%d ch, %d Hz)", dev, AUDIO_CH, AUDIO_RATE);
     return &a->base;
 }
 

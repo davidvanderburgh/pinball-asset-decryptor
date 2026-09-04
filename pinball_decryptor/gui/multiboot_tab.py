@@ -1293,6 +1293,24 @@ def split_confirm_source(spec):
     return host_path(s)
 
 
+def split_music_source(spec):
+    """A ``music_source`` from the card -> an :class:`ImageRow` value.
+
+    The same shape as :func:`split_confirm_source`, and it exists for the
+    same reason: what a load puts in the row has to be the spec that MADE
+    the sound, not the name of the file it made.  Compare a file name
+    against a source and the only possible answer is "these differ", which
+    is how a loaded card's music came back as 'not rendered' with the wav
+    sitting in the media directory (David: "the audio music and confirms
+    are set... what happened?")."""
+    t = (spec or "").strip()
+    if not t or t.lower() == "none":
+        return "none"
+    if t.lower() in ("auto", "synth") or _AUTO_IDX_RE.match(t):
+        return t.lower()
+    return host_path(t)
+
+
 def _image_args(form):
     args = ["--primary", wsl(form.images[0].path.strip().strip('"'))]
     for row in form.images[1:]:
@@ -1870,17 +1888,28 @@ def split_anim_source(spec):
     return ("auto" if s.lower() == "auto" else host_path(s)), start
 
 
-def split_sound_source(spec, what):
+def split_sound_source(spec, what, source=None):
     """A ``sound_move`` / ``sound_confirm`` from the card -> ``(value,
     note)``.
 
-    What a card carries here is the WAV the selector plays (``move.wav``),
-    not the spec that made it - images.conf and build.json both record the
-    file name, and selectmedia's manifest records no source for the sounds.
-    So a bare name means 'this card has a move sound, and which file made it
-    is not written down': the field shows the tab's default and says so.
-    Nothing acts on it until a media change makes the tools run again, and
-    the sound already on the card is untouched until then."""
+    *spec* is the WAV the selector plays (``move.wav``) - what images.conf
+    and build.json record - and *source* is what MADE it, which the card's
+    media.json has recorded since the sounds learned to re-render and which
+    ``inspect`` now hands over.  The source wins whenever there is one: a
+    field holding the file name it produced is a field that can only ever
+    look stale, and it made a loaded card report every sound as missing
+    while the wavs sat in its media directory.
+
+    Without one (a card built before media.json carried them) a bare name
+    still means 'this card has a move sound, and which file made it is not
+    written down': the field shows the tab's default and says so.  Nothing
+    acts on it until a media change makes the tools run again, and the sound
+    already on the card is untouched until then."""
+    src = (source or "").strip()
+    if src:
+        if src.lower() in _WORDS or _AUTO_IDX_RE.match(src):
+            return src.lower(), ""
+        return host_path(src), ""
     s = (spec or "").strip()
     if not s:
         return "none", ""
@@ -1960,7 +1989,9 @@ def rows_from_inspect(info):
             row.anim, row.anim_on_card = im["anim"], True
         else:
             row.anim = "none"
-        if im.get("music"):
+        if im.get("music_source"):
+            row.music = split_music_source(im["music_source"])
+        elif im.get("music"):
             row.music, row.music_on_card = im["music"], True
         else:
             row.music = "none"
@@ -1997,11 +2028,13 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
             "mark it '(on the card)'): it is kept and drawn as it is, and "
             "can be replaced in Edit image… but not re-made from what made "
             "it.")
-    move, why = split_sound_source(info.get("sound_move"), "move sound")
+    move, why = split_sound_source(info.get("sound_move"), "move sound",
+                                   info.get("sound_move_source"))
     if why:
         warnings.append(why)
     confirm, why = split_sound_source(info.get("sound_confirm"),
-                                      "confirm sound")
+                                      "confirm sound",
+                                      info.get("sound_confirm_source"))
     if why:
         warnings.append(why)
     ticked, _armed = bypass_state(info)

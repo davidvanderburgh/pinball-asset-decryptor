@@ -1773,3 +1773,18 @@ def test_proc_written_is_absent_rather_than_wrong(mk):
         assert got is None
     else:
         assert got is None or got >= 0
+
+
+def test_inspect_hands_over_the_sources_that_made_the_sounds(mk):
+    """media.json has recorded them since the sounds learned to re-render;
+    the report used to drop them, which left a loader comparing a card's
+    FILE NAME against a SOURCE and concluding "stale" every time."""
+    src = mk.inspect_card.__doc__ or ""
+    text = open(os.path.join(RIG, "mkmulticard.py"), encoding="utf-8").read()
+    # the per-image music source, beside the three already carried
+    assert '("music_source", m.get("music_source"))' in text
+    # ...and the menu's two, off media.json rather than the conf (the conf
+    # only ever knew the file name that landed)
+    assert '("sound_move_source", (media_man or {}).get("sound_move_source"))'         in text
+    assert ('("sound_confirm_source", '
+            '(media_man or {}).get("sound_confirm_source"))') in text

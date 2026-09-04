@@ -43,8 +43,12 @@ Stern's game validation and keep working with Insider Connected.
    always has.
 
 If anything in step 3 fails (program missing, exits non-zero, cannot open the
-display or the bus), `select.sh` logs to `/dump/log/codeselect.log` and boots
-the primary image — the card degrades to a stock card, never to a brick.
+display or the bus), `select.sh` says so on the console and boots the primary
+image — the card degrades to a stock card, never to a brick. The card log
+(`/dump/log/codeselect.log`) is a development switch: only a card built with
+`mkmulticard.py --debug-log` carries the `log=` line that turns it on, and
+even then a boot starts the file afresh (the previous boot's kept as `.1`)
+and writes at most 1 MiB, so no number of boots can fill the card.
 
 ## Behaviour in the emulator (the proof of concept)
 
@@ -363,9 +367,11 @@ full CLI, the log lines and the test list). What it is:
   ro,relatime,exec <dev> /mnt/multi` + `mount --bind /mnt/multi/<sub>
   /games`; the new `/games` must have `game`. Any failure undoes the mounts
   and puts `/dev/mmcblk0p3` back on `/games`: the primary boots. It never
-  touches `/mnt/boot` and logs to `/dump/log/codeselect.log`; the
-  `CODESELECT_*` variables let `test/select_sh_test.sh` run the whole hook
-  against a fake selector and fake mount/umount.
+  touches `/mnt/boot`; it passes `--log` (and writes its own lines) only when
+  images.conf has a `log=` line (`--debug-log`), else the card gets no log at
+  all; the `CODESELECT_*` variables let `test/select_sh_test.sh` run the whole
+  hook against a fake selector and fake mount/umount (`CODESELECT_LOG` forces
+  the log on or, empty, off).
 
 ## Card builder
 
@@ -421,7 +427,8 @@ across the hand-off and `alive.sh` read 0 after every run.
    15 s countdown boots the remembered image. Service **−/+/Select** on the
    coin door do the same without the node bus.
 3. If the menu never appears the card boots the primary (stock) by itself —
-   nothing else changes. Pull `/dump/log/codeselect.log` (the card's p6, or
+   nothing else changes. Read the serial console, or build the card with
+   `--debug-log` and pull `/dump/log/codeselect.log` (the card's p6, or
    through a root shell): look for `egl: up after N attempt(s)`,
    `nb: node 8 switches 00 ff 1f fb 40 00 00 00` (the first 0x11 answer) and
    `spi: rx ff 0f 0f …`. `short reply (timed out)` on every frame means the

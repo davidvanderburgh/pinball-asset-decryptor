@@ -18,6 +18,14 @@
 # the card degrades to a stock card, never to a brick. This script never
 # touches /mnt/boot. Writing the last-choice file is the selector's job.
 #
+# THE CARD LOG IS OFF unless images.conf carries a `log=<path>` line
+# (mkmulticard.py --debug-log writes log=/dump/log/codeselect.log): a card
+# the app builds writes nothing to /dump, boot after boot. The selector's
+# stderr (the same lines) still reaches the serial console. With a log= line
+# the selector starts the file afresh each boot (the previous boot's is kept
+# as <path>.1) and writes at most 1 MiB, and this script's own lines go there
+# too. CODESELECT_LOG=<path> forces a log, CODESELECT_LOG= (empty) none.
+#
 #   select.sh                     the hook (what /etc/init.d/game calls)
 #   select.sh --lookup N [conf]   print image N's device (without :<sub>)
 #   select.sh --lookup-sub N [conf]   print image N's subdirectory ("" when none)
@@ -30,8 +38,6 @@ DIR=${CODESELECT_DIR:-/usr/local/codeselect}
 CONF=${CODESELECT_CONF:-$DIR/images.conf}
 BIN=${CODESELECT_BIN:-$DIR/codeselect}
 OUT=${CODESELECT_OUT:-/var/volatile/codeselect.choice}
-LOGDIR=${CODESELECT_LOGDIR:-/dump/log}
-LOG="$LOGDIR/codeselect.log"
 PRIMARY=/dev/mmcblk0p3
 GAMES=${CODESELECT_GAMES:-/games}
 MULTI=${CODESELECT_MULTI:-/mnt/multi}
@@ -40,12 +46,18 @@ MOUNT=${CODESELECT_MOUNT:-mount}
 UMOUNT=${CODESELECT_UMOUNT:-umount}
 
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null) select.sh: $*" >> "$LOG" 2>/dev/null
+    [ -n "$LOG" ] && echo "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null) select.sh: $*" >> "$LOG" 2>/dev/null
     echo "select.sh: $*"
 }
 
 # AWK may name another awk (the tests run the card's busybox awk under qemu)
 AWK=${AWK:-awk}
+
+# the conf's `log=<path>` value ("" when there is none: the shipped default)
+conf_log() {
+    $AWK '/^[ \t]*log[ \t]*=/ { sub(/^[^=]*=[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }' "$1" 2>/dev/null
+}
+LOG=${CODESELECT_LOG-$(conf_log "$CONF")}
 
 # image N's device field split at ':' - prints "<dev>" or "<dev> <sub>":
 # the N-th (0-based) 'image=<device>|...' line of the conf
@@ -87,7 +99,10 @@ case "$1" in
         ;;
 esac
 
-mkdir -p "$LOGDIR" 2>/dev/null
+if [ -n "$LOG" ]; then
+    d=${LOG%/*}
+    [ "$d" != "$LOG" ] && mkdir -p "$d" 2>/dev/null
+fi
 
 [ -x "$BIN" ] || { log "no $BIN: booting primary"; exit 0; }
 [ -r "$CONF" ] || { log "no $CONF: booting primary"; exit 0; }
@@ -100,7 +115,7 @@ while [ "$i" -lt 30 ] && pidof boot_display >/dev/null 2>&1; do
 done
 
 rm -f "$OUT"
-"$BIN" --conf "$CONF" --out "$OUT" --log "$LOG"
+"$BIN" --conf "$CONF" --out "$OUT" ${LOG:+--log "$LOG"}
 rc=$?
 [ "$rc" -eq 0 ] || { log "selector exit $rc: booting primary"; exit 0; }
 

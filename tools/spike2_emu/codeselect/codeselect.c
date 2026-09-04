@@ -47,7 +47,7 @@
 #include "codec.h"
 #include "log.h"
 
-#define VERSION "2.8"
+#define VERSION "2.9"
 
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
 #define DEF_OUT      "/var/volatile/codeselect.choice"
@@ -116,7 +116,8 @@ static void usage(FILE *f)
         "  --timeout SEC      countdown, 0 = wait for ever (overrides conf)\n"
         "  --last PATH        last-choice file (default " DEF_LAST ")\n"
         "  --default N        highlight when there is no last choice (overrides conf)\n"
-        "  --log PATH         append diagnostics here (stderr always)\n"
+        "  --log PATH         diagnostics: a fresh file each run (the previous run kept as PATH.1),\n"
+        "                     at most 1 MiB per run; stderr always carries the same lines\n"
         "  --headless FILE.ppm  no EGL; write the final menu frame as a P6 PPM\n"
         "  --snapshot FILE.ppm  render ONE menu frame as a P6 PPM and exit: no display, input,\n"
         "                     audio, choice or last file (the preview)\n"
@@ -1182,10 +1183,12 @@ int main(int argc, char **argv)
     music_clip = media.music[hl];
     if (music_clip) music_voice = audio_play(au, music_clip, 1);
 
-    /* the loop's own account, every 5 s: how many passes, the longest one
-     * (a stall this long is a press that can be missed on a polled backend
-     * and a hitch in every picture), and how far the cache has got */
-    long long perf_due = start + 5000, perf_worst = 0;
+    /* the loop's own account: how many passes, the longest one (a stall this
+     * long is a press that can be missed on a polled backend and a hitch in
+     * every picture), and how far the cache has got.  Every 5 s for the first
+     * minute (the bring-up and the cache fill), then once a minute: a menu
+     * left idle must not talk a log full */
+    long long perf_every = 5000, perf_due = start + perf_every, perf_worst = 0;
     int perf_loops = 0;
 
     while (!g_stop) {
@@ -1280,11 +1283,13 @@ int main(int argc, char **argv)
                     if (media.anim[ci])
                         cn += snprintf(cs + cn, sizeof cs - (size_t)cn, "%s%d:%d/%d", cn ? " " : "",
                                        ci, art_anim_ready(media.anim[ci]), media.anim[ci]->n);
-                sel_log("perf: %d loops/5 s (%d/s), longest %lld ms; cache %s",
-                        perf_loops, perf_loops / 5, perf_worst, cn ? cs : "-");
+                sel_log("perf: %d loops in %lld s (%lld/s), longest %lld ms; cache %s",
+                        perf_loops, perf_every / 1000, perf_loops * 1000 / perf_every,
+                        perf_worst, cn ? cs : "-");
                 perf_loops = 0;
                 perf_worst = 0;
-                perf_due = now + 5000;
+                if (now - start >= 60000) perf_every = 60000;
+                perf_due = now + perf_every;
             }
         }
     }

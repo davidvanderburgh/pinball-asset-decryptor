@@ -1286,4 +1286,7 @@ def test_the_mixer_uses_the_control_names_the_card_defines():
     sgtl5000center / wm8962audio), which is what makes this worth pinning."""
     src = _read("codeselect/audio_alsa.c")
     assert 'mixer_set("backbox"' in src and 'mixer_set("cabinet"' in src
-    assert 'snd_mixer_selem_id_set_name(id, "PCM")' in src
+    # the element is looked up by name through mixer_find() (5b473ec added the
+    # 'Line Out Mute' switch beside it); the volume element is still "PCM"
+    assert 'mixer_find(ctl, "PCM"' in src
+    assert 'snd_mixer_selem_id_set_name(id, name)' in src

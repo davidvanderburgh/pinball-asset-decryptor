@@ -416,6 +416,31 @@ These have each been violated at least once and each cost a run or a window:
       check-hw green (fake-bus scans 124 -> 164 in the same 2.1 s). Injected,
       menu-written. NEXT LOG: `perf:` ~60 loops/s with longest < 30 ms once
       the cache is full; `anim: image N: 150 of 150 frames cached`.
+      **2026-09-04 2.8 "worked great" on the machine. Then David: "make sure
+      we are not endlessly writing logs to the card", and "logging to the
+      card is for my development debug sessions only, we should turn it off
+      for the app".** Measured on the card's p6: `--log` opened with "a" and
+      every boot appended ~7.5 KB (7 boots = 54 KB, for ever); stderr goes
+      to the serial console (S95game runs under init, no file). SELECTOR
+      2.9 + select.sh + mkmulticard: (1) THE CARD LOG IS OFF BY DEFAULT -
+      select.sh passes `--log` (and writes its own lines) only when
+      images.conf has a `log=<path>` line; `mkmulticard.py build|inject
+      --debug-log` writes `log=/dump/log/codeselect.log` (CARD_LOG); the
+      flag is never carried through from the card, so the app's inject
+      (which never passes it) turns a debug card's log off; `inspect` shows
+      `log=off|<path>`; CODESELECT_LOG=<path>/empty forces it for the tests.
+      (2) BOUNDED EVEN WHEN ON: sel_log_open() moves PATH to PATH.1 and
+      opens "w" (one run, one file, two on disk at most) and a run writes
+      at most 1 MiB (PAD_LOG_CAP=<bytes> for the tests; one closing `log:
+      N KB this run: the file stops here` line). (3) `perf:` every 5 s for
+      the first minute, then once a minute (an idle menu wrote 1.2 KB/min).
+      Tests: select_sh_test (off by default / log= on / CODESELECT_LOG),
+      headless.sh (rotation + cap), test_mkmulticard (render/parse/
+      conf_for_plan never carries log= through; the flag on the shared conf
+      flags). The rig test's stale `set_name(id, "PCM")` pin (broken since
+      5b473ec's mixer_find) repinned. David's card re-injected WITHOUT the
+      flag: no more menu logs on it (the old 54 KB /dump/log/codeselect.log
+      stays until something removes it; harmless).
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

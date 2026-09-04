@@ -74,9 +74,11 @@ image=/dev/mmcblk0p7:img2|MULTI 2|m
 image=/dev/mmcblk0p7:img9|MULTI 9|missing tree
 image=/dev/mmcblk0p7:../etc|BAD SUB|x
 EOF
-# the fake selector writes the index the test asks for and exits as asked
+# the fake selector writes the index the test asks for and exits as asked; it
+# records its own command line so the log switch can be checked
 cat > "$W/fakesel" <<'EOF'
 #!/bin/sh
+echo "$*" > "$SELARGS"
 out=""
 while [ $# -gt 0 ]; do [ "$1" = "--out" ] && out=$2; shift; done
 [ -n "$FAKE_IDX" ] && echo "$FAKE_IDX" > "$out"
@@ -103,9 +105,9 @@ rm -f "$1/game"
 exit 0
 EOF
 chmod 755 "$W/fakesel" "$W/fakemount" "$W/fakeumount"
-export FAKELOG="$W/calls"
+export FAKELOG="$W/calls" SELARGS="$W/selargs"
 export CODESELECT_DIR="$W" CODESELECT_CONF="$W/conf" CODESELECT_BIN="$W/fakesel" \
-       CODESELECT_OUT="$W/choice" CODESELECT_LOGDIR="$W/log" CODESELECT_GAMES="$W/games" \
+       CODESELECT_OUT="$W/choice" CODESELECT_GAMES="$W/games" \
        CODESELECT_MULTI="$W/multi" CODESELECT_MULTI_FALLBACK="$W/multi2" \
        CODESELECT_MOUNT="$W/fakemount" CODESELECT_UMOUNT="$W/fakeumount" CODESELECT_NO_BLKCHECK=1
 
@@ -128,6 +130,26 @@ G="$W/games"; M="$W/multi"
 # index 0: nothing is touched
 hook primary 0 0 ""
 grep -q "image 0 is the primary" "$W/out" || { echo "select_sh_test: FAIL (primary) message"; cat "$W/out"; exit 1; }
+# THE CARD LOG IS OFF BY DEFAULT: no --log for the selector, nothing under the log dir
+case " $(cat "$SELARGS") " in *" --log "*) echo "select_sh_test: FAIL the selector got --log with no log= in the conf"; cat "$SELARGS"; exit 1 ;; esac
+[ -z "$(ls -A "$W/log")" ] || { echo "select_sh_test: FAIL the hook wrote under the log dir with the log off"; ls -l "$W/log"; exit 1; }
+# a log= line in the conf (mkmulticard --debug-log) turns it on: the selector gets
+# --log <path> and the hook's own lines land in that file
+{ cat "$W/conf"; echo "log=$W/log/codeselect.log"; } > "$W/conf_log"
+export CODESELECT_CONF="$W/conf_log"
+hook logged 0 0 ""
+case " $(cat "$SELARGS") " in *" --log $W/log/codeselect.log "*) ;; *) echo "select_sh_test: FAIL log= in the conf did not reach the selector"; cat "$SELARGS"; exit 1 ;; esac
+grep -q "select.sh: image 0 is the primary" "$W/log/codeselect.log" || { echo "select_sh_test: FAIL the hook's line is not in the card log"; ls -l "$W/log"; exit 1; }
+# CODESELECT_LOG= (empty) forces it off even then; CODESELECT_LOG=<path> forces it on without the line
+export CODESELECT_LOG=
+hook forced_off 0 0 ""
+case " $(cat "$SELARGS") " in *" --log "*) echo "select_sh_test: FAIL CODESELECT_LOG= did not turn the log off"; cat "$SELARGS"; exit 1 ;; esac
+export CODESELECT_CONF="$W/conf" CODESELECT_LOG="$W/log/forced.log"
+hook forced_on 0 0 ""
+case " $(cat "$SELARGS") " in *" --log $W/log/forced.log "*) ;; *) echo "select_sh_test: FAIL CODESELECT_LOG=<path> did not turn the log on"; cat "$SELARGS"; exit 1 ;; esac
+grep -q "select.sh: image 0 is the primary" "$W/log/forced.log" || { echo "select_sh_test: FAIL the forced log holds no hook line"; exit 1; }
+unset CODESELECT_LOG
+rm -f "$W/log/codeselect.log" "$W/log/forced.log"
 # a plain device: umount + mount
 hook plain 1 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $G"
 grep -q "image 1: mounted /dev/mmcblk0p7 at $G" "$W/out" || { echo "select_sh_test: FAIL (plain) message"; cat "$W/out"; exit 1; }

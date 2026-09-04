@@ -435,6 +435,22 @@ grep -q "audio: --volume 70 overrides volume=machine" "$T/machine.log" \
     || { echo "headless: FAIL --volume did not override volume=machine"; grep audio "$T/machine.log"; exit 1; }
 expect "$T/choice" 0
 
+# THE LOG IS BOUNDED: one run, one file (the previous run's kept as .1), and a
+# run writes at most PAD_LOG_CAP bytes (1 MiB without the override) - a card
+# cannot fill up with menu logs however many boots it sees
+rm -f "$T/rot.log" "$T/rot.log.1"
+run "$T/menu_rot.ppm" "$T/two.conf" --log "$T/rot.log" --no-invert
+run "$T/menu_rot.ppm" "$T/two.conf" --log "$T/rot.log" --no-invert
+[ "$(grep -c 'codeselect .* starting' "$T/rot.log")" = 1 ] || {
+    echo "headless: FAIL the log is not one run's file (banners: $(grep -c 'codeselect .* starting' "$T/rot.log"))"; exit 1; }
+[ "$(grep -c 'codeselect .* starting' "$T/rot.log.1")" = 1 ] || { echo "headless: FAIL the previous run's log was not kept as .1"; exit 1; }
+PAD_LOG_CAP=600 run "$T/menu_rot.ppm" "$T/two.conf" --log "$T/rot.log" --no-invert
+grep -q "log: 0 KB this run: the file stops here (stderr goes on)" "$T/rot.log" || {
+    echo "headless: FAIL no cap line in a 600-byte-capped log"; tail -3 "$T/rot.log"; exit 1; }
+size=$(stat -c %s "$T/rot.log")
+[ "$size" -lt 1000 ] || { echo "headless: FAIL the capped log is $size bytes"; exit 1; }
+expect "$T/choice" 0
+
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"
 python3 "$HERE/ppm2png.py" "$T/menu_invert.ppm" "$T/codeselect_menu_invert.png" --rot180-of "$T/menu.ppm"

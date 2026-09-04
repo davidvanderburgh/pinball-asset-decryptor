@@ -1,7 +1,10 @@
 /* log.h - codeselect's two output channels.
  *
  *   sel_log()  diagnostics: stderr always, plus the --log file when one is
- *              open (appended, one line per call, with a monotonic timestamp).
+ *              open (one line per call, with a monotonic timestamp).  The
+ *              file is one run's: opening it moves the previous run's to
+ *              PATH.1, and a run writes at most 1 MiB (log.c) - the card
+ *              never fills up with menu logs, however many boots.
  *   sel_say()  the rig-facing lines: stdout, prefixed '[select] ', and ALSO
  *              copied into the log file so a hardware run's log holds the
  *              whole story (menu / key / chose / error).

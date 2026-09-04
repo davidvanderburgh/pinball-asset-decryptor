@@ -298,6 +298,40 @@ def test_images_conf_defaults_and_refusals(mk):
         mk.render_images_conf(["/dev/mmcblk0p3"], timeout=-1)
 
 
+def test_the_card_log_is_a_development_switch_the_app_never_sets(mk):
+    """The selector's log on the card (/dump/log/codeselect.log) exists only on a card built or
+    injected with --debug-log: the plain render carries no log= line (the hook then passes no
+    --log and the menu writes nothing to /dump, boot after boot), the flag writes exactly one,
+    parse hands it back as debug_log, and conf_for_plan never carries a card's old log= through
+    - so the app's inject, which never passes the flag, turns a development card's log off."""
+    import argparse
+    devs = ["/dev/mmcblk0p3", "/dev/mmcblk0p7"]
+    plain = mk.render_images_conf(devs, ["A", "B"])
+    assert not [l for l in plain.splitlines() if l.startswith("log")]
+    assert mk.parse_images_conf(plain)["debug_log"] is None
+    debug = mk.render_images_conf(devs, ["A", "B"], debug_log=True)
+    assert [l for l in debug.splitlines() if l.startswith("log")] == ["log=" + mk.CARD_LOG]
+    assert mk.CARD_LOG == "/dump/log/codeselect.log"
+    assert mk.parse_images_conf(debug)["debug_log"] == mk.CARD_LOG
+    # the flag is on build's and inject's shared conf flags, off by default
+    ap = argparse.ArgumentParser()
+    mk._add_conf_flags(ap)
+    assert ap.parse_args([]).debug_log is False
+    assert ap.parse_args(["--debug-log"]).debug_log is True
+    # an inject without the flag over a card that has the line: the line goes
+    plan = _two_image_plan(mk)
+    on_card = mk.parse_images_conf(mk.render_images_conf(plan.devices(), ["A", "B"], debug_log=True))
+    assert on_card["debug_log"] == mk.CARD_LOG
+    args = argparse.Namespace(titles="A;B", subtitles="", timeout=9, default=0, debug_log=False)
+    text = mk.conf_for_plan(plan, args, existing=on_card)
+    assert not [l for l in text.splitlines() if l.startswith("log")]
+    assert mk.parse_images_conf(text)["debug_log"] is None
+    # ...and with it, the line comes back
+    args.debug_log = True
+    text = mk.conf_for_plan(plan, args, existing=on_card)
+    assert mk.parse_images_conf(text)["debug_log"] == mk.CARD_LOG
+
+
 # ---- images.conf v2 (item 90 media): the image lines + the global keys -------------------
 def test_images_conf_v2_round_trips_media_and_the_keys(mk):
     text = mk.render_images_conf(["/dev/mmcblk0p3", "/dev/mmcblk0p7:img1", "p7:img2"], ["A", "B", "C"], ["a", "", "c"], 1, 0, None,

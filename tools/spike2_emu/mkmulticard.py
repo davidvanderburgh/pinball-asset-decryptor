@@ -41,6 +41,12 @@ wide as it needs to be - 3 fields with no media at all, 6 when no image names a 
 and every narrower form stays valid.  An image's own confirm is the sound that plays when THAT image
 is chosen; an empty field falls back to the menu-wide sound_confirm=.
 
+THE CARD LOG IS A DEVELOPMENT SWITCH.  `build`/`inject --debug-log` writes `log=/dump/log/codeselect.log`
+(CARD_LOG) into images.conf and select.sh then passes the selector `--log` (a fresh file each boot, the
+previous boot's kept as .1, 1 MiB at most).  Without the flag - the app never passes it - no log= line is
+written, the menu writes nothing to /dump boot after boot, and an inject turns an old debug card's log
+off; `inspect` prints `log=off` or the path.
+
 THE TWO JSON SIDECARS (item 90, "load a finished card back into the editor").  Beside
 images.conf - never inside media/, never in the media budget, never opened by the selector
 (it reads images.conf and the files that names) - `build` and `inject` also stage
@@ -196,6 +202,11 @@ LAST_REACHABLE_PART = MMC_BLOCK_MINORS - 1          # p7
 # ---- what goes on the card -----------------------------------------------------------------
 SELECT_DIR = "/usr/local/codeselect"
 GAME_SCRIPT = "/etc/init.d/game"
+#: Where a --debug-log card's selector writes its diagnostics (images.conf log=).  Without the
+#: flag no log= line is written and the menu writes NOTHING to /dump, boot after boot: the card
+#: log is for development sessions, never a card the app builds.  With it the selector starts
+#: the file afresh each boot (the previous boot's is kept as .1) and writes at most 1 MiB.
+CARD_LOG = "/dump/log/codeselect.log"
 DEVICE_FMT = "/dev/mmcblk0p%d"
 HOST_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 PKILL_LINE = "pkill boot_display "            # the trailing space is Stern's; the anchor is exact
@@ -1063,13 +1074,14 @@ def check_machine_volume(mv):
 
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None,
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
-                       media_dir=None, theme=None, colors=None, machine_volume=None):
+                       media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
     own, 6 when some other media is set, else the 3-field form every older selector reads.  The
     global keys follow.  `theme` (a built-in's name or 'custom') and `colors` ({role: RRGGBB}) are
-    the menu's colours (see THEMES_JSON); neither is written when not given."""
+    the menu's colours (see THEMES_JSON); neither is written when not given.  `debug_log` writes
+    `log=CARD_LOG` (the selector's diagnostics on the card - a development build only)."""
     devices = list(devices)
     if not devices:
         raise Refused("images.conf: no images")
@@ -1149,6 +1161,10 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     for role in boot_themes()["roles"]:
         if role in colors:
             out.append("color_%s=%s" % (role, colors[role]))
+    if debug_log:
+        out.append("# log: the selector's diagnostics ON THE CARD (a fresh file each boot, the previous")
+        out.append("# boot's kept as .1, 1 MiB at most) - a development card; the app writes no log= line")
+        out.append("log=%s" % CARD_LOG)
     return "\n".join(out) + "\n"
 
 
@@ -1156,7 +1172,7 @@ def parse_images_conf(text):
     """-> {'images': [(device, title, subtitle)], 'media': [(art, anim, music, confirm)] (aligned,
     '' = none), 'default': int, 'timeout': int, 'font': str|None, 'sound_move': str|None,
     'sound_confirm': str|None, 'volume': int|None, 'mixer_volume': int|None, 'media_dir': str|None,
-    'theme': str|None, 'colors': {role: rrggbb}}.
+    'theme': str|None, 'colors': {role: rrggbb}, 'debug_log': str|None (the log= path)}.
     3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
     '|' ':' or '/', or more than 16 images is refused.  Unknown keys are ignored (the file may
     grow).  The theme name is kept as the card spells it (an unknown one is what `inspect` should
@@ -1166,7 +1182,7 @@ def parse_images_conf(text):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "default": 0, "timeout": 15, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
-            "theme": None, "colors": {}, "machine_volume": None}
+            "theme": None, "colors": {}, "machine_volume": None, "debug_log": None}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -1208,6 +1224,8 @@ def parse_images_conf(text):
             conf["media_dir"] = val.strip() or None
         elif key == "theme":
             conf["theme"] = val.strip().lower() or None
+        elif key == "log":
+            conf["debug_log"] = val.strip() or None
         elif key.startswith("color_"):
             m = COLOR_RE.match(val.strip())
             if key[6:] in boot_themes()["roles"] and m:
@@ -2056,7 +2074,9 @@ def conf_for_plan(plan, args, existing=None, media=None):
     without it an `existing` conf's media fields are carried through unchanged.  The theme:
     --theme is the whole answer for the name (and, given alone, drops the card's old colour
     overrides); --color alone keeps the card's theme and replaces its overrides; neither flag
-    carries the card's own through; a card with none gets none."""
+    carries the card's own through; a card with none gets none.  The card log (`log=`) is
+    --debug-log's alone: it is never carried through from the card, so an inject without the
+    flag - the app's - turns a development card's log off."""
     if getattr(args, "conf", None):
         with open(args.conf, "r") as f:
             text = f.read()
@@ -2121,7 +2141,7 @@ def conf_for_plan(plan, args, existing=None, media=None):
             colors = dict(ex.get("colors") or {})
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
-                              machine_volume=mv)
+                              machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)))
 
 
 # ============================================================================= the JSON sidecars
@@ -3113,7 +3133,8 @@ def verify_card(card, plan, selector_dir=None, media_dir=None):
         for (d, t, s), m in zip(conf["images"], conf["media"]):
             print("    image %s | %s | %s%s"
                   % (d, t, s, "".join(" | %s" % x for x in m) if any(m) else ""))
-        print("    default=%d timeout=%d font=%s" % (conf["default"], conf["timeout"], conf["font"]))
+        print("    default=%d timeout=%d font=%s log=%s" % (conf["default"], conf["timeout"], conf["font"],
+                                                            conf.get("debug_log") or "off"))
         print("    sound_move=%s sound_confirm=%s volume=%s mixer_volume=%s media=%s"
               % (conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"], conf["media_dir"]))
         if selector_dir:
@@ -3362,6 +3383,7 @@ def inspect_card(card, media_out=None):
         ("sound_move_source", (media_man or {}).get("sound_move_source")),
         ("sound_confirm_source", (media_man or {}).get("sound_confirm_source")),
         ("font", conf["font"]), ("media_dir", conf["media_dir"]),
+        ("debug_log", conf.get("debug_log")),
         ("theme", conf.get("theme")), ("colors", dict(conf.get("colors") or {})),
         ("media", media), ("media_out", out),
         ("has_media_json", media_json is not None), ("has_build_json", build is not None),
@@ -3391,9 +3413,9 @@ def print_inspect(rep):
     if rep.get("build"):
         print("built      %s by %s %s" % (rep["build"].get("written"), rep["build"].get("tool"),
                                           rep["build"].get("version")))
-    print("menu       default=%s timeout=%s volume=%s mixer_volume=%s sound_move=%s sound_confirm=%s font=%s"
+    print("menu       default=%s timeout=%s volume=%s mixer_volume=%s sound_move=%s sound_confirm=%s font=%s log=%s"
           % (rep["default"], rep["timeout"], rep["volume"], rep["mixer_volume"],
-             rep["sound_move"], rep["sound_confirm"], rep["font"]))
+             rep["sound_move"], rep["sound_confirm"], rep["font"], rep.get("debug_log") or "off"))
     colors = "".join(" color_%s=%s" % kv for kv in sorted((rep.get("colors") or {}).items()))
     print("theme      %s%s" % (rep.get("theme") or "(the selector's default)", colors))
     for im in rep["images"]:
@@ -4018,6 +4040,10 @@ def _add_conf_flags(s):
     s.add_argument("--color", action="append", metavar="ROLE=RRGGBB",
                    help="one colour on top of the theme (repeatable; the roles are in themes.json)")
     s.add_argument("--conf", help="use this images.conf verbatim instead of generating one")
+    s.add_argument("--debug-log", action="store_true",
+                   help="DEVELOPMENT ONLY: images.conf log=%s - the selector writes its diagnostics to the card "
+                        "(a fresh file each boot, the previous boot's kept as .1, 1 MiB at most). Without it the "
+                        "menu writes nothing to /dump; an inject without it turns a card's log off again" % CARD_LOG)
 
 
 def _bypass_after_build(card, plan):

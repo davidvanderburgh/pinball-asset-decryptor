@@ -95,7 +95,7 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--timeout` | conf `timeout=`, else 10 | seconds; 0 = wait for START/ACTION; a key press restarts it |
 | `--last` | `/data/codeselect.last` | read for the initial highlight, written on confirm |
 | `--default` | conf `default=`, else 0 | highlight when the last-choice file is missing/invalid |
-| `--log` | none | appended; stderr always carries the same lines |
+| `--log` | none | one run, one file: the previous run's is moved to `PATH.1` first, and a run writes at most 1 MiB (`PAD_LOG_CAP=<bytes>` for the tests); stderr always carries the same lines. On the card the hook passes it ONLY when images.conf has a `log=` line (`mkmulticard.py --debug-log`): a card the app builds writes nothing to `/dump` |
 | `--headless` | off | no EGL; the loop runs (1360x768) and the last menu frame is written as P6 PPM; the LOADING frame goes to `FILE.loading.ppm` |
 | `--snapshot` | off | render ONE menu frame (1360x768, the moment the menu appears) as a P6 PPM and exit 0 - no EGL, no input backend, no audio, no choice/last file: the preview (below) |
 | `--highlight` | conf `default=`, else 0 | `--snapshot` only: the highlighted card (0-based); the last-choice file is never read; past the last image = exit 2 |
@@ -198,8 +198,9 @@ which is the case wrapping cannot help with.
   ON DEMAND - the tick that shows frame k decodes frame k, a wrap starts
   the file over - because they need frame k exactly. The input scan is a
   thread too (nice -5, `hw: input thread up`), the game's own layout, so no
-  frame of the menu loop can swallow a press; `perf:` every 5 s gives the
-  loop's passes per second, its longest pass and the cache's fill.
+  frame of the menu loop can swallow a press; `perf:` (every 5 s for the
+  first minute, then once a minute so an idle menu cannot talk a log full)
+  gives the loop's passes per second, its longest pass and the cache's fill.
 * **Confirm**: one `LOADING <title>...` frame with the chosen card's picture
   above the line; it stays up (swapped every frame) while the confirm sound
   plays to completion, then the program exits and the LCD keeps that frame
@@ -844,7 +845,11 @@ START held, `00 59 7f ..` = ACTION held, `04 59 7e ..` = Left Coin).
 
 ## What to look for on hardware
 
-In `/dump/log/codeselect.log` (also the serial console):
+On the serial console, or in `/dump/log/codeselect.log` on a card built or
+injected with `mkmulticard.py --debug-log` (the card log is a development
+switch: a card the app builds carries no `log=` line and the menu writes
+nothing to `/dump`, boot after boot; with the switch on, each boot starts the
+file afresh, keeps the previous boot's as `.1`, and writes at most 1 MiB):
 
 ```
 nb: /dev/ttymxc1 open (460800 8N2, VMIN 0 VTIME 3)

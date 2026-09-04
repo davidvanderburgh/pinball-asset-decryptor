@@ -5432,7 +5432,8 @@ def test_a_load_over_unsaved_changes_asks_before_it_reads(tmp_path,
     root, panel, card, _media = _loaded(tmp_path)
     other = _card_file(tmp_path, "second.multi.raw")
     reads = []
-    monkeypatch.setattr(panel, "load_card", lambda p: reads.append(p))
+    monkeypatch.setattr(panel, "load_card",
+                        lambda p, **kw: reads.append(p))
     asked = []
 
     def answer(title, message):
@@ -5463,7 +5464,8 @@ def test_browse_reads_a_card_it_picked_and_only_sets_a_new_one(tmp_path,
     root, panel = _panel()
     card = _card_file(tmp_path)
     reads = []
-    monkeypatch.setattr(panel, "load_card", lambda p: reads.append(p))
+    monkeypatch.setattr(panel, "load_card",
+                        lambda p, **kw: reads.append(p))
     monkeypatch.setattr(
         multiboot_tab.messagebox, "askyesno",
         lambda *a, **kw: pytest.fail("asked with an empty tab"))
@@ -5896,7 +5898,8 @@ def test_browse_asks_before_it_touches_the_box(tmp_path, monkeypatch):
     root, panel, card, _media = _loaded(tmp_path)
     other = _card_file(tmp_path, "second.multi.raw")
     reads = []
-    monkeypatch.setattr(panel, "load_card", lambda p: reads.append(p))
+    monkeypatch.setattr(panel, "load_card",
+                        lambda p, **kw: reads.append(p))
     monkeypatch.setattr(multiboot_tab.filedialog, "asksaveasfilename",
                         lambda **kw: other)
     monkeypatch.setattr(multiboot_tab.messagebox, "askyesno",
@@ -6925,3 +6928,130 @@ def test_cancel_drops_the_action_that_was_waiting_for_a_render(tmp_path):
         assert panel._pending_run is None
     finally:
         root.destroy()
+
+
+def test_opening_the_tab_measures_a_restored_card(tmp_path, monkeypatch):
+    """A RESTORED SESSION GETS A SIZE.  `restore_state` starts no tool, and
+    the arm it makes on the way through is cancelled - but `_maybe_plan`
+    records the list it is about, so nothing ever asks again and the strip
+    reads "-" until the person edits the image list.  Opening the tab is the
+    deliberate act (it is already what reads the card and draws the picture),
+    and of the three the plan is the mildest: it reads the images and writes
+    nothing."""
+    monkeypatch.setattr(multiboot_tab.messagebox, "askyesno",
+                        lambda *a, **kw: True)
+    root, panel = _panel(plan=True)
+    panel.load_card = lambda p, **kw: True
+    try:
+        a, b = _images(tmp_path, 2)
+        assert panel.restore_state(
+            {"v": 1, "card": "", "menu": {},
+             "images": [{"path": a}, {"path": b}]}) is True
+        # the restore measured nothing, and left nothing armed
+        assert panel._plan_job is None and panel.size_view() is None
+        assert panel._size_need.cget("text") == panel.SIZE_UNKNOWN
+        panel.on_shown()
+        assert panel._plan_job is not None      # ...opening it asks
+        assert "Measuring" in panel._size_detail.cget("text")
+        # ...and once there is an answer, opening it again asks nothing
+        panel._plan_step("plan", 0, PLAN_TEXT)
+        panel._cancel_plan()
+        panel.on_shown()
+        assert panel._plan_job is None
+        assert panel._size_need.cget("text") == "16 GB"
+    finally:
+        root.destroy()
+
+
+def test_a_size_check_that_failed_says_so_in_the_strip(tmp_path):
+    """The one state the strip used to have no words for: an empty bar and
+    nothing beside it, which reads as a tab that has forgotten to do its
+    job."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._plan_step("plan", 2, "[card] error: no logical chain")
+        panel._draw_size()
+        assert panel.size_view() is None
+        assert panel._size_need.cget("text") == panel.SIZE_UNKNOWN
+        assert "size check failed" in panel._size_detail.cget("text")
+        # ...and a new answer clears it
+        panel._plan_step("plan", 0, PLAN_TEXT)
+        assert panel._size_need.cget("text") == "16 GB"
+        assert "failed" not in panel._size_detail.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_a_read_nobody_asked_for_does_not_paint_the_tab_red(tmp_path,
+                                                            monkeypatch):
+    """THE RESTORED PATH IS READ ON EVERY LAUNCH, and it is as often where a
+    card WILL be written as a card to read - so half a build, a stock image
+    or a card made without a selector are ordinary things to find there.
+    They were reported as errors, in the destructive colour, on every start
+    (David: "why is the red text there?")."""
+    card = _card_file(tmp_path)
+    _inspect_stand_in(monkeypatch, tmp_path, _rich_report(tmp_path),
+                      refusal="[card] error: %s: no /usr/local/codeselect "
+                              "on its p2" % multiboot_tab.wsl(card),
+                      refuse_at="inspect")
+    root, panel = _panel()
+    th = multiboot_tab.THEMES[panel._theme_fn()]
+    try:
+        panel._out_var.set(card)
+        panel._pending_read = True
+        panel.on_shown()
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        hint = panel._hint.cget("text")
+        assert "not a card this tab can read" in hint
+        assert "no /usr/local/codeselect on its p2" in hint
+        # the tool leads with the path the sentence already names; it goes
+        assert "/mnt/" not in hint
+        assert str(panel._hint.cget("foreground")) == th["gray"]
+        # ...and the row stops offering the load that just refused
+        panel._probe_for = card
+        panel._probe_facts = {"kind": "file"}
+        panel._update_edit_status()
+        line = panel._edit_lbl.cget("text")
+        assert "is not a multi-boot card" in line
+        assert "Load card reads it into the form" not in line
+        # a run that writes makes that stale: a build at that path has just
+        # made it a card
+        panel._set_busy(True)
+        panel._set_busy(False)
+        assert panel._unreadable is None
+    finally:
+        root.destroy()
+
+
+def test_a_read_the_person_asked_for_still_says_it_plainly(tmp_path,
+                                                           monkeypatch):
+    card = _card_file(tmp_path)
+    _inspect_stand_in(monkeypatch, tmp_path, _rich_report(tmp_path),
+                      refusal="[card] error: no /usr/local/codeselect",
+                      refuse_at="inspect")
+    root, panel = _panel()
+    th = multiboot_tab.THEMES[panel._theme_fn()]
+    try:
+        assert panel.load_card(card) is True
+        _wait(root, lambda: not panel._busy)
+        assert "Cannot read" in panel._hint.cget("text")
+        assert str(panel._hint.cget("foreground")) == th["error"]
+    finally:
+        root.destroy()
+
+
+def test_a_refusal_drops_the_path_the_sentence_already_carries():
+    about = "C:/x/gz multi/godzilla.multi.raw"
+    assert parse_refusal(
+        "[card] error: /mnt/c/x/gz multi/godzilla.multi.raw: no selector",
+        about) == "no selector"
+    # a path that is NOT the file in hand is part of the reason, not a prefix
+    assert parse_refusal(
+        "[card] error: /mnt/c/other.raw: no selector", about) == \
+        "/mnt/c/other.raw: no selector"
+    # ...and without a file in hand nothing is dropped
+    assert parse_refusal("[card] error: /mnt/c/x.raw: no selector") == \
+        "/mnt/c/x.raw: no selector"
+    assert parse_refusal("[card] error: no selector", about) == "no selector"

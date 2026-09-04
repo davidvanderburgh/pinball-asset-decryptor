@@ -1804,15 +1804,32 @@ def parse_inspect(text):
 _REFUSAL_PREFIXES = ("[card] error:", "refused:")
 
 
-def parse_refusal(text):
-    """The tool's own refusal line, without the prefix, or ''.  What a failed
-    load says on the tab instead of an exit code."""
+def parse_refusal(text, about=""):
+    """The tool's own refusal line, without its prefix, or ''.  What a failed
+    load says on the tab instead of an exit code.
+
+    *about* is the file the caller names in its own sentence.  The tool leads
+    most refusals with the path, and on this tab that is a WSL spelling of a
+    path the sentence already carries - long enough to push the actual reason
+    off the end of the one line the status block gives it - so a leading path
+    that names the same file is dropped."""
     for line in reversed((text or "").splitlines()):
         s = line.strip()
         for prefix in _REFUSAL_PREFIXES:
             if s.lower().startswith(prefix):
-                return s[len(prefix):].strip() or s
+                return _drop_path_prefix(s[len(prefix):].strip(), about) or s
     return ""
+
+
+def _drop_path_prefix(why, about):
+    """``'/mnt/c/.../x.raw: no selector on its p2'`` -> ``'no selector on its
+    p2'``, and only when the path it leads with names the very file *about*
+    does."""
+    head, sep, tail = (why or "").partition(": ")
+    if (sep and tail.strip() and about
+            and os.path.basename(head) == os.path.basename(about)):
+        return tail.strip()
+    return why
 
 
 _TIME_RE = re.compile(r"^\d+(\.\d+)?$")
@@ -2327,9 +2344,19 @@ def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
     elif kind == "dir":
         state = ("dir", "That path is a folder, not a card.", "error", False)
     elif kind == "file":
-        state = ("file",
-                 "%s is on disk — Load card reads it into the form; Build & "
-                 "verify would write over it." % name, "fg", True)
+        why = (facts or {}).get("unreadable")
+        if why:
+            # It has been read, and it refused.  The sentence says what was
+            # found rather than going on offering the load that failed - but
+            # it does not forbid another: a half-built card at this path
+            # becomes a real one the moment it is built.
+            state = ("unreadable",
+                     "%s is on disk but is not a multi-boot card: %s"
+                     % (name, why), "fg", True)
+        else:
+            state = ("file",
+                     "%s is on disk — Load card reads it into the form; "
+                     "Build & verify would write over it." % name, "fg", True)
     elif kind == "missing":
         if (facts or {}).get("parent"):
             sentence = "Build & verify will write a new card at %s." % name
@@ -3519,6 +3546,9 @@ class MultibootPanel:
         #: that starts a TOOL without being pressed.
         self._plan_for = None
         self._plan_job = None
+        #: ...and whether the last one FAILED, so the strip can say that
+        #: instead of showing an empty bar with nothing beside it.
+        self._plan_failed = False
         self._auto_plan = os.environ.get("PAD_MULTIBOOT_PLAN", "1") != "0" \
             and os.environ.get("PAD_MULTIBOOT_AUTO", "1") != "0"
         #: The two modals.  Their widgets are built on demand and bound to
@@ -3556,6 +3586,12 @@ class MultibootPanel:
         #: A restored card path that has not been read yet - :meth:`on_shown`
         #: reads it the first time the tab is opened.
         self._pending_read = False
+        #: ``(path, why)`` for a card at the output path that would not be
+        #: read - what keeps the row's sentence from going on offering a
+        #: load the tool has already refused.  Dropped the moment the box
+        #: names something else, and after any run that writes (a build
+        #: makes that very path into a card).
+        self._unreadable = None
         self._loaded_form = None
         self._loaded_info = None
         self._armed = False
@@ -4573,6 +4609,8 @@ class MultibootPanel:
                     if len(missing) < len(self._rows) else "")
         if self._plan_job is not None or self._plan_busy():
             return "Measuring\u2026"
+        if self._plan_failed:
+            return "The size check failed - see the Log."
         return ""
 
     def _plan_busy(self):
@@ -5371,11 +5409,15 @@ class MultibootPanel:
 
         Never the answer for OTHER text: a stale fact shown against a path
         it is not about is worse than no fact at all."""
+        facts = {"kind": "unknown"}
         if self._probe_for is not None and self._probe_for == field:
-            return self._probe_facts
-        if self._probe_slow and self._probe_text == field:
-            return {"kind": "looking"}
-        return {"kind": "unknown"}
+            facts = dict(self._probe_facts or {})
+        elif self._probe_slow and self._probe_text == field:
+            facts = {"kind": "looking"}
+        bad = self._unreadable
+        if bad is not None and _plain(bad[0]) == _plain(field):
+            facts["unreadable"] = bad[1]
+        return facts
 
     def _schedule_probe(self, refresh=False):
         """Debounce the stat the same way the preview debounces its render:
@@ -5541,6 +5583,23 @@ class MultibootPanel:
         # it should fire off that event for us").  Opening the tab is the
         # deliberate act; the app still starts no tool merely by launching.
         self.schedule_preview()
+        # AND SO DOES THE SIZE, for exactly the same reason - and it needs
+        # asking for, because _maybe_plan will NEVER ask by itself after a
+        # restore: restore_state cancels the arm it made but leaves
+        # ``_plan_for`` naming that list, so every later call sees the
+        # question as already asked and the strip reads "-" for the whole
+        # session (David, on a restored two-image Godzilla card: "why isn't
+        # the SD card needed / grey bar filled in").  Of the three things
+        # this method starts, it is the mildest: the plan READS the images'
+        # superblocks and writes nothing, takes no rig lock, and touches no
+        # rootfs.
+        if self._plan_info is None and not self._plan_failed:
+            self._plan_for = None
+            self._maybe_plan()
+            # ...and the strip says so: _maybe_plan blanks it on the way IN
+            # and arms the debounce after, so nothing has drawn the state it
+            # is now in ("Measuring...") until something else redraws.
+            self._draw_size()
         if not getattr(self, "_pending_read", False):
             return False
         self._pending_read = False
@@ -5549,7 +5608,7 @@ class MultibootPanel:
         path = self._out_var.get().strip().strip('"')
         if not path or not os.path.isfile(path):
             return False
-        return bool(self._load_or_reload(confirm=False))
+        return bool(self._load_or_reload(confirm=False, asked=False))
 
     def _path_committed(self, _event=None):
         """<Return> in the path box: read the card it names.
@@ -5571,7 +5630,7 @@ class MultibootPanel:
                      "again in a moment.")
         return "break"
 
-    def _load_or_reload(self, confirm=True):
+    def _load_or_reload(self, confirm=True, asked=True):
         """The row's one verb: read the card the path box names.
 
         A LOAD IS A CLICK AND NEVER A KEYSTROKE - there is no <Return> and
@@ -5596,7 +5655,7 @@ class MultibootPanel:
         # kind of question that teaches people to click through questions.
         if confirm and not self._confirm_discard(path):
             return False
-        return self.load_card(path)
+        return self.load_card(path, asked=asked)
 
     def _browse_card(self):
         """ONE picker for both meanings of this box: the card to read, and
@@ -6249,6 +6308,7 @@ class MultibootPanel:
             return
         self._plan_for = key
         self._plan_info = None
+        self._plan_failed = False
         self._draw_size()               # the stale number goes NOW, not later
         self._cancel_plan()
         if len(key) < 1 or not self._auto_plan:
@@ -6323,9 +6383,11 @@ class MultibootPanel:
             return
         if rc == 0:
             self._plan_info = parse_plan(text)
+            self._plan_failed = False
             self._take_versions(self._plan_info.get("versions") or {})
         else:
             self._plan_info = None
+            self._plan_failed = True
         # WHAT THE SENTENCE NOW DESCRIBES.  Claimed here rather than when
         # the run was asked for, so the build's own plan step - the same
         # answer, about the same images - keeps the tab from asking twice.
@@ -6483,11 +6545,21 @@ class MultibootPanel:
     # loading a card, and writing the menu back into it
     # ------------------------------------------------------------------
 
-    def load_card(self, path):
+    def load_card(self, path, asked=True):
         """Read an existing multi-image card into the form: two inspects on
         the worker (the tool's table into the pane, the same read as JSON
         for the fields), the card's media extracted beside it, and then
-        :meth:`load_inspect`.  False when the tab refused to start."""
+        :meth:`load_inspect`.  False when the tab refused to start.
+
+        *asked* is False for the ONE read nobody asked for - the restored
+        path, read when the tab is first opened (:meth:`on_shown`).  A
+        refusal of that one is not an error: the path is where a card WILL
+        be written as often as it is a card to read, and half a build, a
+        stock image or a card made without a selector are all ordinary
+        things to find there.  It is said once, in the ordinary colour, and
+        the row's own sentence carries it from then on - instead of a red
+        line on every launch about a card the person has not built yet
+        (David: "why is the red text there?")."""
         path = (path or "").strip().strip('"')
         if not os.path.isfile(path):
             self._error("No such card image: %s" % path)
@@ -6530,9 +6602,17 @@ class MultibootPanel:
                     # the branch below removes.
                     self._ok("Reading %s was cancelled." % path)
                     return
-                why = parse_refusal(texts.get(failed, "")) or \
+                why = parse_refusal(texts.get(failed, ""), path) or \
                     "%s failed (exit %d) - see the tool output." % (failed, rc)
-                self._error("Cannot read %s: %s" % (path, why))
+                # WHAT THE ROW SAYS FROM NOW ON.  Remembered against the
+                # path, so the sentence under the box stops offering to read
+                # a file that has just refused to be read.
+                self._unreadable = (path, why)
+                if asked:
+                    self._error("Cannot read %s: %s" % (path, why))
+                else:
+                    self._ok("%s is not a card this tab can read: %s"
+                             % (os.path.basename(path), why))
                 if mine:
                     # Empty only: a refusal that got as far as writing files
                     # leaves them for the person to look at.
@@ -8710,7 +8790,11 @@ class MultibootPanel:
             # the card the row was calling missing, an apply changes it, a
             # load that failed may have taken a directory away - and the row
             # reads a CACHED stat, so without this it went on describing the
-            # state before the run for ever.
+            # state before the run for ever.  The same goes for "that file
+            # is not a multi-boot card": a build at that path has just made
+            # it one.  (A load's own refusal is recorded in its ``on_done``,
+            # which runs after this - see _start_worker's finish.)
+            self._unreadable = None
             self._refresh_facts()
         # ...and Apply to card is only ever live for a loaded card whose
         # image list still matches it.

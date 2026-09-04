@@ -708,8 +708,7 @@ def test_the_menu_plan_is_p2_and_a_proof_of_everything_else(tmp_path):
     assert what[0] == "the card's partition table"
     # every games tree is identified, and so is the boot partition...
     # named for what they are to a person, not for a partition number
-    assert "the card's p1" in what and "the games on p3" in what
-    assert "the games on p7" in what
+    assert "the games on p3" in what and "the games on p7" in what
     # ...the logical chain is walked...
     assert ["the card's p%d table entry" % n for n in (5, 6, 7)] == \
         [w for w in what if "table entry" in w]
@@ -717,6 +716,11 @@ def test_the_menu_plan_is_p2_and_a_proof_of_everything_else(tmp_path):
     # writes them, so they differ on any card that has ever booted
     assert "the games on p5" not in what
     assert "the games on p6" not in what
+    # ...and NOT p1, which is the trap: it is FAT, and FAT is rewritten by
+    # being MOUNTED (the dirty flag, the FSInfo block), so it stops matching
+    # the image the moment the machine reads the kernel out of it.  It
+    # refused a card that WAS the right card.
+    assert not [w for w in what if "p1" in w]
     # nothing outside the image is read
     assert all(o + l <= os.path.getsize(img)
                for o, l, _w in plan["prove"] + plan["write"])
@@ -893,3 +897,34 @@ def test_a_slow_flash_says_so_in_the_log(tmp_path, monkeypatch):
     assert len(notes) == 1
     # ...and it knows this image has a menu partition, so it offers that too
     assert notes[0].endswith("True")
+
+
+def test_the_check_ignores_everything_the_machine_writes(tmp_path):
+    """A card that has BOOTED is still the card.  Its FAT boot partition has
+    been mounted (so its dirty flag moved), its /data holds settings and
+    scores and its /dump holds logs - and none of that says anything about
+    which games are on it.  Comparing them refuses the right card, which is
+    exactly what happened (David: "why is the write failing? this is the
+    exact raw image that I wrote onto the attached sd card")."""
+    img = _spike_image(tmp_path / "img.raw", 0xA1B2C3D4)
+    card = tmp_path / "card.raw"
+    card.write_bytes((tmp_path / "img.raw").read_bytes())
+    raw = bytearray(card.read_bytes())
+    # the machine mounted /mnt/boot: FAT's dirty flag and FSInfo moved
+    raw[64 * _SEC + 0x25] = 0x01
+    raw[65 * _SEC:65 * _SEC + 8] = b"FSINFOxx"
+    # ...and it has been played
+    raw[386 * _SEC:386 * _SEC + 8] = b"SCORES!!"
+    raw[514 * _SEC:514 * _SEC + 8] = b"LOGLINES"
+    card.write_bytes(bytes(raw))
+    # ...and the menu still goes on, because none of that is a game
+    n = rd.flash_menu_to_device(img, str(card), verify=True)
+    assert n == 128 * _SEC
+    assert _at(str(card), 386, 8) == b"SCORES!!", "and they are still there"
+    assert _at(str(card), 514, 8) == b"LOGLINES"
+    assert _at(str(card), 64 * 1, 1) is not None
+    # the games ARE still checked, so a different card is still refused
+    other = _spike_image(tmp_path / "other.raw", 0xA1B2C3D4, games=b"OTHER")
+    with pytest.raises(rd.FlashError) as e:
+        rd.flash_menu_to_device(img, other)
+    assert "the games on p3" in str(e.value)

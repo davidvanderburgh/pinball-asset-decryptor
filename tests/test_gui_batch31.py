@@ -486,3 +486,53 @@ def test_the_flash_dialog_offers_the_menu_only_write(app, monkeypatch,
         assert dlg._menu_var.get() is False
     finally:
         dlg._dlg.destroy()
+
+
+@pytest.mark.gui
+@gui_only
+def test_a_window_short_of_its_content_still_shows_start_and_cancel(
+        app, monkeypatch, tmp_path):
+    """A DIALOG CAN BE WRONG ABOUT ITS HEIGHT; IT MUST NOT BE ABLE TO EAT THE
+    TWO CONTROLS THAT END IT.  pack() hands out space in the order things
+    were packed, so whatever went in LAST is what gets squeezed when the
+    window ends up short of its content - and that was the row carrying
+    Start and Cancel (David: "the confirm and cancel buttons in this modal
+    are squeezed to be too tiny to see" - his were 10 px of a wanted 25,
+    two coloured slivers with no text in them).
+
+    The row is packed FIRST now, against the bottom, so the body is what
+    gives way instead.  Forcing the window 90 px short is this test: it is
+    the state the screenshot was in, and it reproduced at exactly 10 px."""
+    _pick(app, "stern")
+    img = _spike_image_for(tmp_path)
+    dlg = _make_dialog(app, monkeypatch,
+                       initial_choices={"build": False, "write": True})
+    try:
+        dlg._image_var.set(img)
+        dlg._sync_sections()
+        app.root.update()
+        w, start = dlg._dlg, dlg._start_btn
+        # ...as it opens: the window is as tall as everything inside it
+        assert w.winfo_height() >= w.winfo_reqheight()
+        assert start.winfo_height() >= start.winfo_reqheight()
+        # ...and 90 px short of that, which is what a note growing a line
+        # after the geometry was pinned does to it
+        w.geometry("%dx%d" % (w.winfo_width(), w.winfo_reqheight() - 90))
+        app.root.update()
+        assert w.winfo_height() < w.winfo_reqheight(), "the force worked"
+        assert start.winfo_height() >= start.winfo_reqheight(), \
+            "Start is squeezed: %d of %d" % (start.winfo_height(),
+                                             start.winfo_reqheight())
+        # every state of the ticks keeps it that way: each one changes the
+        # note, and the readout changes with them
+        for build, write, menu in ((True, True, False), (False, True, True),
+                                   (False, False, False)):
+            dlg._build_var.set(build)
+            dlg._write_var.set(write)
+            dlg._menu_var.set(menu)
+            dlg._sync_sections()
+            app.root.update()
+            assert start.winfo_height() >= start.winfo_reqheight(), \
+                "build=%s write=%s menu=%s" % (build, write, menu)
+    finally:
+        dlg._dlg.destroy()

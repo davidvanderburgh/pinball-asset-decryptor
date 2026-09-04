@@ -188,8 +188,19 @@ class FlashImageDialog:
         dlg.resizable(False, False)
         dlg.protocol("WM_DELETE_WINDOW", self._cancel)
 
-        body = ttk.Frame(dlg, padding=16)
+        # THE BUTTON ROW IS PACKED FIRST, AGAINST THE BOTTOM, and only
+        # filled in at the end.  pack() hands out space in the order things
+        # were packed, so the LAST widget in is the one squeezed when the
+        # window ends up a few pixels short of its content - and that was
+        # the row carrying Start and Cancel (David: "the confirm and cancel
+        # buttons in this modal are squeezed to be too tiny to see").  A
+        # dialog can be wrong about its height; it must not be able to eat
+        # the two controls that end it.
+        btn_row = ttk.Frame(dlg, padding=(16, 0, 16, 16))
+        btn_row.pack(side="bottom", fill="x")
+        body = ttk.Frame(dlg, padding=(16, 16, 16, 8))
         body.pack(fill="both", expand=True)
+        self._btn_row = btn_row
 
         header = (getattr(self._mfr, "flash_header", None)
                   or "Build an image and/or write one onto a %s" % noun)
@@ -350,9 +361,10 @@ class FlashImageDialog:
                 anchor="w").pack(fill="x", pady=(6, 0))
 
         # Buttons — green "go" Start, red Cancel (David: Cancel is red in
-        # general, matching the live-run Cancel in the main window).
-        btn_row = ttk.Frame(body)
-        btn_row.pack(fill="x", pady=(14, 0))
+        # general, matching the live-run Cancel in the main window).  The
+        # row itself was packed at the top of this method; only its contents
+        # are made here, where they read in order with everything else.
+        btn_row = self._btn_row
         ttk.Button(btn_row, text="Cancel", command=self._cancel,
                    style="Danger.TButton").pack(side="right")
         self._start_btn = ttk.Button(
@@ -360,6 +372,7 @@ class FlashImageDialog:
             style="Go.TButton")
         self._start_btn.pack(side="right", padx=(0, 8))
 
+        self._built = True
         self._center()
         dlg.bind("<Escape>", lambda _e: self._cancel())
         dlg.deiconify()
@@ -370,6 +383,34 @@ class FlashImageDialog:
         except tk.TclError:
             dlg.update()
             dlg.grab_set()
+
+    def _refit(self):
+        """Re-fit the window to what it NOW needs, where it already is.
+
+        The dialog is not resizable and its size is pinned once, at the end
+        of :meth:`_build` - so anything that grows the content afterwards
+        comes out of the last thing packed, which is the button row.  David
+        got a Start and a Cancel squeezed to coloured slivers with no text
+        in them, under a note that had grown by a line after the geometry
+        was set.
+
+        Everything that can change the height calls :meth:`_update_readout`
+        on its way through, so this hangs off the end of that: the ticks
+        (which swap the menu-only note), the drive list, the readout itself.
+        It keeps the position - a dialog that re-centred every time someone
+        ticked a box would walk across the screen."""
+        if not getattr(self, "_built", False):
+            return
+        dlg = self._dlg
+        try:
+            dlg.update_idletasks()
+            want = (max(dlg.winfo_reqwidth(), 620), dlg.winfo_reqheight())
+            if want != (dlg.winfo_width(), dlg.winfo_height()):
+                dlg.geometry("%dx%d+%d+%d"
+                             % (want[0], want[1], dlg.winfo_x(),
+                                dlg.winfo_y()))
+        except tk.TclError:                             # pragma: no cover
+            pass
 
     def _center(self):
         dlg = self._dlg
@@ -579,7 +620,16 @@ class FlashImageDialog:
         self._update_readout()
 
     def _update_readout(self):
-        """Show image size vs card capacity and a preliminary fit check."""
+        """Show image size vs card capacity and a preliminary fit check -
+        and then re-fit the window to whatever that left it needing.
+
+        EVERYTHING THAT CHANGES THIS DIALOG'S HEIGHT COMES THROUGH HERE (the
+        ticks, the drive list, the readout's own three states), which is why
+        the re-fit hangs off it rather than off each of them."""
+        self._readout_text()
+        self._refit()
+
+    def _readout_text(self):
         th = self._theme
         if not self._write_var.get():
             self._readout.configure(text="", foreground=th["gray"])

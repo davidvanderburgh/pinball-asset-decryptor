@@ -1266,11 +1266,25 @@ _ROOTFS_INDEX = 1
 #: apart with certainty.  A FAT boot sector is in the same 4 KiB.
 _IDENT_BYTES = 4096
 
-#: The two partitions a menu write deliberately leaves alone.  p5 is /data
-#: (the machine's settings, its NVRAM, its scores) and p6 is /dump - the
-#: machine writes both, so they are EXPECTED to differ from the image, and
-#: keeping them is half the point of a menu-only write.
-_MACHINE_OWNED = (5, 6)
+#: The partitions a menu write neither compares nor writes, because the
+#: MACHINE owns what is in them and they differ from the image on any card
+#: that has ever booted:
+#:
+#:   p1  /mnt/boot, and it is FAT.  A FAT filesystem is rewritten by being
+#:       MOUNTED - the dirty flag in the boot sector, the FSInfo block - so
+#:       its first bytes stop matching the image the moment the machine
+#:       reads the kernel out of it.  This one cost a refusal on a card that
+#:       WAS the right card (David: "why is the write failing? this is the
+#:       exact raw image that I wrote onto the attached sd card").  It was
+#:       only ever a cheap extra proof, and it proved nothing about which
+#:       GAMES are on the card, which is the whole question.
+#:   p5  /data - the settings, the NVRAM, the scores.
+#:   p6  /dump - the logs.
+#:
+#: What is left is what cannot drift: the partition table and the EBR chain
+#: (nothing rewrites those), and the ext4 superblock of every games tree,
+#: which the machine mounts READ-ONLY and therefore never touches.
+_MACHINE_OWNED = (1, 5, 6)
 
 
 def _mbr_primaries(mbr):
@@ -1323,12 +1337,16 @@ def menu_write_plan(image_path):
     THE PROOF IS THE WHOLE SAFETY ARGUMENT.  Writing one partition onto a
     card is only correct if the rest of the card is already the rest of this
     image, and the cheap way to know that is to compare the things that
-    identify it: the MBR (the table and the disk signature), every EBR sector
-    (the logical chain), the boot partition's first block, and the ext4
+    identify it AND CANNOT DRIFT: the MBR (the table and the disk
+    signature), every EBR sector (the logical chain), and the ext4
     superblock of every GAMES tree - UUID, block counts and checksum seed,
-    which two different builds never share.  /data and /dump are skipped on
-    purpose: the machine writes them, so they differ from the image on any
-    card that has ever booted, and preserving them is the point.
+    which two different builds never share, on partitions the machine mounts
+    read-only and so never writes.
+
+    EVERYTHING THE MACHINE OWNS IS LEFT OUT (see :data:`_MACHINE_OWNED`),
+    and that is not a weakening: a range that differs on a card which IS the
+    right card does not prove anything, it just refuses.  p1 is the trap -
+    it is FAT, and FAT is rewritten by being mounted.
     """
     with open(image_path, "rb") as f:
         def read_at(lba):
@@ -1367,9 +1385,10 @@ def menu_write_plan(image_path):
                         prove.append((lstart * 512, _IDENT_BYTES,
                                       "the games on p%d" % part))
                 continue
+            if (idx + 1) in _MACHINE_OWNED or ptype != 0x83:
+                continue        # p1 is FAT and the machine writes it
             prove.append((lba * 512, _IDENT_BYTES,
-                          "the games on p%d" % (idx + 1) if idx == 2
-                          else "the card's p%d" % (idx + 1)))
+                          "the games on p%d" % (idx + 1)))
     return {"write": [(r_lba * 512, r_count * 512, "the menu partition (p2)")],
             "prove": prove, "sector": 512}
 

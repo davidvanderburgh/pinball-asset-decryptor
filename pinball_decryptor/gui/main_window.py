@@ -13987,7 +13987,8 @@ class MainWindow:
             resize_fn=self._resize_notebook_to_current_tab,
             flash_fn=lambda p: self._open_flash_dialog(initial_image=p),
             emulate_fn=run_emulator,
-            phase_fn=self.set_multiboot_phase)
+            phase_fn=self.set_multiboot_phase,
+            status_fn=self.set_status)
         self._multiboot_panel.build(self._tab_multiboot)
 
     def _build_jjp_emulate_tab(self):

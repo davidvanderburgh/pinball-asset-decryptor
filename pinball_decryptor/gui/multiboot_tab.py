@@ -2279,7 +2279,7 @@ CHECK_TONES = {"ok": "success", "now": "accent", "no": "gray", "bad": "error"}
 
 
 def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
-                  have_card=False, built_changes=None, running=""):
+                  card="none", built_changes=None, running=""):
     """THE WHOLE OF THE STATUS ROW, decided here: ``[(key, label, state,
     detail)]`` in :data:`STATUS_CHECKS` order.
 
@@ -2300,6 +2300,19 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
     the caller has already worked out.  THIS IS A DESCRIBER, NOT A GATE -
     ``validate_form``, ``rebuild_blockers`` and the overwrite confirmation
     still decide everything, at press time, on the real paths.
+
+    *card* is what is at the output path, and it has THREE values, not two:
+    ``"none"`` (nothing), ``"file"`` (something is there, but this tab has
+    not confirmed it is a multi-boot card) and ``"card"`` (it read back as
+    one, or this session built it).  The middle one is the whole reason for
+    the distinction - David, looking at a tab reporting a finished Built
+    over a red Ready: "I don't even understand how I got into this error
+    state. So I just need to build the image? If so, then why is built
+    checked off?"  It was ticked because a FILE was there, which is not what
+    the word means.  There was a 17 GB leftover at that path from a build
+    whose inject never ran, and the honest reading of that is that he had
+    not built the card yet - so Built does not tick, its sentence says what
+    IS there, and nothing is red, because nothing is wrong.
 
     *built_changes* is ``None`` when this session did not build the card at
     this path, and the ``(menu, rebuild)`` pair from the form it was built
@@ -2351,13 +2364,23 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
                     why or "%d images, in the order the menu offers them."
                     % n))
 
-    # 3. WHETHER IT EXISTS.
+    # 3. WHETHER THE CARD EXISTS - a CARD, not a file with the right name.
     name = os.path.basename(loaded_card) or "the card"
     if running in ("build", "apply"):
         out.append(("built", "Built", "now", "Writing the card now."))
-    elif have_card:
+    elif card == "card":
         out.append(("built", "Built", "ok",
-                    "There is a card at that path."))
+                    "Built and verified in this session."
+                    if built_changes is not None and not loaded_card
+                    else "%s read back as a multi-boot card." % name))
+    elif card == "file" and kind == "unreadable":
+        out.append(("built", "Built", "no", sentence
+                    + " Build / flash card... writes over it."))
+    elif card == "file":
+        out.append(("built", "Built", "no",
+                    "There is a file at that path, but nothing has looked "
+                    "inside it - Load card reads it, and Build / flash "
+                    "card... writes over it."))
     else:
         out.append(("built", "Built", "no",
                     "Nothing at that path yet - Build / flash card... "
@@ -2367,21 +2390,18 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
     # about the card rather than about the tab, and the one worth a glance
     # before reaching for an SD card.
     changes = list(menu or ()) + list(rebuild or ())
-    if not have_card:
+    if card != "card":
+        # It FOLLOWS from Built, so it says so and nothing more: two marks
+        # both shouting about one missing card is how a person ends up
+        # hunting for a second problem that is not there.
         out.append(("ready", "Ready to flash", "no",
                     "Build the card first."))
-    elif kind == "unreadable":
-        out.append(("ready", "Ready to flash", "bad", sentence))
-    elif loaded_card and kind in ("loaded", "strayed"):
-        if changes:
-            out.append(("ready", "Ready to flash", "no",
-                        "%d change%s not on %s yet: %s."
-                        % (len(changes), "" if len(changes) == 1 else "s",
-                           name, "; ".join(changes))))
-        else:
-            out.append(("ready", "Ready to flash", "ok",
-                        "%s was read back and matches this form." % name))
-    elif built_changes is not None:
+    elif loaded_card and changes:
+        out.append(("ready", "Ready to flash", "no",
+                    "%d change%s not on %s yet: %s."
+                    % (len(changes), "" if len(changes) == 1 else "s",
+                       name, "; ".join(changes))))
+    elif built_changes is not None and not loaded_card:
         since = list(built_changes[0] or ()) + list(built_changes[1] or ())
         if since:
             out.append(("ready", "Ready to flash", "no",
@@ -2390,11 +2410,10 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
                            "; ".join(since))))
         else:
             out.append(("ready", "Ready to flash", "ok",
-                        "Built and verified in this session."))
+                        "Built and verified in this session - flash it."))
     else:
-        out.append(("ready", "Ready to flash", "no",
-                    "There is a card there, but nothing has looked inside "
-                    "it - Load card reads it into the form."))
+        out.append(("ready", "Ready to flash", "ok",
+                    "%s matches this form - flash it." % name))
     return out
 
 
@@ -3612,7 +3631,7 @@ class MultibootPanel:
 
     def __init__(self, parent, log=None, theme_fn=None, badge_fn=None,
                  resize_fn=None, flash_fn=None, emulate_fn=None,
-                 phase_fn=None):
+                 phase_fn=None, status_fn=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
         self._theme_fn = theme_fn or (lambda: "dark")
@@ -3624,6 +3643,13 @@ class MultibootPanel:
         #: every test - drives nothing.
         self._phase_fn = phase_fn or (lambda index, total=None, status=None:
                                       None)
+        #: The app's own status line, under the stage row.  Where this tab's
+        #: messages go now that the row is checks alone - they were a grey
+        #: sentence trailing the checks, saying what the checks' tooltips
+        #: said.  A panel built on its own (every test) keeps them in
+        #: ``message()`` and nowhere else.
+        self._status_fn = status_fn or (lambda msg: None)
+        self._msg = ""
         #: The app's Build / flash flow, handed the finished .raw.  None
         #: (a panel built on its own, every test) greys the button.
         self._flash_fn = flash_fn
@@ -4971,14 +4997,13 @@ class MultibootPanel:
             lbl.pack(side=tk.LEFT, padx=(0, 14))
             self._check_lbls[key] = lbl
             self._check_tips[key] = _Tooltip(lbl, "", self._theme_fn)
-        # PACKED LAST AND EXPANDING, so the MESSAGE is what gives way when
-        # the row runs out of width: this app unmaps the last widget of a
-        # row it cannot fit, and of everything here the message is the one
-        # thing kept somewhere else (the app's Log, in full).
-        self._hint = ttk.Label(wrap, justify=tk.LEFT, anchor=tk.W, text="",
-                               foreground=th["gray"])
-        self._hint.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
-        self._status_lines = (self._hint,)
+        # AND NOTHING ELSE ON THE ROW.  A message used to trail the checks
+        # here, and it said what the checks' own tooltips said (David,
+        # looking at the two together: "the tooltip and the gray text are
+        # duplicated. get rid of the gray text").  Every message this tab
+        # makes still goes to the app's Log in full and to the status line
+        # in its footer; what a CHECK has to say lives on that check.
+        self._status_lines = ()
         self._status_h = 0
         self._fit_status_height()
         self._draw_checks()
@@ -4993,17 +5018,24 @@ class MultibootPanel:
         facts = self._facts_now(field)
         state = card_path_state(field, facts, self._rows, self._loaded_card,
                                 menu, rebuild)
-        # WHETHER THERE IS A CARD THERE comes off the same probe the sentence
-        # does - never a stat per keystroke - and a card that was LOADED is
-        # one whatever the probe has got round to saying.
-        have_card = (facts.get("kind") == "file"
-                     or bool(self._loaded_card
-                             and _plain(self._loaded_card) == _plain(field)))
         built = None
         if self._built is not None and _plain(self._built[0]) == _plain(field):
             built = diff_forms(self._built[1], self.form())
+        # WHAT IS AT THE PATH, in the three values status_checks needs.  A
+        # card is one this tab has CONFIRMED - read back, or built here;
+        # anything else the probe found is a file, and a file is not a card
+        # however it is named.  The probe's answer, never a stat per
+        # keystroke.
+        if (self._loaded_card
+                and _plain(self._loaded_card) == _plain(field)) \
+                or built is not None:
+            card = "card"
+        elif facts.get("kind") == "file":
+            card = "file"
+        else:
+            card = "none"
         return status_checks(self._rows, state, self._loaded_card, menu,
-                             rebuild, have_card, built,
+                             rebuild, card, built,
                              self._run_kind if self._busy else "")
 
     def check_detail(self, key):
@@ -5051,13 +5083,14 @@ class MultibootPanel:
         if wrap is None:
             return
         line = 0
-        for lbl in self._status_lines:
+        for lbl in list(self._status_lines) + list(
+                getattr(self, "_check_lbls", {}).values()):
             try:
                 line = max(line, lbl.winfo_reqheight())
             except tk.TclError:                         # pragma: no cover
                 pass
         line = max(line, self.STATUS_LINE_H)
-        want = line * len(self._status_lines) + 2       # a hair, not a guess
+        want = line * max(1, len(self._status_lines)) + 2
         if want != self._status_h:
             self._status_h = want
             try:
@@ -6457,36 +6490,41 @@ class MultibootPanel:
         return restored
 
     def _error(self, msg):
-        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
-        try:
-            self._hint.configure(text=self._status_line(msg),
-                                 foreground=th["error"])
-        except tk.TclError:
-            pass
-        # The status block is a fixed height and this label gets ONE of
-        # its two lines, so a long list of reasons is SUMMED there and said
-        # in full here - the app's Log keeps every word, and the line above
-        # says how many there were.
+        """Something did not work: the app's status line says the first
+        reason and how many more, and the Log keeps every word.
+
+        IT IS NOT ON THE TAB'S OWN ROW any more - that row is four checks,
+        and a check that cannot work is already red with the reason on it.
+        A message repeating that in grey beside it was the duplication
+        David hit ("the tooltip and the gray text are duplicated")."""
+        self._say(msg)
         for line in msg.splitlines():
             self._write(line)
 
     def _ok(self, msg, extra=True):
-        """The live line.  One line on the tab (the block cannot hold two
-        without dropping the sentence under it); anything past the first
-        goes to the app's Log, where it is kept in full.
+        """The live message: the app's status line, and the Log for the rest.
 
         ``extra=False`` for a caller that has already written the rest
         itself - a load's warnings, which it echoes with their own tag."""
-        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
-        try:
-            self._hint.configure(text=self._status_line(msg),
-                                 foreground=th["gray"])
-        except tk.TclError:
-            pass
+        self._say(msg)
         if extra:
             for line in (msg or "").splitlines()[1:]:
                 if line.strip():
                     self._write(line)
+
+    def _say(self, msg):
+        """Remember the live message and put it on the app's status line."""
+        self._msg = self._status_line(msg)
+        try:
+            self._status_fn(self._msg)
+        except Exception:                               # noqa: BLE001
+            pass                        # the window went; the run has not
+
+    def message(self):
+        """The live message as the status line has it - one line, with a
+        count of the rest.  The seam the tests read now that the tab has no
+        label of its own for it."""
+        return self._msg
 
     # ------------------------------------------------------------------
     # actions
@@ -9085,7 +9123,7 @@ class MultibootPanel:
                            status=line)
         except Exception:                               # noqa: BLE001
             pass
-        self._ok(line, extra=False)
+        self._say(line)
 
     def _phase_cancelled(self):
         try:

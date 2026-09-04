@@ -1546,17 +1546,17 @@ def test_invalid_form_surfaces_error_and_builds_nothing(tmp_path,
         a, b = _images(tmp_path, 2)
         panel.add_image(a)
         panel._build_card()
-        assert "at least two" in panel._hint.cget("text")
+        assert "at least two" in panel.message()
         assert calls == []
         panel.add_image(b)
         panel._rows[1].title = "TMNT|1987"
         panel._build_card()
-        assert "must not contain" in panel._hint.cget("text")
+        assert "must not contain" in panel.message()
         assert calls == []
         panel._rows[1].title = "TMNT 1987"
         panel._out_var.set("D:/Pinball/images/Stern/spike2/x.multi.raw")
         panel._build_card()
-        assert "card library" in panel._hint.cget("text")
+        assert "card library" in panel.message()
         assert calls == []
         # The other run the tab starts by ITSELF refuses this form too: the
         # sound prepare would be preparing for the output the library rule
@@ -1634,7 +1634,7 @@ def test_prepared_media_rides_into_the_build_after_a_fresh_prepare(tmp_path):
         assert "1=auto" in prep
         assert "--media-dir " + multiboot_tab._q(multiboot_tab.wsl(media)) \
             in _line(calls[2][2][1])
-        assert "Preparing the media, then building" in panel._hint.cget("text")
+        assert "Preparing the media, then building" in panel.message()
     finally:
         root.destroy()
 
@@ -1649,7 +1649,7 @@ def test_busy_guard_refuses_a_second_run(tmp_path, monkeypatch):
         panel._set_busy(True)
         assert panel._run_commands([("plan", ["true"])]) is False
         panel._build_card()
-        assert "already in progress" in panel._hint.cget("text")
+        assert "already in progress" in panel.message()
         # ...and the green button is the run's CANCEL while it is up - the
         # one control that stays live, like the Write tab's Build button.
         assert str(panel._buildflash_btn.cget("state")) == "normal"
@@ -1747,7 +1747,7 @@ def test_flash_button_passes_the_output_path(tmp_path):
         out = panel._out_var.get()
         panel._flash()
         assert flashed == []
-        assert "Build the card first" in panel._hint.cget("text")
+        assert "Build the card first" in panel.message()
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, "wb") as f:
             f.write(bytes(16))
@@ -1787,7 +1787,7 @@ def test_handoff_is_refused_without_the_app(tmp_path):
             f.write(bytes(16))
         panel._out_var.set(card)
         panel._flash()
-        assert "not available" in panel._hint.cget("text")
+        assert "not available" in panel.message()
     finally:
         root.destroy()
 
@@ -4358,19 +4358,19 @@ def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
         # 4. and the live line, which an error paints red and the app's Log
         # keeps in full
         panel._ok("Reading the card…")
-        assert panel._hint.cget("text") == "Reading the card…"
+        assert panel.message() == "Reading the card…"
         panel._error("first reason\nsecond reason")
         # ONE LINE EACH.  A two-line message used to unmap the label under
         # it - the consequence line - exactly when there was most to say;
         # so the block says the first reason and how many more, and the
         # Log at the foot of the window keeps every word.
-        assert panel._hint.cget("text") == \
+        assert panel.message() == \
             "first reason  (+1 more - see the Log below)"
         pane = _pane(panel)
         assert "first reason" in pane and "second reason" in pane
-        # ...and the checks beside it still say what they said
+        # ...and the checks still say what they said
         assert panel.check_detail("card").startswith("The image list")
-        lbls = [panel._hint] + list(panel._check_lbls.values())
+        lbls = list(panel._check_lbls.values())
         for lbl in lbls:
             assert lbl.winfo_ismapped(), str(lbl)
             assert "\n" not in lbl.cget("text")
@@ -4383,7 +4383,13 @@ def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
         panel._error("\n".join("reason %d" % i for i in range(20)))
         root.update()
         assert panel._status_wrap.winfo_reqheight() == h
-        assert "(+19 more" in panel._hint.cget("text")
+        assert "(+19 more" in panel.message()
+        # THE MESSAGE IS NOT ON THE ROW.  It said what the checks' own
+        # tooltips say, in grey, beside them - and the app's status line and
+        # its Log both keep it (David: "the tooltip and the gray text are
+        # duplicated. get rid of the gray text").
+        assert not hasattr(panel, "_hint")
+        assert set(panel._status_wrap.winfo_children()) == set(lbls)
     finally:
         root.destroy()
 
@@ -4402,7 +4408,7 @@ def test_the_tools_output_goes_to_the_apps_own_log(tmp_path):
         assert "something happened" in _pane(panel)
         # ...and a message too long for the status block reaches it whole
         panel._error("first reason\nsecond reason\nthird reason")
-        assert panel._hint.cget("text") == \
+        assert panel.message() == \
             "first reason  (+2 more - see the Log below)"
         for reason in ("first reason", "second reason", "third reason"):
             assert "[multi-boot] " + reason in panel.sunk
@@ -4840,7 +4846,7 @@ def test_a_refused_inspect_says_why_and_leaves_the_form_alone(tmp_path,
         before = panel.form()
         assert panel.load_card(card) is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        hint = panel._hint.cget("text")
+        hint = panel.message()
         # the reason, without the tool's prefix
         assert "p2 holds no /usr/local/codeselect" in hint
         assert prefix not in hint
@@ -4872,9 +4878,9 @@ def test_the_busy_guard_covers_a_load_and_an_apply(tmp_path, monkeypatch):
         assert not _apply_live(panel)
         assert panel._load_or_reload() is False
         assert panel.load_card(card) is False
-        assert "already in progress" in panel._hint.cget("text")
+        assert "already in progress" in panel.message()
         assert panel.apply_to_card() is False
-        assert "already in progress" in panel._hint.cget("text")
+        assert "already in progress" in panel.message()
         panel._set_busy(False)
         assert _apply_live(panel)
     finally:
@@ -4905,7 +4911,7 @@ def test_a_menu_change_is_injected_into_the_loaded_card(tmp_path):
         assert words[words.index("--timeout") + 1] == "8"
         assert words[words.index("--media-dir") + 1] == multiboot_tab.wsl(
             media)
-        assert "Writing the menu into" in panel._hint.cget("text")
+        assert "Writing the menu into" in panel.message()
     finally:
         root.destroy()
 
@@ -4994,7 +5000,7 @@ def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
         assert prep[prep.index("--out") + 1] == multiboot_tab.wsl(media)
         assert "0=auto" in prep and "1=auto@20" in prep
         assert "--visual-only" not in prep
-        assert "(media first)" in panel._hint.cget("text")
+        assert "(media first)" in panel.message()
     finally:
         root.destroy()
 
@@ -5047,8 +5053,8 @@ def test_an_image_list_change_refuses_the_apply(tmp_path, how):
         assert not _apply_live(panel)
         assert panel.apply_to_card() is False
         assert calls == []
-        assert "image list changed" in panel._hint.cget("text")
-        assert "Build & verify" in panel._hint.cget("text")
+        assert "image list changed" in panel.message()
+        assert "Build & verify" in panel.message()
     finally:
         root.destroy()
 
@@ -5067,7 +5073,7 @@ def test_build_and_verify_will_not_write_over_the_loaded_card(tmp_path,
         assert panel._out_var.get() == card
         panel._build_card()
         assert calls == []
-        hint = panel._hint.cget("text")
+        hint = panel.message()
         assert "writes a NEW card" in hint and card in hint
         assert "Apply to card" in hint
         # a different path builds as usual (the loaded card is untouched)
@@ -5097,7 +5103,7 @@ def test_a_rebuild_is_blocked_by_media_only_the_card_has(
         assert calls == []
         # every reason at once - one on the tab, all of them in the tool
         # output pane (the status block holds one line per label)
-        assert "(+3 more" in panel._hint.cget("text")
+        assert "(+3 more" in panel.message()
         pane = _pane(panel)
         assert "no such file" in pane.lower()
         assert "art0.png" in pane and "on the loaded card" in pane
@@ -5529,7 +5535,7 @@ def test_the_path_box_is_the_cards_identity(tmp_path):
         # the greying is a claim; this is the guarantee behind it
         assert panel.apply_to_card() is False
         assert calls == []
-        assert "no longer names" in panel._hint.cget("text")
+        assert "no longer names" in panel.message()
         # NOTHING WAS THROWN AWAY: the rows, the baseline and the media dir
         # are all still there, and the way back is one menu entry
         assert panel._loaded_card == card and panel._loaded_form is not None
@@ -5769,8 +5775,8 @@ def test_a_restore_draws_nothing_either(tmp_path, monkeypatch):
         # the headline names no button either: the restored path is usually
         # the card that was being EDITED, and 'then Build & verify' pointed
         # a ~7 GB overwrite at it.
-        assert "Build & verify" not in panel._hint.cget("text")
-        assert "came back from last time" in panel._hint.cget("text")
+        assert "Build & verify" not in panel.message()
+        assert "came back from last time" in panel.message()
     finally:
         root.destroy()
 
@@ -5937,7 +5943,7 @@ def test_a_refused_read_leaves_no_directory_behind(tmp_path, monkeypatch):
             return True
         panel._run_commands = fake
         assert panel.load_card(card) is True
-        assert runs and "Cannot read" in panel._hint.cget("text")
+        assert runs and "Cannot read" in panel.message()
         assert not os.path.isdir(media)
         # ...but a directory that was already there is not ours to remove
         os.makedirs(media)
@@ -6319,7 +6325,7 @@ def test_return_before_the_probe_has_answered_says_so(tmp_path, monkeypatch):
         panel._probe_done(card, {"kind": "looking"})
         panel._path_committed()
         assert read == []
-        assert "press Return again" in panel._hint.cget("text")
+        assert "press Return again" in panel.message()
     finally:
         root.destroy()
 
@@ -6817,7 +6823,7 @@ def test_the_work_meter_moves_the_bar_and_stays_out_of_the_log(tmp_path):
         assert "25% - copying p3 (turtles) into the card image" in \
             [s for _i, s in seen if s]
         # ...and the tab's own line says it too, where the eye already is
-        assert "50%" in panel._hint.cget("text")
+        assert "50%" in panel.message()
     finally:
         root.destroy()
 
@@ -6829,11 +6835,11 @@ def test_the_estimate_comes_from_the_recent_rate(tmp_path):
         panel._prog_clock = lambda: clock[0]
         panel._phase_index = 1
         panel._progress_tick(0, 1000, 0.0, "copying")
-        assert "0%" in panel._hint.cget("text")
+        assert "0%" in panel.message()
         clock[0] += 10.0                        # 100 bytes in 10 s...
         panel._progress_tick(100, 1000, 0.1, "copying")
         # ...so 900 left is 90 s, said coarsely
-        assert "about 2 minutes left" in panel._hint.cget("text")
+        assert "about 2 minutes left" in panel.message()
         # a new step throws the samples away: the last stage's rate says
         # nothing about the next one's
         panel._phase_step("verify")
@@ -6912,8 +6918,8 @@ def test_a_cancelled_build_names_the_half_written_card(tmp_path):
         assert said and said[0] is not None
         panel._cancelled = True                  # as the worker leaves it
         said[0](137, "build", {})
-        assert out in panel.check_detail("card") + panel._hint.cget("text")
-        assert "unfinished" in panel._hint.cget("text")
+        assert out in panel.check_detail("card") + panel.message()
+        assert "unfinished" in panel.message()
     finally:
         root.destroy()
 
@@ -7004,12 +7010,14 @@ def test_a_read_nobody_asked_for_does_not_paint_the_tab_red(tmp_path,
         panel._pending_read = True
         panel.on_shown()
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        hint = panel._hint.cget("text")
+        hint = panel.message()
         assert "not a card this tab can read" in hint
         assert "no /usr/local/codeselect on its p2" in hint
         # the tool leads with the path the sentence already names; it goes
         assert "/mnt/" not in hint
-        assert str(panel._hint.cget("foreground")) == th["gray"]
+        # ...and NOTHING on the row is red: a file at the output path that
+        # is not a card is not an error, it is a card not built yet
+        assert [st for _k, _l, st, _d in panel.checks() if st == "bad"] == []
         # ...and the row stops offering the load that just refused
         panel._probe_for = card
         panel._probe_facts = {"kind": "file"}
@@ -7017,6 +7025,12 @@ def test_a_read_nobody_asked_for_does_not_paint_the_tab_red(tmp_path,
         line = panel.check_detail("card")
         assert "is not a multi-boot card" in line
         assert "Load card reads it into the form" not in line
+        # ...and BUILT does not tick for it (David: "why is built checked
+        # off?"): a file is not a card, and the check says which
+        assert panel.check_state("built") == "no"
+        assert "is not a multi-boot card" in panel.check_detail("built")
+        assert "writes over it" in panel.check_detail("built")
+        assert panel.check_detail("ready") == "Build the card first."
         # a run that writes makes that stale: a build at that path has just
         # made it a card
         panel._set_busy(True)
@@ -7037,8 +7051,7 @@ def test_a_read_the_person_asked_for_still_says_it_plainly(tmp_path,
     try:
         assert panel.load_card(card) is True
         _wait(root, lambda: not panel._busy)
-        assert "Cannot read" in panel._hint.cget("text")
-        assert str(panel._hint.cget("foreground")) == th["error"]
+        assert "Cannot read" in panel.message()
     finally:
         root.destroy()
 
@@ -7084,11 +7097,26 @@ def test_the_checks_walk_the_work_in_order(tmp_path):
     assert [st for _k, _l, st, _d in got] == ["ok", "ok", "no", "no"]
     assert [l for _k, l, _st, _d in got][1] == "2 images"
     assert _detail_of(got, "built").startswith("Nothing at that path yet")
-    # ...and once a card is there but nothing has looked inside it
+    # A FILE AT THE PATH IS NOT A BUILT CARD.  There was a 17 GB leftover
+    # at David's from a build whose inject never ran, and Built ticked for
+    # it: "I don't even understand how I got into this error state. So I
+    # just need to build the image? If so, then why is built checked off?"
     ondisk = ("file", "x is on disk - ...", "fg", True)
-    got = status_checks(rows, ondisk, "", have_card=True)
-    assert [st for _k, _l, st, _d in got] == ["ok", "ok", "ok", "no"]
-    assert "nothing has looked inside" in _detail_of(got, "ready")
+    got = status_checks(rows, ondisk, "", card="file")
+    assert [st for _k, _l, st, _d in got] == ["ok", "ok", "no", "no"]
+    assert "nothing has looked inside" in _detail_of(got, "built")
+    assert _detail_of(got, "ready") == "Build the card first."
+    # ...and a file this tab has READ and found is not one says which
+    bad = ("unreadable", "x is on disk but is not a multi-boot card: no "
+           "selector.", "fg", True)
+    got = status_checks(rows, bad, "", card="file")
+    assert _state_of(got, "built") == "no"
+    assert _detail_of(got, "built").startswith(bad[1])
+    assert "writes over it" in _detail_of(got, "built")
+    # a card this tab has confirmed ticks both
+    got = status_checks(rows, ("loaded", "Editing x.", "fg", True), "x.raw",
+                        card="card")
+    assert [st for _k, _l, st, _d in got] == ["ok", "ok", "ok", "ok"]
 
 
 def test_a_check_that_cannot_work_is_marked_bad(tmp_path):
@@ -7112,7 +7140,7 @@ def test_a_check_that_cannot_work_is_marked_bad(tmp_path):
     # ...but a LOADED card names sources that may live on another machine,
     # and neither drawing its menu nor injecting one opens them
     loaded = ("loaded", "Editing x: no changes yet.", "fg", True)
-    got = status_checks(gone, loaded, "x.raw", have_card=True)
+    got = status_checks(gone, loaded, "x.raw", card="card")
     assert _state_of(got, "images") == "ok"
 
 
@@ -7120,32 +7148,33 @@ def test_ready_to_flash_is_about_the_card_and_not_the_tab(tmp_path):
     rows = [ImageRow(path=p) for p in _images(tmp_path, 2)]
     loaded = ("loaded", "Editing card.raw: no changes yet.", "fg", True)
     # read back, and the form has not moved since
-    got = status_checks(rows, loaded, "card.raw", have_card=True)
+    got = status_checks(rows, loaded, "card.raw", card="card")
     assert _state_of(got, "ready") == "ok"
-    assert "read back and matches this form" in _detail_of(got, "ready")
+    assert "matches this form" in _detail_of(got, "ready")
     # ...and the moment it has
     got = status_checks(rows, loaded, "card.raw", menu=["countdown"],
-                        have_card=True)
+                        card="card")
     assert _state_of(got, "ready") == "no"
     assert "1 change not on card.raw yet: countdown" in \
         _detail_of(got, "ready")
     # a card BUILT in this session counts, because a build leaves no
     # baseline to diff against
     ondisk = ("file", "x is on disk", "fg", True)
-    got = status_checks(rows, ondisk, "", have_card=True,
+    got = status_checks(rows, ondisk, "", card="card",
                         built_changes=([], []))
     assert _state_of(got, "ready") == "ok"
     assert "Built and verified" in _detail_of(got, "ready")
-    got = status_checks(rows, ondisk, "", have_card=True,
+    got = status_checks(rows, ondisk, "", card="card",
                         built_changes=(["volume"], ["image 2"]))
     assert _state_of(got, "ready") == "no"
     assert "2 changes since it was built" in _detail_of(got, "ready")
-    # a file that turned out not to be a multi-boot card cannot be flashed
-    bad = ("unreadable", "x is on disk but is not a multi-boot card: no "
-           "selector", "fg", True)
-    got = status_checks(rows, bad, "", have_card=True)
-    assert _state_of(got, "ready") == "bad"
-    assert _detail_of(got, "ready") == bad[1]
+    # NOTHING TO FLASH IS ONE MARK, NOT TWO: Ready follows Built, and two
+    # marks shouting about one missing card sends a person hunting for a
+    # second problem that is not there.
+    for state in ("none", "file"):
+        got = status_checks(rows, ondisk, "", card=state)
+        assert _state_of(got, "ready") == "no"
+        assert _detail_of(got, "ready") == "Build the card first."
 
 
 def test_a_run_in_flight_shows_on_the_built_check(tmp_path):
@@ -7184,9 +7213,11 @@ def test_the_status_row_paints_the_checks_in_the_footers_colours(tmp_path):
         card = panel._check_lbls["card"]
         assert card.cget("text").startswith(multiboot_tab.CHECK_MARKS["bad"])
         assert str(card.cget("foreground")) == th["error"]
-        # ONE ROW, and the message shares it
-        assert panel._hint.winfo_ismapped()
-        assert panel._hint.winfo_y() == card.winfo_y()
+        # ONE ROW, and the checks are the whole of it
+        assert set(panel._status_wrap.winfo_children()) == \
+            set(panel._check_lbls.values())
+        assert all(lbl.winfo_y() == card.winfo_y()
+                   for lbl in panel._check_lbls.values())
     finally:
         root.destroy()
 

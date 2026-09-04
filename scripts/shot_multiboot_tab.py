@@ -671,7 +671,7 @@ def s_load():
     log("can_read=%s  Build/flash mapped=%s"
         % (panel._can_read, panel._buildflash_btn.winfo_ismapped()))
     log("output: %s" % panel._out_var.get())
-    log("hint: %r" % panel._hint.cget("text"))
+    log("message: %r" % panel.message())
     log("menu summary: %r" % panel._menu_lbl.cget("text"))
     log("table rows:")
     for i in range(panel._table.count()):

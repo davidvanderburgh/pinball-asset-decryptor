@@ -276,8 +276,11 @@ def test_stamp_key_and_candidates(tmp_path, monkeypatch):
     assert k == "7861174272-1725000000000000000-abcdef0123456789-img2"
     monkeypatch.setenv(ts.CACHE_ENV, str(tmp_path / "c"))
     cands = ts.cache_dir_candidates(str(tmp_path / "flag"))
-    assert cands[0] == str(tmp_path / "flag") and cands[1] == str(tmp_path / "c")
-    assert cands[-1].endswith(ts.CACHE_DIRNAME)
+    # an asked-for directory is THE cache: the shared fallbacks are not searched behind it
+    assert cands == [str(tmp_path / "flag"), str(tmp_path / "c")]
+    monkeypatch.delenv(ts.CACHE_ENV)
+    cands = ts.cache_dir_candidates()
+    assert cands and cands[-1].endswith(ts.CACHE_DIRNAME)
     assert len(cands) == len(set(cands))
 
 

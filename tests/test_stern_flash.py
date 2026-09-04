@@ -17,6 +17,9 @@ The actual on-card flash still needs the hardware test (Administrator + a real
 card + a backup).
 """
 
+import os
+import struct
+
 import pytest
 
 from pinball_decryptor.core.pipeline_base import PipelineError
@@ -631,3 +634,176 @@ def test_the_write_and_the_read_back_both_carry_the_rate(tmp_path):
     said = " ".join(seen)
     assert "Writing image to SD card" in said
     assert "Verifying flashed card" in said
+
+
+# ---- the menu-only write ------------------------------------------------------------
+_SEC = 512
+
+
+def _entry(ptype, lba, count):
+    return (b"\x00" + b"\x00\x00\x00" + bytes([ptype]) + b"\x00\x00\x00"
+            + struct.pack("<II", lba, count))
+
+
+def _fill(marker, size):
+    """*marker*, repeated, EXACTLY *size* bytes long.  Slice-assigning a
+    shorter bytes into a bytearray resizes it, which silently shifts every
+    partition after it - the whole image comes out wrong and the failure
+    looks like a bug in the code under test."""
+    reps = size // len(marker) + 1
+    return (marker * reps)[:size]
+
+
+def _spike_image(path, disk_id, games=b"GAMES", extra=b"EXTRA", menu=b"MENU"):
+    """A miniature Spike 2 card: p1 boot, p2 rootfs, p3 games, and an
+    extended container holding p5 /data, p6 /dump and p7 the extra games
+    tree - the shape every real card has, at 384 KB instead of 8 GB.
+
+    Each partition is filled with its own marker so a test can see exactly
+    which ones a write touched.
+    """
+    total = 768
+    img = bytearray(total * _SEC)
+    parts = [(0x0C, 64, 64, b"BOOT"), (0x83, 128, 128, menu),
+             (0x83, 256, 128, games)]
+    mbr = bytearray(_SEC)
+    mbr[440:444] = struct.pack("<I", disk_id)
+    for i, (ptype, lba, count, fill) in enumerate(parts):
+        mbr[446 + i * 16:446 + (i + 1) * 16] = _entry(ptype, lba, count)
+        img[lba * _SEC:(lba + count) * _SEC] = _fill(fill, count * _SEC)
+    ext_lba, ext_count = 384, 384
+    mbr[446 + 3 * 16:446 + 4 * 16] = _entry(0x0F, ext_lba, ext_count)
+    mbr[510:512] = b"\x55\xaa"
+    img[0:_SEC] = mbr
+    logical = [(386, 100, b"DATA"), (514, 100, b"DUMP"), (642, 100, extra)]
+    for n, (lba, count, fill) in enumerate(logical):
+        ebr_lba = ext_lba + n * 128
+        ebr = bytearray(_SEC)
+        ebr[446:462] = _entry(0x83, lba - ebr_lba, count)
+        if n + 1 < len(logical):
+            nxt = ext_lba + (n + 1) * 128
+            ebr[462:478] = _entry(0x05, nxt - ext_lba, 128)
+        ebr[510:512] = b"\x55\xaa"
+        img[ebr_lba * _SEC:(ebr_lba + 1) * _SEC] = ebr
+        img[lba * _SEC:(lba + count) * _SEC] = _fill(fill, count * _SEC)
+    with open(str(path), "wb") as f:
+        f.write(img)
+    return str(path)
+
+
+def _at(path, lba, n=16):
+    with open(path, "rb") as f:
+        f.seek(lba * _SEC)
+        return f.read(n)
+
+
+def test_the_menu_plan_is_p2_and_a_proof_of_everything_else(tmp_path):
+    img = _spike_image(tmp_path / "card.img", 0xA1B2C3D4)
+    plan = rd.menu_write_plan(img)
+    # ONE partition is written: the rootfs, where the selector and its media
+    # and images.conf live
+    assert plan["write"] == [(128 * _SEC, 128 * _SEC,
+                              "the menu partition (p2)")]
+    what = [w for _o, _l, w in plan["prove"]]
+    assert what[0] == "the partition table"
+    # every games tree is identified, and so is the boot partition...
+    assert "p1's filesystem" in what and "p3's filesystem" in what
+    assert "p7's filesystem" in what
+    # ...the logical chain is walked...
+    assert ["the p%d table entry" % n for n in (5, 6, 7)] == \
+        [w for w in what if "table entry" in w]
+    # ...and /data and /dump are DELIBERATELY not compared: the machine
+    # writes them, so they differ on any card that has ever booted
+    assert "p5's filesystem" not in what
+    assert "p6's filesystem" not in what
+    # nothing outside the image is read
+    assert all(o + l <= os.path.getsize(img)
+               for o, l, _w in plan["prove"] + plan["write"])
+
+
+def test_a_menu_write_replaces_the_menu_and_nothing_else(tmp_path):
+    img = _spike_image(tmp_path / "img.raw", 0xA1B2C3D4)
+    card = tmp_path / "card.raw"
+    card.write_bytes((tmp_path / "img.raw").read_bytes())
+    # the machine has been playing: /data and /dump are its own now
+    raw = bytearray(card.read_bytes())
+    raw[386 * _SEC:386 * _SEC + 64] = b"HIGH SCORES AND SETTINGS".ljust(64)
+    raw[514 * _SEC:514 * _SEC + 64] = b"LOGS".ljust(64)
+    card.write_bytes(bytes(raw))
+    # ...and the menu has been edited in the image
+    raw = bytearray((tmp_path / "img.raw").read_bytes())
+    raw[128 * _SEC:128 * _SEC + 64] = b"A DIFFERENT MENU".ljust(64)
+    (tmp_path / "img.raw").write_bytes(bytes(raw))
+
+    said = []
+    n = rd.flash_menu_to_device(img, str(card),
+                                log=lambda m, k="info": said.append(m))
+    assert n == 128 * _SEC                      # p2 and only p2
+    assert _at(str(card), 128, 16) == b"A DIFFERENT MENU"
+    # the games are untouched, and so is the machine's own data
+    assert _at(str(card), 256, 5) == b"GAMES"
+    assert _at(str(card), 642, 5) == b"EXTRA"
+    assert _at(str(card), 386, 24) == b"HIGH SCORES AND SETTINGS"
+    assert _at(str(card), 514, 4) == b"LOGS"
+    assert "verified" in " ".join(said).lower()
+
+
+def test_a_menu_write_refuses_a_card_it_was_not_flashed_onto(tmp_path):
+    img = _spike_image(tmp_path / "img.raw", 0xA1B2C3D4)
+    # same shape, different games
+    other = _spike_image(tmp_path / "other.raw", 0xA1B2C3D4, games=b"OTHER")
+    before = open(other, "rb").read()
+    with pytest.raises(rd.FlashError) as e:
+        rd.flash_menu_to_device(img, other)
+    assert "was not flashed from" in str(e.value)
+    assert "p3's filesystem" in str(e.value)
+    assert "Untick" in str(e.value)
+    assert open(other, "rb").read() == before, "it refused BEFORE writing"
+    # a different EXTRA image is caught too, and so is a different table
+    other2 = _spike_image(tmp_path / "o2.raw", 0xA1B2C3D4, extra=b"OTHER")
+    with pytest.raises(rd.FlashError) as e:
+        rd.flash_menu_to_device(img, other2)
+    assert "p7's filesystem" in str(e.value)
+    other3 = _spike_image(tmp_path / "o3.raw", 0x99999999)
+    with pytest.raises(rd.FlashError) as e:
+        rd.flash_menu_to_device(img, other3)
+    assert "the partition table" in str(e.value)
+
+
+def test_a_menu_write_refuses_an_image_that_is_not_a_card(tmp_path):
+    plain = tmp_path / "plain.raw"
+    plain.write_bytes(b"\x00" * (64 * _SEC))
+    with pytest.raises(rd.FlashError) as e:
+        rd.menu_write_plan(str(plain))
+    assert "partition table" in str(e.value)
+    # ...and one whose second partition is not a Linux rootfs
+    img = bytearray(_spike_image(tmp_path / "x.raw", 1) and
+                    (tmp_path / "x.raw").read_bytes())
+    img[446 + 16 + 4] = 0x0C                    # p2 as FAT
+    (tmp_path / "x.raw").write_bytes(bytes(img))
+    with pytest.raises(rd.FlashError) as e:
+        rd.menu_write_plan(str(tmp_path / "x.raw"))
+    assert "Linux rootfs" in str(e.value)
+
+
+def test_the_pipeline_carries_menu_only_through(tmp_path, monkeypatch):
+    import pinball_decryptor.plugins.stern.pipeline as pl
+    monkeypatch.setattr(pl, "is_device_path", lambda _p: True)
+    img = _spike_image(tmp_path / "img.raw", 0xA1B2C3D4)
+    card = tmp_path / "card.raw"
+    card.write_bytes((tmp_path / "img.raw").read_bytes())
+    done = {}
+    p = SternFlashImagePipeline(
+        img, str(card), lambda *a: None, lambda *a: None, lambda *a: None,
+        lambda ok, summary: done.update(ok=ok, summary=summary),
+        menu_only=True)
+    p.run()
+    assert done["ok"] is True
+    assert "boot menu" in done["summary"]
+    assert "settings and scores were left alone" in done["summary"]
+    # ...and without it the whole image goes
+    p2 = SternFlashImagePipeline(
+        img, str(card), lambda *a: None, lambda *a: None, lambda *a: None,
+        lambda ok, summary: done.update(ok=ok, summary=summary))
+    p2.run()
+    assert done["ok"] is True and "Flashed" in done["summary"]

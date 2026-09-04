@@ -1143,6 +1143,268 @@ def _unlink_quiet(path):
         pass
 
 
+# ============================================================ the menu-only write
+#: The rootfs partition: MBR primary index 1, and the ONLY partition a menu
+#: change touches.  The selector, its media and images.conf all live in p2
+#: (mkmulticard's ``inject``), which is why "Apply to card" rewrites a card
+#: image in seconds - and why writing that one partition onto a card the
+#: image was already flashed from is a minute's work instead of an hour's.
+_ROOTFS_INDEX = 1
+
+#: How much of a partition is read to identify it: the ext4 superblock lives
+#: at byte 1024 and carries the filesystem UUID, the block counts and the
+#: checksum seed, so 4 KiB from the start tells two different games trees
+#: apart with certainty.  A FAT boot sector is in the same 4 KiB.
+_IDENT_BYTES = 4096
+
+#: The two partitions a menu write deliberately leaves alone.  p5 is /data
+#: (the machine's settings, its NVRAM, its scores) and p6 is /dump - the
+#: machine writes both, so they are EXPECTED to differ from the image, and
+#: keeping them is half the point of a menu-only write.
+_MACHINE_OWNED = (5, 6)
+
+
+def _mbr_primaries(mbr):
+    """``[(index, type, lba, sectors)]`` from a 512-byte MBR, empty if it is
+    not one.  Kept here rather than borrowed from the Stern plugin: core does
+    not import plugins, and this is six lines of a fixed on-disk format."""
+    if len(mbr) < 512 or mbr[510:512] != b"\x55\xaa":
+        return []
+    out = []
+    for i in range(4):
+        e = mbr[446 + i * 16:446 + i * 16 + 16]
+        ptype = e[4]
+        lba, count = struct.unpack_from("<II", e, 8)
+        if ptype and count:
+            out.append((i, ptype, lba, count))
+    return out
+
+
+def _ebr_chain(read_at, ext_lba, sector=512, limit=64):
+    """Walk the extended partition's EBR chain -> ``[(ebr_lba, type, start,
+    count)]`` for the logicals, in card order (p5, p6, p7, ...).
+
+    *read_at* reads one sector at an LBA.  ``limit`` is a cycle guard: a
+    corrupt chain must not spin.
+    """
+    out = []
+    cur, seen = ext_lba, set()
+    while cur and cur not in seen and len(out) < limit:
+        seen.add(cur)
+        sec = read_at(cur)
+        if len(sec) < 512 or sec[510:512] != b"\x55\xaa":
+            break
+        e0 = sec[446:462]
+        if e0[4] and struct.unpack_from("<II", e0, 8)[1]:
+            start, count = struct.unpack_from("<II", e0, 8)
+            out.append((cur, e0[4], cur + start, count))
+        e1 = sec[462:478]
+        nxt = struct.unpack_from("<II", e1, 8)[0] if e1[4] else 0
+        cur = (ext_lba + nxt) if nxt else 0
+    return out
+
+
+def menu_write_plan(image_path):
+    """What a menu-only write would touch, off the IMAGE alone (no device).
+
+    ``{"write": [(offset, length, what)], "prove": [(offset, length, what)],
+    "sector": 512}`` - *write* is the rootfs partition, *prove* is every range
+    that has to match on the card before a byte is written.
+
+    THE PROOF IS THE WHOLE SAFETY ARGUMENT.  Writing one partition onto a
+    card is only correct if the rest of the card is already the rest of this
+    image, and the cheap way to know that is to compare the things that
+    identify it: the MBR (the table and the disk signature), every EBR sector
+    (the logical chain), the boot partition's first block, and the ext4
+    superblock of every GAMES tree - UUID, block counts and checksum seed,
+    which two different builds never share.  /data and /dump are skipped on
+    purpose: the machine writes them, so they differ from the image on any
+    card that has ever booted, and preserving them is the point.
+    """
+    with open(image_path, "rb") as f:
+        def read_at(lba):
+            f.seek(lba * 512)
+            return f.read(512)
+
+        mbr = read_at(0)
+        prim = _mbr_primaries(mbr)
+        if not prim:
+            raise FlashError(
+                "%s does not start with a partition table, so there is no "
+                "menu partition to write. Flash the whole image instead."
+                % os.path.basename(image_path))
+        rootfs = [p for p in prim if p[0] == _ROOTFS_INDEX]
+        if not rootfs or rootfs[0][1] != 0x83:
+            raise FlashError(
+                "%s has no Linux rootfs as its second partition, so it is "
+                "not a Stern card image. Flash the whole image instead."
+                % os.path.basename(image_path))
+        _i, _t, r_lba, r_count = rootfs[0]
+        prove = [(0, 512, "the partition table")]
+        for idx, ptype, lba, _count in prim:
+            if idx == _ROOTFS_INDEX:
+                continue            # it is what we are about to overwrite
+            if ptype == 0x0F:       # the extended container: walk its chain
+                for n, (ebr, ltype, lstart, _lc) in enumerate(
+                        _ebr_chain(read_at, lba)):
+                    part = 5 + n
+                    prove.append((ebr * 512, 512, "the p%d table entry" % part))
+                    if ltype == 0x83 and part not in _MACHINE_OWNED:
+                        prove.append((lstart * 512, _IDENT_BYTES,
+                                      "p%d's filesystem" % part))
+                continue
+            prove.append((lba * 512, _IDENT_BYTES,
+                          "p%d's filesystem" % (idx + 1)))
+    return {"write": [(r_lba * 512, r_count * 512, "the menu partition (p2)")],
+            "prove": prove, "sector": 512}
+
+
+def _ranges_match(dev, src, ranges, log=None):
+    """Every range the same on the device and in the image?  -> (ok, what).
+
+    Reads the DEVICE through the aligned reader, so a 4096-sector card is
+    read the way it insists on being read."""
+    for off, length, what in ranges:
+        want = _read_file_range(src, off, length)
+        got = dev._aligned_read(off, len(want))
+        if got[:len(want)] != want:
+            return False, what
+        if log is not None:
+            log("  %s matches" % what, "info")
+    return True, ""
+
+
+def _read_file_range(f, off, length):
+    f.seek(off)
+    return f.read(length)
+
+
+def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
+                         cancel=None, verify=True, on_verify_start=None):
+    """Write ONLY the menu partition of *image_path* onto *device_path*.
+
+    For the card you already flashed from this image and have since changed
+    the MENU of - new titles, a different countdown, other sounds.  An Apply
+    rewrites p2 of the image in seconds; this puts that one partition on the
+    card, which is 350 MB rather than the whole image (David, watching a
+    14.72 GB write crawl at 6 MB/s: "yes, build the menu-only write").
+
+    IT REFUSES A CARD THAT IS NOT THAT CARD.  Every range
+    :func:`menu_write_plan` calls for is compared first, and a single
+    mismatch raises :class:`FlashError` naming what differed - writing one
+    partition of an image onto a card holding a different one makes a card
+    that boots a menu into games that are not there.
+
+    It also LEAVES /data AND /dump ALONE, which a whole-image flash cannot:
+    the machine's settings, its NVRAM and its scores stay as the machine
+    left them.  Returns the bytes written.
+    """
+    if not os.path.isfile(image_path):
+        raise FlashError("Image file not found: %s" % image_path)
+    plan = menu_write_plan(image_path)
+    dev_size = device_size(device_path)
+    need = max(off + length for off, length, _w in plan["write"])
+    if dev_size is not None and dev_size < need:
+        raise FlashError(
+            "The card (%s) is smaller than this image's menu partition needs "
+            "(%s). It cannot be the card this image was flashed onto."
+            % (format_size(dev_size), format_size(need)))
+    if log is not None:
+        log("Menu-only write: checking that this card was flashed from %s"
+            % os.path.basename(image_path), "info")
+    written = 0
+    with _disk_offline_for_write(device_path, log), \
+            _locked_volumes(device_path, log):
+        with open(image_path, "rb") as src:
+            with RawDeviceFile(device_path, writable=True) as dev:
+                ok, what = _ranges_match(dev, src, plan["prove"], log=log)
+                if not ok:
+                    raise FlashError(
+                        "This card was not flashed from %s - %s does not "
+                        "match. Untick 'Only the boot menu' and write the "
+                        "whole image."
+                        % (os.path.basename(image_path), what))
+                if log is not None:
+                    log("This is that card. Writing the menu partition only "
+                        "- /data and /dump (the machine's settings and "
+                        "scores) are left as they are.", "info")
+                if cancel is not None and cancel():
+                    raise FlashCancelled("Cancelled before anything was "
+                                         "written.")
+                total = sum(length for _o, length, _w in plan["write"])
+                rate = []
+                for off, length, _what in plan["write"]:
+                    src.seek(off)
+                    dev.seek(off)
+                    done = 0
+                    while done < length:
+                        if cancel is not None and cancel():
+                            raise FlashCancelled(
+                                "Menu write cancelled after %d of %d bytes - "
+                                "the card's menu is half written and must be "
+                                "written again." % (written, total))
+                        buf = src.read(min(_FLASH_CHUNK, length - done))
+                        if not buf:
+                            break
+                        dev.write(buf)
+                        done += len(buf)
+                        written += len(buf)
+                        if progress is not None:
+                            progress(written, total,
+                                     "Writing the boot menu onto the card\u2026"
+                                     + _rate_note(rate, written, total))
+                dev.flush()
+        if verify:
+            if on_verify_start is not None:
+                on_verify_start()
+            _verify_menu_readback(device_path, image_path, plan,
+                                  log=log, progress=progress, cancel=cancel)
+    if log is not None:
+        log("Menu written: %s onto %s." % (format_size(written), device_path),
+            "success")
+    return written
+
+
+def _verify_menu_readback(device_path, image_path, plan, *, log=None,
+                          progress=None, cancel=None):
+    """Read the menu partition back and confirm it matches the image.
+
+    The same reasoning as the whole-image verify: a raw write has no other
+    integrity check, and a card whose menu half landed boots into nothing."""
+    if log is not None:
+        log("Verifying the menu partition (reading it back)\u2026", "info")
+    total = sum(length for _o, length, _w in plan["write"])
+    checked = 0
+    rate = []
+    with RawDeviceFile(device_path, writable=False) as dev, \
+            open(image_path, "rb") as src:
+        for off, length, _what in plan["write"]:
+            src.seek(off)
+            done = 0
+            while done < length:
+                if cancel is not None and cancel():
+                    raise FlashCancelled(
+                        "Verify cancelled after %d of %d bytes." % (checked,
+                                                                    total))
+                exp = src.read(min(_VERIFY_CHUNK, length - done))
+                if not exp:
+                    break
+                got = dev._aligned_read(off + done, len(exp))
+                if got[:len(exp)] != exp:
+                    raise FlashError(
+                        "The card does not match the image at byte %s of the "
+                        "menu partition - the write did not land. Try again, "
+                        "or write the whole image."
+                        % f"{off + done:,}")
+                done += len(exp)
+                checked += len(exp)
+                if progress is not None:
+                    progress(checked, total, "Verifying the boot menu\u2026"
+                             + _rate_note(rate, checked, total))
+    if log is not None:
+        log("Menu verified: it matches the image byte-for-byte.", "success")
+
+
 def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
                            progress=None, cancel=None):
     """Read the just-flashed card back and compare it to the source image.

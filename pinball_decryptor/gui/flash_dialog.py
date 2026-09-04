@@ -39,6 +39,8 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from ..core.rawdevice import menu_write_plan
+
 from ..core.admin import is_admin
 from ..core.elevated_flash import can_self_elevate as _self_elevates
 from .placement import centered_over
@@ -111,6 +113,7 @@ class FlashImageDialog:
         self._drives = []            # list[PhysicalDrive] from last enumeration
         self._selected = None        # the chosen PhysicalDrive
         self._enum_id = 0            # bump-counter to drop stale enumerations
+        self._menu_seen = None       # the image the menu tick last defaulted for
         self._initial_build, self._initial_write = self._opening_ticks(
             initial_choices)
 
@@ -259,6 +262,29 @@ class FlashImageDialog:
             img_row, text="Browse…", command=self._browse_image)
         self._image_browse.pack(side="left", padx=(4, 0))
 
+        # THE MENU-ONLY WRITE.  A multi-boot card's menu lives in ONE
+        # partition, so changing it and writing that partition back is 350 MB
+        # rather than the whole image - a minute instead of the hour a 14.7 GB
+        # image takes on an ordinary card (David: "writing to my sd card is
+        # pretty slow... yes, build the menu-only write").  It also leaves
+        # /data and /dump alone, so the machine keeps its settings and scores,
+        # which a whole-image flash cannot.
+        #
+        # DEFAULT ON when the image supports it: the run REFUSES a card this
+        # image was not flashed from, naming what differed, so a wrong default
+        # costs one refusal - while the wrong default the other way costs an
+        # hour, every time.
+        self._menu_var = tk.BooleanVar(value=False)
+        self._menu_chk = ttk.Checkbutton(
+            flash_body, variable=self._menu_var, command=self._sync_sections,
+            text="Only the boot menu — fast, and the machine keeps its "
+                 "settings and scores")
+        self._menu_chk.pack(anchor="w", pady=(2, 0))
+        self._menu_note = ttk.Label(
+            flash_body, foreground=self._theme["gray"], wraplength=430,
+            justify="left", text="")
+        self._menu_note.pack(anchor="w", padx=(22, 0))
+
         # Target-card row.
         card_row = ttk.Frame(flash_body)
         card_row.pack(fill="x", pady=4)
@@ -382,6 +408,8 @@ class FlashImageDialog:
             except tk.TclError:
                 pass
 
+        self._sync_menu_only(writing, building)
+
         action = self._words["action"]
         if building and writing:
             label = "Build + %s" % action
@@ -396,6 +424,49 @@ class FlashImageDialog:
         self._start_btn.state(
             ["!disabled"] if (building or writing) else ["disabled"])
         self._update_readout()
+
+    #: What the menu-only tick says under itself, per state.
+    _MENU_NOTE_OK = ("Writes the menu partition only, onto a card this image "
+                     "was already flashed from. It checks first, and refuses "
+                     "if the card holds anything else.")
+    _MENU_NOTE_BUILD = ("A freshly built image has never been on this card, "
+                        "so the whole of it has to be written.")
+
+    def _sync_menu_only(self, writing, building):
+        """Offer the menu-only write only where it can mean anything: a
+        flash (not a build+flash - a fresh image was never on that card) of
+        an image that HAS a menu partition to write.
+
+        The image is asked, not assumed: reading its partition table is 512
+        bytes, and an image with no Linux rootfs as its second partition is
+        not a Stern card at all."""
+        why = ""
+        can = bool(writing and not building)
+        if can:
+            img = (self._image_var.get() or "").strip().strip('"')
+            try:
+                menu_write_plan(img)
+                why = self._MENU_NOTE_OK
+            except Exception:                           # noqa: BLE001
+                can = False                 # not a card image, or not there
+        elif writing and building:
+            why = self._MENU_NOTE_BUILD
+        try:
+            self._menu_chk.state(["!disabled"] if can else ["disabled"])
+        except tk.TclError:                             # pragma: no cover
+            pass
+        if not can:
+            self._menu_var.set(False)
+        elif self._menu_seen != self._image_var.get():
+            # First sight of an image that supports it: on by default.
+            self._menu_var.set(True)
+        self._menu_seen = self._image_var.get()
+        try:
+            self._menu_note.configure(
+                text=(why if (can and self._menu_var.get()) or not can
+                      else "The whole image is written."))
+        except tk.TclError:                             # pragma: no cover
+            pass
 
     def _on_build_path_changed(self):
         if self._build_var.get() and self._can_build:
@@ -631,19 +702,38 @@ class FlashImageDialog:
             flash_what = (os.path.basename(build_path)
                           if building else os.path.basename(img))
             verb = self._words["confirm_verb"]
-            lead = ("After the build finishes, this will ERASE the entire "
-                    "%s and %s." % (noun, verb)
-                    if building else
-                    "This will ERASE the entire %s and %s." % (noun, verb))
-            if not messagebox.askyesno(
-                "Erase the %s and continue?" % noun,
-                "%s There is no undo.\n\n  Target: %s\n  Image:  %s\n\n"
-                "Make sure you have a backup of anything on the %s. Proceed?"
-                % (lead, card.display, flash_what, noun),
-                icon="warning", parent=self._dlg,
-            ):
-                return
+            if self._menu_var.get() and not building:
+                # A MENU WRITE DOES NOT ERASE THE CARD, and must not claim to:
+                # one partition is replaced, the games and the machine's own
+                # /data and /dump are untouched, and the run refuses outright
+                # if the card is not the one this image was flashed onto.
+                if not messagebox.askyesno(
+                    "Write the boot menu?",
+                    "This replaces the BOOT MENU on %s and nothing else.\n\n"
+                    "  Target: %s\n  Image:  %s\n\n"
+                    "The games stay as they are, and so do the machine's own "
+                    "settings and scores. If the card was not written from "
+                    "this image it is refused before anything is written. "
+                    "Proceed?" % (noun, card.display, flash_what),
+                    parent=self._dlg,
+                ):
+                    return
+            else:
+                lead = ("After the build finishes, this will ERASE the entire "
+                        "%s and %s." % (noun, verb)
+                        if building else
+                        "This will ERASE the entire %s and %s." % (noun, verb))
+                if not messagebox.askyesno(
+                    "Erase the %s and continue?" % noun,
+                    "%s There is no undo.\n\n  Target: %s\n  Image:  %s\n\n"
+                    "Make sure you have a backup of anything on the %s. "
+                    "Proceed?"
+                    % (lead, card.display, flash_what, noun),
+                    icon="warning", parent=self._dlg,
+                ):
+                    return
 
+        menu_only = bool(self._menu_var.get()) and not building
         device_path = card.device_path if (writing and card) else None
         # Past every confirmation — this is the pair the user committed to, so
         # it's the pair the dialog opens with next time.
@@ -654,7 +744,7 @@ class FlashImageDialog:
             if self._on_build_flash is not None:
                 self._on_build_flash(build_path, device_path)
         elif writing and self._on_flash is not None:
-            self._on_flash(img, device_path)
+            self._on_flash(img, device_path, menu_only=menu_only)
 
     def _cancel(self):
         try:

@@ -1963,8 +1963,14 @@ class App:
             self.window.write_filename_var.set(name)
         self._start_write(chain_flash_device=device_path)
 
-    def _start_flash_image(self, image_path, device_path):
+    def _start_flash_image(self, image_path, device_path, menu_only=False):
         """Flash a pre-built image onto a card (dd-style whole-image write).
+
+        ``menu_only`` writes ONLY the boot menu partition onto a card this
+        image was already flashed from - 350 MB rather than the whole image,
+        and the machine's own settings and scores survive it.  The core
+        refuses outright if the card is not that card
+        (:func:`core.rawdevice.flash_menu_to_device`).
 
         The image + target card were collected and confirmed by the flash
         dialog (``gui.flash_dialog.FlashImageDialog``); this just runs the
@@ -1987,7 +1993,9 @@ class App:
         # chips said nothing about a raw-device write (David: "the progress
         # bar status checkpoint need to be changed to the 'write' ones while
         # i'm writing an image"); set_running(False) hands the footer back.
-        self.window.set_write_phases(getattr(mfr, "flash_phases", ()))
+        self.window.set_write_phases(
+            getattr(mfr, "menu_flash_phases", ()) if menu_only
+            else getattr(mfr, "flash_phases", ()))
         self.window.show_phase_row("write", borrow=True)
         self.window.set_running(True, mode="write")
         # The Flash button doubles as this run's live Cancel (set_running
@@ -1997,7 +2005,8 @@ class App:
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
         self.pipeline = mfr.make_flash_pipeline(
-            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
+            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb,
+            menu_only=menu_only)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     def _start_read_card(self, device_path, image_path):

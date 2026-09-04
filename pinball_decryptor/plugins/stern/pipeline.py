@@ -403,10 +403,15 @@ class SternFlashImagePipeline(BasePipeline):
     and confirms the destructive write before reaching here."""
 
     def __init__(self, image_path, device_path,
-                 log_cb, phase_cb, progress_cb, done_cb):
+                 log_cb, phase_cb, progress_cb, done_cb, menu_only=False):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image_path = image_path
         self.device_path = device_path
+        #: Write ONLY the boot menu (p2) onto a card this image was already
+        #: flashed from - 350 MB instead of the whole image, and it keeps the
+        #: machine's own /data and /dump.  See rawdevice.flash_menu_to_device,
+        #: which refuses outright if the card is not that card.
+        self.menu_only = bool(menu_only)
 
     def _run(self):
         self._set_phase(0)  # Check card
@@ -428,12 +433,19 @@ class SternFlashImagePipeline(BasePipeline):
                 self.image_path, self.device_path,
                 log=self._log, progress=self._progress,
                 cancel=lambda: self._cancelled,
-                on_verify_start=lambda: self._set_phase(2))  # Verify card
+                on_verify_start=lambda: self._set_phase(2),  # Verify card
+                menu_only=self.menu_only)
         except FlashCancelled:
             # The card is now partially written — surface it as a cancel, but
-            # make clear the card is no longer usable until re-flashed.
-            self._log("Flash cancelled — the card is incomplete and must be "
-                      "re-flashed before use.", "error")
+            # make clear the card is no longer usable until re-flashed.  A
+            # menu write leaves the GAMES intact whatever happens: only p2 is
+            # half written, and writing the menu again finishes the job.
+            self._log(
+                "Menu write cancelled — the card's menu is half written; "
+                "write it again. The games on the card are untouched."
+                if self.menu_only else
+                "Flash cancelled — the card is incomplete and must be "
+                "re-flashed before use.", "error")
             self._check_cancel()   # raises PipelineError("Cancelled", ...)
             return
         except FlashError as e:
@@ -441,7 +453,11 @@ class SternFlashImagePipeline(BasePipeline):
         self._check_cancel()
 
         self._set_phase(3)  # Flush
-        self._done(True, "Flashed %s onto the SD card (%s)."
+        self._done(True, ("Wrote the boot menu (%s) onto the SD card (%s) - "
+                          "the games and the machine's own settings and "
+                          "scores were left alone."
+                          if self.menu_only else
+                          "Flashed %s onto the SD card (%s).")
                    % (format_size(written), self.device_path))
 
 

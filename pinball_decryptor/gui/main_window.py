@@ -2422,6 +2422,9 @@ class MainWindow:
         # ladder says nothing about assembling a card).  Packed only while
         # that tab shows; the panel drives it through set_multiboot_phase.
         self._multiboot_phases_frame = ttk.Frame(status_frame)
+        #: The chip row a RUN has borrowed from the tab that is open, or
+        #: None - see show_phase_row.
+        self._borrowed_row = None
 
         self._progress_bar = ttk.Progressbar(status_frame, mode="determinate",
                                              maximum=100)
@@ -15709,6 +15712,12 @@ class MainWindow:
             self._write_phases_frame.pack_forget()
             self._extract_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
+        # A RUN THAT BORROWED THE FOOTER KEEPS IT: every branch above packs
+        # the row the TAB owns, and a flash started from another tab is
+        # walking a ladder that is not that one.  Last word, after them all.
+        if getattr(self, "_running", False) \
+                and getattr(self, "_borrowed_row", None):
+            self.show_phase_row(self._borrowed_row)
 
         # Warn (amber top banner) if the source image these assets came from
         # has since changed on disk — only on the asset-editing tabs.
@@ -21080,6 +21089,59 @@ class MainWindow:
         if status:
             self.set_status(status)
 
+    #: Which tab owns which chip row in the footer.  Everything not named
+    #: here shows the Extract ladder; the tabs mapped to None show no row at
+    #: all (a read-only browse has no pipeline to walk).
+    PHASE_ROW_BY_TAB = {
+        "Write": "write",
+        "Emulate": "emulate", "Emulate JJP": "emulate",
+        "Emulate Spike1": "emulate",
+        "Multi-boot": "multiboot",
+        "Replace Audio": None, "Replace Video": None,
+        "Replace Images": None, "Replace Text": None,
+        "Partition Explorer": None, "Default Settings": None,
+    }
+
+    def _phase_row_for_tab(self):
+        """The chip row the SELECTED tab owns - what the footer goes back to
+        when a run that borrowed it finishes."""
+        key = self._current_tab_key()
+        return self.PHASE_ROW_BY_TAB.get(key, "extract")
+
+    def show_phase_row(self, mode, borrow=False):
+        """Show one chip row in the footer and hide the rest.
+
+        THE ROW FOLLOWS THE RUN, NOT ONLY THE TAB.  It used to be chosen by
+        the selected tab alone, which is right until a run started on one tab
+        walks a ladder that belongs to another: flashing a card from the
+        Multi-boot tab left its Media / Copy / Inject / Verify chips sitting
+        there, all four green from the build that had just finished, while
+        the write pipeline walked Check / Write / Flush underneath a row
+        nobody could see (David, watching 'Writing image to SD card...' under
+        four finished multi-boot chips: "the progress bar status checkpoint
+        need to be changed to the 'write' ones while i'm writing an image").
+        ``borrow=True`` marks the row as the RUN's until the run ends, so
+        switching tabs mid-flash does not hide the ladder being walked;
+        ``set_running(False)`` clears that and hands the footer back."""
+        if borrow:
+            self._borrowed_row = mode
+        frames = {
+            "extract": getattr(self, "_extract_phases_frame", None),
+            "write": getattr(self, "_write_phases_frame", None),
+            "emulate": getattr(self, "_emulate_phases_frame", None),
+            "multiboot": getattr(self, "_multiboot_phases_frame", None),
+        }
+        for name, frame in frames.items():
+            if frame is None:
+                continue
+            try:
+                if name == mode:
+                    frame.pack(fill=tk.X, before=self._progress_bar)
+                else:
+                    frame.pack_forget()
+            except tk.TclError:                         # pragma: no cover
+                pass
+
     def set_write_phases(self, phases):
         """Swap the Write phase row to an arbitrary ``phases`` tuple and reset
         it to all-pending — used for the flash-image run, whose Check/Write/
@@ -21268,6 +21330,10 @@ class MainWindow:
             # Unconditional: restores the Flash opener whether or not this run
             # was a flash (no-op otherwise).
             self.set_flash_running(False)
+            # ...and the footer goes back to the tab that is open, whether or
+            # not this run borrowed it (see show_phase_row).
+            self._borrowed_row = None
+            self.show_phase_row(self._phase_row_for_tab())
             # Revert button tracks the change count, not a blanket re-enable —
             # disabled when there's nothing to revert (see _update_revert_btn_state).
             self._update_revert_btn_state()

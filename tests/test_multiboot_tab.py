@@ -5201,6 +5201,7 @@ def test_multiboot_tab_built_for_spike2_and_absent_otherwise(
     assert w.MULTIBOOT_PHASES == ("Media", "Copy", "Inject", "Verify")
     assert len(w._multiboot_phase_labels) == len(w.MULTIBOOT_PHASES)
     assert w._multiboot_panel._phase_fn == w.set_multiboot_phase
+    assert w._multiboot_panel._status_fn == w.set_status
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
     w.extract_input_var.set("")
@@ -7251,3 +7252,39 @@ def test_a_build_in_this_session_is_what_ready_knows(tmp_path):
         assert panel._built is None
     finally:
         root.destroy()
+
+
+@pytest.mark.gui
+@pytest.mark.skipif(not HAS_DISPLAY, reason="no Tk display available")
+def test_a_flash_takes_the_footer_and_gives_it_back(app):       # noqa: F811
+    """THE CHIP ROW FOLLOWS THE RUN, NOT ONLY THE TAB.  Build / flash card
+    can start a raw-device write from the Multi-boot tab, and this tab's own
+    Media / Copy / Inject / Verify say nothing about one - they sat there,
+    all four green from the build that had just finished, while the write
+    pipeline walked Check / Write / Flush under a row nobody could see."""
+    w = app.window
+    for tid in w._notebook.tabs():
+        if w._tab_key(tid) == "Multi-boot":
+            w._notebook.select(tid)
+            break
+    app.root.update()
+    assert w._multiboot_phases_frame.winfo_manager() == "pack"
+    assert w._write_phases_frame.winfo_manager() == ""
+    assert w._phase_row_for_tab() == "multiboot"
+
+    # the flash borrows it
+    w.show_phase_row("write", borrow=True)
+    assert w._write_phases_frame.winfo_manager() == "pack"
+    assert w._multiboot_phases_frame.winfo_manager() == ""
+    # ...and keeps it while the run is up, even if the tab changes under it
+    w._running = True
+    w._on_tab_changed()
+    assert w._write_phases_frame.winfo_manager() == "pack"
+    assert w._multiboot_phases_frame.winfo_manager() == ""
+    # the run ends: the footer goes back to the tab that is open
+    w._running = False
+    w.set_running(False, mode="write")
+    app.root.update()
+    assert w._borrowed_row is None
+    assert w._multiboot_phases_frame.winfo_manager() == "pack"
+    assert w._write_phases_frame.winfo_manager() == ""

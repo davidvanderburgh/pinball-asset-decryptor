@@ -1981,8 +1981,14 @@ class App:
         # the macOS Full Disk Access banner (proof FDA works), same as Direct-SD.
         self._current_run_is_direct_ssd = True
         self._cancel_requested = False
-        # Show the flash-specific phase row (Check card / Write image / Flush).
+        # Show the flash-specific phase row (Check card / Write image / Flush)
+        # - and PUT IT IN THE FOOTER, whatever tab the flash was started from.
+        # Multi-boot's Build / flash card can start one, and its own four
+        # chips said nothing about a raw-device write (David: "the progress
+        # bar status checkpoint need to be changed to the 'write' ones while
+        # i'm writing an image"); set_running(False) hands the footer back.
         self.window.set_write_phases(getattr(mfr, "flash_phases", ()))
+        self.window.show_phase_row("write", borrow=True)
         self.window.set_running(True, mode="write")
         # The Flash button doubles as this run's live Cancel (set_running
         # restores it when the run ends, whatever way it ends).

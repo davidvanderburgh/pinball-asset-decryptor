@@ -53,6 +53,27 @@ static const unsigned short PLAY_CENTER[NREG] = {
     0x0028, 0x0050, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 };
 
+/* THE STANDBY SET - what the game's first bring-up writes (0x1fa8c0(1))
+ * right after the bridge's 08 01 01 has reset the chips: DAC muted (000e
+ * 020c), outputs unpowered (0030 4060), the clock at its 48 kHz/256 setting
+ * (0004 0008) and the I2S format at default (0006 0000) - the PCM open that
+ * follows powers what it needs.  Written EXACTLY (no ORing: there is no
+ * live kernel configuration to preserve after a reset). */
+static const unsigned short STANDBY_MAIN[NREG] = {
+    0x0060, 0x0008, 0x0000, 0x0010, 0x020c, 0x7676, 0x015f, 0x0000, 0x1010, 0x0020,
+    0x0068, 0x01f0, 0x0000, 0x0322, 0x0404, 0x4060, 0x5000, 0x0000, 0x0017, 0x01c0,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0040, 0x051f, 0x0000, 0x0040, 0x0000, 0x0000,
+    0x0000, 0x002f, 0x002f, 0x002f, 0x002f, 0x002f, 0x8000, 0x0000, 0x0100, 0x1473,
+    0x0028, 0x0050, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+};
+static const unsigned short STANDBY_CENTER[NREG] = {
+    0x0060, 0x0008, 0x0000, 0x0010, 0x020c, 0x6c6c, 0x015f, 0x00cc, 0x4040, 0x0022,
+    0x0068, 0x01f0, 0x0002, 0x0322, 0x0404, 0x4060, 0x5000, 0x0000, 0x0017, 0x01c0,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0040, 0x051f, 0x0000, 0x0040, 0x0000, 0x0000,
+    0x0000, 0x002f, 0x002f, 0x002f, 0x002f, 0x002f, 0x8000, 0x0000, 0x0100, 0x1473,
+    0x0028, 0x0050, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+};
+
 /* left to the kernel: CHIP_CLK_CTRL and CHIP_I2S_CTRL (hw_params set them
  * for the stream that is actually running), CHIP_DAC_VOL and
  * CHIP_ANA_HP_CTRL (the PCM / Headphone mixer controls), CHIP_ANA_STATUS
@@ -175,24 +196,28 @@ void codec_snapshot(const char *when)
     close(fd);
 }
 
-/* write the full-power table to both chips.  record = 1 saves the kernel's
- * value into changed[] the first time (for restore); reassert = 1 logs each
- * register it had to put back (the drift the kernel's DAPM caused) rather
- * than every write.  Returns registers changed. */
-static int apply(int fd, int record, int reassert)
+/* write a table (wm for 0x0a, wc for 0x2a) to both chips, verify-and-correct
+ * like the game's 0x1fa8c0.  whole = 1 is the after-reset pass: every
+ * register but the two volumes the game skips and the read-only status,
+ * values exact; whole = 0 is the live pass: the kernel-owned registers are
+ * left alone and the power registers ORed.  record = 1 saves the values
+ * found into changed[] (for restore); log_each = 1 logs every write, with
+ * `note` on the end.  Returns registers changed (negative = had failures). */
+static int apply(int fd, const unsigned short *wm, const unsigned short *wc, int whole,
+                 int record, int log_each, const char *note)
 {
     int i, k, total = 0, bad = 0;
     for (i = 0; i < 2; i++) {
-        const unsigned short *want = i == 0 ? PLAY_MAIN : PLAY_CENTER;
+        const unsigned short *want = i == 0 ? wm : wc;
         for (k = 0; k < NREG; k++) {
             unsigned reg = REGS[k], cur = 0, to, back = 0;
-            if (kernel_owned(reg)) continue;
+            if (whole ? (reg == 0x0010 || reg == 0x002e || reg == 0x0036) : kernel_owned(reg)) continue;
             if (rd(fd, ADDRS[i], reg, &cur) < 0) {
-                if (!reassert) sel_log("codec 0x%02x reg %04x: unreadable, skipped", ADDRS[i], reg);
+                if (log_each) sel_log("codec 0x%02x reg %04x: unreadable, skipped", ADDRS[i], reg);
                 bad++;
                 continue;
             }
-            to = power_reg(reg) ? (cur | want[k]) : want[k];
+            to = (!whole && power_reg(reg)) ? (cur | want[k]) : want[k];
             if (to == cur) continue;
             if (wr(fd, ADDRS[i], reg, to) < 0 || rd(fd, ADDRS[i], reg, &back) < 0) {
                 sel_log("codec 0x%02x reg %04x %04x -> %04x: write failed", ADDRS[i], reg, cur, to);
@@ -206,12 +231,50 @@ static int apply(int fd, int record, int reassert)
                 nchanged++;
             }
             total++;
-            sel_log("codec 0x%02x reg %04x %04x -> %04x%s", ADDRS[i], reg, cur, to,
-                    reassert ? " (the kernel had pulled it back)" : "");
-            if (back != to) sel_log("codec 0x%02x reg %04x reads back %04x", ADDRS[i], reg, back);
+            if (log_each) sel_log("codec 0x%02x reg %04x %04x -> %04x%s", ADDRS[i], reg, cur, to, note);
+            if (back != to) sel_log("codec 0x%02x reg %04x reads back %04x, not %04x", ADDRS[i], reg, back, to);
         }
     }
-    return bad ? -total - 1 : total;   /* <0 encodes "had failures"; caller only logs the first time */
+    return bad ? -total - 1 : total;
+}
+
+#define RESET_WAIT_MS  250      /* the game's 250 x usleep(1000) poll (0x1faa5c) */
+#define RESET_SETTLE_US 750000  /* its usleep after the value came (0x1faa84) */
+void codec_after_reset(void)
+{
+    int fd, i, ms, r, total;
+    unsigned v[2] = { 0, 0 };
+    if (!enabled || gone) return;
+    fd = open_bus();
+    if (fd < 0) return;
+    for (ms = 0; ms < RESET_WAIT_MS; ms++) {
+        int ok = 1;
+        for (i = 0; i < 2; i++)
+            if (rd(fd, ADDRS[i], 0x0024, &v[i]) < 0 || v[i] != 0x0111) ok = 0;
+        if (ok) break;
+        usleep(1000);
+    }
+    if (ms < RESET_WAIT_MS)
+        sel_log("codec: both chips at their reset value after %d ms (CHIP_ANA_CTRL 0x0111): the bridge reset them", ms);
+    else
+        sel_log("codec: reset value NOT seen in %d ms (0x0a reads %04x, 0x2a %04x): the bridge did not reset the codecs; continuing as the game would",
+                RESET_WAIT_MS, v[0], v[1]);
+    close(fd);
+    usleep(RESET_SETTLE_US);
+    fd = open_bus();
+    if (fd < 0) return;
+    r = apply(fd, STANDBY_MAIN, STANDBY_CENTER, 1, 0, 0, "");
+    total = r < 0 ? -r - 1 : r;
+    for (i = 0; i < 2; i++) {
+        unsigned a = 0, b = 0, c = 0, d = 0, e = 0, f = 0;
+        rd(fd, ADDRS[i], 0x0002, &a); rd(fd, ADDRS[i], 0x0004, &b); rd(fd, ADDRS[i], 0x0006, &c);
+        rd(fd, ADDRS[i], 0x000e, &d); rd(fd, ADDRS[i], 0x0024, &e); rd(fd, ADDRS[i], 0x0030, &f);
+        sel_log("codec 0x%02x after the standby table: DIG_POWER %04x CLK %04x I2S %04x ADCDAC %04x ANA_CTRL %04x ANA_POWER %04x",
+                ADDRS[i], a, b, c, d, e, f);
+    }
+    close(fd);
+    sel_log("codec: the game's standby table written after the reset, %d register(s) changed%s; the stream opens next",
+            total, r < 0 ? " (some failed)" : "");
 }
 
 int codec_power_up(void)
@@ -219,7 +282,7 @@ int codec_power_up(void)
     int fd = open_bus(), r, total;
     if (fd < 0) return 0;
     nchanged = 0;
-    r = apply(fd, 1, 0);
+    r = apply(fd, PLAY_MAIN, PLAY_CENTER, 0, 1, 1, "");
     close(fd);
     total = r < 0 ? -r - 1 : r;
     sel_log("codec: %d register(s) set on the two chips: line-out, VAG, DAC powered, analog mutes cleared", total);
@@ -235,7 +298,7 @@ void codec_keep(long long now_ms)
     due = now_ms + KEEP_MS;
     fd = open_bus();                 /* cheap no-op once `gone` is set (no bus / not this board) */
     if (fd < 0) return;
-    apply(fd, 0, 1);                 /* re-assert; logs only the registers the kernel pulled back */
+    apply(fd, PLAY_MAIN, PLAY_CENTER, 0, 0, 1, " (the kernel had pulled it back)");
     close(fd);
 }
 

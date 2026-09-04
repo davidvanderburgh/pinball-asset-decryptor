@@ -847,9 +847,14 @@ egl: initialised 1.4 / egl: display 1360x768  Vivante came up
 egl: up after N attempt(s)                    N > 1 = boot_display was still releasing the LCD
 codec 0x0a before the menu (1/2): 0002=0060 0004=0008 ...   both SGTL5000s answered; their registers as the kernel left them
 audio: alsa default ok (2 ch, 44100 Hz)       the codec took the stream (else 'audio: none (no alsa: ...)')
-codec: 0 register(s) set on the two chips: line-out, VAG, DAC powered   the kernel had already powered it for the stream (David's machine: nothing ever pulled back)
-gpio75: raised to 1 (was 0) - the CPU-board line the game raises before the node bus   THE AMPLIFIER LINE - the one thing the menu had never done (input_hw.c)
-spi: /dev/spidev1.0 open (100 kHz, mode 3, 8-byte transfers, amp enable tx[7]=0x03)   the cabinet word, identical to the game's (read live from its memory)
+nb 0a: tx 0a 00 rx 04 00                      the bridge MCU's status: bit 1 CLEAR = the audio section has never been brought up
+spi: amp muted (tx[7]=0x27)                   the game's mute during the bring-up
+nb 08: tx 08 01 01                            THE AUDIO SECTION BRING-UP - the game's first audio step, the one the menu had never sent
+nb: bridge after 08 01 01: status 0x .. (bit1 = audio section initialized: yes)
+codec: both chips at their reset value after 3 ms (CHIP_ANA_CTRL 0x0111): the bridge reset them
+codec 0x0a after the standby table: DIG_POWER 0060 CLK 0008 I2S 0000 ADCDAC 020c ANA_CTRL 0020 ANA_POWER 4060
+audio: alsa default ok (2 ch, 44100 Hz)       the stream, opened after the table as the game opens its PCMs after it
+nb 0b: tx 0b 01 06 / spi: amp unmuted (tx[7]=0x03)   the bring-up's last step, then the amplifiers on
 media: 2 art, 1 anim (30 frames), 1 music, 0 card confirm, move=y confirm=y
 [select] key: left / [select] chose 1 TMNT 1987
 confirm: menu sound confirm.wav, 1540 ms under the LOADING frame

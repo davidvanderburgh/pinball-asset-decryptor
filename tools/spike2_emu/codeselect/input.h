@@ -66,6 +66,15 @@ const char *input_event_name(int ev);
 
 struct input *input_hw_open(const struct input_cfg *cfg);
 struct input *input_padsw_open(const struct input_cfg *cfg);
+/* hw only - no-ops on every other backend (they return -1 / do nothing):
+ *   input_hw_bridge  sends the CPU board's bridge MCU a one-argument command
+ *                    ({cmd, 01, arg}, write-only, like the game's 0x59ebac)
+ *                    and reads the `0a 00` status back; returns status[0]
+ *                    (bit 0 present, bit 1 = audio section initialized) or -1
+ *   input_hw_amp_mute  bits 2|5 of the cabinet word (SPI tx[7]), the game's
+ *                    amplifier mute; sent at once when the SPI is open */
+int  input_hw_bridge(struct input *in, unsigned char cmd, unsigned char arg);
+void input_hw_amp_mute(struct input *in, int mute);
 /* Does this title's switch list give the lockdown-bar Action button an id?
  * The same resolution input_padsw_open() does, without opening anything else -
  * --snapshot runs no input backend but must draw the footer the live menu

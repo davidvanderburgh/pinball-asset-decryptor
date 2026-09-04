@@ -373,6 +373,28 @@ These have each been violated at least once and each cost a run or a window:
       trips it); PAD_GPIO75=0|skip for experiments. Left high (the game
       writes 1 itself). Built, check + check-hw green, injected, menu-written.
       PROOF ON THE NEXT BOOT: `gpio75: raised to 1 (was 0)` and sound.
+      **2026-09-04 ROUND 6 - THE BRIDGE MCU: `08 01 01` (selector 2.7).** GPIO 75
+      raised, still silent; David: the speakers start at the game's 'Startup
+      in progress...' banner = the END of its audio bring-up. Every value the
+      menu can set is now verified identical to the game (codec registers,
+      ALSA switch, SPI tx[7], GPIO 75). What the game does that the menu never
+      did: its audio bring-up 0x1fa9c8 STARTS by sending the CPU board's
+      bridge MCU (LPC1111 netbridge) `08 01 01` via 0x5a4528 -> 0x59ebac
+      (descriptors are {cmd, payload-len, payload, reply-len}; 07/08/0b are
+      write-only; `0a 00` reads 2 status bytes - bit 1 = 'aux/audio section
+      initialized', and the game's runtime sweep 0x1d7d88 redoes the whole
+      bring-up while it is CLEAR). David's machine answers `0a 00` with
+      `04 00`: bit 1 clear, the audio section was never brought up. The
+      bridge resets both codecs (0x0111 poll) so the menu must then write the
+      game's STANDBY table itself (clock + I2S included: the kernel's cache is
+      stale after a reset). FIX: startup reordered - input (bus) first; then
+      SPI mute (tx[7]|0x24), `08 01 01`, poll 0x0111 <=250 ms, 750 ms, standby
+      table, THEN the stream; `0b 01 06` (the game's 0x1d7e3c, after its
+      bring-up) + unmute once it runs. input_hw_bridge()/input_hw_amp_mute()
+      + codec_after_reset(); all no-ops off hw. check + check-hw green (the
+      fake bus tolerates 08/0b); injected; menu-written. PROOF: `nb: bridge
+      after 08 01 01: status .. (bit1 ...: yes)` and sound. Earlier rule 'do
+      NOT send 08 01 01' (memory) is superseded by this evidence.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

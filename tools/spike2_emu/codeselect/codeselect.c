@@ -47,7 +47,7 @@
 #include "codec.h"
 #include "log.h"
 
-#define VERSION "2.6"
+#define VERSION "2.7"
 
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
 #define DEF_OUT      "/var/volatile/codeselect.choice"
@@ -940,6 +940,7 @@ int main(int argc, char **argv)
     char err[300], fontpath[300], tables[400], padsw[400];
     int headless, snapshot, invert, timeout, n, hl, chosen = -1, w, h, volume, pinned;
     int machine_v = -1;       /* volume=machine: the machine's own 0-63, else -1 */
+    int audio_up = 0;         /* the bridge brought the audio section up (hw only) */
     int action;                       /* this title has a lockdown-bar ACTION button */
     int music_voice = -1;
     const struct audio_clip *music_clip = NULL;
@@ -1071,13 +1072,37 @@ int main(int argc, char **argv)
         }
         if (machine_v >= 0) volume = audio_machine_gain(machine_v);
     }
-    /* THE CODECS (codec.h): what the two SGTL5000s hold before the menu
-     * touches anything goes in the log - it is the whole diagnosis when a
-     * machine stays silent - and the ALSA sink powers their line-out after
-     * its own open (audio_alsa.c), the way the game does over i2c.  Not on
-     * the emulator: there is no /dev/i2c-1 there, and the first call says so. */
+    /* THE INPUT FIRST - the node bus is also the way to the CPU board's bridge
+     * MCU, which the audio section below is brought up through */
+    memset(&icfg, 0, sizeof icfg);
+    icfg.nodebus = o.nodebus;
+    icfg.spi = o.spi;
+    icfg.preamble_full = !strcmp(o.preamble, "full");
+    if (o.padsw) snprintf(padsw, sizeof padsw, "%s", o.padsw);
+    else snprintf(padsw, sizeof padsw, "%s", getenv("PAD_SW_SHM") ? getenv("PAD_SW_SHM") : "/dump/padsw");
+    icfg.padsw = padsw;
+    icfg.tables = tables;
+    if (!strcmp(o.input, "hw")) in = input_hw_open(&icfg);
+    else if (!strcmp(o.input, "padsw")) in = input_padsw_open(&icfg);
+
+    /* THE AUDIO SECTION, in the game's order (0x1fa9c8 then 0x1fb2a8): the
+     * codecs as found go in the log; the amplifiers are muted in the cabinet
+     * word; the bridge MCU is told to bring the audio section up (08 01 01 -
+     * until then it answers `0a 00` with bit 1 clear, "audio not initialized",
+     * and no codec register, ALSA switch, SPI bit or GPIO the menu could set
+     * made a sound: David's Godzilla, five silent builds); both codecs are
+     * waited for at their reset value, the game's 750 ms, its standby table;
+     * THEN the stream, and once it runs 0b 01 06 and the unmute.  Every step
+     * is a no-op where there is no bridge (the emulator, --input none). */
     codec_configure(o.codec);
-    if (strcmp(o.audio, "none")) codec_snapshot("before the menu");
+    if (strcmp(o.audio, "none")) {
+        codec_snapshot("before the menu");
+        input_hw_amp_mute(in, 1);
+        if (input_hw_bridge(in, 0x08, 0x01) >= 0) {
+            codec_after_reset();
+            audio_up = 1;
+        }
+    }
     au = audio_open(o.audio, fmt_path, volume, o.audio_dump);
     if (machine_v >= 0 && !strcmp(audio_sink_name(au), "alsa")) {
         audio_alsa_mixer(machine_v);     /* the machine's own curve, on its own mixer */
@@ -1091,19 +1116,14 @@ int main(int argc, char **argv)
     media_load(&media, &c, &L, audio_active(au));
     media_log(&media);
 
-    memset(&icfg, 0, sizeof icfg);
-    icfg.nodebus = o.nodebus;
-    icfg.spi = o.spi;
-    icfg.preamble_full = !strcmp(o.preamble, "full");
-    if (o.padsw) snprintf(padsw, sizeof padsw, "%s", o.padsw);
-    else snprintf(padsw, sizeof padsw, "%s", getenv("PAD_SW_SHM") ? getenv("PAD_SW_SHM") : "/dump/padsw");
-    icfg.padsw = padsw;
-    icfg.tables = tables;
-    if (!strcmp(o.input, "hw")) in = input_hw_open(&icfg);
-    else if (!strcmp(o.input, "padsw")) in = input_padsw_open(&icfg);
+    /* (the input backend was opened before the sound: see THE AUDIO SECTION) */
     /* the backend is the authority once it exists: padsw may resolve its table
      * later than the probe above could, and --input none has no buttons */
     action = input_has(in, EV_ACTION);
+    /* the bring-up's last step (the game's 0x1d7e3c after its audio init), then
+     * the amplifiers back on now that the stream is running - no-ops off hw */
+    if (audio_up) input_hw_bridge(in, 0x0b, 0x06);
+    input_hw_amp_mute(in, 0);
 
     sel_say("menu: %d image%s, highlight %d (%s) from %s, timeout %d s, input %s, invert %d, %dx%d, font %s, audio %s, media %s, footer \"%s\"",
             n, n == 1 ? "" : "s", hl, c.img[hl].title, how, timeout, o.input, invert, w, h, fontpath,

@@ -512,6 +512,44 @@ static void cpu_gpio_raise(const char *nodebus)
             val[0] == '1' ? "raised to 1" : "written 0", was);
 }
 
+/* THE BRIDGE MCU AND THE AUDIO SECTION.  The CPU board's node-bus bridge (an
+ * LPC1111, "netbridge") takes short commands with bit 7 clear: `0a 00` is
+ * its status query (2 bytes back; the game's 0x59ed10 fans byte 0 out as
+ * bits - bit 0 present, bit 1 "aux device initialized", and its runtime
+ * sweep 0x1d7d88 RE-RUNS the whole audio bring-up whenever bit 1 is clear),
+ * `07 01 01` is sent by the bus init (0x5a4564), `08 01 01` is the FIRST
+ * thing the game's audio bring-up does (0x1fa9c8 -> 0x5a4528: the audio
+ * section comes up and both codecs read their reset value afterwards) and
+ * `0b 01 06` follows the bring-up (0x1d7e3c).  David's machine answers
+ * `0a 00` with 04 00 while the menu runs: bit 1 clear - the audio section
+ * had never been brought up, which is what every other control matching
+ * the game could not fix.  The menu sends the same commands in the same
+ * order now; codec.c handles the codecs' reset in between. */
+int input_hw_bridge(struct input *in, unsigned char cmd, unsigned char arg)
+{
+    struct hw *h = (struct hw *)in;
+    unsigned char c[3], r[2] = { 0, 0 };
+    char tag[8];
+    static const unsigned char c0a[] = { 0x0a, 0x00 };
+    if (!in || in->ops != &hw_ops || h->fd < 0) return -1;
+    c[0] = cmd; c[1] = 0x01; c[2] = arg;
+    snprintf(tag, sizeof tag, "%02x", cmd);
+    if (xchg_raw(h, tag, c, sizeof c, NULL, 0) < 0) return -1;
+    if (xchg_raw(h, "0a", c0a, sizeof c0a, r, 2) != 2) return -1;
+    sel_log("nb: bridge after %02x 01 %02x: status %02x %02x (bit1 = audio section initialized: %s)",
+            cmd, arg, r[0], r[1], (r[0] & 2) ? "yes" : "no");
+    return r[0];
+}
+
+void input_hw_amp_mute(struct input *in, int mute)
+{
+    struct hw *h = (struct hw *)in;
+    if (!in || in->ops != &hw_ops) return;
+    if (mute) h->tx7 |= 0x24; else h->tx7 &= (unsigned char)~0x24;
+    if (h->spi >= 0) spi_poll(h);                 /* out on the wire now, not at the next 10 ms tick */
+    sel_log("spi: amp %s (tx[7]=0x%02x)", mute ? "muted" : "unmuted", h->tx7);
+}
+
 struct input *input_hw_open(const struct input_cfg *cfg)
 {
     struct hw *h = calloc(1, sizeof *h);

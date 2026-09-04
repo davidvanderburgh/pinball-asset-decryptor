@@ -44,6 +44,15 @@ void codec_configure(const char *mode);
 /* log both chips' registers as they stand (two lines per chip); `when`
  * names the moment.  The first call decides whether the codecs are there. */
 void codec_snapshot(const char *when);
+/* AFTER THE BRIDGE'S 08 01 01 (input_hw_bridge): the game's 0x1fa9c8 from
+ * that point - wait up to 250 ms for both chips to read CHIP_ANA_CTRL ==
+ * 0x0111 (their reset value; the log says how long it took, or that it never
+ * came), the game's 750 ms settle, then its STANDBY table onto both chips -
+ * every register but the two volumes it skips, clock and I2S format
+ * included, because the kernel's register cache is stale after a reset and
+ * it will not rewrite what it believes it already set.  The stream is
+ * opened after this, as the game opens its PCMs after it. */
+void codec_after_reset(void);
 /* the game's full-power table onto both chips; the number of registers
  * changed (0 = nothing done, for whatever reason the log says).  Records
  * the kernel's original values so codec_restore can put them back. */

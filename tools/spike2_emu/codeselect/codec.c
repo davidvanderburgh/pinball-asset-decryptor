@@ -289,18 +289,6 @@ int codec_power_up(void)
     return total;
 }
 
-#define KEEP_MS 400
-void codec_keep(long long now_ms)
-{
-    static long long due;
-    int fd;
-    if (now_ms < due) return;
-    due = now_ms + KEEP_MS;
-    fd = open_bus();                 /* cheap no-op once `gone` is set (no bus / not this board) */
-    if (fd < 0) return;
-    apply(fd, PLAY_MAIN, PLAY_CENTER, 0, 0, 1, " (the kernel had pulled it back)");
-    close(fd);
-}
 
 void codec_restore(void)
 {

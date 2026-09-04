@@ -23,6 +23,9 @@
 #include <sys/ioctl.h>
 #include <linux/serial.h>
 #include <linux/spi/spidev.h>
+#include <pthread.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
 #include "input.h"
 #include "log.h"
 
@@ -70,6 +73,14 @@ struct hw {
     int cab_valid;
     int spi_logged;
     unsigned char tx7;                     /* the cabinet output byte: SPI_TX7_AMP, or PAD_SPI_TX7 */
+    /* THE INPUT THREAD - the game's own layout (its node-bus and SPI loops
+     * are threads): the scan runs on its own, at its own cadence, and a
+     * long frame in the menu loop (a decode, an upload) can no longer
+     * swallow a flipper press.  `bus` serialises the wire: the thread's
+     * scans and the bring-up commands the menu sends from its own thread. */
+    pthread_t th;
+    int th_on, th_stop;
+    pthread_mutex_t bus;
 };
 
 static const struct input_ops hw_ops;
@@ -433,11 +444,38 @@ static void hw_poll(struct input *in, long long now)
     }
 }
 
+static void *hw_thread(void *p)
+{
+    struct hw *h = p;
+    /* ahead of the menu's own thread (root: a negative nice is allowed):
+     * a press is sampled on time whatever the picture is doing */
+    setpriority(PRIO_PROCESS, (int)syscall(SYS_gettid), -5);
+    while (!h->th_stop) {
+        long long now = sel_now_ms(), next, wait;
+        pthread_mutex_lock(&h->bus);
+        hw_poll(&h->base, now);
+        next = h->fd >= 0 ? h->next_scan : now + SPI_MS;
+        if (h->spi >= 0 && h->next_spi < next) next = h->next_spi;
+        pthread_mutex_unlock(&h->bus);
+        wait = next - sel_now_ms();
+        if (wait < 1) wait = 1;
+        if (wait > SPI_MS) wait = SPI_MS;
+        sel_sleep_ms((int)wait);
+    }
+    return NULL;
+}
+
 static void hw_close(struct input *in)
 {
     struct hw *h = (struct hw *)in;
+    if (h->th_on) {
+        h->th_stop = 1;
+        pthread_join(h->th, NULL);
+        h->th_on = 0;
+    }
     if (h->fd >= 0) close(h->fd);
     if (h->spi >= 0) close(h->spi);
+    pthread_mutex_destroy(&h->bus);
     free(h);
 }
 
@@ -531,22 +569,28 @@ int input_hw_bridge(struct input *in, unsigned char cmd, unsigned char arg)
     unsigned char c[3], r[2] = { 0, 0 };
     char tag[8];
     static const unsigned char c0a[] = { 0x0a, 0x00 };
+    int rc = -1;
     if (!in || in->ops != &hw_ops || h->fd < 0) return -1;
     c[0] = cmd; c[1] = 0x01; c[2] = arg;
     snprintf(tag, sizeof tag, "%02x", cmd);
-    if (xchg_raw(h, tag, c, sizeof c, NULL, 0) < 0) return -1;
-    if (xchg_raw(h, "0a", c0a, sizeof c0a, r, 2) != 2) return -1;
-    sel_log("nb: bridge after %02x 01 %02x: status %02x %02x (bit1 = audio section initialized: %s)",
-            cmd, arg, r[0], r[1], (r[0] & 2) ? "yes" : "no");
-    return r[0];
+    pthread_mutex_lock(&h->bus);                  /* the scan thread shares the wire */
+    if (xchg_raw(h, tag, c, sizeof c, NULL, 0) >= 0 && xchg_raw(h, "0a", c0a, sizeof c0a, r, 2) == 2)
+        rc = r[0];
+    pthread_mutex_unlock(&h->bus);
+    if (rc >= 0)
+        sel_log("nb: bridge after %02x 01 %02x: status %02x %02x (bit1 = audio section initialized: %s)",
+                cmd, arg, r[0], r[1], (r[0] & 2) ? "yes" : "no");
+    return rc;
 }
 
 void input_hw_amp_mute(struct input *in, int mute)
 {
     struct hw *h = (struct hw *)in;
     if (!in || in->ops != &hw_ops) return;
+    pthread_mutex_lock(&h->bus);
     if (mute) h->tx7 |= 0x24; else h->tx7 &= (unsigned char)~0x24;
     if (h->spi >= 0) spi_poll(h);                 /* out on the wire now, not at the next 10 ms tick */
+    pthread_mutex_unlock(&h->bus);
     sel_log("spi: amp %s (tx[7]=0x%02x)", mute ? "muted" : "unmuted", h->tx7);
 }
 
@@ -561,7 +605,19 @@ struct input *input_hw_open(const struct input_cfg *cfg)
     tty_setup(h, cfg->nodebus ? cfg->nodebus : "/dev/ttymxc1");
     preamble(h, cfg->preamble_full);
     spi_setup(h, cfg->spi ? cfg->spi : "/dev/spidev1.0");
-    if (h->fd < 0 && h->spi < 0)
+    pthread_mutex_init(&h->bus, NULL);
+    if (h->fd < 0 && h->spi < 0) {
         sel_log("hw: neither the node bus nor the SPI opened: no buttons, countdown only");
+        return &h->base;
+    }
+    /* the scan on its own thread from here (input.c dequeues under the lock) */
+    h->base.threaded = 1;
+    if (pthread_create(&h->th, NULL, hw_thread, h) == 0) {
+        h->th_on = 1;
+        sel_log("hw: input thread up (node bus every %d ms, SPI every %d ms, nice -5)", SCAN_MS, SPI_MS);
+    } else {
+        h->base.threaded = 0;                     /* polled from the menu loop, as before */
+        sel_log("hw: input thread failed: %s (polling from the menu loop)", strerror(errno));
+    }
     return &h->base;
 }

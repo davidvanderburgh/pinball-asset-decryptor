@@ -23,6 +23,7 @@
  */
 #ifndef CODESELECT_INPUT_H
 #define CODESELECT_INPUT_H
+#include <pthread.h>
 
 enum sel_event {
     EV_NONE = 0,
@@ -48,6 +49,10 @@ struct input_ops {
 
 struct input {
     const struct input_ops *ops;
+    /* a backend that samples on ITS OWN THREAD (hw) sets threaded: input_poll
+     * then only dequeues, under lock, and never calls ops->poll */
+    int threaded;
+    pthread_mutex_t lock;     /* the event queue: a sampling thread queues, the menu dequeues */
     int last[KEY_COUNT], count[KEY_COUNT], stable[KEY_COUNT];
     /* can this key ever fire? 1 for every key until a backend says otherwise
      * (padsw clears the ones its switch list does not name). May change

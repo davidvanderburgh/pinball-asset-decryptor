@@ -43,7 +43,8 @@ LDPOST    = $(CRTEND) $(ROOT)/usr/lib/crtn.o -L$(ROOT)/lib -L$(ROOT)/usr/lib \
             -Wl,--dynamic-linker=/lib/ld-linux-armhf.so.3
 # libc_nonshared.a: __libc_csu_init/fini for the rootfs crt1.o + the stat wrappers
 # -l:libgcc_s.so.1: the rig's bridge shims leave __aeabi_uldivmod undefined
-LIBC      = -l:libc.so.6 $(ROOT)/usr/lib/libc_nonshared.a -l:libm.so.6 -l:libgcc_s.so.1 -lgcc
+# -l:libpthread.so.0: the input scan and the animation cache are threads (2.8)
+LIBC      = -l:libpthread.so.0 -l:libc.so.6 $(ROOT)/usr/lib/libc_nonshared.a -l:libm.so.6 -l:libgcc_s.so.1 -lgcc
 GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 # the rootfs alsa-lib 1.0.28 (GLIBC_2.4 only; its libdl/libpthread/librt are
 # in the rootfs). Hand prototypes in audio_alsa.c: no headers on the box.

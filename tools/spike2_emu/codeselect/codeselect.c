@@ -47,7 +47,7 @@
 #include "codec.h"
 #include "log.h"
 
-#define VERSION "2.7"
+#define VERSION "2.8"
 
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
 #define DEF_OUT      "/var/volatile/codeselect.choice"
@@ -514,16 +514,44 @@ static void media_check(const struct media *m, int i)
     }
 }
 
-/* what the on-demand decoding cost, per animation that was played */
+/* what the decoding cost, per animation that was played: on demand (the
+ * menu's own thread) or the cache thread's fill */
 static void media_stats(const struct media *m)
 {
     int i;
     for (i = 0; i < CONF_MAX_IMAGES; i++) {
         const struct art_anim *a = m->anim[i];
-        if (a && a->decodes)
+        if (!a || !a->decodes) continue;
+        if (a->caching)
+            sel_log("anim: image %d: %d of %d frames cached, %.2f ms each on the cache thread",
+                    i, art_anim_ready(a), a->n, a->decodes ? a->decode_us / 1000.0 / a->decodes : 0.0);
+        else
             sel_log("anim: image %d: %d frame decodes, %.2f ms each",
                     i, a->decodes, a->decode_us / 1000.0 / a->decodes);
     }
+}
+
+/* RAM for the frame cache: half of what the kernel calls available, capped
+ * - the game's own working set is not running yet, and the cache is freed
+ * before the game starts; 64 MB when /proc/meminfo cannot be read */
+static size_t anim_cache_budget(void)
+{
+    FILE *f = fopen("/proc/meminfo", "r");
+    char line[128];
+    size_t avail_kb = 0, free_kb = 0, budget;
+    if (f) {
+        while (fgets(line, sizeof line, f)) {
+            unsigned long v;
+            if (sscanf(line, "MemAvailable: %lu", &v) == 1) avail_kb = v;
+            else if (sscanf(line, "MemFree: %lu", &v) == 1) free_kb = v;
+        }
+        fclose(f);
+    }
+    if (!avail_kb) avail_kb = free_kb;
+    if (!avail_kb) return (size_t)64 * 1024 * 1024;
+    budget = avail_kb * 1024 / 2;
+    if (budget > (size_t)192 * 1024 * 1024) budget = (size_t)192 * 1024 * 1024;
+    return budget;
 }
 
 static void media_log(struct media *m)
@@ -1115,6 +1143,15 @@ int main(int argc, char **argv)
     snprintf(media.dir, sizeof media.dir, "%s", media_dir(&o, &c));
     media_load(&media, &c, &L, audio_active(au));
     media_log(&media);
+    /* THE FRAME CACHE (art.h): every clip decoded once, on a thread below
+     * this one, and played from RAM - on the machine a frame costs 13 ms to
+     * decode and two clips at their rate were more than half the CPU in this
+     * loop.  Not when the frames are pinned: those modes need frame k exactly. */
+    if (!pinned) {
+        char why[240];
+        art_cache_start(media.anim, n, anim_cache_budget(), why, sizeof why);
+        sel_log("anim: cache: %s", why);
+    }
 
     /* (the input backend was opened before the sound: see THE AUDIO SECTION) */
     /* the backend is the authority once it exists: padsw may resolve its table
@@ -1145,15 +1182,15 @@ int main(int argc, char **argv)
     music_clip = media.music[hl];
     if (music_clip) music_voice = audio_play(au, music_clip, 1);
 
+    /* the loop's own account, every 5 s: how many passes, the longest one
+     * (a stall this long is a press that can be missed on a polled backend
+     * and a hitch in every picture), and how far the cache has got */
+    long long perf_due = start + 5000, perf_worst = 0;
+    int perf_loops = 0;
+
     while (!g_stop) {
         long long now = sel_now_ms();
         int ev, remain, old_hl = hl;
-
-        /* hold the codecs' line-out on: the kernel routes only the headphone
-         * jack, so its DAPM pulls LINE_OUT (the amps' feed) back down once the
-         * stream is running - the game reprograms the codec continuously for
-         * the same reason (codec.h). A no-op where there is no codec bus. */
-        codec_keep(now);
 
         while ((ev = input_poll(in, now)) != EV_NONE) {
             sel_say("key: %s", input_event_name(ev));
@@ -1232,6 +1269,24 @@ int main(int argc, char **argv)
             dirty = 0;
         }
         present(&g, &egl, headless, invert);
+        {
+            long long dt = sel_now_ms() - now;
+            if (dt > perf_worst) perf_worst = dt;
+            perf_loops++;
+            if (now >= perf_due) {
+                char cs[200];
+                int ci, cn = 0;
+                for (ci = 0; ci < n && cn < (int)sizeof cs - 24; ci++)
+                    if (media.anim[ci])
+                        cn += snprintf(cs + cn, sizeof cs - (size_t)cn, "%s%d:%d/%d", cn ? " " : "",
+                                       ci, art_anim_ready(media.anim[ci]), media.anim[ci]->n);
+                sel_log("perf: %d loops/5 s (%d/s), longest %lld ms; cache %s",
+                        perf_loops, perf_loops / 5, perf_worst, cn ? cs : "-");
+                perf_loops = 0;
+                perf_worst = 0;
+                perf_due = now + 5000;
+            }
+        }
     }
 
     if (chosen >= 0) {
@@ -1265,7 +1320,6 @@ int main(int argc, char **argv)
             if (cc) cv = audio_play(au, cc, 0);
             while (!g_stop) {
                 long long now = sel_now_ms();
-                codec_keep(now);        /* keep line-out up while the confirm sound plays */
                 audio_pump(au, now);
                 if (!done_at && (cv < 0 || !audio_playing(au, cv))) done_at = now + audio_lead_ms(au);
                 if (done_at && now >= done_at) break;
@@ -1293,6 +1347,7 @@ int main(int argc, char **argv)
     audio_close(au);
     input_close(in);
     if (!headless) egl_stern_close(&egl);
+    art_cache_stop();
     media_free(&media);
     gfx_free(&g);
     gfx_font_free(font);

@@ -57,14 +57,11 @@ void codec_after_reset(void);
  * changed (0 = nothing done, for whatever reason the log says).  Records
  * the kernel's original values so codec_restore can put them back. */
 int  codec_power_up(void);
-/* RE-ASSERT the table, at most every KEEP_MS - call it from the menu loop.
- * The kernel's device tree routes only the headphone jack, so its DAPM
- * powers the headphone path for the running stream and pulls the LINE_OUT
- * block (the amplifiers' feed) back down after codec_power_up ran; the game
- * fights this by reprogramming the codec continuously (its health check),
- * and so does this.  Every register it finds drifted is written back and
- * logged, which is also the proof of what the kernel undoes. */
-void codec_keep(long long now_ms);
+/* (2.5's codec_keep, a re-assert from the menu loop every 400 ms, is gone:
+ * on David's machine it never found a register pulled back, and its ~90
+ * i2c reads blocked the loop for tens of milliseconds each pass - stutter
+ * in the pictures and swallowed flipper presses.  The gate was the bridge
+ * MCU's 08 01 01, not the kernel undoing the codec.) */
 /* put back what codec_power_up first found (power bits only ever removed) */
 void codec_restore(void);
 

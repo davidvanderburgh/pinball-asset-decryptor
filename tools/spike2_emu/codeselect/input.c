@@ -8,6 +8,7 @@ void input_base_init(struct input *in, const struct input_ops *ops)
     int k;
     memset(in, 0, sizeof *in);
     in->ops = ops;
+    pthread_mutex_init(&in->lock, NULL);
     for (k = 0; k < KEY_COUNT; k++) {
         in->last[k] = -1;
         in->stable[k] = -1;          /* unknown until two samples agree */
@@ -17,10 +18,14 @@ void input_base_init(struct input *in, const struct input_ops *ops)
 
 static void queue(struct input *in, int ev)
 {
-    int next = (in->evw + 1) % 32;
-    if (next == in->evr) return;     /* full: drop */
-    in->evq[in->evw] = ev;
-    in->evw = next;
+    int next;
+    pthread_mutex_lock(&in->lock);
+    next = (in->evw + 1) % 32;
+    if (next != in->evr) {           /* full: drop */
+        in->evq[in->evw] = ev;
+        in->evw = next;
+    }
+    pthread_mutex_unlock(&in->lock);
 }
 
 void input_sample(struct input *in, int key, int pressed)
@@ -46,12 +51,15 @@ void input_sample(struct input *in, int key, int pressed)
 
 int input_poll(struct input *in, long long now_ms)
 {
-    int ev;
+    int ev = EV_NONE;
     if (!in) return EV_NONE;
-    if (in->ops && in->ops->poll) in->ops->poll(in, now_ms);
-    if (in->evr == in->evw) return EV_NONE;
-    ev = in->evq[in->evr];
-    in->evr = (in->evr + 1) % 32;
+    if (!in->threaded && in->ops && in->ops->poll) in->ops->poll(in, now_ms);
+    pthread_mutex_lock(&in->lock);
+    if (in->evr != in->evw) {
+        ev = in->evq[in->evr];
+        in->evr = (in->evr + 1) % 32;
+    }
+    pthread_mutex_unlock(&in->lock);
     return ev;
 }
 

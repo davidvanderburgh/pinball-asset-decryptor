@@ -174,7 +174,11 @@ full CLI, the log lines and the test list). What it is:
   dirty-rect tracking + a packed sub-rect, 180-degree rotation, P6 PPM),
   `egl_stern.c` (Stern's EGL bring-up, sub-rect uploads), `art.c` (PNG +
   animated GIF through the vendored stb_image, box-downscaled into the art
-  panel; a GIF is decoded ON DEMAND, one frame per tick, frame 0 kept as
+  panel; a GIF is decoded ON DEMAND in the pinned/snapshot modes - one frame
+  per tick - and ONCE, onto a RAM cache filled by a thread at nice 10, in
+  the live menu (2.8: 13 ms a frame on the machine, more than half the CPU
+  for two clips when it ran on the menu's thread; the hardware input scan is
+  its own thread at nice -5 for the same reason), frame 0 kept as
   the still, the count and delays from a walk of the block stream - so a
   150-frame loop costs two panels of RAM and the menu is up after one
   frame), `audio.c` (WAV loader, 4-voice mixer) +

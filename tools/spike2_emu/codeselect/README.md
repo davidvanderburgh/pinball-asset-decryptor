@@ -185,11 +185,21 @@ which is the case wrapping cannot help with.
   highlighted or not (David, 2026-09-03: "all boot selections should play
   video at the same time all the time"); a card without one shows its
   still. A GIF is
-  up to 150 frames (5 s at 30 fps, the tools' contract) and is decoded
+  up to 150 frames (5 s at 30 fps, the tools' contract). **In the live menu
+  every frame is decoded ONCE, by a cache thread at nice 10, and played
+  from RAM** (`art_cache_start`, 2.8): on the machine a 298x168 frame costs
+  13 ms to decode (1 ms on the PC), and two clips at their rate decoded on
+  the menu's own thread were more than half the CPU - slow pictures and
+  swallowed flipper presses. Playback shows frame k when it is in, else the
+  newest frame that is, so the clips catch up over the first seconds while
+  the loop stays at the LCD's rate; the cache is bounded by half the
+  kernel's available RAM (cap 192 MB, `anim: cache:` in the log says) and a
+  clip over it stays on demand. The pinned and snapshot modes still decode
   ON DEMAND - the tick that shows frame k decodes frame k, a wrap starts
-  the file over - so the menu holds one frame per animation plus frame
-  0, whatever the length, and comes up after one frame's decode
-  (measured under qemu: ~1 ms a frame at 200x112, ~4 ms at 384x216).
+  the file over - because they need frame k exactly. The input scan is a
+  thread too (nice -5, `hw: input thread up`), the game's own layout, so no
+  frame of the menu loop can swallow a press; `perf:` every 5 s gives the
+  loop's passes per second, its longest pass and the cache's fill.
 * **Confirm**: one `LOADING <title>...` frame with the chosen card's picture
   above the line; it stays up (swapped every frame) while the confirm sound
   plays to completion, then the program exits and the LCD keeps that frame

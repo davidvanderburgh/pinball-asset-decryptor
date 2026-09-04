@@ -395,6 +395,27 @@ These have each been violated at least once and each cost a run or a window:
       fake bus tolerates 08/0b); injected; menu-written. PROOF: `nb: bridge
       after 08 01 01: status .. (bit1 ...: yes)` and sound. Earlier rule 'do
       NOT send 08 01 01' (memory) is superseded by this evidence.
+      **2026-09-04 SOUND CONFIRMED ON THE MACHINE with 2.7 (the bridge's
+      `08 01 01`). David next: "animation playback feels a little slow and the
+      flipper switch input is occasionally not rendering... extra processing
+      (unthrottled) swallowing cpu... prioritize audio, switch input,
+      animations". DIAGNOSIS from the machine's own logs: (1) 2.5's
+      codec_keep blocked the loop ~70 ms every 400 ms (90 i2c reads at
+      100 kHz) and never found a register to fix - REMOVED; (2) a 298x168
+      GIF frame decodes in 13 ms on the i.MX6 (1 ms on the PC): two clips at
+      their rate = 54% CPU on the menu thread (`476 frame decodes, 12.98 ms`
+      each in a 23 s run). SELECTOR 2.8: art_cache_start() - every frame
+      decoded once by a thread at nice 10 into a RAM cache (budget = half
+      MemAvailable, cap 192 MB; over-budget clips stay on demand; pinned/
+      snapshot modes unchanged); playback shows frame k if in, else the
+      newest, catching up over the first seconds; the hw input scan is its
+      own thread at nice -5 (node bus 25 ms, SPI 10 ms; a `bus` mutex
+      serialises it with the bring-up commands; input.c's queue is locked);
+      `perf:` line every 5 s (loops/s, longest pass, cache fill).
+      -l:libpthread.so.0 added (check_elf allowlist updated). check +
+      check-hw green (fake-bus scans 124 -> 164 in the same 2.1 s). Injected,
+      menu-written. NEXT LOG: `perf:` ~60 loops/s with longest < 30 ms once
+      the cache is full; `anim: image N: 150 of 150 frames cached`.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

@@ -17,6 +17,10 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
 #include "art.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -393,6 +397,13 @@ const struct art_image *art_anim_frame(struct art_anim *a, int k)
     if (!a || a->n <= 0) return NULL;
     k %= a->n;
     if (k < 0) k += a->n;
+    if (a->caching) {
+        /* the decoder belongs to the cache thread now: a lookup, never a decode */
+        int ready = __atomic_load_n(&a->ready, __ATOMIC_ACQUIRE);
+        if (k == 0) return &a->first;
+        if (k < ready) return &a->cache[k];
+        return ready > 1 ? &a->cache[ready - 1] : &a->first;
+    }
     if (k == a->cur) return &a->frame;
     /* an earlier frame (the loop wrapping, usually) means starting the file
      * over: one decode per tick either way, since frame 0 is the first thing
@@ -419,9 +430,115 @@ const struct art_image *art_anim_frame(struct art_anim *a, int k)
 void art_anim_free(struct art_anim *a)
 {
     if (!a) return;
+    if (a->cache) {
+        int k;
+        for (k = 1; k < a->n; k++) free(a->cache[k].rgba);
+        free(a->cache);
+    }
     free(a->frame.rgba);
     free(a->first.rgba);
     free(a->delay_ms);
     gifdec_free((struct gifdec *)a->dec);
     free(a);
+}
+
+/* ---------------------------------------------------------- the cache */
+
+static struct {
+    pthread_t th;
+    int on, stop;
+    struct art_anim *anims[64];
+    int n;
+} cache;
+
+static void *cache_thread(void *arg)
+{
+    int k, i;
+    (void)arg;
+    /* below the menu's own thread and the input thread: the picture may lag
+     * for a moment, a flipper press and the audio must not */
+    setpriority(PRIO_PROCESS, (int)syscall(SYS_gettid), 10);
+    for (k = 1; !cache.stop; k++) {
+        int any = 0;
+        for (i = 0; i < cache.n && !cache.stop; i++) {
+            struct art_anim *a = cache.anims[i];
+            long long t0;
+            if (!a || !a->caching || k >= a->n) continue;
+            any = 1;
+            t0 = now_us();
+            if (!anim_decode_next(a)) {
+                /* fewer frames than the walk counted: the clip is what did
+                 * decode; media_check logs a->err once */
+                int have = a->cur + 1 > 0 ? a->cur + 1 : 1;
+                __atomic_store_n(&a->n, have, __ATOMIC_RELEASE);
+                continue;
+            }
+            a->cache_us += now_us() - t0;
+            a->cache[k] = a->frame;               /* the pixels move into the cache */
+            a->frame.rgba = NULL;                 /* (the next decode frees NULL) */
+            __atomic_store_n(&a->ready, k + 1, __ATOMIC_RELEASE);
+        }
+        if (!any) break;
+    }
+    return NULL;
+}
+
+int art_cache_start(struct art_anim **anims, int n, size_t budget_bytes, char *why, int whylen)
+{
+    size_t used = 0;
+    int i, on = 0, skipped = 0;
+    if (cache.on) { snprintf(why, whylen, "already running"); return 0; }
+    cache.n = 0;
+    cache.stop = 0;
+    for (i = 0; i < n && cache.n < (int)(sizeof cache.anims / sizeof *cache.anims); i++) {
+        struct art_anim *a = anims[i];
+        size_t need;
+        if (!a || a->n < 2) continue;
+        need = (size_t)(a->n - 1) * (size_t)a->w * (size_t)a->h * 4;
+        if (used + need > budget_bytes) { skipped++; continue; }
+        a->cache = calloc((size_t)a->n, sizeof *a->cache);
+        if (!a->cache) { skipped++; continue; }
+        /* the thread continues the decoder from frame 0 (art_anim_open
+         * decoded it); put it back there if anything moved it since */
+        if (a->cur != 0) { gifdec_rewind((struct gifdec *)a->dec); a->cur = -1; anim_decode_next(a); }
+        a->ready = 1;
+        a->caching = 1;
+        used += need;
+        cache.anims[cache.n++] = a;
+        on++;
+    }
+    if (!on) {
+        snprintf(why, whylen, "nothing to cache%s", skipped ? " (over the budget)" : "");
+        return 0;
+    }
+    if (pthread_create(&cache.th, NULL, cache_thread, NULL) != 0) {
+        for (i = 0; i < cache.n; i++) { cache.anims[i]->caching = 0; cache.anims[i]->ready = 0; }
+        cache.n = 0;
+        snprintf(why, whylen, "pthread_create failed, decoding on demand");
+        return 0;
+    }
+    cache.on = 1;
+    {
+        int w = snprintf(why, whylen, "%d clip(s), %zu MB of frames, decoding on a thread at nice 10",
+                         on, (used + 512 * 1024) / (1024 * 1024));
+        if (skipped && w > 0 && w < whylen)
+            snprintf(why + w, (size_t)(whylen - w), "; %d clip(s) left on demand, over the %zu MB budget",
+                     skipped, (budget_bytes + 512 * 1024) / (1024 * 1024));
+    }
+    return on;
+}
+
+void art_cache_stop(void)
+{
+    if (!cache.on) return;
+    cache.stop = 1;
+    pthread_join(cache.th, NULL);
+    cache.on = 0;
+    cache.n = 0;
+}
+
+int art_anim_ready(const struct art_anim *a)
+{
+    if (!a || !a->caching) return 0;
+    return __atomic_load_n(&a->ready, __ATOMIC_ACQUIRE);
 }

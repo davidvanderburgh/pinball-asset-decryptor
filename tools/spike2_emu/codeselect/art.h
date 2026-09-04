@@ -37,6 +37,15 @@ struct art_anim {
     void *dec;                /* the file bytes + stb's state */
     char err[200];            /* why decoding stopped early, or "" */
     int err_said;             /* the caller has logged err */
+    /* THE CACHE (art_cache_start): every frame decoded ONCE, by a thread, and
+     * kept - art_anim_frame is then a lookup that never decodes on the
+     * caller's thread.  On the machine a 298x168 GIF frame costs 13 ms to
+     * decode (1 ms on the PC): two clips at 30 fps was 54% of the CPU inside
+     * the menu loop, beside the input scan and the audio pump. */
+    struct art_image *cache;  /* n slots; [0] stands for `first` and is never filled */
+    int ready;                /* frames 0..ready-1 are in (the decoder publishes it last) */
+    int caching;              /* 1 = the decoder thread owns the decoder from now on */
+    long long cache_us;       /* decode time spent filling the cache (log) */
 };
 
 /* Decode a PNG and fit it into max_w x max_h (aspect kept, never upscaled).
@@ -61,5 +70,20 @@ const struct art_image *art_anim_frame(struct art_anim *a, int k);
  * highlighted. */
 const struct art_image *art_anim_still(const struct art_anim *a);
 void art_anim_free(struct art_anim *a);
+
+/* Cache every frame of these animations in RAM, decoded by ONE background
+ * thread at a lower priority than the caller (round-robin across the
+ * clips, so they all stay ahead of playback together).  budget_bytes caps
+ * the total; a clip that does not fit stays on demand.  From then on
+ * art_anim_frame(a, k) for a cached clip returns frame k when it is in,
+ * else the newest frame that is (playback catches up as the cache fills),
+ * and never decodes on the calling thread.  NOT for the pinned and snapshot
+ * modes, which need frame k exactly.  Returns the clips being cached; why
+ * says what was decided. */
+int  art_cache_start(struct art_anim **anims, int n, size_t budget_bytes, char *why, int whylen);
+/* stop and join the decoder - before art_anim_free on a cached clip */
+void art_cache_stop(void);
+/* frames of a in the cache so far (a->n = all; 0 = not a cached clip) */
+int  art_anim_ready(const struct art_anim *a);
 
 #endif

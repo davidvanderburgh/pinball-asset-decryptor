@@ -294,6 +294,64 @@ The hardware side is the same program installed in p2 and hooked into
 remounting `/games` from the chosen partition - `codeselect/DESIGN.md` has the
 card layout, the file formats and the degrade-to-stock rules.
 
+### Updating a card in place (item 93)
+
+A finished card is not rebuilt for a small change.  `build` records what is on every
+games tree (`/usr/local/codeselect/trees.json` on p2, beside `build.json`: every file's
+sha256, size, mode and owner, every symlink and directory, and the stamp - size, mtime,
+partition UUID - of the source each tree came from), and
+
+```
+mkmulticard.py update --card OUT [--primary P --extra X ...] [menu flags as build] [--dry-run]
+```
+
+writes ONLY what changed since.  Every source's stamp is compared with the record; an
+unchanged source is skipped without a byte read; a changed one is hashed (about 16 s per
+4 GB, cached under `%TEMP%\pinball_spike2_multiboot` so it is never hashed twice); the
+diff per tree is applied through a loop mount of that partition alone - every write a
+temporary file then a rename, adds before removals, whole trees moved in two phases when a
+multi card's images are reordered - then the validator bypass runs through the mount for a
+tree whose game changed, the record is written last, and `verify --touched` re-hashes what
+moved.  A one-file change is about a minute; the work is proportional to the change, not
+the card.  A multi card's p7 grows on demand (resize2fs on the loop device) up to the
+Stern size class when an added image needs the room.
+
+**Root.**  `update` and `build` run under `wsl -u root` (the app passes the desktop user's
+HOME so `~/spike2root` is still theirs): the loop mount is what makes writing into a
+`.raw` on a Windows drive fast (~150 MB/s with `--direct-io=on`; debugfs manages 13).
+`plan`, `update --dry-run`, `verify` and `inspect` stay ordinary-user runs - they read the
+card through the pure-Python ext4 reader and debugfs and never mount.
+
+**What it refuses, before writing anything:** a card that is not a regular file; a card
+something else holds (a fuse2fs mount of it - the emulator with its cache off - or the card
+cache's copier); another update of the same card (a flock on `<card>.lock`); a loop of the
+same file mounted anywhere but under this tool's own `/var/tmp/mkmulticard_mnt_*`; a
+`parts`-layout list change (that layout holds its extra as a whole partition - build a
+fresh card); a primary that is another build (p1 must be the card's bytes and p2, minus the
+boot menu's own files, the same tree - never a range md5, which a rw mount stamps); a
+partition without room for the update's PEAK (a replacement's new bytes coexist with the
+old until the rename); `--expect-bytes N` when a source moved since a dialog measured it.
+
+**Crash safety.**  Before the first write the rootfs is copied to `<card>.p2.bak` (the one
+partition an interrupted write could leave unbootable - `dd` it back), and the record is
+written with the touched partitions flagged DIRTY; the small p2 writes go through one
+debugfs script straight into the card (never the 352 MB extract/write-back).  A killed
+update leaves old files in place, temporary files, a loop device and the dirty flag; the
+next `update` detaches the stale loop (held by nobody, under this tool's prefix), runs
+`e2fsck -fy` on the dirty partitions, sweeps the leftovers and converges; `verify` fails a
+dirty card loudly, and `inject` refuses it.  A card built before item 93 carries no record:
+the first `update` hashes its trees once (cached under the card's own stamp) and records
+them.  `verify` holds a partition written in place to the record rather than to a range
+md5 (a rw mount alone moves the superblock); `plan` prints `image-size free N`, the room
+the games partitions keep for updates, and every image row is its tree's used bytes.
+
+`mkmulticard.py selftest DIR` part 4 proves the record with any user; part 5 (root) proves
+update: nothing changed writes nothing, one changed file writes one file, the primary's
+tree syncs in place, list changes on a parts card refuse, another build refuses at the
+gate, an unrecorded card is hashed once, a multi card reorders/removes/adds without
+copying what stayed, p7 grows, a held lock refuses, a writer SIGKILLed mid-file is
+repaired by the next update, and a foreign mount of the card refuses by name.
+
 ## Titles
 
 **Per-title emulation status, one line per title, kept current by `/finish`**

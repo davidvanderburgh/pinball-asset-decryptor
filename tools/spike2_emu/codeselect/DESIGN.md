@@ -381,6 +381,23 @@ p2 with `debugfs -w`, verifies every copied range by digest and every ext4
 by `e2fsck -fn`, and prints the `images.conf` it wrote. `--verify` re-checks
 an existing output.
 
+## Updating a card in place (item 93)
+
+The card records what is on every games tree - `trees.json` on p2 beside `build.json`
+(format 1: per image the device, the subdirectory, the source's stamp, every file's
+sha256/size/mode/owner, every symlink and directory, the bypass's own digests for the game
+and the .sidx; the primary's identity for the update gate; which partitions were written
+in place; a DIRTY list while an update runs) - and `mkmulticard.py update` changes only
+what changed: stamps against the record, a diff per tree, a loop mount per touched
+partition (root; `--direct-io=on`), tmp + rename writes with adds before removals, the
+bypass through the mount, the record written last.  The engine is
+`tools/spike2_emu/treesync.py` (pure Python, tested on Windows); the mount, the lock, the
+p2 primitive and the CLI are mkmulticard's.  A partition written in place is held by
+`verify` to the record, never to a range md5: a rw mount alone stamps the superblock.
+Metadata is never identity - two cards were found with files equal in path, size and
+mtime and different in content.  The multi layout's p7 grows on demand up to the Stern
+size class.  Full detail in `tools/spike2_emu/README.md`, "Updating a card in place".
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both

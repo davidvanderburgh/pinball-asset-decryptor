@@ -178,7 +178,8 @@ PLAN_TEXT = (
     "image-size 0 /dev/mmcblk0p3 6861881344 turtles_pro-1_59_0.Release\n"
     "image-size 1 /dev/mmcblk0p7:img1 3400000000 turtles_pro-1_59_0.1987\n"
     "image-size 2 /dev/mmcblk0p7:img2 2600000000 turtles_pro-1_59_0.arcade\n"
-    "image-size overhead 1861174272 boot + rootfs + data + dump + slack\n"
+    "image-size free 700000000 room for updates in the games partitions\n"
+    "image-size overhead 1161174272 boot + rootfs + data + dump + metadata\n"
     "image: 28755968 sectors = 14723055616 bytes (14.72 GB)\n"
     "  fits Stern 8G  image size 7861174272: NO (spare -6861881344)\n"
     "  fits Stern 16G image size 15494807552: YES (spare 771751936)\n"
@@ -621,6 +622,11 @@ def inspect_report():
                   + [{"name": "anim%d.gif" % HIGHLIGHT,
                       "bytes": 1_402_880}]),
         "has_media_json": True, "has_build_json": True,
+        # the record an item-93 card carries: what an update would compare
+        "trees": {"recorded": True, "free_bytes": 3400000000, "dirty": [],
+                  "synced": [],
+                  "images": [{"index": i, "source_changed": i == 1}
+                             for i in range(len(IMAGES))]},
         "selector": {"bytes": 41272, "version": "codeselect 1.0"},
         "warnings": []}
 

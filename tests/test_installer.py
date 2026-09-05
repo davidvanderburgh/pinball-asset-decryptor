@@ -39,6 +39,7 @@ virtualisation.  These are the checks that *are* feasible and would
 have caught both shipped bugs.
 """
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -491,6 +492,171 @@ def test_windows_installer_offers_every_stern_pip_dep():
     assert not missing, (
         f"install_prerequisites.ps1's Stern entry is missing pip prereq(s): "
         f"{', '.join(missing)} -- Install Missing won't install them on Windows.")
+
+
+def _bash_has_associative_arrays():
+    """macOS ships bash 3.2, which has no ``declare -A`` and no ``${v,,}``.
+
+    The picker below is executed rather than read, so it needs a bash that can
+    actually run it.  The script itself only ever runs on the Linux side, where
+    bash is 5.x."""
+    if not HAS_BASH:
+        return False
+    r = subprocess.run(["bash", "-c", 'echo "${BASH_VERSINFO[0]}"'],
+                       capture_output=True, timeout=30)
+    try:
+        return int(r.stdout.decode().strip()) >= 4
+    except (ValueError, AttributeError):
+        return False
+
+
+HAS_BASH4 = _bash_has_associative_arrays()
+
+
+def _run_linux_picker(pick):
+    """Run install_prerequisites_linux.sh's REAL picker with `pick` typed in.
+
+    The manifest, the menu and the selection logic are lifted verbatim, down to
+    the dedup that produces the apt list; only the `read` is replaced, because
+    that is the one line a test cannot answer.  Nothing installs: the slice
+    ends before the first apt-get.
+
+    Fed to bash ON STDIN for the reason the other shell tests here give — a
+    Windows `bash` is git-bash on one host and the WSL launcher on the next,
+    and only one of them can read a C:\\... path.
+    """
+    src = (INSTALLER / "install_prerequisites_linux.sh").read_text(
+        encoding="utf-8")
+    body = src[src.index("declare -A MFR_NAMES=("):]
+    body = body[:body.index("all_packages=(") + len('all_packages=("${!pkg_set[@]}")')]
+    lines = [ln for ln in body.splitlines()
+             if not ln.startswith("read -rp")]
+    harness = "\n".join(lines) + (
+        '\nprintf "selected: %s\\n" "${selected[*]:-}"'
+        '\nprintf "packages: %s\\n" "$(printf \'%s\\n\' '
+        '"${all_packages[@]}" | sort | tr \'\\n\' \' \')"\n')
+    r = subprocess.run(["bash", "-s"],
+                       input=("pick=%s\n" % pick + harness).encode("utf-8"),
+                       capture_output=True, timeout=120)
+    return r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+
+
+@pytest.mark.skipif(not HAS_BASH4, reason="no bash 4+ to run the picker with")
+def test_linux_picker_can_actually_select_every_manufacturer_it_lists():
+    """★ PAD-104 — "All of the above" installed nothing for Stern.
+
+    The menu is built from MFR_NAMES, so it has listed `[6] Stern Pinball`
+    since v0.110.0.  The two places that decide what a typed answer MEANS were
+    a second, hardcoded copy that stayed at five:
+
+        if [ "${pick,,}" = "a" ]; then selected=(1 2 3 4 5)
+        ...  case "$t" in 1|2|3|4|5) selected+=("$t") ;; esac
+
+    So "a" installed every other manufacturer's packages and none of Stern's,
+    "6" answered "No manufacturers selected - nothing to install", and "2,6"
+    installed Spooky's and reported success.  What that costs is
+    qemu-user-static and the four packages beside it, and on Linux the app has
+    no other way to install them: "Set up emulator..." installs through
+    `wsl -u root`, so off Windows it can only print the command.
+
+    Runs the real picker rather than grepping for the fix, because the next
+    version of this bug will not be spelled the same way."""
+    ids = sorted(int(m) for m in re.findall(
+        r"^\s*\[(\d+)\]=",
+        (INSTALLER / "install_prerequisites_linux.sh").read_text(
+            encoding="utf-8").split("MFR_NAMES=(", 1)[1].split("\n)", 1)[0],
+        re.M))
+    assert 6 in ids, "the Linux installer lost its Stern manufacturer entry"
+
+    all_out = _run_linux_picker("a")
+    for i in ids:
+        assert re.search(r"\b%d\b" % i, all_out.split("packages:")[0]), (
+            f'"All of the above" does not select manufacturer [{i}] — the '
+            f'menu offers it and the picker drops it:\n{all_out}')
+    # The one the report was about, by name: a user who picks "all" off a menu
+    # that says "and the Emulate tab" must end up with the emulator's packages.
+    assert "qemu-user-static" in all_out, all_out
+
+    # ...and each id on its own, because "a" and a typed number are two code
+    # paths and only one of them was wrong the first time this shipped.
+    for i in ids:
+        out = _run_linux_picker(str(i))
+        assert "No manufacturers selected" not in out, (
+            f'typing "{i}" selects nothing, though the menu offers it:\n{out}')
+        assert "packages:" in out and out.split("packages:")[1].strip(), out
+
+    # A pick that is partly valid must not lose the rest of itself in silence.
+    mixed = _run_linux_picker("2,%d" % ids[-1])
+    assert re.search(r"\b%d\b" % ids[-1], mixed.split("packages:")[0]), mixed
+    junk = _run_linux_picker("nope")
+    assert "Ignoring" in junk, (
+        f"an unrecognised pick is dropped without a word:\n{junk}")
+
+
+@pytest.mark.skipif(not HAS_BASH4, reason="no bash 4+ to run the installer with")
+def test_linux_installer_one_bad_package_does_not_block_the_others():
+    """★ PAD-104 / PAD-41 — `apt-get install a b c` is all or nothing.
+
+    A single name apt has no version of fails the WHOLE command and installs
+    none of the others; with `set -e` at the top of the script it also kills
+    the run before the summary that would have named the culprit.  That is how
+    a tester once ended a run four packages short having been told about one
+    (PAD-41).  The WSL installer learned it; this one still had the batch.
+
+    The real install and summary blocks are run here against a fake apt where
+    exactly one package has no candidate — the same fault the reporter met.
+    The fakes are written by the harness into its own mktemp, so nothing
+    crosses the git-bash / WSL path boundary; see _run_linux_picker.
+    """
+    src = (INSTALLER / "install_prerequisites_linux.sh").read_text(
+        encoding="utf-8")
+    install = src[src.index("# --- Install ---"):
+                  src.index("# --- Custom post-install")]
+    summary = src[src.index("# --- Summary ---"):]
+    harness = r"""
+set -euo pipefail
+T=$(mktemp -d) || exit 1
+cat > "$T/apt-get" <<'APT'
+#!/bin/sh
+case "$1" in update) exit 0 ;; indextargets) exit 0 ;; esac
+for a in "$@"; do
+  [ "$a" = "qemu-user-static" ] || continue
+  echo "E: Package 'qemu-user-static' has no installation candidate" >&2
+  exit 100
+done
+for a in "$@"; do
+  case "$a" in -*|install) continue ;; esac
+  echo "$a" >> "$PAD_INSTALLED"
+done
+APT
+cat > "$T/dpkg" <<'DPKG'
+#!/bin/sh
+[ "$1" = "-s" ] || exit 1
+grep -qx "$2" "$PAD_INSTALLED" 2>/dev/null
+DPKG
+chmod +x "$T/apt-get" "$T/dpkg"
+export PAD_INSTALLED="$T/installed"
+: > "$PAD_INSTALLED"
+export PATH="$T:$PATH"
+SUDO=""
+all_packages=(qemu-user-static gcc-arm-linux-gnueabihf e2fsprogs ffmpeg)
+all_pip_packages=()
+"""
+    r = subprocess.run(
+        ["bash", "-s"],
+        input=(harness + install + summary).encode("utf-8"),
+        capture_output=True, timeout=180)
+    said = r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert r.returncode == 0, (
+        "the installer died on a package apt could not get, so the summary "
+        "naming it never printed:\n" + r.stderr.decode("utf-8", "replace"))
+    # Everything apt CAN get is installed...
+    for pkg in ("gcc-arm-linux-gnueabihf", "e2fsprogs", "ffmpeg"):
+        assert re.search(r"^\s+%s\s+OK$" % re.escape(pkg), said, re.M), (
+            f"{pkg} was taken down by the one package beside it that apt "
+            f"has no version of:\n{said}")
+    # ...and the one it cannot is named rather than swallowed.
+    assert re.search(r"^\s+qemu-user-static\s+MISSING$", said, re.M), said
 
 
 def test_both_installers_offer_every_emulator_package_the_tab_names():

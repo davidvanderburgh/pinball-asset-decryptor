@@ -84,6 +84,78 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **100. A "Compact build" tick beside the size strip, and the strip shows
+      what compact saves.** `S2 D2` *(David, 2026-09-05: "checkbox in the GUI
+      next to the 'space needed' section that says something like '[x] Compact
+      build' and that shows the space savings on the 'space needed' bar.")*
+      Item 95 put the compact (store layout) tick inside the Menu settings
+      dialog, and the strip only says "N GB shared" in words. Wanted: the tick
+      right next to the size strip on the Multi-boot tab (the one place the
+      size is looked at; the dialog copy goes), and with it on, the strip draws
+      the saving - a hatched band for the bytes the images share and the card
+      stores once - so the bar itself answers "what does compact buy me". Same
+      variable, same `--layout store` plumbing, same default OFF (item 95's
+      rule: opt-in, experimental until a store card has booted on a machine).
+      **Acceptance:** the tick sits beside the strip, off by default, saved
+      and restored with the tab's state and read back from a loaded card's
+      layout; ticking it re-measures (the plan hashes, cached) and the strip
+      shows the shared bytes as a hatched band with the number in its detail
+      line and tooltip; the bands still add up to the card; unticked, the
+      layouts the app has always made and no hashing. `--measure` sweep OK;
+      screenshot regenerated.
+      — S2: a second place to find the tick, and the saving is invisible
+      today. D2: a tab-only change on shipped plumbing.
+
+- [ ] **99. Load the multi-boot menu straight from the SD card in the
+      reader.** `S2 D3` *(David, 2026-09-05: "load multi-boot menu from sd
+      card".)* The Multi-boot tab loads a card back from a `.raw` file
+      (inspect: images, titles, art, sounds, settings, sources) but not from
+      the card itself - to edit the menu on a card you built weeks ago you
+      need its image file. Wanted: a "Load from SD card…" beside Load that
+      picks the reader (`core.drives`, the same picker the Direct-SD path
+      uses), reads only what the menu needs off the device - the tables and
+      p2 (the selector directory: images.conf, build.json, media.json, the
+      media files), a few hundred MB, never the games partitions - into a
+      temp image, and runs the ordinary inspect + load on that; the games
+      trees' versions/bypass state come back null with a warning, as inspect
+      already allows. A raw device read needs elevation: reuse the elevated
+      helper (`core.elevated_flash`, a range read beside `read_device_
+      with_privileges`), and FIX ITS RELAY FIRST - from an unelevated parent
+      the helper's IPC files come back Administrators-only (seen 2026-09-04
+      flashing the v3 card: no progress relayed, a verified write reported as
+      a failure). Writing the menu back to the card is `flash_menu_to_device`
+      (menu_only), already there; wire "Apply to card" to it when the loaded
+      card is a device. **Acceptance:** with the TMNT card in the reader, Load
+      from SD card fills the tab with that card's menu in under a minute,
+      Apply writes a changed title back to the card, and the machine shows it.
+      — S2: today's answer is "find the .raw you flashed". D3: elevation and
+      a partial device read in the app.
+
+- [ ] **98. On the TMNT: a latched GAME VALIDATION ERROR and Stern Insider
+      Connected not connecting on the multi-boot card.** `S2 D3` *(David,
+      2026-09-05, after the v3 two-image card booted and both images ran:
+      "there is an existing game validation error that is latched on in the
+      machine and stern insider connect is not connecting, so I can't validate
+      that insider connect is working as intended. however, we can punt that
+      as another item.")* Two things to separate: (1) the validation error is
+      LATCHED - the machine's NVRAM keeps the grade from an earlier boot
+      (nvgrades.py reads and clears the persisted grades off a card's
+      /data/nv mirror; the machine's copy is what needs clearing, or a boot
+      with the bypassed image must re-grade it P) - find which and give the
+      tab/tool a one-click "clear the latched validation grade"; (2) Insider
+      Connected cannot be checked until (1) is out of the way and the machine
+      is on the network with the stock image selected - the selector must not
+      change anything Insider needs (the rootfs is stock but for the hook and
+      /usr/local/codeselect; the menu runs before the game and exits; p2's
+      network config is untouched). **Acceptance:** after the fix the TMNT
+      boots the stock image with no validation banner and Insider Connected
+      shows connected (or the exact reason it does not, with the selector
+      ruled in or out by booting the same card with the menu disabled).
+      Acceptance on the Insider half: not yet defined beyond that - it needs
+      the machine on the network and David at it.
+      — S2: it blocks validating Insider on multi-boot cards. D3: machine
+      time and NVRAM archaeology.
+
 - [ ] **97. A multi-boot card should NAME what a pair costs, and refuse the one
       *(Numbered 92 on item/90's branch; renumbered at the merge, 2026-09-05,
       because main's 92 was already taken.)*

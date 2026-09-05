@@ -93,6 +93,16 @@ These have each been violated at least once and each cost a run or a window:
       unchanged; sweep OK, screenshot regenerated. *(David, 2026-09-05: "checkbox in the GUI
       next to the 'space needed' section that says something like '[x] Compact
       build' and that shows the space savings on the 'space needed' bar.")*
+      **Follow-up 2026-09-05 (main):** ticking it left the bar EMPTY for the
+      20-30 s the plan spent hashing the images (the strip's "measuring" test
+      read a key the tab had already claimed, so it never fired for an
+      automatic check). Now the run on the worker is tracked, `plan --layout
+      store` drives the tool's meter while it hashes (one line a second, the
+      image's name as the stage), those lines go to the strip and never the
+      Log, the head reads "…", the detail says "Measuring what the images
+      share… NN%", and a hatched band sweeps the bar until the meter speaks.
+      *(David: "if it takes long to compute, we need to show a loading state
+      in the bar that it is thinking.")*
       Item 95 put the compact (store layout) tick inside the Menu settings
       dialog, and the strip only says "N GB shared" in words. Wanted: the tick
       right next to the size strip on the Multi-boot tab (the one place the

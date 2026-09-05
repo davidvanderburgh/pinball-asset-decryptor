@@ -466,7 +466,10 @@ img1`), which the emulator's `run_game.sh` binds as it binds a p7 subtree.
 into every tree sharing them - rebuild with this tool.  `bypass` refuses a store card (use
 `build --bypass-validation` / `update`).  The tick in the app ("Compact build", beside the size
 strip; the bar hatches what it saves) is OFF by default and the layouts the app has always
-made are untouched without it.  Two things only hardware can prove: that Stern's update/spk
+made are untouched without it.  Ticking it hashes every image the first time (20-30 s for two;
+the cache answers after), and the strip shows it thinking meanwhile - the head reads "…", a
+hatched band sweeps the bar until `plan`'s meter (`[card] progress … measuring <image>`) says
+how far it has got, and the detail line names what is being measured.  Two things only hardware can prove: that Stern's update/spk
 layer tolerates `.blobs/` and `img1/` at the primary's `/games` root, and the same-device
 remount of p3's subtree; the tick says experimental until both have.
 

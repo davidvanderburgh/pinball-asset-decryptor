@@ -928,6 +928,35 @@ def store_sectors_for_class(P, extra_geoms, primary, extras, subs, cls):
     return cnt
 
 
+def measure_sources(paths, cache_dir=None, progress=None):
+    """The manifests of these sources' games trees, hashed (or taken from the cache) one after
+    another.  A `progress` with a `step` (the tool's own meter) is told which image is being
+    read before each one: the app's size strip shows the name and the percentage while the
+    compact plan works - 20-30 s of silence for two images otherwise (David: "show the loading
+    state in the size bar")."""
+    mans = []
+    for path in paths:
+        if progress is not None and hasattr(progress, "step"):
+            progress.step("measuring %s" % os.path.basename(path))
+        mans.append(source_tree(path, cache_dir, progress)[0])
+    return mans
+
+
+def measure_total(paths):
+    """The meter's budget for :func:`measure_sources`: the used bytes of every source's games
+    partition - what hashing reads, near enough (the meter's finish makes up the difference,
+    and a cached source adds nothing).  A source without a readable table or superblock counts
+    nothing; the plan itself says what is wrong with it."""
+    total = 0
+    for path in paths:
+        try:
+            _t3, s3, _c3 = Geometry.from_file(path).part(3)
+        except Exception:                                # noqa: BLE001 - not a card: nothing to budget
+            continue
+        total += _used_bytes_or_none(path, s3 * SECTOR) or 0
+    return total
+
+
 def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdirs=None, cache_dir=None,
                     progress=None):
     """The Plan of a store card (item 95).  With `store_sectors` (a card that exists, or verify)
@@ -942,7 +971,7 @@ def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdir
     if store_sectors is not None:
         return Plan(P, XG, primary, list(extras), "store", multi_subdirs=subs, store_sectors=int(store_sectors))
     ts = _treesync()
-    mans = [source_tree(path, cache_dir, progress)[0] for path in [primary] + list(extras)]
+    mans = measure_sources([primary] + list(extras), cache_dir, progress)
     unique, shared = ts.dedup_costs(mans)
     _t3, s3, c3 = P.part(3)
     used3 = _used_bytes_or_none(primary, s3 * SECTOR)
@@ -6339,7 +6368,16 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         if a.cmd == "plan":
-            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size, cache_dir=a.cache_dir)
+            meter = None
+            if resolve_layout(a.layout, len(a.extra)) == "store":
+                # the store plan HASHES every image (the first time; the cache answers after):
+                # the meter's lines are what the app's size strip shows meanwhile
+                PROGRESS.start(measure_total([a.primary] + list(a.extra)), "measuring")
+                meter = PROGRESS
+            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size, cache_dir=a.cache_dir,
+                             progress=meter)
+            if meter is not None:
+                meter.finish()
             print_plan(plan)
             check_reachable(plan, a.allow_unreachable)
             recs = plan_identities(plan, progress=None)

@@ -225,7 +225,7 @@ def test_update_card_runs_update_then_reads_the_card_back(tmp_path, monkeypatch)
         panel._update_step(0, _dry(1, 65011712))
         seen = {}
 
-        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
             seen["labels"] = [label for label, _ in cmds]
             seen["argv"] = [argv for _l, argv in cmds]
             seen["quiet"] = quiet
@@ -250,7 +250,7 @@ def test_a_refused_update_run_says_why_and_offers_a_fresh_card(tmp_path, monkeyp
     try:
         panel._update_step(0, _dry(1, 65011712))
 
-        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
             on_done(2, "update", {"update": "[card] error: other.raw is not the primary this card was built from"})
             return True
         monkeypatch.setattr(panel, "_run_commands", fake)
@@ -268,7 +268,7 @@ def test_a_cancelled_update_says_it_carries_on(tmp_path, monkeypatch):
     try:
         panel._update_step(0, _dry(1, 65011712))
 
-        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
             panel._cancelled = True
             on_done(137, "update", {"update": ""})
             return True
@@ -291,7 +291,7 @@ def test_the_size_check_asks_for_the_dry_run_only_on_the_loaded_card(tmp_path, m
     try:
         seen = []
 
-        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
             seen.append([label for label, _ in cmds])
             return True
         monkeypatch.setattr(panel, "_run_commands", fake)

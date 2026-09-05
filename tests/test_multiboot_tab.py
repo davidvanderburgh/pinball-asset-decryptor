@@ -967,7 +967,7 @@ def _recorder(panel):
     """Replace the worker with a recorder: (cmds, on_step, on_done)."""
     calls = []
 
-    def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+    def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
         calls.append(cmds)
         return True
     panel._run_commands = fake
@@ -4528,7 +4528,8 @@ def test_the_size_sentence_keeps_itself_true(tmp_path):
         # number is worse than none - and another run is armed.
         panel.add_image(c)
         assert panel.size_view() is None
-        assert panel._size_need.cget("text") == panel.SIZE_UNKNOWN
+        assert panel._size_need.cget("text") == panel.SIZE_THINKING
+        assert panel.size_measuring() == {"text": "Measuring\u2026", "frac": None}
         assert panel._plan_job is not None
         assert len(calls) == 1
     finally:
@@ -4986,7 +4987,7 @@ def test_the_build_flash_modal_can_build_then_flash(tmp_path):
     panel._flash_fn = lambda p: flashed.append(p)
     try:
         # a recorder that reports success, so the after-hook (flash) runs
-        def ok(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+        def ok(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
             if on_done is not None:
                 on_done(0, None, {})
             return True
@@ -5002,7 +5003,7 @@ def test_the_build_flash_modal_can_build_then_flash(tmp_path):
         # a write that FAILS does not flash
         flashed.clear()
 
-        def fail(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+        def fail(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
             if on_done is not None:
                 on_done(2, "inject", {})
             return True
@@ -5964,7 +5965,7 @@ def test_a_refused_read_leaves_no_directory_behind(tmp_path, monkeypatch):
         media = loaded_media_dir(card)
         runs = []
 
-        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+        def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
             runs.append(cmds)
             on_done(2, "inspect", {"inspect": "refusing: not a multi card"})
             return True
@@ -6779,9 +6780,12 @@ def test_the_size_strip_waits_rather_than_showing_a_stale_number(tmp_path):
         panel.add_image(a)
         panel.add_image(b)
         root.update()
-        # the debounce is armed, so the strip says the answer is coming
+        # the debounce is armed, so the strip says the answer is coming -
+        # and shows it: the head is '…' and the band is sweeping
         assert panel._plan_job is not None
         assert "Measuring" in panel._size_detail.cget("text")
+        assert panel._size_need.cget("text") == panel.SIZE_THINKING
+        assert panel._size_anim_job is not None
         panel._plan_step("plan", 0, PLAN_TEXT)
         root.update()
         assert panel._size_need.cget("text") == "16 GB"
@@ -6794,6 +6798,92 @@ def test_the_size_strip_waits_rather_than_showing_a_stale_number(tmp_path):
         assert panel.size_view() is None
         assert panel._size_need.cget("text") == panel.SIZE_UNKNOWN
         assert "on this machine" in panel._size_detail.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_the_size_strip_shows_it_is_thinking_while_the_compact_plan_runs(tmp_path):
+    """David ticked Compact build and the bar sat empty for 20-30 s while the
+    plan hashed both images.  Now the head reads '…', the detail says what is
+    being measured, a hatched band sweeps the trough until the tool's own
+    meter says how far it has got, and the answer ends all of it."""
+    root, panel = _panel(plan=True)
+    runs = []
+
+    def fake(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
+        runs.append((cmds, on_step, on_done, on_tick, preview))
+        return True
+    panel._run_commands = fake
+    try:
+        a, b = _images(tmp_path, 2)
+        panel.add_image(a)
+        panel.add_image(b)
+        panel._compact_var.set(True)
+        root.update()
+        assert panel._plan_now() is True
+        _cmds, _step, done, tick, preview = runs[-1]
+        assert preview is True and tick is not None
+        # on the worker: thinking, with the compact wording
+        assert panel._plan_busy() is True and panel._plan_job is None
+        assert panel._size_need.cget("text") == panel.SIZE_THINKING
+        assert panel._size_detail.cget("text") == "Measuring what the images share\u2026"
+        assert panel.size_measuring() == {"text": "Measuring what the images share\u2026",
+                                          "frac": None}
+        assert panel._size_anim_job is not None           # the band is sweeping
+        phase = panel._size_anim_phase
+        panel._size_animate()
+        assert panel._size_anim_phase != phase and panel._size_anim_job is not None
+        # the tool's meter: the band stops sweeping and fills as far as it has got
+        tick("plan", 250, 1000, 0.25, "measuring b.raw")
+        assert panel._size_detail.cget("text") == "Measuring what the images share\u2026 25%"
+        assert panel.size_measuring()["frac"] == 0.25
+        assert panel._size_anim_job is None
+        # a tick about another step changes nothing
+        tick("dry-run", 900, 1000, 0.9, "x")
+        assert panel.size_measuring()["frac"] == 0.25
+        # the answer lands: a number, and nothing is thinking any more
+        panel._plan_step("plan", 0, PLAN_TEXT)
+        done(0, None, {})
+        root.update()
+        assert panel._plan_busy() is False and panel.size_measuring() is None
+        assert panel._size_need.cget("text") == "16 GB"
+        assert panel._size_anim_job is None
+        # ...and off the compact tick, the plain word
+        panel._compact_var.set(False)
+        root.update()
+        assert panel.size_measuring() == {"text": "Measuring\u2026", "frac": None}
+    finally:
+        root.destroy()
+
+
+def test_a_background_runs_meter_goes_to_on_tick_and_stays_out_of_the_log():
+    """A preview run has no footer to drive: with ``on_tick`` its progress
+    lines go there (the size strip) and never into the Log or the step's
+    text; without it they are ordinary output."""
+    root, panel = _panel()
+    ticks, done = [], []
+    argv = [sys.executable, "-c",
+            "print('[card] layout: store'); "
+            "print('[card] progress 250/1000 25.0% measuring b.raw'); "
+            "print('image: 1 sectors = 2 bytes')"]
+    try:
+        assert panel._run_commands(
+            [("plan", argv)], preview=True,
+            on_tick=lambda label, *t: ticks.append((label, t)),
+            on_done=lambda rc, failed, texts: done.append((rc, texts))) is True
+        _wait(root, lambda: done)
+        assert done[0][0] == 0
+        assert ticks == [("plan", (250, 1000, 0.25, "measuring b.raw"))]
+        # (the Log echoes the command line itself, which names the word)
+        assert not [ln for ln in panel.log_lines() if ln.startswith("[card] progress")]
+        assert "[card] progress" not in done[0][1]["plan"]
+        assert "layout: store" in _pane(panel)
+        done.clear()
+        assert panel._run_commands(
+            [("plan", argv)], preview=True,
+            on_done=lambda rc, failed, texts: done.append((rc, texts))) is True
+        _wait(root, lambda: done)
+        assert "progress 250/1000" in done[0][1]["plan"]
     finally:
         root.destroy()
 

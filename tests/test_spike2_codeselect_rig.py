@@ -553,7 +553,7 @@ def test_cli_multiboot_is_one_line_and_an_exit_status(parts, monkeypatch, capsys
 EXEC_PIVOT = "        exec /.padqemu/game ./game </dev/null >/dump/game.out 2>&1"
 EXEC_CHROOT = ('exec chroot "$R" /bin/sh -c \\\n'
                '  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}'
-               '/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1 '
+               '/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} '
                'exec ./game"')
 
 

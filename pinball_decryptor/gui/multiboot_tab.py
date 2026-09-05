@@ -1596,6 +1596,29 @@ def root_command(args, cwd=None, exe="python3"):
     return later
 
 
+def menu_card_image_path(drive):
+    """Where the boot menu read off *drive* (a ``core.drives.PhysicalDrive``) lands: a
+    sparse image named for the card, under the same TEMP directory the tools' caches use,
+    so a re-read of the same card lands in the same place and nothing lands in a project
+    folder.  Only the menu's ranges are in it (item 99) - the file is a few hundred MB on
+    disk however big the card."""
+    model = re.sub(r"[^A-Za-z0-9._-]+", "_", (getattr(drive, "model", "") or "card").strip()) or "card"
+    size = int(getattr(drive, "size_bytes", 0) or 0)
+    name = "%s-%dG.menu.raw" % (model, round(size / 1e9)) if size else "%s.menu.raw" % model
+    return os.path.join(tempfile.gettempdir(), "pinball_spike2_multiboot", "cards", name)
+
+
+def card_drives():
+    """The SD cards a menu can be read off: ``(drives, best, reason)`` from the app's own
+    drive picker (core.drives), the small-card preference - the reader, never a backup
+    SSD.  Empty when nothing removable is connected."""
+    from ..core import drives as _drives
+    found = _drives.list_physical_drives()
+    best, _conf, why = _drives.pick_best_game_ssd(found, prefer="sd_card")
+    shown = _drives.visible_drives(found, prefer="sd_card", keep=(best,) if best else ())
+    return list(shown), best, why or ""
+
+
 def cache_dir_args():
     """``--cache-dir`` for plan/build/update (item 93): where the tools keep
     the hashed manifests of the source cards - the Windows TEMP directory
@@ -3834,6 +3857,98 @@ def _int(var, default):
         return default
 
 
+class CardPickDialog:
+    """Item 99: pick the SD card whose boot menu to read.  A small modal - the
+    app's drive picker (core.drives, the SD-card preference: the reader, never
+    a backup SSD) in a dropdown, Refresh, Read, Cancel.  The enumeration runs
+    off-thread (PowerShell on Windows takes a second)."""
+
+    def __init__(self, parent, theme_fn, on_read):
+        self._parent = parent
+        self._theme_fn = theme_fn
+        self._on_read = on_read
+        self._drives = []
+        self._best = None
+        th = THEMES.get(theme_fn()) or THEMES["dark"]
+        dlg = tk.Toplevel(parent)
+        self._dlg = dlg
+        dlg.title("Read the boot menu off an SD card")
+        dlg.transient(parent.winfo_toplevel())
+        dlg.configure(bg=th["bg"])
+        body = ttk.Frame(dlg, padding=12)
+        body.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(body, text="SD card:").grid(row=0, column=0, sticky=tk.W, pady=(0, 6))
+        self._var = tk.StringVar(value="Looking for cards\u2026")
+        self._combo = ttk.Combobox(body, textvariable=self._var, state="readonly", width=56)
+        self._combo.grid(row=0, column=1, sticky=tk.EW, padx=(6, 0), pady=(0, 6))
+        self._note = ttk.Label(body, text="", foreground=th["gray"], wraplength=440,
+                               justify=tk.LEFT)
+        self._note.grid(row=1, column=0, columnspan=2, sticky=tk.W)
+        btns = ttk.Frame(body)
+        btns.grid(row=2, column=0, columnspan=2, sticky=tk.E, pady=(10, 0))
+        ttk.Button(btns, text="Refresh", command=self.refresh).pack(side=tk.LEFT)
+        self._read_btn = ttk.Button(btns, text="Read", command=self._read, state=tk.DISABLED)
+        self._read_btn.pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(btns, text="Cancel", command=self.cancel).pack(side=tk.LEFT, padx=(6, 0))
+        body.columnconfigure(1, weight=1)
+        dlg.bind("<Escape>", lambda _e: self.cancel())
+        dlg.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.refresh()
+
+    def refresh(self):
+        self._var.set("Looking for cards\u2026")
+        self._read_btn.configure(state=tk.DISABLED)
+
+        def work():
+            try:
+                found, best, why = card_drives()
+            except Exception as exc:                       # noqa: BLE001 - shown, never lost
+                found, best, why = [], None, "could not list the drives: %s" % exc
+            try:
+                self._dlg.after(0, lambda: self.apply(found, best, why))
+            except tk.TclError:
+                pass
+        threading.Thread(target=work, daemon=True).start()
+
+    def apply(self, drives, best, why):
+        """Main loop: the enumeration's answer into the dropdown."""
+        self._drives = list(drives)
+        self._best = best
+        names = [d.display for d in self._drives]
+        try:
+            self._combo.configure(values=names)
+            if best is not None and best in self._drives:
+                self._var.set(best.display)
+            elif names:
+                self._var.set(names[0])
+            else:
+                self._var.set("No SD card found - connect the card and press Refresh")
+            self._note.configure(text=why or "")
+            self._read_btn.configure(state=tk.NORMAL if names else tk.DISABLED)
+        except tk.TclError:
+            pass
+
+    def picked(self):
+        want = self._var.get()
+        for d in self._drives:
+            if d.display == want:
+                return d
+        return None
+
+    def _read(self):
+        d = self.picked()
+        if d is None:
+            return
+        self._dlg.destroy()
+        self._on_read(d.device_path, d)
+
+    def cancel(self):
+        try:
+            self._dlg.destroy()
+        except tk.TclError:
+            pass
+
+
 class MultibootPanel:
     """The Multi-boot tab's widgets and its one worker at a time."""
 
@@ -4075,6 +4190,8 @@ class MultibootPanel:
         self._run_kind = ""
         self._loaded_form = None
         self._loaded_info = None
+        self._card_device = None            # item 99: the card the loaded image was read off
+        self._card_device_name = ""
         #: The record the loaded card carries (item 93; trees_from_inspect),
         #: and what the last dry-run said an update of it would write - or
         #: {"refused": why} when the tool would not.  Neither is persisted:
@@ -4557,6 +4674,15 @@ class MultibootPanel:
         self._browse_btn = ttk.Button(row, text="Browse…", width=10,
                                       command=self._browse_card)
         self._browse_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        # Item 99 (David: "load multi-boot menu from sd card"): the menu of
+        # the card in the READER, without its image file - only the menu's
+        # ranges are read (elevated), into a sparse image this tab then
+        # loads like any other; Apply writes the menu back onto that card.
+        self._from_card_btn = ttk.Button(row, text="From SD card…", width=13,
+                                         command=self._from_card_clicked)
+        self._from_card_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        self._from_card_tip = _Tooltip(self._from_card_btn, self.FROM_CARD_TIP,
+                                       self._theme_fn)
         self._out_entry = ttk.Entry(row, textvariable=self._out_var)
         self._out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True,
                              padx=(0, 6))
@@ -5003,6 +5129,113 @@ class MultibootPanel:
         card's edit status counts a layout change as a rebuild."""
         self._update_edit_status()
         self._maybe_plan()
+
+    FROM_CARD_TIP = (
+        "Read the boot menu off the SD card in the reader - titles, pictures, "
+        "sounds, settings and the images' sources - without its image file. "
+        "Only the menu's part of the card is read (a few hundred MB), so the "
+        "games' versions are not shown. Apply then writes the menu back onto "
+        "that card. Windows asks for administrator access for the read and "
+        "the write.")
+
+    def _from_card_clicked(self):
+        if self._busy:
+            self._error("A run is already in progress.")
+            return
+        CardPickDialog(self._parent, self._theme_fn, self.load_from_card)
+
+    def load_from_card(self, device_path, drive):
+        """Read the menu off the card at *device_path* (elevated, off-thread)
+        into :func:`menu_card_image_path` and load that image; the card is
+        remembered so Apply writes the menu back onto it.  False when the
+        tab refused."""
+        if self._busy:
+            self._error("A run is already in progress.")
+            return False
+        path = menu_card_image_path(drive)
+        name = getattr(drive, "display", None) or device_path
+        self._pending_device = (path, device_path, name)
+        self._card_device = None
+        self._set_busy(True)
+        self._run_kind = "load"
+        self._ok("Reading the boot menu off %s\u2026" % name)
+        self._phase_fn(3, status="Reading the boot menu off the card\u2026")
+        last = [0]
+
+        def log(text, level="info"):
+            self._ui(lambda: self._log_sink("[card] " + text))
+
+        def progress(done, total, msg=""):
+            if total and done - last[0] >= total // 10:
+                last[0] = done
+                self._ui(lambda: self._status_fn("%s %d%%" % (msg or "Reading\u2026", 100 * done // total)))
+
+        def run():
+            from ..core import elevated_flash as _ef
+            try:
+                _ef.read_device_menu_with_privileges(device_path, path, log=log, progress=progress)
+            except Exception as exc:                       # noqa: BLE001 - reported, never lost
+                err = exc                                   # the name dies with the except block
+                self._ui(lambda: self._from_card_failed(name, err))
+                return
+            self._ui(lambda: self._from_card_read(path))
+
+        threading.Thread(target=run, daemon=True).start()
+        self._drain()
+        return True
+
+    def _from_card_failed(self, name, exc):
+        self._set_busy(False)
+        self._pending_device = None
+        self._error("Cannot read the boot menu off %s: %s" % (name, exc))
+
+    def _from_card_read(self, path):
+        self._set_busy(False)
+        self._out_var.set(path)
+        self.load_card(path)
+
+    def _write_menu_to_device(self, after=None):
+        """After an Apply into the image that was read off a card (item 99):
+        the menu partition onto that card, elevated, off-thread - the app's
+        own menu-only write, which proves the card is that card first."""
+        path, device_path, name = self._loaded_card, self._card_device, self._card_device_name
+        self._set_busy(True)
+        self._ok("Writing the menu onto %s\u2026" % name)
+        self._phase_fn(2, status="Writing the boot menu onto the card\u2026")
+        last = [0]
+
+        def log(text, level="info"):
+            self._ui(lambda: self._log_sink("[card] " + text))
+
+        def progress(done, total, msg=""):
+            if total and done - last[0] >= max(1, total // 10):
+                last[0] = done
+                self._ui(lambda: self._status_fn("%s %d%%" % (msg or "Writing\u2026", 100 * done // total)))
+
+        def run():
+            from ..core import elevated_flash as _ef
+            try:
+                _ef.flash_image_with_privileges(path, device_path, log=log, progress=progress,
+                                                menu_only=True)
+            except Exception as exc:                       # noqa: BLE001 - reported, never lost
+                err = exc
+                self._ui(lambda: self._menu_write_done(name, err, after))
+                return
+            self._ui(lambda: self._menu_write_done(name, None, after))
+
+        threading.Thread(target=run, daemon=True).start()
+        self._drain()
+        return True
+
+    def _menu_write_done(self, name, exc, after):
+        self._set_busy(False)
+        if exc is not None:
+            self._error("The menu was updated in the image but NOT written onto %s: %s"
+                        % (name, exc))
+            return
+        self._ok("Menu written onto %s - the card can go back in the machine." % name)
+        if after is not None:
+            after()
 
     def _build_size(self, parent, th):
         """THE SIZE STRIP - the card these images need, under the images.
@@ -5979,6 +6212,8 @@ class MultibootPanel:
         self._unreadable = None
         self._loaded_form = None
         self._loaded_info = None
+        self._card_device = None            # item 99: the card the loaded image was read off
+        self._card_device_name = ""
         self._armed = False
         self._media_override = ""
         self._out_auto_value = ""
@@ -6788,6 +7023,8 @@ class MultibootPanel:
         self._loaded_card = ""
         self._loaded_form = None
         self._loaded_info = None
+        self._card_device = None            # item 99: the card the loaded image was read off
+        self._card_device_name = ""
         self._armed = False
         # The alarm strip is the other half of what a load put on screen,
         # and it is about the card that is no longer loaded.
@@ -7369,6 +7606,12 @@ class MultibootPanel:
         _ticked, self._armed = bypass_state(info)
         self._loaded_card = card
         self._loaded_info = info
+        pend = getattr(self, "_pending_device", None)
+        if pend and _norm(pend[0]) == _norm(card):
+            self._card_device, self._card_device_name = pend[1], pend[2]
+        else:
+            self._card_device, self._card_device_name = None, ""
+        self._pending_device = None
         self._loaded_trees = trees_from_inspect(info)
         self._update_info = None
         # THE LOUD ONE.  Everything else a load has to say is a note on the
@@ -7531,7 +7774,9 @@ class MultibootPanel:
             # The prepare writes media.json into that dir; the inject must
             # name it even when the card carried no media before.
             form = replace(form, media_dir=media)
-        bypass = bool(form.bypass) and self._armed
+        # a card read off the reader holds only its menu here: the bypass
+        # would write into games trees the image does not carry
+        bypass = bool(form.bypass) and self._armed and not self._card_device
         cmds = apply_commands(form, self._loaded_card, media,
                               prepare=prepare, bypass=bypass)
         self._ok("Writing the menu into %s%s…" % (
@@ -7571,6 +7816,9 @@ class MultibootPanel:
                 ", ".join(menu) if menu else "no menu change",
                 " - flash it again" if bypass else ""))
             self._update_edit_status()
+            if self._card_device:
+                self._write_menu_to_device(after)       # item 99: onto the card itself
+                return
             if after is not None:
                 after()
         self._run_kind = "apply"
@@ -7728,7 +7976,21 @@ class MultibootPanel:
             menu, rebuild)
         editing = kind == "loaded"
         have_card = bool(field and os.path.isfile(field))
-        upd = self._update_info if editing else None
+        if editing and self._card_device and rebuild:
+            return {
+                "action": "build",
+                "can_write": False,
+                "default_write": False,
+                "have_card": False,
+                "out": field,
+                "write_label": "Build a fresh card",
+                "write_detail": ("The image list changed (%s). This form was read off the "
+                                 "card in the reader, which holds only its menu here: Apply "
+                                 "can change the menu, and nothing else. To change its "
+                                 "images, point 'Card image' at a new path, build a fresh "
+                                 "card from the sources and flash it." % "; ".join(rebuild)),
+            }
+        upd = self._update_info if (editing and not self._card_device) else None
         refused = (upd or {}).get("refused") if upd else None
         stale = [i for i, (n, nbytes, action) in ((upd or {}).get("files") or {}).items()
                  if not refused and (nbytes > 0 or action in ("new", "remove", "rename", "sync"))]

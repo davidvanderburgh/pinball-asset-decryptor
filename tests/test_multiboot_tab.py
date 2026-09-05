@@ -7566,3 +7566,109 @@ def test_the_compact_tick_lives_beside_the_size_strip_and_in_the_state():
         assert menu_from_state({"compact": True})["compact"] is True
     finally:
         root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# item 99: the menu straight off the SD card in the reader
+# ---------------------------------------------------------------------------
+def test_menu_card_image_path_names_the_card_under_temp(monkeypatch, tmp_path):
+    from pinball_decryptor.gui.multiboot_tab import menu_card_image_path
+    from pinball_decryptor.core.drives import PhysicalDrive
+    monkeypatch.setattr("pinball_decryptor.gui.multiboot_tab.tempfile.gettempdir",
+                        lambda: str(tmp_path))
+    d = PhysicalDrive(device_path="\\\\.\\PHYSICALDRIVE4", model="NORELSYS 1081CS1",
+                      size_bytes=15931539456, bus_type="USB")
+    p = menu_card_image_path(d)
+    assert p == os.path.join(str(tmp_path), "pinball_spike2_multiboot", "cards",
+                             "NORELSYS_1081CS1-16G.menu.raw")
+
+
+def test_load_from_card_reads_the_menu_off_thread_then_loads_it(monkeypatch, tmp_path):
+    """The elevated read (faked) writes the menu image; the panel then loads that path
+    and remembers the card it came off, so Apply writes the menu back onto it."""
+    from pinball_decryptor.gui import multiboot_tab as mt
+    from pinball_decryptor.core import elevated_flash as ef
+    from pinball_decryptor.core.drives import PhysicalDrive
+    monkeypatch.setattr(mt.tempfile, "gettempdir", lambda: str(tmp_path))
+    d = PhysicalDrive(device_path="\\\\.\\PHYSICALDRIVE9", model="Reader",
+                      size_bytes=15931539456, bus_type="USB")
+
+    def fake_read(device, image, log=None, progress=None, cancel=None):
+        os.makedirs(os.path.dirname(image), exist_ok=True)
+        with open(image, "wb") as f:
+            f.write(b"menu")
+        if log:
+            log("read it")
+        if progress:
+            progress(4, 4, "Reading")
+        return 4
+    monkeypatch.setattr(ef, "read_device_menu_with_privileges", fake_read)
+    root, panel = _panel()
+    try:
+        loaded = []
+        panel.load_card = lambda path, asked=True: loaded.append(path) or True
+        assert panel._from_card_btn.cget("text") == "From SD card…"
+        assert panel.load_from_card(d.device_path, d) is True
+        for _ in range(40):
+            root.update()
+            if loaded:
+                break
+            time.sleep(0.05)
+        assert loaded == [mt.menu_card_image_path(d)]
+        assert panel._out_var.get() == loaded[0] and not panel._busy
+        # load_inspect binds the device to the card it loads - and only that card
+        panel.load_inspect(_rich_report(tmp_path), loaded[0], "")
+        assert panel._card_device == d.device_path and panel._card_device_name == d.display
+        panel.load_inspect(_rich_report(tmp_path), str(tmp_path / "other.raw"), "")
+        assert panel._card_device is None
+    finally:
+        root.destroy()
+
+
+def test_an_apply_on_a_card_read_off_the_reader_writes_the_menu_back(monkeypatch, tmp_path):
+    from pinball_decryptor.core import elevated_flash as ef
+    writes = []
+
+    def fake_flash(image, device, log=None, progress=None, cancel=None, verify=True,
+                   on_verify_start=None, menu_only=False):
+        writes.append((image, device, menu_only))
+        return 10
+    monkeypatch.setattr(ef, "flash_image_with_privileges", fake_flash)
+    root, panel = _panel()
+    try:
+        panel._loaded_card = str(tmp_path / "menu.raw")
+        panel._card_device = "\\\\.\\PHYSICALDRIVE9"
+        panel._card_device_name = "Reader (16 GB)"
+        after = []
+        assert panel._write_menu_to_device(lambda: after.append(1)) is True
+        for _ in range(40):
+            root.update()
+            if after:
+                break
+            time.sleep(0.05)
+        assert writes == [(panel._loaded_card, panel._card_device, True)] and after == [1]
+        assert not panel._busy and "Menu written onto Reader (16 GB)" in panel.message()
+    finally:
+        root.destroy()
+
+
+def test_a_card_read_off_the_reader_takes_only_menu_changes(monkeypatch, tmp_path):
+    """A list change on such a card is a fresh build from the sources, said in the
+    dialog's own words; the in-place update is never offered for it."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        root.update()
+        panel._loaded_card = panel._out_var.get() or str(tmp_path / "menu.raw")
+        panel._out_var.set(panel._loaded_card)
+        panel._loaded_form = panel.form()
+        panel._card_device = "\\\\.\\PHYSICALDRIVE9"
+        panel._card_device_name = "Reader"
+        panel.add_image(_images(tmp_path, 3)[-1])
+        root.update()
+        plan = panel._write_plan()
+        assert plan["action"] == "build" and plan["can_write"] is False
+        assert "card in the reader" in plan["write_detail"]
+    finally:
+        root.destroy()

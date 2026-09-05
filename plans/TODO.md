@@ -111,8 +111,19 @@ These have each been violated at least once and each cost a run or a window:
       — S2: a second place to find the tick, and the saving is invisible
       today. D2: a tab-only change on shipped plumbing.
 
-- [ ] **99. Load the multi-boot menu straight from the SD card in the
-      reader.** `S2 D3` *(David, 2026-09-05: "load multi-boot menu from sd
+- [x] **99. Load the multi-boot menu straight from the SD card in the
+      reader.** `S2 D3` **SHIPPED on `item/99` 2026-09-05:** "From SD card…"
+      beside Browse (a picker on the app's drive enumeration), `core.rawdevice.
+      read_device_menu_to_image` (the menu's ranges into a sparse image of the
+      card's size) through a new `read_menu` job of the elevated helper, the
+      ordinary load on that image, the card remembered so Apply writes the menu
+      back with the menu-only flash (proven against the card); a list change
+      refuses with "build a fresh card from the sources". The relay fix: the
+      helper's IPC directory gets an inheritable ACE for the user (its files were
+      Administrators-only), and an unreadable result says so instead of "the card
+      may not have been written". Not yet driven on David's reader with the
+      machine's card - the emulator/unit path only; the read + write on his TMNT
+      card is the acceptance still to be seen. *(David, 2026-09-05: "load multi-boot menu from sd
       card".)* The Multi-boot tab loads a card back from a `.raw` file
       (inspect: images, titles, art, sounds, settings, sources) but not from
       the card itself - to edit the menu on a card you built weeks ago you

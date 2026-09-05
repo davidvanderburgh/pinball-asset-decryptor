@@ -1035,7 +1035,9 @@ def _slow_card_watch(log, progress, menu_only=False):
             state["t0"], state["b0"] = now, done
             return
         span, moved = now - state["t0"], done - state["b0"]
-        if span < _SLOW_AFTER_S or moved < _SLOW_AFTER_BYTES:
+        # Two callbacks inside one clock tick (Windows' clock is 15 ms) are
+        # no rate at all: wait for the next tick rather than divide by zero.
+        if span <= 0 or span < _SLOW_AFTER_S or moved < _SLOW_AFTER_BYTES:
             return
         state["said"] = True
         note = slow_card_advice(moved / span, total, menu_only)

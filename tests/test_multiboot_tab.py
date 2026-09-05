@@ -755,6 +755,7 @@ def test_validation_refuses_what_the_tool_would(tmp_path):
     assert any("default image" in e for e in validate_form(bad_default))
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows path semantics (D:/)")
 def test_default_output_leaves_the_library(tmp_path):
     """A default the tool would refuse is no default: a primary IN the
     library gets its output beside the library, not inside it."""
@@ -847,8 +848,9 @@ def test_the_size_view_says_when_nothing_holds_it():
 def test_suggest_title_splits_the_card_name():
     assert suggest_title("turtles_pro-1_59_0.Release.8G.sdcard.raw") == \
         ("turtles_pro-1_59_0", "Release")
-    assert suggest_title(r"D:\x\turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw") \
-        == ("turtles_pro-1_59_0", "1987-upscaled")
+    if sys.platform == "win32":                 # a backslash path is Windows' alone
+        assert suggest_title(r"D:\x\turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw") \
+            == ("turtles_pro-1_59_0", "1987-upscaled")
     assert suggest_title("card.img") == ("card", "")
 
 
@@ -1349,6 +1351,8 @@ def test_the_modals_write_on_ok_and_change_nothing_on_cancel(tmp_path):
         menu = panel.open_menu_settings()
         root.update()
         panel._volume_var.set("70")
+        menu.top.focus_force()      # X11 drops a synthetic key on an unfocused window
+        root.update()
         menu.top.event_generate("<Escape>")
         root.update()
         assert panel._volume_var.get() == "35"
@@ -1598,7 +1602,7 @@ def test_invalid_form_surfaces_error_and_builds_nothing(tmp_path,
         assert calls == []
         assert panel.render_preview() is False
         assert calls == []
-        assert "Fix the form" in panel._pv_status.cget("text")
+        assert "Fix the form" in panel.pv_status_text()
     finally:
         root.destroy()
 
@@ -1680,7 +1684,7 @@ def test_busy_guard_refuses_a_second_run(tmp_path, monkeypatch):
         # ...and the preview: refused, said on its own status line, and
         # nothing queued for the worker.
         assert panel.render_preview() is False
-        assert "already in progress" in panel._pv_status.cget("text")
+        assert "already in progress" in panel.pv_status_text()
         assert panel._pv_cache == {}
         panel._set_busy(False)
         assert str(panel._buildflash_btn.cget("state")) == "normal"
@@ -1956,7 +1960,7 @@ def test_load_frame_shows_a_ppm_scaled_into_the_box(tmp_path):
             multiboot_tab.scaled_size(136, 77, *box)
         assert panel._pv_shown == (0, 0)
         assert panel.load_frame(str(tmp_path / "missing.ppm")) is False
-        assert "Cannot load" in panel._pv_status.cget("text")
+        assert "Cannot load" in panel.pv_status_text()
         assert "Cannot load" in _pane(panel)
     finally:
         root.destroy()
@@ -2157,7 +2161,7 @@ def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         # a redraw stops the ticks and says so; the clock is not reset
         panel._form_moved_under_play()
         assert panel._play_var.get() is False
-        assert "form changed" in panel._pv_status.cget("text")
+        assert "form changed" in panel.pv_status_text()
         assert panel._play_job is None
         t0 = panel._play_t0
         panel._play_start()
@@ -2212,7 +2216,7 @@ def test_an_edit_during_a_slow_animation_is_not_thrown_away(tmp_path):
         # redrawn - in the ordinary colour, because editing while an
         # animation runs is an ordinary thing to do
         assert panel._play_var.get() is False
-        assert "form changed" in panel._pv_status.cget("text")
+        assert "form changed" in panel.pv_status_text()
         assert panel._pv_error is False
         # ...and the render for the NEW form really happened, in the same
         # pass: nothing was thrown away and nothing is left queued
@@ -2333,7 +2337,7 @@ def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,
         panel._rows[1].title = "TMNT 1987"
         panel._default_var.set("1")
         assert panel.render_preview() is True
-        assert "rendering" in panel._pv_status.cget("text")
+        assert "rendering" in panel.pv_status_text()
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         out = panel._out_var.get()
         pv = multiboot_tab.preview_dir_for(out)
@@ -2636,13 +2640,13 @@ def test_a_stepper_on_a_frame_that_is_not_drawn_yet_says_so(tmp_path):
         panel._out_var.set(str(tmp_path / "out" / "card.multi.raw"))
         panel._auto_preview.set(False)
         panel._frame_var.set("4")
-        assert "not been drawn yet" in panel._pv_status.cget("text")
+        assert "not been drawn yet" in panel.pv_status_text()
         # ...and it names no control: the picture redraws itself, so a
         # frame nobody is drawing is a fact rather than an instruction
-        assert "right-click" not in panel._pv_status.cget("text")
+        assert "right-click" not in panel.pv_status_text()
         panel._auto_preview.set(True)
         panel._frame_var.set("5")
-        assert "is being drawn" in panel._pv_status.cget("text")
+        assert "is being drawn" in panel.pv_status_text()
         assert panel._pv_debounce_job is not None
     finally:
         root.destroy()
@@ -2662,8 +2666,8 @@ def test_a_settled_invalid_form_says_the_preview_is_out_of_date(tmp_path):
         _fire_debounce(root, panel)
         assert started == []
         # ONE image is not a card, and the tab now says which line to read
-        assert "Preview not updated" in panel._pv_status.cget("text")
-        assert "at least two images" in panel._pv_status.cget("text")
+        assert "Preview not updated" in panel.pv_status_text()
+        assert "at least two images" in panel.pv_status_text()
         panel.add_image(b)
         _fire_debounce(root, panel)
         assert started                       # ...and it draws once it can
@@ -2824,7 +2828,7 @@ def test_a_flipper_press_draws_the_new_highlights_frame(tmp_path,
         # is DRAWN - not skipped because the form did not change
         panel.flip_right()
         assert panel._hl_var.get() == "1"
-        assert "is being drawn" in panel._pv_status.cget("text")
+        assert "is being drawn" in panel.pv_status_text()
         job, panel._pv_debounce_job = panel._pv_debounce_job, None
         root.after_cancel(job)
         assert panel._auto_render() is True
@@ -3050,7 +3054,7 @@ def test_a_failing_preview_step_surfaces_the_error(tmp_path, monkeypatch,
         panel._play_fp = preview_fingerprint(panel.form())
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        status = panel._pv_status.cget("text")
+        status = panel.pv_status_text()
         label = {"frame": "frame 0", "prepare": "video"}.get(fail, fail)
         assert "Preview failed at %s (exit 2)" % label in status
         assert panel._media_state["video"] == "failed - see the Log"
@@ -3510,7 +3514,7 @@ def test_a_flipper_press_plays_the_move_sound_over_the_music(tmp_path,
         # It NAMES NO CONTROL: the entry it used to send people to is gone,
         # and what replaced it is the Sound tick that has already been
         # pressed by anyone who can read this line.
-        assert "No move sound in this" in panel._pv_status.cget("text")
+        assert "No move sound in this" in panel.pv_status_text()
         # ...and wherever the strip had to cut it, the whole of it is still
         # reachable: the label's tooltip carries it, and so does the Log.
         assert "no move sound" in (panel._pv_status_tip.text
@@ -3541,7 +3545,7 @@ def test_the_confirm_sound_can_be_heard_before_a_card_is_written(
         # the bed is STOPPED for it, as on the machine (sound is always on
         # now, so there is a bed to stop) - and none is started
         assert made[0].played("loop") == [None]
-        assert "confirm1.wav" in panel._pv_status.cget("text")
+        assert "confirm1.wav" in panel.pv_status_text()
         # image 0 has none of its own, so it is the menu's
         panel._set_var(panel._hl_var, 0)
         assert panel.play_confirm() is True
@@ -3550,7 +3554,7 @@ def test_the_confirm_sound_can_be_heard_before_a_card_is_written(
         # ...and with nothing prepared it says so instead of playing
         _media_set(panel, sounds=False)
         assert panel.play_confirm() is False
-        assert "no confirm sound" in panel._pv_status.cget("text")
+        assert "no confirm sound" in panel.pv_status_text()
     finally:
         root.destroy()
 
@@ -3578,7 +3582,7 @@ def test_the_confirm_sound_is_judged_without_the_music_under_it(
         assert audio.looping is None
         assert audio.played("play") == [os.path.join(media, "confirm1.wav")]
         # ...said, so the silence that follows is not a mystery
-        assert "music stops for it" in panel._pv_status.cget("text")
+        assert "music stops for it" in panel.pv_status_text()
         # and the next flipper press brings the bed back
         assert panel.flip_left() is True
         assert audio.looping == os.path.join(media, "music0.wav")
@@ -3605,7 +3609,7 @@ def test_a_machine_with_no_sound_says_so_once_and_goes_on_drawing(
                             "darwin.")
         audio.status = audio.why_silent
         panel._sound_poll()
-        assert "sounddevice is not installed" in panel._pv_status.cget("text")
+        assert "sounddevice is not installed" in panel.pv_status_text()
         assert "[preview] No sound:" in _pane(panel)
         # the picture still draws, and says it once
         # ...and the draw CLEARS what the strip was saying: an empty
@@ -3643,7 +3647,7 @@ def test_a_confirm_the_form_has_turned_off_is_not_offered_or_played(
         panel._set_var(panel._hl_var, 1)
         assert panel.play_confirm() is False
         assert made == []                       # no device opened for it
-        assert "no confirm sound" in panel._pv_status.cget("text")
+        assert "no confirm sound" in panel.pv_status_text()
         # ...and Select says so rather than playing something else
         # an image with a confirm of its OWN still has one, whatever the
         # menu says - that is the selector's fallback, not a veto
@@ -3739,7 +3743,10 @@ def test_nothing_the_strip_says_is_cut_in_half_by_its_own_bottom_edge(
                      "The form changed - redrawing…"):
             panel._pv_say(line)
             fits(repr(line))
-            assert panel._pv_status.cget("text") == line
+            # the WHOLE of it is reachable at every width: on the strip when
+            # the font lets it fit, in the tooltip when it had to be cut
+            # (CI's wider font cut lines the desktop's showed whole)
+            assert whole() == line and panel.pv_status_text() == line
         # ...and anything else at all is cut, with the whole of it kept
         long = ("A preview failure with a very long explanation indeed, of "
                 "the kind a tool prints when a path is wrong: " + "x" * 200)
@@ -3789,12 +3796,12 @@ def test_a_sound_poll_does_not_wipe_what_the_strip_was_saying(tmp_path,
         # ...and the flipper walks to image 0, which has not been drawn
         assert panel.flip_right() is True
         assert panel._hl_var.get() == "0"
-        assert "has not been drawn yet" in panel._pv_status.cget("text")
+        assert "has not been drawn yet" in panel.pv_status_text()
         # now the sound is turned on: the strip must still be describing
         # the card the flipper left it on
         panel._sound_var.set(True)
         panel._sound_toggled()
-        assert "has not been drawn yet" in panel._pv_status.cget("text")
+        assert "has not been drawn yet" in panel.pv_status_text()
         # ...and the same for the poll that follows the backend being
         # chosen, and for a red failure
         panel._pv_say("Preview failed at animation (exit 2).", error=True)
@@ -5790,7 +5797,7 @@ def test_a_restore_draws_nothing_either(tmp_path, monkeypatch):
         assert panel._pv_busy is False and panel._busy is False
         # ...and the picture never claims one is on its way: the hold is
         # what the caption's own wording is asked about.
-        caption = panel._pv_status.cget("text")
+        caption = panel.pv_status_text()
         assert "has not been drawn yet" in caption
         assert "drawing it" not in caption
         # the headline names no button either: the restored path is usually
@@ -5836,6 +5843,7 @@ def test_a_loaded_cards_media_dir_survives_the_path_straying(tmp_path):
         root.destroy()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows file-name rules")
 def test_a_name_the_file_system_refuses_is_not_an_unplugged_drive(tmp_path):
     """Windows raises the same class of OSError for a '?' in a file name as
     it does for a share that is down (errno 22 / winerror 123), so the row
@@ -5914,7 +5922,7 @@ def test_a_dead_drive_is_answered_before_anything_stats_it(tmp_path,
                             lambda p: stat_calls.append(p) or False)
         assert panel._auto_render() is False
         assert stat_calls == []
-        assert "is not there right now" in panel._pv_status.cget("text")
+        assert "is not there right now" in panel.pv_status_text()
     finally:
         root.destroy()
 
@@ -7400,6 +7408,7 @@ def test_a_flash_takes_the_footer_and_gives_it_back(app):       # noqa: F811
 
 
 # ---- a loaded card's sounds are the sounds it has ------------------------------------
+@pytest.mark.skipif(sys.platform != "win32", reason="a WSL path reads back as a Windows one")
 def test_a_sound_reads_back_as_the_spec_that_made_it():
     """WHAT MADE IT, not what it made.  media.json has recorded the source of
     every sound since they learned to re-render; inspect hands it over now,

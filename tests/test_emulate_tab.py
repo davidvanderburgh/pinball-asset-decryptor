@@ -3079,6 +3079,11 @@ def _select_panel(tmp_path, monkeypatch, answer=None, inline=True):
     for name in ("watch.sh", "killgame.sh", "status.sh", "parts.py"):
         (rig / name).write_text("", encoding="utf-8")
     monkeypatch.setenv("PAD_EMU_DIR", str(rig))
+    # macOS asks no probe by design (multiboot_cmd: the rig lives in a
+    # container there); these tests are about the probe, so on a Mac runner
+    # they drive the tab as Linux.
+    if sys.platform == "darwin":
+        monkeypatch.setattr(emulate_tab.sys, "platform", "linux")
     calls = []
 
     def fake_run(cmd, **_kw):

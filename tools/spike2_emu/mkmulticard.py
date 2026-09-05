@@ -2763,7 +2763,10 @@ class DirOps(object):
         return os.listdir(self._p(rel))
 
     def _own(self, p, uid, gid):
-        if hasattr(os, "chown"):
+        # Only root can give a file to another owner: a plain-user run (the
+        # tests' walk of a scratch directory; every real update is root)
+        # leaves ownership alone rather than dying on EPERM.
+        if hasattr(os, "chown") and getattr(os, "geteuid", lambda: 0)() == 0:
             os.chown(p, uid, gid)
 
     def mkdir(self, rel, mode, uid, gid):

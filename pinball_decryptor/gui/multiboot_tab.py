@@ -8297,6 +8297,14 @@ class MultibootPanel:
         except (tk.TclError, ValueError, AttributeError):   # pragma: no cover
             return None
 
+    def pv_status_text(self):
+        """The WHOLE of the strip's current line - what :meth:`_pv_say` was
+        given, before :meth:`_one_line` cut it to the strip's width.  The
+        cut depends on the font and the window, so the tests read THIS and
+        not the label (a CI runner's wider font ellipsised sentences the
+        desktop showed whole); the label's tooltip carries the same text."""
+        return getattr(self, "_pv_full", "")
+
     def _one_line(self, text):
         """*text* cut to the ONE line the control strip can draw.
 
@@ -8345,6 +8353,7 @@ class MultibootPanel:
         known ways of freezing its own UI thread."""
         self._pv_caption, self._pv_error = msg, bool(error)
         text = (msg + (note or "")).strip()
+        self._pv_full = text
         shown = self._one_line(text)
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
         try:

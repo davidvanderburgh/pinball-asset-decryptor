@@ -220,6 +220,9 @@ def test_a_list_change_on_a_recorded_card_is_an_update(tmp_path):
 
 
 def test_update_card_runs_update_then_reads_the_card_back(tmp_path, monkeypatch):
+    # the root step is a CALLABLE on Windows (the WSL home is resolved on the
+    # worker) and a `sudo -n` argv elsewhere; this test is about the former
+    monkeypatch.setattr(multiboot_tab.sys, "platform", "win32")
     root, panel, card, media = _loaded(tmp_path, report=_recorded_report(tmp_path))
     try:
         panel._update_step(0, _dry(1, 65011712))

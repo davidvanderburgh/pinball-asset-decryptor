@@ -148,13 +148,13 @@ def test_apply_writes_a_tree_from_nothing_and_a_rerun_is_a_no_op():
     ops = ts.MemOps()
     ops.mkdir("img1", 0o755, 0, 0)
     stats = _apply(ops, "img1", None, new, src)
-    assert stats == {"written": 3, "bytes": 12, "removed": 0}
+    assert stats == {"written": 3, "bytes": 12, "removed": 0, "linked": 0}
     assert ops.manifest("img1") == new
     assert ops.read("img1/t/a.bin") == b"A" * 10 and ops.lstat("img1/t/a.bin")["mode"] == 0o755
     assert ops.lstat("img1/game")["target"] == "t/a.bin"
     assert not any(ts.is_tmp(r) for r, _ in ops.walk_files("img1"))
     before = ops.ops
-    assert _apply(ops, "img1", new, new, src) == {"written": 0, "bytes": 0, "removed": 0}
+    assert _apply(ops, "img1", new, new, src) == {"written": 0, "bytes": 0, "removed": 0, "linked": 0}
     assert ops.ops == before
 
 
@@ -307,3 +307,73 @@ def test_source_manifest_reads_the_fixture_and_caches_it(tmp_path, monkeypatch):
     assert how3 == "hashed"
     src = ts.ReaderSource
     assert src is not None
+
+
+# ============================================================================ the blob store (item 95)
+def test_blob_key_carries_content_mode_and_owner_and_parses_back():
+    rec = ts.FileRec("ab" * 32, 10, 0o755, 1000, 5, 7)
+    key = ts.blob_key(rec)
+    assert key == "ab" * 32 + ".0755.1000.5"
+    assert ts.parse_blob_key(key) == ("ab" * 32, 0o755, 1000, 5)
+    assert ts.parse_blob_key("notablob") is None and ts.parse_blob_key(".tmp." + key + ".12") is None
+    assert ts.blob_key(ts.FileRec("ab" * 32, 10, 0o644, 1000, 5, 7)) != key      # another mode = another blob
+
+
+def test_dedup_costs_counts_a_blob_once_across_images_and_inside_one():
+    a, _ = _tree({"x/one": b"A" * 100, "x/two": b"B" * 50})
+    b, _ = _tree({"y/one": b"A" * 100, "y/same": b"A" * 100, "y/three": b"C" * 10})
+    c, _ = _tree({"z/exec": (b"A" * 100, 0o755, 0, 0, 1), "z/four": b"D" * 5})
+    unique, shared = ts.dedup_costs([a, b, c])
+    assert unique == [150, 10, 105]                      # the same bytes at another path count once
+    assert shared == (150 + 210 + 105) - sum(unique)
+
+
+def test_apply_with_the_store_links_and_writes_each_blob_once():
+    new, src = _tree({"t/a": b"A" * 10, "t/b": b"A" * 10, "t/c": b"C" * 3})
+    ops = ts.MemOps()
+    ops.mkdir(".blobs", 0o700, 0, 0)
+    ops.mkdir("img1", 0o755, 0, 0)
+    stats = _apply(ops, "img1", None, new, src, store=True)
+    assert stats == {"written": 2, "bytes": 13, "removed": 0, "linked": 1}
+    key_a = ts.blob_key(new.files["t/a"])
+    assert ops.ino("img1/t/a") == ops.ino("img1/t/b") == ops.ino(".blobs/" + key_a)
+    assert ops.lstat(".blobs/" + key_a)["nlink"] == 3
+    # a second tree with the same content writes nothing
+    ops.mkdir("img2", 0o755, 0, 0)
+    assert _apply(ops, "img2", None, new, src, store=True) == {"written": 0, "bytes": 0, "removed": 0, "linked": 3}
+    assert ops.ino("img2/t/c") == ops.ino("img1/t/c")
+    # a re-run converges with nothing to do, and the trees read back as recorded
+    assert _apply(ops, "img2", new, new, src, store=True) == {"written": 0, "bytes": 0, "removed": 0, "linked": 0}
+    assert ops.manifest("img2") == new and ops.manifest("img1") == new
+    assert not any(ts.is_tmp(n) for n in ops.listdir(".blobs"))
+    # a replacement: the old link goes, the new blob is written once
+    new2, src2 = _tree({"t/a": b"Z" * 4, "t/b": b"A" * 10, "t/c": b"C" * 3})
+    assert _apply(ops, "img1", new, new2, src2, store=True) == {"written": 1, "bytes": 4, "removed": 0, "linked": 0}
+    assert ops.read("img1/t/a") == b"Z" * 4 and ops.lstat(".blobs/" + key_a)["nlink"] == 4
+
+
+def test_adopt_tree_keeps_the_inodes_and_frees_duplicates():
+    new, src = _tree({"t/a": b"A" * 10, "t/dup": b"A" * 10, "t/c": b"C" * 3})
+    ops = ts.MemOps()
+    _apply(ops, "", None, new, src)                      # a plain tree, as a copied primary
+    ino_a, ino_c = ops.ino("t/a"), ops.ino("t/c")
+    free_before = ops.free_bytes()
+    stats = ts.adopt_tree(ops, "", new)
+    assert stats == {"adopted": 2, "deduped": 1, "bytes_freed": 10}
+    assert ops.ino("t/a") == ino_a and ops.ino("t/c") == ino_c      # never rewritten
+    assert ops.ino("t/dup") == ino_a and ops.free_bytes() == free_before + 10
+    assert ops.lstat(".blobs/" + ts.blob_key(new.files["t/a"]))["nlink"] == 3
+    assert ts.adopt_tree(ops, "", new) == {"adopted": 0, "deduped": 0, "bytes_freed": 0}
+    assert ops.manifest("") == new                       # the store's own names are not the tree's
+
+
+def test_gc_blobs_removes_orphans_and_half_written_blobs_only():
+    new, src = _tree({"t/a": b"A" * 10, "t/c": b"C" * 3})
+    ops = ts.MemOps()
+    ops.mkdir(".blobs", 0o700, 0, 0)
+    ops.mkdir("img1", 0o755, 0, 0)
+    _apply(ops, "img1", None, new, src, store=True)
+    assert ts.gc_blobs(ops) == (0, 0)
+    ops.write_stream(".blobs/.tmp.deadbeef.0644.0.0.99", [b"half"], 0o644, 0, 0, 0)
+    ops.rmtree("img1/t")                                 # the tree goes; its blobs are orphans now
+    assert ts.gc_blobs(ops) == (3, 17) and ops.listdir(".blobs") == []

@@ -396,6 +396,68 @@ gate, an unrecorded card is hashed once, a multi card reorders/removes/adds with
 copying what stayed, p7 grows, a held lock refuses, a writer SIGKILLed mid-file is
 repaired by the next update, and a foreign mount of the card refuses by name.
 
+### The compact layout (item 95) - opt-in, experimental
+
+Three TMNT 1.59 images (stock pro, 1987 pro, 1987 LE) are 18 GB on a card while their
+unique content, by sha256, is 6.6 GB: the 1987 pro and LE share 2.4 GB at DIFFERENT paths
+(`turtles_pro/` vs `turtles_le/`), the stock and the 1987 pro 2.4 GB more.  `build --layout
+store` (root, like `update`) keeps one copy of every file the images have in common:
+
+```
+mkmulticard.py build --primary P --extra X --extra Y --out OUT --layout store [--size 16G|32G|content] ...
+```
+
+The primary's own p3 - Stern's filesystem, copied verbatim - is grown with `resize2fs` on the
+loop device to the smallest Stern image size that holds the union of the images' unique
+content (`--size` picks another; `content` = just what it needs), p5 and p6 are re-laid after
+it (the card names them by device, never by LBA), and there is no p7.  Inside p3:
+
+```
+/spk/ /<title>/ game conagent data   the primary's tree at the root, byte for byte Stern's (image 0)
+/img1/ ... /imgK/                    the extras: complete trees of the same shape (images 1..K)
+/.blobs/<sha256>.<mode>.<uid>.<gid>  one inode per unique (content, mode, owner); every regular
+                                     file of every tree is a HARDLINK to its blob
+```
+
+The primary's files are ADOPTED (linked into `.blobs/` - zero bytes rewritten, its inode
+numbers stay the source's); each extra is synced into its `imgK/` writing only the blobs the
+store does not hold yet.  The three TMNT images come to about 8 GB on a 16G card.  The menu's
+device for an extra is `/dev/mmcblk0p3:img1`, which `select.sh` already handles the way it
+handles `p7:img1` (umount /games, mount the device, bind the subtree).  `plan --layout store`
+hashes the sources (cached) and prints each image's UNIQUE bytes as its row plus
+`image-size shared N`, the bytes stored once.  `update` works on a store card as on any other
+- a file the store already holds is linked, not written (the dry-run's byte counts say so),
+blobs nothing links any more are collected - and `verify` adds the store's own invariants:
+every blob's name parses and matches its inode's mode/owner, every file of every tree is a
+link into the store, every blob's link count is 1 + its references, no orphan, no half-written
+blob, and (full) every blob hashes to its name.  The validator bypass goes through the mount
+(a raw write behind a shared blob would patch every tree at once) and the patched game is
+adopted into the store under its own key, so two images with the same stock game share one
+patched game too.  `parts.py --list-games` lists the store's trees under p3 (`3 ... <title>
+img1`), which the emulator's `run_game.sh` binds as it binds a p7 subtree.
+
+**Rules.**  Never USB-update a store card: a Stern update writes through hardlinked blobs
+into every tree sharing them - rebuild with this tool.  `bypass` refuses a store card (use
+`build --bypass-validation` / `update`).  The tick in the app ("Compact card: store files the
+images share only once (experimental)") is OFF by default and the layouts the app has always
+made are untouched without it.  Two things only hardware can prove: that Stern's update/spk
+layer tolerates `.blobs/` and `img1/` at the primary's `/games` root, and the same-device
+remount of p3's subtree; the tick says experimental until both have.
+
+**Proven in the emulator (2026-09-05):** the store card of David's three TMNT images (stock
+pro, 1987 pro, 1987 LE; `verify` PASS in full) booted each image through the menu -
+`[select] chose 0/1/2`, the extras bound from `p3:img1` / `p3:img2` with their own clip root -
+reached its attract with that image's own art, and took START into PLAYER 1 / BALL 1 with a
+ball fed every time (DESIGN.md's proof table, run 7).
+
+`selftest` part 6 (root) builds a store card from three sources sharing files by content at
+different paths (and one with another mode), checks the shared inode has link count 4, the
+other-mode twin its own blob, the primary's inode numbers unchanged, verify PASS (full), the
+plan rows' invariant, inspect's `trees.store` block, `--list-games`, then update drills: a
+new unique file writes once, a file the store holds writes nothing (linked), reorder = renames,
+remove = its blobs collected, add back = only its own bytes, the primary's tree synced in place,
+a raw bypass refused.
+
 ## Titles
 
 **Per-title emulation status, one line per title, kept current by `/finish`**

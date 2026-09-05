@@ -246,7 +246,7 @@ def test_two_image_form_builds_plan_build_verify(monkeypatch, tmp_path):
     plan = _tool_words(cmds[0][1])
     assert plan[:2] == ["tools/spike2_emu/mkmulticard.py", "plan"]
     assert plan[2:6] == ["--primary", prim, "--extra", extra]
-    assert plan[-2:] == ["--layout", "auto"]
+    assert plan[plan.index("--layout") + 1] == "auto" and "--cache-dir" in plan
     build = _tool_words(cmds[1][1])
     assert build[1] == "build"
     assert build[2:6] == ["--primary", prim, "--extra", extra]
@@ -4345,6 +4345,7 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
         multiboot_tab.MAX_IMAGES
     menu = menu_from_state({"volume": "not a number", "timeout": None,
                             "default": 2, "bypass": False})
+    assert menu.pop("compact") is False
     assert menu == {"move": "auto", "confirm": "auto", "volume": 50,
                     "timeout": 15, "default": 2, "bypass": False,
                     "machine_volume": True,
@@ -7480,3 +7481,84 @@ def test_no_sentence_names_a_control_that_is_not_there(tmp_path):
     assert WRITE_BUTTON == multiboot_tab.MultibootPanel.BUILD_FLASH_TEXT
     assert WRITE_BUTTON in APPLY_TICK
     assert "Update the loaded card in place" in APPLY_TICK
+
+
+# ---------------------------------------------------------------------------
+# the compact (store) layout tick - item 95, OPT-IN, default off
+# ---------------------------------------------------------------------------
+def test_the_compact_tick_is_off_by_default_and_selects_the_store_layout(tmp_path):
+    from pinball_decryptor.gui.multiboot_tab import build_args, plan_args
+    form = _form(tmp_path, 2)
+    assert form.compact is False
+    b, p = build_args(form), plan_args(form)
+    assert b[b.index("--layout") + 1] == "auto" and p[p.index("--layout") + 1] == "auto"
+    assert "store" not in b and "store" not in p
+    form.compact = True
+    b, p = build_args(form), plan_args(form)
+    assert b[b.index("--layout") + 1] == "store" and p[p.index("--layout") + 1] == "store"
+    assert "--cache-dir" in p                     # the plan hashes to size the store: one cache with build
+
+
+def test_diff_forms_puts_a_compact_change_in_the_rebuild_bucket(tmp_path):
+    from dataclasses import replace
+    before = _form(tmp_path, 2)
+    after = replace(before, compact=True)
+    menu, rebuild = diff_forms(before, after)
+    assert menu == [] and rebuild == ["compact layout on"]
+    assert diff_forms(after, before)[1] == ["compact layout off"]
+    assert diff_forms(before, replace(before))[1] == []
+
+
+def test_parse_plan_reads_the_shared_row_and_the_strip_says_so():
+    text = ("image-size 0 /dev/mmcblk0p3 3000000000 a.raw\n"
+            "image-size 1 /dev/mmcblk0p3:img1 1000000000 b.raw\n"
+            "image-size free 5000000000 room for updates in the games partitions\n"
+            "image-size shared 2500000000 stored once, shared by content\n"
+            "image-size overhead 1000000000 boot + rootfs + data + dump + metadata\n"
+            "image: 19531250 sectors = 10000000000 bytes (10.00 GB)\n"
+            "  fits Stern 16G image size 15494807552: YES (spare 5494807552)\n")
+    info = parse_plan(text)
+    assert info["shared"] == 2500000000 and info["free"] == 5000000000 and info["bytes"] == 10000000000
+    view = card_size_view(info)
+    assert view["detail"] == "4.00 GB of games, 2.50 GB shared, 5.00 GB free."
+    assert sum(b for _l, b, _k in view["bands"]) == 10000000000
+    assert parse_plan("image-size free 1\n")["shared"] is None
+    info["shared"] = None
+    assert card_size_view(info)["detail"] == "4.00 GB of games, 5.00 GB free for updates."
+
+
+def test_form_from_inspect_reads_the_store_layout_as_the_compact_tick(monkeypatch, tmp_path):
+    _win(monkeypatch)
+    info = _rich_report(tmp_path)
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    assert form_from_inspect(info, card, "")[0].compact is False
+    info["layout"] = "store"
+    assert form_from_inspect(info, card, "")[0].compact is True
+
+
+def test_the_compact_tick_lives_in_the_menu_settings_and_the_state():
+    root, panel = _panel()
+    try:
+        assert panel.form().compact is False and panel.state()["menu"]["compact"] is False
+        menu = panel.open_menu_settings()
+        root.update()
+        panel._compact_var.set(True)
+        menu.cancel()
+        root.update()
+        assert panel._compact_var.get() is False          # Cancel restores it
+        menu = panel.open_menu_settings()
+        root.update()
+        panel._compact_var.set(True)
+        menu.ok()
+        root.update()
+        assert panel.form().compact is True
+        doc = panel.state()
+        assert doc["menu"]["compact"] is True
+        panel._compact_var.set(False)
+        panel.restore_state(doc)
+        root.update()
+        assert panel.form().compact is True
+        assert menu_from_state({})["compact"] is False
+        assert menu_from_state({"compact": True})["compact"] is True
+    finally:
+        root.destroy()

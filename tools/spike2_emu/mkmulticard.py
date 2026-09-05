@@ -378,7 +378,7 @@ MULTI_FEATURES = ("has_journal,ext_attr,resize_inode,dir_index,filetype,extent,f
                   "^metadata_csum,^metadata_csum_seed,^64bit,^orphan_file")
 MULTI_SLACK = 0.10                            # size = used * (1 + slack) + headroom, MiB-rounded
 MULTI_HEADROOM = 256 << 20
-LAYOUTS = ("auto", "parts", "multi")
+LAYOUTS = ("auto", "parts", "multi", "store")
 
 # ---- game code versions (item 90: the same-version gate) -----------------------------------
 #: A games tree's package manifest, '/spk/index/<pkg>-<M_mm_p>.sidx' - Stern's own name for the
@@ -516,6 +516,12 @@ PROGRESS = Progress()
 def build_work_bytes(plan):
     """The bytes a build of `plan` will move: the multi layout's extraction out of the sources
     and the mke2fs that writes them back, then every range of the image copy."""
+    if plan.layout == "store":
+        total = PRE_P1 * SECTOR + sum(p.count * SECTOR for p in plan.prims + plan.logs if p.num != 3)
+        total += (plan.store_src_count or 0) * SECTOR
+        if plan.store_unique:
+            total += sum(plan.store_unique[1:])
+        return total
     total = PRE_P1 * SECTOR + sum(p.count * SECTOR for p in plan.prims + plan.logs)
     if plan.layout == "multi" and plan.multi_used:
         total += 2 * plan.multi_used
@@ -698,19 +704,22 @@ class Plan:
     trees  [(Part, subdir|None)] every games tree in selector index order - the unit the
            conf, the bypass and verify's root listing work on; subdir is 'img1', 'img2', ...
            for the multi layout's p7 and None for a whole-partition tree
-    layout 'parts' (each extra's games partition verbatim as p7, p8, ...) or 'multi' (one
-           ext4 p7 holding img1/, img2/, ... - see the module docstring)
+    layout 'parts' (each extra's games partition verbatim as p7, p8, ...), 'multi' (one
+           ext4 p7 holding img1/, img2/, ... - see the module docstring) or 'store' (item 95:
+           the primary's own p3 grown to hold the extras as img1/, img2/, ... beside its tree
+           and one .blobs/ store every file of every tree is a hardlink into; p5/p6 re-laid
+           after it, no p7)
     """
 
     def __init__(self, primary_geom, extra_geoms, primary=None, extras=None, layout="parts",
-                 multi_sectors=None, multi_subdirs=None, multi_src=None):
+                 multi_sectors=None, multi_subdirs=None, multi_src=None, store_sectors=None):
         P = primary_geom
         if P.ext is None or len(P.logical) < 1:
             raise Refused("%s: no extended partition / logical chain" % (primary or "primary"))
         for n in (1, 2, 3):
             P.part(n)
-        if layout not in ("parts", "multi"):
-            raise Refused("layout %r is not 'parts' or 'multi'" % (layout,))
+        if layout not in ("parts", "multi", "store"):
+            raise Refused("layout %r is not 'parts', 'multi' or 'store'" % (layout,))
         self.layout = layout
         self.primary, self.extras = primary, list(extras or [None] * len(extra_geoms))
         self.primary_geom, self.extra_geoms = P, list(extra_geoms)
@@ -729,6 +738,12 @@ class Plan:
         self.multi_subdirs = []
         self.multi_used = None
         self.multi_each = None          # the used bytes of each extra inside p7, in order
+        self.store_subdirs = []         # the store layout's extras, 'img1', 'img2', ... inside p3
+        self.store_src_count = None     # ...and the primary's own p3 size in sectors (what build copies)
+        self.store_unique = None        # per image, the bytes only it brings to the store (plan/build)
+        self.store_shared = None        # the bytes the images share by content, stored once
+        self.store_meta = None          # the primary's own filesystem overhead inside p3
+        self.manifests = None           # the sources' manifests when the plan hashed them
         if layout == "parts":
             for x, xp in zip(self.extra_geoms, self.extras):
                 t, xs, xc = x.part(3)
@@ -740,7 +755,7 @@ class Plan:
                 self.trees.append((p, None))
                 num += 1
                 prev_end = st + xc - 1
-        else:
+        elif layout == "multi":
             subs = list(multi_subdirs) if multi_subdirs else ["img%d" % (i + 1) for i in range(len(self.extra_geoms))]
             if multi_sectors is None:
                 self.multi_each = multi_used_each(self.extras, self.extra_geoms)
@@ -758,6 +773,33 @@ class Plan:
                     self.trees.append((p, s))
                 num += 1
                 prev_end = st + p.count - 1
+        else:
+            # THE STORE (item 95): the primary's p3 - Stern's own filesystem, copied verbatim -
+            # grown to `store_sectors`; the extras live INSIDE it as img1/, img2/, ...; p5 and
+            # p6 follow it at the first aligned sectors after (device names, not LBAs, are what
+            # fstab and the game use); there is no p7.
+            subs = list(multi_subdirs) if multi_subdirs else ["img%d" % (i + 1) for i in range(len(self.extra_geoms))]
+            t3, s3, c3 = P.part(3)
+            cnt = int(store_sectors) if store_sectors else c3
+            if cnt < c3:
+                raise Refused("the store cannot be smaller than the primary's games partition (%d < %d sectors)"
+                              % (cnt, c3))
+            p3 = Part(3, t3, s3, cnt, primary, s3, None)
+            self.prims[2] = p3
+            self.store_src_count = c3
+            self.store_subdirs = subs
+            self.images = [p3]
+            self.trees = [(p3, None)] + [(p3, s) for s in subs]
+            self.ext_base = align_up(s3 + cnt)
+            self.logs = []
+            num = 5
+            prev_end = self.ext_base - 1
+            for _ebr0, t, st0, lcnt in P.logical:
+                ebr = prev_end + 1
+                st = align_up(ebr + 1)
+                self.logs.append(Part(num, t, st, lcnt, primary, st0, ebr))
+                num += 1
+                prev_end = st + lcnt - 1
         self.ext_count = prev_end + 1 - self.ext_base
         self.total = prev_end + 1 + TAIL
 
@@ -860,13 +902,88 @@ def resolve_layout(layout, n_extra):
     return layout
 
 
+STORE_META_SLACK = 0.02                    # what the store's own metadata may add to its content
+STORE_HEADROOM = 64 << 20                  # ...and the room a content-sized store keeps
+STORE_SIZES = ("content",) + tuple(STERN_SIZES)
+
+
+def store_sectors_for_class(P, extra_geoms, primary, extras, subs, cls):
+    """The biggest p3 (in sectors) that keeps a store card inside the Stern `cls` image size
+    with p5 and p6 re-laid after it - found by building the plan, since the alignment of the
+    EBR chain is the plan's own arithmetic."""
+    total = STERN_SIZES[cls] // SECTOR
+    _t3, s3, c3 = P.part(3)
+    cnt = total - TAIL - s3 - sum(lc for (_e, _t, _s, lc) in P.logical) - ALIGN * (len(P.logical) + 1)
+    cnt = max(c3, cnt - cnt % ALIGN)               # never below the primary's own p3 (an 8G class = the stock p3)
+
+    def total_of(n):
+        return Plan(P, extra_geoms, primary, extras, "store", multi_subdirs=subs, store_sectors=n).total
+    if total_of(c3) > total:
+        raise Refused("--size %s: the primary's games partition alone (%s) does not leave room for the store"
+                      % (cls, _gb(c3 * SECTOR)))
+    while total_of(cnt) > total and cnt - ALIGN >= c3:
+        cnt -= ALIGN
+    while total_of(cnt + ALIGN) <= total:
+        cnt += ALIGN
+    return cnt
+
+
+def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdirs=None, cache_dir=None,
+                    progress=None):
+    """The Plan of a store card (item 95).  With `store_sectors` (a card that exists, or verify)
+    nothing is read but the tables; otherwise every source's games tree is hashed (or taken
+    from the cache) so the store can be sized by the UNION of the images' unique content: to
+    the smallest Stern image size that holds it (the default), to `size_class`, or - 'content'
+    - to just what it needs plus a small headroom.  The plan carries the manifests and the
+    per-image unique bytes for the size rows."""
+    P = Geometry.from_file(primary)
+    XG = [Geometry.from_file(x) for x in extras]
+    subs = list(subdirs) if subdirs else ["img%d" % (i + 1) for i in range(len(extras))]
+    if store_sectors is not None:
+        return Plan(P, XG, primary, list(extras), "store", multi_subdirs=subs, store_sectors=int(store_sectors))
+    ts = _treesync()
+    mans = [source_tree(path, cache_dir, progress)[0] for path in [primary] + list(extras)]
+    unique, shared = ts.dedup_costs(mans)
+    _t3, s3, c3 = P.part(3)
+    used3 = _used_bytes_or_none(primary, s3 * SECTOR)
+    meta = max(0, used3 - mans[0].tree.bytes()) if used3 is not None else 0
+    need = int((meta + sum(unique)) * (1 + STORE_META_SLACK)) + STORE_HEADROOM
+    if size_class == "content":
+        grow = int(sum(unique[1:]) * (1 + STORE_META_SLACK)) + STORE_HEADROOM
+        cnt = c3 + align_up((grow + SECTOR - 1) // SECTOR)
+    elif size_class is None:
+        fixed = (s3 + TAIL + sum(lc for (_e, _t, _s, lc) in P.logical) + ALIGN * (len(P.logical) + 1)) * SECTOR
+        cls = next((k for k, v in STERN_SIZES.items() if v >= fixed + need), None)
+        if cls is None:
+            raise Refused("the images' unique content (%s) does not fit the biggest Stern image size even stored once"
+                          % _gb(sum(unique)))
+        cnt = store_sectors_for_class(P, XG, primary, list(extras), subs, cls)
+    else:
+        if size_class not in STERN_SIZES:
+            raise Refused("--size %r: one of %s" % (size_class, "/".join(STORE_SIZES)))
+        cnt = store_sectors_for_class(P, XG, primary, list(extras), subs, size_class)
+        if cnt * SECTOR < need:
+            raise Refused("--size %s: the images' unique content needs %s of p3 and the class leaves %s"
+                          % (size_class, _gb(need), _gb(cnt * SECTOR)))
+    plan = Plan(P, XG, primary, list(extras), "store", multi_subdirs=subs, store_sectors=cnt)
+    plan.manifests = mans
+    plan.store_unique = unique
+    plan.store_shared = shared
+    plan.store_meta = meta
+    return plan
+
+
 def make_plan(primary, extras, layout="auto", multi_sectors=None, multi_src=None, multi_subdirs=None,
-              size_class=None):
+              size_class=None, store_sectors=None, cache_dir=None, progress=None):
     """The Plan for these images.  `size_class` ('8G'/'16G'/'32G', item 93's --size) fills the
     multi layout's p7 to the END of that Stern image size instead of its content-sized default,
     so later updates and added images have room without a re-layout; refused when the content
-    does not fit the class."""
+    does not fit the class.  The store layout (item 95) is sized by :func:`make_store_plan`."""
     lay = resolve_layout(layout, len(extras))
+    if lay == "store":
+        return make_store_plan(primary, extras, size_class, store_sectors, multi_subdirs, cache_dir, progress)
+    if size_class == "content":
+        size_class = None
     plan = Plan(Geometry.from_file(primary), [Geometry.from_file(x) for x in extras], primary, list(extras),
                 lay, multi_sectors=multi_sectors, multi_subdirs=multi_subdirs, multi_src=multi_src)
     if size_class and lay == "multi" and multi_sectors is None:
@@ -957,6 +1074,15 @@ def image_costs(plan):
     devs = plan.devices()
     srcs = [plan.primary] + list(plan.extras)
     rows = []
+    if plan.layout == "store":
+        # every image costs the bytes only IT brings to the store (item 95); what the images
+        # share is stored once and reported apart as `image-size shared`
+        uniq = plan.store_unique
+        for i, dev in enumerate(devs):
+            rows.append((i, dev, uniq[i] if uniq is not None and i < len(uniq) else None,
+                         srcs[i] if i < len(srcs) else None))
+        room = plan_room(plan)
+        return rows, plan.total_bytes - sum(n for _i, _d, n, _s in rows if n) - room
     if plan.multi_part is not None:
         p3 = plan.prims[2]
         used = _used_bytes_or_none(p3.src, p3.src_start * SECTOR) if p3.src else None
@@ -980,6 +1106,12 @@ def plan_room(plan):
     image partition's size minus its used bytes (0 for one whose superblock cannot be read),
     and the multi p7's slack over its trees."""
     room = 0
+    if plan.layout == "store":
+        p3 = plan.prims[2]
+        if plan.store_unique is not None:
+            return max(0, p3.count * SECTOR - sum(plan.store_unique) - (plan.store_meta or 0))
+        used = _used_bytes_or_none(p3.src, p3.src_start * SECTOR) if p3.src else None
+        return max(0, p3.count * SECTOR - used) if used is not None else 0
     if plan.multi_part is not None:
         p3 = plan.prims[2]
         used = _used_bytes_or_none(p3.src, p3.src_start * SECTOR) if p3.src else None
@@ -1024,6 +1156,13 @@ def print_plan(plan):
                 if plan.multi_used is not None else "size read from the card")
         print("p%d (multi layout): %d trees %s, %d MiB (%s)" % (mp.num, len(plan.multi_subdirs), "/".join(plan.multi_subdirs),
                                                              mp.count * SECTOR >> 20, used))
+    if plan.layout == "store":
+        p3 = plan.prims[2]
+        print("p3 (store layout): %d trees %s inside the primary's games partition, grown from %d to %d MiB%s"
+              % (len(plan.trees), ", ".join(["/"] + plan.store_subdirs), (plan.store_src_count or 0) * SECTOR >> 20,
+                 p3.count * SECTOR >> 20,
+                 (", %s shared by content and stored once" % _gb(plan.store_shared))
+                 if plan.store_shared is not None else ""))
     note = plan.unreachable_note()
     print("images: " + ", ".join("%d=%s" % (i, d) for i, d in enumerate(plan.devices()))
           + ("  (%s)" % note if note else ""))
@@ -1039,6 +1178,10 @@ def print_plan(plan):
     # rebuild - the games partitions' free space.  A word where the index goes, so an older
     # reader of these rows cannot mistake it for an image.
     print("image-size free %d room for updates in the games partitions" % plan_room(plan))
+    if plan.layout == "store":
+        # what the images have in common and the store holds once (item 95) - NOT on the card,
+        # which is the point; a word where the index goes, like the free row
+        print("image-size shared %d stored once, shared by content" % (plan.store_shared or 0))
     print("image-size overhead %d boot + rootfs + data + dump + metadata" % max(0, overhead))
     print("image: %d sectors = %d bytes (%s)" % (plan.total, plan.total_bytes, _gb(plan.total_bytes)))
     for k, spare in plan.fits().items():
@@ -1716,10 +1859,13 @@ def build_image(plan, out, use_dd=False):
             what = ("the games partition" if plan.multi_part is not None and p.num == plan.multi_part.num
                     else default_title(p.src))
             meter.step("copying p%d (%s) into the card image" % (p.num, what))
+        length = p.count * SECTOR
+        if plan.layout == "store" and p.num == 3 and plan.store_src_count:
+            length = plan.store_src_count * SECTOR         # the primary's own p3; the growth comes after
         if use_dd:
-            dd_range(p.src, p.src_start * SECTOR, out, p.start * SECTOR, p.count * SECTOR, label, meter=meter)
+            dd_range(p.src, p.src_start * SECTOR, out, p.start * SECTOR, length, label, meter=meter)
         else:
-            copy_range(p.src, p.src_start * SECTOR, out, p.start * SECTOR, p.count * SECTOR, label, meter=meter)
+            copy_range(p.src, p.src_start * SECTOR, out, p.start * SECTOR, length, label, meter=meter)
     write_tables(plan, out)
     say("tables written: MBR entries + %d EBR sector(s)" % len(plan.logs))
 
@@ -2612,13 +2758,19 @@ class DirOps(object):
     def rename(self, a, b):
         os.replace(self._p(a), self._p(b))
 
+    def link(self, src, dst):
+        os.link(self._p(src), self._p(dst))
+
     def write_stream(self, rel, chunks, mode, uid, gid, mtime):
         p = self._p(rel)
         with open(p, "wb") as f:
             for c in chunks:
                 f.write(c)
             f.flush()
-            os.fsync(f.fileno())
+            # NO fsync per file: on the loop device each one forces a journal commit that
+            # waits on the backing file through 9p (measured: 11 MB/s, in jbd2_log_wait_commit,
+            # against ~150 MB/s streaming).  Durability comes from commit() - os.sync() before
+            # the record is written - and a crash before it is what the dirty flag repairs.
         self._own(p, uid, gid)
         os.chmod(p, mode)
         os.utime(p, (mtime, mtime))
@@ -2864,16 +3016,26 @@ def source_tree(path, cache_dir=None, progress=None):
                               progress=progress)
 
 
-def card_tree(card, part, sub, cache_dir=None, progress=None):
+def card_tree(card, part, sub, cache_dir=None, progress=None, skip=None):
     """(SourceManifest, how) of one games tree ON a card - what `update` reads off a card built
-    before trees.json existed, cached under the CARD's own stamp."""
+    before trees.json existed, cached under the CARD's own stamp.  `skip` names root entries
+    the walk leaves out (a store card's root: the store and the extras' trees)."""
     ts = _treesync()
     _v, _s, ext4, _a = _stern_plugins()
     with open(card, "rb") as f:
         r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
         root = tree_root_inode(r, sub)
     return ts.source_manifest(card, part.start * SECTOR, part.count * SECTOR, root_ino=root,
-                              sub=device_name(part.num, sub), cache_dir=cache_dir, progress=progress)
+                              sub=device_name(part.num, sub), cache_dir=cache_dir, progress=progress, skip=skip)
+
+
+def tree_skip(plan, sub):
+    """What a walk of a games tree's root leaves out: lost+found - and, at a store card's root,
+    the store and the extras' trees, which live beside the primary's own (item 95)."""
+    ts = _treesync()
+    if plan is not None and plan.layout == "store" and not sub:
+        return tuple(ts.SKIP_ROOT) + tuple(ts.STORE_SKIP) + tuple(plan.store_subdirs)
+    return tuple(ts.SKIP_ROOT)
 
 
 def p2_digest(path, cache_dir=None):
@@ -3076,6 +3238,180 @@ def apply_bypass_fs(ops, prefix):
     return state, written, notes, gpath, spath
 
 
+def adopt_written(ops, prefix, written):
+    """After the bypass wrote a patched game / a refreshed .sidx into a store card's tree (a
+    new inode each, tmp + rename), link them into the store under their own keys - or replace
+    them by a link to the identical blob another tree's bypass already made - so every file of
+    every tree stays a link to a blob (what verify holds a store card to)."""
+    ts = _treesync()
+    for rel, sha in written.items():
+        full = ts._join(prefix, rel)
+        st = ops.lstat(full)
+        if st is None or st["kind"] != "file":
+            continue
+        blob = ts.BLOBS_DIR + "/" + "%s.%04o.%d.%d" % (sha, st["mode"] & 0o7777, st["uid"], st["gid"])
+        bst = ops.lstat(blob)
+        if bst is None:
+            ops.link(full, blob)
+        elif bst["ino"] != st["ino"]:
+            tmp = ts.tmp_name(full)
+            if ops.exists(tmp):
+                ops.unlink(tmp)
+            ops.link(blob, tmp)
+            ops.rename(tmp, full)
+
+
+def build_store(plan, out, trees):
+    """Turn the freshly copied p3 of a store card into the store (item 95): resize2fs on the
+    loop device grows Stern's own filesystem to the plan's size (its UUID, label, features and
+    inode numbers untouched); through one rw mount the primary's files are linked into
+    `.blobs/` without a byte rewritten (adopt_tree), then every extra is synced into its
+    imgK/ writing only the blobs the store does not hold yet."""
+    ts = _treesync()
+    _v, _s, ext4, _a = _stern_plugins()
+    need_tools("resize2fs", "e2fsck", "losetup")
+    p3 = plan.prims[2]
+    off, length = p3.start * SECTOR, p3.count * SECTOR
+    t0 = time.monotonic()
+    if p3.count > (plan.store_src_count or p3.count):
+        PROGRESS.step("growing the games partition to %s" % _gb(length))
+        with LoopMount(out, off, length, mount=False) as loop:
+            _run(["e2fsck", "-fp", loop], ok_rc=(0, 1))
+            res = _run(["resize2fs", loop])
+            say("resize2fs p3: " + " ".join(line.strip() for line in res.splitlines() if "now" in line))
+    srcs = [plan.primary] + list(plan.extras)
+    with LoopMount(out, off, length) as mp:
+        ops = DirOps(mp)
+        man0 = trees.image(0).tree
+        PROGRESS.step("linking the primary's %d files into the store" % len(man0.files))
+        st = ts.adopt_tree(ops, "", man0)
+        say("store: the primary's tree adopted - %d files became blobs, %d duplicates inside it freed (%s)"
+            % (st["adopted"], st["deduped"], _gb(st["bytes_freed"])))
+        for i, (part, sub) in enumerate(plan.trees):
+            if i == 0:
+                continue
+            tree = trees.image(i).tree
+            if not ops.exists(sub):
+                ops.mkdir(sub, 0o755, 0, 0)
+            changes = ts.diff_tree(None, tree)
+            with open(srcs[i], "rb") as f:
+                spart = source_part(srcs[i])
+                r = ext4.Ext4Reader(f, spart.start * SECTOR, spart.count * SECTOR)
+                if not tree.inodes:                              # a cached manifest: find the inodes
+                    for rel, kind, ino, _node in r.iter_tree(2):
+                        if kind == "file":
+                            tree.inodes[rel] = ino
+                PROGRESS.step("writing image %d (%s) into the store" % (i, os.path.basename(srcs[i])),
+                              sum(c.size for c in changes if c.op == "write"))
+                stats = ts.apply_changes(ops, sub, changes, tree, ts.ReaderSource(r, tree), PROGRESS, store=True)
+            say("image %d %s: %d files written (%s), %d linked to blobs the store already held"
+                % (i, device_name(part.num, sub), stats["written"], _gb(stats["bytes"]), stats["linked"]))
+        ops.commit()
+    say("store built in %.0f s" % (time.monotonic() - t0))
+
+
+def bypass_store(card, plan, trees):
+    """The validator bypass on every tree of a store card, THROUGH the mount: a raw write
+    behind a shared blob would patch every tree at once and leave the record wrong.  Each
+    tree's patched game and refreshed .sidx are written as their own inodes, then linked into
+    the store under their own keys (two trees with the same stock game share one patched one);
+    the digests go into the record; blobs nothing links any more are removed."""
+    print("== validator bypass (through the store's mount)")
+    ts = _treesync()
+    p3 = plan.prims[2]
+    with LoopMount(card, p3.start * SECTOR, p3.count * SECTOR) as mp:
+        ops = DirOps(mp)
+        for i, (part, sub) in enumerate(plan.trees):
+            dev = device_name(part.num, sub)
+            try:
+                state, written, notes, gpath, spath = apply_bypass_fs(ops, sub or "")
+            except Refused as e:
+                print("image %d %s: validator: SKIPPED (%s)" % (i, dev, e))
+                continue
+            adopt_written(ops, sub or "", written)
+            im = trees.image(i)
+            if written:
+                by = {"game_path": gpath, "sidx_path": spath}
+                for rel, sha in written.items():
+                    by["game" if rel == gpath else "sidx"] = sha
+                im.bypass = by
+            after = "bypassed" if (written and gpath in written) or state == "bypassed" else state
+            line = bypass_words(after)
+            if written:
+                line += " (%s written)" % ", ".join(sorted(written))
+            elif state == "bypassed":
+                line += " (already)"
+            print("image %d %s: %s - %s" % (i, dev, line, "; ".join(notes)))
+        n, nbytes = ts.gc_blobs(ops)
+        if n:
+            say("store: %d blob(s) no tree links any more removed (%s)" % (n, _gb(nbytes)))
+        ops.commit()
+
+
+def verify_store(card, plan, rec, check, mode="full"):
+    """The store's own invariants (item 95): every blob's name parses and its inode's
+    mode/owner match the name; every regular file of every tree IS a link into the store (the
+    same inode as a blob); every blob's link count is 1 + the links the trees hold; no
+    half-written blob, no orphan; and, in 'full' mode, every blob's content hashes to its
+    name (the trees' own content is verify_trees' business)."""
+    ts = _treesync()
+    _v, _s, ext4, _a = _stern_plugins()
+    p3 = plan.prims[2]
+    with open(card, "rb") as f:
+        r = ext4.Ext4Reader(f, p3.start * SECTOR, p3.count * SECTOR)
+        ents = _dir_entries(r, 2)
+        if ts.BLOBS_DIR not in ents:
+            check("store: %s at the root of p3" % ts.BLOBS_DIR, False)
+            return
+        blobs, bad_names, bad_attrs, tmp = {}, [], [], []
+        for name, (c, _t) in _dir_entries(r, ents[ts.BLOBS_DIR][0]).items():
+            node = r.read_inode(c)
+            if ts.is_tmp(name):
+                tmp.append(name)
+                continue
+            key = ts.parse_blob_key(name)
+            if key is None or (node["mode"] & ext4.S_IFMT) != ext4.S_IFREG:
+                bad_names.append(name)
+                continue
+            if (node["mode"] & 0o7777, node["uid"], node["gid"]) != key[1:]:
+                bad_attrs.append(name)
+            blobs[name] = (c, node)
+        check("store: %d blobs, every name a blob's, none half-written" % len(blobs), not bad_names and not tmp,
+              "odd %r tmp %r" % (bad_names[:3], tmp[:3]))
+        check("store: blob mode/owner match their names", not bad_attrs, "%r" % bad_attrs[:3])
+        by_ino = {c: name for name, (c, _n) in blobs.items()}
+        refs = collections.Counter()
+        unlinked = []
+        for i, (part, sub) in enumerate(plan.trees):
+            try:
+                root = tree_root_inode(r, sub)
+            except Refused as e:
+                check("store: image %d %s root" % (i, device_name(part.num, sub)), False, str(e))
+                continue
+            for rel, kind, ino, _node in r.iter_tree(root, skip=tree_skip(plan, sub)):
+                if kind != "file":
+                    continue
+                if ino in by_ino:
+                    refs[ino] += 1
+                else:
+                    unlinked.append("%s:%s" % (device_name(part.num, sub), rel))
+        check("store: every file of every tree is a link into the store", not unlinked, "%r" % unlinked[:5])
+        bad_links = ["%s links %d refs %d" % (name, node["links"], refs.get(c, 0))
+                     for name, (c, node) in blobs.items() if node["links"] != 1 + refs.get(c, 0)]
+        check("store: link count = 1 + references, every blob", not bad_links, "%r" % bad_links[:3])
+        orphans = [name for name, (c, _n) in blobs.items() if refs.get(c, 0) == 0]
+        check("store: no orphan blobs", not orphans, "%r" % orphans[:3])
+        if mode == "full":
+            t0 = time.monotonic()
+            bad, nbytes = [], 0
+            for name, (c, node) in sorted(blobs.items()):
+                nbytes += node["size"]
+                if ts.hash_inode(r, node) != name.split(".")[0]:
+                    bad.append(name)
+            check("store: %d blobs hash to their names (%s, %.0f s)" % (len(blobs), _gb(nbytes), time.monotonic() - t0),
+                  not bad, "%r" % bad[:3])
+
+
 def verify_trees(card, plan, rec, mode, check, touched=None):
     """Every recorded tree against trees.json: paths, kinds, mode/owner, symlink targets, and
     the CONTENT of every file ('full'), of the touched files + game + .sidx ('touched') or of a
@@ -3098,7 +3434,7 @@ def verify_trees(card, plan, rec, mode, check, touched=None):
             r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
             root = tree_root_inode(r, sub)
             files, links, dirs, nodes = {}, {}, {}, {}
-            for rel, kind, ino, node in r.iter_tree(root):
+            for rel, kind, ino, node in r.iter_tree(root, skip=tree_skip(plan, sub)):
                 if kind == "file":
                     files[rel] = node
                 elif kind == "symlink":
@@ -3165,8 +3501,13 @@ def trees_report(card, plan, rec, warnings):
         images.append(collections.OrderedDict([
             ("index", im.index), ("device", im.device), ("files", len(im.tree.files)),
             ("tree_bytes", im.tree.bytes()), ("source_stamp", im.stamp), ("source_changed", changed)]))
+    store = None
+    if plan is not None and plan.layout == "store":
+        unique, shared = ts.dedup_costs(rec.images)
+        store = collections.OrderedDict([("shared_bytes", shared), ("unique_bytes", unique)])
     return collections.OrderedDict([
         ("recorded", True), ("written", rec.written), ("version", rec.version), ("free_bytes", free),
+        ("layout", plan.layout if plan is not None else rec.layout), ("store", store),
         ("synced", rec.synced), ("dirty", rec.dirty), ("images", images)])
 
 
@@ -3248,11 +3589,18 @@ def _update_locked(a, ts, card, dry):
         if not sources or not all(sources):
             raise Refused("%s records no source paths; pass --primary/--extra" % os.path.basename(card))
     devs_now = plan.devices()
+    store = plan.layout == "store"
 
     def subdir_for(i):
         if i == 0:
             return ""
-        return "img%d" % i if plan.layout == "multi" else (plan.trees[i][1] or "")
+        return "img%d" % i if plan.layout in ("multi", "store") else (plan.trees[i][1] or "")
+
+    def tree_part(i):
+        """The partition image i lives in - p7 for a multi card's new image, p3 for a store's."""
+        if i < len(plan.trees):
+            return plan.trees[i][0]
+        return plan.multi_part if plan.multi_part is not None else plan.prims[2]
 
     if plan.layout == "parts" and len(sources) != len(plan.trees):
         raise Refused("a parts-layout card holds its extra image as a whole partition: only its CONTENTS can be "
@@ -3274,7 +3622,7 @@ def _update_locked(a, ts, card, dry):
         say("%s carries no %s: reading its %d tree(s) once" % (os.path.basename(card), TREES_MANIFEST, len(plan.trees)))
         images = []
         for i, (part, sub) in enumerate(plan.trees):
-            man, how = card_tree(card, part, sub, a.cache_dir)
+            man, how = card_tree(card, part, sub, a.cache_dir, skip=tree_skip(plan, sub))
             # a tree the bypass already patched keeps its bypass through an update: without
             # this a source's stock game would be written over it and the machine would show
             # GAME VALIDATION ERROR again
@@ -3308,8 +3656,8 @@ def _update_locked(a, ts, card, dry):
     for i, path in enumerate(sources):
         st = ts.source_stamp(path)
         stamps.append((i, st))
-    actions = ts.match_trees(rec, [(i, devs_now[i] if i < len(devs_now) else device_name(7, "img%d" % i), st)
-                                   for i, st in stamps], subdir_for)
+    actions = ts.match_trees(rec, [(i, devs_now[i] if i < len(devs_now) else device_name(tree_part(i).num, "img%d" % i),
+                                    st) for i, st in stamps], subdir_for)
     by_index = {a_.index: a_ for a_ in actions if a_.action != "remove"}
     for i, path in enumerate(sources):
         act = by_index[i]
@@ -3328,9 +3676,14 @@ def _update_locked(a, ts, card, dry):
             base = os.path.basename((im.stamp or {}).get("path", "")) if im else None
             u["sources"].append((act.index, act.device, "removed", base))
     # the version gate on the new list
-    newplan = plan if plan.layout == "parts" else make_plan(sources[0], sources[1:], "multi",
-                                                            multi_sectors=plan.multi_part.count,
-                                                            multi_subdirs=["img%d" % i for i in range(1, len(sources))])
+    if plan.layout == "parts":
+        newplan = plan
+    elif store:
+        newplan = make_plan(sources[0], sources[1:], "store", store_sectors=plan.prims[2].count,
+                            multi_subdirs=["img%d" % i for i in range(1, len(sources))])
+    else:
+        newplan = make_plan(sources[0], sources[1:], "multi", multi_sectors=plan.multi_part.count,
+                            multi_subdirs=["img%d" % i for i in range(1, len(sources))])
     versions = plan_identities(newplan, progress=None)
     report_versions(versions, a.allow_version_mismatch)
     # the diff per tree and the room per partition
@@ -3339,15 +3692,27 @@ def _update_locked(a, ts, card, dry):
     per_part_freed = {n: 0 for n in free}
     changes = {}
     touched = {}
+    # on a store card a written file costs nothing when the store already holds its blob
+    # (another tree's, or one written earlier in this very update)
+    store_keys = {ts.blob_key(fr) for im in rec.images for fr in im.tree.files.values()} if store else set()
     for i, path in enumerate(sources):
         act = by_index[i]
         tree, st, uuid, old_im = new_trees[i]
         old_tree = old_im.tree if (old_im is not None and act.action in ("keep", "rename")) else None
         ch = ts.diff_tree(old_tree, tree)
         changes[i] = ch
-        part = plan.trees[i][0] if i < len(plan.trees) else plan.multi_part
+        part = tree_part(i)
         need, peak = ts.room_needed(ch, old_tree, tree, margin=0)
         adds = sum(c.size for c in ch if c.op == "write")
+        if store:
+            adds = 0
+            for c in ch:
+                if c.op == "write":
+                    k = ts.blob_key(tree.files[c.rel])
+                    if k not in store_keys:
+                        store_keys.add(k)
+                        adds += c.size
+            need = min(need, adds)
         per_part_adds[part.num] = per_part_adds.get(part.num, 0) + adds
         per_part_freed[part.num] = per_part_freed.get(part.num, 0) + (adds - need)
         n = len([c for c in ch if c.op != "attr_dir"])
@@ -3412,7 +3777,8 @@ def _update_locked(a, ts, card, dry):
         raise Refused("; ".join(u["notes"]))
     if dry:
         return 0
-    if u["size"] == 0 and not list_changed and not u["inject"] and not dirty and not unrecorded:
+    if (u["size"] == 0 and not any(changes.values()) and not list_changed and not u["inject"] and not dirty
+            and not unrecorded):
         say("nothing to write: every source is as recorded and the menu is unchanged")
         return 0
     if not a.selector_dir and u["inject"]:
@@ -3422,9 +3788,11 @@ def _update_locked(a, ts, card, dry):
     # EVERY PARTITION MOUNTED RW IS A SYNCED ONE from here on - a rw mount alone moves the
     # superblock, so a range md5 against the source can never hold for it again - and only a
     # partition with something to write is mounted at all
-    touched_set = {(plan.trees[i][0] if i < len(plan.trees) else plan.multi_part).num for i in changes if changes[i]}
+    touched_set = {tree_part(i).num for i in changes if changes[i]}
     if list_changed and p7:
         touched_set.add(p7)
+    if list_changed and store:
+        touched_set.add(3)
     touched_set |= set(dirty)
     touched_parts = sorted(touched_set)
     bak = p2_backup(card)
@@ -3441,10 +3809,11 @@ def _update_locked(a, ts, card, dry):
     for i in changes:
         if not changes[i]:
             continue
-        part = plan.trees[i][0] if i < len(plan.trees) else plan.multi_part
-        mounts.setdefault(part.num, []).append(i)
+        mounts.setdefault(tree_part(i).num, []).append(i)
     if list_changed and p7 and p7 not in mounts:
         mounts[p7] = []
+    if list_changed and store and 3 not in mounts:
+        mounts[3] = []
     for n in dirty:                     # a dirty partition is mounted for its sweep, changes or not
         mounts.setdefault(n, [])
     for n, idxs in mounts.items():
@@ -3454,7 +3823,7 @@ def _update_locked(a, ts, card, dry):
             if dirty:
                 say("sweeping temporary files an interrupted run left in p%d: %d" % (n, ts.sweep_tmp(ops, "")))
                 ts.sweep_parked(ops)
-            if n == p7:
+            if n == p7 or (store and n == 3):
                 for what, old, new in ts.apply_tree_actions(ops, actions):
                     say("p%d: %s %s%s" % (n, what, old or "", (" -> " + new) if new else ""))
             for i in idxs:
@@ -3472,11 +3841,13 @@ def _update_locked(a, ts, card, dry):
                                 tree.inodes[rel] = ino
                     PROGRESS.step("writing image %d (%s)" % (i, os.path.basename(sources[i])),
                                   sum(c.size for c in changes[i] if c.op == "write"))
-                    stats = ts.apply_changes(ops, prefix, changes[i], tree, ts.ReaderSource(r, tree), PROGRESS)
+                    stats = ts.apply_changes(ops, prefix, changes[i], tree, ts.ReaderSource(r, tree), PROGRESS,
+                                             store=store)
                 finally:
                     src_reader_ctx.close()
-                say("image %d: %d written (%s), %d removed"
-                    % (i, stats["written"], _gb(stats["bytes"]), stats["removed"]))
+                say("image %d: %d written (%s), %d removed%s"
+                    % (i, stats["written"], _gb(stats["bytes"]), stats["removed"],
+                       (", %d linked to blobs the store already held" % stats["linked"]) if store else ""))
                 # the bypass, through the mount, for a tree whose game or .sidx moved (or that was never done)
                 want_bypass = a.bypass_validation or bool(old_im is not None and old_im.bypass)
                 if want_bypass:
@@ -3495,13 +3866,18 @@ def _update_locked(a, ts, card, dry):
                     bypass_digests[i] = by
                     for rel in written:
                         touched.setdefault(i, []).append(rel)
+                    if store:
+                        adopt_written(ops, prefix, written)
+            if store:
+                n_gc, b_gc = ts.gc_blobs(ops)
+                say("store: %d blob(s) no tree links any more removed (%s)" % (n_gc, _gb(b_gc)))
             ops.commit()
     # the record, last: the new trees, the stamps, synced, dirty cleared
     images = []
     for i, path in enumerate(sources):
         act = by_index[i]
         tree, st, uuid, old_im = new_trees[i]
-        part = plan.trees[i][0] if i < len(plan.trees) else plan.multi_part
+        part = tree_part(i)
         sub = "" if i == 0 else (act.new_sub or "")
         carried = old_im is not None and act.action in ("keep", "rename") and not changes[i]
         by = bypass_digests.get(i, old_im.bypass if carried else None)
@@ -3540,6 +3916,9 @@ def verify_plan(card, sources):
     if own.layout == "multi":
         return make_plan(sources[0], sources[1:], "multi", multi_sectors=own.multi_part.count,
                          multi_subdirs=own.multi_subdirs)
+    if own.layout == "store":
+        return make_plan(sources[0], sources[1:], "store", store_sectors=own.prims[2].count,
+                         multi_subdirs=own.store_subdirs)
     return make_plan(sources[0], sources[1:], "parts")
 
 
@@ -3601,12 +3980,40 @@ def multi_subdirs_on(card, part_num=7):
         return []
 
 
+def store_subdirs_on(card):
+    """The imgN subdirectories at the root of p3 BESIDE its own spk/ - the store layout's
+    marker (item 95: the primary's tree at the root, the extras as imgN/ next to it) -
+    numerically ordered, or [] for a plain games partition / anything unreadable."""
+    try:
+        _vp, _sx, ext4, _adj = _stern_plugins()
+        off, size = part_range(card, 3)
+        with open(card, "rb") as f:
+            r = ext4.Ext4Reader(f, off, size)
+            root = r.read_inode(2)
+            names = {n: (c, t) for (n, c, t) in r._iter_dir(root) if n not in (".", "..")}
+            if "spk" not in names:
+                return []
+            subs = []
+            for n, (c, _t) in names.items():
+                m = MULTI_SUBDIR_RE.match(n)
+                if m and (r.read_inode(c)["mode"] & ext4.S_IFMT) == ext4.S_IFDIR:
+                    subs.append((int(m.group(1)), n))
+            return [n for (_k, n) in sorted(subs)]
+    except Exception:
+        return []
+
+
 def plan_from_card(card):
     """A Plan describing an existing multi card: p3 + every logical after p6 is an image
-    partition; a p7 whose root holds img1/, img2/ ... (and no spk/) is the multi layout."""
+    partition; a p7 whose root holds img1/, img2/ ... (and no spk/) is the multi layout; a p3
+    whose root holds img1/, img2/ ... BESIDE its spk/ is the store layout (item 95)."""
     G = Geometry.from_file(card)
     stock_logs = G.logical[:2]
     base = Geometry(G.size, G.mbr, G.prim, G.ext, stock_logs, G.ebr_raw, card)
+    subs3 = store_subdirs_on(card)
+    if subs3 and len(G.logical) == 2:
+        _t3, _s3, c3 = G.part(3)
+        return Plan(base, [], card, [], "store", multi_subdirs=subs3, store_sectors=c3)
     if len(G.logical) == 3:
         subs = multi_subdirs_on(card, 7)
         if subs:
@@ -3790,8 +4197,8 @@ def tree_game(reader, root_ino):
 def tree_sidx(reader, root_ino):
     """(path relative to the tree root, inode) of the tree's /spk/index/*.sidx, or (None, None)."""
     for path, ino, node in reader.iter_regular_files(root_ino=root_ino, max_depth=6, min_size=1):
-        if path.endswith(".sidx") and "/spk/index/" in path:
-            return path.lstrip("/"), node
+        if path.endswith(".sidx") and path.lstrip("/").startswith("spk/index/"):
+            return path.lstrip("/"), node                   # THIS tree's, never an imgN's beneath a store root
     return None, None
 
 
@@ -4537,6 +4944,10 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
         check("%s: not mid-update (dirty %r)" % (TREES_MANIFEST, trees_rec.dirty), not trees_rec.dirty,
               "an update was interrupted; run update again" if trees_rec.dirty else "")
         verify_trees(card, plan, trees_rec, hash_mode, check, touched)
+        if plan.layout == "store":
+            verify_store(card, plan, trees_rec, check, hash_mode)
+    elif plan.layout == "store":
+        check("%s: a store card carries its record" % TREES_MANIFEST, False, "none on the card")
     else:
         print("%s: none (built before item 93; `update` records it)" % TREES_MANIFEST)
     # every games tree's game code version + node board firmware, read off the CARD (item 90):
@@ -5549,6 +5960,145 @@ def selftest(d, selector_file=None):
         _run(["losetup", "-d", loop])
         os.rmdir(foreign)
     print("SELFTEST part 5 (update)", "PASS" if ok else "FAIL")
+
+    # ------------------------------------------------- part 6: the store layout (item 95), root only
+    print("== the store layout: one blob per unique (content, mode, owner); the primary adopted in place")
+    _vp6, _sx6, ext4m, _adj6 = _stern_plugins()
+    shared = os.path.join(d, "shared.bin")
+    with open(shared, "wb") as f:
+        f.write(bytes(range(256)) * 300)                      # 76800 bytes, the same in three trees
+    only = os.path.join(d, "only.bin")
+    with open(only, "wb") as f:
+        f.write(b"C" * 40000)
+    S = os.path.getsize(shared)
+
+    def put(src, rel, stage, mode="0100644"):
+        _t, st_, _c = Geometry.from_file(src).part(3)
+        debugfs_write_script(fs_ref(src, st_ * SECTOR), ["write %s %s" % (dq(stage), rel),
+                                                         "set_inode_field %s mode %s" % (rel, mode)])
+        os.utime(src)
+    put(A, "/A_title/shared.bin", shared)
+    put(B, "/B_title/shared.bin", shared)                     # the same bytes at ANOTHER path
+    put(C, "/C_title/other.bin", shared)                      # ...and another
+    put(C, "/C_title/exec.bin", shared, "0100755")            # the same bytes, another mode: its own blob
+    put(C, "/C_title/only.bin", only)
+    out6 = os.path.join(d, "store3.img")
+    ok &= main(["build", "--primary", A, "--extra", B, "--extra", C, "--out", out6, "--selector-dir", sel,
+                "--layout", "store", "--size", "content", "--allow-version-mismatch", "--bypass-validation",
+                "--force"]) == 0
+    G6 = Geometry.from_file(out6)
+    _t3, s3, c3 = G6.part(3)
+    ok &= c3 > Geometry.from_file(A).part(3)[2] and len(G6.logical) == 2
+    plan6 = plan_from_card(out6)
+    ok &= plan6.layout == "store" and plan6.store_subdirs == ["img1", "img2"]
+    ok &= plan6.devices() == ["/dev/mmcblk0p3", "/dev/mmcblk0p3:img1", "/dev/mmcblk0p3:img2"]
+    ok &= [(p.num, p.start, p.count) for p in plan6.logs] == [(5 + i, st_, cnt_) for i, (_e, _t, st_, cnt_) in enumerate(G6.logical)]
+    ok &= card_conf(out6)["images"][2][0] == "/dev/mmcblk0p3:img2"
+
+    def card_inos(sub):
+        with open(out6, "rb") as f:
+            r = ext4m.Ext4Reader(f, s3 * SECTOR, c3 * SECTOR)
+            root = tree_root_inode(r, sub)
+            return {rel: (ino, node["links"]) for rel, kind, ino, node in r.iter_tree(root, skip=tree_skip(plan6, sub))}
+    i0, i1, i2 = card_inos(None), card_inos("img1"), card_inos("img2")
+    ok &= i0["A_title/shared.bin"] == i1["B_title/shared.bin"] == i2["C_title/other.bin"], (i0.get("A_title/shared.bin"), i1.get("B_title/shared.bin"), i2.get("C_title/other.bin"))
+    ok &= i0["A_title/shared.bin"][1] == 4                    # three trees + the store's own name
+    ok &= i2["C_title/exec.bin"][0] != i0["A_title/shared.bin"][0] and i2["C_title/exec.bin"][1] == 2
+    with open(A, "rb") as f:                                  # the primary's inode numbers are the source's
+        _t, sa, ca = Geometry.from_file(A).part(3)
+        ra = ext4m.Ext4Reader(f, sa * SECTOR, ca * SECTOR)
+        src_inos = {rel: ino for rel, kind, ino, _n in ra.iter_tree(2)}
+    ok &= {rel: ino for rel, (ino, _l) in i0.items()} == src_inos
+    rec6 = read_trees(out6)
+    ok &= rec6 is not None and rec6.layout == "store" and rec6.synced == [3] and rec6.dirty == []
+    print("== verify holds the store to its invariants (full)")
+    ok &= verify_card(out6, verify_plan(out6, [A, B, C]), sel, mode="full")
+    print("== plan prints unique bytes per image and the shared row; the rows add up")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        print_plan(make_plan(A, [B, C], "store", size_class="content"))
+    lines = buf.getvalue().splitlines()
+    shared_row = [ln for ln in lines if ln.startswith("image-size shared ")]
+    # the shared bytes by the same arithmetic on the sources: at least the two copies of
+    # shared.bin's content (the synthetic cards share a little more, their .sidx stubs)
+    _uq, want_shared = ts.dedup_costs([source_tree(x)[0] for x in (A, B, C)])
+    ok &= want_shared >= 2 * S
+    ok &= len(shared_row) == 1 and int(shared_row[0].split()[2]) == want_shared, (shared_row, want_shared)
+    rows = [int(ln.split()[3]) for ln in lines if ln.startswith("image-size ") and ln.split()[1].isdigit()]
+    free_row = [int(ln.split()[2]) for ln in lines if ln.startswith("image-size free ")]
+    over = [int(ln.split()[2]) for ln in lines if ln.startswith("image-size overhead ")]
+    total6 = [int(ln.split()[4]) for ln in lines if ln.startswith("image: ")]
+    ok &= sum(rows) + free_row[0] + over[0] == total6[0], (rows, free_row, over, total6)
+    rep6 = inspect_card(out6)
+    ok &= rep6["layout"] == "store" and rep6["trees"]["layout"] == "store"
+    ok &= rep6["trees"]["store"]["shared_bytes"] == want_shared, (rep6["trees"]["store"], want_shared)
+    ok &= [im["title_dir"] for im in rep6["images"]] == ["A_title", "B_title", "C_title"]
+    print("== parts.py --list-games lists the store's trees under p3")
+    parts_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts.py")
+    r = subprocess.run([sys.executable, parts_py, "--list-games", out6], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    rows6 = [ln.split() for ln in r.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
+    ok &= r.returncode == 0 and [(rw[0], rw[3], rw[4] if len(rw) > 4 else None) for rw in rows6] == [
+        ("3", "A_title", None), ("3", "B_title", "img1"), ("3", "C_title", "img2")], rows6
+    print("== update on a store card: a new unique file writes once; a file the store holds writes nothing")
+    ref3 = fs_ref(out6, s3 * SECTOR)
+    ok &= main(["update", "--card", out6, "--selector-dir", sel, "--allow-version-mismatch", "--dry-run"]) == 0
+    put(C, "/C_title/new.bin", stage_new)                     # 70000 new bytes
+    put(B, "/B_title/again.bin", shared)                      # bytes the store already holds
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["update", "--card", out6, "--selector-dir", sel, "--allow-version-mismatch", "--dry-run"])
+    dry6 = buf.getvalue()
+    print(dry6)
+    ok &= rc == 0 and "update-size 70000" in dry6 and "update-fits YES" in dry6
+    rows_f = [ln.split() for ln in dry6.splitlines() if ln.startswith("update-files ")]
+    ok &= any(rw[1] == "1" and rw[3] == "1" and rw[4] == "0" for rw in rows_f), rows_f
+    ok &= any(rw[1] == "2" and rw[3] == "1" and rw[4] == "70000" for rw in rows_f), rows_f
+    ok &= main(["update", "--card", out6, "--selector-dir", sel, "--allow-version-mismatch"]) == 0
+    ok &= debugfs_cat(ref3, "/img2/C_title/new.bin") == b"N" * 70000
+    i1 = card_inos("img1")
+    ok &= i1["B_title/again.bin"] == i1["B_title/shared.bin"] and i1["B_title/again.bin"][1] == 5
+    ok &= verify_card(out6, verify_plan(out6, [A, B, C]), sel, mode="full")
+    print("== update on a store card: reorder = renames; remove = its blobs go; add = only its own bytes")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["update", "--card", out6, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                   "--allow-version-mismatch", "--dry-run"])
+    dry6b = buf.getvalue()
+    ok &= rc == 0 and "update-size 0" in dry6b and "rename" in dry6b and "update-inject yes" in dry6b
+    ok &= main(["update", "--card", out6, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                "--allow-version-mismatch"]) == 0
+    ok &= debugfs_cat(ref3, "/img1/C_title/game") == b"C p3 game\n" and debugfs_cat(ref3, "/img2/B_title/game") == b"B p3 game\n"
+    ok &= card_conf(out6)["images"][1][0] == "/dev/mmcblk0p3:img1"
+    ok &= verify_card(out6, verify_plan(out6, [A, C, B]), sel, mode="full")
+    n_blobs = len([e for e in debugfs_ls(ref3, "/.blobs") if e[4] not in (".", "..")])
+    ok &= main(["update", "--card", out6, "--primary", A, "--extra", C, "--selector-dir", sel,
+                "--allow-version-mismatch"]) == 0
+    ok &= not debugfs_exists(ref3, "/img2")
+    n_after = len([e for e in debugfs_ls(ref3, "/.blobs") if e[4] not in (".", "..")])
+    ok &= n_after < n_blobs, (n_blobs, n_after)                # B's own blobs were collected
+    ok &= verify_card(out6, verify_plan(out6, [A, C]), sel, mode="full")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["update", "--card", out6, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                   "--allow-version-mismatch", "--dry-run"])
+    dry6c = buf.getvalue()
+    size_c = [int(ln.split()[1]) for ln in dry6c.splitlines() if ln.startswith("update-size ")]
+    b_bytes = read_trees(out6) and sum(fr.size for fr in source_tree(B)[0].tree.files.values())
+    ok &= rc == 0 and 0 < size_c[0] < b_bytes, (size_c, b_bytes)    # B's shared bytes are linked, not written
+    ok &= main(["update", "--card", out6, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                "--allow-version-mismatch"]) == 0
+    ok &= debugfs_cat(ref3, "/img2/B_title/game") == b"B p3 game\n"
+    ok &= verify_card(out6, verify_plan(out6, [A, C, B]), sel, mode="full")
+    print("== update on a store card: the primary's own tree changes -> synced in place, still a link")
+    put(A, "/A_title/newa.bin", only)
+    ok &= main(["update", "--card", out6, "--selector-dir", sel, "--allow-version-mismatch"]) == 0
+    i0, i1 = card_inos(None), card_inos("img1")               # img1 is C now: newa.bin is its only.bin's blob
+    ok &= debugfs_cat(ref3, "/A_title/newa.bin") == b"C" * 40000
+    ok &= i0["A_title/newa.bin"] == i1["C_title/only.bin"] and i0["A_title/newa.bin"][1] == 3
+    ok &= verify_card(out6, verify_plan(out6, [A, C, B]), sel, mode="full")
+    print("== a raw bypass of a store card is refused")
+    ok &= main(["bypass", "--card", out6, "--dry-run"]) == 2
+    print("SELFTEST part 6 (store)", "PASS" if ok else "FAIL")
     print("SELFTEST", "PASS" if ok else "FAIL")
     return bool(ok)
 
@@ -5581,7 +6131,9 @@ def _add_images(s, out_flag, reach_flag=True, layout_flag=True):
     if layout_flag:
         s.add_argument("--layout", choices=LAYOUTS, default="auto",
                        help="parts = one extra as p7 verbatim; multi = every extra as a tree inside one ext4 p7; "
-                            "auto = parts for one extra, multi for two or more")
+                            "auto = parts for one extra, multi for two or more; store = EXPERIMENTAL, opt-in "
+                            "(item 95): the primary's p3 grown to hold every extra as img1/, img2/ ... and one "
+                            "store of the files the images share (root only; never USB-update such a card)")
     if reach_flag:
         _add_reach_flag(s)
 
@@ -5626,13 +6178,17 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("plan", help="print the layout + byte totals; writes nothing")
     _add_images(s, None)
+    s.add_argument("--size", choices=list(STORE_SIZES), help="as for build (the store layout is sized by it)")
+    s.add_argument("--cache-dir", help="where hashed source manifests are kept (the store layout hashes to plan)")
     s = sub.add_parser("check-stock", help="regenerate a stock card's tables with this writer and byte-compare")
     s.add_argument("image")
     s = sub.add_parser("build", help="write the sparse multi card and inject the selector into p2")
     _add_images(s, "--out")
     _add_conf_flags(s)
-    s.add_argument("--size", choices=list(STERN_SIZES), help="fill the multi layout's p7 to the end of this Stern "
-                   "image size (room for later updates and images without a re-layout); default: content-sized")
+    s.add_argument("--size", choices=list(STORE_SIZES), help="fill the multi layout's p7 - or the store layout's "
+                   "p3 - to the end of this Stern image size (room for later updates and images without a "
+                   "re-layout); default: content-sized for multi, the smallest class that fits for store "
+                   "('content' = just the content plus a small headroom)")
     s.add_argument("--cache-dir", help="where hashed source manifests are kept (default: the Windows TEMP "
                    "directory's %s seen from WSL, or $MULTIBOOT_CACHE)" % CACHE_DIRNAME_HINT)
     s.add_argument("--bypass-validation", action="store_true",
@@ -5696,7 +6252,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         if a.cmd == "plan":
-            plan = make_plan(a.primary, a.extra, a.layout)
+            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size, cache_dir=a.cache_dir)
             print_plan(plan)
             check_reachable(plan, a.allow_unreachable)
             recs = plan_identities(plan, progress=None)
@@ -5710,9 +6266,17 @@ def main(argv=None):
             check_output_path(a.out, [a.primary] + a.extra + [a.conf, a.selector_dir, a.media_dir], force=a.force)
             if not a.no_inject and not a.selector_dir:
                 raise Refused("build needs --selector-dir (or --no-inject)")
-            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size)
+            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size, cache_dir=a.cache_dir)
             print_plan(plan)
             check_reachable(plan, a.allow_unreachable)       # before a byte is written
+            if plan.layout == "store":
+                ok, why = loop_available()
+                if not ok:
+                    raise Refused("--layout store grows the primary's games partition and writes the store through "
+                                  "a loop mount; it cannot here: %s" % why)
+                if a.no_inject:
+                    raise Refused("--layout store needs its record on the card: drop --no-inject")
+                need_tools("resize2fs")
             if not a.extra:
                 say("WARNING: no --extra given; building a one-image card")
             versions = plan_identities(plan)                 # read off the SOURCE images...
@@ -5761,6 +6325,11 @@ def main(argv=None):
                     shutil.rmtree(tmp, ignore_errors=True)
             say("copy + tables took %.0f s" % (time.monotonic() - t0))
             drop_stale_sidecars(a.out, keep=())
+            if plan.layout == "store":
+                build_store(plan, a.out, trees)
+                if a.bypass_validation:
+                    bypass_store(a.out, plan, trees)
+                trees.synced = [3]                       # written in place: held to the record, never a range md5
             if plan.layout == "multi":
                 say("p%d md5 %s recorded in %s" % (plan.multi_part.num, write_part_sidecar(a.out, plan.multi_part.num),
                                                   sidecar_path(a.out, plan.multi_part.num)))
@@ -5775,7 +6344,7 @@ def main(argv=None):
             else:
                 # stock p2, still recorded: verify then has something to hold p2 against
                 say("p2 md5 %s recorded in %s" % (write_p2_sidecar(a.out), p2_sidecar_path(a.out)))
-            if a.bypass_validation:
+            if a.bypass_validation and plan.layout != "store":
                 _bypass_after_build(a.out, plan)
             PROGRESS.finish()
             alloc = allocated_bytes(a.out)
@@ -5837,6 +6406,9 @@ def main(argv=None):
             check_output_path(a.card, [], must_exist=True)
             plan = plan_from_card(a.card)
             print("layout: %s; trees: %s" % (plan.layout, ", ".join(plan.devices())))
+            if plan.layout == "store":
+                raise Refused("a store card's trees share their files: the bypass is applied through the mount by "
+                              "build --bypass-validation and by update, never by a raw write")
             states = bypass_card(a.card, plan, dry_run=a.dry_run)
             bad = [i for i, st in states.items() if st not in ("bypassed", "absent")]
             if bad:
@@ -5846,7 +6418,14 @@ def main(argv=None):
             return update_card(a)
         elif a.cmd == "verify":
             subs = multi_subdirs_on(a.card, 7)
-            if subs:
+            subs3 = store_subdirs_on(a.card)
+            if subs3 and len(Geometry.from_file(a.card).logical) == 2:
+                if a.extra and len(a.extra) != len(subs3):
+                    raise Refused("%s holds %d trees in its store (%s) but %d --extra were given"
+                                  % (a.card, len(subs3), "/".join(subs3), len(a.extra)))
+                plan = make_plan(a.primary, a.extra, "store", store_sectors=Geometry.from_file(a.card).part(3)[2],
+                                 multi_subdirs=subs3)
+            elif subs:
                 # the multi layout: p7's size and subdirectories as the build chose them, off the card
                 if a.extra and len(a.extra) != len(subs):
                     raise Refused("%s holds %d trees in p7 (%s) but %d --extra were given" % (a.card, len(subs), "/".join(subs), len(a.extra)))

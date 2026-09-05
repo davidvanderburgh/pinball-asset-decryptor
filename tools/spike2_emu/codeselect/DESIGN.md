@@ -398,6 +398,25 @@ Metadata is never identity - two cards were found with files equal in path, size
 mtime and different in content.  The multi layout's p7 grows on demand up to the Stern
 size class.  Full detail in `tools/spike2_emu/README.md`, "Updating a card in place".
 
+## The compact layout (item 95) - opt-in, default off
+
+A third layout, `store`, chosen only by `--layout store` (the app's tick, off by default):
+the primary's own p3 grown with `resize2fs` on the loop device, the extras inside it as
+`img1/`, `img2/` ... beside the primary's tree, and one `.blobs/<sha256>.<mode>.<uid>.<gid>`
+store every regular file of every tree is a hardlink into - one inode per unique (content,
+mode, owner).  The primary is adopted by linking (its inode numbers stay the source's; zero
+bytes rewritten); each extra writes only the blobs the store lacks.  p5/p6 are re-laid after
+p3; no p7.  Device form `/dev/mmcblk0p3:img1`: `select.sh`'s `<dev>:<sub>` branch handles it
+unchanged (umount /games, mount p3 at /mnt/multi, bind the subtree).  David's three TMNT
+images: 18 GB -> about 8 GB.  `update` converges the store (a held blob is linked, never
+written; orphans collected); `verify` holds the store to its invariants (names, attrs, link
+counts = 1 + references, every file a link, no orphan/tmp, full: every blob hashes to its
+name).  The bypass runs through the mount and the patched game is adopted under its own key.
+Never USB-update a store card (a Stern update writes through shared blobs); `bypass` refuses
+one.  Hardware-only proofs, until which the tick says experimental: Stern's update/spk layer
+tolerating `.blobs/` and `img1/` at `/games`' root, and the same-device remount.  Detail in
+`tools/spike2_emu/README.md`, "The compact layout".
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both
@@ -426,6 +445,8 @@ PAD_CARD_CACHE=0 PAD_SELECT=1 PAD_AUDIO=0 watch.sh`, four times:
 | 4 | right, start | 1 TMNT 1987 | `[padvid] clip root overridden by dump/vidroot: .../tmnt_multi.p7/turtles_pro`; attract shows the 1987 cartoon art |
 | 5 (after the review fixes) | right, 95 s dwell, left, start | 1 TMNT 1987 | watch.sh no longer drops the selecting flag on a wall-clock bound (no `giving up` / `the game exited`); the 1987 splash `Back in 1987` was on the glass 1 s after START; attract at 259 s; clean teardown |
 | 6 (v2: three images, media, bypass) | right, left, start | 1 TMNT 1987 from `p7:img1` (multi layout) | three cards with the cards' own logos, the 1987 animation on the highlighted card, move/confirm sounds through the rig's audio FIFO (`guest reports 44100 Hz x 2 ch`, padplay fed/played growing), confirm played 1.7 s under the LOADING frame, videos from `tmnt_multi3.p7/img1`, attract, grades P/P/P; one emulator-only gap: the FIFO reader dropped at 31 s and the menu's later sounds were lost - root-caused 2026-09-02 (reproduced standalone) to the rig's Windows padplay.py dying on its first `print()` after the wsl.exe session that launched the run exited, with playaudio.sh's restart loop blind to it (the interop stub never returns), so no reader ever came back for the game either; the selector had been retrying correctly and now names the gap and re-asserts the fmt file; the rig-side fix (a print-proof player, a restart loop that trusts the relay's "player went away" rather than the stub) is proposed, not applied |
+
+| 7 (item 95: the STORE layout, three images inside p3) | start / right, start / right, right, start (one run per image, `PAD_CARD_CACHE=0 PAD_SELECT=1 PAD_AUDIO=0`, keys within the menu's 15 s) | 0 STERN 1.59.0 (p3, primary in place); 1 TMNT 1987 PRO (`p3:img1`, bound over /games/turtles_pro, `clip root overridden by dump/vidroot: .../sdcard.p3/img1/turtles_pro`); 2 TMNT 1987 LE (`p3:img2`, bound over /games/turtles_pro) | card `turtles-1_59_0.store-stock+1987pro+1987le.16G.sdcard.raw` (15.49 GB apparent = the 16G class exactly; 3.35 / 1.65 / 1.59 GB unique, 5.40 GB shared and stored once, 7.6 GB free; `verify` PASS in full: 1827 blobs, every tree file a link into the store, link counts exact, 6.58 GB of blobs hash to their names); the menu listed all three with the right trees, every choice landed (`[select] chose N`), the game drew its attract with each image's OWN art (image 0 the modern art, images 1 and 2 the 1987 cartoon - the framebuffer read back with `glshot.sh`), START fed a ball every time (`[ball] trough 5/6 after the feed`) and the glass showed PLAYER 1 / BALL 1 (Raphael on image 0, Donatello on image 1; the LE, on a fresh per-title NVRAM, first showed Stern's GUIDED SETUP - stepped to Save & Exit with SERVICE PLUS/SELECT (ids 26/25, 300 ms presses), a coin (39), then START - PLAYER 1 over the 1987 rooftop intro, a ball fed); no validation line; clean teardown, `alive.sh --total` 0 after each. `cardmount.sh`'s title rule had to learn that `img1/game` is a symlink (it would have run image 1 as the primary). |
 
 The selector attached to the live GL bridge after padglhost was already up,
 drew at ~60 fps, mapped the flipper ids from the title's switch table, and

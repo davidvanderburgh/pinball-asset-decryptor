@@ -1,0 +1,47 @@
+# images.conf - codeselect's menu: one image per line, index = order (0-based).
+#
+#   image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
+#     <device>   the games partition on hardware: /dev/mmcblk0p3 = the primary,
+#                /dev/mmcblk0p7 = one extra image in its own partition, or
+#                /dev/mmcblk0p7:img2 = a subdirectory of a partition that holds
+#                several games trees (img1/, img2/ ...). An opaque token in the
+#                emulator (p3, p7, p7:img2). Titles and subtitles are free UTF-8.
+#     <art>      a PNG shown at the top of the card (pre-scaled by the tools)
+#     <anim>     an animated GIF (<= 512x288, <= 30 frames) that plays while the
+#                card is highlighted (the still, or frame 0, otherwise)
+#     <music>    a WAV looped while the card is highlighted
+#     <confirm>  a WAV played when THIS card is confirmed, in place of the
+#                menu-wide sound_confirm (empty or absent = sound_confirm)
+#                Media names are files in the media directory; empty = none;
+#                three-field and six-field lines are still valid.
+#   default=N    highlight when there is no usable /data/codeselect.last
+#   timeout=S    seconds before the highlighted image boots by itself; 0 = wait
+#   font=PATH    optional TrueType font (default: /usr/local/codeselect/font.ttf,
+#                then the card's /usr/local/spike/VeraMono.ttf)
+#   media=DIR    where the media names live (default /usr/local/codeselect/media)
+#   sound_move=<wav>     played on every LEFT / RIGHT / - / + press
+#   sound_confirm=<wav>  played to completion on START / Select, under LOADING,
+#                        for every card that names no <confirm> of its own
+#   volume=0-100         software mix gain (default 50)
+#   volume=machine       follow the machine's own MASTER VOLUME SETTING instead (with
+#                        machine_volume=<store>|<sha1 key>|<factory 0-63>; mkmulticard --machine-volume)
+#   mixer_volume=0-63    optional, hardware only: the game's codec volume curve
+#                        on the ALSA 'PCM' control (untouched when absent)
+#   theme=NAME           the menu's colours: midnight (the default), arcade, neon,
+#                        emerald, slate or daylight - or custom (themes.json)
+#   color_<role>=RRGGBB  one colour on top of the theme; the roles are background,
+#                        heading, card, card_hl, frame, frame_hl, title, title_hl,
+#                        subtitle, subtitle_hl, label, label_hl, footer, countdown
+#
+# WAVs: RIFF PCM 16-bit 44100 Hz, 1 or 2 channels. Up to 16 images; two to
+# four sit in a row, more become a carousel. Unknown keys are ignored.
+#
+# The card builder writes this file; edit the names as you like.
+image=/dev/mmcblk0p3|STERN STOCK|TMNT Pro 1.59.0 - original Stern code|art0.png||
+image=/dev/mmcblk0p7|TMNT 1987|1.59.0 - upscaled cartoon retheme|art1.png|anim1.gif|music1.wav|confirm1.wav
+sound_move=move.wav
+sound_confirm=confirm.wav
+volume=50
+default=0
+timeout=10
+#theme=midnight

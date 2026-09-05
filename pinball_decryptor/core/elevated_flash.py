@@ -42,7 +42,8 @@ import time
 
 from .admin import is_admin
 from .rawdevice import (FlashCancelled, FlashError, flash_image_to_device,
-                        is_device_path, read_device_to_image)
+                        flash_menu_to_device, is_device_path,
+                        read_device_to_image)
 
 # IPC file names inside the per-flash temp directory.  The parent creates the
 # directory and ``job.json``; the elevated child writes the rest.
@@ -77,7 +78,7 @@ def can_self_elevate():
 
 def flash_image_with_privileges(image_path, device_path, *, log=None,
                                 progress=None, cancel=None, verify=True,
-                                on_verify_start=None):
+                                on_verify_start=None, menu_only=False):
     """Flash *image_path* onto *device_path*, elevating only the write.
 
     Drop-in for :func:`core.rawdevice.flash_image_to_device` with the same
@@ -90,8 +91,9 @@ def flash_image_with_privileges(image_path, device_path, *, log=None,
     # already Administrator/root, or the target is a plain file (backing-file
     # tests, or any non-device path), write in-process — spawning an elevated
     # child there would be pointless (and would pop a UAC/password prompt).
+    write = flash_menu_to_device if menu_only else flash_image_to_device
     if is_admin() or not is_device_path(device_path):
-        return flash_image_to_device(
+        return write(
             image_path, device_path, log=log, progress=progress,
             cancel=cancel, verify=verify, on_verify_start=on_verify_start)
 
@@ -103,7 +105,8 @@ def flash_image_with_privileges(image_path, device_path, *, log=None,
     try:
         with open(os.path.join(ipc, _JOB), "w", encoding="utf-8") as f:
             json.dump({"image": image_path, "device": device_path,
-                       "verify": bool(verify)}, f)
+                       "verify": bool(verify),
+                       "menu_only": bool(menu_only)}, f)
 
         run = _spawn_elevated_helper(ipc)
         if run is None:
@@ -479,6 +482,7 @@ def run_helper_main(argv):
     device = job.get("device")
     reading = job.get("mode") == "read"
     verify = bool(job.get("verify", True))
+    menu_only = bool(job.get("menu_only"))
     cancel_path = os.path.join(ipc, _CANCEL)
     log_path = os.path.join(ipc, _LOG)
     prog_path = os.path.join(ipc, _PROGRESS)
@@ -511,7 +515,8 @@ def run_helper_main(argv):
             written = read_device_to_image(
                 device, image, log=_log, progress=_progress, cancel=_cancel)
         else:
-            written = flash_image_to_device(
+            write = flash_menu_to_device if menu_only else flash_image_to_device
+            written = write(
                 image, device, log=_log, progress=_progress, cancel=_cancel,
                 verify=verify, on_verify_start=_on_verify_start)
         _write_json_atomic(result_path, {"ok": True, "written": written})

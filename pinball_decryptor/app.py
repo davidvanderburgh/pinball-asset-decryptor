@@ -447,6 +447,8 @@ class App:
         # The Emulate tab's card path is project state; a quit is the one
         # save-point that always happens, so a changed path lands in the open
         # project's anchor even when nothing else was extracted or staged.
+        # The Multi-boot tab's whole form rides the same moment, for the same
+        # reason: it is set up over an evening and nothing else writes it.
         try:
             from .core import project_file
             folder = self._project_path
@@ -460,13 +462,16 @@ class App:
                     else False
                 overrides = bool(ovr_var.get()) if ovr_var is not None \
                     else False
+                multi = self.multiboot_state()
                 data = project_file.load_anchor(folder)
                 if (data.get("emulate_card") or "") != card or \
                         bool(data.get("emulate_savestates")) != states or \
-                        bool(data.get("emulate_overrides")) != overrides:
+                        bool(data.get("emulate_overrides")) != overrides or \
+                        (data.get("multiboot") or {}) != multi:
                     project_file.update_anchor(folder, emulate_card=card,
                                                emulate_savestates=states,
-                                               emulate_overrides=overrides)
+                                               emulate_overrides=overrides,
+                                               multiboot=multi)
         except Exception:
             pass
         self._save_settings()
@@ -554,6 +559,13 @@ class App:
         # startup the path sat in the anchor and was never fetched, and "Card
         # image to run" was empty every launch.
         self._restore_emulate_card(folder if is_project else "")
+        # The Multi-boot tab's whole FORM rides the same rail - a document
+        # rather than one path, because that tab is a card path, an image
+        # list and a menu, and rebuilding all of it every launch is what
+        # David asked us to stop doing.  Its own call rather than a line
+        # inside the one above: that one returns early on a window with no
+        # Emulate tab, and this must not hang off that.
+        self.restore_multiboot_state(folder if is_project else "")
         self.window.apply_manufacturer(mfr)
         # Kick off the runtime-prereq check on a background thread.  The
         # GUI is already showing "[?] name" placeholders; results trickle
@@ -658,6 +670,100 @@ class App:
             else:
                 s1_card = str(self._settings.get("spike1_emulate_card") or "")
             s1_var.set(_rmd(s1_card) if s1_card else "")
+
+    def multiboot_state(self):
+        """The Multi-boot tab's form as a document (see
+        :meth:`..gui.multiboot_tab.MultibootPanel.state`), or ``{}``.
+
+        Read defensively: this also runs on the way out, and a Tk variable
+        read after the interpreter has gone raises rather than returning."""
+        panel = getattr(self.window, "_multiboot_panel", None)
+        if panel is None:
+            return {}
+        try:
+            return panel.state()
+        except Exception:
+            return {}
+
+    def save_multiboot_state(self, project_folder):
+        """Write the Multi-boot tab's form into *project_folder*'s anchor.
+
+        THE OUTGOING PROJECT'S SAVE-POINT.  A quit writes the open
+        project's form (_on_close) and so does an extract, a Project ▸ Save
+        and a New project - but OPENING another project wrote nothing, and
+        that tab is set up over an evening with none of those in it.  So an
+        evening of work on project A was still only on screen when project
+        B was opened, and the restore then replaced it: A's anchor kept the
+        morning's version, and the form still visible belonged to B.
+
+        Only a folder that already IS a project, and only when the form has
+        actually changed: this must never be what turns a folder into one,
+        and it must not touch the anchor's mtime for a tab nobody opened.
+        Best-effort - a NAS hiccup on the way OUT of a project must not
+        stop the one being opened."""
+        folder = (project_folder or "").strip()
+        if not folder:
+            return
+        try:
+            from .core import project_file
+            if not project_file.has_anchor(folder):
+                return
+            multi = self.multiboot_state()
+            data = project_file.load_anchor(folder)
+            if (data.get("multiboot") or {}) != multi:
+                project_file.update_anchor(folder, multiboot=multi)
+        except Exception:
+            pass
+
+    def restore_multiboot_state(self, project_folder):
+        """Put the Multi-boot tab back the way it was left.
+
+        *project_folder* is the active project, or "" when the restored
+        folder is not one.
+
+        A PROJECT'S VALUE WINS ABSOLUTELY, INCLUDING WHEN IT IS EMPTY —
+        ``_restore_emulate_card``'s rule, and the reason switching projects
+        cannot leak the last one's state.  The ONE exception is an anchor
+        written before this shipped: with no ``multiboot`` key at all there
+        is nothing to honour, so the global is used, exactly as the JJP ISO
+        and the Spike 1 card do.  An anchor whose ``multiboot`` is present
+        but empty means "this project's tab is empty" and is honoured.  A
+        MISSING key and an UNREADABLE anchor are different answers and are
+        answered differently — only the first one may use the global.
+
+        Best-effort throughout: a half-written anchor on a NAS leaves the
+        tab empty, never fails the startup that asked for it.  Nothing here
+        runs a tool."""
+        panel = getattr(self.window, "_multiboot_panel", None)
+        if panel is None:
+            return
+        doc = None
+        if project_folder:
+            from .core import project_file
+            try:
+                data = project_file.load_anchor(project_folder)
+            except (OSError, ValueError):
+                # An anchor that is THERE but won't parse is not an anchor
+                # written before the key existed: a truncated file says
+                # nothing at all about this project, so treating it as "old"
+                # and reaching for the global would put the LAST project's
+                # card and image list on this project's tab — the exact leak
+                # the rule above exists to prevent, and worse here than on
+                # the Emulate tab because this form is what Build writes to
+                # an SD card.  A folder with NO anchor is a different answer:
+                # it simply isn't a project, and takes the global the way any
+                # plain folder does.
+                doc = ({} if project_file.has_anchor(project_folder)
+                       else self._settings.get("multiboot_state"))
+            else:
+                doc = data.get("multiboot") if "multiboot" in data \
+                    else self._settings.get("multiboot_state")
+        else:
+            doc = self._settings.get("multiboot_state")
+        try:
+            panel.restore_state(doc if isinstance(doc, dict) else {})
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Prerequisite checking
@@ -1872,8 +1978,14 @@ class App:
             self.window.write_filename_var.set(name)
         self._start_write(chain_flash_device=device_path)
 
-    def _start_flash_image(self, image_path, device_path):
+    def _start_flash_image(self, image_path, device_path, menu_only=False):
         """Flash a pre-built image onto a card (dd-style whole-image write).
+
+        ``menu_only`` writes ONLY the boot menu partition onto a card this
+        image was already flashed from - 350 MB rather than the whole image,
+        and the machine's own settings and scores survive it.  The core
+        refuses outright if the card is not that card
+        (:func:`core.rawdevice.flash_menu_to_device`).
 
         The image + target card were collected and confirmed by the flash
         dialog (``gui.flash_dialog.FlashImageDialog``); this just runs the
@@ -1890,8 +2002,16 @@ class App:
         # the macOS Full Disk Access banner (proof FDA works), same as Direct-SD.
         self._current_run_is_direct_ssd = True
         self._cancel_requested = False
-        # Show the flash-specific phase row (Check card / Write image / Flush).
-        self.window.set_write_phases(getattr(mfr, "flash_phases", ()))
+        # Show the flash-specific phase row (Check card / Write image / Flush)
+        # - and PUT IT IN THE FOOTER, whatever tab the flash was started from.
+        # Multi-boot's Build / flash card can start one, and its own four
+        # chips said nothing about a raw-device write (David: "the progress
+        # bar status checkpoint need to be changed to the 'write' ones while
+        # i'm writing an image"); set_running(False) hands the footer back.
+        self.window.set_write_phases(
+            getattr(mfr, "menu_flash_phases", ()) if menu_only
+            else getattr(mfr, "flash_phases", ()))
+        self.window.show_phase_row("write", borrow=True)
         self.window.set_running(True, mode="write")
         # The Flash button doubles as this run's live Cancel (set_running
         # restores it when the run ends, whatever way it ends).
@@ -1900,7 +2020,8 @@ class App:
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
         self.pipeline = mfr.make_flash_pipeline(
-            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
+            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb,
+            menu_only=menu_only)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     def _start_read_card(self, device_path, image_path):
@@ -4304,6 +4425,13 @@ class App:
                 self._settings["spike1_emulate_card"] = s1_var.get().strip()
             except tk.TclError:
                 pass
+        # The Multi-boot tab's form, globally — the fallback for having no
+        # project, which the anchor save cannot cover.  multiboot_state()
+        # swallows a var read after the interpreter has gone, the way the
+        # try/except above each of these does.
+        multi = self.multiboot_state()
+        if multi:
+            self._settings["multiboot_state"] = multi
         states_var = getattr(self.window, "emulate_savestates_var", None)
         if states_var is not None:
             try:
@@ -4405,6 +4533,10 @@ class App:
         jjp_emulate_iso = jjp_var.get().strip() if jjp_var else ""
         s1_var = getattr(self.window, "spike1_emulate_card_var", None)
         spike1_emulate_card = s1_var.get().strip() if s1_var else ""
+        # The Multi-boot tab's form belongs in the anchor for the same
+        # reason the Emulate card does: it is per-project state, and the
+        # global copy is only the no-project fallback.
+        multiboot = self.multiboot_state()
         try:
             if project_file.has_anchor(folder):
                 project_file.update_anchor(
@@ -4419,6 +4551,7 @@ class App:
                     emulate_overrides=emulate_overrides,
                     jjp_emulate_iso=jjp_emulate_iso,
                     spike1_emulate_card=spike1_emulate_card,
+                    multiboot=multiboot,
                     saved_with=__version__)
             else:
                 # First anchor for this folder.  Compat rule: a custom Build
@@ -4446,7 +4579,8 @@ class App:
                            "emulate_savestates": emulate_savestates,
                            "emulate_overrides": emulate_overrides,
                            "jjp_emulate_iso": jjp_emulate_iso,
-                           "spike1_emulate_card": spike1_emulate_card})
+                           "spike1_emulate_card": spike1_emulate_card,
+                           "multiboot": multiboot})
                 self.window.append_log(
                     "This folder is now a project — picking it again "
                     "restores this whole setup.", "info")
@@ -4530,6 +4664,16 @@ class App:
         """Push an anchored project onto the UI: manufacturer, stock image,
         the folder itself (build location derives), options, file name."""
         from .core.admin import resolve_mapped_drive as _rmd
+        # THE PROJECT BEING LEFT IS SAVED FIRST, before one line of this
+        # method has replaced anything on screen - the Multi-boot tab's form
+        # is per-project state that nothing else on this path writes (see
+        # save_multiboot_state).  Skipped when the incoming folder IS the
+        # active one: re-opening a project must not write it back over
+        # itself.
+        outgoing = (self._project_path or "").strip()
+        if outgoing and os.path.normcase(os.path.normpath(outgoing)) != \
+                os.path.normcase(os.path.normpath(folder)):
+            self.save_multiboot_state(outgoing)
         mfr = get_manufacturer(data["manufacturer"])
         if self._current_mfr is not mfr:
             self._on_manufacturer_change(mfr)
@@ -4552,6 +4696,10 @@ class App:
         states_var = getattr(self.window, "emulate_savestates_var", None)
         if states_var is not None:
             states_var.set(bool(data.get("emulate_savestates")))
+        # ...and the Multi-boot tab's whole form, through the one spelling
+        # the startup path uses, so an explicit Open and an ordinary launch
+        # cannot come to disagree about which project's tab is on screen.
+        self.restore_multiboot_state(folder)
         self._registry_touch(folder)
         self._set_loaded_project(folder)
         self._save_settings()

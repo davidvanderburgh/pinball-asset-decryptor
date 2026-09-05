@@ -428,3 +428,111 @@ def test_the_stale_banner_dismiss_is_a_labelled_button(app):
     labels = [str(c.cget("text")) for c in banner.winfo_children()]
     assert "Dismiss" in labels, labels
     assert "✕" not in labels
+
+
+# ---- the menu-only write, where someone about to wait an hour will find it ----------
+def _spike_image_for(tmp_path):
+    """A miniature card image with a Linux rootfs as p2 - enough for
+    menu_write_plan to say yes."""
+    import struct
+    sec = 512
+
+    def entry(ptype, lba, count):
+        return (b"\x00\x00\x00\x00" + bytes([ptype]) + b"\x00\x00\x00"
+                + struct.pack("<II", lba, count))
+    img = bytearray(256 * sec)
+    mbr = bytearray(sec)
+    for i, (t, lba, cnt) in enumerate([(0x0C, 8, 8), (0x83, 16, 16),
+                                       (0x83, 32, 16), (0x0F, 64, 64)]):
+        mbr[446 + i * 16:446 + (i + 1) * 16] = entry(t, lba, cnt)
+    mbr[510:512] = b"\x55\xaa"
+    img[0:sec] = mbr
+    p = tmp_path / "card.multi.raw"
+    p.write_bytes(bytes(img))
+    return str(p)
+
+
+@pytest.mark.gui
+@gui_only
+def test_the_flash_dialog_offers_the_menu_only_write(app, monkeypatch,
+                                                     tmp_path):
+    """A 14.7 GB image on an ordinary card is forty minutes; its MENU is one
+    partition and about a minute.  The option defaults ON for an image that
+    has one, because the run refuses a card this image was not flashed onto
+    - a wrong default costs one refusal, the other way costs the hour (David,
+    twice: "flashing the whole thing takes over an hour with my slow sd
+    card")."""
+    _pick(app, "stern")
+    img = _spike_image_for(tmp_path)
+    dlg = _make_dialog(app, monkeypatch,
+                       initial_choices={"build": False, "write": True})
+    try:
+        dlg._image_var.set(img)
+        dlg._sync_sections()
+        assert dlg._menu_var.get() is True, "on by default when it can be"
+        assert str(dlg._menu_chk.state()).find("disabled") < 0
+        assert "menu partition only" in dlg._menu_note.cget("text")
+        # ...and never for a build+flash: a fresh image was never on that card
+        dlg._build_var.set(True)
+        dlg._sync_sections()
+        assert dlg._menu_var.get() is False
+        assert "has to be written" in dlg._menu_note.cget("text")
+        # ...nor for something that is not a card image at all
+        dlg._build_var.set(False)
+        plain = tmp_path / "notacard.raw"
+        plain.write_bytes(b"\x00" * 4096)
+        dlg._image_var.set(str(plain))
+        dlg._sync_sections()
+        assert dlg._menu_var.get() is False
+    finally:
+        dlg._dlg.destroy()
+
+
+@pytest.mark.gui
+@gui_only
+def test_a_window_short_of_its_content_still_shows_start_and_cancel(
+        app, monkeypatch, tmp_path):
+    """A DIALOG CAN BE WRONG ABOUT ITS HEIGHT; IT MUST NOT BE ABLE TO EAT THE
+    TWO CONTROLS THAT END IT.  pack() hands out space in the order things
+    were packed, so whatever went in LAST is what gets squeezed when the
+    window ends up short of its content - and that was the row carrying
+    Start and Cancel (David: "the confirm and cancel buttons in this modal
+    are squeezed to be too tiny to see" - his were 10 px of a wanted 25,
+    two coloured slivers with no text in them).
+
+    The row is packed FIRST now, against the bottom, so the body is what
+    gives way instead.  Forcing the window 90 px short is this test: it is
+    the state the screenshot was in, and it reproduced at exactly 10 px."""
+    _pick(app, "stern")
+    img = _spike_image_for(tmp_path)
+    dlg = _make_dialog(app, monkeypatch,
+                       initial_choices={"build": False, "write": True})
+    try:
+        dlg._image_var.set(img)
+        dlg._sync_sections()
+        app.root.update()
+        w, start = dlg._dlg, dlg._start_btn
+        # ...as it opens: the window is as tall as everything inside it
+        assert w.winfo_height() >= w.winfo_reqheight()
+        assert start.winfo_height() >= start.winfo_reqheight()
+        # ...and 90 px short of that, which is what a note growing a line
+        # after the geometry was pinned does to it
+        w.geometry("%dx%d" % (w.winfo_width(), w.winfo_reqheight() - 90))
+        app.root.update()
+        assert w.winfo_height() < w.winfo_reqheight(), "the force worked"
+        assert start.winfo_height() >= start.winfo_reqheight(), \
+            "Start is squeezed: %d of %d" % (start.winfo_height(),
+                                             start.winfo_reqheight())
+        # every state of the ticks keeps it that way: each one changes the
+        # note, and the readout changes with them
+        for build, write, menu in ((True, True, False), (False, True, True),
+                                   (False, False, False)):
+            dlg._build_var.set(build)
+            dlg._write_var.set(write)
+            dlg._menu_var.set(menu)
+            dlg._sync_sections()
+            app.root.update()
+            assert start.winfo_height() >= start.winfo_reqheight(), \
+                "build=%s write=%s menu=%s" % (build, write, menu)
+    finally:
+        dlg._dlg.destroy()

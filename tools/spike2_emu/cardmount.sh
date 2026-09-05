@@ -1,9 +1,16 @@
 #!/bin/bash
-# cardmount.sh <card.raw> [--umount] - mount a Spike 2 card's games partition,
-# READ ONLY, WITHOUT ROOT, so a title can be run without extracting 6 GB first.
+# cardmount.sh <card.raw> [--part N] [--umount] - mount a Spike 2 card's games
+# partition, READ ONLY, WITHOUT ROOT, so a title can be run without extracting
+# 6 GB first.
 #
 #   cardmount.sh .../jaws_le-1_02_0.Release.16G.sdcard.raw
 #   -> $HOME/card/jaws_le-1_02_0   (and prints the title directory)
+#
+#   cardmount.sh multi.raw --part 7
+#   -> $HOME/card/multi.p7         (item 90: partition N of a multi-image card;
+#                                   the default is the FIRST games partition, p3,
+#                                   and --part N mounts any other one beside it,
+#                                   sharing the same local cache copy)
 #
 # WHY THIS IS POSSIBLE AT ALL. The obvious `mount -o loop,offset=` needs real
 # root, and this rig has no sudo. Two things make it work anyway:
@@ -125,6 +132,20 @@ other_copier() {   # <own-copy-path>
     return 1
 }
 
+# Is any mount of this label live - the games mount at $CARDS/<label> OR one
+# of the per-partition ones at $CARDS/<label>.pN (item 90: a PAD_SELECT run
+# mounts every games partition of a multi-image card beside the first)? ONE
+# test, because both the cache manager's eviction guard and --cache-drop ask
+# it, and a check that saw only the plain directory would evict the cache
+# copy out from under a live .p7 mount.
+label_mounted() {   # <label>
+    local m
+    for m in "$CARDS/$1" "$CARDS/$1".p*; do
+        mountpoint -q "$m" 2>/dev/null && return 0
+    done
+    return 1
+}
+
 # ITEM 77: never start a copy the disk cannot hold - the cache was measured
 # at 125 GB real (half the WSL disk) with 29 GB free and NOTHING pruning it.
 # Frees space by evicting the least-recently-BOOTED entries first (the .boot
@@ -148,7 +169,7 @@ cache_make_room() {   # <img> <own-copy-path>
             [ -e "$f" ] || break
             [ "$f" = "$2" ] && continue
             vlabel=$(basename "$f" .raw)
-            mountpoint -q "$CARDS/$vlabel" 2>/dev/null && continue
+            label_mounted "$vlabel" && continue
             copier_alive "$CACHE/$vlabel.pid" "$f" && continue
             vboot=$(stat -c %Y "$CACHE/$vlabel.boot" 2>/dev/null \
                     || stat -c %Y "$f" 2>/dev/null) || continue
@@ -355,10 +376,24 @@ games_offset() {
 
 # The title directory inside the partition: the one holding a `game` ELF. The
 # card also has spk/ and the three symlinks the machine itself uses.
+#
+# ITEM 90's MULTI LAYOUT (mkmulticard.py --layout multi): p7 is one ext4 whose
+# root holds img1/, img2/ ... - each a COMPLETE games tree, so the title dir
+# sits one level down. For such a partition this prints the FIRST imgN that
+# holds a title (`img1`), never `img1/<title>`: the last line of this script
+# is "$MNT/<that>", and watch.sh takes its dirname to find the mount to tear
+# down - a two-component answer would leave the FUSE mount behind. run_game.sh
+# resolves the subdirectory it actually wants from parts.py --list-games.
 title_dir() {
-    local m="$1" d
+    local m="$1" d s
     for d in "$m"/*; do
         [ -f "$d/game" ] && [ ! -L "$d" ] && { basename "$d"; return 0; }
+    done
+    for d in "$m"/img[0-9]*; do
+        [ -d "$d" ] && [ ! -L "$d" ] || continue
+        for s in "$d"/*; do
+            [ -f "$s/game" ] && [ ! -L "$s" ] && { basename "$d"; return 0; }
+        done
     done
     return 1
 }
@@ -384,7 +419,7 @@ fi
 if [ "${1:-}" = "--cache-drop" ]; then
     l="${2:-}"; [ -n "$l" ] || die "usage: cardmount.sh --cache-drop <label>"
     c="$CACHE/$l.raw"
-    mountpoint -q "$CARDS/$l" 2>/dev/null && die "$l is mounted - not dropping"
+    label_mounted "$l" && die "$l is mounted - not dropping"
     copier_alive "$CACHE/$l.pid" "$c" && die "$l is being copied - not dropping"
     rm -f "$c" "$c.partial" "$CACHE/$l.src" "$CACHE/$l.log" \
           "$CACHE/$l.boot" "$CACHE/$l.pid"
@@ -393,12 +428,29 @@ if [ "${1:-}" = "--cache-drop" ]; then
 fi
 
 IMG=${1:-}
-[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--umount|--precache] | --cache-list | --cache-drop <label>"
+[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--part N] [--umount|--precache] | --cache-list | --cache-drop <label>"
 [ -f "$IMG" ] || die "no image at $IMG"
 LABEL=$(basename "$IMG"); LABEL=${LABEL%%.Release*}; LABEL=${LABEL%%.raw}
 MNT="$CARDS/$LABEL"
+# ITEM 90: `--part N` mounts partition N (kernel numbering: p3 is the first
+# games partition, p7 the first appended one on a multi-image card) at its
+# OWN directory, $CARDS/<label>.pN, so the first games partition's mount at
+# $CARDS/<label> - which every existing card run uses - is never disturbed
+# and the two can be live side by side. The cache copy is shared: it is keyed
+# by the label, so the second mount of one image finds the copy the first
+# one waited for. Without --part nothing below changes.
+PART=""
+MODE=${2:-}
+if [ "$MODE" = "--part" ]; then
+    PART=${3:-}
+    case "$PART" in
+        ''|*[!0-9]*) die "usage: cardmount.sh <card.raw> --part N [--umount|--precache]" ;;
+    esac
+    MNT="$CARDS/$LABEL.p$PART"
+    MODE=${4:-}
+fi
 
-if [ "${2:-}" = "--umount" ]; then
+if [ "$MODE" = "--umount" ]; then
     fusermount -u "$MNT" 2>/dev/null || fusermount3 -u "$MNT" 2>/dev/null
     rmdir "$MNT" 2>/dev/null
     echo "[card] unmounted $MNT"
@@ -410,7 +462,7 @@ fi
 # is pressed the copy is done or well along, and the boot's sync wait in
 # cache_pick collects whatever remains. Idempotent: a valid cache just prints
 # "using local cache", a copy already running prints that it is.
-if [ "${2:-}" = "--precache" ]; then
+if [ "$MODE" = "--precache" ]; then
     # Never start a 7 GB dd beside a live run - the copy would fight the
     # run's 9p reads, which is the exact contention item 74 removed. Checked
     # HERE rather than only in the GUI, because the GUI's run-is-up flag is
@@ -473,11 +525,19 @@ fi
 ensure_fuse2fs || die "could not get fuse2fs"
 # Mount the local cache when there is a valid one; start building it when not.
 SRC=$(cache_pick "$IMG" "$LABEL")
-OFF=$(games_offset "$SRC")
-[ -n "$OFF" ] || die "no third Linux partition in $(basename "$SRC")"
+if [ -n "$PART" ]; then
+    # By NUMBER, not by contents (item 90): the caller has already asked
+    # parts.py --list-games which partitions hold a game, and this is the one
+    # it chose. parts.py walks the EBR chain, so p7 and up resolve too.
+    OFF=$(python3 "$SELF/parts.py" --part "$PART" "$SRC" 2>/dev/null)
+    [ -n "$OFF" ] || die "no partition $PART in $(basename "$SRC")"
+else
+    OFF=$(games_offset "$SRC")
+    [ -n "$OFF" ] || die "no third Linux partition in $(basename "$SRC")"
+fi
 mkdir -p "$MNT" || die "cannot create $MNT"
 
-echo "[card] mounting $(basename "$SRC") p3 at offset $OFF (read only)"
+echo "[card] mounting $(basename "$SRC") p${PART:-3} at offset $OFF (read only)"
 # A ROOT MOUNT MUST CARRY allow_other, and only root may add it freely: FUSE
 # denies everyone but the mounting user by default, and a PAD_PIVOT session
 # (item 13) is root mounting a card that DAVID's helpers then read - the

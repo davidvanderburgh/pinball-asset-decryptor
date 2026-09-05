@@ -84,6 +84,375 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **97. A multi-boot card should NAME what a pair costs, and refuse the one
+      *(Numbered 92 on item/90's branch; renumbered at the merge, 2026-09-05,
+      because main's 92 was already taken.)*
+      pairing that can need service.** `S2 D2` *(From the 2026-09-02
+      settings investigation for Cabal; see
+      `reference_spike2_settings_are_caption_keyed` in memory.)*
+      Settings, audits and scores live in board NVRAM keyed by SHA1 of each
+      setting's MENU CAPTION, so they migrate across versions by themselves
+      - measured 11/11 across a TMNT 1.59 -> 1.58 -> 1.59 round trip in which
+      202 of 228 shared captions were renumbered. So the work is NOT to move
+      state at boot; it is to stop the operator being surprised, and to stop
+      the one thing that is not recoverable in the living room:
+      **(1) a pair classifier in `mkmulticard.py`** - same title+version
+      (David's TMNT pair: two ELFs four bytes apart, nothing is lost), same
+      title+different version (name the settings that carry, the ones that
+      fall back to defaults, and the ones a renamed caption reverts), or
+      different titles (nothing carries) - printed at build time and shown by
+      the menu at select time; **(2) a NODE-FIRMWARE PARITY GATE in the same
+      pass** - the images ship their own `*-N_NN_N.hex` (1.59 carries 1.33.0,
+      1.58 carries 1.19.0) and the EEPROM's node-firmware byte at 0x185 is
+      rewritten to the running build every boot, so a cross-version card can
+      drive node-board reflashing on EVERY swap; warn hard, or refuse without
+      an override; **(3) a read-only settings safe in `select.sh`** - copy
+      `/data/nv/<title>` to `/data/nvsafe/<build stamp>/` before the game
+      starts (two deep, free-space checked, never fatal), because the store's
+      own generation ring is three deep and two boots of the other build
+      erase a build-exclusive value for good; **(4) an `.SPB`/NVM reader and
+      writer in PAD** as the way back - the container is cracked and the
+      import is the only software-only write into board NVRAM proven on
+      David's machine.
+      — S2: it protects the next card (Godzilla normal + orchestra, or a
+      Beatles pair) rather than the one that already works. D2: (1) and (2)
+      are static reads of two ELFs and two directory listings; (3) is a dozen
+      lines; (4) is a format we already decoded.
+
+- [ ] **96. A run started as the ORDINARY USER leaves a card mount root's
+      *(Numbered 91 on item/90's branch; renumbered at the merge, 2026-09-05,
+      because main's 91 is Transformers.)*
+      `killgame.sh` cannot clear, so its Stop ends in
+      `PAD_STOP_NEEDS_WSL_RESTART`.** `S3 D2` *(Found 2026-09-02 while
+      proving item 90's Stop fix; pre-existing, off the app's path.)*
+      `cardmount.sh` adds `allow_other` only for a root mount, and
+      `/etc/fuse.conf`'s `user_allow_other` is commented out, so a user
+      run's FUSE mount is readable by that user alone. `killgame.sh` then
+      enumerates mounts with the glob `"$PAD_HOME/card/"*/`, which cannot
+      stat the mountpoint as root, matches nothing, and skips the unmount
+      pass entirely - the sweep ends "still running: 2" and offers a WSL
+      restart. **Not on the app's path today**: save states have been on
+      since 2026-08-10, so the app always launches root + `PAD_PIVOT`; it
+      bites a hand-run `watch.sh` and the container. The fix is to
+      enumerate from `/proc/self/mounts` (which lists every mount whatever
+      its permissions - the same source `cardmount.sh`'s own stale-mount
+      test already trusts) instead of the glob.
+      — S3: a workaround exists (run as root) and the app never hits it.
+      D2: one loop in one script, plus the escaped-space parse
+      `/proc/self/mounts` needs ( ), which cardmount.sh already does.
+
+- [x] **90. A BOOT-TIME CODE SELECTOR: one SD card, several game images,
+      **SHIPPED on `item/90`, MERGED to main 2026-09-05. Proven on David's TMNT
+      pro 2026-09-04 with the v3 two-image card (stock 1.59 + the 1987 upscale,
+      selector 2.9): both images in the menu, both boot and run. Left open on
+      the machine: a latched GAME VALIDATION ERROR and Stern Insider Connected not
+      connecting, queued as item 98. The number 90 is shared with the Spike 1
+      early-cards item below (two sessions took it the same day); the code and
+      docs say "item 90" for THIS one.**
+      pick one with the flippers before the game starts — first in the
+      emulator, then on David's machine.** `S2 D4`
+      *(David's ask 2026-09-01: "we want to be able to run our own code on
+      the machine … a multi image selector on an SD card that could allow
+      us to play either the original Stern code or our custom 1987 code …
+      a GUI that shows when you boot the game … left or right with flipper
+      button input … extended later to switch between the orchestra and
+      normal versions of the new Godzilla custom code … needs to pass the
+      game validation checks that Stern does, for online play.")*
+      **The shape:** the card keeps Stern's p1 (boot) and p2 (rootfs) where
+      u-boot and fstab expect them, p3 stays the PRIMARY image's games
+      partition, p5/p6 stay /data and /dump, and the extended partition is
+      grown to the end of the card so each EXTRA image's games partition
+      rides verbatim as p7, p8… A selector program installed in the rootfs
+      (`/usr/local/codeselect/`) is hooked into `/etc/init.d/game` right
+      after `pkill boot_display` — it draws through the same libEGL/libGLESv2
+      the game uses, reads the flippers off node 8 (bits 24/25) over the node
+      bus and START off node 1, remounts `/games` from the chosen partition,
+      and falls through to Stern's own launch lines. Nothing Stern validates
+      is touched: `./game`, `./conagent`, the zImage on p1 and the asset tree
+      are the stock image's own bytes on its own partition, and the `.sidx`
+      indexes only `<title>/…` on that partition. First pair = David's TMNT
+      Pro: stock `turtles_pro-1_59_0` + the 1987 upscaled Pro build (same
+      1.59.0 version, so NVRAM identity is not disturbed). Godzilla (stock /
+      Heisei normal / Heisei orchestra) is the same builder with three
+      inputs — EXCEPT that the card's kernel exposes only p1..p7
+      (`CONFIG_MMC_BLOCK_MINORS=8`, found in review), so a THIRD image
+      needs two images inside one partition, a follow-up design; today's
+      builder refuses it. Proven in the rig as `PAD_CARD=<multi.raw>
+      PAD_SELECT=1`.
+      — S2: it is the whole point of the emulator work — running our own
+      code on the machine. D4: a new ARM program, a card builder, and rig
+      plumbing, all of which exist in parts already.
+      **WORKED ON DAVID'S MACHINE (2026-09-01 evening): menu on the LCD,
+      flippers, START, remount, both images boot. One fault: a GAME
+      VALIDATION ERROR on BOTH images - the stock image needs the same
+      valpatch bx-lr bypass + sidx refresh the Insider-clean 1987 card
+      carries (shared grade/tamper state per build stamp). v2 in flight:
+      bypass on every image (`mkmulticard.py bypass --card`), per-image
+      art/GIF/sounds on the menu (confirm sound plays to completion), N
+      images via a `multi` p7 holding img1/.. (p7 is the kernel's last
+      partition), and a Multi-boot tab in the app.**
+      **v2 LANDED 2026-09-02 (item/90): every image bypassed, art/GIF/
+      sounds on the menu, N images (`--layout multi`), Multi-boot tab;
+      run 6 in the rig = a three-image card with media, chose
+      `p7:img1`, attract, P/P/P. Cards for David on D:/Pinball/TMNT
+      1987/multi/: `...multi-stock+1987patched...` (v1 menu, now
+      bypassed on both images) and `...multi-v2-stock+1987patched...`
+      (v2: media + bypass), both verify PASS. Open: the rig's audio FIFO
+      reader drops ~31 s into the menu (emulator only; hardware uses
+      ALSA), and the v2 selector's ALSA path is unproven on the machine.**
+      **v3 2026-09-02: the tab PREVIEWS the boot screen** - the selector
+      gained `--snapshot` (one frame, no input/audio/writes, ~80 ms under
+      qemu) and the tab renders it with Highlight / Animation frame /
+      Play; each picture is customisable (art `auto|none|file|VIDEO@T`,
+      animation `auto|file` with start, length and fps), and
+      `selectmedia.py` caches by source+params so a re-render of an
+      unchanged picture costs 0.13 s. The preview and the build share one
+      media directory, so the card matches the picture.
+      **v4 2026-09-02, from David running the card himself.** The menu is a
+      property of the CARD, not a checkbox: `PAD_SELECT` unset now asks the
+      card (`parts.py --multiboot`), and 1/0 still force it either way.
+      Stopping a run while the menu was up used to look like "no choice",
+      so the rig booted the primary and left a brand-new guest behind - a
+      killed selector is now a stop (129/130/143/137), while one that DIED
+      or refused its configuration still falls through, because a broken
+      menu must never be the reason a pinball machine will not start. The
+      ACTION button confirms alongside START. And each entry can name its
+      own confirm sound - a seventh `image=` field, empty meaning the
+      menu-wide one - so a menu of four builds can say four different
+      things while the LOADING frame is up.
+      **The tab was rebuilt around the preview** in the same round (one
+      arrangement at every width, the images list a table below the picture
+      with per-row icons, the tool output folded into the app's Log), and it
+      now **reads each image's game code version off the image itself** -
+      Stern's own package name in /spk/index, cross-checked against the game
+      ELF's per-build record - shows it in a column, refuses to build a card
+      whose images disagree unless you say to, and raises a bar across the
+      tab when a card you load has that problem.
+      **IN PROGRESS (2026-09-01, `item/90`): PROVEN IN THE EMULATOR.**
+      `mkmulticard.py` builds the card (verify PASS), `codeselect` draws
+      through the bridge and takes the padsw keys, `PAD_SELECT=1` runs it
+      before the game; four runs: stock and 1987 both chosen by flipper
+      keys, both boot to attract with NVRAM grades P/P/P, the 1987 run
+      serves its own videos (`dump/vidroot`). Production card for David's
+      TMNT Pro at `D:/Pinball/TMNT 1987/multi/` (stock + Insider-clean
+      patched 1987). Both unknowns were answered on the machine the same
+      evening: the node bus does reply before the game's own bring-up, and
+      the Vivante EGL init works because it copies boot_display's order.
+      Detail: `tools/spike2_emu/codeselect/DESIGN.md`.
+      **2026-09-03: animations at the source's own frame rate, 5 s loops**
+      (David: "playing at like 2fps... run at original fps (minimum 30fps
+      would be ideal). we can limit them to 5 second clips"). Contract
+      150 frames / 10 MB / 5 s at up to 30 fps, LENGTH gives before rate;
+      the selector decodes a GIF on demand (one frame per tick, frame 0
+      kept) on the clip's own timeline (was: every frame in RAM, ticks
+      rounded to vsync = 24 fps); clips rendered at the panel's true
+      298x168 (1 ms a frame under qemu, was 20 with a per-tick box
+      filter); the tab's Play lays the GIF over ONE rendered frame at the
+      `picture x,y,w,h` the selector now reports (pixel-identical to its
+      own render, no PPM per frame); the row's stale length/rate fields
+      - the actual cause of the 2 fps - are gone.
+      **Same day, later (David): "all boot selections should play video
+      at the same time all the time (not just when hovered). also, sound
+      and video should always be on for the preview (and we should
+      indicate when the videos / audio are loading separately)".** The
+      selector ticks EVERY visible card's animation on its own timeline
+      (`media_tick`, per-image frame/due in `struct media`; a flipper
+      press restarts nothing) and its snapshot line reports `pictures
+      i:x,y,w,h;...` for every animated card. The tab lost its Play, Sound
+      and Frame controls: the clips play on one shared clock the moment
+      frame 0 lands, the sounds play (David's one exception to
+      bring-it-up-muted), and two strip readouts - `Video:` / `Audio:` -
+      say which half is loading; the pictures render in a `video` run
+      before the frame and the sounds in an `audio` run after it, and a
+      refused audio run (cold params cache) leaves the picture playing
+      with the reason on the readout. **Three fixes from David's first
+      look:** the sound plays only while the tab is on screen (the tab
+      frame's `<Map>`/`<Unmap>` - behind another tab or minimised it
+      stops, and it never starts on launch); a flipper press draws the
+      new card's frame (the auto render had returned early on an
+      unchanged form fingerprint, which has no highlight in it - the
+      preview froze on the first card); and the preview has the Emulate
+      tab's Volume slider + Mute at the right of the strip, its own file
+      (`preview_audio_ctl.json`), scaling the menu's volume rather than
+      changing it.
+      **2026-09-03 LATER STILL (item/90): LIVE SOUND** - a menu/editor
+      sound change is heard at once ('none' stops the bed now; a new choice
+      goes quiet until rendered) and a sound-only change re-runs the audio
+      half by itself. **CARD LAYOUT** - the picture panel is the widest
+      16:9 the card allows (TEXT_BLOCK 118, cards top 140 / 460 tall),
+      title + subtitle centred below it. **THE MACHINE'S OWN VOLUME**
+      (David: "it should follow the set volume of the actual machine") -
+      images.conf `volume=machine` + `machine_volume=<store>|<sha1
+      key>|<factory>`: the selector reads MASTER VOLUME SETTING off the
+      card's /data/nv/<title>/NVM mirror (nvm.c: newest hex-named
+      generation, .crc32 sidecars skipped, 44-byte records keyed by SHA1
+      of the caption), hands it to the codec mixer on the hardware (mix at
+      100) or applies the same (v/63)^0.2 curve as a software gain on the
+      emulator's FIFO; falls back to the title's factory level
+      (factory_volume) and then the plain number; `--volume` (the app's
+      preview) still wins. mkmulticard `--machine-volume` (the default
+      image's title names the store + factory level; a card on `machine`
+      stays so unless `--volume N`); the tab's Menu settings tick "On the
+      machine, play at its own volume setting" (default ON). PROVEN on the
+      rig's real stores: TMNT 18/63, Godzilla 10/63 (= their factory
+      levels).
+
+      **2026-09-04 (item/90): THE MENU WAS SILENT ON THE MACHINE - THE
+      AMPLIFIER GATE, NOT THE DEVICE.** The card's own /dump/log/
+      codeselect.log (p6 read off the SD card) said `alsa ... ok`, PCM
+      mixer set, `1007616 frames written, 0 dropped` over 23 s: the codec
+      ate the stream and the speakers stayed dead, so the device walk
+      (bff476c) was never the cause. The game's mute helper (godzilla_pro
+      0x1faad4, from its bring-up 0x1fb2a8) sets the playback switch of
+      simple mixer element "Line Out Mute" ON on ctl backbox + cabinet;
+      asound.state never names it, so a boot leaves it muted and only the
+      game opens it (its other mute stage, SPI tx[7] bits 2/5, the selector
+      already sends as zeros = playing; Stern's own spike_menu carries the
+      same string). FIX: audio_alsa.c switches it ON once the device is
+      open, remembers what it read, and puts a switch that was OFF back at
+      close; README / DESIGN / audio.h say so; make check + check-hw green;
+      injected into David's Godzilla two-image card image and menu-written
+      to the card. PROOF ON THE NEXT BOOT: `audio: mixer backbox 'Line Out
+      Mute' switch on (was off)` in codeselect.log.
+      **2026-09-04 ROUND 2 (item/90): STILL SILENT - THE KERNEL NEVER POWERS
+      THE CODEC'S LINE_OUT.** The next machine log said the 'Line Out
+      Mute' switch was already ON (`switch on (was on)`), and David heard
+      the speakers come on only during the GAME's own startup. The device
+      tree routes each codec as "Headphone Jack"/"HP_OUT" and nothing
+      else, so ALSA powers the headphone path for a stream and never the
+      LINE_OUT block - which feeds the amplifiers. The game programs both
+      SGTL5000s itself over /dev/i2c-1 (slaves 0x0a/0x2a: hwshim's
+      item-17 "two i2c MCUs" are the codecs) with a 50-register table
+      that is byte-identical across titles; its recovery path writes the
+      full-power set (CHIP_ANA_POWER 0x40f9 = VAG+HP+DAC+LINEOUT, all
+      analog mutes clear, line-out bias + reference) over a running
+      stream. SELECTOR 2.3, codec.c: after snd_pcm_set_params the same
+      set goes onto both chips (kernel-owned clock/format/volume regs
+      left alone, power regs ORed so the kernel's regulator bits stay),
+      both chips' registers logged as found, every change logged, all
+      put back at close; gated on both CHIP_IDs = 0xA0xx; --codec off.
+      Built, check + check-hw green, injected, menu-written to the card.
+      PROOF ON THE NEXT BOOT: `codec: N register(s) set` with `0030 ...
+      -> 40f9` on both chips, and sound. Memory:
+      reference_spike2_amp_gate_line_out_mute (table + the 0x0111 risk).
+      **2026-09-04 ROUND 3 - THE ACTUAL FIX: THE AMPLIFIER ENABLE IS SPI
+      tx[7].** The 2.3 boot proved the codec was a red herring: the log
+      showed `codec: 0 register(s) set` (the kernel already powers the
+      codec for the stream) and still silence. The one thing left that the
+      game does and the menu did not is the cabinet SPI OUTPUT byte tx[7].
+      The game drives bit 0 (0x5a5580, which then opens the amp's
+      iio:device0/in_power monitor = the amplifier enable) and bit 1 (main
+      init 0x4f0720), and clears its mute bits 2/5 once audio is primed, so
+      its steady playing value is 0x03; the selector sent 0x00, leaving
+      both amp channels OFF - a perfect ALSA stream into dead speakers, and
+      the speakers David hears 'turn on' during game startup are the game
+      asserting these bits. FIX (selector 2.4, input_hw.c): tx[7] =
+      SPI_TX7_AMP (0x03) every SPI poll while the menu is up;
+      PAD_SPI_TX7=<hex> overrides (0 = the old word). codec.c kept as
+      diagnostics + defence for a kernel that does not pre-power the codec.
+      Built, check + check-hw green, injected, menu-written to the card.
+      PROOF ON THE NEXT BOOT: `spi: ... amp enable tx[7]=0x03` and sound.
+      **2026-09-04 ROUND 4 - EMPIRICAL: SPI tx[7]=0x03 CONFIRMED CORRECT, the
+      real gate is CONTINUOUS codec re-assert.** Ran the real godzilla_pro
+      under the emulator (MUTED) and read its live cabinet output word from
+      guest memory: `SPI tx (0x84214c) = 00 00 00 00 00 00 00 03` - the game
+      drives exactly the tx[7]=0x03 the selector now sends, so SPI is not the
+      gap. The difference is that the game reprograms the codec CONTINUOUSLY
+      (its health check re-writes the full-power table whenever the kernel's
+      DAPM pulls LINE_OUT back down - the device tree routes only the
+      headphone jack, so DAPM never leaves LINE_OUT, the amps' feed, powered).
+      A one-shot codec write before the stream starts (2.2-2.4) is undone the
+      moment it does. FIX (selector 2.5): codec_keep() re-asserts the
+      full-power table every 400 ms from the menu loop; `codec 0x0a reg 0030
+      4060 -> 40f9 (the kernel had pulled it back)` is that fight and the
+      proof. Built, check + check-hw green, injected, menu-written to the
+      card. If STILL silent, the re-assert log shows exactly what the kernel
+      is doing to the codec during playback.
+      **2026-09-04 ROUND 5 - GPIO 75, the line the game raises before it opens
+      the node bus (selector 2.6).** The 2.5 boot log settled the codec for
+      good: codec_keep found NOTHING pulled back in the whole run (the kernel
+      keeps the codec fully powered for the stream), still silent, and David
+      pinned the click to the END of the game's audio bring-up. The game's
+      device list (missed earlier under the AD_*CHAMPION noise) has
+      /sys/class/gpio/gpio75/{direction,value}: 0x5a4eb8 (node-bus module
+      init) calls 0x5a4dc0(1) = export 75, direction out, value "1" - right
+      before it opens /dev/ttymxc1, beside the LPC1111 netbridge and the iio
+      amp power monitor strings. GPIO3_IO11 has no device-tree consumer:
+      application-owned, the game alone drives it. FIX: input_hw.c
+      cpu_gpio_raise() does the same before tty_setup, gated on the real
+      node-bus device name + /sys/class/gpio existing (check-hw's pty never
+      trips it); PAD_GPIO75=0|skip for experiments. Left high (the game
+      writes 1 itself). Built, check + check-hw green, injected, menu-written.
+      PROOF ON THE NEXT BOOT: `gpio75: raised to 1 (was 0)` and sound.
+      **2026-09-04 ROUND 6 - THE BRIDGE MCU: `08 01 01` (selector 2.7).** GPIO 75
+      raised, still silent; David: the speakers start at the game's 'Startup
+      in progress...' banner = the END of its audio bring-up. Every value the
+      menu can set is now verified identical to the game (codec registers,
+      ALSA switch, SPI tx[7], GPIO 75). What the game does that the menu never
+      did: its audio bring-up 0x1fa9c8 STARTS by sending the CPU board's
+      bridge MCU (LPC1111 netbridge) `08 01 01` via 0x5a4528 -> 0x59ebac
+      (descriptors are {cmd, payload-len, payload, reply-len}; 07/08/0b are
+      write-only; `0a 00` reads 2 status bytes - bit 1 = 'aux/audio section
+      initialized', and the game's runtime sweep 0x1d7d88 redoes the whole
+      bring-up while it is CLEAR). David's machine answers `0a 00` with
+      `04 00`: bit 1 clear, the audio section was never brought up. The
+      bridge resets both codecs (0x0111 poll) so the menu must then write the
+      game's STANDBY table itself (clock + I2S included: the kernel's cache is
+      stale after a reset). FIX: startup reordered - input (bus) first; then
+      SPI mute (tx[7]|0x24), `08 01 01`, poll 0x0111 <=250 ms, 750 ms, standby
+      table, THEN the stream; `0b 01 06` (the game's 0x1d7e3c, after its
+      bring-up) + unmute once it runs. input_hw_bridge()/input_hw_amp_mute()
+      + codec_after_reset(); all no-ops off hw. check + check-hw green (the
+      fake bus tolerates 08/0b); injected; menu-written. PROOF: `nb: bridge
+      after 08 01 01: status .. (bit1 ...: yes)` and sound. Earlier rule 'do
+      NOT send 08 01 01' (memory) is superseded by this evidence.
+      **2026-09-04 SOUND CONFIRMED ON THE MACHINE with 2.7 (the bridge's
+      `08 01 01`). David next: "animation playback feels a little slow and the
+      flipper switch input is occasionally not rendering... extra processing
+      (unthrottled) swallowing cpu... prioritize audio, switch input,
+      animations". DIAGNOSIS from the machine's own logs: (1) 2.5's
+      codec_keep blocked the loop ~70 ms every 400 ms (90 i2c reads at
+      100 kHz) and never found a register to fix - REMOVED; (2) a 298x168
+      GIF frame decodes in 13 ms on the i.MX6 (1 ms on the PC): two clips at
+      their rate = 54% CPU on the menu thread (`476 frame decodes, 12.98 ms`
+      each in a 23 s run). SELECTOR 2.8: art_cache_start() - every frame
+      decoded once by a thread at nice 10 into a RAM cache (budget = half
+      MemAvailable, cap 192 MB; over-budget clips stay on demand; pinned/
+      snapshot modes unchanged); playback shows frame k if in, else the
+      newest, catching up over the first seconds; the hw input scan is its
+      own thread at nice -5 (node bus 25 ms, SPI 10 ms; a `bus` mutex
+      serialises it with the bring-up commands; input.c's queue is locked);
+      `perf:` line every 5 s (loops/s, longest pass, cache fill).
+      -l:libpthread.so.0 added (check_elf allowlist updated). check +
+      check-hw green (fake-bus scans 124 -> 164 in the same 2.1 s). Injected,
+      menu-written. NEXT LOG: `perf:` ~60 loops/s with longest < 30 ms once
+      the cache is full; `anim: image N: 150 of 150 frames cached`.
+      **2026-09-04 2.8 "worked great" on the machine. Then David: "make sure
+      we are not endlessly writing logs to the card", and "logging to the
+      card is for my development debug sessions only, we should turn it off
+      for the app".** Measured on the card's p6: `--log` opened with "a" and
+      every boot appended ~7.5 KB (7 boots = 54 KB, for ever); stderr goes
+      to the serial console (S95game runs under init, no file). SELECTOR
+      2.9 + select.sh + mkmulticard: (1) THE CARD LOG IS OFF BY DEFAULT -
+      select.sh passes `--log` (and writes its own lines) only when
+      images.conf has a `log=<path>` line; `mkmulticard.py build|inject
+      --debug-log` writes `log=/dump/log/codeselect.log` (CARD_LOG); the
+      flag is never carried through from the card, so the app's inject
+      (which never passes it) turns a debug card's log off; `inspect` shows
+      `log=off|<path>`; CODESELECT_LOG=<path>/empty forces it for the tests.
+      (2) BOUNDED EVEN WHEN ON: sel_log_open() moves PATH to PATH.1 and
+      opens "w" (one run, one file, two on disk at most) and a run writes
+      at most 1 MiB (PAD_LOG_CAP=<bytes> for the tests; one closing `log:
+      N KB this run: the file stops here` line). (3) `perf:` every 5 s for
+      the first minute, then once a minute (an idle menu wrote 1.2 KB/min).
+      Tests: select_sh_test (off by default / log= on / CODESELECT_LOG),
+      headless.sh (rotation + cap), test_mkmulticard (render/parse/
+      conf_for_plan never carries log= through; the flag on the shared conf
+      flags). The rig test's stale `set_name(id, "PCM")` pin (broken since
+      5b473ec's mixer_find) repinned. David's card re-injected WITHOUT the
+      flag: no more menu logs on it (the old 54 KB /dump/log/codeselect.log
+      stays until something removes it; harmless).
+
 - [x] **93. godzilla_le dies ~4 s after start, on a user's card, every time.
       SOLVED 2026-09-02 — it was `sw_prime()` splatting the shim's own .bss.**
       `S1 D4`
@@ -6819,7 +7188,8 @@ These have each been violated at least once and each cost a run or a window:
       marker pads — no measured misattribution, and the report was the
       schematic. If a marker ever hovers wrong, that is where to look.
 
-- [ ] **94. A one-file change to a multi-boot image is written in about a
+- [x] **94. A one-file change to a multi-boot image is written in about a
+      **MERGED to main 2026-09-05 (awaiting release).**
       minute, not a rebuild.** `S2 D3` *(David, 2026-09-04: "if we have small
       updates to just one of the images for, say, a new video asset, we should
       be able to update it without having to reprocess so much and just target
@@ -6858,7 +7228,8 @@ These have each been violated at least once and each cost a run or a window:
       — S2: it costs runs on every multi-card change. D3: rig runs and one
       flash confirm it.
 
-- [ ] **95. An OPT-IN compact multi-boot layout stores what the images share
+- [x] **95. An OPT-IN compact multi-boot layout stores what the images share
+      **MERGED to main 2026-09-05 (awaiting release).**
       once (default off).** `S3 D4` *(David, 2026-09-04: "compact opt-in
       multi-boot images", after "if we're only saving 3gb for three images, i
       don't know if the juice is worth the squeeze" - and then "one store on

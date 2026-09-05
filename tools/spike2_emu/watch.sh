@@ -3,8 +3,8 @@
 #
 #   wsl -e bash $RIG/watch.sh
 #
-# Opens a window on the Windows desktop (via WSLg) showing Godzilla Pro running
-# under emulation at 60 fps on the GPU. Close the window to stop everything.
+# Opens a window on the Windows desktop (via WSLg) showing the emulated game
+# running at 60 fps on the GPU. Close the window to stop everything.
 #
 # WHY THIS SCRIPT EXISTS SEPARATELY FROM runbridge.sh: runbridge.sh is built for
 # timed measurement runs - it sleeps for N seconds and then kills. Watching needs
@@ -51,6 +51,75 @@ pad_ensure_rootfs || exit 1
 pad_ensure_guest_exec || exit 1
 pad_ensure_shim || exit 1
 pad_ensure_bridge || exit 1
+# ★ ITEM 90 - IS THERE A MENU ON THIS CARD? DECIDED HERE, ONCE, AND EXPORTED.
+#
+# David, 2026-09-02: "i shouldn't have to check off 'boot selector' in the
+# emulate tab. if it has multi-boot, i expect to see the multi-boot screen."
+# So PAD_SELECT stopped being a flag someone has to set and became a
+# three-way switch: UNSET asks the CARD, 1 forces the menu on, 0 forces it
+# off. pad_select_wanted (padpath.sh) is the only reader of it and
+# parts.py --multiboot is the only definition of "this card boots into a
+# menu"; the answer is resolved to a plain 1 or 0 HERE and exported, so
+# run_game.sh is handed the decision rather than making a second one.
+#
+# EARLY, AND ONCE. The probe is a handful of debugfs reads on the card's
+# rootfs - a few hundred milliseconds - and it runs before anything is built,
+# so a menu run has its selector gate below and a plain run never pays for
+# one. No PAD_CARD means no probe at all (an extracted title under games/ has
+# nothing to choose between).
+#
+# NOT `$(pad_select_wanted ...)`: the function answers in PAD_SELECT_WHY and
+# PAD_SELECT_AUTO as well as in its exit status, and a command substitution
+# would run it in a subshell where both of those die. PAD_SELECT_AUTO is the
+# PROVENANCE - 1 when the card decided, 0 when a human did - and every gate
+# below reads it to know whether a menu it cannot give is a refusal or a
+# shrug. Exported, because run_game.sh has the same gates.
+pad_select_wanted "${PAD_CARD:-}" && PAD_SELECT=1 || PAD_SELECT=0
+export PAD_SELECT PAD_SELECT_AUTO
+SEL_WHY=${PAD_SELECT_WHY:-}   # `set -u` is on; the function always sets it
+# WHAT IT DECIDED AND WHY, in one line, because "the menu did not come up" and
+# "the menu came up and I did not want it" are both answered here. The words
+# are pad_select_wanted's own - it is the only thing that knows whether the
+# CARD or the caller decided, and a sentence rebuilt out here from the 1/0
+# would eventually say "this card carries a menu" about an override.
+if [ -n "${PAD_CARD:-}" ] || [ "${PAD_SELECT:-}" = 1 ]; then
+    echo "[watch] boot selector: $SEL_WHY"
+fi
+# ★ A CARD MUST NEVER MAKE THE EMULATOR REFUSE TO START (2026-09-02).
+#
+# Every gate under PAD_SELECT below used to be fatal, and while PAD_SELECT
+# meant "the user asked for a menu" that was right: giving them the primary
+# without a word is the silent-fallback fault every gate in this script exists
+# to stop. Since the CARD started answering that question, the same gates
+# would kill a run nobody asked anything of - a rig without a cross compiler,
+# a second games partition that will not mount - and a card that booted
+# yesterday would simply not start today.
+#
+# So the rule became: a menu the CARD asked for degrades to no menu, out
+# loud, and the game still boots; a menu a HUMAN asked for still refuses.
+# PAD_SELECT_AUTO (padpath.sh, set beside the answer) is which. Returns 0
+# when it has switched the menu off and the caller should carry on, 1 when
+# the caller must fail - `pad_select_off "..." || exit 1` at every site.
+pad_select_off() {
+    if [ "${PAD_SELECT_AUTO:-}" = 1 ]; then
+        echo "[watch] boot selector: $1" >&2
+        echo "[watch]   the CARD asked for this menu, nobody typed" >&2
+        echo "[watch]   PAD_SELECT=1, so this run boots the primary image" >&2
+        echo "[watch]   without a menu rather than refusing to start." >&2
+        PAD_SELECT=0
+        export PAD_SELECT
+        return 0
+    fi
+    echo "[watch] PAD_SELECT=1 was asked for, but $1" >&2
+    echo "[watch]   PAD_SELECT=0 boots this card without a menu." >&2
+    return 1
+}
+# ITEM 90: the boot selector, ONLY on a run that asked for it, and MISSING is
+# fatal only for a run that ASKED - see pad_select_off above.
+if [ "${PAD_SELECT:-}" = 1 ] && ! pad_ensure_select; then
+    pad_select_off "this rig has no boot selector built and cannot build one" \
+        || exit 1
+fi
 
 MINS=${1:-30}
 LOG=${LOG:-$HOME/gzwatch.log}
@@ -135,6 +204,10 @@ GAME=${PAD_GAME:-}
 # its own answer and quietly left the mount behind. The symptom was the exact
 # thing being fixed, which is a good way to waste a run.
 CARD_MNT=""
+# ITEM 90: the EXTRA games partitions a PAD_SELECT run mounts beside the
+# first ($CARDS/<label>.pN), only those this run created - same rule as
+# CARD_MNT, one entry per mount, unmounted in teardown the same way.
+CARD_MNTS=()
 if [ -n "${PAD_CARD:-}" ]; then
     # Keep the WHOLE output, not just the path: it is the only place that says
     # whether this run created the mount or joined one that already existed,
@@ -153,6 +226,45 @@ if [ -n "${PAD_CARD:-}" ]; then
     # The video host reads clips itself, outside the chroot, so it needs the
     # card's real path - the title is not under spike2root/games at all.
     export PAD_CARD PAD_VID_ROOT="$CARD_PATH"
+    # ★ ITEM 90: a multi-image card's OTHER games partitions, mounted HERE so
+    # that THIS run owns them for teardown (run_game.sh rejoins them exactly
+    # as it rejoins the first). The first games partition is the mount above
+    # - parts.py's --games and the head of its --list-games are the same
+    # partition (p3) by construction - so it is skipped rather than mounted
+    # twice under a second name.
+    # Both failures here are the CARD's - an images.conf that promises trees
+    # this image does not carry, a partition fuse2fs will not open - so both
+    # go through pad_select_off: a menu that cannot be mounted is no menu,
+    # never a run that will not start. A `break` and not an exit, because the
+    # partitions already mounted are this run's to tear down.
+    if [ "${PAD_SELECT:-}" = 1 ]; then
+        SEL_PARTS=$(python3 "$S/parts.py" --list-games "$PAD_CARD" 2>/dev/null | awk '{print $1}')
+        [ -n "$SEL_PARTS" ] \
+            || pad_select_off "no games partition on $PAD_CARD" || exit 1
+    fi
+    if [ "${PAD_SELECT:-}" = 1 ]; then
+        _first=1
+        for _p in $SEL_PARTS; do
+            if [ -n "$_first" ]; then _first=""; continue; fi
+            _out=$(bash "$S/cardmount.sh" "$PAD_CARD" --part "$_p")
+            printf '%s\n' "$_out" | grep '^\[card\]'
+            _path=$(printf '%s\n' "$_out" | tail -1)
+            if [ ! -d "$_path" ]; then
+                pad_select_off "partition $_p of $PAD_CARD could not be mounted" \
+                    || exit 1
+                break
+            fi
+            case "$_out" in
+                *"already mounted"*) ;;
+                *) CARD_MNTS+=("$(dirname "$_path")") ;;
+            esac
+        done
+        unset _first _p _out _path
+    fi
+    if [ "${PAD_SELECT:-}" = 1 ]; then
+        echo "[watch] boot selector: games partitions on this card:" \
+             "$(printf 'p%s ' $SEL_PARTS)"
+    fi
 elif [ -n "${PAD_GAME_DIR:-}" ]; then
     # A title directory anywhere on disk, bind mounted the same way.
     GAME=$(basename "${PAD_GAME_DIR%/}")
@@ -571,6 +683,9 @@ teardown() {
     # the rig's historic 'godzilla_pro/game' pattern never could.
     pkill -9 -x game 2>/dev/null
     pkill -9 -f arm-binfmt 2>/dev/null
+    # The boot selector (item 90), in case the run ends while the menu is up:
+    # arm-binfmt reaches it on WSL, its comm is the only handle elsewhere.
+    pkill -9 -x codeselect 2>/dev/null
     # PAD_PIVOT runs exec qemu explicitly (no binfmt) and fold the guest log in
     # through a tail; kill it too. -F holds the file open forever otherwise.
     [ -n "$GAMEOUTTAIL" ] && kill -9 "$GAMEOUTTAIL" 2>/dev/null
@@ -715,23 +830,33 @@ teardown() {
     # success, and a run that quietly left a mount behind was then
     # indistinguishable from one that had no card at all - which is how the
     # leak being fixed here stayed invisible in the first place.
-    if [ -n "$CARD_MNT" ]; then
-        if mountpoint -q "$CARD_MNT" 2>/dev/null; then
-            fusermount -u "$CARD_MNT" 2>/dev/null \
-                || fusermount3 -u "$CARD_MNT" 2>/dev/null \
-                || fusermount -uz "$CARD_MNT" 2>/dev/null
-            rmdir "$CARD_MNT" 2>/dev/null
-            if mountpoint -q "$CARD_MNT" 2>/dev/null; then
-                echo "[watch] could NOT unmount the card at $CARD_MNT"
+    # ONE body for every mount this run made (item 90 added the .pN ones):
+    # the first games partition's, and each extra games partition's.
+    unmount_card() {   # <mount dir>
+        if mountpoint -q "$1" 2>/dev/null; then
+            fusermount -u "$1" 2>/dev/null \
+                || fusermount3 -u "$1" 2>/dev/null \
+                || fusermount -uz "$1" 2>/dev/null
+            rmdir "$1" 2>/dev/null
+            if mountpoint -q "$1" 2>/dev/null; then
+                echo "[watch] could NOT unmount the card at $1"
             else
                 echo "[watch] unmounted the card"
             fi
         else
             echo "[watch] the card was already unmounted"
         fi
+    }
+    if [ -n "$CARD_MNT" ]; then
+        unmount_card "$CARD_MNT"
     elif [ -n "${PAD_CARD:-}" ]; then
         echo "[watch] leaving the card mounted: it was mounted before this run"
     fi
+    # ITEM 90: the extra games partitions of a multi-image card (PAD_SELECT),
+    # each one owned by this run for exactly the reason CARD_MNT is.
+    for _m in ${CARD_MNTS[@]+"${CARD_MNTS[@]}"}; do
+        unmount_card "$_m"
+    done
     sleep 0.5
     echo "--- what is still running (all must be 0) ---"
     bash "$S/alive.sh"
@@ -1075,6 +1200,55 @@ echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
 # on stdout, so clear any stale copy before the run and fold the fresh one into
 # $LOG below. Nothing else about the launch changes.
 [ -n "${PAD_PIVOT:-}" ] && rm -f "$ROOT/dump/game.out"
+# ★ ITEM 90 - "A SELECTION IS IN PROGRESS", as a flag file, for the three
+# things below that must not read the selector phase as a dead game: the
+# start wait, the poll loop and autoattract's launch. Raised HERE, before
+# the launch, so there is no instant in which the menu is up and the flag
+# is not; cleared by this script when `pgrep -x game` first answers (the
+# selector's comm is codeselect on both launch paths, the game's is game on
+# both), or when run_game.sh is gone, or after SEL_WAIT seconds. The same
+# shape as loadgame.sh's dump/reloading, with a longer, configurable bound:
+# a human choosing takes as long as the countdown lets them.
+# PAD_SELECT_TIMEOUT is the selector's countdown (30 s unless told; 0 =
+# wait for ever); SEL_WAIT gives the game a minute on top of it to appear.
+# Removed on a plain run, so a stale flag from an aborted selector run can
+# never leak into the next start.
+#
+# THE BOUND RIDES THE SELECTOR'S LIFE, NOT THE CLOCK. The selector restarts
+# its countdown on every key press, so a player reading the menu can hold it
+# up for longer than any wall-clock figure - and a bound of SEL_WAIT from the
+# flag's own timestamp then called the selector-exit gap "the game exited"
+# and tore the session down under a live menu. So: while `pgrep -x
+# codeselect` finds the selector the flag's mtime is refreshed (touch), and
+# the flag only goes stale once the selector has been GONE for SEL_GAP
+# seconds with no game in its place (the exec gap is tens of milliseconds).
+# SEL_WAIT still bounds the phase BEFORE the selector has ever been seen (a
+# run_game.sh that never reaches it), and 0 still means wait for ever there;
+# sel_flag_stale() below is the one place that says all this.
+if [ "${PAD_SELECT:-}" = 1 ]; then
+    SEL_TO=${PAD_SELECT_TIMEOUT:-30}
+    case "$SEL_TO" in ''|*[!0-9]*) SEL_TO=30 ;; esac
+    if [ "$SEL_TO" = 0 ]; then SEL_WAIT=0; else SEL_WAIT=$((SEL_TO + 60)); fi
+    SEL_GAP=30; SEL_SEEN=""
+    : > "$ROOT/dump/selecting"
+else
+    rm -f "$ROOT/dump/selecting" "$ROOT/dump/vidroot"
+fi
+# 0 = the flag has outlived the selector: stop waiting on it. 1 = keep
+# waiting (and the selector is alive, or was seen alive less than SEL_GAP s
+# ago, or has not appeared yet and SEL_WAIT has not run out). Only ever
+# called under PAD_SELECT.
+sel_flag_stale() {
+    local age bound
+    if pgrep -x codeselect >/dev/null 2>&1; then
+        touch "$ROOT/dump/selecting" 2>/dev/null
+        SEL_SEEN=1
+        return 1
+    fi
+    age=$(( $(date +%s) - $(stat -c %Y "$ROOT/dump/selecting" 2>/dev/null || echo 0) ))
+    if [ -n "$SEL_SEEN" ]; then bound=$SEL_GAP; else bound=$SEL_WAIT; fi
+    [ "$bound" != 0 ] && [ "$age" -ge "$bound" ]
+}
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
            PAD_LCD_SHM="$LCD_GUEST" PAD_LCD_NODE="${PAD_LCD_NODE:-$LCD_NODE}" \
@@ -1083,6 +1257,8 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
            PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
            PAD_PIVOT="${PAD_PIVOT:-}" PAD_OVERRIDE_DIR="${PAD_OVERRIDE_DIR:-}" \
+           PAD_PIVOT="${PAD_PIVOT:-}" PAD_SELECT="${PAD_SELECT:-0}" \
+           PAD_SELECT_AUTO="${PAD_SELECT_AUTO:-0}" \
            bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
 GAMEPG=$!
 if [ -n "${PAD_PIVOT:-}" ]; then
@@ -1169,7 +1345,27 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # window by a minute on every first run of a title; never blocking would
     # open an empty window for a title that has no artwork and no device table,
     # which is exactly what Led Zeppelin and Elvira are.
-    if grep -q '^drawable=yes' "$TBL_OUT"; then
+    if [ "${PAD_SELECT:-}" = 1 ]; then
+        # ★ ITEM 90: HELD BACK until the boot selector has chosen, the same
+        # shape as autoattract below. --wait is measured from mktables' own
+        # start, and a menu phase longer than PF_WAIT ate the whole budget on
+        # a title whose switch table is not cached yet. The wrapper waits for
+        # dump/selecting to go (its age, bounded like everything else here),
+        # then BECOMES mktables.py - exec, so $! is what teardown kills and the
+        # 'mktables[.]py' patterns in alive.sh/killgame.sh see it throughout
+        # (the wrapper's own command line carries the name). In the
+        # background whether or not there is a drawing: a foreground wait
+        # here would block this script through the menu phase, and the wait
+        # loop further down is what tracks the selector.
+        echo "[watch]   the switch table follows in the background, once the boot selector has chosen"
+        setsid_as_user bash -c 'f=$1; b=$2; shift 2
+            while [ -f "$f" ] && { [ "$b" = 0 ] || [ $(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) )) -lt "$b" ]; }; do
+                sleep 1
+            done
+            exec python3 "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
+            "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" > "$HOME/padtables.log" 2>&1 &
+        TBLPG=$!
+    elif grep -q '^drawable=yes' "$TBL_OUT"; then
         echo "[watch]   opening now; the switch table follows in the background"
         setsid_as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
             > "$HOME/padtables.log" 2>&1 &
@@ -1360,6 +1556,57 @@ fi
 # chroot before it execs the game, so qemu is not visible for a second or two -
 # and polling immediately made the first version of this script declare "the
 # game exited" 0.25 s in and kill a perfectly healthy run.
+#
+# ★ ITEM 90 - A HUMAN CHOOSING IS NOT A GAME THAT NEVER STARTED. On a
+# PAD_SELECT run the selector is up first, for as long as the countdown
+# lets the player think, and only then does run_game.sh exec the game. So
+# the wait rides the dump/selecting flag: through the menu while
+# run_game.sh's process is alive, until comm=game exists (the selector's
+# comm is codeselect on both launch paths), for as long as the selector
+# LIVES - sel_flag_stale() refreshes the flag while `pgrep -x codeselect`
+# finds it, and gives up only once it has been gone SEL_GAP s with no game
+# (or, before it ever appeared, after SEL_WAIT s; 0 = for ever). A player
+# who keeps pressing keys keeps the countdown, and this wait, going.
+# Under WSL's binfmt the selector itself satisfies pad_guest_up, so the
+# 60 s loop below would break out early anyway; this block is what makes
+# the macOS container (no arm-binfmt on the command line) behave the same,
+# and what puts the selector's progress in this log. The loop below is
+# untouched: once the flag is down it finds the game immediately.
+if [ "${PAD_SELECT:-}" = 1 ]; then
+    # The COUNTDOWN is not named here: it is the card's own `timeout=` unless
+    # PAD_SELECT_TIMEOUT overrides it, and only run_game.sh has read the card
+    # by now (its "[select] menu up: ... auto-boot in N s" lands in this same
+    # log a moment later). $SEL_TO is this script's WAIT bound, which is a
+    # different number and used to be printed as if it were the countdown.
+    echo "[watch] boot selector: waiting for the choice (LEFT/RIGHT flipper" \
+         "= arrows move, START = 1 or ACTION = Space boots)"
+    while [ -f "$ROOT/dump/selecting" ]; do
+        if pgrep -x game >/dev/null 2>&1; then
+            rm -f "$ROOT/dump/selecting"
+            echo "[watch] boot selector: done; the game is starting"
+            break
+        fi
+        if ! kill -0 "$GAMEPG" 2>/dev/null; then
+            rm -f "$ROOT/dump/selecting"
+            echo "[watch] boot selector: run_game.sh ended before the game started" >&2
+            break
+        fi
+        if ! pgrep -x padglhost >/dev/null; then
+            echo "[watch] the renderer died while the boot selector was up:" >&2
+            tail -20 "$HOSTLOG" >&2
+            exit 1
+        fi
+        if sel_flag_stale; then
+            if [ -n "$SEL_SEEN" ]; then
+                echo "[watch] boot selector: gone $SEL_GAP s and no game in its place; not waiting any longer" >&2
+            else
+                echo "[watch] boot selector: not up after $SEL_WAIT s; not waiting any longer" >&2
+            fi
+            break
+        fi
+        sleep 0.25
+    done
+fi
 echo "[watch] waiting for the game to start..."
 for i in $(seq 1 240); do
     pad_guest_up && break
@@ -1411,10 +1658,34 @@ fi
 # asleep waiting on the boot, and this loop must stay responsive to the window
 # closing. It exits by itself when the game gets there, or when the game dies.
 if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
-    setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &
-    AUTOPG=$!
-    echo "[watch] auto-advance on: it will press Service Back until the game"
-    echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
+    if [ "${PAD_SELECT:-}" = 1 ]; then
+        # ★ ITEM 90: HELD BACK until the boot selector has chosen. autoattract
+        # reads "the bus has gone quiet" as "the game is ready" and presses
+        # Service Back - and while the menu is up the log IS quiet, so it
+        # would spend its five presses on a menu that ignores them and have
+        # none left for the Tech Alerts screen they exist for. The wrapper
+        # waits for dump/selecting to go (by the flag's AGE - this script
+        # refreshes it while the selector lives, so a long read of the menu
+        # does not run the bound out; SEL_WAIT is the backstop for a flag
+        # nobody is refreshing, 0 = for ever), then BECOMES autoattract.sh -
+        # exec, so $! is the process teardown kills and alive.sh's
+        # `autoattract\.sh` pattern sees it throughout (the wrapper's own
+        # command line carries the name).
+        setsid_as_user bash -c 'f=$1; b=$2; shift 2
+            while [ -f "$f" ] && { [ "$b" = 0 ] || [ $(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) )) -lt "$b" ]; }; do
+                sleep 1
+            done
+            exec bash "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
+            "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &
+        AUTOPG=$!
+        echo "[watch] auto-advance on, held back until the boot selector has"
+        echo "[watch] chosen; then it presses Service Back past Tech Alerts."
+    else
+        setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &
+        AUTOPG=$!
+        echo "[watch] auto-advance on: it will press Service Back until the game"
+        echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
+    fi
 fi
 
 # THE SWITCH EXERCISER (item 59). The `CHECK SWITCH #n` rows on Tech Alerts are
@@ -1589,7 +1860,9 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # with no picture, in a log the app never showed. Matched anywhere in
         # the line because both put the word at the END of it.
         /\[padglhost\] .*headless/ { print "[event] " $0; fflush(); next }
-        /\[vid\]|\[card\]/       { print "[event] " $0; fflush(); next }
+        # [select] is the boot selector (item 90): the menu, the keys it saw,
+        # the choice and any fallback - run_game.sh prints them into $LOG.
+        /\[vid\]|\[card\]|\[select\]/ { print "[event] " $0; fflush(); next }
         # [swpend]/[swlatch] were silently dropped here until 2026-08-13 -
         # run 6 exported PAD_SW_PEND and got a console with zero swpend
         # lines, which read as "instrument dead" until this filter was
@@ -1683,6 +1956,28 @@ while :; do
         sleep 0.5
     fi
     WEDGE_TICK=$(( WEDGE_TICK + 1 ))
+    # ★ ITEM 90 - THE SELECTOR-EXIT -> GAME-EXEC GAP is not the game exiting
+    # either. Between codeselect leaving and run_game.sh exec'ing the game
+    # there are some tens of milliseconds with no guest at all (and in the
+    # macOS container the whole selector phase reads that way, comm being
+    # codeselect and no arm-binfmt on its command line). The same flag the
+    # start wait rode carries this loop through it - normally the start wait
+    # has already cleared it, and this is the backstop for the case where it
+    # gave up - until comm=game exists, while run_game.sh is alive, for as
+    # long as the selector lives and SEL_GAP s past it (sel_flag_stale(),
+    # which refreshes the flag while `pgrep -x codeselect` finds it).
+    if [ "${PAD_SELECT:-}" = 1 ] && [ -f "$ROOT/dump/selecting" ]; then
+        if pgrep -x game >/dev/null 2>&1; then
+            rm -f "$ROOT/dump/selecting"
+            echo "[watch] boot selector: done; the game is up"
+        elif kill -0 "$GAMEPG" 2>/dev/null && ! sel_flag_stale; then
+            sleep 0.25
+            continue
+        else
+            echo "[watch] boot selector: giving up on it (run_game.sh gone, or the selector left $SEL_GAP s ago with no game)"
+            rm -f "$ROOT/dump/selecting"
+        fi
+    fi
     if ! pad_guest_up; then
         echo "[watch] the game exited. Last lines of its log:"
         tail -5 "$LOG"

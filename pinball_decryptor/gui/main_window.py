@@ -2345,6 +2345,7 @@ class MainWindow:
         self._tab_emulate = ttk.Frame(self._notebook)
         self._tab_jjp_emulate = ttk.Frame(self._notebook)
         self._tab_spike1_emulate = ttk.Frame(self._notebook)
+        self._tab_multiboot = ttk.Frame(self._notebook)
 
         # Order: Extract → the Replace tabs → Default Settings (set defaults
         # before building) → Write → Mod Pack → Partitions.  Display labels are
@@ -2373,6 +2374,11 @@ class MainWindow:
             # as the other two, gated by its own capability (emulate_spike1),
             # and only one emulate tab is ever visible for a given selection.
             (self._tab_spike1_emulate, "Emulate", "Emulate Spike1"),
+            # Item 90: the multi-image SD card builder (Stern Spike 2 only,
+            # gated by ``multiboot``).  Its own tab rather than a section of
+            # Emulate or Write: it makes a CARD out of several images, and
+            # neither of those tabs is about that.
+            (self._tab_multiboot, "Multi-boot", "Multi-boot"),
         ]
         self._tab_keys = {}
         for _frame, _label, _key in _tabs:
@@ -2390,6 +2396,7 @@ class MainWindow:
         self._build_settings_tab()
         self._build_compare_tab()
         self._build_emulate_tab()
+        self._build_multiboot_tab()
         self._build_jjp_emulate_tab()
         self._build_spike1_emulate_tab()
 
@@ -2409,6 +2416,15 @@ class MainWindow:
         # fight the emulation for labels.  Packed only while an Emulate tab
         # shows; set_emulate_progress drives it.
         self._emulate_phases_frame = ttk.Frame(status_frame)
+        # ...and the Multi-boot tab's own row, the same way and for the same
+        # reason (David, 2026-09-02: "the progress bar on this tab should be
+        # specific to the build or write button on this tab" — the Extract
+        # ladder says nothing about assembling a card).  Packed only while
+        # that tab shows; the panel drives it through set_multiboot_phase.
+        self._multiboot_phases_frame = ttk.Frame(status_frame)
+        #: The chip row a RUN has borrowed from the tab that is open, or
+        #: None - see show_phase_row.
+        self._borrowed_row = None
 
         self._progress_bar = ttk.Progressbar(status_frame, mode="determinate",
                                              maximum=100)
@@ -13951,6 +13967,42 @@ class MainWindow:
                 k, p, t, tab="Emulate"))
         self._emulate_panel.build(self._tab_emulate)
 
+    def _build_multiboot_tab(self):
+        """Build the 'Multi-boot' tab: one SD card carrying several game
+        images and a menu at power-up (item 90).
+
+        The seam only.  Everything of substance is in
+        :mod:`..gui.multiboot_tab`, and the card itself is made by the rig's
+        ``tools/spike2_emu/mkmulticard.py`` (with ``selectmedia.py`` for the
+        menu's art and sounds) - the tab runs those under WSL and streams
+        what they say.  Built AFTER the Emulate tab because its 'Run in
+        emulator' is that panel's launch with the boot selector ticked, and
+        its 'Flash to SD card…' is the Write tab's Build / flash dialog opened
+        flash-only on the finished image."""
+        from .multiboot_tab import MultibootPanel
+
+        def run_emulator(path):
+            # Show the Emulate tab so the start is watched where its status
+            # lives, then launch exactly as its own Start button would, with
+            # PAD_SELECT=1 so the rig shows the card's menu first.
+            try:
+                self._notebook.select(self._tab_emulate)
+            except tk.TclError:
+                pass
+            self._emulate_panel.launch_card(path, select=True)
+
+        self._multiboot_panel = MultibootPanel(
+            self._tab_multiboot,
+            log=self.append_log,
+            theme_fn=lambda: self._current_theme,
+            badge_fn=self._make_round_icon,
+            resize_fn=self._resize_notebook_to_current_tab,
+            flash_fn=lambda p: self._open_flash_dialog(initial_image=p),
+            emulate_fn=run_emulator,
+            phase_fn=self.set_multiboot_phase,
+            status_fn=self.set_status)
+        self._multiboot_panel.build(self._tab_multiboot)
+
     def _build_jjp_emulate_tab(self):
         """Build the 'Emulate JJP' tab: run a Jersey Jack game on this PC.
 
@@ -15476,6 +15528,8 @@ class MainWindow:
             self._extract_phase_labels = labels
         elif mode == "emulate":
             self._emulate_phase_labels = labels
+        elif mode == "multiboot":
+            self._multiboot_phase_labels = labels
         else:
             self._write_phase_labels = labels
 
@@ -15491,6 +15545,15 @@ class MainWindow:
     #: screen it happens to be showing.
     EMULATE_PHASES = ("Copy card", "Boot", "Node boards", "Ready")
 
+    #: The Multi-boot tab's own stages, named so BOTH of its writing buttons
+    #: read honestly on them: Build & verify walks all four (render the
+    #: media, copy each image into the new card, inject the menu, verify),
+    #: Apply to card only the last two (a media change when there is one,
+    #: then the inject, then the read-back).  They are the tools' real
+    #: steps - selectmedia's prepare, mkmulticard's "[card] copying …",
+    #: "[card] injected N files …" and its verify's PASS.
+    MULTIBOOT_PHASES = ("Media", "Copy", "Inject", "Verify")
+
     def _init_phase_steps(self):
         # Initial labels — apply_manufacturer rebuilds them per-mfr later.
         self._extract_phases = tuple(EXTRACT_PHASES)
@@ -15502,6 +15565,9 @@ class MainWindow:
         self._emulate_phases = self.EMULATE_PHASES
         self._build_phase_steps(self._emulate_phases_frame,
                                 self._emulate_phases, "emulate")
+        self._multiboot_phases = self.MULTIBOOT_PHASES
+        self._build_phase_steps(self._multiboot_phases_frame,
+                                self._multiboot_phases, "multiboot")
 
     def _rebuild_phase_steps(self, extract_phases, write_phases):
         """Tear down + rebuild the phase indicator widgets when the
@@ -15529,6 +15595,16 @@ class MainWindow:
                 self._footer_owner = "pipeline"
                 self._progress_bar.stop()
                 self._progress_bar.configure(mode="determinate")
+                self._progress_bar["value"] = 0
+                self.set_status("Ready")
+        # ...and the same for the Multi-boot row (item 90): it belongs to
+        # that tab's own buttons, so it is packed only while that tab shows
+        # and the footer goes back to the pipeline on the way out.
+        if text != "Multi-boot":
+            self._multiboot_phases_frame.pack_forget()
+            if getattr(self, "_footer_owner", "pipeline") == "multiboot" \
+                    and not getattr(self, "_running", False):
+                self._footer_owner = "pipeline"
                 self._progress_bar["value"] = 0
                 self.set_status("Ready")
         # Switching tabs means leaving whatever preview was playing.  Each tab
@@ -15609,6 +15685,23 @@ class MainWindow:
             self._emulate_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
             self.set_emulate_progress("idle")
+        elif text == "Multi-boot":
+            # Item 90: this tab's buttons assemble a card; the Extract
+            # ladder (Detect / Locate partitions / Extract video …) says
+            # nothing about that, so it swaps for the tab's own stages.
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self._multiboot_phases_frame.pack(
+                fill=tk.X, before=self._progress_bar)
+            # A card restored from a project is a PATH, not a reading of it:
+            # the restore deliberately runs no tools, because the app must
+            # not start a WSL run merely by launching, and the rig is a
+            # mutex between David's sessions.  Opening the tab is the
+            # deliberate act that asks for the answer, and the person is
+            # here to see it - so the card is read now, once.
+            panel = getattr(self, "_multiboot_panel", None)
+            if panel is not None:
+                panel.on_shown()
         elif text == "Default Settings":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
@@ -15628,6 +15721,12 @@ class MainWindow:
             self._write_phases_frame.pack_forget()
             self._extract_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
+        # A RUN THAT BORROWED THE FOOTER KEEPS IT: every branch above packs
+        # the row the TAB owns, and a flash started from another tab is
+        # walking a ladder that is not that one.  Last word, after them all.
+        if getattr(self, "_running", False) \
+                and getattr(self, "_borrowed_row", None):
+            self.show_phase_row(self._borrowed_row)
 
         # Warn (amber top banner) if the source image these assets came from
         # has since changed on disk — only on the asset-editing tabs.
@@ -16037,6 +16136,7 @@ class MainWindow:
         self._configure_tab("Emulate JJP", getattr(caps, "emulate_jjp", False))
         self._configure_tab("Emulate Spike1",
                             getattr(caps, "emulate_spike1", False))
+        self._configure_tab("Multi-boot", getattr(caps, "multiboot", False))
         # The Mod Pack tab is shared, but the "Transfer Mods to New Version"
         # section only fits plugins whose vendor re-lays-out the card across
         # versions (Stern) — show it only for those, hide it for the rest.
@@ -19802,7 +19902,7 @@ class MainWindow:
         if self._help_window is not None:
             self._help_window.refresh(tab_name)
 
-    def _open_flash_dialog(self):
+    def _open_flash_dialog(self, initial_image=None):
         """Open the two-section Build / flash modal.
 
         Section 1 builds a fresh image (the Write tab's normal Build, path
@@ -19811,7 +19911,10 @@ class MainWindow:
         testing on the machine was always a two-step).  The dialog hands the
         choice to the app's ``on_build_flash`` / ``on_flash_image``
         callbacks, which run the pipelines through the normal status area.
-        Refuses while a run is in flight (the status area is busy)."""
+        Refuses while a run is in flight (the status area is busy).
+
+        ``initial_image``: a finished image handed in by another tab (the
+        Multi-boot tab's card) - the dialog then opens flash-only on it."""
         if self._on_flash_image is None:
             return
         if self._is_running():
@@ -19842,6 +19945,13 @@ class MainWindow:
         # just built is the overwhelmingly common case (feedback batch 8).
         initial = target if (target and os.path.isfile(target)) else None
         mfr_key = getattr(self._current_mfr, "key", "")
+        choices = self._saved_flash_choices.get(mfr_key)
+        if initial_image and os.path.isfile(initial_image):
+            # Item 90: a card handed in by the Multi-boot tab.  Flash THAT
+            # file, and open flash-only - the build section would build the
+            # Write tab's image, which is not the card that was just made.
+            initial = initial_image
+            choices = {"build": False, "write": True}
         from .flash_dialog import FlashImageDialog
         FlashImageDialog(
             self._tk_root(),
@@ -19854,7 +19964,7 @@ class MainWindow:
             can_build=can_build,
             cannot_build_reason=reason,
             has_pending_changes=self._has_pending_write_changes(),
-            initial_choices=self._saved_flash_choices.get(mfr_key),
+            initial_choices=choices,
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(k, c))
 
     def _open_read_card_dialog(self):
@@ -20929,6 +21039,7 @@ class MainWindow:
     def set_phase(self, index, mode="extract"):
         labels = (self._extract_phase_labels if mode == "extract"
                   else self._emulate_phase_labels if mode == "emulate"
+                  else self._multiboot_phase_labels if mode == "multiboot"
                   else self._write_phase_labels)
         c = THEMES[self._current_theme]
         for i, lbl in enumerate(labels):
@@ -20944,14 +21055,101 @@ class MainWindow:
     def reset_steps(self, mode="extract"):
         phases = (self._extract_phases if mode == "extract"
                   else self._emulate_phases if mode == "emulate"
+                  else self._multiboot_phases if mode == "multiboot"
                   else self._write_phases)
         labels = (self._extract_phase_labels if mode == "extract"
                   else self._emulate_phase_labels if mode == "emulate"
+                  else self._multiboot_phase_labels if mode == "multiboot"
                   else self._write_phase_labels)
         c = THEMES[self._current_theme]
         for lbl, name in zip(labels, phases):
             lbl.configure(text=f"○ {name}", foreground=c["gray"])
         self._progress_bar["value"] = 0
+
+    def set_multiboot_phase(self, index, total=None, status=None):
+        """The Multi-boot tab's footer: light its stages as a run walks
+        them, and move the bar with them.  ``index`` is the stage now
+        running (``-1`` = idle / done, which resets the row); ``total``
+        overrides how many stages this particular run walks, so 'Apply to
+        card' - which only injects and reads back - fills the bar honestly
+        instead of stopping a quarter of the way along.
+
+        ``index`` MAY BE FRACTIONAL - 1.34 is "a third of the way through
+        stage 1".  The chips light one stage at a time and take the whole
+        number; the BAR takes the fraction, which is what turns a bar that
+        jumped four times an hour into one that moves (David, on a build of
+        three images: "I have no idea what\u2019s going on or when it\u2019s
+        supposed to be done").  A fraction rather than a second argument
+        because this callback is stubbed in several places, and an extra
+        keyword would have had to be threaded through every one of them.
+
+        The one seam the panel drives; it holds no widget of the footer's."""
+        self._footer_owner = "multiboot"
+        n = len(self._multiboot_phases)
+        if index is None:
+            self.reset_steps(mode="multiboot")          # nothing has run
+        elif index < 0:
+            self.set_phase(n, mode="multiboot")         # every stage done
+            self._progress_bar["value"] = 100
+        else:
+            self.set_phase(min(int(index), n - 1), mode="multiboot")
+            span = max(1, total or n)
+            self._progress_bar["value"] = min(100, int(100.0 * index / span))
+        if status:
+            self.set_status(status)
+
+    #: Which tab owns which chip row in the footer.  Everything not named
+    #: here shows the Extract ladder; the tabs mapped to None show no row at
+    #: all (a read-only browse has no pipeline to walk).
+    PHASE_ROW_BY_TAB = {
+        "Write": "write",
+        "Emulate": "emulate", "Emulate JJP": "emulate",
+        "Emulate Spike1": "emulate",
+        "Multi-boot": "multiboot",
+        "Replace Audio": None, "Replace Video": None,
+        "Replace Images": None, "Replace Text": None,
+        "Partition Explorer": None, "Default Settings": None,
+    }
+
+    def _phase_row_for_tab(self):
+        """The chip row the SELECTED tab owns - what the footer goes back to
+        when a run that borrowed it finishes."""
+        key = self._current_tab_key()
+        return self.PHASE_ROW_BY_TAB.get(key, "extract")
+
+    def show_phase_row(self, mode, borrow=False):
+        """Show one chip row in the footer and hide the rest.
+
+        THE ROW FOLLOWS THE RUN, NOT ONLY THE TAB.  It used to be chosen by
+        the selected tab alone, which is right until a run started on one tab
+        walks a ladder that belongs to another: flashing a card from the
+        Multi-boot tab left its Media / Copy / Inject / Verify chips sitting
+        there, all four green from the build that had just finished, while
+        the write pipeline walked Check / Write / Flush underneath a row
+        nobody could see (David, watching 'Writing image to SD card...' under
+        four finished multi-boot chips: "the progress bar status checkpoint
+        need to be changed to the 'write' ones while i'm writing an image").
+        ``borrow=True`` marks the row as the RUN's until the run ends, so
+        switching tabs mid-flash does not hide the ladder being walked;
+        ``set_running(False)`` clears that and hands the footer back."""
+        if borrow:
+            self._borrowed_row = mode
+        frames = {
+            "extract": getattr(self, "_extract_phases_frame", None),
+            "write": getattr(self, "_write_phases_frame", None),
+            "emulate": getattr(self, "_emulate_phases_frame", None),
+            "multiboot": getattr(self, "_multiboot_phases_frame", None),
+        }
+        for name, frame in frames.items():
+            if frame is None:
+                continue
+            try:
+                if name == mode:
+                    frame.pack(fill=tk.X, before=self._progress_bar)
+                else:
+                    frame.pack_forget()
+            except tk.TclError:                         # pragma: no cover
+                pass
 
     def set_write_phases(self, phases):
         """Swap the Write phase row to an arbitrary ``phases`` tuple and reset
@@ -21141,6 +21339,10 @@ class MainWindow:
             # Unconditional: restores the Flash opener whether or not this run
             # was a flash (no-op otherwise).
             self.set_flash_running(False)
+            # ...and the footer goes back to the tab that is open, whether or
+            # not this run borrowed it (see show_phase_row).
+            self._borrowed_row = None
+            self.show_phase_row(self._phase_row_for_tab())
             # Revert button tracks the change count, not a blanket re-enable —
             # disabled when there's nothing to revert (see _update_revert_btn_state).
             self._update_revert_btn_state()
@@ -21825,6 +22027,13 @@ class MainWindow:
             _cv = getattr(self, _attr, None)
             if _cv is not None:
                 _cv.configure(highlightbackground=c["border"])
+
+        # The Multi-boot tab's images table is a grid of raw tk widgets
+        # (item 90's ImageTable, not a ttk.Treeview), so its colours do not
+        # follow the ttk styles above - it must be told.
+        _mb = getattr(self, "_multiboot_panel", None)
+        if _mb is not None and hasattr(_mb, "apply_theme"):
+            _mb.apply_theme(c)
 
         if hasattr(self, "_compare_tree"):
             # The rows a double-click can open, in the same hue every other

@@ -1375,6 +1375,142 @@ HELP_CONTENT = {
          "cards' compiled defaults — a machine's live settings and scores "
          "are in its own memory, not on the card."),
     ],
+    "Multi-boot": [
+        ("What it does",
+         "Builds ONE SD card that carries several complete Spike 2 game "
+         "images and shows a menu at power-up: the flippers move the "
+         "highlight, START boots the highlighted image, and a countdown "
+         "boots the remembered choice by itself. Stock code and a custom "
+         "build (or two builds) live on the same machine without swapping "
+         "cards. The first image in the list is the primary — its boot "
+         "files are the card's, and the machine falls back to it if the "
+         "menu ever fails."),
+        ("The tab, top to bottom",
+         "One column, and it never rearranges itself under the window: the "
+         "card path first, with Load card, Browse… and New card beside it, "
+         "because reading a card you already built is usually the first "
+         "thing you do here. "
+         "Then the PREVIEW, the full width of the tab — the boot menu "
+         "drawn by the selector itself. Then the IMAGES TABLE under it, "
+         "one row per image. Then one bar: Menu settings… on the left, four "
+         "actions on the right — Apply to card, Build & verify, Flash to SD "
+         "card… and Run in emulator — and the status under them. There is "
+         "nothing else on that bar: everything it used to hide behind a "
+         "More ▾ button the tab now either does by itself or does not need. "
+         "Everything the tools print goes to the Log at the foot of the "
+         "window, beside the other tabs', and the footer's stages and "
+         "progress bar are this tab's own while you are on it."),
+        ("The card path, and the three buttons beside it",
+         "The path box IS the card this tab is pointing at, and it means "
+         "both things a card path can mean. A path with a card already at "
+         "it is one you can read: Load card fills every field from it, and "
+         "the tab is then editing THAT card. A path with nothing at it yet "
+         "is where Build & verify will write a new one. Browse… covers "
+         "both — it takes a card that exists and a name that does not — and "
+         "picking an existing card there reads it straight away (it asks "
+         "first if you have unsaved changes, and answering no leaves the "
+         "box alone). Typing never reads a card, because on the way to "
+         "typing one name you pass through another that exists. The line "
+         "under the buttons always says which of those two you are in, and "
+         "what the button above it would do about it. Point the box "
+         "somewhere else while a card is loaded and the tab simply stops "
+         "claiming to be editing it — nothing is thrown away, and typing "
+         "that path back picks it up again. New card is the one way to "
+         "empty the tab; clearing the path does not, because people clear "
+         "a path to retype it. The whole form — the path, the images and "
+         "the menu — comes back the way you left it on the next launch, "
+         "per project, the way the Emulate tab's card does; it comes back "
+         "OUT of editing mode, and nothing is read or run to restore it."),
+        ("The images table",
+         "One row per image, in the order the menu will list them, and "
+         "each row carries that image's own settings: its title and "
+         "subtitle, its picture, its animation, its music, the sound that "
+         "plays when it is chosen, and its game code version where that is "
+         "known. The last row is dim and has a +: click it to add an "
+         "image. Every row ends in four icons that act on THAT row — ✎ "
+         "opens it, − takes it off the card, ▲ and ▼ move it (an outlined "
+         "arrow means that row cannot go further that way). A "
+         "double-click or Enter opens a row too, and a right-click offers "
+         "the same five commands. The line under the table names the .raw "
+         "the selected image was copied from."),
+        ("One image's text and media",
+         "✎ (or a double-click on the row) opens that image: title, "
+         "subtitle, Art (the picture on its card in the menu — auto = the "
+         "game's own logo, pulled off the image, or a frame of a video at "
+         "a second you choose), Animation (auto = the attract clip, or a "
+         "GIF or clip of your own, with its start, length and frame rate) "
+         "and Music, an optional WAV loop while it is highlighted."),
+        ("Menu settings",
+         "The button on the action bar opens everything that belongs to "
+         "the MENU rather than to one image, and the line beside it "
+         "already says what those are: the move and confirm sounds (auto "
+         "pulls a click and a stinger from the primary image, synth "
+         "generates tones), the volume, the countdown (0 = wait for "
+         "START), which image is highlighted at power-up, the validator "
+         "bypass and the WSL path of the built selector."),
+        ("The preview",
+         "It redraws itself. Change anything — a title, the countdown, the "
+         "art, the highlighted image — and about a third of a second after "
+         "you stop, the selector draws that frame again under qemu. A text "
+         "change costs one snapshot; only a media change makes the media "
+         "be rendered again, and that is cached. It scales with the "
+         "window, and it never greys the tab while it is drawing. "
+         "Selecting a row in the table points it at that image. It is the "
+         "same media the build will use, so the card carries exactly what "
+         "you previewed. It draws itself when you open the tab and after "
+         "every change, so there is nothing to press."),
+        ("The flippers, the animation and the sound",
+         "The two flipper buttons under the picture are the machine's: "
+         "they move the highlight one card and wrap round at the ends, "
+         "exactly as the flippers on the lockdown bar do, and the left and "
+         "right arrow keys do the same once you have clicked the picture. "
+         "Frame steps through the highlighted image's animation and Play "
+         "runs it — the whole animation is drawn in one go and then played "
+         "from memory at the clip's own frame rate. Sound plays what the "
+         "menu plays: the highlighted image's music loop, and the move "
+         "sound on every flipper press, at the volume in Menu settings. It "
+         "starts off — nothing opens a sound device until you tick it — "
+         "and the sounds are the prepared media's own. While it is off the "
+         "preview renders pictures and music only, so ticking it is also "
+         "what asks for the move and confirm sounds: the media is prepared "
+         "again in full and the sounds arrive when that run finishes. The "
+         "picture's right-click menu also plays the highlighted image's own "
+         "confirm sound, which is the one sound you cannot otherwise hear "
+         "before the card is written."),
+        ("Bypass game validation",
+         "Ticked by default, and leave it so: with more than one image on "
+         "a card the machine's validator can fail them (GAME VALIDATION "
+         "ERROR), because the images share one grade state. The bypass "
+         "neuters the validator in every image on the card — a four-byte "
+         "patch at the validator's entry, with that image's package index "
+         "record refreshed. A card that is already built is repaired by "
+         "Apply to card: with the box ticked, Apply patches any image on "
+         "the card that is still unpatched, and reads the card back "
+         "afterwards to say so — no rebuild, and no separate command."),
+        ("Apply to card, or Build & verify",
+         "After Load card the tab is editing THAT card: every field came "
+         "off it, and the status line says which of the two things can "
+         "happen. Apply to card rewrites the menu in place with one inject "
+         "— seconds, no copy — and is the green button while that is what "
+         "you want; it is live only while the path box still names the card "
+         "the form was read from. Adding, removing, reordering or replacing "
+         "an IMAGE is the one thing an inject cannot do: that needs Build & "
+         "verify, which writes a whole new card image (point the path box "
+         "somewhere else first) and then verifies every copied range, every "
+         "file system and the injected selector. Reload card re-reads the "
+         "card, which is how you resync after something else changed it and "
+         "how you throw unapplied edits away. The sentence beside the "
+         "status line says which Stern card size the images fit, before a "
+         "byte is written: the tab asks the tool for it by itself whenever "
+         "the image list changes, so it is never a stale answer from the "
+         "last time somebody thought to check."),
+        ("Flash and run",
+         "Flash to SD card… opens the app's Build / flash dialog on the "
+         "finished image; Run in emulator starts the Emulate tab on it "
+         "with Boot selector ticked, so the same menu appears in the game "
+         "window here first. Everything runs under WSL and reports into "
+         "the Log at the foot of the window, tagged [multi-boot]."),
+    ],
 }
 
 # The Image Info WINDOW (the "Info" button beside the Extract / Write image

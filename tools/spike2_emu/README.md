@@ -11,13 +11,13 @@ The rootfs is the OS partition and carries no title of its own; each game is a
 directory under `games/`. `PAD_GAME` picks one:
 
 ```bash
-PAD_GAME=turtles_pro watch.sh
+PAD_GAME=<title> watch.sh          # the directory's name under games/
 ```
 
 ## Straight off the card, with nothing extracted
 
 ```bash
-PAD_CARD=images/Stern/spike2/jaws_le-1_02_0.Release.16G.sdcard.raw watch.sh
+PAD_CARD=/path/to/<card>.sdcard.raw watch.sh
 ```
 
 `cardmount.sh` puts the card's games partition on a **read-only FUSE mount** and
@@ -70,6 +70,273 @@ The set names the card it was built from. A file in it that the booted card
 does not have **fails the run** rather than being skipped: it means the set was
 built against a different card, and half of one build over half of another is
 not a card anybody should be listening to.
+
+## Boot selector (item 90)
+
+```bash
+PAD_CARD=/path/to/<multi-image card>.raw watch.sh
+```
+
+**The card decides, not a flag.** A **multi-image card** (`mkmulticard.py`:
+Stern's p1/p2, the primary's games partition as p3, each extra image's games
+partition appended as p7, p8...) boots into a menu on the machine, and it
+boots into the same menu here without being asked to. `PAD_SELECT` is a
+**three-way switch** and `padpath.sh`'s `pad_select_wanted` is the only thing
+that reads it:
+
+| `PAD_SELECT` | what happens |
+| --- | --- |
+| unset (the default) | **ask the card** - `parts.py --multiboot <card>`, the one definition of "this card boots into a menu": the rootfs holds `/usr/local/codeselect/codeselect` **and** its `images.conf` names two or more images. `yes` = exit 0, `no` = 1, `unknown` (not a card, no debugfs) = 2 and is treated as no, out loud. No `PAD_CARD` at all = no menu and no probe. |
+| `1` | show the menu whatever the card looks like |
+| `0` (also `no`/`off`/`false`) | do not, whatever the card looks like |
+
+`watch.sh` asks once, at the top of the run, prints what was decided and why,
+and exports the resolved `1`/`0` to `run_game.sh` - so the menu that comes up
+and the menu that was decided on can never be two different answers.
+
+**A card can never make the emulator refuse to start.** The provenance travels
+with the answer (`PAD_SELECT_AUTO=1` when the *card* decided), and every gate
+that used to be fatal now reads it: an unbuilt selector, a missing games
+partition, a partition that will not mount, or fewer than two games trees once
+`parts.py --list-games` has resolved them all say so and **boot the primary
+image without a menu**. An explicit `PAD_SELECT=1` still refuses loudly - it
+asked for something it did not get.
+
+What a menu run does: `run_game.sh` mounts every games partition
+(`cardmount.sh --part N`, one `~/card/<label>.pN` per extra, sharing the
+primary's cache copy), writes the menu to `$ROOT/dump/codeselect.conf` (the
+card's own `/usr/local/codeselect/images.conf` names, `default=`, `timeout=`
+and sound keys when it carries them - read the way `conf.c` reads them, so
+`image = /dev/...` with spaces counts), and chroots
+`/usr/local/codeselect/codeselect` - the ARM selector, drawing in the game
+window through the GL bridge, no shim - before the game. Arrow keys are the
+flippers and move the highlight, `1` (START) or Space (ACTION) confirms, and
+the countdown boots the highlighted image by itself. The choice lands in
+`$ROOT/dump/select.choice`, the selector's log in `$ROOT/dump/codeselect.log`,
+the remembered highlight in `$ROOT/data/codeselect.last`; a non-primary choice
+is a second bind over `games/<title>`, and the game then execs exactly as on
+a plain card run. `[select]` lines reach the event pane; `dump/selecting` is
+the flag that keeps `watch.sh` (and autoattract) from reading the menu phase
+as a dead game.
+
+Knobs: `PAD_SELECT` as above; `PAD_SELECT_TIMEOUT` is the countdown in seconds
+and **overrides the card's own `timeout=`** (which is what is used when the
+variable is unset; 30 when neither says, `0` waits for ever);
+`PAD_CARD_CACHE=0` runs a WSL-local image without the 14 GB cache copy.
+`buildselect.sh` builds the selector into `$ROOT` (`ensurebuild.sh`'s
+`pad_ensure_select` does it on a menu start; it refuses the run only when the
+menu was *asked* for); `alive.sh` counts it as `selector (codeselect)`. In the
+app, the Emulate tab's **Boot selector** box shows what the card answered and
+is an override: leave it alone and the rig asks the card again at Start, move
+it and the tab says `PAD_SELECT=1`/`0` out loud. A launch from a save slot
+always sends `0` - the save already chose its image.
+
+### N images: the two card layouts
+
+The card's own kernel exposes `/dev/mmcblk0p1..p7` only, so one extra games
+partition is all a card can carry as a partition. `mkmulticard.py --layout`
+(default `auto`) chooses:
+
+- **`parts`** (one extra): the extra's games partition is p7 verbatim; the
+  selector's device is `/dev/mmcblk0p7`, the rig's token `p7`.
+- **`--layout multi`** (two or more): p7 is ONE ext4 partition (label
+  `multi`) holding `img1/`, `img2/`, ... `imgK/`, each the complete file tree
+  of that extra's games partition (`spk/`, the title dir, the
+  `game`/`conagent`/`data` symlinks) - built with `debugfs rdump` from the
+  read-only source into a scratch tree, `mke2fs -d` with the stock p3's
+  feature set, sized to the sum of the extras' used bytes + 10% + 256 MiB.
+  The devices are `/dev/mmcblk0p7:img1`, `/dev/mmcblk0p7:img2` ...
+  (`select.sh` mounts p7 at `/mnt/multi` and binds the subdirectory over
+  `/games`); the rig's tokens are `p7:img1`, `p7:img2` ... `parts.py
+  --list-games` prints one line per TREE with the subdirectory as a fifth
+  field (`7 15353856 7861174272 <title> img1`), `cardmount.sh --part 7`
+  answers `<mount>/img1` for the partition (one component, so the teardown
+  still finds the mount), and `run_game.sh` binds `<mount>/imgN/<title>` over
+  `games/<title>` for the chosen tree.
+
+### Media: art, animations, sounds
+
+`mkmulticard.py build ... --media-dir DIR` reads `DIR/media.json` (written
+by `selectmedia.py prepare`: per image an art PNG, an animated GIF and a
+music WAV, any of them null, plus `sound_move`, `sound_confirm`, `volume`)
+and stages only the referenced files into the card's
+`/usr/local/codeselect/media` (flat, `^[A-Za-z0-9._-]+$`, PNG <= 1360x768,
+GIF <= 1.5 MB / 512x288 / 30 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the set
+<= 20 MB - a wrong file refuses the build before a byte is copied). The
+`images.conf` it writes carries the six-field image lines
+(`image=<device>|<title>|<subtitle>|<art>|<anim>|<music>`) and the
+`sound_move=` / `sound_confirm=` / `volume=` (a number, or `machine` plus a
+`machine_volume=` line with `--machine-volume`: the menu then follows the
+machine's own MASTER VOLUME SETTING) / `mixer_volume=` keys; `inject`
+without `--media-dir` carries an existing media directory and those fields
+through, with it the media directory is replaced.
+
+In the rig, `run_game.sh` pulls the card's media out of its rootfs with
+`parts.py --rootfs-dir /usr/local/codeselect/media` (debugfs, no mount) into
+`$ROOT/dump/media` before the selector runs, forwards the card's
+`sound_move`/`sound_confirm`/`volume`/`machine_volume`/`mixer_volume` keys into
+`dump/codeselect.conf`, and passes `--media /dump/media`.
+**`PAD_SELECT_MEDIA=<host dir>`** hands the selector a directory of your own
+instead (art and sounds without rebuilding a card). Every media failure
+inside the selector is non-fatal: the menu still draws, the card still boots.
+
+**Hearing the selector in the rig: `PAD_AUDIO=1`.** David's default runs
+are muted (`PAD_AUDIO=0`, no player, `PAD_AUDIO_PLAY` unset - the selector
+logs `audio: none`); with `PAD_AUDIO=1` the selector inherits
+`PAD_AUDIO_PLAY`/`PAD_AUDIO_FMT` from `watch.sh`, writes `44100 2` to the
+format file, streams into the FIFO and closes it before the game starts, so
+`~/padaudio.log` shows `guest reports 44100 Hz x 2 ch` before `[select]
+chose`. To run such an E2E with SILENT speakers, mute the Windows player
+rather than the run: `padplay.py` re-reads the JSON named by
+`PAD_AUDIO_CTL` every 250 ms (`{"gain": 0.0-1.0, "muted": true|false}` -
+the app's Emulate-tab knob writes it as
+`%APPDATA%\pinball_decryptor\audio_ctl.json`, `_write_audio_ctl` in
+`pinball_decryptor/gui/emulate_tab.py`), so
+`PAD_AUDIO=1 PAD_AUDIO_CTL=/mnt/c/Users/<you>/AppData/Roaming/pinball_decryptor/audio_ctl.json`
+with `{"gain": 1.0, "muted": true}` in that file plays everything into the
+FIFO chain and nothing out of the speakers (the `[padplay] fed/played`
+counters and the `[select]`/`audio:` lines are the oracle); flip `muted` to
+`false` in the file to hear it, no restart needed.
+
+### Same game code version on every image
+
+**Use the same game code version for every image on the card.** `plan`,
+`build`, `verify` and `inspect` all print a VERSION table - one line per image:
+index, device, title directory, game code version, where that answer came from,
+node board firmware - and `build` **refuses** a card whose images are not the
+same game code. The refusal *is* the warning; it explains the cost and ends
+with the flag that overrides it.
+
+```
+== game code versions
+idx device                 title                    version   read from              node firmware
+0   /dev/mmcblk0p3         turtles_pro              1.59.0    spk index + game ELF   1.33.0 (17 hex)
+1   /dev/mmcblk0p7         turtles_pro              1.58.0    spk index + game ELF   1.19.0 (15 hex)
+```
+
+What each case costs:
+
+- **Same title, same version — nothing.** This is the normal card: David's own
+  is stock TMNT 1.59 plus a 1987 re-skin of that same 1.59, two game ELFs four
+  bytes apart. Nothing is reported and nothing is lost.
+- **Same title, different version — three specific things.** Operator settings,
+  audits and scores are *not* on the card: they live in the node board's NVRAM
+  keyed by the **SHA1 of each setting's menu caption**, not by its number, so a
+  caption both builds spell the same way carries over untouched (11 of 11
+  measured across a TMNT 1.59 → 1.58 → 1.59 round trip, with 202 of the 228
+  shared captions renumbered in between). What *does* break: a setting only one
+  build has falls back to that build's compiled default whenever you boot the
+  other (43 settings of 1.59 and 13 of 1.58 on that pair); a setting Stern
+  **renamed** reverts, because the new caption hashes to a slot never written
+  (3 on that pair); and the store keeps only **three** generations, so two boots
+  of the other build erase a build-exclusive value for good.
+- **Different node board firmware — a service call.** Each image ships its own
+  `*-<M_mm_p>.hex` node firmware set (`-1_33_0.hex` on TMNT 1.59, `-1_19_0.hex`
+  on 1.58) and the machine records the running build's node firmware version at
+  every boot, so a card whose images disagree can **reflash the node boards on
+  every swap**. This is checked on its own line: two images can share a game
+  code version and still differ here, and that alone is refused.
+- **Different titles — everything.** Settings, audits and high scores are stored
+  per title; nothing carries at all, and each title wants its own node boards,
+  coils and switch table. Reported as its own, larger warning.
+
+```bash
+mkmulticard.py build ... --allow-version-mismatch
+```
+
+is the one override, and it covers all three (version, node firmware, title):
+they are the same question - *these images are not the same code, build anyway?*
+`plan` never refuses (it writes nothing); it prints the same table and then
+exactly what `build` would have said. `verify` and `inspect` report a mismatch
+and never fail on it: a card built with the flag is a card its owner chose.
+
+**Where the version comes from** - read off each image, never guessed from a
+file name, cross-checked between:
+
+| source | what it is | notes |
+| --- | --- | --- |
+| `/spk/index/<pkg>-<M_mm_p>.sidx` | Stern's own package name (`turtles_pro-1_59_0.sidx`) | the authority: all three components, and what the code updater speaks. A bare `<pkg>.sidx` symlink sits beside it on some cards; it names no version and is skipped |
+| the game ELF's build-identity record | a run of pointers to the game code, the model name(s), the release date and (on most builds) the title directory, followed by the version as a **uint16** — high byte major, low byte minor | the cross-check. MAJOR.MINOR only: `turtles_le` 1.58.**1** and `turtles_pro` 1.58.**0** both hold `0x013a`. Located on all 46 cards in the library and agreeing with the package name on 45 — `dungeons_and_dragons_le` 1.00.0's record says `0.01`, which is reported as a disagreement rather than resolved |
+| the title directory's `*-<M_mm_p>.hex` | the node board firmware version | a **different** number from the game code version, so it gets its own column and is never used as one |
+| `/data`'s `nv/<title>/NVM` | the machine's own record | `/data` is empty on all 49 cards in the library (it is written on the machine, not by the factory), so nothing here depends on it |
+
+`build.json` records each image's `title_dir`, `version` and `node_fw_version`
+too, so a card loaded back says what it was built from; `inspect` re-reads the
+live truth off the card and flags any disagreement with that record.
+
+### Loading a finished card back
+
+A card carries what it takes to re-open its own menu in an editor. Beside
+`images.conf` - **never** inside `media/`, never in the media budget, never
+opened by the selector - `build` and `inject` stage two small JSON files into
+`/usr/local/codeselect/`:
+
+- **`build.json`** `{"tool", "version", "written", "layout", "images":
+  [{"device", "source", "title", "subtitle", "art", "anim", "music",
+  "title_dir", "version", "node_fw_version"}], "timeout", "default", "volume",
+  "machine_volume", "mixer_volume", "sound_move", "sound_confirm"}`. `source` is the absolute path of the `.raw` that image was
+  built from - the one thing `images.conf` cannot hold and a rebuild needs. An
+  `inject` given no `--primary`/`--extra` reads the card's own `build.json`
+  first and carries the old sources through, **by device**: an inject must
+  never lose provenance. (`inject --primary P --extra E` RECORDS those paths
+  and reads nothing from them.)
+- **`media.json`** - the manifest `selectmedia.py prepare` wrote for the staged
+  set, **verbatim**, so the art/animation *spec strings* (`auto@20:2:8`,
+  `/x/clip.mov@21`) survive on the card. `inject` with `--media-dir` restages it
+  from that directory; without it the card's own is carried through byte for
+  byte. A card with no media carries no `media.json`.
+
+```bash
+mkmulticard.py inspect --card CARD [--json] [--media-out DIR]
+```
+
+reads it all back with no mounts and no writes: the table, the menu, the
+provenance, the media list and every games tree's `title_dir` and validator
+state. The default is a human table; `--json` prints ONE object on stdout
+(`card`, `size`, `layout`, `partitions`, `images[]` with `art_source` /
+`anim_source` / `source` / `source_exists` / `title_dir` / `bypass` /
+`version` / `version_source` / `sidx` / `sidx_version` / `elf_version` /
+`node_fw` / `node_fw_version` / `built_version`, the globals, `media[]`,
+`has_build_json`, `has_media_json`, `selector`, the ready-made
+`version_mismatch` / `node_fw_mismatch` / `title_mismatch` /
+`unknown_version` sentences (null when the images agree), and `warnings`),
+and `--media-out DIR` extracts the card's media directory +
+`media.json` into `DIR` - the flat shape `--media-dir` reads back, so a loaded
+menu can be previewed and re-injected without a rebuild. A card written before
+the sidecars existed still loads: the unknown fields degrade to `null` with a
+warning. Exit 0 with the report; exit 2 only when the file is not a Spike 2
+card or carries no selector.
+
+That is the loop the app's Multi-boot tab runs on: `inspect --json --media-out`
+fills the fields, then `inject` (seconds) writes back anything the menu owns -
+titles, subtitles, art/animation/music, sounds, volume, countdown, default.
+Adding, removing, reordering or replacing an image is a partition change and
+still needs a full `build`.
+
+### The validator bypass
+
+A modified image trips Stern's game self/asset validator (`GAME VALIDATION
+ERROR / UPDATE SD CARD`). `mkmulticard.py build ... --bypass-validation`
+neuters it in EVERY games tree on the output card the way the app's Write
+does (`plugins/stern/valpatch.py`: `validation_exec` found by signature,
+`bx lr` at its entry, that tree's `.sidx` record of the game file refreshed)
+and prints `validator: bypassed` / `validator: none on this build` per tree;
+`mkmulticard.py bypass --card OUT` applies the same to an existing card in
+place (`--dry-run` only reports) - which is what fixes a card that already
+shows the error, no rebuild. Every partition written into gets an
+`OUT.pN.md5` sidecar and `verify` holds it to that instead of the source,
+and reports `bypass_status: armed|bypassed|absent|unlocated` per tree.
+Measured on a two-image card carrying a stock image and a modified build of
+the same version: the stock tree was ARMED and took 40 bytes (4 + the two
+digests), the modified tree was already bypassed; the `.sidx` HMAC and MD5
+matched the patched ELF afterwards and `verify` PASSed. The tamper *state*
+lives on the machine's board NVRAM, not on the card: a machine that already
+booted an unpatched image may keep its flag until a settings/factory reset.
+
+The hardware side is the same program installed in p2 and hooked into
+`/etc/init.d/game` by `select.sh`, reading the flippers over the node bus and
+remounting `/games` from the chosen partition - `codeselect/DESIGN.md` has the
+card layout, the file formats and the degrade-to-stock rules.
 
 ## Titles
 
@@ -680,7 +947,7 @@ that could be written — running the rig there means running Linux there, and
 
 ```bash
 docker/padbox.sh --build                 # once
-PAD_CARD=~/cards/godzilla.raw docker/padbox.sh watch.sh 30
+PAD_CARD=~/cards/<card>.raw docker/padbox.sh watch.sh 30
 open vnc://localhost:5900                # Screen Sharing; nothing to install
 ```
 

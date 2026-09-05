@@ -398,6 +398,25 @@ Metadata is never identity - two cards were found with files equal in path, size
 mtime and different in content.  The multi layout's p7 grows on demand up to the Stern
 size class.  Full detail in `tools/spike2_emu/README.md`, "Updating a card in place".
 
+## The compact layout (item 95) - opt-in, default off
+
+A third layout, `store`, chosen only by `--layout store` (the app's tick, off by default):
+the primary's own p3 grown with `resize2fs` on the loop device, the extras inside it as
+`img1/`, `img2/` ... beside the primary's tree, and one `.blobs/<sha256>.<mode>.<uid>.<gid>`
+store every regular file of every tree is a hardlink into - one inode per unique (content,
+mode, owner).  The primary is adopted by linking (its inode numbers stay the source's; zero
+bytes rewritten); each extra writes only the blobs the store lacks.  p5/p6 are re-laid after
+p3; no p7.  Device form `/dev/mmcblk0p3:img1`: `select.sh`'s `<dev>:<sub>` branch handles it
+unchanged (umount /games, mount p3 at /mnt/multi, bind the subtree).  David's three TMNT
+images: 18 GB -> about 8 GB.  `update` converges the store (a held blob is linked, never
+written; orphans collected); `verify` holds the store to its invariants (names, attrs, link
+counts = 1 + references, every file a link, no orphan/tmp, full: every blob hashes to its
+name).  The bypass runs through the mount and the patched game is adopted under its own key.
+Never USB-update a store card (a Stern update writes through shared blobs); `bypass` refuses
+one.  Hardware-only proofs, until which the tick says experimental: Stern's update/spk layer
+tolerating `.blobs/` and `img1/` at `/games`' root, and the same-device remount.  Detail in
+`tools/spike2_emu/README.md`, "The compact layout".
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both

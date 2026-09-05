@@ -55,6 +55,14 @@ subdirectory as a fifth field (`7 15353856 7861174272 <title> img1`), and
 the selector's device token for it is `p7:img1`. A plain games partition
 prints four fields, as before.
 
+THE STORE LAYOUT (item 95, opt-in): mkmulticard.py --layout store grows the
+primary's OWN p3 and puts the extras inside it as img1/, img2/ ... BESIDE the
+primary's spk/ and title directory (one .blobs/ store under them holds every
+file once). So a games partition that passes the strict rule itself may
+ALSO hold imgN trees: `--list-games` prints the partition's own line and
+then one per imgN that passes the rule (`3 <lba> <offset> <title> img1`),
+token `p3:img1`. An imgN directory without spk and a game is not listed.
+
 **`--multiboot` IS THE ONE DEFINITION OF "THIS CARD BOOTS INTO A MENU"**, and
 it exists because that question had grown three answers. David, 2026-09-02:
 "i shouldn't have to check off 'boot selector' in the emulate tab. if it has
@@ -205,12 +213,29 @@ def _title_dirs(path, offset, sub="/"):
     base = sub.rstrip("/")
     out = []
     for d in sorted(_dirs(path, offset, sub) or []):
-        if d in ("lost+found", "spk"):
+        if d in ("lost+found", "spk") or MULTI_SUBDIR.match(d):
+            # an imgN beside the root's own spk is a store layout's tree (item
+            # 95), never a title of THIS tree - it holds a `game` link too
             continue
         inside = _ls(path, offset, base + "/" + d)
         if inside and "game" in inside:
             out.append(d)
     return out
+
+
+def _store_subdirs(path, offset):
+    """The imgN directories at the root of a games partition that HAS its
+    own /spk - the store layout's marker (item 95). Empty for a partition
+    without /spk (that is _multi_subdirs' case) and for one without them."""
+    names = _ls(path, offset)
+    if not names or "spk" not in names:
+        return []
+    subs = []
+    for d in _dirs(path, offset) or []:
+        m = MULTI_SUBDIR.match(d)
+        if m:
+            subs.append((int(m.group(1)), d))
+    return [d for _n, d in sorted(subs)]
 
 
 def _multi_subdirs(path, offset):
@@ -233,7 +258,8 @@ def games_all(path):
     tree, primaries and logicals, in partition order - the strict rule from
     the header: /spk AND a title directory holding `game`. `subdir` is None
     for a whole games partition and 'imgN' for a tree inside the multi
-    layout's p7 (one entry per tree, same idx/lba/offset)."""
+    layout's p7 - or inside a store layout's p3, after the partition's own
+    line (one entry per tree, same idx/lba/offset)."""
     parts = [(idx, ptype, start) for idx, ptype, start, _c in table(path)]
     parts += [(idx, ptype, start) for idx, ptype, start, _c, _e in logical(path)]
     out = []
@@ -243,8 +269,8 @@ def games_all(path):
         titles = _title_dirs(path, start * SECTOR)
         if titles:
             out.append((idx, start, start * SECTOR, titles, None))
-            continue
-        for sub in _multi_subdirs(path, start * SECTOR):
+        subs = _store_subdirs(path, start * SECTOR) if titles else _multi_subdirs(path, start * SECTOR)
+        for sub in subs:
             titles = _title_dirs(path, start * SECTOR, "/" + sub)
             if titles:
                 out.append((idx, start, start * SECTOR, titles, sub))

@@ -44,6 +44,8 @@ HASH_CHUNK = 1 << 20                  # 1 MiB reads: fast on DrvFs, 8 MiB reads 
 ROOM_MARGIN = 64 << 20                # what an update keeps free after itself
 TMP_MARK = ".tmp."                    # a file being written: <name>.tmp.<pid>
 SKIP_ROOT = ("lost+found",)
+BLOBS_DIR = ".blobs"                  # the compact layout's store (item 95): one inode per unique file
+STORE_SKIP = (BLOBS_DIR, ".multiboot", "lost+found")
 
 
 class TreesError(Exception):
@@ -188,6 +190,46 @@ class CardTrees:
                    d.get("written"))
 
 
+# ============================================================================ the blob store
+def blob_key(rec):
+    """The name of a file's blob in the compact layout's store: its content AND its mode,
+    uid and gid - the whole identity a hardlink shares - so the name says everything a
+    verify needs and two files alike in bytes but not in mode are two blobs.  mtime is
+    not part of it: the blob keeps the first writer's."""
+    return "%s.%04o.%d.%d" % (rec.sha256, rec.mode & 0o7777, rec.uid, rec.gid)
+
+
+_BLOB_RE = re.compile(r"^([0-9a-f]{64})\.([0-7]{4})\.(\d+)\.(\d+)$")
+
+
+def parse_blob_key(name):
+    """-> (sha256, mode, uid, gid) or None for a name that is not a blob's."""
+    m = _BLOB_RE.match(name)
+    if not m:
+        return None
+    return m.group(1), int(m.group(2), 8), int(m.group(3)), int(m.group(4))
+
+
+def dedup_costs(manifests):
+    """What each image costs in a store, in order: the bytes of blobs FIRST needed by that
+    image among the images before it (a file repeated inside one tree counts once too) ->
+    (unique bytes per image, shared bytes = sum of tree bytes - sum of unique)."""
+    seen = set()
+    unique = []
+    total = 0
+    for man in manifests:
+        tree = man.tree if hasattr(man, "tree") else man
+        mine = 0
+        for rec in tree.files.values():
+            total += rec.size
+            k = blob_key(rec)
+            if k not in seen:
+                seen.add(k)
+                mine += rec.size
+        unique.append(mine)
+    return unique, total - sum(unique)
+
+
 # ============================================================================ hashing a tree
 class _NoProgress:
     def add(self, n):
@@ -324,13 +366,20 @@ def store_cached(man, cache_dir=None):
 
 
 def source_manifest(path, part_offset, part_size, root_ino=2, sub="", cache_dir=None, progress=None,
-                    force=False, reader_factory=None):
+                    force=False, reader_factory=None, skip=None):
     """The manifest of the games tree at `root_ino` inside the ext4 at `part_offset` of the
     card file `path`: from the cache when the file's stamp + the partition's UUID match,
     else hashed now and cached.  The stamp is taken BEFORE the hash and checked AFTER it:
     a card being written while it is read is discarded (TreesError), never cached.
     -> (SourceManifest, "cached" | "hashed")"""
-    from pinball_decryptor.plugins.stern import ext4 as _ext4    # lazy: the pure parts need no app
+    try:
+        from pinball_decryptor.plugins.stern import ext4 as _ext4    # lazy: the pure parts need no app
+    except ImportError:
+        # run as a script from tools/spike2_emu the app's package is three directories up
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from pinball_decryptor.plugins.stern import ext4 as _ext4
     factory = reader_factory or (lambda f: _ext4.Ext4Reader(f, part_offset, part_size))
     before = source_stamp(path)
     with open(path, "rb") as f:
@@ -340,7 +389,7 @@ def source_manifest(path, part_offset, part_size, root_ino=2, sub="", cache_dir=
             hit = load_cached(before, uuid, sub, cache_dir)
             if hit is not None:
                 return hit, "cached"
-        tree = hash_tree(reader, root_ino, progress)
+        tree = hash_tree(reader, root_ino, progress, skip=tuple(skip) if skip else SKIP_ROOT)
     after = source_stamp(path)
     if not stamps_equal(before, after):
         raise TreesError("%s changed while it was being read (size/mtime moved); run again when it is finished"
@@ -517,6 +566,10 @@ class FsOps:
     def rename(self, a, b):
         raise NotImplementedError
 
+    def link(self, src, dst):
+        """A hard link: `dst` becomes another name for `src`'s inode."""
+        raise NotImplementedError
+
     def write_stream(self, rel, chunks, mode, uid, gid, mtime):
         raise NotImplementedError
 
@@ -582,14 +635,18 @@ class MemOps(FsOps):
     def _parent(self, rel):
         return rel.rsplit("/", 1)[0] if "/" in rel else ""
 
+    def _node(self, e):
+        return e.get("node", e)
+
     def lstat(self, rel):
         e = self.entries.get(rel)
         if e is None:
             return None
-        out = dict(e)
+        out = dict(self._node(e))
+        out["kind"] = e["kind"]
         if e["kind"] == "file":
-            out["size"] = len(e["data"])
-            out["nlink"] = sum(1 for x in self.entries.values() if x.get("ino") == e["ino"])
+            out["size"] = len(out["data"])
+            out["nlink"] = sum(1 for x in self.entries.values() if self._node(x).get("ino") == out["ino"])
         return out
 
     def listdir(self, rel):
@@ -619,11 +676,26 @@ class MemOps(FsOps):
                              "ino": self.next_ino}
         self.next_ino += 1
 
+    def _freed(self, e):
+        n = self._node(e)
+        if e["kind"] == "file" and not any(self._node(x).get("ino") == n["ino"] for x in self.entries.values()):
+            self.free += len(n["data"])
+
     def unlink(self, rel):
         self._tick("unlink " + rel)
         e = self.entries.pop(rel)
-        if e["kind"] == "file" and not any(x.get("ino") == e["ino"] for x in self.entries.values()):
-            self.free += len(e["data"])
+        self._freed(e)
+
+    def link(self, src, dst):
+        self._tick("link %s -> %s" % (src, dst))
+        e = self.entries[src]
+        if e["kind"] != "file":
+            raise OSError(errno.EPERM, "only a regular file can be hard-linked", src)
+        if dst in self.entries:
+            raise OSError(errno.EEXIST, "exists", dst)
+        if self._parent(dst) not in self.entries:
+            raise OSError(errno.ENOENT, "no parent", dst)
+        self.entries[dst] = {"kind": "file", "node": self._node(e)}
 
     def rename(self, a, b):
         """Move an entry - and, for a directory, everything under it (entries are keyed by
@@ -631,9 +703,8 @@ class MemOps(FsOps):
         self._tick("rename %s -> %s" % (a, b))
         e = self.entries.pop(a)
         old = self.entries.pop(b, None)
-        gone = old is not None and old["kind"] == "file"
-        if gone and not any(x.get("ino") == old["ino"] for x in self.entries.values()):
-            self.free += len(old["data"])
+        if old is not None:
+            self._freed(old)
         self.entries[b] = e
         if e["kind"] == "dir":
             pre = a + "/"
@@ -648,20 +719,20 @@ class MemOps(FsOps):
         for c in chunks:
             if len(c) > self.free:
                 # what was written so far stays, as it would on disk
-                self.entries[rel] = {"kind": "file", "data": bytes(data), "mode": mode, "uid": uid, "gid": gid,
-                                     "mtime": mtime, "ino": self.next_ino}
+                node = {"data": bytes(data), "mode": mode, "uid": uid, "gid": gid, "mtime": mtime, "ino": self.next_ino}
+                self.entries[rel] = {"kind": "file", "node": node}
                 self.next_ino += 1
                 self.free -= len(data)
                 raise OSError(errno.ENOSPC, "no space left on device", rel)
             data += c
             self.free -= len(c)
-        self.entries[rel] = {"kind": "file", "data": bytes(data), "mode": mode, "uid": uid, "gid": gid,
-                             "mtime": mtime, "ino": self.next_ino}
+        node = {"data": bytes(data), "mode": mode, "uid": uid, "gid": gid, "mtime": mtime, "ino": self.next_ino}
+        self.entries[rel] = {"kind": "file", "node": node}
         self.next_ino += 1
 
     def set_attrs(self, rel, mode=None, uid=None, gid=None):
         self._tick("attrs " + rel)
-        e = self.entries[rel]
+        e = self._node(self.entries[rel])
         if mode is not None:
             e["mode"] = mode
         if uid is not None:
@@ -674,7 +745,10 @@ class MemOps(FsOps):
 
     # the tests' view
     def read(self, rel):
-        return self.entries[rel]["data"]
+        return self._node(self.entries[rel])["data"]
+
+    def ino(self, rel):
+        return self._node(self.entries[rel])["ino"]
 
     def manifest(self, prefix=""):
         """The tree under `prefix` as a TreeManifest (what a verify would record)."""
@@ -686,9 +760,12 @@ class MemOps(FsOps):
             rel = k[len(pre):]
             if rel.split("/")[-1].find(TMP_MARK) >= 0:
                 continue
+            if not pre and rel.split("/")[0] in STORE_SKIP:
+                continue
             if e["kind"] == "file":
-                man.files[rel] = FileRec(hashlib.sha256(e["data"]).hexdigest(), len(e["data"]), e["mode"], e["uid"],
-                                         e["gid"], e["mtime"])
+                n = self._node(e)
+                man.files[rel] = FileRec(hashlib.sha256(n["data"]).hexdigest(), len(n["data"]), n["mode"], n["uid"],
+                                         n["gid"], n["mtime"])
             elif e["kind"] == "symlink":
                 man.symlinks[rel] = LinkRec(e["target"], e["uid"], e["gid"])
             else:
@@ -771,13 +848,15 @@ def sweep_tmp(ops, prefix=""):
     return n
 
 
-def apply_changes(ops, prefix, changes, new, source, progress=None):
+def apply_changes(ops, prefix, changes, new, source, progress=None, store=False):
     """Apply `changes` (diff_tree's order) to the tree at `prefix` on `ops`, taking bytes
     from `source.chunks(rel)`.  Every write is tmp + rename; nothing is removed before
     every add is done; every step is idempotent (a re-run after a crash converges).
-    -> {"written": n, "bytes": n, "removed": n}."""
+    With `store` (item 95) a file is a HARDLINK to `.blobs/<blob_key>`: a blob the store
+    already holds is linked without a byte read or written, a missing one is written into
+    the store first.  -> {"written": n, "bytes": n, "removed": n, "linked": n}."""
     p = progress or _NoProgress()
-    stats = {"written": 0, "bytes": 0, "removed": 0}
+    stats = {"written": 0, "bytes": 0, "removed": 0, "linked": 0}
     pending_removals = []
     for c in changes:
         rel = _join(prefix, c.rel)
@@ -802,6 +881,24 @@ def apply_changes(ops, prefix, changes, new, source, progress=None):
             tmp = tmp_name(rel)
             if ops.exists(tmp):
                 ops.unlink(tmp)
+            if store:
+                blob = BLOBS_DIR + "/" + blob_key(r)
+                bst = ops.lstat(blob)
+                if bst is not None and st is not None and st["kind"] == "file" and st["ino"] == bst["ino"]:
+                    continue                                # already that very blob
+                if bst is None:
+                    btmp = BLOBS_DIR + "/" + TMP_MARK + blob_key(r) + "." + str(os.getpid())
+                    if ops.exists(btmp):
+                        ops.unlink(btmp)
+                    ops.write_stream(btmp, _metered(source.chunks(c.rel), p), r.mode, r.uid, r.gid, r.mtime)
+                    ops.rename(btmp, blob)
+                    stats["written"] += 1
+                    stats["bytes"] += r.size
+                else:
+                    stats["linked"] += 1
+                ops.link(blob, tmp)
+                ops.rename(tmp, rel)
+                continue
             ops.write_stream(tmp, _metered(source.chunks(c.rel), p), r.mode, r.uid, r.gid, r.mtime)
             ops.rename(tmp, rel)
             stats["written"] += 1
@@ -833,6 +930,54 @@ def apply_changes(ops, prefix, changes, new, source, progress=None):
             ops.rmtree(rel) if st["kind"] == "dir" else ops.unlink(rel)
         stats["removed"] += 1
     return stats
+
+
+def adopt_tree(ops, prefix, manifest):
+    """Make every file of the tree at `prefix` a hardlink into the store WITHOUT rewriting
+    a byte: a file whose blob is not in the store BECOMES the blob (linked into `.blobs`);
+    one whose blob is there is replaced by a link to it (the duplicate inode is freed).
+    The primary's own tree at a store card's root, and a store card built before its record.
+    -> {"adopted": n, "deduped": n, "bytes_freed": n}."""
+    stats = {"adopted": 0, "deduped": 0, "bytes_freed": 0}
+    if not ops.exists(BLOBS_DIR):
+        ops.mkdir(BLOBS_DIR, 0o700, 0, 0)
+    for rel, rec in sorted(manifest.files.items()):
+        full = _join(prefix, rel)
+        st = ops.lstat(full)
+        if st is None or st["kind"] != "file":
+            continue
+        blob = BLOBS_DIR + "/" + blob_key(rec)
+        bst = ops.lstat(blob)
+        if bst is None:
+            ops.link(full, blob)
+            stats["adopted"] += 1
+        elif bst["ino"] != st["ino"]:
+            tmp = tmp_name(full)
+            if ops.exists(tmp):
+                ops.unlink(tmp)
+            ops.link(blob, tmp)
+            ops.rename(tmp, full)
+            stats["deduped"] += 1
+            stats["bytes_freed"] += rec.size
+    return stats
+
+
+def gc_blobs(ops):
+    """Remove every blob no tree links any more (nlink 1: the store's own name) and every
+    half-written one.  -> (n removed, bytes)."""
+    n = nbytes = 0
+    if not ops.exists(BLOBS_DIR):
+        return 0, 0
+    for name in sorted(ops.listdir(BLOBS_DIR)):
+        rel = BLOBS_DIR + "/" + name
+        st = ops.lstat(rel)
+        if st is None or st["kind"] != "file":
+            continue
+        if is_tmp(name) or st.get("nlink", 1) <= 1:
+            ops.unlink(rel)
+            n += 1
+            nbytes += st.get("size", 0)
+    return n, nbytes
 
 
 def _metered(chunks, progress):

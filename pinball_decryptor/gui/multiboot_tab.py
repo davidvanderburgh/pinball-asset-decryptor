@@ -457,6 +457,11 @@ class MultibootForm:
     #: should follow the set volume of the actual machine").  The number
     #: is then only how loud the preview plays here.
     machine_volume: bool = True
+    #: The compact layout (item 95, OPT-IN, default off - David: "it feels
+    #: much riskier than what we already have"): ``--layout store`` stores
+    #: every file the images have in common once.  Off = today's layouts,
+    #: byte for byte what the tool made before the tick existed.
+    compact: bool = False
     timeout: int = 15              # 0 = wait for START
     default: int = 0
     bypass: bool = True
@@ -1371,7 +1376,8 @@ def preview_prepare_args(form, media_dir):
 def plan_args(form):
     """``mkmulticard.py plan``: the layout and whether it fits 16G / 32G.
     Writes nothing."""
-    return [MKMULTICARD, "plan"] + _image_args(form) + ["--layout", "auto"]
+    return ([MKMULTICARD, "plan"] + _image_args(form)
+            + ["--layout", "store" if form.compact else "auto"] + cache_dir_args())
 
 
 def build_args(form):
@@ -1383,7 +1389,7 @@ def build_args(form):
     args = [MKMULTICARD, "build"] + _image_args(form) + [
         "--out", wsl(form.out.strip().strip('"')),
         "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
-        "--layout", "auto",
+        "--layout", "store" if form.compact else "auto",
         "--titles", ";".join(titles),
         "--timeout", str(int(form.timeout)),
         "--default", str(int(form.default)),
@@ -2183,6 +2189,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
         images=rows, out=card, sound_move=move, sound_confirm=confirm,
         volume=_int_of("volume", 50), timeout=_int_of("timeout", 15),
         machine_volume=(info.get("volume") == "machine"),
+        compact=(info.get("layout") == "store"),
         default=_int_of("default", 0), bypass=ticked,
         theme=theme, colors=colors,
         media_dir=media_dir if (media_dir and os.path.isfile(
@@ -2259,6 +2266,9 @@ def diff_forms(before, after):
     elif b_keys != a_keys:
         rebuild.append("reordered" if sorted(b_keys) == sorted(a_keys)
                        else "an image was replaced")
+    if bool(before.compact) != bool(after.compact):
+        # the card's layout is not a menu field: only a build changes it
+        rebuild.append("compact layout %s" % ("on" if after.compact else "off"))
     menu = [f for f in MENU_FIELD_ORDER if f in _menu_fields(before, after)]
     return menu, rebuild
 
@@ -2789,6 +2799,7 @@ def menu_from_state(menu):
             "confirm": str(menu.get("confirm") or "auto"),
             "volume": max(0, min(100, _as_int("volume", 50))),
             "machine_volume": bool(menu.get("machine_volume", True)),
+            "compact": bool(menu.get("compact", False)),
             "timeout": max(0, _as_int("timeout", 15)),
             "default": max(0, _as_int("default", 0)),
             "bypass": bool(menu.get("bypass", True)),
@@ -2832,7 +2843,7 @@ def parse_plan(text):
     nothing and is the same number by the same route (David: "the code
     column is not being populated for me when i load in images")."""
     info = {"bytes": None, "fits": {}, "versions": {}, "sizes": [],
-            "overhead": None, "free": None}
+            "overhead": None, "free": None, "shared": None}
     for line in (text or "").splitlines():
         m = _SIZE_OVER_RE.match(line.strip())
         if m:
@@ -2841,6 +2852,10 @@ def parse_plan(text):
         m = _SIZE_FREE_RE.match(line.strip())
         if m:
             info["free"] = int(m.group(1))
+            continue
+        m = _SIZE_SHARED_RE.match(line.strip())
+        if m:
+            info["shared"] = int(m.group(1))
             continue
         m = _SIZE_ROW_RE.match(line.strip())
         if m:
@@ -2876,6 +2891,9 @@ _SIZE_OVER_RE = re.compile(r"^image-size overhead (\d+)")
 #: ...and the room the games partitions keep for in-place updates (item 93):
 #: a WORD where the index goes, so the row above cannot read it as an image.
 _SIZE_FREE_RE = re.compile(r"^image-size free (\d+)")
+#: ...and what the compact layout stores once (item 95): bytes the images
+#: share by content, which are NOT on the card - the saving, in a word row.
+_SIZE_SHARED_RE = re.compile(r"^image-size shared (\d+)")
 
 _UPDATE_FILES_RE = re.compile(r"^update-files (\d+) (\S+) (\d+) (\d+) (\S+)")
 _UPDATE_SOURCE_RE = re.compile(r"^update-source (\d+) (\S+) (\S+)")
@@ -3047,6 +3065,12 @@ def card_size_view(info):
         view["head"] = "too big"
         view["detail"] = ("%s of code - %s more than a %s card holds. Drop an "
                           "image." % (_gbytes(total), _gbytes(short), biggest))
+    elif free is not None and info.get("shared"):
+        # the compact layout: the images' rows are what each brings on its
+        # own; what they share is stored once and is the saving
+        view["head"] = view["need"]
+        view["detail"] = "%s of games, %s shared, %s free." % (
+            _gbytes(games), _gbytes(info["shared"]), _gbytes(free))
     elif free is not None:
         view["head"] = view["need"]
         view["detail"] = "%s of games, %s free for updates." % (
@@ -3591,6 +3615,21 @@ class MenuSettingsDialog(_Modal):
             row=4, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
         g.columnconfigure(1, weight=1)
 
+        layout = ttk.LabelFrame(b, text="Card layout")
+        layout.pack(fill=tk.X, pady=(10, 0))
+        g0 = ttk.Frame(layout)
+        g0.pack(fill=tk.X, padx=8, pady=6)
+        ttk.Checkbutton(g0, text="Compact card: store files the images "
+                                 "share only once (experimental)",
+                        variable=panel._compact_var).pack(anchor=tk.W)
+        ttk.Label(g0, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
+                  text="One copy of every file the images have in common. "
+                       "Smaller card, same games. A card built this way must "
+                       "be changed with this app, not by a Stern USB update. "
+                       "Experimental until it has booted on a machine; off = "
+                       "the card layouts this app has always made.").pack(
+            anchor=tk.W, pady=(4, 0))
+
         look = ttk.LabelFrame(b, text="Look")
         look.pack(fill=tk.X, pady=(10, 0))
         g1 = ttk.Frame(look)
@@ -4072,6 +4111,10 @@ class MultibootPanel:
         # re-pin it after they run so a card saved unpatched, or an older
         # anchor with bypass:false, is brought up to patched.
         self._bypass_var = tk.BooleanVar(value=True)
+        #: The compact layout (item 95): OFF by default, and it stays off
+        #: until the user ticks it - never set from a card that is merely
+        #: loaded, only from one whose layout inspect reports as 'store'.
+        self._compact_var = tk.BooleanVar(value=False)
         # THE SELECTOR BUILD PATH is no longer an entry box (David: the
         # Advanced section - "people are likely to mess it up").  It is the
         # default, overridable only by an env var for the rig.
@@ -4115,7 +4158,7 @@ class MultibootPanel:
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var,
-                    self._default_var, self._bypass_var):
+                    self._default_var, self._bypass_var, self._compact_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
         self._theme_var.trace_add("write", lambda *_a: self._theme_changed())
         for var in self._color_vars.values():
@@ -4950,7 +4993,9 @@ class MultibootPanel:
         "card spends on itself (boot, rootfs, /data, /dump and the "
         "filesystems' own bookkeeping). It re-measures itself whenever the "
         "image list changes, and for a loaded card it also works out what an "
-        "update would write.")
+        "update would write. With the compact card ticked (Menu settings) "
+        "each band is what that image brings on its own and the line says "
+        "how much the images share - stored once, so not on the card.")
 
     def _build_size(self, parent, th):
         """THE SIZE STRIP - the card these images need, under the images.
@@ -6329,7 +6374,8 @@ class MultibootPanel:
                              self._default_var.get(), self._bypass_var.get(),
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
-                              for role, var in self._color_vars.items()})
+                              for role, var in self._color_vars.items()},
+                             self._compact_var.get())
         self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
         return self._menu_dialog.show()
 
@@ -6342,8 +6388,9 @@ class MultibootPanel:
         self._forget_menu_dialog()
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, default, bypass,
-             selector, theme, colors) = self._menu_backup
+             selector, theme, colors, compact) = self._menu_backup
             self._menu_backup = None
+            self._compact_var.set(compact)
             self._move_var.set(move)
             self._confirm_var.set(confirm)
             self._volume_var.set(vol)
@@ -6552,6 +6599,7 @@ class MultibootPanel:
             sound_confirm=self._confirm_var.get().strip() or "none",
             volume=_int(self._volume_var, 50),
             machine_volume=bool(self._machine_vol_var.get()),
+            compact=bool(self._compact_var.get()),
             timeout=_int(self._timeout_var, 15),
             default=_int(self._default_var, 0),
             bypass=bool(self._bypass_var.get()),
@@ -6609,6 +6657,7 @@ class MultibootPanel:
                      "confirm": self._confirm_var.get().strip(),
                      "volume": _int(self._volume_var, 50),
                      "machine_volume": bool(self._machine_vol_var.get()),
+                     "compact": bool(self._compact_var.get()),
                      "timeout": _int(self._timeout_var, 15),
                      "default": _int(self._default_var, 0),
                      "bypass": bool(self._bypass_var.get()),
@@ -6722,6 +6771,7 @@ class MultibootPanel:
             self._confirm_var.set(menu["confirm"])
             self._volume_var.set(str(menu["volume"]))
             self._machine_vol_var.set(bool(menu.get("machine_volume", True)))
+            self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
             self._default_var.set(str(menu["default"]))
             self._bypass_var.set(True)      # always on (David); see __init__
@@ -7246,6 +7296,7 @@ class MultibootPanel:
             self._confirm_var.set(form.sound_confirm)
             self._volume_var.set(str(int(form.volume)))
             self._machine_vol_var.set(bool(form.machine_volume))
+            self._compact_var.set(bool(form.compact))
             self._timeout_var.set(str(int(form.timeout)))
             self._default_var.set(str(int(form.default)))
             # The LIVE form's bypass is always on (David); the card's own

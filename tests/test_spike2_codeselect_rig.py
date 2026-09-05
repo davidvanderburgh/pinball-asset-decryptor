@@ -299,13 +299,24 @@ def test_an_imgn_without_spk_or_without_a_title_is_not_a_tree(parts):
     assert [g[0] for g in parts.mod.games_all(parts.img)] == [3]
 
 
-def test_a_plain_games_partition_is_never_also_walked_for_imgn(parts):
-    """/spk at the root makes it a whole-partition tree; an imgN beside it is
-    just a directory."""
-    parts.fs[P7 * SECTOR] = {"/": [("spk", DIR), ("turtles_pro", DIR), ("img1", DIR)],
+def test_a_games_partition_with_imgn_beside_its_spk_is_the_store_layout(parts):
+    """/spk at the root makes it a whole-partition tree - and (item 95) an imgN
+    beside it that passes the strict rule is a tree of the STORE layout,
+    listed after the partition's own line with the subdirectory as the fifth
+    field; an imgN without spk or without a title is just a directory, and so
+    is anything not named imgN (the .blobs store included)."""
+    parts.fs[P3 * SECTOR] = {"/": [("lost+found", DIR), ("spk", DIR), ("turtles_pro", DIR), ("game", LNK),
+                                   (".blobs", DIR), ("img1", DIR), ("img2", DIR), ("img3", DIR)],
                              "/turtles_pro": [("game", REG)],
-                             "/img1": [("spk", DIR), ("other", DIR)], "/img1/other": [("game", REG)]}
-    assert [(g[0], g[4]) for g in parts.mod.games_all(parts.img)] == [(3, None), (7, None)]
+                             "/.blobs": [("deadbeef.0644.0.0", REG)],
+                             "/img1": [("spk", DIR), ("turtles_le", DIR), ("game", LNK)],
+                             "/img1/turtles_le": [("game", REG)],
+                             "/img2": [("other", DIR)], "/img2/other": [("game", REG)],       # no spk
+                             "/img3": [("spk", DIR)]}                                        # no title
+    assert [(g[0], g[3], g[4]) for g in parts.mod.games_all(parts.img)] == [
+        (3, ["turtles_pro"], None), (3, ["turtles_le"], "img1"), (7, ["turtles_pro"], None)]
+    assert parts.mod._store_subdirs(parts.img, P3 * SECTOR) == ["img1", "img2", "img3"]
+    assert parts.mod._multi_subdirs(parts.img, P3 * SECTOR) == []
 
 
 def test_cli_list_games_prints_the_subdir_as_a_fifth_field(parts, monkeypatch, capsys):

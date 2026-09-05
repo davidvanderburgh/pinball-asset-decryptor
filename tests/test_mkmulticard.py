@@ -602,7 +602,7 @@ def test_multi_plan_puts_every_extra_inside_one_p7(mk, tmp_path):
     assert mk.resolve_layout("auto", 1) == "parts" and mk.resolve_layout("auto", 2) == "multi"
     with pytest.raises(mk.Refused):
         mk.resolve_layout("bogus", 1)
-    with pytest.raises(mk.Refused, match="not 'parts' or 'multi'"):
+    with pytest.raises(mk.Refused, match="not 'parts', 'multi' or 'store'"):
         mk.Plan(stock_8g(mk), [], layout="auto")
 
 
@@ -1829,3 +1829,63 @@ def test_inspect_hands_over_the_sources_that_made_the_sounds(mk):
     assert '("sound_move_source", (media_man or {}).get("sound_move_source"))'         in text
     assert ('("sound_confirm_source", '
             '(media_man or {}).get("sound_confirm_source"))') in text
+
+
+# ============================================================================ the store layout (item 95)
+def test_store_plan_grows_p3_and_relays_p5_p6_after_it(mk):
+    """--layout store: the primary's p3 grown to the given sectors, the extras as trees INSIDE
+    it (p3:img1...), p5/p6 re-laid at the first aligned sectors after it, no p7 - and with the
+    stock p3 size the plan reproduces the stock table exactly."""
+    g = stock_8g(mk)
+    _t, s3, c3 = g.part(3)
+    same = mk.Plan(g, [extra_8g(mk, "x.raw")], "a.raw", ["x.raw"], "store")
+    assert same.layout == "store" and same.prims[2].count == c3 and same.store_src_count == c3
+    assert same.table() == mk.Plan(g, []).table()
+    assert same.devices() == ["/dev/mmcblk0p3", "/dev/mmcblk0p3:img1"]
+    assert [(p.num, s) for (p, s) in same.trees] == [(3, None), (3, "img1")] and same.multi_part is None
+    grown = mk.Plan(g, [extra_8g(mk, "x.raw"), extra_8g(mk, "y.raw")], "a.raw", ["x.raw", "y.raw"], "store",
+                    store_sectors=c3 + 4096000)
+    p3 = grown.prims[2]
+    assert (p3.num, p3.start, p3.count, p3.src, p3.src_start) == (3, s3, c3 + 4096000, "a.raw", s3)
+    assert grown.ext_base == mk.align_up(s3 + p3.count)
+    p5, p6 = grown.logs
+    assert p5.ebr == grown.ext_base and p5.start == mk.align_up(grown.ext_base + 1)
+    assert p6.ebr == p5.start + p5.count and p6.start == mk.align_up(p6.ebr + 1)
+    assert [(p.num, p.count, p.src_start) for p in (p5, p6)] == [
+        (5, g.part(5)[2], g.part(5)[1]), (6, g.part(6)[2], g.part(6)[1])]
+    assert grown.total == p6.start + p6.count + mk.TAIL and grown.unreachable() == []
+    assert grown.table()[3] == (4, 0x0F, grown.ext_base, grown.ext_count) and grown.images == [p3]
+    assert grown.store_subdirs == ["img1", "img2"] and grown.devices()[-1] == "/dev/mmcblk0p3:img2"
+    with pytest.raises(mk.Refused):
+        mk.Plan(g, [], "a.raw", [], "store", store_sectors=c3 - 1)
+    assert mk.resolve_layout("store", 1) == "store" and mk.resolve_layout("auto", 5) == "multi"
+    assert "store" in mk.LAYOUTS and mk.STORE_SIZES == ("content", "8G", "16G", "32G")
+    assert mk.store_sectors_for_class(g, [], "a.raw", [], [], "8G") == c3       # the stock card IS the 8G class
+
+
+def test_store_sectors_for_class_fills_the_stern_image_size(mk):
+    g = stock_8g(mk)
+    for cls in ("8G", "16G", "32G"):
+        cnt = mk.store_sectors_for_class(g, [], "a.raw", [], [], cls)
+        plan = mk.Plan(g, [], "a.raw", [], "store", store_sectors=cnt)
+        assert plan.total_bytes <= mk.STERN_SIZES[cls] and cnt >= g.part(3)[2]
+        bigger = mk.Plan(g, [], "a.raw", [], "store", store_sectors=cnt + mk.ALIGN)
+        assert bigger.total_bytes > mk.STERN_SIZES[cls]
+
+
+def test_store_plan_costs_are_the_unique_bytes_and_the_shared_row(mk, capsys):
+    g = stock_8g(mk)
+    plan = mk.Plan(g, [extra_8g(mk, "x.raw")], "a.raw", ["x.raw"], "store", store_sectors=g.part(3)[2] + 2048 * 100)
+    plan.store_unique = [3000000000, 1000000000]
+    plan.store_shared = 2500000000
+    plan.store_meta = 100000000
+    rows, over = mk.image_costs(plan)
+    assert [(i, d, n) for i, d, n, _s in rows] == [(0, "/dev/mmcblk0p3", 3000000000), (1, "/dev/mmcblk0p3:img1", 1000000000)]
+    room = mk.plan_room(plan)
+    assert room == plan.prims[2].count * 512 - 4000000000 - 100000000
+    assert sum(n for _i, _d, n, _s in rows) + room + over == plan.total_bytes
+    mk.print_plan(plan)
+    out = capsys.readouterr().out
+    assert "layout: store" in out and "image-size shared 2500000000" in out
+    assert "p3 (store layout): 2 trees /, img1 inside the primary" in out and "image-size free %d" % room in out
+    assert "image-size 1 /dev/mmcblk0p3:img1 1000000000 x.raw" in out

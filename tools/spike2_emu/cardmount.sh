@@ -387,7 +387,9 @@ games_offset() {
 title_dir() {
     local m="$1" d s
     for d in "$m"/*; do
-        [ -f "$d/game" ] && [ ! -L "$d" ] && { basename "$d"; return 0; }
+        # the title's own `game` is a FILE; a store card's img1/ (item 95)
+        # sits beside the title with a `game` SYMLINK, and sorts before it
+        [ -f "$d/game" ] && [ ! -L "$d/game" ] && [ ! -L "$d" ] && { basename "$d"; return 0; }
     done
     for d in "$m"/img[0-9]*; do
         [ -d "$d" ] && [ ! -L "$d" ] || continue

@@ -400,6 +400,12 @@ made are untouched without it.  Two things only hardware can prove: that Stern's
 layer tolerates `.blobs/` and `img1/` at the primary's `/games` root, and the same-device
 remount of p3's subtree; the tick says experimental until both have.
 
+**Proven in the emulator (2026-09-05):** the store card of David's three TMNT images (stock
+pro, 1987 pro, 1987 LE; `verify` PASS in full) booted each image through the menu -
+`[select] chose 0/1/2`, the extras bound from `p3:img1` / `p3:img2` with their own clip root -
+reached its attract with that image's own art, and took START into PLAYER 1 / BALL 1 with a
+ball fed every time (DESIGN.md's proof table, run 7).
+
 `selftest` part 6 (root) builds a store card from three sources sharing files by content at
 different paths (and one with another mode), checks the shared inode has link count 4, the
 other-mode twin its own blob, the primary's inode numbers unchanged, verify PASS (full), the

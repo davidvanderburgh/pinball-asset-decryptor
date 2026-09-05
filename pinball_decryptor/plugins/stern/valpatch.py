@@ -81,6 +81,31 @@ import struct
 
 _CRC32_POLY = 0xEDB88320
 _BX_LR = bytes.fromhex("1eff2fe1")          # ARM A32 ``bx lr``
+_MOV_R0_0 = bytes.fromhex("0000a0e3")       # ARM A32 ``mov r0, #0``
+
+# THE GRADE RESTORE (item 98).  ``validation_exec`` is only the state machine's TICK.  The
+# module's START function runs first, at boot, and RESTORES a persisted blob over the
+# module's globals - the three track grades included - from the board's NVRAM
+# (``eeprom_read(area=80, addr=0x214, MOD, 128)``), initialising the grades to P only when
+# that restore FAILS.  So a ``bx lr`` on the tick alone leaves whatever grade was last
+# written down in place for ever: a GAME VALIDATION ERROR that an earlier card left in
+# the machine stays latched on every bypassed image, and nothing is alive to clear it
+# (proven on David's TMNT, 2026-09-05, and on the emulator's EEPROM before that).  The
+# bypass therefore ALSO turns the restore call into ``mov r0, #0`` - "the restore
+# failed" - so every boot takes the module's own init path and starts at P/P/P.
+#
+# The call site is the same five-instruction shape on every build measured (turtles_pro
+# 1.59, batman 1.13, foo_fighters_le 1.03: exactly one hit each):
+#
+#     mov r0, #0x50          e3a00050      area 80
+#     mov r1, #0x214         e3a01f85      NVRAM address of the blob
+#     mov r2, rN             e1a0200N      the module globals
+#     mov r3, #0x80          e3a03080      128 bytes
+#     bl  <storage read>     eb......      -> mov r0, #0
+#     cmp r0, #0             e3500000
+#     bne <restored>         1a......
+_RESTORE_MOV_R0, _RESTORE_MOV_R1, _RESTORE_MOV_R3 = 0xE3A00050, 0xE3A01F85, 0xE3A03080
+_RESTORE_CMP = 0xE3500000
 
 # The validator's *private* progress/format strings.  Every validation stage
 # has a tag (``SS`` ``GE`` ``CE`` ``ZK`` ``SF``) and emits "<tag>: <progress>";
@@ -154,6 +179,25 @@ def find_validation_exec(elf):
     if not _entry_ok(elf, eoff):
         return None
     return eoff
+
+
+def find_grade_restore(elf):
+    """File offset of the ``bl`` that restores the validation module's persisted grades
+    (see the note on :data:`_MOV_R0_0`), or None when the shape is not found exactly once.
+    Idempotent: a call already turned into ``mov r0, #0`` still matches."""
+    hits = []
+    pat = struct.pack("<I", _RESTORE_MOV_R0)
+    i = elf.find(pat)
+    while i != -1:
+        if i % 4 == 0 and i + 28 <= len(elf):
+            w = struct.unpack_from("<7I", elf, i)
+            if (w[1] == _RESTORE_MOV_R1 and (w[2] & 0xFFFFFFF0) == 0xE1A02000
+                    and w[3] == _RESTORE_MOV_R3
+                    and ((w[4] & 0xFF000000) == 0xEB000000 or w[4] == 0xE3A00000)
+                    and w[5] == _RESTORE_CMP and (w[6] & 0xFF000000) == 0x1A000000):
+                hits.append(i + 16)
+        i = elf.find(pat, i + 1)
+    return hits[0] if len(hits) == 1 else None
 
 
 def _entry_ok(elf, eoff):
@@ -387,6 +431,10 @@ def bypass_overlay(elf_bytes):
     :func:`bypass_status`) says whether that means there is none to match."""
     eoff = find_validation_exec(elf_bytes)
     overlay = {} if eoff is None else {eoff: _BX_LR}
+    if eoff is not None:
+        roff = find_grade_restore(elf_bytes)
+        if roff is not None:
+            overlay[roff] = _MOV_R0_0
     return overlay, bypass_status(elf_bytes, eoff)
 
 
@@ -424,11 +472,19 @@ def compute_writes(reader, log, fw_overlay=None):
             return [], status
 
         writes = []
-        elf[eoff:eoff + 4] = _BX_LR            # patched bytes -> new sidx digest
-        b = _BX_LR
-        for disk, n in reader.disk_ranges(fw_node, eoff, 4):
-            writes.append((disk, b[:n]))
-            b = b[n:]
+        patches = {eoff: _BX_LR}
+        roff = find_grade_restore(bytes(elf))
+        if roff is not None:
+            patches[roff] = _MOV_R0_0          # the grade restore, too (item 98)
+        elif log is not None:
+            log("validator bypassed, but its grade restore was not located: a "
+                "validation error left in the machine by an earlier card could "
+                "stay on this image", "warning")
+        for poff, b in sorted(patches.items()):
+            elf[poff:poff + 4] = b             # patched bytes -> new sidx digest
+            for disk, n in reader.disk_ranges(fw_node, poff, 4):
+                writes.append((disk, b[:n]))
+                b = b[n:]
 
         # refresh the game ELF's .sidx record so ``spk`` still validates it
         sidx_path, sidx_node = _sidx.find_sidx(reader)

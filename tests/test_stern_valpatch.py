@@ -452,3 +452,43 @@ def test_compute_writes_folds_other_firmware_edits_into_the_sidx_digest():
     stock[eoff:eoff + 4] = valpatch._BX_LR
     bad_h = hmac.new(_sidx.SIDX_KEY, bytes(stock), hashlib.sha1).digest()
     assert want_h != bad_h
+
+
+# ---- item 98: the grade restore is switched off with the tick ---------------------------
+_RESTORE_SEQ = (0xE3A00050, 0xE3A01F85, 0xE1A02004, 0xE3A03080, 0xEB000123, 0xE3500000, 0x1A000004)
+
+
+def _with_restore(elf, at_words_from_text_end=40):
+    """The restore call's five-instruction shape spliced over NOPs near the end of .text."""
+    b = bytearray(elf)
+    off = TEXT_OFF + (NWORDS - at_words_from_text_end) * 4
+    for k, w in enumerate(_RESTORE_SEQ):
+        struct.pack_into("<I", b, off + 4 * k, w)
+    return bytes(b), off + 16
+
+
+def test_the_grade_restore_is_found_by_its_shape_and_patched_with_the_tick():
+    elf, bl_off = _with_restore(_build_elf())
+    assert valpatch.find_grade_restore(elf) == bl_off
+    overlay, status = valpatch.bypass_overlay(elf)
+    assert status == ("bypassed", "")
+    assert overlay == {valpatch.find_validation_exec(elf): valpatch._BX_LR, bl_off: valpatch._MOV_R0_0}
+    # idempotent: the patched call still matches, and the overlay is the same
+    patched = bytearray(elf)
+    for off, b in overlay.items():
+        patched[off:off + 4] = b
+    assert valpatch.find_grade_restore(bytes(patched)) == bl_off
+    assert valpatch.bypass_overlay(bytes(patched))[0] == overlay
+
+
+def test_without_the_restore_shape_the_tick_alone_is_patched():
+    elf = _build_elf()
+    assert valpatch.find_grade_restore(elf) is None
+    overlay, _status = valpatch.bypass_overlay(elf)
+    assert list(overlay) == [valpatch.find_validation_exec(elf)]
+
+
+def test_two_restore_shapes_are_no_answer():
+    elf, _first = _with_restore(_build_elf(), 40)
+    elf, _second = _with_restore(elf, 60)
+    assert valpatch.find_grade_restore(elf) is None

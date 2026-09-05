@@ -660,7 +660,8 @@ def test_the_stock_card_validator_is_located_and_reported_armed(mk):
         assert mk.bypass_state(elf) == "armed"
         assert mk.tree_sidx(r, 2)[0] == "spk/index/turtles_pro-1_59_0.sidx"
         state, writes, notes = mk.compute_bypass_writes(r, 2)
-        assert state == "armed" and sum(len(b) for (_d, b) in writes) == 4 + 20 + 16, notes
+        # bx lr on the tick + mov r0,#0 on the grade restore (item 98) + the two .sidx digests
+        assert state == "armed" and sum(len(b) for (_d, b) in writes) == 4 + 4 + 20 + 16, notes
         assert all(st * 512 <= d < (st + cnt) * 512 for (d, _b) in writes), "every write lands inside p3"
     assert mk.tree_state(STOCK_CARD, G and mk.Part(3, 0x83, st, cnt, STOCK_CARD, st, None), None)[0] == "armed"
 
@@ -1889,3 +1890,21 @@ def test_store_plan_costs_are_the_unique_bytes_and_the_shared_row(mk, capsys):
     assert "layout: store" in out and "image-size shared 2500000000" in out
     assert "p3 (store layout): 2 trees /, img1 inside the primary" in out and "image-size free %d" % room in out
     assert "image-size 1 /dev/mmcblk0p3:img1 1000000000 x.raw" in out
+
+
+# ---- item 98: the three validator states the tool tells apart ----------------------------
+def test_bypass_state_tells_a_half_bypass_from_a_whole_one(mk, monkeypatch):
+    """A tick already at bx lr whose grade restore is still live is 'half': the bypass
+    has to be re-applied to finish it (item 98)."""
+    import pinball_decryptor.plugins.stern.valpatch as vp
+    elf = bytearray(b"\0" * 64)
+    monkeypatch.setattr(vp, "find_validation_exec", lambda e: 0)
+    monkeypatch.setattr(vp, "find_grade_restore", lambda e: 32)
+    assert mk.bypass_state(bytes(elf)) == "armed"
+    elf[0:4] = vp._BX_LR
+    assert mk.bypass_state(bytes(elf)) == "half"
+    elf[32:36] = vp._MOV_R0_0
+    assert mk.bypass_state(bytes(elf)) == "bypassed"
+    monkeypatch.setattr(vp, "find_grade_restore", lambda e: None)
+    assert mk.bypass_state(bytes(elf)) == "bypassed"
+    assert "HALF" in mk.bypass_words("half")

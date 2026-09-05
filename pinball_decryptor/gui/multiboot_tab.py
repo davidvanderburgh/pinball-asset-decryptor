@@ -464,13 +464,13 @@ class MultibootForm:
     compact: bool = False
     timeout: int = 15              # 0 = wait for START
     default: int = 0
-    #: The validator bypass on EVERY image.  OFF by default since item 98:
-    #: a bypassed image never re-grades, so a GAME VALIDATION ERROR an
-    #: earlier card left in the machine's NVRAM stays latched for ever, and
-    #: Insider Connected sees a modified game.  A stock image validates
-    #: itself; an image this app wrote already carries its bypass.  On =
-    #: patch every image (a card modified outside this app).
-    bypass: bool = False
+    #: The validator bypass on EVERY image - ON by default (David: "both
+    #: images on the multi boot need to bypass and clear validation").  Since
+    #: item 98 the bypass also switches off the module's GRADE RESTORE, so a
+    #: bypassed image boots at P/P/P every time and a GAME VALIDATION ERROR
+    #: an earlier card left in the machine cannot latch.  Off = images keep
+    #: what they came with; unticking a loaded card puts the stock game back.
+    bypass: bool = True
     media_dir: str = ""            # a prepared media dir (holds media.json)
     selector_dir: str = DEFAULT_SELECTOR_DIR
     force: bool = False
@@ -2129,7 +2129,9 @@ def bypass_state(info):
     reported: ticked when no tree is still armed, armed when at least one
     is (an inject alone never patches a tree, so Apply runs the bypass)."""
     states = [(im or {}).get("bypass") for im in (info.get("images") or [])]
-    armed = any(st == "armed" for st in states)
+    # 'half' (item 98): the tick is off but the grade restore is still live -
+    # a bypass has something left to do there
+    armed = any(st in ("armed", "half") for st in states)
     return (not armed and any(st == "bypassed" for st in states)), armed
 
 
@@ -2835,7 +2837,7 @@ def menu_from_state(menu):
             "compact": bool(menu.get("compact", False)),
             "timeout": max(0, _as_int("timeout", 15)),
             "default": max(0, _as_int("default", 0)),
-            "bypass": bool(menu.get("bypass", False)),
+            "bypass": bool(menu.get("bypass", True)),
             "theme": theme,
             "colors": clean_colors(menu.get("colors"))}
 
@@ -3735,18 +3737,18 @@ class MenuSettingsDialog(_Modal):
         val.pack(fill=tk.X, pady=(10, 0))
         g3 = ttk.Frame(val)
         g3.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Checkbutton(g3, text="Bypass the game validator on every image",
+        ttk.Checkbutton(g3, text="Bypass the game validator on every image "
+                                 "(recommended)",
                         variable=panel._bypass_var).pack(anchor=tk.W)
         ttk.Label(g3, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
-                  text="Off (recommended): each image keeps what it came "
-                       "with. A stock image validates itself on the machine "
-                       "- a pass clears a validation error an earlier card "
-                       "left behind, and Insider Connected sees a genuine "
-                       "game - and an image written by this app already "
-                       "carries its bypass. On: every image is patched, for "
-                       "a card modified outside this app. Unticking it on a "
-                       "loaded card puts the stock game back where this app "
-                       "had patched it (an update, not a rebuild).").pack(
+                  text="On: every image's validator is switched off AND it "
+                       "starts each boot with a clean validation state, so a "
+                       "GAME VALIDATION ERROR an earlier card left in the "
+                       "machine cannot latch on it - both images boot clean. "
+                       "Off: each image keeps what it came with (a stock "
+                       "image validates itself). Unticking it on a loaded "
+                       "card puts the stock game back where this app had "
+                       "patched it (an update, not a rebuild).").pack(
             anchor=tk.W, pady=(4, 0))
         #
         # NO 'Advanced' SECTION EITHER (David: "people are likely to mess it
@@ -4242,7 +4244,7 @@ class MultibootPanel:
         # unticks it, and the loaders below (load_inspect / restore_state)
         # re-pin it after they run so a card saved unpatched, or an older
         # anchor with bypass:false, is brought up to patched.
-        self._bypass_var = tk.BooleanVar(value=False)
+        self._bypass_var = tk.BooleanVar(value=True)
         #: The compact layout (item 95): OFF by default, and it stays off
         #: until the user ticks it - never set from a card that is merely
         #: loaded, only from one whose layout inspect reports as 'store'.
@@ -6257,7 +6259,7 @@ class MultibootPanel:
             self._machine_vol_var.set(True)
             self._timeout_var.set("15")
             self._default_var.set("0")
-            self._bypass_var.set(False)
+            self._bypass_var.set(True)
             self._theme_var.set(DEFAULT_THEME)
             self._seed_colors(theme_colors(DEFAULT_THEME) or {})
         finally:
@@ -7089,7 +7091,7 @@ class MultibootPanel:
             self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
             self._default_var.set(str(menu["default"]))
-            self._bypass_var.set(bool(menu.get("bypass", False)))
+            self._bypass_var.set(bool(menu.get("bypass", True)))
             self._theme_var.set(menu["theme"])
             # a built-in comes back as the file spells it today; a custom
             # theme as it was saved, the default under any role it lacks
@@ -7615,10 +7617,12 @@ class MultibootPanel:
             self._compact_var.set(bool(form.compact))
             self._timeout_var.set(str(int(form.timeout)))
             self._default_var.set(str(int(form.default)))
-            # The tick follows the CARD (item 98): on when every tree is
-            # bypassed, off otherwise - so unticking a patched card is the
-            # ask to put the stock game back (update --restore-validation).
-            self._bypass_var.set(bool(form.bypass))
+            # The LIVE form's bypass is on (David); the card's own state stays
+            # in _loaded_form, so an image loaded unpatched - or half patched,
+            # its grade restore still live - shows a 'bypass' change and the
+            # update finishes it.  Unticking is the ask to put the stock game
+            # back (update --restore-validation).
+            self._bypass_var.set(True)
             self._theme_var.set(form.theme)
             self._seed_colors(form.colors if form.theme == CUSTOM_THEME
                               else theme_colors(form.theme) or {})

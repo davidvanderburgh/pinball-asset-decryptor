@@ -343,18 +343,21 @@ matched the patched ELF afterwards and `verify` PASSed. The tamper *state*
 lives on the machine's board NVRAM, not on the card: a machine that already
 booted an unpatched image may keep its flag until a settings/factory reset.
 
-**LEAVE A STOCK IMAGE'S VALIDATOR ALONE (item 98).**  The validator persists
-its three track grades in the board's NVRAM and restores them at start-up;
-it only re-grades when it RUNS.  A bypassed image never runs it, so a GAME
-VALIDATION ERROR that an earlier card left in the machine stays latched for
-ever on that image (nvgrades.py's finding, proven on the emulator's EEPROM),
-and Insider Connected sees a modified game.  A pristine image validates
-itself and passes, which clears the latch; an image this app wrote already
-carries its own bypass.  So the app's tick is OFF by default and `build`
-patches nothing unless asked, and `update --restore-validation` puts the
-source's own game and `.sidx` back on every tree this tool bypassed (the
-record's digests say which) - the fix for a card built before this: update,
-flash, boot the stock image once, the banner goes.
+**THE BYPASS ALSO SWITCHES OFF THE GRADE RESTORE (item 98).**  The validator
+persists its three track grades in the board's NVRAM; the module's START
+function restores that blob over its globals at every boot and initialises
+the grades to P only when the restore fails, and only the state machine tick
+ever re-grades.  A `bx lr` on the tick alone therefore froze whatever grade
+was last written down: a GAME VALIDATION ERROR an earlier card left in the
+machine stayed latched for ever on David's TMNT, on both images.  The bypass
+now also turns the restore call (`bl` after `mov r0,#0x50; mov r1,#0x214; mov
+r2,rN; mov r3,#0x80`, the same shape on every build measured) into
+`mov r0, #0` - "the restore failed" - so a bypassed image starts every boot at
+P/P/P and boots clean (`valpatch.find_grade_restore`).  A card patched before
+this reads `validator: HALF bypassed` and any bypass run finishes it.  The
+app's tick is ON by default (David: "make both images clear the validation
+errors always"); `update --restore-validation` (the tick off) puts the
+source's own game and `.sidx` back on every tree the card holds bypassed.
 
 The hardware side is the same program installed in p2 and hooked into
 `/etc/init.d/game` by `select.sh`, reading the flippers over the node bus and

@@ -257,7 +257,7 @@ def test_two_image_form_builds_plan_build_verify(monkeypatch, tmp_path):
     assert build[build.index("--timeout") + 1] == "15"
     assert build[build.index("--default") + 1] == "0"
     assert build[build.index("--volume") + 1] == "50"
-    assert "--bypass-validation" not in build      # off by default (item 98)
+    assert "--bypass-validation" in build          # on by default (David; item 98 made it safe)
     assert "--media-dir" not in build              # nothing prepared
     assert "--force" not in build
     assert "--subtitles" not in build              # none given
@@ -697,7 +697,7 @@ def test_the_table_cells_and_the_menu_summary_say_it_in_a_phrase():
     form.machine_volume = True
     assert "volume 35 (the machine's own on the card)" in menu_summary(form)
     assert "15 s countdown" in menu_summary(MultibootForm(images=[]))
-    assert "bypass off" in menu_summary(MultibootForm(images=[]))      # item 98: off by default
+    assert "bypass on" in menu_summary(MultibootForm(images=[]))
 
 
 def test_the_media_fingerprint_moves_only_for_media(tmp_path):
@@ -994,7 +994,7 @@ def test_add_images_fills_title_and_output(tmp_path):
         assert form.images[1].subtitle == "1987-upscaled"
         assert os.path.normpath(form.out) == os.path.normpath(
             default_output_path(a))
-        assert form.bypass is False and form.volume == 50     # item 98: off by default
+        assert form.bypass is True and form.volume == 50
         assert form.timeout == 15 and form.default == 0
         assert form.media_dir == ""                    # nothing prepared
         assert form.selector_dir == DEFAULT_SELECTOR_DIR
@@ -1613,7 +1613,7 @@ def test_valid_form_runs_plan_build_verify(tmp_path):
         panel._build_card()
         assert len(calls) == 1
         assert [label for label, _ in calls[0]] == ["plan", "build", "verify"]
-        assert "--bypass-validation" not in _line(calls[0][1][1])   # item 98: off unless ticked
+        assert "--bypass-validation" in _line(calls[0][1][1])
         panel._auto_plan = True
         assert panel._plan_now() is True
         assert [label for label, _ in calls[1]] == ["plan"]
@@ -4117,7 +4117,7 @@ def test_diff_forms_splits_menu_changes_from_image_list_changes(tmp_path):
     assert changed(volume=35) == (["volume"], [])
     assert changed(timeout=0) == (["countdown"], [])
     assert changed(default=2) == (["default"], [])
-    assert changed(bypass=True) == (["bypass"], [])
+    assert changed(bypass=False) == (["bypass"], [])
     assert changed(sound_move="synth") == (["move sound"], [])
     assert media_specs_changed(before, _form(tmp_path, 3, volume=35)) is False
     # ...and the image list, every way it can change
@@ -4350,7 +4350,7 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                     "timeout": 15, "default": 2, "bypass": False,
                     "machine_volume": True,
                     "theme": "midnight", "colors": {}}
-    assert menu_from_state(None)["bypass"] is False
+    assert menu_from_state(None)["bypass"] is True
     assert menu_from_state({"volume": 900})["volume"] == 100
 
 
@@ -4687,7 +4687,7 @@ def test_new_card_clears_the_form_and_leaves_editing_mode(tmp_path):
         assert panel._out_var.get() == ""
         assert panel._volume_var.get() == "50"
         assert panel._timeout_var.get() == "15"
-        assert panel._bypass_var.get() is False       # item 98: off by default
+        assert panel._bypass_var.get() is True
         assert panel._plan_info is None
         # The line under the buttons never goes blank any more: it is where
         # the mode is said now that the row has one control instead of two.
@@ -4832,9 +4832,9 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
         assert panel._default_var.get() == "1"
         assert panel._volume_var.get() == "35"
         assert panel._move_var.get() == "synth"
-        # the tick follows the card (item 98): image 1 is still armed, so
-        # it is off; _armed says a bypass would have something to do
-        assert panel._bypass_var.get() is False
+        # the LIVE form's bypass is on; the card's own state (image 1
+        # armed) is what _armed tracks, so an Update patches it
+        assert panel._bypass_var.get() is True
         assert panel._armed is True
         assert panel._loaded_card == card
         # the card's own default is the row the load lands on, so the
@@ -5034,16 +5034,15 @@ def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
         root.destroy()
 
 
-def test_the_bypass_is_an_ask_while_a_tree_is_still_armed(tmp_path):
-    """Item 98: an armed tree stays armed unless the tick says otherwise -
-    a stock image validates itself and a pass clears a latched error.  Ticked
-    by the user, an Apply runs the bypass step for the armed tree."""
+def test_the_bypass_rides_along_while_a_tree_is_still_armed(tmp_path):
+    """The bypass is on by default (David), and since item 98 it also clears
+    the validation state, so an armed tree on a loaded card is patched by the
+    next Apply without anyone ticking anything."""
     root, panel, card, _media = _loaded(
         tmp_path, report=_rich_report(tmp_path, armed=True))
     calls = _recorder(panel)
     try:
-        assert panel._armed is True and panel._bypass_var.get() is False
-        panel._bypass_var.set(True)
+        assert panel._armed is True and panel._bypass_var.get() is True
         assert panel.apply_to_card() is True
         assert [label for label, _ in calls[0]] == [
             "inject", "bypass", "inspect", INSPECT_JSON]
@@ -5657,7 +5656,7 @@ def test_the_form_survives_a_restart(tmp_path):
         assert panel._rows[1].anim == "auto"
         assert panel._timeout_var.get() == "8"
         assert panel._volume_var.get() == "70"
-        assert panel._bypass_var.get() is False    # item 98: off unless the state says so
+        assert panel._bypass_var.get() is False    # the saved state carries it (item 98)
         assert panel.form().out == out
         # OUT OF EDITING MODE, on purpose: the baseline is not restored, so
         # Apply cannot inject a diff computed against a stale one.  One
@@ -7568,6 +7567,14 @@ def test_the_compact_tick_lives_beside_the_size_strip_and_in_the_state():
 # ---------------------------------------------------------------------------
 # item 99: the menu straight off the SD card in the reader
 # ---------------------------------------------------------------------------
+def test_a_half_bypassed_tree_counts_as_armed_for_the_apply():
+    """Item 98: a tree whose tick is off but whose grade restore is still live
+    ('half') has a bypass left to finish, so it reads as armed."""
+    from pinball_decryptor.gui.multiboot_tab import bypass_state
+    assert bypass_state({"images": [{"bypass": "bypassed"}, {"bypass": "half"}]}) == (False, True)
+    assert bypass_state({"images": [{"bypass": "bypassed"}, {"bypass": "bypassed"}]}) == (True, False)
+
+
 def test_menu_card_image_path_names_the_card_under_temp(monkeypatch, tmp_path):
     from pinball_decryptor.gui.multiboot_tab import menu_card_image_path
     from pinball_decryptor.core.drives import PhysicalDrive
@@ -7679,34 +7686,34 @@ def test_update_args_carry_bypass_or_restore(tmp_path):
     from pinball_decryptor.gui.multiboot_tab import update_args
     form = _form(tmp_path, 2)
     card = str(tmp_path / "multi" / "card.multi.raw")
-    off = update_args(form, card)
-    assert "--restore-validation" in off and "--bypass-validation" not in off
-    on = update_args(replace(form, bypass=True), card)
+    on = update_args(form, card)
     assert "--bypass-validation" in on and "--restore-validation" not in on
+    off = update_args(replace(form, bypass=False), card)
+    assert "--restore-validation" in off and "--bypass-validation" not in off
 
 
-def test_the_bypass_tick_is_off_by_default_and_lives_in_menu_settings():
+def test_the_bypass_tick_is_on_by_default_and_lives_in_menu_settings():
     root, panel = _panel()
     try:
-        assert panel.form().bypass is False and panel.state()["menu"]["bypass"] is False
+        assert panel.form().bypass is True and panel.state()["menu"]["bypass"] is True
         menu = panel.open_menu_settings()
         root.update()
-        panel._bypass_var.set(True)
+        panel._bypass_var.set(False)
         menu.cancel()
         root.update()
-        assert panel._bypass_var.get() is False          # Cancel restores it
+        assert panel._bypass_var.get() is True           # Cancel restores it
         menu = panel.open_menu_settings()
         root.update()
-        panel._bypass_var.set(True)
+        panel._bypass_var.set(False)
         menu.ok()
         root.update()
-        assert panel.form().bypass is True
+        assert panel.form().bypass is False
         doc = panel.state()
-        panel._bypass_var.set(False)
+        panel._bypass_var.set(True)
         panel.restore_state(doc)
         root.update()
-        assert panel.form().bypass is True
-        assert menu_from_state({})["bypass"] is False
-        assert menu_from_state({"bypass": True})["bypass"] is True
+        assert panel.form().bypass is False
+        assert menu_from_state({})["bypass"] is True
+        assert menu_from_state({"bypass": False})["bypass"] is False
     finally:
         root.destroy()

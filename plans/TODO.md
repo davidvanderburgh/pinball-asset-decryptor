@@ -159,11 +159,24 @@ These have each been violated at least once and each cost a run or a window:
       wrote already carries its bypass), `build` patches nothing unless asked,
       and `update --restore-validation` puts the source's game + .sidx back on
       every tree the tool patched (the tab sends it whenever the tick is off).
-      David's v3 card: `update --restore-validation` restores image 0 (2 files,
-      6.5 MB), flash, boot the stock image once - it re-grades P and the banner
-      goes; then test Insider on that image. The v3 image IS restored (image 0
-      armed again, 2 files / 6.7 MB in 13 s, verify PASS); the flash and the boot
-      are the proof still to come. *(David,
+      **ROUND TWO, same day (David: "both images on the multi boot need to
+      bypass and clear validation ... make both images clear the validation
+      errors always"):** the bypass itself now clears the latch. The module's
+      START function restores the persisted grade blob (`bl` after `mov r0,#0x50;
+      mov r1,#0x214; mov r2,rN; mov r3,#0x80` - one hit on every build measured)
+      and inits to P only when that fails; the bypass turns that `bl` into
+      `mov r0,#0`, so a bypassed image boots at P/P/P every time.
+      `valpatch.find_grade_restore`, the overlay carries both patches, the tool
+      tells `half` (tick off, restore live) from `bypassed` and re-applies, the
+      app's Write path patches both, the tick is ON by default again. David's v3
+      image: both images re-bypassed with the restore off (update, 37 s, verify
+      PASS). **PROVEN IN THE EMULATOR 2026-09-05:** each image booted through the
+      menu with the EEPROM poisoned to F/F/F in BOTH slots (PAD_NV_POKE) and the
+      module's own bytes read out of the game said GE/CE/ZK = 01 01 01 (P), V =
+      MOD+0 (the init path, not the restore), state 1; the shim's readout agreed;
+      no validation words in the log; attract clean. The machine is the last
+      word: flash the v3 image, boot each image, the banner must be gone, then
+      Insider Connected. *(David,
       2026-09-05, after the v3 two-image card booted and both images ran:
       "there is an existing game validation error that is latched on in the
       machine and stern insider connect is not connecting, so I can't validate

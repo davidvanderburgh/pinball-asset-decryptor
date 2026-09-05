@@ -3163,13 +3163,17 @@ def bypass_tree_bytes(elf, sdata, gpath, title):
     state = bypass_state(elf)
     notes = ["%s (%d bytes): %s" % (gpath, len(elf), state)]
     new_elf = None
-    if state == "armed":
-        eoff = valpatch.find_validation_exec(bytes(elf))
-        elf[eoff:eoff + 4] = valpatch._BX_LR
+    if state in ("armed", "half"):
+        overlay, _status = valpatch.bypass_overlay(bytes(elf))
+        for poff, b in sorted(overlay.items()):
+            elf[poff:poff + len(b)] = b
         new_elf = bytes(elf)
-        notes.append("bx lr at ELF offset 0x%x" % eoff)
+        notes.append("bx lr at ELF offset 0x%x%s" % (
+            valpatch.find_validation_exec(bytes(elf)),
+            ", grade restore off at 0x%x" % valpatch.find_grade_restore(bytes(elf))
+            if valpatch.find_grade_restore(bytes(elf)) is not None else ", grade restore NOT located"))
     new_sidx = None
-    if sdata is not None and state in ("armed", "bypassed"):
+    if sdata is not None and state in ("armed", "half", "bypassed"):
         recs, _crc, fmt = sidx.parse_records(sdata)
         cands = [gpath, "%s/game" % title, "%s/game_real" % title]
         rec_path = next((c for c in cands if c in recs), None)
@@ -3723,11 +3727,27 @@ def _update_locked(a, ts, card, dry):
     # on a store card a written file costs nothing when the store already holds its blob
     # (another tree's, or one written earlier in this very update)
     store_keys = {ts.blob_key(fr) for im in rec.images for fr in im.tree.files.values()} if store else set()
+    # --bypass-validation: a tree whose validator is still armed - or half done (item 98:
+    # the tick off, the grade restore live) - is patched through the mount even when
+    # nothing else changed; its game and .sidx count as writes for the room and the rows
+    bypass_pending = {}
     for i, path in enumerate(sources):
         act = by_index[i]
         tree, st, uuid, old_im = new_trees[i]
         old_tree = old_im.tree if (old_im is not None and act.action in ("keep", "rename")) else None
         ch = ts.diff_tree(old_tree, tree)
+        if a.bypass_validation and i < len(plan.trees):
+            try:
+                live_b = tree_state(card, plan.trees[i][0], plan.trees[i][1])
+            except Exception:                                # noqa: BLE001 - an unreadable tree is left alone
+                live_b = None
+            if live_b and live_b[0] in ("armed", "half"):
+                written_now = {c.rel for c in ch if c.op == "write"}
+                rels = [live_b[2]] + [r for r in sorted(tree.files)
+                                      if r.startswith("spk/index/") and r.endswith(".sidx")]
+                rels = [r for r in rels if r in tree.files and r not in written_now]
+                if rels:
+                    bypass_pending[i] = rels
         if getattr(a, "restore_validation", False):
             live = None
             if not ((old_im.bypass if old_im is not None else None) or {}).get("game") and i < len(plan.trees):
@@ -3755,9 +3775,12 @@ def _update_locked(a, ts, card, dry):
             need = min(need, adds)
         per_part_adds[part.num] = per_part_adds.get(part.num, 0) + adds
         per_part_freed[part.num] = per_part_freed.get(part.num, 0) + (adds - need)
-        n = len([c for c in ch if c.op != "attr_dir"])
+        pend = bypass_pending.get(i, ())
+        adds += sum(tree.files[r].size for r in pend)
+        per_part_adds[part.num] += sum(tree.files[r].size for r in pend)
+        n = len([c for c in ch if c.op != "attr_dir"]) + len(pend)
         touched[i] = [c.rel for c in ch if c.op == "write"]
-        action = act.action if act.action != "keep" else ("sync" if ch else "keep")
+        action = act.action if act.action != "keep" else ("sync" if ch else ("bypass" if pend else "keep"))
         u["files"].append((i, act.device, n, adds, action, os.path.basename(path)))
     removed_bytes = 0
     for act in actions:
@@ -3817,8 +3840,8 @@ def _update_locked(a, ts, card, dry):
         raise Refused("; ".join(u["notes"]))
     if dry:
         return 0
-    if (u["size"] == 0 and not any(changes.values()) and not list_changed and not u["inject"] and not dirty
-            and not unrecorded):
+    if (u["size"] == 0 and not any(changes.values()) and not bypass_pending and not list_changed
+            and not u["inject"] and not dirty and not unrecorded):
         say("nothing to write: every source is as recorded and the menu is unchanged")
         return 0
     if not a.selector_dir and u["inject"]:
@@ -3828,7 +3851,7 @@ def _update_locked(a, ts, card, dry):
     # EVERY PARTITION MOUNTED RW IS A SYNCED ONE from here on - a rw mount alone moves the
     # superblock, so a range md5 against the source can never hold for it again - and only a
     # partition with something to write is mounted at all
-    touched_set = {tree_part(i).num for i in changes if changes[i]}
+    touched_set = {tree_part(i).num for i in changes if changes[i] or i in bypass_pending}
     if list_changed and p7:
         touched_set.add(p7)
     if list_changed and store:
@@ -3847,7 +3870,7 @@ def _update_locked(a, ts, card, dry):
     # p3 (image 0) then p7 (every extra): one mount each
     mounts = collections.OrderedDict()
     for i in changes:
-        if not changes[i]:
+        if not changes[i] and i not in bypass_pending:
             continue
         mounts.setdefault(tree_part(i).num, []).append(i)
     if list_changed and p7 and p7 not in mounts:
@@ -4189,12 +4212,20 @@ def bypass_state(elf):
     elf = bytes(elf)
     eoff = valpatch.find_validation_exec(elf)
     if eoff is not None:
-        return "bypassed" if elf[eoff:eoff + 4] == valpatch._BX_LR else "armed"
+        if elf[eoff:eoff + 4] != valpatch._BX_LR:
+            return "armed"
+        # item 98: a bypassed tick whose GRADE RESTORE is still live keeps a fossil
+        # grade for ever ('half' - re-apply the bypass to finish the job)
+        roff = valpatch.find_grade_restore(elf)
+        if roff is not None and elf[roff:roff + 4] != valpatch._MOV_R0_0:
+            return "half"
+        return "bypassed"
     return "unlocated" if valpatch.carries_validator(elf) else "absent"
 
 
 def bypass_words(state):
     return {"bypassed": "validator: bypassed", "armed": "validator: ARMED", "absent": "validator: none on this build",
+            "half": "validator: HALF bypassed (the tick is off but a stale grade still restores - re-apply)",
             "unlocated": "validator: UNLOCATED (this build carries one the locator cannot pin)"}.get(state, "validator: ?")
 
 
@@ -4260,16 +4291,19 @@ def compute_bypass_writes(reader, root_ino):
     elf = bytearray(reader.read_file_bytes(gnode))
     state = bypass_state(elf)
     notes = ["%s (%d bytes)" % (gpath, len(elf))]
-    if state != "armed":
+    if state not in ("armed", "half"):
         return state, [], notes
-    eoff = valpatch.find_validation_exec(bytes(elf))
-    elf[eoff:eoff + 4] = valpatch._BX_LR
+    overlay, _status = valpatch.bypass_overlay(bytes(elf))
     writes = []
-    b = valpatch._BX_LR
-    for disk, n in reader.disk_ranges(gnode, eoff, 4):
-        writes.append((disk, b[:n]))
-        b = b[n:]
-    notes.append("bx lr at ELF offset 0x%x" % eoff)
+    for poff, b in sorted(overlay.items()):
+        elf[poff:poff + len(b)] = b
+        for disk, n in reader.disk_ranges(gnode, poff, len(b)):
+            writes.append((disk, b[:n]))
+            b = b[n:]
+    roff = valpatch.find_grade_restore(bytes(elf))
+    notes.append("bx lr at ELF offset 0x%x%s" % (valpatch.find_validation_exec(bytes(elf)),
+                                                 (", grade restore off at 0x%x" % roff) if roff is not None
+                                                 else ", grade restore NOT located"))
     spath, snode = tree_sidx(reader, root_ino)
     if snode is None:
         notes.append("no .sidx manifest in this tree - the spk layer may flag the game file")
@@ -4771,7 +4805,7 @@ def bypass_card(card, plan=None, dry_run=False):
             print("image %d %s: validator: SKIPPED (%s)" % (i, dev, e))
             states[i] = "error"
             continue
-        if before == "armed" and writes and not dry_run:
+        if before in ("armed", "half") and writes and not dry_run:
             with open(card, "r+b") as f:
                 for disk, b in writes:
                     f.seek(disk)
@@ -4782,9 +4816,9 @@ def bypass_card(card, plan=None, dry_run=False):
         else:
             after = before
         line = bypass_words(after)
-        if before == "armed" and after == "bypassed":
-            line += " (was armed; %d bytes written)" % sum(len(b) for (_d, b) in writes)
-        elif before == "armed" and dry_run:
+        if before in ("armed", "half") and after == "bypassed":
+            line += " (was %s; %d bytes written)" % (before, sum(len(b) for (_d, b) in writes))
+        elif before in ("armed", "half") and dry_run:
             line += " (dry run: %d bytes would be written)" % sum(len(b) for (_d, b) in writes)
         elif before == "bypassed":
             line += " (already)"

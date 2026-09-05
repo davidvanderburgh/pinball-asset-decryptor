@@ -6862,34 +6862,42 @@ These have each been violated at least once and each cost a run or a window:
       once (default off).** `S3 D4` *(David, 2026-09-04: "compact opt-in
       multi-boot images", after "if we're only saving 3gb for three images, i
       don't know if the juice is worth the squeeze" - and then "one store on
-      p3" chosen when the numbers said ~10 GB.)* Three TMNT 1.59 images (stock
-      pro, 1987 pro, 1987 LE) are 18.06 GB on the card - a 32 GB card - while
-      their unique content, by sha256, is 6.59 GB (pro87 and le87 share
-      2.43 GB at DIFFERENT paths, `turtles_pro/` vs `turtles_le/`; stock and
-      pro87 share 2.37 GB). **The shape (approved plan, C:\Users\david\.claude\plans\for-multiboot-spike-2-ticklish-pine.md, "Item 94" there = this):**
-      `build --layout store`, root-only: copy the primary's p3 verbatim, grow it
-      to the Stern size class with `resize2fs` on the loop device (proven: the
-      filesystem keeps its identity), `mkdir .blobs`, hardlink every primary
-      file into `.blobs/<sha256>.<mode>.<uid>.<gid>` (zero bytes rewritten -
-      proven: the inode is kept), sync each extra into `imgK/` writing only
-      blobs the store lacks; the card ≈ 8 GB on a 16G card. Device form
-      `/dev/mmcblk0p3:img1`; `select.sh` needs NO change (its `<dev>:<sub>`
-      branch already handles it; `umount /games` is the path the parts card
-      proved on the TMNT); `parts.py --list-games` and `multi_subdirs_on` must
-      list `imgN` subtrees under a root that has `spk` (both return [] today).
-      The tab: a tick "Compact card: store files the images share only once
-      (experimental)", default OFF, `--layout store` only when ticked, the
-      shared bytes as a hatched band. Stands on item 94's engine (treesync's
-      diff/apply become a stat-walk converge with `blobs_add` deduplicated
-      across trees; the bypass through the mount already refreshes a .sidx
-      whenever its record disagrees with the ELF - the shared-blob hazard).
-      **Hardware-only proofs, until which the tick says experimental:** Stern's
-      `update`/spk layer tolerating `.blobs/` and `img1/` at the primary's
-      `/games` root, and the same-device remount. **Rule to document:** never
-      USB-update a store card (a Stern update writes through hardlinked blobs
-      into every tree sharing them); rebuild with the tool.
-      — S3: a workaround exists (a 32 GB card). D4: a new on-card layout whose
-      hardware proof is one flash away.
+      p3" chosen when the numbers said ~10 GB; "it feels much riskier than
+      what we already have" = opt-in, default OFF.)* Three TMNT 1.59 images
+      (stock pro, 1987 pro, 1987 LE) were 18.06 GB on the card - a 32 GB card
+      - while their unique content, by sha256, is 6.59 GB (pro87 and le87
+      share 2.43 GB at DIFFERENT paths, `turtles_pro/` vs `turtles_le/`).
+      **SHIPPED on `item/95` (2026-09-05), awaiting /finish:** `build --layout
+      store` (root, never chosen by `auto`): the primary's own p3 copied
+      verbatim, grown with `resize2fs` on the loop device to the smallest
+      Stern image size that holds the union of unique content (`--size
+      16G|32G|content`), p5/p6 re-laid after it, no p7; the primary's tree at
+      the root ADOPTED by hardlink into `.blobs/<sha256>.<mode>.<uid>.<gid>`
+      (zero bytes rewritten, inode numbers the source's), every extra synced
+      into `imgK/` writing only the blobs the store lacks; device
+      `/dev/mmcblk0p3:img1`, `select.sh` unchanged. `update` is store-aware (a
+      held blob costs nothing - the dry-run says so - blobs nothing links are
+      collected), `verify` adds the store's invariants (names parse and match
+      attrs, every file a link into the store, nlink = 1 + refs, no orphan or
+      half-written blob, full: every blob hashes to its name), the bypass
+      goes through the mount and the patched game is adopted under its own
+      key, `bypass` refuses a store card, `parts.py --list-games` lists the
+      store's trees under p3, `cardmount.sh` wants the title's own game FILE
+      (`img1/game` is a symlink that used to win). The tab: "Compact card:
+      store files the images share only once (experimental)", OFF by default,
+      the strip says "N shared". Rule: never USB-update a store card (a Stern
+      update writes through shared blobs); the tick says experimental until
+      hardware proves Stern's update/spk layer tolerates `.blobs/` and `img1/`
+      at `/games`' root and the same-device remount. **Measured on David's
+      three cards:** rows 3.35 / 1.65 / 1.59 GB unique, 5.40 GB shared and
+      stored once, 7.64 GB free, a 16G card exactly (was 18.06 GB / 32G);
+      build 421 s. **Oracle:** `wsl -u root python3 tools/spike2_emu/mkmulticard.py
+      selftest DIR` part 6 (CI runs it on Linux); `verify` PASS (full) on the
+      real card; the emulator booted image 0, 1 and 2 through the menu
+      (run 7 in DESIGN.md's proof table: each choice landed, each image drew its OWN attract art, START fed a ball and the glass showed PLAYER 1 - the LE first through Stern's Guided Setup and a coin, its fresh per-title NVRAM). **Not yet done:** one flash to the TMNT (the two
+      hardware-only proofs above).
+      — S3: a workaround exists (a 32 GB card). D4: a new on-card layout
+      whose hardware proof is one flash away.
 
 ## Reference material that is NOT in this repo
 

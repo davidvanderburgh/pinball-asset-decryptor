@@ -17,6 +17,7 @@ The actual on-card flash still needs the hardware test (Administrator + a real
 card + a backup).
 """
 
+import json
 import os
 import struct
 
@@ -1001,3 +1002,79 @@ def test_a_filesystem_is_identified_by_what_it_is_born_with(tmp_path):
     # anything that is not a filesystem is not identified at all
     assert rd._ext_identity(b"\x00" * 2048) is None
     assert rd._ext_identity(b"short") is None
+
+
+# ---- item 99: the menu's ranges off a card, into a sparse image, and back ---------------
+def test_the_menu_read_takes_the_menu_ranges_and_nothing_else(tmp_path):
+    """read_device_menu_to_image: the table, p1 and p2 whole, every EBR sector and the
+    identity bytes of the games partitions - and NOT the games, /data or /dump; the image
+    is the card's full size (sparse), and menu_write_plan proves it against the card."""
+    card = _spike_image(tmp_path / "card.raw", 0x0BADCAFE)
+    img = str(tmp_path / "menu.raw")
+    got = []
+    n = rd.read_device_menu_to_image(card, img, progress=lambda d, t, m: got.append((d, t)))
+    assert os.path.getsize(img) == os.path.getsize(card)
+    assert got and got[-1][0] == got[-1][1] == n
+    # p1 + p2 whole (their ranges end where p2 ends), the MBR too
+    assert _at(img, 0, 512) == _at(card, 0, 512)
+    assert _at(img, 64, 512) == b"BOOT" * 128 and _at(img, 200, 512) == _at(card, 200, 512)
+    # the games partitions: identity bytes only
+    assert _at(img, 256, rd._IDENT_BYTES) == _at(card, 256, rd._IDENT_BYTES)
+    assert _at(img, 256 + 16, 512) == bytes(512)
+    assert _at(img, 642, rd._IDENT_BYTES) == _at(card, 642, rd._IDENT_BYTES)
+    assert _at(img, 700, 512) == bytes(512)
+    # /data and /dump not at all; every EBR sector yes
+    assert _at(img, 386, 512) == bytes(512) and _at(img, 514, 512) == bytes(512)
+    for ebr in (384, 512, 640):
+        assert _at(img, ebr, 512) == _at(card, ebr, 512)
+    assert n < os.path.getsize(card) // 2
+    # ...and a menu-only write of the image is provable against the card it came off
+    plan = rd.menu_write_plan(img)
+    with rd.RawDeviceFile(card, writable=False) as dev, open(img, "rb") as src:
+        ok, what = rd._ranges_match(dev, src, plan["prove"])
+    assert ok, what
+
+
+def test_the_menu_read_refuses_a_card_without_a_table(tmp_path):
+    blank = tmp_path / "blank.raw"
+    blank.write_bytes(bytes(1 << 20))
+    with pytest.raises(rd.FlashError):
+        rd.read_device_menu_to_image(str(blank), str(tmp_path / "out.raw"))
+    assert not (tmp_path / "out.raw").exists() and not (tmp_path / "out.raw.part").exists()
+
+
+def test_the_elevated_helper_reads_a_menu(tmp_path):
+    """The helper's ``read_menu`` job mode, on plain files (no elevation needed)."""
+    from pinball_decryptor.core import elevated_flash as ef
+    card = _spike_image(tmp_path / "card.raw", 0x11223344)
+    img = str(tmp_path / "menu.raw")
+    ipc = tmp_path / "ipc"
+    ipc.mkdir()
+    (ipc / "job.json").write_text(json.dumps({"mode": "read_menu", "image": img, "device": card}))
+    assert ef.run_helper_main(["--flash-helper", str(ipc)]) == 0
+    result = json.loads((ipc / "result.json").read_text())
+    assert result["ok"] is True and result["written"] > 0
+    assert os.path.getsize(img) == os.path.getsize(card)
+    # the unelevated entry point on a plain file runs in-process
+    n = ef.read_device_menu_with_privileges(card, str(tmp_path / "menu2.raw"))
+    assert n == result["written"]
+
+
+def test_the_ipc_dir_is_granted_to_the_user_on_windows(tmp_path, monkeypatch):
+    """The relay fix: the elevated child's files inherit an ACE for the user (they were
+    Administrators-only, so nothing came back to an unelevated parent)."""
+    from pinball_decryptor.core import elevated_flash as ef
+    calls = []
+    monkeypatch.setattr(ef.subprocess, "run", lambda argv, **kw: calls.append(argv))
+    monkeypatch.setattr(ef.sys, "platform", "win32")
+    monkeypatch.setenv("USERNAME", "david")
+    monkeypatch.setenv("USERDOMAIN", "EAGLE")
+    monkeypatch.setattr(ef.tempfile, "gettempdir", lambda: str(tmp_path))
+    d = ef._ipc_dir("pad_test_")
+    assert os.path.isdir(d) and d.startswith(str(tmp_path))
+    assert calls and calls[0][:3] == ["icacls", d, "/grant"]
+    assert calls[0][3] == "EAGLE\\david:(OI)(CI)F"
+    monkeypatch.setattr(ef.sys, "platform", "linux")
+    calls.clear()
+    ef._ipc_dir("pad_test_")
+    assert calls == []

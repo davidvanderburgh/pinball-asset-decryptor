@@ -1467,6 +1467,105 @@ def _read_file_range(f, off, length):
     return f.read(length)
 
 
+def menu_read_ranges(read_at, dev_size):
+    """The byte ranges the boot MENU needs off a card -> ``[(offset, length, what)]``:
+    the partition table with the first two partitions (boot + rootfs: the selector, its
+    images.conf, build.json, media.json and the media files), every EBR sector (the
+    logical chain a card reader needs to see the layout), and the identity bytes of every
+    games partition - exactly what :func:`menu_write_plan` proves, so a menu edited in an
+    image made of these ranges can be written back to the very same card.  *read_at*
+    reads one sector at an LBA."""
+    mbr = read_at(0)
+    prim = _mbr_primaries(mbr)
+    if not prim:
+        raise FlashError("The card does not start with a partition table, so it holds no "
+                         "boot menu to read.")
+    rootfs = [p for p in prim if p[0] == _ROOTFS_INDEX]
+    if not rootfs or rootfs[0][1] != 0x83:
+        raise FlashError("The card has no Linux rootfs as its second partition, so it is "
+                         "not a Stern card.")
+    _i, _t, r_lba, r_count = rootfs[0]
+    end = min((r_lba + r_count) * 512, dev_size)
+    ranges = [(0, end, "the partition table, the boot partition and the rootfs")]
+    for idx, ptype, lba, _count in prim:
+        if idx == _ROOTFS_INDEX:
+            continue
+        if ptype == 0x0F:
+            for n, (ebr, ltype, lstart, _lc) in enumerate(_ebr_chain(read_at, lba)):
+                part = 5 + n
+                ranges.append((ebr * 512, 512, "the card's p%d table entry" % part))
+                if ltype == 0x83 and part not in _MACHINE_OWNED:
+                    ranges.append((lstart * 512, _IDENT_BYTES, "the identity of p%d" % part))
+            continue
+        if (idx + 1) in _MACHINE_OWNED or ptype != 0x83:
+            continue
+        ranges.append((lba * 512, _IDENT_BYTES, "the identity of p%d" % (idx + 1)))
+    return [r for r in ranges if r[0] < dev_size]
+
+
+def read_device_menu_to_image(device_path, image_path, *, log=None, progress=None,
+                              cancel=None):
+    """Read only what the boot MENU needs off *device_path* into *image_path*: a SPARSE
+    image of the card's full size holding :func:`menu_read_ranges` - a few hundred MB
+    instead of the whole card, so the Multi-boot tab can open the menu of the card in the
+    reader (item 99: "load multi-boot menu from sd card").  The games trees are NOT in
+    it: an inspect of the image reports the menu, the sources and the settings, and says
+    the trees could not be read.  :func:`flash_menu_to_device` accepts the image as the
+    source of a menu-only write, since every range it proves is here.  Returns the bytes
+    read.  Built at ``<image_path>.part`` and renamed once complete."""
+    dev_size = device_size(device_path)
+    if not dev_size and os.path.isfile(device_path):
+        dev_size = os.path.getsize(device_path)
+    if not dev_size:
+        raise FlashError(
+            "Could not read the size of %s, so there is no way to know where its "
+            "partitions end. Re-seat the card (or its reader) and try again." % device_path)
+    dest_dir = os.path.dirname(os.path.abspath(image_path)) or "."
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+    except OSError as e:
+        raise FlashError("Could not create the folder for the image:\n%s" % e) from e
+    part_path = image_path + ".part"
+    read = 0
+    try:
+        with RawDeviceFile(device_path, writable=False) as dev, open(part_path, "wb") as out:
+            def read_at(lba):
+                return dev._aligned_read(lba * 512, 512)
+            ranges = menu_read_ranges(read_at, dev_size)
+            total = sum(length for _o, length, _w in ranges)
+            if log is not None:
+                log("Reading the boot menu off %s: %s of %s (the menu, not the games)"
+                    % (device_path, format_size(total), format_size(dev_size)), "info")
+            out.truncate(dev_size)
+            for off, length, _what in ranges:
+                done = 0
+                while done < length:
+                    if cancel is not None and cancel():
+                        raise FlashCancelled("Read cancelled after %d of %d bytes." % (read, total))
+                    want = min(_VERIFY_CHUNK, length - done)
+                    buf = dev._aligned_read(off + done, want)
+                    if not buf:
+                        break
+                    out.seek(off + done)
+                    out.write(buf)
+                    done += len(buf)
+                    read += len(buf)
+                    if progress is not None:
+                        progress(read, total, "Reading the boot menu off the card\u2026")
+            out.flush()
+            os.fsync(out.fileno())
+    except PermissionError as e:
+        _unlink_quiet(part_path)
+        raise FlashError(str(e)) from e
+    except BaseException:
+        _unlink_quiet(part_path)
+        raise
+    os.replace(part_path, image_path)
+    if log is not None:
+        log("Menu image: %s (%s read)" % (image_path, format_size(read)), "info")
+    return read
+
+
 def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
                          cancel=None, verify=True, on_verify_start=None):
     """Write ONLY the menu partition of *image_path* onto *device_path*.

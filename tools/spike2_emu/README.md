@@ -266,6 +266,16 @@ live truth off the card and flags any disagreement with that record.
 
 ### Loading a finished card back
 
+**Straight off the SD card (item 99).**  The tab's "From SD card…" reads only the menu's
+part of the card in the reader - the partition table, the boot and rootfs partitions,
+every EBR sector and the identity bytes of the games partitions (`core.rawdevice.
+read_device_menu_to_image`, elevated like a flash) - into a sparse image under
+`%TEMP%\\pinball_spike2_multiboot\\cards\\<card>.menu.raw`, and loads that: titles, pictures,
+sounds, settings and the images' sources come back; the games' versions do not (the trees
+are not read).  Apply rewrites the menu in that image and then writes the menu partition
+onto the card with the app's menu-only write, which first proves the card is that card
+(the same ranges the read took).  A list change is a fresh build from the sources.
+
 A card carries what it takes to re-open its own menu in an editor. Beside
 `images.conf` - **never** inside `media/`, never in the media budget, never
 opened by the selector - `build` and `inject` stage two small JSON files into

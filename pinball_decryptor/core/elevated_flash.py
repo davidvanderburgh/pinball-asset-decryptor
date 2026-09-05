@@ -43,7 +43,7 @@ import time
 from .admin import is_admin
 from .rawdevice import (FlashCancelled, FlashError, flash_image_to_device,
                         flash_menu_to_device, is_device_path,
-                        read_device_to_image)
+                        read_device_menu_to_image, read_device_to_image)
 
 # IPC file names inside the per-flash temp directory.  The parent creates the
 # directory and ``job.json``; the elevated child writes the rest.
@@ -101,7 +101,7 @@ def flash_image_with_privileges(image_path, device_path, *, log=None,
         log("This flash needs administrator access — approve the prompt to "
             "continue (the app itself keeps running normally).", "info")
 
-    ipc = tempfile.mkdtemp(prefix="pad_flash_")
+    ipc = _ipc_dir("pad_flash_")
     try:
         with open(os.path.join(ipc, _JOB), "w", encoding="utf-8") as f:
             json.dump({"image": image_path, "device": device_path,
@@ -140,7 +140,7 @@ def read_device_with_privileges(device_path, image_path, *, log=None,
             "prompt to continue (the app itself keeps running normally).",
             "info")
 
-    ipc = tempfile.mkdtemp(prefix="pad_read_")
+    ipc = _ipc_dir("pad_read_")
     try:
         with open(os.path.join(ipc, _JOB), "w", encoding="utf-8") as f:
             json.dump({"mode": "read", "image": image_path,
@@ -152,6 +152,60 @@ def read_device_with_privileges(device_path, image_path, *, log=None,
                 "Could not request administrator access on this system. "
                 "Re-launch the app as administrator and read the card again.")
 
+        return _relay_until_done(
+            run, ipc, log=log, progress=progress, cancel=cancel,
+            on_verify_start=None, mode="read")
+    finally:
+        _rmtree_quiet(ipc)
+
+
+def _ipc_dir(prefix):
+    """The per-job IPC directory the elevated child writes into.
+
+    THE CHILD'S FILES MUST BE READABLE BY THE PARENT, and on Windows they were not:
+    ``tempfile.mkdtemp`` makes an owner-only directory, and the files an ELEVATED process
+    creates in it are owned by the Administrators group - so an unelevated parent saw
+    PermissionError on every ``progress.json`` (no progress relayed) and on ``result.json``
+    (a verified write reported as "exited without a result") - seen 2026-09-04 writing a
+    card from a source run.  The fix is one inheritable ACE for the user, granted before
+    the child exists, so everything it creates inherits it.  Best-effort: a failed grant
+    changes nothing for the shipped build, which launches elevated anyway."""
+    ipc = tempfile.mkdtemp(prefix=prefix)
+    if sys.platform == "win32":
+        user = os.environ.get("USERNAME")
+        if user:
+            domain = os.environ.get("USERDOMAIN")
+            who = "%s\\%s" % (domain, user) if domain else user
+            try:
+                subprocess.run(["icacls", ipc, "/grant", "%s:(OI)(CI)F" % who],
+                               capture_output=True, timeout=30,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            except (OSError, subprocess.SubprocessError):
+                pass
+    return ipc
+
+
+def read_device_menu_with_privileges(device_path, image_path, *, log=None,
+                                     progress=None, cancel=None):
+    """Read only the boot menu's ranges of *device_path* into a sparse image (item 99),
+    elevating only the read - :func:`core.rawdevice.read_device_menu_to_image` through
+    the flash helper's elevation + IPC, like :func:`read_device_with_privileges`."""
+    if is_admin() or not is_device_path(device_path):
+        return read_device_menu_to_image(device_path, image_path, log=log,
+                                         progress=progress, cancel=cancel)
+    if log is not None:
+        log("Reading the card's boot menu needs administrator access - approve the "
+            "prompt to continue (the app itself keeps running normally).", "info")
+    ipc = _ipc_dir("pad_read_")
+    try:
+        with open(os.path.join(ipc, _JOB), "w", encoding="utf-8") as f:
+            json.dump({"mode": "read_menu", "image": image_path,
+                       "device": device_path}, f)
+        run = _spawn_elevated_helper(ipc)
+        if run is None:
+            raise FlashError(
+                "Could not request administrator access on this system. "
+                "Re-launch the app as administrator and read the card again.")
         return _relay_until_done(
             run, ipc, log=log, progress=progress, cancel=cancel,
             on_verify_start=None, mode="read")
@@ -199,7 +253,18 @@ def _relay_until_done(run, ipc, *, log, progress, cancel, on_verify_start,
     # verify-phase transition — that the loop may not have observed.
     _drain()
 
-    result = _read_json(os.path.join(ipc, _RESULT))
+    result_path = os.path.join(ipc, _RESULT)
+    result = _read_json(result_path)
+    if result is None and os.path.exists(result_path):
+        # the helper DID report; this process cannot read what it wrote (an ACL the
+        # grant in _ipc_dir did not take) - say that, never "the card may not have been
+        # written"
+        raise FlashError(
+            "The elevated %s helper finished and reported a result, but this app could "
+            "not read its report (permissions on %s). The %s itself may well have "
+            "completed - check the card before repeating it."
+            % ("read" if reading else "flash", result_path,
+               "read" if reading else "write"))
     if result is None:
         # The child died before writing a result: user declined the prompt,
         # or it crashed on startup.
@@ -480,7 +545,8 @@ def run_helper_main(argv):
     job = _read_json(os.path.join(ipc, _JOB)) or {}
     image = job.get("image")
     device = job.get("device")
-    reading = job.get("mode") == "read"
+    mode = job.get("mode")
+    reading = mode in ("read", "read_menu")
     verify = bool(job.get("verify", True))
     menu_only = bool(job.get("menu_only"))
     cancel_path = os.path.join(ipc, _CANCEL)
@@ -511,7 +577,10 @@ def run_helper_main(argv):
         state["last_write"] = 0.0        # force the next progress write through
 
     try:
-        if reading:
+        if mode == "read_menu":
+            written = read_device_menu_to_image(
+                device, image, log=_log, progress=_progress, cancel=_cancel)
+        elif reading:
             written = read_device_to_image(
                 device, image, log=_log, progress=_progress, cancel=_cancel)
         else:

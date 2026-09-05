@@ -35,7 +35,7 @@ def test_update_argv_is_the_menu_flags_on_the_loaded_card(monkeypatch, tmp_path)
     assert words[:4] == ["tools/spike2_emu/mkmulticard.py", "update", "--card", multiboot_tab.wsl(card)]
     assert "--primary" in words and "--extra" in words
     for flag in ("--selector-dir", "--titles", "--subtitles", "--timeout", "--default", "--volume",
-                 "--cache-dir", "--bypass-validation"):
+                 "--cache-dir", "--restore-validation"):
         assert flag in words, flag
     assert "--dry-run" not in words and "--expect-bytes" not in words
     assert "--out" not in words and "--layout" not in words and "--force" not in words

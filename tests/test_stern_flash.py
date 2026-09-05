@@ -919,6 +919,16 @@ def test_a_slow_flash_says_so_in_the_log(tmp_path, monkeypatch):
     monkeypatch.setattr(rd, "slow_card_advice",
                         lambda rate, total, menu_only=False:
                         "SLOW %.1f %s" % (rate / 1e6, menu_only))
+    # A clock that MOVES between callbacks: a CI runner copies this whole
+    # image inside one 15 ms Windows clock tick, and a zero-length span is
+    # no rate (the watch waits for the next tick), so real time never let
+    # the note fire there - the v0.184.1 tripwire.
+    clock = [1000.0]
+
+    def moving():
+        clock[0] += 0.05
+        return clock[0]
+    monkeypatch.setattr(rd.time, "monotonic", moving)
     img = _spike_image(tmp_path / "img.raw", 0xA1B2C3D4)
     dev = tmp_path / "dev.raw"
     dev.write_bytes(b"\x00" * os.path.getsize(img))

@@ -84,8 +84,13 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **100. A "Compact build" tick beside the size strip, and the strip shows
-      what compact saves.** `S2 D2` *(David, 2026-09-05: "checkbox in the GUI
+- [x] **100. A "Compact build" tick beside the size strip, and the strip shows
+      what compact saves.** `S2 D2` **SHIPPED on `item/100` 2026-09-05:** the tick
+      moved out of Menu settings into the size row (its own trace re-plans; the
+      plan key carries it), `card_size_view` names the saving, the bar hatches it
+      over the start of the free room (clipped diagonals, no stipple - macOS
+      ignores them), tooltip + detail line say "N GB saved"; state/restore/inspect
+      unchanged; sweep OK, screenshot regenerated. *(David, 2026-09-05: "checkbox in the GUI
       next to the 'space needed' section that says something like '[x] Compact
       build' and that shows the space savings on the 'space needed' bar.")*
       Item 95 put the compact (store layout) tick inside the Menu settings

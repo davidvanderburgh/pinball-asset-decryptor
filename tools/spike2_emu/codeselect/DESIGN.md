@@ -111,9 +111,9 @@ multi card therefore gets the same treatment the Insider-clean 1987 card has:
 `valpatch.find_validation_exec` (a signature match, no fixed address) and a
 4-byte `bx lr` at the validator's entry, with the game's `.sidx` record
 refreshed so `spk` still accepts the file at update time. `build
---bypass-validation` does it for every games tree (opt-in since item 98: a bypassed image never
-re-grades, so a stock image is left alone to clear a latched error; `update --restore-validation`
-puts the stock game back), `bypass --card` retrofits a
+--bypass-validation` does it for every games tree (the app always passes it: since item 98's
+round two the bypass also ignores the saved grades at boot, so a latched error clears - proven on
+the TMNT; the tool's `update --restore-validation` puts the stock game back), `bypass --card` retrofits a
 built card in seconds, and `verify` reports the state per tree. The July 2026
 hardware test of that patch is what makes this Insider-safe.
 

@@ -1446,8 +1446,8 @@ HELP_CONTENT = {
          "already says what those are: the move and confirm sounds (auto "
          "pulls a click and a stinger from the primary image, synth "
          "generates tones), the volume, the countdown (0 = wait for "
-         "START), which image is highlighted at power-up, the validator "
-         "bypass and the WSL path of the built selector."),
+         "START), which image is highlighted at power-up, and the WSL "
+         "path of the built selector."),
         ("The preview",
          "It redraws itself. Change anything — a title, the countdown, the "
          "art, the highlighted image — and about a third of a second after "
@@ -1478,15 +1478,16 @@ HELP_CONTENT = {
          "confirm sound, which is the one sound you cannot otherwise hear "
          "before the card is written."),
         ("Bypass game validation",
-         "Ticked by default, and leave it so: with more than one image on "
-         "a card the machine's validator can fail them (GAME VALIDATION "
-         "ERROR), because the images share one grade state. The bypass "
-         "neuters the validator in every image on the card — a four-byte "
-         "patch at the validator's entry, with that image's package index "
-         "record refreshed. A card that is already built is repaired by "
-         "Apply to card: with the box ticked, Apply patches any image on "
-         "the card that is still unpatched, and reads the card back "
-         "afterwards to say so — no rebuild, and no separate command."),
+         "Always on, for every image on the card - there is no box to "
+         "tick. The machine's validator would fail a modified image (GAME "
+         "VALIDATION ERROR), and the images on one card share one saved "
+         "grade, so a failure one image left behind would latch on the "
+         "next. Every image gets its validator switched off and its saved "
+         "grades ignored at boot, with that image's package index record "
+         "refreshed - proven on a TMNT. A card that is already built is "
+         "repaired by Apply / Update: any image still unpatched is patched, "
+         "and the card is read back afterwards to say so - no rebuild, and "
+         "no separate command."),
         ("Apply to card, or Build & verify",
          "After Load card the tab is editing THAT card: every field came "
          "off it, and the status line says which of the two things can "

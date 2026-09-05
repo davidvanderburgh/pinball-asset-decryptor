@@ -61,6 +61,11 @@ pyinstaller \
     `# the playfield as a Windows process, the audio bridge - are WSL` \
     `# workarounds the Linux path skips.` \
     --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \
+    `# The Spike 3 key tools (stern-spike-3/tools). core.spike3 loads and runs` \
+    `# them IN-PROCESS, so no python is spawned, but the FILES must be bundled` \
+    `# or the Spike 3 tab has nothing to load (the frozen build ships no python` \
+    `# to shell out to - the exact break the first Spike 3 release hit).` \
+    --add-data "$ROOT_DIR/stern-spike-3/tools:stern-spike-3/tools" \
     `# THE PREREQUISITE INSTALLER ITSELF, which this AppImage has never` \
     `# carried. The gear menu's "Install Prerequisites" looks for it beside` \
     `# the package (app.py::_find_prereqs_script_linux) and an AppImage user` \
@@ -131,6 +136,10 @@ pyinstaller \
     --collect-all "unicorn" \
     --collect-all "capstone" \
     --collect-all "numpy" \
+    `# zstandard backs build_extractor_card.py (Spike 3 prepare). It ships as` \
+    `# DATA, so PyInstaller never analyses its import - collect it explicitly` \
+    `# so the frozen Spike 3 tab can build an extractor card.` \
+    --collect-all "zstandard" \
     --collect-all "faster_whisper" \
     --collect-all "ctranslate2" \
     --collect-all "onnxruntime" \

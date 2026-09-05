@@ -729,6 +729,19 @@ def test_windows_installer_hands_a_failed_package_to_the_rigs_repair(tmp_path):
     (fake / "wsl.cmd").write_text(
         '@echo off\r\n"%s" "%%~dp0fakewsl.py" %%*\r\n' % sys.executable,
         encoding="ascii")
+    # ...and a Unix-executable stub of the same fake, so this test runs under
+    # pwsh on the macOS / Linux CI runners too.  A .cmd is not an executable
+    # off Windows, so the Windows-only stub left `wsl` unresolved there and
+    # failed the whole run (a real red on those two runners).
+    wsl_sh = fake / "wsl"
+    wsl_sh.write_text(
+        '#!/bin/sh\nexec "%s" "%s" "$@"\n'
+        % (sys.executable, (fake / "fakewsl.py").as_posix()),
+        encoding="ascii")
+    try:
+        wsl_sh.chmod(0o755)
+    except OSError:
+        pass
 
     harness = r"""
 $ErrorActionPreference = "Stop"

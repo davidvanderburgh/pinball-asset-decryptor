@@ -294,3 +294,61 @@ def test_verify_real_header_end_to_end():
                          capture_output=True, text=True)
     assert spike3.interpret_verify_output(bad.stdout, bad.returncode)["valid"] \
         is False
+
+
+# --- in-process execution (the path the app actually uses) -----------------
+
+def test_tools_available_in_dev_checkout():
+    assert spike3.tools_available() is True
+
+
+def test_load_module_loads_the_tool():
+    mod = spike3._load_module(spike3.build_extractor_tool())
+    assert mod is not None and hasattr(mod, "patch_boot_img")
+
+
+def test_run_verify_in_process_valid_and_invalid():
+    rc, out = spike3.run_verify(FIXTURE, KNOWN_KEY)
+    info = spike3.interpret_verify_output(out, rc)
+    assert info["valid"] is True
+    assert info["master_key"] == EXPECTED_MASTER
+    rc2, out2 = spike3.run_verify(FIXTURE, "00" * 32)
+    assert spike3.interpret_verify_output(out2, rc2)["valid"] is False
+
+
+def test_run_prepare_bad_input_reports_cleanly(tmp_path):
+    bad = tmp_path / "bad.img"
+    bad.write_bytes(b"not an image" * 8)
+    rc, out = spike3.run_prepare(str(bad), str(tmp_path / "out"))
+    assert rc != 0
+    # The tool's own error string is surfaced, not swallowed.
+    assert "Unrecognized input" in out
+
+
+def test_run_prepare_missing_tool_is_a_plain_message(monkeypatch):
+    monkeypatch.setattr(spike3, "build_extractor_tool",
+                        lambda: "/no/such/build_extractor_card.py")
+    spike3._MODULE_CACHE.clear()
+    rc, out = spike3.run_prepare("x.raw", "out")
+    assert rc != 0 and "did not ship" in out
+    spike3._MODULE_CACHE.clear()
+
+
+# --- packaging guard: the tools MUST ship in every installer ---------------
+# The first Spike 3 build shipped without stern-spike-3/tools, so the tab ran
+# a file that was not there.  These assert every installer config references it.
+
+def test_windows_installer_ships_the_spike3_tools():
+    iss = os.path.join(str(REPO), "installer", "pinball_decryptor.iss")
+    text = open(iss, encoding="utf-8", errors="replace").read()
+    assert "stern-spike-3\tools" in text or "stern-spike-3/tools" in text
+
+
+@pytest.mark.parametrize("script", ["build_linux.sh", "build_macos.sh"])
+def test_frozen_builds_bundle_the_spike3_tools(script):
+    path = os.path.join(str(REPO), "installer", script)
+    text = open(path, encoding="utf-8", errors="replace").read()
+    assert "stern-spike-3/tools" in text, "%s must --add-data the tools" % script
+    # zstandard powers build_extractor_card and ships as data (not analysed),
+    # so the frozen builds must collect it explicitly.
+    assert "zstandard" in text, "%s must collect zstandard" % script

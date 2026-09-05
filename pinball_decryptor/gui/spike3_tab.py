@@ -30,14 +30,12 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import _rig
 from ..core import spike3
 
 
@@ -272,27 +270,12 @@ class Spike3Panel:
                 self._ui(lambda: self._set_busy(False))
         return run
 
-    def _run_capture(self, argv, label=""):
-        """Run *argv*, stream every line into the log, return (rc, text).
-        Runs on the worker thread."""
-        self._log("$ " + " ".join(_short(a) for a in argv))
-        lines = []
-        try:
-            proc = subprocess.Popen(
-                argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                creationflags=_rig.CREATE_FLAGS)
-        except Exception as exc:                    # noqa: BLE001
-            self._log("[spike3] cannot start %s: %s" % (label or argv[0], exc), "error")
-            return 1, ""
-        try:
-            for raw in proc.stdout:
-                line = raw.decode("utf-8", "replace").rstrip()
-                lines.append(line)
-                self._log(line)
-        except Exception:                           # noqa: BLE001
-            pass
-        rc = proc.wait()
-        return rc, "\n".join(lines)
+    def _log_block(self, text, level="info"):
+        """Send a tool's captured multi-line output to the shared Log, one line
+        at a time so each gets the pane's timestamp.  Runs on the worker."""
+        for line in (text or "").splitlines():
+            if line.strip():
+                self._log("[spike3] " + line, level)
 
     # ------------------------------------------------------------------
     # Step 1: prepare
@@ -305,6 +288,9 @@ class Spike3Panel:
             messagebox.showerror("Spike 3", "Pick a card image or boot.img "
                                             "first.")
             return
+        if not spike3.tools_available():
+            messagebox.showerror("Spike 3", _TOOLS_MISSING)
+            return
         if not outdir:
             outdir = os.path.join(os.path.dirname(src), "spike3_extractor")
             self.out_var.set(outdir)
@@ -312,16 +298,15 @@ class Spike3Panel:
         def work():
             self._ui(lambda: self._status_fn("Spike 3: building extractor "
                                              "files…"))
-            argv = spike3.prepare_argv(src, outdir, boot_sig=sig)
-            rc, _ = self._run_capture(argv, "prepare")
+            rc, out = spike3.run_prepare(src, outdir, boot_sig=sig)
+            self._log_block(out, "info" if rc == 0 else "error")
             img = os.path.join(outdir, "boot.img")
-            sig_out = os.path.join(outdir, "boot.sig")
             if rc == 0 and os.path.exists(img):
                 self._prepared_dir = outdir
                 self._ui(self._prepare_ok)
             else:
                 self._ui(lambda: self._status_fn(
-                    "Spike 3: prepare failed (exit %d)." % rc))
+                    "Spike 3: prepare failed (exit %d) - see the Log." % rc))
         self._start(work)
 
     def _prepare_ok(self):
@@ -425,6 +410,9 @@ class Spike3Panel:
             messagebox.showerror("Spike 3", "Pick a card image or a LUKS "
                                             "header file to verify against.")
             return
+        if not spike3.tools_available():
+            messagebox.showerror("Spike 3", _TOOLS_MISSING)
+            return
 
         def work():
             self._ui(lambda: self._status_fn("Spike 3: verifying…"))
@@ -439,8 +427,8 @@ class Spike3Panel:
         self._start(work)
 
     def _verify_header(self, header_path, name, key):
-        rc, text = self._run_capture(
-            spike3.verify_argv(header_path, key), "verify:%s" % name)
+        rc, text = spike3.run_verify(header_path, key)
+        self._log_block(text, "info")
         info = spike3.interpret_verify_output(text, rc)
         return {"name": name, "valid": info["valid"],
                 "master_key": info["master_key"]}
@@ -503,11 +491,10 @@ class Spike3Panel:
                         % (good, len(results)))
 
 
-def _short(arg):
-    """A long path prints as its basename in the echoed command line."""
-    if os.path.sep in str(arg) and len(str(arg)) > 40:
-        return os.path.basename(arg)
-    return str(arg)
+_TOOLS_MISSING = (
+    "The Spike 3 tools did not ship with this build of the app. Update to the "
+    "latest version and try again."
+)
 
 
 _PREP_HELP = (

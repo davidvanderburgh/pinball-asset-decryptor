@@ -76,6 +76,9 @@ pyinstaller \
     `# namespaces - so tools/spike2_emu/docker runs it in a container and exports` \
     `# the display over VNC, which macOS Screen Sharing opens with no install.` \
     --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \
+    `# Spike 3 key tools - core.spike3 runs them in-process, but the files must` \
+    `# ship (the frozen app has no python to subprocess); see build_linux.sh.` \
+    --add-data "$ROOT_DIR/stern-spike-3/tools:stern-spike-3/tools" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto_v3.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/filelist.py:pinball_decryptor/plugins/jjp" \
@@ -137,6 +140,9 @@ pyinstaller \
     --collect-all "unicorn" \
     --collect-all "capstone" \
     --collect-all "numpy" \
+    `# zstandard backs build_extractor_card.py (Spike 3 prepare); it ships as` \
+    `# DATA so PyInstaller never analyses its import - collect it explicitly.` \
+    --collect-all "zstandard" \
     --collect-all "faster_whisper" \
     --collect-all "ctranslate2" \
     --collect-all "onnxruntime" \

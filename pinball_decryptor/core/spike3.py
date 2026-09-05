@@ -39,10 +39,20 @@ from dataclasses import dataclass
 # --- locating the standalone tools -----------------------------------------
 
 def repo_root():
-    """The checkout root - three levels up from this file
+    """The directory that holds ``stern-spike-3/`` at runtime.
+
+    In a dev checkout that is three levels up from this file
     (``pinball_decryptor/core/spike3.py`` -> ``core`` -> ``pinball_decryptor``
-    -> root)."""
+    -> root).  In a frozen build (PyInstaller macOS / Linux) the tools are
+    added under ``sys._MEIPASS`` beside ``pinball_decryptor/``, so that wins -
+    the frozen app ships no separate Python and ``__file__`` may point into an
+    archive, so the checkout math cannot be relied on there.  The Windows
+    installer is not frozen (embedded Python + source tree), so it takes the
+    checkout branch and finds ``{app}/stern-spike-3/tools``."""
     from pathlib import Path
+    mp = getattr(sys, "_MEIPASS", None)
+    if mp:
+        return Path(mp)
     return Path(__file__).resolve().parents[2]
 
 
@@ -109,6 +119,105 @@ def decrypt_probe_argv(image, header, part_base_lba, key_hex, out,
             "--count", str(int(count)), "--out", out]
 
 
+# --- running the tools IN-PROCESS ------------------------------------------
+#
+# The tools are pure Python (build_extractor_card needs only ``zstandard``,
+# already bundled; luks_otp is stdlib), so the app runs them in ITS OWN
+# interpreter rather than shelling out.  A subprocess would need a Python on
+# PATH, and the frozen macOS / Linux builds ship none (``sys.executable`` is the
+# app binary) - which is exactly how the first Spike 3 build failed in the field
+# (``pythonw ... build_extractor_card.py: No such file``).  In-process also means
+# the same dependencies the app already has, and real exceptions we can report.
+# The tool FILES still have to be packaged with the app (installer/*.iss,
+# build_linux.sh, build_macos.sh add ``stern-spike-3/tools``); this only removes
+# the second interpreter, not the need to ship the code.
+
+_MODULE_CACHE = {}
+
+
+def _load_module(path):
+    """Import a standalone tool file by absolute *path* (the ``stern-spike-3``
+    dir has a hyphen, so it is not an ordinary package import).  Cached.
+    Returns the module, or None if the file is missing or fails to import."""
+    if path in _MODULE_CACHE:
+        return _MODULE_CACHE[path]
+    import importlib.util
+    if not os.path.exists(path):
+        return None
+    name = "_spike3_" + os.path.splitext(os.path.basename(path))[0]
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:               # noqa: BLE001 - e.g. zstandard missing
+        return None
+    _MODULE_CACHE[path] = mod
+    return mod
+
+
+def tools_available():
+    """True when both tool files are present where the app can reach them -
+    the check the tab makes before offering to run anything, so a missing
+    install surfaces a plain sentence instead of an interpreter error."""
+    return (os.path.exists(build_extractor_tool())
+            and os.path.exists(luks_otp_tool()))
+
+
+def _run_module_main(mod, argv):
+    """Call *mod*.main(*argv*) in-process, capturing everything it prints and
+    turning its exit into an ``(rc, text)`` pair.  argparse errors and explicit
+    ``sys.exit`` both come back as a non-zero rc rather than killing the app."""
+    import contextlib
+    import io
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            ret = mod.main(argv)
+        rc = int(ret) if ret is not None else 0
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            rc = 0
+        elif isinstance(code, int):
+            rc = code
+        else:
+            # ``sys.exit("message")`` - the tool's own error string, which
+            # Python would print to stderr; keep it so the user sees why.
+            buf.write(str(code))
+            rc = 1
+    except Exception as exc:        # noqa: BLE001 - report, never crash the app
+        buf.write("\nerror: %s: %s" % (type(exc).__name__, exc))
+        rc = 1
+    return rc, buf.getvalue()
+
+
+def run_prepare(source, outdir, boot_sig=None):
+    """Build the extractor ``boot.img`` + ``boot.sig`` from *source* into
+    *outdir*, in-process.  Returns ``(rc, output_text)``; rc 0 on success."""
+    mod = _load_module(build_extractor_tool())
+    if mod is None:
+        return 1, ("Cannot load build_extractor_card.py. The Spike 3 tools did "
+                   "not ship with this build - reinstall the latest version.")
+    argv = [source, "-o", outdir]
+    if boot_sig:
+        argv += ["--boot-sig", boot_sig]
+    return _run_module_main(mod, argv)
+
+
+def run_verify(header, key_hex, slot="0", digest="0"):
+    """Verify *key_hex* against a carved LUKS2 *header*, in-process.  Returns
+    ``(rc, output_text)``; rc 0 == the key opens it, 2 == it does not."""
+    mod = _load_module(luks_otp_tool())
+    if mod is None:
+        return 1, ("Cannot load luks_otp.py. The Spike 3 tools did not ship "
+                   "with this build - reinstall the latest version.")
+    return _run_module_main(
+        mod, ["verify", header, "--key-hex", key_hex,
+              "--slot", slot, "--digest", digest])
+
+
 # --- the key, out of whatever the owner brings back ------------------------
 
 _KEY_RE = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])")
@@ -164,22 +273,9 @@ def _find_otp_txt(folder):
 
 
 def _fat_reader():
-    """Load ``FatReader``/MBR helpers from build_extractor_card by path (the
-    dir name has a hyphen, so it is not an ordinary import).  Returns the
-    module, or None if it cannot be loaded."""
-    import importlib.util
-    path = build_extractor_tool()
-    if not os.path.exists(path):
-        return None
-    spec = importlib.util.spec_from_file_location("_spike3_bec", path)
-    if spec is None or spec.loader is None:
-        return None
-    mod = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(mod)
-    except Exception:               # noqa: BLE001 - missing zstandard etc.
-        return None
-    return mod
+    """The build_extractor_card module (for its ``FatReader``/MBR helpers), or
+    None if it cannot be loaded."""
+    return _load_module(build_extractor_tool())
 
 
 def read_key_from_image(path):

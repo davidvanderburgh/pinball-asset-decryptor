@@ -68,6 +68,11 @@ _GAMES = _SPIKE2_GAMES + _SPIKE1_GAMES + _WHITESTAR_GAMES
 # Capture-only capabilities for the Whitestar era (no write/replace/Direct-SD
 # — you can't repack a MAME ROM; extraction is a libpinmame attract capture).
 _WHITESTAR_CAPS = Capabilities(extract=False, capture=True)
+# Spike 3 (Raspberry Pi CM4) is a preview: the ONLY thing wired is the OTP-key
+# helper tab.  No extract, write or emulator yet - so its era shows just that
+# one tab (the header pill carries a BETA badge).  See core.spike3 and
+# gui/spike3_tab.py.
+_SPIKE3_CAPS = Capabilities(extract=False, spike3_key=True)
 
 # Spike 1: audio extract + write.  The master directory is plaintext and every
 # sound is raw PCM, so no emulator/codec prerequisites; the surface is audio-
@@ -219,7 +224,8 @@ class SternManufacturer(Manufacturer):
         # docs/architecture/spike1_emulation.md) — its static armel binary
         # boots to hardware-init under qemu-user, but its device model needs a
         # privileged host setup, so no GUI tab is surfaced yet (a tab that
-        # starts nothing is worse than no tab).  Spike 3 remains unwired.
+        # starts nothing is worse than no tab).  Spike 3 is its own era (a BETA
+        # OTP-key preview - see _SPIKE3_CAPS), not a rider here.
         emulate=True,
         # Item 90: the Multi-boot tab - one SD card, several images, a menu at
         # power-up.  Spike 2 only: the layout (the extra images' partition
@@ -383,8 +389,11 @@ class SternManufacturer(Manufacturer):
     # Hardware eras, surfaced as a segmented pill switcher in the working-view
     # header so the user picks the era explicitly (which makes the input field
     # single-mode per era — Card image vs ROM zip — instead of multi-modal).
+    # A 3rd tuple element is an optional corner badge on that pill (the GUI's
+    # _build_era_badges renders it) — "BETA" on Spike 3 so nobody mistakes the
+    # key-extraction preview for finished support.
     eras = (("spike2", "SPIKE 2"), ("spike1", "SPIKE 1"),
-            ("whitestar", "WHITESTAR"))
+            ("whitestar", "WHITESTAR"), ("spike3", "SPIKE 3", "BETA"))
     # Mirror the destination radio so the action button names what it does
     # (the generic "Build update" / "Apply Modifications" don't connect to
     # the SD-card wording above them).
@@ -416,7 +425,8 @@ class SternManufacturer(Manufacturer):
         self._era = "spike2"
 
     def set_era(self, era):
-        self._era = era if era in ("whitestar", "spike1") else "spike2"
+        self._era = era if era in ("whitestar", "spike1", "spike3") \
+            else "spike2"
 
     @property
     def current_era(self):
@@ -428,6 +438,8 @@ class SternManufacturer(Manufacturer):
             return _WHITESTAR_CAPS
         if self._era == "spike1":
             return _SPIKE1_CAPS
+        if self._era == "spike3":
+            return _SPIKE3_CAPS
         return self._SPIKE2_CAPS
 
     @property
@@ -436,6 +448,10 @@ class SternManufacturer(Manufacturer):
             return _WHITESTAR_PREREQS
         if self._era == "spike1":
             return _SPIKE1_PREREQS
+        if self._era == "spike3":
+            # The Spike 3 key tools are pure Python (only zstandard, already a
+            # project dependency), so the era demands nothing of the host.
+            return ()
         return self._SPIKE2_PREREQS
 
     @property

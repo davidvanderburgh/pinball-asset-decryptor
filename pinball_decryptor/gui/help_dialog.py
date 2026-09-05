@@ -1532,6 +1532,36 @@ HELP_CONTENT = {
          "Everything runs under WSL and reports into the Log at the foot of "
          "the window, tagged [multi-boot]."),
     ],
+    "Spike 3": [
+        ("What it does (BETA)",
+         "Reads the encryption key off a Stern Spike 3 machine. Spike 3 "
+         "keeps its assets on encrypted volumes whose key is fused into the "
+         "board and is in NO file on the SD card, so the key must be read "
+         "once from a real machine. This tab preps a card that dumps the "
+         "key at boot, then reads the dumped key back and checks it. It is a "
+         "preview - hence the BETA badge on the SPIKE 3 pill; the on-machine "
+         "step still needs a cooperative owner."),
+        ("Step 1 - Prepare the extractor card",
+         "Pick a Spike 3 card image (or a bare boot.img) and click Prepare. "
+         "You get two small files, boot.img and boot.sig, plus the exact "
+         "steps to send to the machine's owner: back up the card's two boot "
+         "files, drop these two in, boot once, and copy back the OTP_KEY.TXT "
+         "that appears. Nothing large is shipped and the original card is "
+         "never modified here. If the machine refuses to boot the patched "
+         "card, it enforces secure boot (harmless - restore the backup), and "
+         "that refusal is itself the answer. Use Copy onto boot partition… "
+         "to do the swap on a card that is in THIS PC (it backs up the "
+         "originals first)."),
+        ("Step 2 - Read the answer back",
+         "Point it at whatever the owner returns - OTP_KEY.TXT, the boot "
+         "folder, a whole card image, or a key pasted straight in - and it "
+         "shows the 64-character key. Then give it a card image (or a single "
+         "LUKS header) under Verify to see which volumes the key opens: if "
+         "one key opens every volume, trying it against a different game's "
+         "image proves whether the key is global. The recovered key and the "
+         "verify results are colour-coded in the Log at the foot of the "
+         "window, tagged [spike3]."),
+    ],
 }
 
 # The Image Info WINDOW (the "Info" button beside the Extract / Write image

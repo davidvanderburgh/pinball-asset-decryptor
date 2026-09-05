@@ -2767,7 +2767,10 @@ class DirOps(object):
             for c in chunks:
                 f.write(c)
             f.flush()
-            os.fsync(f.fileno())
+            # NO fsync per file: on the loop device each one forces a journal commit that
+            # waits on the backing file through 9p (measured: 11 MB/s, in jbd2_log_wait_commit,
+            # against ~150 MB/s streaming).  Durability comes from commit() - os.sync() before
+            # the record is written - and a crash before it is what the dirty flag repairs.
         self._own(p, uid, gid)
         os.chmod(p, mode)
         os.utime(p, (mtime, mtime))

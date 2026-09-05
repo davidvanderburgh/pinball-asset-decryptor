@@ -343,6 +343,19 @@ matched the patched ELF afterwards and `verify` PASSed. The tamper *state*
 lives on the machine's board NVRAM, not on the card: a machine that already
 booted an unpatched image may keep its flag until a settings/factory reset.
 
+**LEAVE A STOCK IMAGE'S VALIDATOR ALONE (item 98).**  The validator persists
+its three track grades in the board's NVRAM and restores them at start-up;
+it only re-grades when it RUNS.  A bypassed image never runs it, so a GAME
+VALIDATION ERROR that an earlier card left in the machine stays latched for
+ever on that image (nvgrades.py's finding, proven on the emulator's EEPROM),
+and Insider Connected sees a modified game.  A pristine image validates
+itself and passes, which clears the latch; an image this app wrote already
+carries its own bypass.  So the app's tick is OFF by default and `build`
+patches nothing unless asked, and `update --restore-validation` puts the
+source's own game and `.sidx` back on every tree this tool bypassed (the
+record's digests say which) - the fix for a card built before this: update,
+flash, boot the stock image once, the banner goes.
+
 The hardware side is the same program installed in p2 and hooked into
 `/etc/init.d/game` by `select.sh`, reading the flippers over the node bus and
 remounting `/games` from the chosen partition - `codeselect/DESIGN.md` has the

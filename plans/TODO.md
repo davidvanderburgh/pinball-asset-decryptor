@@ -147,8 +147,21 @@ These have each been violated at least once and each cost a run or a window:
       — S2: today's answer is "find the .raw you flashed". D3: elevation and
       a partial device read in the app.
 
-- [ ] **98. On the TMNT: a latched GAME VALIDATION ERROR and Stern Insider
-      Connected not connecting on the multi-boot card.** `S2 D3` *(David,
+- [x] **98. On the TMNT: a latched GAME VALIDATION ERROR and Stern Insider
+      Connected not connecting on the multi-boot card.** `S2 D3` **ROOT CAUSE
+      + FIX on `item/98` 2026-09-05 (machine proof pending):** the cause was the
+      "always on" bypass. The validator keeps its three track grades in the
+      board's NVRAM and only re-grades when it RUNS (nvgrades.py); the v3 card's
+      stock image was bypassed by the build, so the F an earlier card had left
+      behind could never be re-graded - latched - and Insider Connected saw a
+      patched game. Fix: the bypass is opt-in (tick in Menu settings, OFF by
+      default; a stock image validates itself and passes, an image this app
+      wrote already carries its bypass), `build` patches nothing unless asked,
+      and `update --restore-validation` puts the source's game + .sidx back on
+      every tree the tool patched (the tab sends it whenever the tick is off).
+      David's v3 card: `update --restore-validation` restores image 0 (2 files,
+      6.5 MB), flash, boot the stock image once - it re-grades P and the banner
+      goes; then test Insider on that image. Not proven on the machine yet. *(David,
       2026-09-05, after the v3 two-image card booted and both images ran:
       "there is an existing game validation error that is latched on in the
       machine and stern insider connect is not connecting, so I can't validate

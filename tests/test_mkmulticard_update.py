@@ -198,3 +198,27 @@ def test_selector_manifests_carry_trees_json_through(mk, ts, tmp_path):
     assert out[mk.TREES_MANIFEST] == b"{carried}"
     out = mk.selector_manifests(plan, conf, None, None, None, None)
     assert mk.TREES_MANIFEST not in out
+
+
+# ---- item 98: putting the stock game back where the tool patched it -------------------
+def test_restore_changes_names_the_patched_game_and_sidx_only(mk):
+    ts = mk._treesync()
+    tree = ts.TreeManifest({"t/game": ts.FileRec("a" * 64, 100, 0o755, 0, 0, 1),
+                            "spk/index/t.sidx": ts.FileRec("b" * 64, 20, 0o644, 0, 0, 1),
+                            "t/other": ts.FileRec("c" * 64, 5, 0o644, 0, 0, 1)})
+    patched = ts.ImageTrees(0, "/dev/mmcblk0p3", "", tree, None, None,
+                            {"game_path": "t/game", "sidx_path": "spk/index/t.sidx", "game": "d" * 64, "sidx": "e" * 64})
+    assert [(c.op, c.rel, c.size) for c in mk.restore_changes(patched, tree, [])] == [
+        ("write", "t/game", 100), ("write", "spk/index/t.sidx", 20)]
+    # already written by the diff -> not twice; already bypassed in the SOURCE (no digest
+    # recorded) -> nothing to put back; no record -> nothing
+    assert [c.rel for c in mk.restore_changes(patched, tree, [ts.Change("write", "t/game", 100)])] == ["spk/index/t.sidx"]
+    carried = ts.ImageTrees(0, "/dev/mmcblk0p3", "", tree, None, None, {"game_path": "t/game", "sidx_path": None})
+    assert mk.restore_changes(carried, tree, []) == []
+    assert mk.restore_changes(None, tree, []) == []
+
+
+def test_update_refuses_bypass_and_restore_together(mk, tmp_path):
+    card = tmp_path / "x.raw"
+    card.write_bytes(bytes(1024))
+    assert mk.main(["update", "--card", str(card), "--bypass-validation", "--restore-validation", "--dry-run"]) == 2

@@ -3544,6 +3544,8 @@ def update_card(a):
     check_output_path(card, [a.conf, a.selector_dir, a.media_dir] + ([a.primary] if a.primary else []) + list(a.extra),
                       must_exist=True)
     dry = bool(a.dry_run)
+    if a.bypass_validation and getattr(a, "restore_validation", False):
+        raise Refused("--bypass-validation and --restore-validation ask for opposite things")
     if not dry:
         ok, why = loop_available()
         if not ok:
@@ -3564,6 +3566,22 @@ def update_card(a):
     finally:
         if lock:
             lock.__exit__(None, None, None)
+
+
+def restore_changes(old_im, tree, changes):
+    """The writes that put the SOURCE's own game (and .sidx) back on a tree this tool
+    bypassed (item 98): the record's bypass digests name the files the card holds patched;
+    the source's copies go over them.  Only files the source has, only where the tool
+    itself patched (a digest recorded), and never one the diff already writes."""
+    ts = _treesync()
+    by = (old_im.bypass or {}) if old_im is not None else {}
+    have = {c.rel for c in changes if c.op == "write"}
+    out = []
+    for path_key, digest_key in (("game_path", "game"), ("sidx_path", "sidx")):
+        rel = by.get(path_key)
+        if rel and by.get(digest_key) and rel in tree.files and rel not in have:
+            out.append(ts.Change("write", rel, tree.files[rel].size))
+    return out
 
 
 def _update_locked(a, ts, card, dry):
@@ -3700,6 +3718,8 @@ def _update_locked(a, ts, card, dry):
         tree, st, uuid, old_im = new_trees[i]
         old_tree = old_im.tree if (old_im is not None and act.action in ("keep", "rename")) else None
         ch = ts.diff_tree(old_tree, tree)
+        if getattr(a, "restore_validation", False):
+            ch = ch + restore_changes(old_im, tree, ch)
         changes[i] = ch
         part = tree_part(i)
         need, peak = ts.room_needed(ch, old_tree, tree, margin=0)
@@ -3849,7 +3869,8 @@ def _update_locked(a, ts, card, dry):
                     % (i, stats["written"], _gb(stats["bytes"]), stats["removed"],
                        (", %d linked to blobs the store already held" % stats["linked"]) if store else ""))
                 # the bypass, through the mount, for a tree whose game or .sidx moved (or that was never done)
-                want_bypass = a.bypass_validation or bool(old_im is not None and old_im.bypass)
+                want_bypass = a.bypass_validation or (
+                    bool(old_im is not None and old_im.bypass) and not getattr(a, "restore_validation", False))
                 if want_bypass:
                     state, written, notes, gpath, spath = apply_bypass_fs(ops, prefix)
                     states[i] = state
@@ -6234,6 +6255,11 @@ def main(argv=None):
     _add_conf_flags(s)
     s.add_argument("--bypass-validation", action="store_true",
                    help="neuter Stern's validator in every tree whose game changed (the others keep their state)")
+    s.add_argument("--restore-validation", action="store_true",
+                   help="put the SOURCE's own game and .sidx back on every tree this tool bypassed, so the validator "
+                        "runs again (item 98: a bypassed image never re-grades, so a GAME VALIDATION ERROR an earlier "
+                        "card left in the machine's NVRAM stays latched; a pristine image re-grades P and clears it, "
+                        "and Insider Connected sees a genuine game); the other trees keep their state")
     s.add_argument("--allow-version-mismatch", action="store_true", help="as for build")
     s.add_argument("--dry-run", action="store_true", help="say what an update would write; write nothing")
     s.add_argument("--expect-bytes", type=int,

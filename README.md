@@ -488,6 +488,18 @@ PowerShell (create the username/password it asks for, then type `exit`),
 or install **Ubuntu** from the Microsoft Store app and launch it once —
 then run **Install Prerequisites** again.
 
+If the summary instead reports one of the **WSL packages** as MISSING —
+the Spike 2 emulator's `qemu-user-static` is the usual one — apt saying
+no is no longer where the run stops. The installer names the packages apt
+refused, says in plain words what the app can try that apt cannot (refresh
+the package index and retry one at a time, switch on the `universe`
+component if this Ubuntu has it turned off, or fetch a single
+dependency-free package from a release that publishes it), and asks before
+doing any of it — the same repair the Emulate tab's **Set up
+emulator…** button runs. Every package it touched is then re-checked, so
+the summary reports what is really on the machine rather than what apt was
+asked for.
+
 If the installer instead stops with a red **virtualization is disabled
 in BIOS/UEFI** banner, WSL2 cannot run on your machine at all until you
 switch the CPU virtualization option back on in firmware setup (Intel
@@ -605,6 +617,20 @@ After install, run **Install Missing** from the prereqs row (or run
 directly) — it asks which manufacturers you'll actually use and installs
 only the apt packages those plugins need (see
 [Per-manufacturer prerequisites](#per-manufacturer-prerequisites) below).
+
+From v0.184.2 the AppImage carries that script itself, so **Install
+Missing** works from a downloaded AppImage and not only from a source
+checkout. In the same pass: **'a' for all** really does install every
+manufacturer's packages, Stern's included (the picker used to stop at the
+five manufacturers the menu had when it was written, so the Spike 2
+emulator's `qemu-user-static` was skipped without a word, and an
+unrecognised number is now named instead of dropped); one package apt
+cannot get no longer takes the whole batch down with it, since the batch
+falls back to installing one at a time; running the script as root works
+instead of failing on every install; and anything apt still refuses is
+named, with the offer to try the app's own repair (index refresh, the
+`universe` component, or a single dependency-free package fetched from a
+release that publishes it).
 
 The installer expects an apt-based distro (Debian / Ubuntu); on other
 distros, install the equivalent packages manually using the table in that

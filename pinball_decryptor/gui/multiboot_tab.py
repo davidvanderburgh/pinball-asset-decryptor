@@ -3029,7 +3029,7 @@ def card_size_view(info):
     fits = info.get("fits") or {}
     view = {"known": bool(total), "need": None, "over": False,
             "total": total or 0, "scale": total or 1, "spare": None,
-            "cap": None, "bands": [], "head": "", "detail": ""}
+            "cap": None, "bands": [], "head": "", "detail": "", "saved": 0}
     if not total:
         return view
     biggest = fits.get(CARD_SIZES[-1][0])
@@ -3066,10 +3066,12 @@ def card_size_view(info):
         view["detail"] = ("%s of code - %s more than a %s card holds. Drop an "
                           "image." % (_gbytes(total), _gbytes(short), biggest))
     elif free is not None and info.get("shared"):
-        # the compact layout: the images' rows are what each brings on its
-        # own; what they share is stored once and is the saving
+        # the compact layout (items 95/100): the images' rows are what each
+        # brings on its own; what they share is stored once - the saving,
+        # drawn as a hatched part of the free room (clamped to it)
         view["head"] = view["need"]
-        view["detail"] = "%s of games, %s shared, %s free." % (
+        view["saved"] = int(info["shared"])
+        view["detail"] = "%s of games, %s saved, %s free." % (
             _gbytes(games), _gbytes(info["shared"]), _gbytes(free))
     elif free is not None:
         view["head"] = view["need"]
@@ -3615,21 +3617,6 @@ class MenuSettingsDialog(_Modal):
             row=4, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
         g.columnconfigure(1, weight=1)
 
-        layout = ttk.LabelFrame(b, text="Card layout")
-        layout.pack(fill=tk.X, pady=(10, 0))
-        g0 = ttk.Frame(layout)
-        g0.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Checkbutton(g0, text="Compact card: store files the images "
-                                 "share only once (experimental)",
-                        variable=panel._compact_var).pack(anchor=tk.W)
-        ttk.Label(g0, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
-                  text="One copy of every file the images have in common. "
-                       "Smaller card, same games. A card built this way must "
-                       "be changed with this app, not by a Stern USB update. "
-                       "Experimental until it has booted on a machine; off = "
-                       "the card layouts this app has always made.").pack(
-            anchor=tk.W, pady=(4, 0))
-
         look = ttk.LabelFrame(b, text="Look")
         look.pack(fill=tk.X, pady=(10, 0))
         g1 = ttk.Frame(look)
@@ -4114,7 +4101,9 @@ class MultibootPanel:
         #: The compact layout (item 95): OFF by default, and it stays off
         #: until the user ticks it - never set from a card that is merely
         #: loaded, only from one whose layout inspect reports as 'store'.
-        self._compact_var = tk.BooleanVar(value=False)
+        #: Made here unless the size strip (built earlier) already did.
+        if not hasattr(self, "_compact_var"):
+            self._compact_var = tk.BooleanVar(value=False)
         # THE SELECTOR BUILD PATH is no longer an entry box (David: the
         # Advanced section - "people are likely to mess it up").  It is the
         # default, overridable only by an env var for the rig.
@@ -4158,8 +4147,12 @@ class MultibootPanel:
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var,
-                    self._default_var, self._bypass_var, self._compact_var):
+                    self._default_var, self._bypass_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
+        # Item 100: the compact tick beside the size strip.  Not a menu field
+        # (an inject never changes a card's layout: diff_forms puts it in the
+        # rebuild bucket), and what it changes is the SIZE - so it re-plans.
+        self._compact_var.trace_add("write", lambda *_a: self._compact_changed())
         self._theme_var.trace_add("write", lambda *_a: self._theme_changed())
         for var in self._color_vars.values():
             var.trace_add("write", lambda *_a: self._color_changed())
@@ -4993,9 +4986,23 @@ class MultibootPanel:
         "card spends on itself (boot, rootfs, /data, /dump and the "
         "filesystems' own bookkeeping). It re-measures itself whenever the "
         "image list changes, and for a loaded card it also works out what an "
-        "update would write. With the compact card ticked (Menu settings) "
-        "each band is what that image brings on its own and the line says "
-        "how much the images share - stored once, so not on the card.")
+        "update would write. With Compact build ticked each band is what "
+        "that image brings on its own, and the hatched part of the free "
+        "room is what compact saved - stored once, so not on the card.")
+
+    COMPACT_TIP = (
+        "Compact build (experimental): one copy of every file the images "
+        "have in common, stored once. Smaller card, same games - the bar "
+        "shows what it saves as a hatched part of the free room. A card "
+        "built this way must be changed with this app, not by a Stern USB "
+        "update. Off = the card layouts this app has always made.")
+
+    def _compact_changed(self):
+        """The compact tick moved: the size is a different question now
+        (the plan hashes the images to find what they share), and a loaded
+        card's edit status counts a layout change as a rebuild."""
+        self._update_edit_status()
+        self._maybe_plan()
 
     def _build_size(self, parent, th):
         """THE SIZE STRIP - the card these images need, under the images.
@@ -5025,6 +5032,20 @@ class MultibootPanel:
         self._size_need = ttk.Label(row, text=self.SIZE_UNKNOWN, width=9,
                                     anchor=tk.W)
         self._size_need.pack(side=tk.LEFT, padx=(6, 8))
+        # Item 100 (David: "checkbox in the GUI next to the 'space needed'
+        # section ... [x] Compact build ... shows the space savings on the
+        # bar"): the compact layout's tick lives HERE, where the size is
+        # looked at, and the bar answers what it buys.  Off by default (item
+        # 95's rule: opt-in, experimental until a store card has booted on a
+        # machine).  Packed before the bar so it is never the widget a
+        # narrow tab gives up.
+        if not hasattr(self, "_compact_var"):
+            self._compact_var = tk.BooleanVar(value=False)
+        self._compact_chk = ttk.Checkbutton(row, text="Compact build",
+                                            variable=self._compact_var)
+        self._compact_chk.pack(side=tk.LEFT, padx=(0, 8))
+        self._compact_tip = _Tooltip(self._compact_chk, self.COMPACT_TIP,
+                                     self._theme_fn)
         # The sentence is packed BEFORE the canvas and to the right, so the
         # BAR is the thing in the row that gives way when the tab is narrow -
         # this app unmaps the last widget of a row it cannot fit, and the
@@ -5090,6 +5111,13 @@ class MultibootPanel:
                         fill=th["gray"] if kind == "overhead" else th["accent"])
                 if x > 0:               # a hairline, so two bands read as two
                     canvas.create_line(x, 0, x, height, fill=th["trough"])
+                if kind == "free" and view.get("saved"):
+                    # Item 100: what compact saved, hatched over the start of
+                    # the free room (as much of it as the saving fills).
+                    # Lines, not a stipple - Tk ignores stipples on macOS.
+                    ws = min(w, width * view["saved"] / scale)
+                    self._hatch(canvas, x + 1, x + ws - 1, height,
+                                th["accent"])
                 x += w
             if view["over"] and view["cap"]:
                 # Everything past the biggest card there is, in the colour
@@ -5101,10 +5129,34 @@ class MultibootPanel:
             canvas.create_rectangle(0, 0, width - 1, height - 1,
                                     outline=th["border"])
             self._size_tip.text = self.SIZE_TIP + "\n\n" + "\n".join(
-                "%s: %s" % (label, _gbytes(size))
-                for label, size, _kind in view["bands"])
+                ["%s: %s" % (label, _gbytes(size))
+                 for label, size, _kind in view["bands"]]
+                + (["Saved by compact (stored once): %s" % _gbytes(view["saved"])]
+                   if view.get("saved") else []))
         except tk.TclError:                             # pragma: no cover
             pass
+
+    @staticmethod
+    def _hatch(canvas, x0, x1, height, color, step=6):
+        """Diagonal hatching over [x0, x1] x [1, height - 1]: 45-degree lines
+        every `step` px, each clipped to the box.  Nothing when the box has
+        no width."""
+        if x1 - x0 < 2:
+            return
+        h = height - 2
+        k = -h
+        while x0 + k < x1:
+            ax, ay = x0 + k, height - 1          # bottom-left end
+            bx, by = x0 + k + h, 1               # top-right end
+            if ax < x0:                          # clip at the left edge
+                ay -= x0 - ax
+                ax = x0
+            if bx > x1:                          # clip at the right edge
+                by += bx - x1
+                bx = x1
+            if bx > ax:
+                canvas.create_line(ax, ay, bx, by, fill=color)
+            k += step
 
     def _size_waiting(self):
         """The strip's line while there is no measurement: what it is waiting
@@ -6374,8 +6426,7 @@ class MultibootPanel:
                              self._default_var.get(), self._bypass_var.get(),
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
-                              for role, var in self._color_vars.items()},
-                             self._compact_var.get())
+                              for role, var in self._color_vars.items()})
         self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
         return self._menu_dialog.show()
 
@@ -6388,9 +6439,8 @@ class MultibootPanel:
         self._forget_menu_dialog()
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, default, bypass,
-             selector, theme, colors, compact) = self._menu_backup
+             selector, theme, colors) = self._menu_backup
             self._menu_backup = None
-            self._compact_var.set(compact)
             self._move_var.set(move)
             self._confirm_var.set(confirm)
             self._volume_var.set(vol)
@@ -6890,7 +6940,8 @@ class MultibootPanel:
         output path cannot change the answer - which is exactly what makes
         it safe to ask this question on every keystroke."""
         return (tuple((r.path or "").strip().strip('"') for r in self._rows),
-                self._loaded_card if self._loaded_trees else "")
+                self._loaded_card if self._loaded_trees else "",
+                bool(self._compact_var.get()))
 
     def _maybe_plan(self):
         """Keep the size sentence TRUE, without anyone having to ask.

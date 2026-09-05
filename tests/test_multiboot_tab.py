@@ -7520,11 +7520,13 @@ def test_parse_plan_reads_the_shared_row_and_the_strip_says_so():
     info = parse_plan(text)
     assert info["shared"] == 2500000000 and info["free"] == 5000000000 and info["bytes"] == 10000000000
     view = card_size_view(info)
-    assert view["detail"] == "4.00 GB of games, 2.50 GB shared, 5.00 GB free."
-    assert sum(b for _l, b, _k in view["bands"]) == 10000000000
+    assert view["detail"] == "4.00 GB of games, 2.50 GB saved, 5.00 GB free."
+    assert view["saved"] == 2500000000
+    assert sum(b for _l, b, _k in view["bands"]) == 10000000000     # the saving is not a band
     assert parse_plan("image-size free 1\n")["shared"] is None
     info["shared"] = None
-    assert card_size_view(info)["detail"] == "4.00 GB of games, 5.00 GB free for updates."
+    v2 = card_size_view(info)
+    assert v2["detail"] == "4.00 GB of games, 5.00 GB free for updates." and v2["saved"] == 0
 
 
 def test_form_from_inspect_reads_the_store_layout_as_the_compact_tick(monkeypatch, tmp_path):
@@ -7536,22 +7538,24 @@ def test_form_from_inspect_reads_the_store_layout_as_the_compact_tick(monkeypatc
     assert form_from_inspect(info, card, "")[0].compact is True
 
 
-def test_the_compact_tick_lives_in_the_menu_settings_and_the_state():
+def test_the_compact_tick_lives_beside_the_size_strip_and_in_the_state():
+    """Item 100: the tick is in the size row (not the Menu settings dialog),
+    off by default, part of the plan key (ticking it is a new size question),
+    saved and restored with the state."""
     root, panel = _panel()
     try:
         assert panel.form().compact is False and panel.state()["menu"]["compact"] is False
-        menu = panel.open_menu_settings()
+        chk = panel._compact_chk
+        assert chk.winfo_manager() == "pack" and chk.master is panel._size_row
+        assert chk.cget("text") == "Compact build"
+        key_off = panel._plan_key()
+        menu = panel.open_menu_settings()     # the dialog no longer carries it
         root.update()
-        panel._compact_var.set(True)
         menu.cancel()
         root.update()
-        assert panel._compact_var.get() is False          # Cancel restores it
-        menu = panel.open_menu_settings()
-        root.update()
         panel._compact_var.set(True)
-        menu.ok()
         root.update()
-        assert panel.form().compact is True
+        assert panel.form().compact is True and panel._plan_key() != key_off
         doc = panel.state()
         assert doc["menu"]["compact"] is True
         panel._compact_var.set(False)

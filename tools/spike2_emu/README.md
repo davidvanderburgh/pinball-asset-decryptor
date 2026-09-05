@@ -438,8 +438,8 @@ img1`), which the emulator's `run_game.sh` binds as it binds a p7 subtree.
 
 **Rules.**  Never USB-update a store card: a Stern update writes through hardlinked blobs
 into every tree sharing them - rebuild with this tool.  `bypass` refuses a store card (use
-`build --bypass-validation` / `update`).  The tick in the app ("Compact card: store files the
-images share only once (experimental)") is OFF by default and the layouts the app has always
+`build --bypass-validation` / `update`).  The tick in the app ("Compact build", beside the size
+strip; the bar hatches what it saves) is OFF by default and the layouts the app has always
 made are untouched without it.  Two things only hardware can prove: that Stern's update/spk
 layer tolerates `.blobs/` and `img1/` at the primary's `/games` root, and the same-device
 remount of p3's subtree; the tick says experimental until both have.

@@ -745,7 +745,7 @@ def test_windows_installer_hands_a_failed_package_to_the_rigs_repair(tmp_path):
 
     harness = r"""
 $ErrorActionPreference = "Stop"
-$env:PATH = "{fake};" + $env:PATH
+$env:PATH = "{fake}" + [IO.Path]::PathSeparator + $env:PATH
 $script:results = @()
 function Write-Step($msg) {{ Write-Host "=== $msg ===" }}
 # qemu comes back after the repair; the compiler does not.

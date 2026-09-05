@@ -790,6 +790,93 @@ if ($needsWsl) {
 }
 
 # =========================================================================
+# 2b. The repair for an apt that says no -- which the app already owns
+# =========================================================================
+# See the long note at the call site, below the package loop.  In short: the
+# emulator rig ships beside this installer and its setupfix.sh is the app's
+# one implementation of "get this package onto this Ubuntu, and if you cannot,
+# say why in terms of facts rather than guesses".  These two functions are how
+# a prerequisites run reaches it.
+
+function Get-RigSetupFix {
+    # Installed layout: this script is {app}\install_prerequisites.ps1 and
+    # pinball_decryptor.iss puts the rig at {app}\tools\spike2_emu.  Source
+    # checkout: this script is in installer\, so the rig is one level up.
+    # Both, because the installer is run from both.
+    $candidates = @(
+        (Join-Path $PSScriptRoot "tools\spike2_emu\setupfix.sh"),
+        (Join-Path $PSScriptRoot "..\tools\spike2_emu\setupfix.sh")
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path -LiteralPath $c) {
+            return (Resolve-Path -LiteralPath $c).Path
+        }
+    }
+    return $null
+}
+
+function Repair-WslPackages($failed) {
+    # The apt names, not the labels: "gcc + libc6-dev" is one line here and
+    # two packages to apt, and several entries are like that.
+    $names = @()
+    foreach ($p in $failed) { $names += ($p.pkg -split '\s+') }
+    $names = @($names | Where-Object { $_ } | Select-Object -Unique)
+
+    Write-Step ("apt could not install: {0}" -f ($names -join ", "))
+
+    $fix = Get-RigSetupFix
+    if (-not $fix) {
+        Write-Host ("  The repair step (tools\spike2_emu\setupfix.sh) is not " +
+            "beside this installer, so this run cannot go further than apt " +
+            "did.") -ForegroundColor Yellow
+        Write-Host ("  Run this in Ubuntu to see apt's own reason:  sudo " +
+            "apt-get install {0}" -f ($names -join " ")) -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  There is more the app can do about that than apt can, and it" -ForegroundColor Cyan
+    Write-Host "  is what the Emulate tab's 'Set up emulator...' button runs:" -ForegroundColor Cyan
+    Write-Host "    * refresh the package index and try again, one at a time" -ForegroundColor Gray
+    Write-Host "    * if this Ubuntu has its 'universe' component switched off" -ForegroundColor Gray
+    Write-Host "      (that is where qemu-user-static and ffmpeg live), turn it on" -ForegroundColor Gray
+    Write-Host "    * for a package this release does not publish at all, fetch" -ForegroundColor Gray
+    Write-Host "      that one file from Ubuntu 24.04 - only ever a package that" -ForegroundColor Gray
+    Write-Host "      depends on nothing, which is checked before it is installed" -ForegroundColor Gray
+    Write-Host "    * and if none of that works, say which of those it was" -ForegroundColor Gray
+    Write-Host "  It changes nothing else and needs no password." -ForegroundColor Gray
+    Write-Host ""
+    $go = Read-Host "  Try that now? [Y/n]"
+    if ($go) { $go = $go.Trim().ToLower() }
+    if ($go -and $go -ne "y" -and $go -ne "yes") {
+        Write-Host "  Skipped." -ForegroundColor Yellow
+        return
+    }
+
+    $wslFix = wsl -u root -- wslpath -a "$fix"
+    if ($wslFix) { $wslFix = "$wslFix".Trim() }
+    if (-not $wslFix) {
+        Write-Host "  Could not reach the repair script from inside WSL." -ForegroundColor Yellow
+        return
+    }
+    wsl -u root -- bash $wslFix --packages $names 2>&1 |
+        ForEach-Object { Write-Host "    $_" }
+
+    # RE-PROBED, not trusted.  The script's own exit status answers for apt;
+    # this answers the question the summary is about, which is whether the
+    # TOOL is there now - the same distinction the gcc/libc6-dev entry above
+    # exists for.
+    foreach ($p in $failed) {
+        if (Test-WslPkg $p) {
+            Write-Host ("  [INSTALLED] {0}" -f $p.label) -ForegroundColor Green
+            $rows = @($script:results |
+                Where-Object { $_.Name -eq $p.label -and $_.Status -eq "Missing" })
+            if ($rows.Count -gt 0) { $rows[-1].Status = "Installed" }
+        }
+    }
+}
+
+# =========================================================================
 # 3. WSL-side packages (apt)
 # =========================================================================
 if ($wslPlan.Count -gt 0) {
@@ -801,12 +888,24 @@ if ($wslPlan.Count -gt 0) {
         # A package with a probeCmd is tested by running that command
         # instead of a PATH lookup — some packages (gcc) are on PATH while
         # still being unusable, so "is the binary there" is the wrong test.
+        #
+        # `bash -c "command -v"`, NOT `wsl -- which`.  Two reasons, both of
+        # which have already cost a report here: `wsl -- <prog>` runs with no
+        # shell and therefore with WSL's appended WINDOWS PATH on it, which is
+        # the traversal that made the GDRE probe fail intermittently on a
+        # machine that had it; and `which` is a program, from debianutils, that
+        # a slim distro image need not have at all — on one of those EVERY
+        # package here would report missing.  `command -v` is a shell builtin
+        # and is what the emulator rig's own probe uses (setupcheck.sh's
+        # _have), so the installer and the Emulate tab now answer this question
+        # the same way instead of two ways that can disagree.
         function Test-WslPkg($p) {
             try {
                 if ($p.probeCmd) {
                     wsl -u root -- bash -c "$($p.probeCmd)" 2>&1 | Out-Null
                 } else {
-                    wsl -u root -- which $p.probe 2>&1 | Out-Null
+                    wsl -u root -- bash -c "command -v $($p.probe)" 2>&1 |
+                        Out-Null
                 }
                 return ($LASTEXITCODE -eq 0)
             } catch {
@@ -814,6 +913,7 @@ if ($wslPlan.Count -gt 0) {
             }
         }
 
+        $wslFailed = @()
         foreach ($p in $wslPlan) {
             Write-Step ("Checking {0} in WSL (for: {1})" -f $p.label, ($p.for -join ", "))
             $found = Test-WslPkg $p
@@ -824,8 +924,35 @@ if ($wslPlan.Count -gt 0) {
                 $cmd = "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq " + $p.pkg
                 wsl -u root -- bash -c $cmd 2>&1 | ForEach-Object { Write-Host "    $_" }
                 if (Test-WslPkg $p) { Write-Installed $p.label }
-                else                { Write-FAIL $p.label }
+                else                { Write-FAIL $p.label; $wslFailed += $p }
             }
+        }
+
+        # ------------------------------------------------------------------
+        # ...AND WHAT TO DO WHEN apt WOULD NOT, which until now was nothing.
+        #
+        # A red MISSING was the end of it.  That is the whole of what a
+        # Windows tester had to go on in September 2026 - "I installed
+        # everything but the qemu-user-static is missing" (PAD-104) - and it
+        # is not even a diagnosis: apt refusing a package because Ubuntu keeps
+        # it in a component this distro has switched off is a completely
+        # different fault from a download that failed, it is knowable, and one
+        # of the two has a repair.
+        #
+        # ALL OF THAT ALREADY EXISTS, in tools\spike2_emu\setupfix.sh, which
+        # the Emulate tab's "Set up emulator..." button runs: refresh the
+        # index, turn `universe` on when that is why, install one at a time,
+        # and for the one package that Depends on nothing, fetch it from an
+        # Ubuntu that publishes it.  It ships beside this installer.  So this
+        # hands it the packages rather than growing a second, weaker copy of
+        # that knowledge in PowerShell - the rig's oldest rule is that two
+        # scripts answering one question is how they start disagreeing.
+        #
+        # NAMED, NOT IMPLIED: it is given the packages that actually failed,
+        # so a JJP user whose partclone would not install is helped without
+        # 133 MB of ARM emulator arriving on his PC as a side effect.
+        if ($wslFailed.Count -gt 0) {
+            Repair-WslPackages $wslFailed
         }
     } else {
         foreach ($p in $wslPlan) {

@@ -61,6 +61,18 @@ pyinstaller \
     `# the playfield as a Windows process, the audio bridge - are WSL` \
     `# workarounds the Linux path skips.` \
     --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \
+    `# THE PREREQUISITE INSTALLER ITSELF, which this AppImage has never` \
+    `# carried. The gear menu's "Install Prerequisites" looks for it beside` \
+    `# the package (app.py::_find_prereqs_script_linux) and an AppImage user` \
+    `# therefore got "Could not locate install_prerequisites_linux.sh" - so on` \
+    `# Linux the ONE automated way to install the emulator's packages was` \
+    `# reachable only from a git checkout. ":installer" is the directory that` \
+    `# search already looks in, and it puts $SCRIPT_DIR/../tools/spike2_emu` \
+    `# right on top of the rig above, which is where that script now goes for` \
+    `# the apt repair. install_gdre.sh travels with it because the BOF step` \
+    `# runs it by path.` \
+    --add-data "$SCRIPT_DIR/install_prerequisites_linux.sh:installer" \
+    --add-data "$SCRIPT_DIR/install_gdre.sh:installer" \
     --hidden-import "Crypto" \
     --hidden-import "Crypto.Cipher" \
     --hidden-import "Crypto.Cipher.AES" \

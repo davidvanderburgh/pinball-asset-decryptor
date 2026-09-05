@@ -112,6 +112,20 @@ declare -A MFR_CUSTOM=(
 )
 
 # --- Picker -------------------------------------------------------------
+# THE MENU AND THE VALID ANSWERS COME FROM THE MANIFEST, not from a list of
+# numbers written out a second time down here.  They were two lists and they
+# came apart: Stern went in as [6] with v0.110.0, this block stayed at five,
+# and from then on "All of the above" installed everything EXCEPT the Spike 2
+# emulator's packages while typing 6 was dropped without a word ("2,6"
+# installed Spooky's and reported success).  What that costs is
+# qemu-user-static, and on Linux there is no second way to get it: the Emulate
+# tab's "Set up emulator..." installs packages through `wsl -u root`, so on a
+# Linux desktop it can only print the command.  So a user who picked "a" off a
+# menu that lists Stern got a machine that cannot emulate and nothing anywhere
+# saying why (PAD-104).  A seventh manufacturer cannot repeat it.
+mfr_ids=$(printf '%s\n' "${!MFR_NAMES[@]}" | sort -n | tr '\n' ' ')
+mfr_ids=${mfr_ids% }
+
 echo ""
 echo "============================================================"
 echo "  Pinball Asset Decryptor - Prerequisite Installer (Linux)"
@@ -120,8 +134,7 @@ echo ""
 echo "Pick the manufacturers you plan to use.  We'll install only"
 echo "the tools those plugins actually need."
 echo ""
-for i in $(printf "%s
-" "${!MFR_NAMES[@]}" | sort -n); do
+for i in $mfr_ids; do
     printf "  [%d] %s\n" "$i" "${MFR_NAMES[$i]}"
     printf "       %s\n" "${MFR_DESCRIPTIONS[$i]}"
 done
@@ -131,12 +144,21 @@ read -rp "Enter numbers separated by commas (e.g. '2,4'), or 'a' for all: " pick
 
 selected=()
 if [ "${pick,,}" = "a" ]; then
-    selected=(1 2 3 4 5)
+    selected=($mfr_ids)
 else
     IFS=', ' read -ra tokens <<< "$pick"
     for t in "${tokens[@]}"; do
-        case "$t" in
-            1|2|3|4|5) selected+=("$t") ;;
+        [ -n "$t" ] || continue
+        # Membership by string match on the id list rather than by indexing
+        # MFR_NAMES with it, because the token is whatever the user typed and
+        # an array subscript is arithmetic: `MFR_NAMES[$t]` on "1+1" answers
+        # for Spooky.
+        case " $mfr_ids " in
+            *" $t "*) selected+=("$t") ;;
+            # AND SAY SO.  A number this script did not recognise used to
+            # vanish silently, which is how a pick could be half honoured and
+            # still look like it worked.
+            *) echo "  Ignoring \"$t\" - not one of the numbers above." ;;
         esac
     done
 fi
@@ -186,7 +208,81 @@ echo "Refreshing apt indexes..."
 $SUDO apt-get update -qq
 
 echo "Installing packages..."
-$SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${all_packages[@]}"
+# ONE UNAVAILABLE NAME MUST NOT TAKE THE OTHERS DOWN WITH IT.  `apt-get install
+# a b c` is all or nothing: if apt has no version of ONE of them the whole
+# command fails and none of the rest are installed - and with `set -e` above,
+# the script dies there, so the summary that would have named the culprit never
+# prints either.  A tester met exactly that on the WSL side of this (PAD-41):
+# ended a run four packages short having been told about one.  So the batch is
+# tried first because it is one download plan and much faster, and only if it
+# fails is each package retried on its own, which is what turns "nothing
+# installed, here is an apt error" into "everything installed except this one",
+# and the summary below then names it.
+#
+# `$SUDO env VAR=...`, NOT `$SUDO VAR=... `: bash decides which leading words
+# are variable assignments while PARSING, before `$SUDO` is expanded, so on a
+# machine already running as root - where SUDO is empty and vanishes -
+# `DEBIAN_FRONTEND=noninteractive` becomes the command word and every install
+# dies with "DEBIAN_FRONTEND=noninteractive: command not found".  `env` also
+# takes the setting past a sudoers policy that would otherwise refuse it.
+if ! $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        "${all_packages[@]}"; then
+    echo ""
+    echo "That did not go through as one command.  Retrying them one at a"
+    echo "time so a package apt cannot get does not block the rest..."
+    for p in "${all_packages[@]}"; do
+        $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" \
+            || echo "  apt could not install $p"
+    done
+fi
+
+# --- ...and what to do about one apt would not install ------------------
+# A red MISSING in the summary used to be the end of it, on both installers,
+# and that is not even a diagnosis: apt refusing a package because Ubuntu keeps
+# it in a component this distro has switched off is a different fault from a
+# download that failed, it is knowable, and only one of the two is repairable.
+#
+# ALL OF THAT ALREADY EXISTS, in tools/spike2_emu/setupfix.sh - the script the
+# Emulate tab's "Set up emulator..." button runs.  It refreshes the index,
+# turns `universe` on when that is why, installs one at a time, fetches the one
+# package that depends on nothing from a release that publishes it, and says
+# which of those it was when none of them worked.  Handing it the packages is
+# how this script gets all of that without keeping a second, weaker copy of it
+# (PAD-104); `--packages` is step one only, so nothing here registers a kernel
+# handler or builds anything.
+#
+# NAMED, NOT IMPLIED: only the packages that actually failed, so a Spooky user
+# is helped without an ARM emulator arriving on his machine as a side effect.
+still=
+for p in "${all_packages[@]}"; do
+    dpkg -s "$p" >/dev/null 2>&1 || still="$still $p"
+done
+if [ -n "$still" ]; then
+    rig="$SCRIPT_DIR/../tools/spike2_emu"
+    [ -f "$rig/setupfix.sh" ] || rig="$SCRIPT_DIR/tools/spike2_emu"
+    echo ""
+    echo "apt could not install:$still"
+    if [ -f "$rig/setupfix.sh" ]; then
+        echo ""
+        echo "There is more the app can do about that than apt can:"
+        echo "  * refresh the package index and try again, one at a time"
+        echo "  * if this Ubuntu has its 'universe' component switched off"
+        echo "    (where qemu-user-static and ffmpeg live), turn it on"
+        echo "  * for a package this release does not publish at all, fetch"
+        echo "    that one file from Ubuntu 24.04 - only ever a package that"
+        echo "    depends on nothing, which is checked before it is installed"
+        echo "  * and if none of that works, say which of those it was"
+        echo ""
+        read -rp "Try that now? [Y/n] " try
+        case "${try,,}" in
+            ''|y|yes) $SUDO bash "$rig/setupfix.sh" --packages $still || true ;;
+            *)        echo "Skipped." ;;
+        esac
+    else
+        echo "Run this to see apt's own reason:"
+        echo "    sudo apt-get install$still"
+    fi
+fi
 
 # --- Custom post-install steps (downloads that aren't in apt) -----------
 install_gdre_tools() {
@@ -238,5 +334,9 @@ for p in "${all_pip_packages[@]}"; do
         printf "  %-30s MISSING (pip)\n" "$p"
     fi
 done
+# Anything still MISSING here has already been past the repair step above,
+# which is where the explanation lives - the reason is not repeated as a guess
+# down here, where nothing has been checked.
+
 echo ""
 echo "Done.  Launch the app from the AppImage or 'python3 -m pinball_decryptor'."

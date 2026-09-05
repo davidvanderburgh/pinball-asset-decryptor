@@ -355,9 +355,11 @@ r2,rN; mov r3,#0x80`, the same shape on every build measured) into
 `mov r0, #0` - "the restore failed" - so a bypassed image starts every boot at
 P/P/P and boots clean (`valpatch.find_grade_restore`).  A card patched before
 this reads `validator: HALF bypassed` and any bypass run finishes it.  The
-app's tick is ON by default (David: "make both images clear the validation
-errors always"); `update --restore-validation` (the tick off) puts the
-source's own game and `.sidx` back on every tree the card holds bypassed.
+app always passes `--bypass-validation` - there is no tick (David, once the
+TMNT had booted clean on both images: "we tested that this bypass works, we
+don't need to make it optional. it should always be on now"); the tool's own
+`update --restore-validation` puts the source's game and `.sidx` back on
+every tree the card holds bypassed, for anyone who wants a stock tree back.
 
 The hardware side is the same program installed in p2 and hooked into
 `/etc/init.d/game` by `select.sh`, reading the flippers over the node bus and

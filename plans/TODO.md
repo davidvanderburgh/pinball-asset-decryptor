@@ -159,7 +159,11 @@ These have each been violated at least once and each cost a run or a window:
 
 - [x] **98. On the TMNT: a latched GAME VALIDATION ERROR and Stern Insider
       Connected not connecting on the multi-boot card.** `S2 D3` **ROOT CAUSE
-      + FIX on `item/98` 2026-09-05 (machine proof pending):** the cause was the
+      + FIX on `item/98` 2026-09-05; PROVEN ON THE TMNT the same day (David: "it
+      successfully cleared the game validation") and the tick REMOVED - the
+      bypass is always on, every build and update passes it, no restore from
+      the app (David: "we tested that this bypass works, we don't need to make
+      it optional. it should always be on now"):** the cause was the
       "always on" bypass. The validator keeps its three track grades in the
       board's NVRAM and only re-grades when it RUNS (nvgrades.py); the v3 card's
       stock image was bypassed by the build, so the F an earlier card had left

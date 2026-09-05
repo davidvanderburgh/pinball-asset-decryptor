@@ -271,7 +271,7 @@ def test_three_image_form_carries_every_extra_and_the_media(monkeypatch,
                                                            tmp_path):
     _win(monkeypatch)
     media = tmp_path / "multi" / "media"
-    form = _form(tmp_path, 3, bypass=False, media_dir=str(media), force=True,
+    form = _form(tmp_path, 3, media_dir=str(media), force=True,
                  timeout=0, default=2, volume=35, sound_move="synth",
                  sound_confirm="none")
     form.images[1].subtitle = "1987 cartoon"
@@ -280,7 +280,7 @@ def test_three_image_form_carries_every_extra_and_the_media(monkeypatch,
     build = _tool_words(cmds[1][1])
     extras = [build[i + 1] for i, w in enumerate(build) if w == "--extra"]
     assert extras == [multiboot_tab.wsl(r.path) for r in form.images[1:]]
-    assert "--bypass-validation" not in build
+    assert "--bypass-validation" in build            # always on
     assert build[build.index("--media-dir") + 1] == multiboot_tab.wsl(
         str(media))
     assert "--force" in build
@@ -524,8 +524,8 @@ def test_fingerprint_changes_with_what_the_frame_shows(tmp_path):
     a = preview_fingerprint(other)
     other.images[1].anim_start = "20"
     assert preview_fingerprint(other) != a
-    # sounds, volume-less things and the bypass flag are not in the picture
-    quiet = _form(tmp_path, 2, sound_move="none", bypass=False)
+    # sounds and volume-less things are not in the picture
+    quiet = _form(tmp_path, 2, sound_move="none")
     assert preview_fingerprint(quiet) == fp
 
 
@@ -689,15 +689,14 @@ def test_the_table_cells_and_the_menu_summary_say_it_in_a_phrase():
     assert list_title(ImageRow("", device="/dev/mmcblk0p3"), 2) == \
         "image 2  [no source recorded]"
     form = MultibootForm(images=[], volume=35, timeout=0, default=1,
-                         bypass=False, sound_move="D:/a b/click.wav",
+                         sound_move="D:/a b/click.wav",
                          machine_volume=False)
     assert menu_summary(form) == (
         "sounds click.wav / auto  ·  volume 35  ·  wait for START  ·  "
-        "default 1  ·  bypass off  ·  theme midnight")
+        "default 1  ·  theme midnight")
     form.machine_volume = True
     assert "volume 35 (the machine's own on the card)" in menu_summary(form)
     assert "15 s countdown" in menu_summary(MultibootForm(images=[]))
-    assert "bypass on" in menu_summary(MultibootForm(images=[]))
 
 
 def test_the_media_fingerprint_moves_only_for_media(tmp_path):
@@ -994,7 +993,7 @@ def test_add_images_fills_title_and_output(tmp_path):
         assert form.images[1].subtitle == "1987-upscaled"
         assert os.path.normpath(form.out) == os.path.normpath(
             default_output_path(a))
-        assert form.bypass is True and form.volume == 50
+        assert form.volume == 50
         assert form.timeout == 15 and form.default == 0
         assert form.media_dir == ""                    # nothing prepared
         assert form.selector_dir == DEFAULT_SELECTOR_DIR
@@ -1617,9 +1616,8 @@ def test_valid_form_runs_plan_build_verify(tmp_path):
         panel._auto_plan = True
         assert panel._plan_now() is True
         assert [label for label, _ in calls[1]] == ["plan"]
-        panel._bypass_var.set(False)
         panel._build_card()
-        assert "--bypass-validation" not in _line(calls[2][1][1])
+        assert "--bypass-validation" in _line(calls[2][1][1])    # always on
     finally:
         root.destroy()
 
@@ -4042,7 +4040,6 @@ def test_a_rich_report_becomes_the_whole_form(monkeypatch, tmp_path):
     assert form.out == card
     assert (form.timeout, form.default, form.volume) == (20, 1, 35)
     assert (form.sound_move, form.sound_confirm) == ("synth", "none")
-    assert form.bypass is False              # image 1 is still armed
     a, b = _images(tmp_path, 2)
     assert [multiboot_tab._norm(r.path) for r in form.images] == \
         [multiboot_tab._norm(a), multiboot_tab._norm(b)]
@@ -4071,7 +4068,6 @@ def test_a_degraded_report_keeps_the_cards_own_files_and_says_so(monkeypatch,
     # no sound_move on the card at all -> none; a confirm.wav whose source
     # nothing records -> the tab's default, said out loud
     assert form.sound_move == "none" and form.sound_confirm == "auto"
-    assert form.bypass is True               # every tree is bypassed
     row0, row1 = form.images
     assert (row0.art, row0.art_on_card) == ("art0.png", True)
     assert (row0.music, row0.music_on_card) == ("music0.wav", True)
@@ -4117,7 +4113,6 @@ def test_diff_forms_splits_menu_changes_from_image_list_changes(tmp_path):
     assert changed(volume=35) == (["volume"], [])
     assert changed(timeout=0) == (["countdown"], [])
     assert changed(default=2) == (["default"], [])
-    assert changed(bypass=False) == (["bypass"], [])
     assert changed(sound_move="synth") == (["move sound"], [])
     assert media_specs_changed(before, _form(tmp_path, 3, volume=35)) is False
     # ...and the image list, every way it can change
@@ -4347,10 +4342,10 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                             "default": 2, "bypass": False})
     assert menu.pop("compact") is False
     assert menu == {"move": "auto", "confirm": "auto", "volume": 50,
-                    "timeout": 15, "default": 2, "bypass": False,
+                    "timeout": 15, "default": 2,
                     "machine_volume": True,
                     "theme": "midnight", "colors": {}}
-    assert menu_from_state(None)["bypass"] is True
+    assert "bypass" not in menu_from_state(None)     # always on: not a setting
     assert menu_from_state({"volume": 900})["volume"] == 100
 
 
@@ -4688,7 +4683,6 @@ def test_new_card_clears_the_form_and_leaves_editing_mode(tmp_path):
         assert panel._out_var.get() == ""
         assert panel._volume_var.get() == "50"
         assert panel._timeout_var.get() == "15"
-        assert panel._bypass_var.get() is True
         assert panel._plan_info is None
         # The line under the buttons never goes blank any more: it is where
         # the mode is said now that the row has one control instead of two.
@@ -4833,9 +4827,8 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
         assert panel._default_var.get() == "1"
         assert panel._volume_var.get() == "35"
         assert panel._move_var.get() == "synth"
-        # the LIVE form's bypass is on; the card's own state (image 1
-        # armed) is what _armed tracks, so an Update patches it
-        assert panel._bypass_var.get() is True
+        # the card's own state (image 1 armed) is what _armed tracks, so an
+        # Update patches it - the bypass is always on
         assert panel._armed is True
         assert panel._loaded_card == card
         # the card's own default is the row the load lands on, so the
@@ -4850,7 +4843,9 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
         assert multiboot_tab.cell_anim(panel.form().images[1]) == \
             "auto @20s"
         assert _apply_live(panel)
-        assert "no changes yet" in panel.check_detail("card")
+        # ...and that armed tree IS the one pending change (the bypass is
+        # always on: an Update finishes it - nothing else moved)
+        assert "1 menu change (bypass)" in panel.check_detail("card")
     finally:
         root.destroy()
 
@@ -5043,7 +5038,7 @@ def test_the_bypass_rides_along_while_a_tree_is_still_armed(tmp_path):
         tmp_path, report=_rich_report(tmp_path, armed=True))
     calls = _recorder(panel)
     try:
-        assert panel._armed is True and panel._bypass_var.get() is True
+        assert panel._armed is True
         assert panel.apply_to_card() is True
         assert [label for label, _ in calls[0]] == [
             "inject", "bypass", "inspect", INSPECT_JSON]
@@ -5635,7 +5630,6 @@ def test_the_form_survives_a_restart(tmp_path):
         panel._ed_media.set("attract")
         panel._timeout_var.set("8")
         panel._volume_var.set("70")
-        panel._bypass_var.set(False)
         panel._out_var.set(out)
         doc = panel.state()
         assert doc["v"] == multiboot_tab.STATE_VERSION
@@ -5657,7 +5651,6 @@ def test_the_form_survives_a_restart(tmp_path):
         assert panel._rows[1].anim == "auto"
         assert panel._timeout_var.get() == "8"
         assert panel._volume_var.get() == "70"
-        assert panel._bypass_var.get() is False    # the saved state carries it (item 98)
         assert panel.form().out == out
         # OUT OF EDITING MODE, on purpose: the baseline is not restored, so
         # Apply cannot inject a diff computed against a stale one.  One
@@ -7769,41 +7762,70 @@ def test_a_card_read_off_the_reader_takes_only_menu_changes(monkeypatch, tmp_pat
 
 
 # ---------------------------------------------------------------------------
-# item 98: the validator is left alone unless asked; unticking restores the stock game
+# item 98: the validator bypass is ALWAYS ON - no tick, no restore from the app
 # ---------------------------------------------------------------------------
-def test_update_args_carry_bypass_or_restore(tmp_path):
-    from dataclasses import replace
-    from pinball_decryptor.gui.multiboot_tab import update_args
+def test_build_and_update_args_always_carry_the_bypass(tmp_path):
+    """David, after the TMNT booted clean on both images: "we tested that
+    this bypass works, we don't need to make it optional. it should always
+    be on now." """
+    from pinball_decryptor.gui.multiboot_tab import build_args, update_args
     form = _form(tmp_path, 2)
     card = str(tmp_path / "multi" / "card.multi.raw")
-    on = update_args(form, card)
-    assert "--bypass-validation" in on and "--restore-validation" not in on
-    off = update_args(replace(form, bypass=False), card)
-    assert "--restore-validation" in off and "--bypass-validation" not in off
+    upd = update_args(form, card)
+    assert "--bypass-validation" in upd and "--restore-validation" not in upd
+    assert "--bypass-validation" in build_args(form)
+    assert not hasattr(form, "bypass")
 
 
-def test_the_bypass_tick_is_on_by_default_and_lives_in_menu_settings():
+def test_the_bypass_is_always_on_and_nothing_in_the_tab_unticks_it(tmp_path):
+    from pinball_decryptor.gui.multiboot_tab import build_args
     root, panel = _panel()
+    for p in _images(tmp_path, 2):
+        panel.add_image(p)
+
+    def texts(w):
+        out = []
+        try:
+            out.append(str(w.cget("text")))
+        except Exception:                               # noqa: BLE001 - no text on this one
+            pass
+        for c in w.winfo_children():
+            out += texts(c)
+        return out
     try:
-        assert panel.form().bypass is True and panel.state()["menu"]["bypass"] is True
+        assert not hasattr(panel, "_bypass_var")
+        assert "bypass" not in panel.state()["menu"]
         menu = panel.open_menu_settings()
         root.update()
-        panel._bypass_var.set(False)
+        assert not any("validator" in t.lower() for t in texts(root))
         menu.cancel()
         root.update()
-        assert panel._bypass_var.get() is True           # Cancel restores it
-        menu = panel.open_menu_settings()
-        root.update()
-        panel._bypass_var.set(False)
-        menu.ok()
-        root.update()
-        assert panel.form().bypass is False
+        # an older saved state that carried the tick off restores, and still
+        # builds with the flag: the key is ignored
         doc = panel.state()
-        panel._bypass_var.set(True)
-        panel.restore_state(doc)
+        doc["menu"]["bypass"] = False
+        assert panel.restore_state(doc) is True
         root.update()
-        assert panel.form().bypass is False
-        assert menu_from_state({})["bypass"] is True
-        assert menu_from_state({"bypass": False})["bypass"] is False
+        assert "--bypass-validation" in build_args(panel.form())
+        assert "bypass" not in menu_from_state({"bypass": False})
+    finally:
+        root.destroy()
+
+
+def test_an_armed_tree_on_a_loaded_card_is_a_pending_bypass(tmp_path):
+    """With no tick to compare, an unpatched (or half-patched, item 98)
+    games tree on the loaded card is still a change - the one Apply /
+    Update finishes - and a card read off the reader (no games trees here)
+    has none."""
+    root, panel, _card, _media = _loaded(
+        tmp_path, report=_rich_report(tmp_path, armed=True))
+    try:
+        assert panel._armed is True
+        assert panel._loaded_diff() == (["bypass"], [])
+        panel._card_device = r"\\.\PHYSICALDRIVE9"
+        assert panel._loaded_diff() == ([], [])
+        panel._card_device = None
+        panel._armed = False
+        assert panel._loaded_diff() == ([], [])
     finally:
         root.destroy()

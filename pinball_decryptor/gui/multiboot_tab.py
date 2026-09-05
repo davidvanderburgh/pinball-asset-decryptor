@@ -140,7 +140,7 @@ remembered, every keystroke is diffed against that baseline, and the status
 block says which of the two things can happen - and which of the two
 writing buttons is the green one.  'Apply to card' writes the menu
 back with ``inject`` (plus a ``prepare`` when a media field changed, plus
-``bypass`` when it is ticked and a tree is still armed) - seconds, no copy.
+``bypass`` while a games tree is still armed) - seconds, no copy.
 The image LIST - how many images, in what order, from which files - is the
 one thing an inject cannot change, so changing it disables Apply and says
 so; and because the path box now holds the loaded card, 'Build & verify'
@@ -464,13 +464,10 @@ class MultibootForm:
     compact: bool = False
     timeout: int = 15              # 0 = wait for START
     default: int = 0
-    #: The validator bypass on EVERY image - ON by default (David: "both
-    #: images on the multi boot need to bypass and clear validation").  Since
-    #: item 98 the bypass also switches off the module's GRADE RESTORE, so a
-    #: bypassed image boots at P/P/P every time and a GAME VALIDATION ERROR
-    #: an earlier card left in the machine cannot latch.  Off = images keep
-    #: what they came with; unticking a loaded card puts the stock game back.
-    bypass: bool = True
+    # (No bypass field: the validator bypass is ALWAYS ON - build_args and
+    # update_args pass it for every image.  David, after the TMNT booted
+    # clean on both images: "we tested that this bypass works, we don't need
+    # to make it optional. it should always be on now.")
     media_dir: str = ""            # a prepared media dir (holds media.json)
     selector_dir: str = DEFAULT_SELECTOR_DIR
     force: bool = False
@@ -1409,8 +1406,11 @@ def build_args(form):
         args.append("--machine-volume")
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
-    if form.bypass:
-        args.append("--bypass-validation")
+    # ALWAYS: the validator bypass on every image (David, after the TMNT
+    # proved it: "we don't need to make it optional. it should always be on").
+    # Since item 98 it also ignores the saved grades at boot, so a GAME
+    # VALIDATION ERROR an earlier card left in the machine cannot latch.
+    args.append("--bypass-validation")
     if form.media_dir:
         args += ["--media-dir", wsl(form.media_dir)]
     if form.force:
@@ -1480,12 +1480,7 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
             "--volume", str(int(form.volume))] + theme_args(form)
     if form.machine_volume:
         args.append("--machine-volume")
-    if form.bypass:
-        args.append("--bypass-validation")
-    else:
-        # item 98: unticked = the stock game goes back where this app had
-        # patched it (the tool writes nothing for a tree it never patched)
-        args.append("--restore-validation")
+    args.append("--bypass-validation")      # always (see build_args)
     if form.media_dir:
         args += ["--media-dir", wsl(form.media_dir)]
     args += cache_dir_args()
@@ -2211,7 +2206,6 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
                                       info.get("sound_confirm_source"))
     if why:
         warnings.append(why)
-    ticked, _armed = bypass_state(info)
 
     def _int_of(key, default):
         val = info.get(key)
@@ -2225,7 +2219,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
         volume=_int_of("volume", 50), timeout=_int_of("timeout", 15),
         machine_volume=(info.get("volume") == "machine"),
         compact=(info.get("layout") == "store"),
-        default=_int_of("default", 0), bypass=ticked,
+        default=_int_of("default", 0),
         theme=theme, colors=colors,
         media_dir=media_dir if (media_dir and os.path.isfile(
             os.path.join(media_dir, "media.json"))) else "",
@@ -2235,6 +2229,9 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
 
 #: The menu fields an inject rewrites, in the order the tab names them.
 #: Everything NOT here is the image list, and that needs a full build.
+#: ('bypass' is not a field any more - the bypass is always on - but it is
+#: still the change an armed games tree puts in the list, see
+#: MultibootPanel._loaded_diff.)
 MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "move sound", "confirm sound", "volume", "countdown",
                     "default", "bypass", "theme")
@@ -2279,8 +2276,6 @@ def _menu_fields(before, after):
                        ("default", before.default, after.default)):
         if int(b) != int(a):
             changed.add(name)
-    if bool(before.bypass) != bool(after.bypass):
-        changed.add("bypass")
     if theme_args(before) != theme_args(after):
         changed.add("theme")
     return changed
@@ -2818,8 +2813,9 @@ def rows_from_state(images, resolve=None):
 
 def menu_from_state(menu):
     """A saved menu block, sanitised: the two sound specs as strings, the
-    three numbers as ints, the bypass as a bool.  Anything missing or
-    unreadable keeps the tab's own default rather than raising."""
+    three numbers as ints.  Anything missing or unreadable keeps the tab's
+    own default rather than raising (an older state's ``bypass`` key is
+    ignored: the bypass is always on)."""
     menu = menu if isinstance(menu, dict) else {}
 
     def _as_int(key, default):
@@ -2837,7 +2833,6 @@ def menu_from_state(menu):
             "compact": bool(menu.get("compact", False)),
             "timeout": max(0, _as_int("timeout", 15)),
             "default": max(0, _as_int("default", 0)),
-            "bypass": bool(menu.get("bypass", True)),
             "theme": theme,
             "colors": clean_colors(menu.get("colors"))}
 
@@ -3341,14 +3336,14 @@ def menu_summary(form):
         v = (v or "").strip() or "none"
         return v if v.lower() in _WORDS else os.path.basename(v)
     return ("sounds %s / %s  ·  volume %d%s  ·  %s  ·  default %d  ·  "
-            "bypass %s  ·  theme %s" % (
+            "theme %s" % (
                 sound(form.sound_move), sound(form.sound_confirm),
                 int(form.volume),
                 " (the machine's own on the card)" if form.machine_volume
                 else "",
                 "wait for START" if int(form.timeout) == 0
                 else "%d s countdown" % int(form.timeout),
-                int(form.default), "on" if form.bypass else "off",
+                int(form.default),
                 (form.theme or "").strip().lower() or DEFAULT_THEME))
 
 
@@ -3610,9 +3605,8 @@ class ImageEditorDialog(_Modal):
 
 class MenuSettingsDialog(_Modal):
     """'Menu settings…': the sounds, the volume, the LOOK (a theme, or your
-    own colours), the countdown, the default image, the validator bypass and
-    the selector build path - everything that belongs to the MENU rather
-    than to one image."""
+    own colours), the countdown, the default image and the selector build
+    path - everything that belongs to the MENU rather than to one image."""
 
     def __init__(self, panel, images):
         _Modal.__init__(self, panel._parent, "Menu settings",
@@ -3726,30 +3720,14 @@ class MenuSettingsDialog(_Modal):
                            "once one was made)",
                   foreground=th["gray"]).pack(side=tk.LEFT, padx=(6, 0))
         g2.columnconfigure(1, weight=1)
-        # THE BYPASS TICK IS BACK, OFF BY DEFAULT (item 98).  It had been
-        # removed as "always on" (David: "why is this even an option?"), and
-        # that was the fault: a bypassed image never re-grades, so a GAME
-        # VALIDATION ERROR an earlier card left in the machine's NVRAM
-        # stays latched for ever (nvgrades.py's finding), and Insider
-        # Connected sees a modified game.  A stock image validates itself
-        # and passes; an image this app wrote already carries its bypass.
-        val = ttk.LabelFrame(b, text="Game validator")
-        val.pack(fill=tk.X, pady=(10, 0))
-        g3 = ttk.Frame(val)
-        g3.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Checkbutton(g3, text="Bypass the game validator on every image "
-                                 "(recommended)",
-                        variable=panel._bypass_var).pack(anchor=tk.W)
-        ttk.Label(g3, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
-                  text="On: every image's validator is switched off AND it "
-                       "starts each boot with a clean validation state, so a "
-                       "GAME VALIDATION ERROR an earlier card left in the "
-                       "machine cannot latch on it - both images boot clean. "
-                       "Off: each image keeps what it came with (a stock "
-                       "image validates itself). Unticking it on a loaded "
-                       "card puts the stock game back where this app had "
-                       "patched it (an update, not a rebuild).").pack(
-            anchor=tk.W, pady=(4, 0))
+        # NO 'Game validator' SECTION.  The bypass is ALWAYS ON.  It went
+        # through three shapes - always on; a tick after item 98's latched
+        # GAME VALIDATION ERROR (a bypassed image never re-graded); on by
+        # default once the bypass also ignored the saved grades at boot -
+        # and David closed it after the TMNT booted clean on both images:
+        # "we tested that this bypass works, we don't need to make it
+        # optional. it should always be on now."  Every build and update
+        # passes --bypass-validation; nothing here can turn it off.
         #
         # NO 'Advanced' SECTION EITHER (David: "people are likely to mess it
         # up").  The Selector build path is DEFAULT_SELECTOR_DIR, overridable
@@ -4191,7 +4169,6 @@ class MultibootPanel:
         self._media_entries = {}
         self._clip_widgets = ()
         self._default_spin = None
-        self._bypass_chk = None
         self._theme_combo = None
         self._theme_tip = None
         self._color_entries = {}
@@ -4247,14 +4224,6 @@ class MultibootPanel:
         self._machine_vol_var = tk.BooleanVar(value=True)
         self._timeout_var = tk.StringVar(value="15")
         self._default_var = tk.StringVar(value="0")
-        # THE VALIDATOR BYPASS IS ALWAYS ON (David: "it should always be
-        # on") - an unpatched image fails the game's own validator on the
-        # machine.  The var stays, so every diff, command line and test
-        # still reads one truth, but it is pinned True: nothing in the UI
-        # unticks it, and the loaders below (load_inspect / restore_state)
-        # re-pin it after they run so a card saved unpatched, or an older
-        # anchor with bypass:false, is brought up to patched.
-        self._bypass_var = tk.BooleanVar(value=True)
         #: The compact layout (item 95): OFF by default, and it stays off
         #: until the user ticks it - never set from a card that is merely
         #: loaded, only from one whose layout inspect reports as 'store'.
@@ -4304,7 +4273,7 @@ class MultibootPanel:
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var,
-                    self._default_var, self._bypass_var):
+                    self._default_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
         # Item 100: the compact tick beside the size strip.  Not a menu field
         # (an inject never changes a card's layout: diff_forms puts it in the
@@ -4642,7 +4611,7 @@ class MultibootPanel:
     PATH_TIP = ("The card this tab is pointing at. A path with a card "
                 "already at it is one you can read: reading it fills every "
                 "field from it - images, titles, subtitles, art, animation, "
-                "music, sounds, volume, countdown, default and bypass - and "
+                "music, sounds, volume, countdown and default - and "
                 "'Update the loaded card in place', in the green button's "
                 "dialog, then writes your changes back into it in seconds. "
                 "A path with nothing at it yet is where that same button "
@@ -5765,7 +5734,7 @@ class MultibootPanel:
         field = self._out_var.get().strip().strip('"')
         menu, rebuild = [], []
         if self._loaded_card and self._loaded_form is not None:
-            menu, rebuild = diff_forms(self._loaded_form, self.form())
+            menu, rebuild = self._loaded_diff()
         facts = self._facts_now(field)
         state = card_path_state(field, facts, self._rows, self._loaded_card,
                                 menu, rebuild)
@@ -6355,7 +6324,6 @@ class MultibootPanel:
             self._machine_vol_var.set(True)
             self._timeout_var.set("15")
             self._default_var.set("0")
-            self._bypass_var.set(True)
             self._theme_var.set(DEFAULT_THEME)
             self._seed_colors(theme_colors(DEFAULT_THEME) or {})
         finally:
@@ -6542,6 +6510,8 @@ class MultibootPanel:
         kept."""
         if not self._loaded_card or self._loaded_form is None:
             return 0
+        # the person's OWN edits: an armed tree on the card is not one of
+        # them (see _loaded_diff), so it never asks "discard changes?"
         menu, rebuild = diff_forms(self._loaded_form, self.form())
         return len(menu) + len(rebuild)
 
@@ -6775,8 +6745,8 @@ class MultibootPanel:
                 pass
 
     def open_menu_settings(self):
-        """'Menu settings…': the sounds, volume, countdown, default image,
-        the bypass and the selector build path, in a modal.  The button
+        """'Menu settings…': the sounds, volume, countdown, default image
+        and the selector build path, in a modal.  The button
         beside it already says what they are (:func:`menu_summary`)."""
         if self._menu_dialog is not None:
             return self._menu_dialog
@@ -6784,7 +6754,7 @@ class MultibootPanel:
                              self._volume_var.get(),
                              self._machine_vol_var.get(),
                              self._timeout_var.get(),
-                             self._default_var.get(), self._bypass_var.get(),
+                             self._default_var.get(),
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
                               for role, var in self._color_vars.items()})
@@ -6799,7 +6769,7 @@ class MultibootPanel:
     def _menu_settings_cancel(self):
         self._forget_menu_dialog()
         if self._menu_backup is not None:
-            (move, confirm, vol, machine, timeout, default, bypass,
+            (move, confirm, vol, machine, timeout, default,
              selector, theme, colors) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
@@ -6808,7 +6778,6 @@ class MultibootPanel:
             self._machine_vol_var.set(machine)
             self._timeout_var.set(timeout)
             self._default_var.set(default)
-            self._bypass_var.set(bypass)
             self._selector_var.set(selector)
             # the theme and the grid together, or the theme's trace would
             # re-seed the grid from the built-in and lose the colours
@@ -6825,7 +6794,6 @@ class MultibootPanel:
     def _forget_menu_dialog(self):
         self._menu_dialog = None
         self._default_spin = None
-        self._bypass_chk = None
         self._theme_combo = None
         self._theme_tip = None
         self._color_entries = {}
@@ -7013,7 +6981,6 @@ class MultibootPanel:
             compact=bool(self._compact_var.get()),
             timeout=_int(self._timeout_var, 15),
             default=_int(self._default_var, 0),
-            bypass=bool(self._bypass_var.get()),
             media_dir=media if (media and os.path.isfile(
                 os.path.join(media, "media.json"))) else "",
             selector_dir=self._selector_var.get().strip()
@@ -7071,7 +7038,6 @@ class MultibootPanel:
                      "compact": bool(self._compact_var.get()),
                      "timeout": _int(self._timeout_var, 15),
                      "default": _int(self._default_var, 0),
-                     "bypass": bool(self._bypass_var.get()),
                      "theme": self._theme_var.get().strip().lower()
                      or DEFAULT_THEME,
                      "colors": {role: var.get().strip()
@@ -7187,7 +7153,6 @@ class MultibootPanel:
             self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
             self._default_var.set(str(menu["default"]))
-            self._bypass_var.set(bool(menu.get("bypass", True)))
             self._theme_var.set(menu["theme"])
             # a built-in comes back as the file spells it today; a custom
             # theme as it was saved, the default under any role it lacks
@@ -7729,12 +7694,6 @@ class MultibootPanel:
             self._compact_var.set(bool(form.compact))
             self._timeout_var.set(str(int(form.timeout)))
             self._default_var.set(str(int(form.default)))
-            # The LIVE form's bypass is on (David); the card's own state stays
-            # in _loaded_form, so an image loaded unpatched - or half patched,
-            # its grade restore still live - shows a 'bypass' change and the
-            # update finishes it.  Unticking is the ask to put the stock game
-            # back (update --restore-validation).
-            self._bypass_var.set(True)
             self._theme_var.set(form.theme)
             self._seed_colors(form.colors if form.theme == CUSTOM_THEME
                               else theme_colors(form.theme) or {})
@@ -7891,7 +7850,7 @@ class MultibootPanel:
             self._error("A run is already in progress.")
             return False
         form = self.form()
-        menu, rebuild = diff_forms(self._loaded_form, form)
+        menu, rebuild = self._loaded_diff(form)
         if rebuild:
             self._error(
                 "The image list changed (%s). Updating in place only "
@@ -7919,7 +7878,7 @@ class MultibootPanel:
             form = replace(form, media_dir=media)
         # a card read off the reader holds only its menu here: the bypass
         # would write into games trees the image does not carry
-        bypass = bool(form.bypass) and self._armed and not self._card_device
+        bypass = self._armed and not self._card_device
         cmds = apply_commands(form, self._loaded_card, media,
                               prepare=prepare, bypass=bypass)
         self._ok("Writing the menu into %s%s…" % (
@@ -7989,7 +7948,7 @@ class MultibootPanel:
             self._error("A run is already in progress.")
             return False
         form = self.form()
-        menu, rebuild = diff_forms(self._loaded_form, form)
+        menu, rebuild = self._loaded_diff(form)
         prepare = media_specs_changed(self._loaded_form, form)
         errs = validate_form(form) + self._apply_blockers(form, prepare)
         if errs:
@@ -8080,7 +8039,7 @@ class MultibootPanel:
         field = self._out_var.get().strip().strip('"')
         menu, rebuild = [], []
         if self._loaded_card and self._loaded_form is not None:
-            menu, rebuild = diff_forms(self._loaded_form, self.form())
+            menu, rebuild = self._loaded_diff()
         kind, _text, _tone, can_read = card_path_state(
             field, self._facts_now(field), self._rows, self._loaded_card,
             menu, rebuild)
@@ -8094,6 +8053,19 @@ class MultibootPanel:
         #: What the probe last said about the path, so <Return> can tell
         #: "there is nothing there" from "the answer has not come back".
         self._row_kind = kind
+
+    def _loaded_diff(self, form=None):
+        """``(menu, rebuild)`` between the loaded card and *form* (the live
+        form by default) - with 'bypass' among the menu changes while a games
+        tree on the loaded card is still armed, or half patched (item 98).
+        The bypass is always on, so an unpatched tree IS a change, one Apply
+        / Update carries even when no field moved; a card read off the reader
+        holds no games trees here, so nothing is pending on it."""
+        menu, rebuild = diff_forms(self._loaded_form,
+                                   form if form is not None else self.form())
+        if self._armed and not self._card_device and "bypass" not in menu:
+            menu = list(menu) + ["bypass"]
+        return menu, rebuild
 
     def _write_plan(self):
         """What 'Build / flash card…' would do, for the dialog and its own
@@ -8109,7 +8081,7 @@ class MultibootPanel:
         field = self._out_var.get().strip().strip('"')
         menu, rebuild = [], []
         if self._loaded_card and self._loaded_form is not None:
-            menu, rebuild = diff_forms(self._loaded_form, form)
+            menu, rebuild = self._loaded_diff(form)
         # EDITING is decided the SAME WAY the consequence line decides it
         # (card_path_state, off the probe's facts), not by a bare string
         # compare: a junction or case spelling of the loaded card the probe

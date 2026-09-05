@@ -182,7 +182,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 #: This tool's own version, stamped into build.json so a card says what wrote it.  Bump it when
 #: the sidecar's SHAPE changes; a reader must accept an older (or missing) one.
 #: 1.1 added each image's "title_dir" / "version" / "node_fw_version" (item 90's version gate).
-VERSION = "1.1"
+#: 1.2 added trees.json beside it (item 93: what is on every tree, so `update` writes only what changed).
+VERSION = "1.2"
 
 SECTOR = 512
 HEADS, SPT = 4, 32          # geometry the stock CHS bytes decode with (p1: 64/0/1 .. 191/3/32)
@@ -233,7 +234,11 @@ MEDIA_MANIFEST = "media.json"                 # selectmedia.py writes it; --medi
 #: media: they never go into MEDIA_DIR (where the selector scans), never count against
 #: MEDIA_BUDGET and are never subject to the "only what media.json names is staged" rule.
 BUILD_MANIFEST = "build.json"
-SIDECAR_MANIFESTS = (BUILD_MANIFEST, MEDIA_MANIFEST)
+#: trees.json (item 93): what is on every games tree - every file's sha256/size/mode/owner,
+#: the source's stamp, which partitions were written in place, a DIRTY flag while an update
+#: runs.  Beside build.json; carried through every inject byte for byte like media.json.
+TREES_MANIFEST = "trees.json"
+SIDECAR_MANIFESTS = (BUILD_MANIFEST, MEDIA_MANIFEST, TREES_MANIFEST)
 #: 'codeselect 2.1 - Spike 2 boot-time code selector' lives in the binary's .rodata
 SELECTOR_VERSION_RE = re.compile(rb"codeselect (\d+(?:\.\d+)+)")
 SELECTOR_VERSION_MAX = 8 << 20                # do not read a huge file just to sniff a version
@@ -855,10 +860,27 @@ def resolve_layout(layout, n_extra):
     return layout
 
 
-def make_plan(primary, extras, layout="auto", multi_sectors=None, multi_src=None, multi_subdirs=None):
+def make_plan(primary, extras, layout="auto", multi_sectors=None, multi_src=None, multi_subdirs=None,
+              size_class=None):
+    """The Plan for these images.  `size_class` ('8G'/'16G'/'32G', item 93's --size) fills the
+    multi layout's p7 to the END of that Stern image size instead of its content-sized default,
+    so later updates and added images have room without a re-layout; refused when the content
+    does not fit the class."""
     lay = resolve_layout(layout, len(extras))
-    return Plan(Geometry.from_file(primary), [Geometry.from_file(x) for x in extras], primary, list(extras),
+    plan = Plan(Geometry.from_file(primary), [Geometry.from_file(x) for x in extras], primary, list(extras),
                 lay, multi_sectors=multi_sectors, multi_subdirs=multi_subdirs, multi_src=multi_src)
+    if size_class and lay == "multi" and multi_sectors is None:
+        if size_class not in STERN_SIZES:
+            raise Refused("--size %r: one of %s" % (size_class, "/".join(STERN_SIZES)))
+        want = STERN_SIZES[size_class] // SECTOR - TAIL - plan.multi_part.start
+        if want < plan.multi_part.count:
+            raise Refused("--size %s: the images need %s of p7 and the class leaves %s"
+                          % (size_class, _gb(plan.multi_part.count * SECTOR), _gb(max(0, want) * SECTOR)))
+        plan = Plan(plan.primary_geom, plan.extra_geoms, primary, list(extras), lay, multi_sectors=want,
+                    multi_subdirs=multi_subdirs or plan.multi_subdirs, multi_src=multi_src)
+        plan.multi_each = multi_used_each(list(extras), plan.extra_geoms)
+        plan.multi_used = sum(plan.multi_each)
+    return plan
 
 
 def check_reachable(plan, allow=False):
@@ -913,20 +935,32 @@ def _gb(n):
     return "%.2f GB" % (n / 1e9)
 
 
+def _used_bytes_or_none(path, offset):
+    """The used bytes of the ext4 at `offset` in `path`, or None when there is no superblock
+    there (a synthetic test card, an unreadable source)."""
+    try:
+        return ext_used_bytes(path, offset)[0]
+    except Exception:                                    # noqa: BLE001 - any unreadable superblock
+        return None
+
+
 def image_costs(plan):
     """What each game costs on the finished card -> ([(index, device, bytes or None, source)],
-    overhead bytes).
+    overhead bytes).  See :func:`plan_room` for the third number the strip needs.
 
-    The unit differs by layout and that is the point of computing it here rather than in the
-    caller: a `parts` image is a whole partition, a `multi` one is the USED bytes of its tree
-    inside the shared p7.  The overhead is everything the games do not account for - boot,
-    rootfs, /data, /dump and p7's own slack - so the rows and the overhead add up to the image
+    The unit is the USED bytes of each games tree whatever the layout (item 93: a partition's
+    free space is ROOM FOR UPDATES, reported apart, not a cost of the game in it); a source
+    whose superblock cannot be read (a synthetic card) falls back to its whole partition.  The
+    overhead is everything the games and the room do not account for - boot, rootfs, /data,
+    /dump and the filesystems' own metadata - so rows + room + overhead add up to the image
     size exactly."""
     devs = plan.devices()
     srcs = [plan.primary] + list(plan.extras)
     rows = []
     if plan.multi_part is not None:
-        rows.append((0, devs[0], plan.prims[2].count * SECTOR, srcs[0]))
+        p3 = plan.prims[2]
+        used = _used_bytes_or_none(p3.src, p3.src_start * SECTOR) if p3.src else None
+        rows.append((0, devs[0], p3.count * SECTOR if used is None else used, srcs[0]))
         each = plan.multi_each
         for i, sub in enumerate(plan.multi_subdirs):
             rows.append((i + 1, devs[i + 1] if i + 1 < len(devs) else sub,
@@ -934,9 +968,29 @@ def image_costs(plan):
                          srcs[i + 1] if i + 1 < len(srcs) else None))
     else:
         for i, part in enumerate(plan.images):
+            used = _used_bytes_or_none(part.src, part.src_start * SECTOR) if part.src else None
             rows.append((i, devs[i] if i < len(devs) else device_name(part.num),
-                         part.count * SECTOR, srcs[i] if i < len(srcs) else None))
-    return rows, plan.total_bytes - sum(n for _i, _d, n, _s in rows if n)
+                         part.count * SECTOR if used is None else used, srcs[i] if i < len(srcs) else None))
+    room = plan_room(plan)
+    return rows, plan.total_bytes - sum(n for _i, _d, n, _s in rows if n) - room
+
+
+def plan_room(plan):
+    """The bytes free for in-place updates inside the games partitions the plan writes: each
+    image partition's size minus its used bytes (0 for one whose superblock cannot be read),
+    and the multi p7's slack over its trees."""
+    room = 0
+    if plan.multi_part is not None:
+        p3 = plan.prims[2]
+        used = _used_bytes_or_none(p3.src, p3.src_start * SECTOR) if p3.src else None
+        room += max(0, p3.count * SECTOR - used) if used is not None else 0
+        if plan.multi_used is not None:
+            room += max(0, plan.multi_part.count * SECTOR - plan.multi_used)
+        return room
+    for part in plan.images:
+        used = _used_bytes_or_none(part.src, part.src_start * SECTOR) if part.src else None
+        room += max(0, part.count * SECTOR - used) if used is not None else 0
+    return room
 
 
 def print_plan(plan):
@@ -981,7 +1035,11 @@ def print_plan(plan):
     for i, dev, n, src in costs:
         print("image-size %d %s %s %s" % (i, dev, "?" if n is None else n,
                                           os.path.basename(src or "") or "(no source)"))
-    print("image-size overhead %d boot + rootfs + data + dump + slack" % max(0, overhead))
+    # room for updates (item 93): what an in-place `update` can write before the card needs a
+    # rebuild - the games partitions' free space.  A word where the index goes, so an older
+    # reader of these rows cannot mistake it for an image.
+    print("image-size free %d room for updates in the games partitions" % plan_room(plan))
+    print("image-size overhead %d boot + rootfs + data + dump + metadata" % max(0, overhead))
     print("image: %d sectors = %d bytes (%s)" % (plan.total, plan.total_bytes, _gb(plan.total_bytes)))
     for k, spare in plan.fits().items():
         print("  fits Stern %-3s image size %d: %s (spare %d)%s" % (k, STERN_SIZES[k], "YES" if spare >= 0 else "NO", spare,
@@ -2198,11 +2256,13 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
 
 
 def selector_manifests(plan, conf_text, media_dir=None, sources=None, existing_build=None,
-                       existing_media=None, written=None, versions=None):
+                       existing_media=None, written=None, versions=None, existing_trees=None, trees=None):
     """The JSON sidecars to stage beside images.conf -> OrderedDict {name: text or bytes}.
     build.json is always written (from `conf_text` + `sources`, carrying `existing_build`'s
     sources through); media.json is --media-dir's file verbatim when one was given, else the
-    card's own `existing_media` bytes carried through unchanged, else absent."""
+    card's own `existing_media` bytes carried through unchanged, else absent; trees.json is
+    `trees` (a CardTrees, or its bytes) when given, else the card's own `existing_trees` bytes
+    carried through unchanged - an inject must never un-record a card - else absent."""
     out = collections.OrderedDict()
     out[BUILD_MANIFEST] = json.dumps(
         build_manifest(plan, parse_images_conf(conf_text), sources, existing_build, written, versions),
@@ -2212,6 +2272,10 @@ def selector_manifests(plan, conf_text, media_dir=None, sources=None, existing_b
             out[MEDIA_MANIFEST] = f.read()
     elif existing_media:
         out[MEDIA_MANIFEST] = existing_media
+    if trees is not None:
+        out[TREES_MANIFEST] = trees.to_json() if hasattr(trees, "to_json") else trees
+    elif existing_trees:
+        out[TREES_MANIFEST] = existing_trees
     return out
 
 
@@ -2232,6 +2296,1261 @@ def parse_manifest(raw, what, warnings=None):
         raise Refused(msg)
     warnings.append(msg)
     return None
+
+
+# ============================================================================= item 93: writing into a card in place
+# `update` changes ONLY what changed: it loop-mounts one partition of the card image (root,
+# --direct-io=on: measured ~150 MB/s into a .raw on a Windows drive, 30 MB/s buffered, 13 MB/s
+# through debugfs), lets the kernel's ext4 do the file work through treesync.DirOps, and keeps
+# the record of what is on each tree in trees.json on p2 beside build.json.  Everything a
+# reader needs (plan --quick, update --dry-run, verify, inspect) goes through the pure-Python
+# ext4 reader and debugfs and never mounts, so those stay ordinary-user runs.
+MOUNT_PREFIX = "/var/tmp/mkmulticard_mnt_"
+TMP_MARK_CHILD = ".tmp.drill"                  # what the selftest's crash drill leaves behind
+LOCK_SUFFIX = ".lock"
+P2_BACKUP_SUFFIX = ".p2.bak"
+
+
+def _treesync():
+    """The treesync module (beside this file), imported when first needed."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import treesync
+    return treesync
+
+
+def read_trees(card, ref=None):
+    """The card's trees.json as a CardTrees, or None when the card carries none (built before
+    item 93 - `update` then hashes the card's own trees once and records them)."""
+    ts = _treesync()
+    raw = read_select_file(ref or select_ref(card), TREES_MANIFEST)
+    if raw is None:
+        return None
+    try:
+        return ts.CardTrees.from_json(raw)
+    except ts.TreesError as e:
+        raise Refused("%s on %s cannot be read: %s" % (TREES_MANIFEST, card, e))
+
+
+def loop_available():
+    """(ok, why): can this process attach a loop device and mount it?  Root plus util-linux
+    plus a kernel with loop support (WSL2 has it; a container may not)."""
+    if os.name != "posix" or not hasattr(os, "geteuid"):
+        return False, "not a Linux host"
+    if os.geteuid() != 0:
+        return False, "not root (run under 'wsl -u root')"
+    missing = [n for n in ("losetup", "mount", "umount", "findmnt", "fuser", "e2fsck") if shutil.which(n) is None]
+    if missing:
+        return False, "missing tool(s): " + ", ".join(missing)
+    if not os.path.exists("/dev/loop-control"):
+        return False, "no /dev/loop-control (the kernel has no loop device support)"
+    return True, "root, losetup and /dev/loop-control present"
+
+
+def _run(argv, ok_rc=(0,)):
+    r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out = r.stdout.decode("utf-8", "replace")
+    if r.returncode not in ok_rc:
+        raise Refused("%s failed (rc=%d): %s" % (" ".join(argv), r.returncode, out.strip()))
+    return out
+
+
+def parse_losetup_j(text):
+    """`losetup -j FILE` lines -> [(loop device, offset)].  Format: '/dev/loop3: [2049]:1234
+    (/path/to/file), offset 364904448' (the offset field is absent for offset 0)."""
+    out = []
+    for line in text.splitlines():
+        m = re.match(r"^(/dev/loop\d+):.*?(?:,\s*offset\s+(\d+))?\s*$", line.strip())
+        if m:
+            out.append((m.group(1), int(m.group(2) or 0)))
+    return out
+
+
+def loop_mountpoint(loop):
+    """Where a loop device is mounted, or None."""
+    r = subprocess.run(["findmnt", "-rn", "-S", loop, "-o", "TARGET"], stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL)
+    tgt = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    return tgt[0] if tgt else None
+
+
+def mount_in_use(mountpoint):
+    """True when a process holds something under the mountpoint (fuser -m says so)."""
+    r = subprocess.run(["fuser", "-m", mountpoint], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return bool(r.stdout.strip())
+
+
+def sweep_stale_loops(card):
+    """Detach loop devices an earlier, killed run of THIS tool left on `card`: only those
+    mounted under this tool's own mountpoint prefix and held by nobody.  A loop of the same
+    file mounted anywhere else (the app's video grow at /var/tmp/pad_grow_*, or a run still
+    writing) is a refusal that names the mountpoint - never something to unmount blind.
+    -> the number detached."""
+    real = os.path.realpath(card)
+    r = subprocess.run(["losetup", "-j", real], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    n = 0
+    for loop, _off in parse_losetup_j(r.stdout.decode("utf-8", "replace")):
+        mp = loop_mountpoint(loop)
+        if mp is None:
+            _run(["losetup", "-d", loop])
+            say("detached a stale loop %s of %s (attached, not mounted)" % (loop, os.path.basename(card)))
+            n += 1
+            continue
+        if not mp.startswith(MOUNT_PREFIX):
+            raise Refused("%s is already mounted at %s (loop %s) by something else - not this tool's mount; "
+                          "unmount it first" % (os.path.basename(card), mp, loop))
+        if mount_in_use(mp):
+            raise Refused("%s is mounted at %s (loop %s) and a process still holds it - an earlier update is "
+                          "still running" % (os.path.basename(card), mp, loop))
+        say("unmounting a stale mount %s (loop %s) an interrupted run left" % (mp, loop))
+        _run(["umount", mp])
+        _run(["losetup", "-d", loop])
+        try:
+            os.rmdir(mp)
+        except OSError:
+            pass
+        n += 1
+    return n
+
+
+def partition_feature_words(card, offset, length):
+    _v, _s, ext4, _a = _stern_plugins()
+    with open(card, "rb") as f:
+        return ext4.Ext4Reader(f, offset, length).feature_words()
+
+
+#: Journal (jbd2) incompat features the card's 3.14 kernel knows: REVOKE, 64BIT, ASYNC_COMMIT,
+#: CSUM_V2, CSUM_V3.  A first rw mount by any kernel sets REVOKE on a journal made without it;
+#: anything above these (FAST_COMMIT, 5.10+) would be a feature the card cannot read.
+JOURNAL_INCOMPAT_KNOWN = 0x1F
+
+
+def feature_words_moved(before, after):
+    """True when a mount left the filesystem with a feature the card's kernel may not know:
+    any change to the ext4 superblock's three words, or a journal incompat bit outside
+    JOURNAL_INCOMPAT_KNOWN.  (A journal gaining REVOKE is the one change every kernel makes.)"""
+    if tuple(before[:3]) != tuple(after[:3]):
+        return True
+    if len(before) >= 6 and len(after) >= 6:
+        if after[4] & ~JOURNAL_INCOMPAT_KNOWN:
+            return True
+        if before[3] != after[3] and (after[3] & ~before[3]):
+            return False                                   # compat bits: harmless by definition
+    return False
+
+
+def drop_page_cache(card):
+    """After a loop device wrote around the page cache (O_DIRECT), make sure no buffered page
+    of the card is stale: sync, then tell the kernel to forget what it cached of the file."""
+    os.sync()
+    try:
+        fd = os.open(card, os.O_RDONLY)
+        try:
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        finally:
+            os.close(fd)
+    except (OSError, AttributeError):
+        pass
+
+
+class LoopMount:
+    """One partition of a card image, attached to a loop device and (unless mount=False)
+    mounted rw for the duration of a `with` block -> the mountpoint (or the loop device).
+
+    Order of business: the stale sweep, `losetup --find --show --direct-io=on -o OFF
+    --sizelimit LEN` (a retry without direct-io when the kernel or the filesystem refuses,
+    with a warning: it is the 5x slower path), the partition's feature words recorded, the
+    mount at a fresh /var/tmp/mkmulticard_mnt_* directory.  On the way out, whatever
+    happened: umount, losetup -d, rmdir, sync + fadvise, the feature words asserted (a
+    foreign kernel must leave nothing the card's 3.14 kernel has never seen), e2fsck -fn.
+    SIGTERM/SIGINT become KeyboardInterrupt while inside so the block's finally clauses run.
+    """
+
+    def __init__(self, card, offset, length, direct_io=True, mount=True, options="rw,noatime"):
+        self.card, self.offset, self.length = card, offset, length
+        self.direct_io, self.mount, self.options = direct_io, mount, options
+        self.loop = self.mountpoint = None
+        self.words = None
+        self._old = {}
+
+    def __enter__(self):
+        ok, why = loop_available()
+        if not ok:
+            raise Refused("cannot loop-mount %s: %s" % (self.card, why))
+        sweep_stale_loops(self.card)
+        self.words = partition_feature_words(self.card, self.offset, self.length)
+        base = ["losetup", "--find", "--show", "-o", str(self.offset), "--sizelimit", str(self.length)]
+        argv = base[:3] + (["--direct-io=on"] if self.direct_io else []) + base[3:] + [self.card]
+        r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if r.returncode != 0 and self.direct_io:
+            say("WARNING: losetup --direct-io=on refused (%s); attaching without it - writes will be slower"
+                % r.stdout.decode("utf-8", "replace").strip())
+            r = subprocess.run(base + [self.card], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if r.returncode != 0:
+            raise Refused("losetup %s failed: %s" % (self.card, r.stdout.decode("utf-8", "replace").strip()))
+        self.loop = r.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
+        import signal
+
+        def interrupt(signum, _frame):
+            raise KeyboardInterrupt("signal %d" % signum)
+        for sig in (signal.SIGTERM, signal.SIGINT, getattr(signal, "SIGHUP", None)):
+            if sig is not None:
+                try:
+                    self._old[sig] = signal.signal(sig, interrupt)
+                except (ValueError, OSError):
+                    pass
+        if not self.mount:
+            return self.loop
+        self.mountpoint = tempfile.mkdtemp(prefix=MOUNT_PREFIX)
+        try:
+            _run(["mount", "-t", "ext4", "-o", self.options, self.loop, self.mountpoint])
+        except Refused:
+            self._detach()
+            raise
+        return self.mountpoint
+
+    def _detach(self):
+        problems = []
+        if self.mountpoint:
+            os.sync()
+            for attempt in range(5):
+                r = subprocess.run(["umount", self.mountpoint], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                if r.returncode == 0:
+                    break
+                time.sleep(0.5 * (attempt + 1))
+            else:
+                problems.append("umount %s: %s" % (self.mountpoint, r.stdout.decode("utf-8", "replace").strip()))
+            try:
+                os.rmdir(self.mountpoint)
+            except OSError:
+                pass
+        if self.loop:
+            r = subprocess.run(["losetup", "-d", self.loop], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            if r.returncode != 0:
+                problems.append("losetup -d %s: %s" % (self.loop, r.stdout.decode("utf-8", "replace").strip()))
+        import signal
+        for sig, old in self._old.items():
+            try:
+                signal.signal(sig, old)
+            except (ValueError, OSError):
+                pass
+        self._old = {}
+        drop_page_cache(self.card)
+        return problems
+
+    def __exit__(self, exc_type, exc, tb):
+        problems = self._detach()
+        if problems:
+            raise Refused("releasing %s: %s" % (self.card, "; ".join(problems)))
+        after = partition_feature_words(self.card, self.offset, self.length)
+        if feature_words_moved(self.words, after):
+            raise Refused("the mount CHANGED the filesystem's feature words on %s (%r -> %r): a kernel newer "
+                          "than the card's may have added a feature it cannot read; the card is left as "
+                          "it is for a look" % (os.path.basename(self.card), self.words, after))
+        rc, txt = e2fsck(fs_ref(self.card, self.offset))
+        if rc != 0:
+            raise Refused("e2fsck -fn is not clean after the mount of %s@%d (rc=%d):\n%s"
+                          % (os.path.basename(self.card), self.offset, rc, txt.strip()[-800:]))
+        return False
+
+
+class DirOps(object):
+    """treesync.FsOps over a directory - the mounted partition.  Paths are relative to it."""
+
+    def __init__(self, root):
+        self.root = root
+        self._base = _treesync().FsOps
+
+    def _p(self, rel):
+        return os.path.join(self.root, rel) if rel else self.root
+
+    def lstat(self, rel):
+        try:
+            st = os.lstat(self._p(rel))
+        except FileNotFoundError:
+            return None
+        if statmod.S_ISDIR(st.st_mode):
+            kind = "dir"
+        elif statmod.S_ISREG(st.st_mode):
+            kind = "file"
+        elif statmod.S_ISLNK(st.st_mode):
+            kind = "symlink"
+        else:
+            kind = "other"
+        d = {"kind": kind, "mode": st.st_mode & 0o7777, "uid": st.st_uid, "gid": st.st_gid, "ino": st.st_ino,
+             "size": st.st_size, "nlink": st.st_nlink, "mtime": int(st.st_mtime)}
+        if kind == "symlink":
+            d["target"] = os.readlink(self._p(rel))
+        return d
+
+    def listdir(self, rel):
+        return os.listdir(self._p(rel))
+
+    def _own(self, p, uid, gid):
+        if hasattr(os, "chown"):
+            os.chown(p, uid, gid)
+
+    def mkdir(self, rel, mode, uid, gid):
+        os.mkdir(self._p(rel))
+        self._own(self._p(rel), uid, gid)
+        os.chmod(self._p(rel), mode)
+
+    def rmdir(self, rel):
+        os.rmdir(self._p(rel))
+
+    def symlink(self, rel, target, uid, gid):
+        os.symlink(target, self._p(rel))
+        try:
+            os.lchown(self._p(rel), uid, gid)
+        except (OSError, AttributeError):
+            pass
+
+    def unlink(self, rel):
+        os.unlink(self._p(rel))
+
+    def rename(self, a, b):
+        os.replace(self._p(a), self._p(b))
+
+    def write_stream(self, rel, chunks, mode, uid, gid, mtime):
+        p = self._p(rel)
+        with open(p, "wb") as f:
+            for c in chunks:
+                f.write(c)
+            f.flush()
+            os.fsync(f.fileno())
+        self._own(p, uid, gid)
+        os.chmod(p, mode)
+        os.utime(p, (mtime, mtime))
+
+    def set_attrs(self, rel, mode=None, uid=None, gid=None):
+        p = self._p(rel)
+        if (uid is not None or gid is not None) and hasattr(os, "chown"):
+            st = os.lstat(p)
+            os.chown(p, st.st_uid if uid is None else uid, st.st_gid if gid is None else gid)
+        if mode is not None:
+            os.chmod(p, mode)
+
+    def free_bytes(self):
+        return shutil.disk_usage(self.root).free
+
+    def commit(self):
+        os.sync()
+
+    # the FsOps helpers, borrowed
+    def exists(self, rel):
+        return self.lstat(rel) is not None
+
+    def walk_files(self, rel=""):
+        return self._base.walk_files(self, rel)
+
+    def rmtree(self, rel):
+        return self._base.rmtree(self, rel)
+
+
+class CardLock:
+    """`with CardLock(card):` - one update of a card at a time.  A non-blocking flock on
+    <card>.lock; a held lock is a LIVE run, never a stale one (the stale-loop sweep runs
+    after this, so it can only ever find a dead run's leftovers)."""
+
+    def __init__(self, card):
+        self.path = card + LOCK_SUFFIX
+        self.fd = None
+
+    def __enter__(self):
+        import fcntl
+        self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            holder = ""
+            try:
+                holder = os.read(self.fd, 64).decode("utf-8", "replace").strip()
+            except OSError:
+                pass
+            os.close(self.fd)
+            self.fd = None
+            raise Refused("another update of %s is still running%s (%s is locked)"
+                          % (os.path.basename(self.path[:-len(LOCK_SUFFIX)]), (" - pid " + holder) if holder else "",
+                             os.path.basename(self.path)))
+        os.ftruncate(self.fd, 0)
+        os.write(self.fd, ("%d\n" % os.getpid()).encode("utf-8"))
+        return self
+
+    def __exit__(self, *exc):
+        if self.fd is not None:
+            try:
+                os.ftruncate(self.fd, 0)
+            except OSError:
+                pass
+            os.close(self.fd)
+            self.fd = None
+        return False
+
+
+def lock_held(card):
+    """True when another process holds the card's update lock (a reader then says 'busy')."""
+    path = card + LOCK_SUFFIX
+    if os.name != "posix" or not os.path.exists(path):
+        return False
+    import fcntl
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        return False
+    except OSError:
+        return True
+    finally:
+        os.close(fd)
+
+
+def p2_backup(card):
+    """<card>.p2.bak = the card's p2 as it is now (the rootfs: the one partition an interrupted
+    write could leave unbootable; `dd` it back).  -> the path."""
+    off, length = p2_range(card)
+    bak = card + P2_BACKUP_SUFFIX
+    with open(bak, "wb") as f:
+        f.truncate(length)
+    copy_range(card, off, bak, 0, length, "p2 backup", sparse=False, progress=None)
+    return bak
+
+
+def select_write_commands(items, remove=()):
+    """The debugfs -w script that puts `items` = [(staged native path, name)] into SELECT_DIR
+    IN PLACE (rm + write + mode/uid/gid) and removes `remove` names.  Pure."""
+    cmds = []
+    for _staged, name in items:
+        cmds.append("rm " + dq(SELECT_DIR + "/" + name))
+    for name in remove:
+        cmds.append("rm " + dq(SELECT_DIR + "/" + name))
+    for staged, name in items:
+        cmds.append("write %s %s" % (dq(staged), dq(SELECT_DIR + "/" + name)))
+    for _staged, name in items:
+        card = dq(SELECT_DIR + "/" + name)
+        cmds.append("set_inode_field %s mode 0100644" % card)
+        cmds.append("set_inode_field %s uid 0" % card)
+        cmds.append("set_inode_field %s gid 0" % card)
+    return cmds
+
+
+def write_select_files(card, files, remove=(), workdir=None):
+    """Write small files into the card's p2 SELECT_DIR without extracting the partition: a
+    debugfs -w script straight into the card (rm + write + mode/uid/gid), e2fsck -fn, the p2
+    md5 sidecar rewritten.  `files` = {name: bytes}; names must be selector sidecars.  A kill
+    mid-script leaves at worst one small file half written, which e2fsck -fy reconciles - the
+    rootfs stays bootable, which the 352 MB extract/write-back of inject_card cannot promise.
+    -> the names written."""
+    need_tools("debugfs", "e2fsck")
+    off, length = p2_range(card)
+    ref = fs_ref(card, off)
+    if not debugfs_exists(ref, SELECT_DIR):
+        raise Refused("%s has no %s on its p2 (not a multi-boot card)" % (card, SELECT_DIR))
+    rc, txt = e2fsck(ref)
+    if rc != 0:
+        raise Refused("p2 of %s is not clean before the write (e2fsck rc=%d):\n%s" % (card, rc, txt.strip()[-600:]))
+    used, total = e2fsck_blocks(txt)
+    bs = ext_block_size(card, off)
+    free = (total - used) * bs
+    need = sum(len(b) for b in files.values())
+    reclaim = 0
+    for e in debugfs_ls(ref, SELECT_DIR):
+        if e[4] in files or e[4] in remove:
+            reclaim += e[5]
+    if need > free + reclaim - min(P2_FREE_MARGIN, total * bs // 20):
+        raise Refused("p2 has %d KB free (+ %d KB the rewrite frees) and %s needs %d KB"
+                      % (free >> 10, reclaim >> 10, ", ".join(sorted(files)), need >> 10))
+    stage = tempfile.mkdtemp(prefix="mkmulticard.p2w.", dir=workdir)
+    try:
+        items = []
+        for name in sorted(files):
+            p = os.path.join(stage, name)
+            with open(p, "wb") as f:
+                f.write(files[name])
+            items.append((p, name))
+        present = {e[4] for e in debugfs_ls(ref, SELECT_DIR)}
+        # rm only what is there (debugfs reports a missing rm as an error line); the script is
+        # every rm, then every write, then every attribute - in that order
+        cmds = ["rm " + dq(SELECT_DIR + "/" + n) for (_p, n) in items if n in present]
+        cmds += ["rm " + dq(SELECT_DIR + "/" + n) for n in remove if n in present]
+        cmds += ["write %s %s" % (dq(p), dq(SELECT_DIR + "/" + n)) for (p, n) in items]
+        for _p, n in items:
+            c = dq(SELECT_DIR + "/" + n)
+            cmds += ["set_inode_field %s mode 0100644" % c, "set_inode_field %s uid 0" % c,
+                     "set_inode_field %s gid 0" % c]
+        debugfs_write_script(ref, cmds)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    rc, txt = e2fsck(ref)
+    if rc != 0:
+        raise Refused("p2 of %s is not clean after the write (e2fsck rc=%d):\n%s" % (card, rc, txt.strip()[-600:]))
+    for name, data in files.items():
+        back = debugfs_cat(ref, SELECT_DIR + "/" + name)
+        if back != data:
+            raise Refused("%s read back from p2 differs from what was written" % name)
+    write_p2_sidecar(card)
+    return sorted(files)
+
+
+def write_trees(card, trees, build_json=None, workdir=None):
+    """Record `trees` (a CardTrees) on the card's p2 - and, when given, the new build.json -
+    through write_select_files."""
+    files = {TREES_MANIFEST: trees.to_json()}
+    if build_json is not None:
+        files[BUILD_MANIFEST] = build_json if isinstance(build_json, bytes) else build_json.encode("utf-8")
+    return write_select_files(card, files, workdir=workdir)
+
+
+def plan_with_p7_sectors(card, new_sectors):
+    """The card's own Plan (plan_from_card) with the multi p7 given `new_sectors` - what
+    write_tables needs to grow the last partition in place."""
+    G = Geometry.from_file(card)
+    subs = multi_subdirs_on(card, 7)
+    if not subs or len(G.logical) != 3:
+        raise Refused("%s is not a multi-layout card with a p7 to grow" % card)
+    base = Geometry(G.size, G.mbr, G.prim, G.ext, G.logical[:2], G.ebr_raw, card)
+    return Plan(base, [], card, [], "multi", multi_sectors=int(new_sectors), multi_subdirs=subs, multi_src=None)
+
+
+def grow_last_partition(card, new_sectors):
+    """Grow the multi layout's p7 (the last partition) IN PLACE to `new_sectors`: the image
+    file is extended, the extended container's and p7's table entries rewritten, then
+    resize2fs runs on the loop device (unmounted) and e2fsck -fn checks the result.  The
+    filesystem keeps its identity; only its block count moves.  -> the new Plan."""
+    need_tools("resize2fs", "e2fsck", "losetup")
+    plan = plan_with_p7_sectors(card, new_sectors)
+    p7 = plan.multi_part
+    old_total = os.path.getsize(card)
+    if plan.total_bytes < old_total:
+        raise Refused("p7 can only grow (%d -> %d sectors would shrink the image)" % (old_total // SECTOR, plan.total))
+    say("growing p%d of %s to %d sectors (%s); the image becomes %s"
+        % (p7.num, os.path.basename(card), p7.count, _gb(p7.count * SECTOR), _gb(plan.total_bytes)))
+    with open(card, "r+b") as f:
+        f.truncate(plan.total_bytes)
+    write_tables(plan, card)
+    with LoopMount(card, p7.start * SECTOR, p7.count * SECTOR, mount=False) as loop:
+        _run(["e2fsck", "-fp", loop], ok_rc=(0, 1))
+        out = _run(["resize2fs", loop])
+        say("resize2fs: " + " ".join(line.strip() for line in out.splitlines() if "now" in line))
+    return plan
+
+
+# ============================================================================= item 93: the record and `update`
+CACHE_DIRNAME_HINT = "pinball_spike2_multiboot"
+UPDATE_SLACK = 0.10                            # --expect-bytes tolerance
+UPDATE_SLACK_BYTES = 64 << 20
+P2_SKIP = ("usr/local/codeselect", "etc/init.d/game")   # what the primary gate leaves out of p2
+
+
+def partition_free(path, offset, length):
+    """(free, total) bytes of the ext4 at `offset`, from its superblock."""
+    used, total = ext_used_bytes(path, offset)
+    return max(0, total - used), total
+
+
+def games_free(card, plan):
+    """{partition number: (free, total)} of every games partition the plan names."""
+    out = {}
+    for p, _sub in plan.trees:
+        if p.num not in out:
+            out[p.num] = partition_free(card, p.start * SECTOR, p.count * SECTOR)
+    return out
+
+
+def source_tree(path, cache_dir=None, progress=None):
+    """(SourceManifest, 'cached'|'hashed') of a SOURCE card's games tree (its p3 root)."""
+    ts = _treesync()
+    part = source_part(path)
+    return ts.source_manifest(path, part.start * SECTOR, part.count * SECTOR, root_ino=2, cache_dir=cache_dir,
+                              progress=progress)
+
+
+def card_tree(card, part, sub, cache_dir=None, progress=None):
+    """(SourceManifest, how) of one games tree ON a card - what `update` reads off a card built
+    before trees.json existed, cached under the CARD's own stamp."""
+    ts = _treesync()
+    _v, _s, ext4, _a = _stern_plugins()
+    with open(card, "rb") as f:
+        r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+        root = tree_root_inode(r, sub)
+    return ts.source_manifest(card, part.start * SECTOR, part.count * SECTOR, root_ino=root,
+                              sub=device_name(part.num, sub), cache_dir=cache_dir, progress=progress)
+
+
+def p2_digest(path, cache_dir=None):
+    """A digest of a card's p2 CONTENT minus what this tool puts there (the selector directory
+    and the hooked game script): the same for a source and for the card built from it, however
+    many times the menu was re-injected, and unmoved by a rw mount (a range md5 is not).
+    Cached under the file's stamp like a games tree."""
+    ts = _treesync()
+    t, st, cnt = Geometry.from_file(path).part(2)
+    if t != 0x83:
+        raise Refused("%s: p2 is type 0x%02x, not Linux" % (path, t))
+    man, _how = ts.source_manifest(path, st * SECTOR, cnt * SECTOR, root_ino=2, sub="p2", cache_dir=cache_dir)
+    keep = ts.TreeManifest(
+        {k: v for k, v in man.tree.files.items() if not k.startswith(P2_SKIP[0]) and k != P2_SKIP[1]},
+        {k: v for k, v in man.tree.symlinks.items() if not k.startswith(P2_SKIP[0])},
+        {k: v for k, v in man.tree.dirs.items() if not k.startswith(P2_SKIP[0])})
+    return hashlib.sha256(json.dumps(keep.to_dict(), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def primary_identity(path, cache_dir=None):
+    """{'p1_md5', 'p2_tree'}: what the update gate compares a card's primary with a source's."""
+    t, st, cnt = Geometry.from_file(path).part(1)
+    return {"p1_md5": md5_range(path, st * SECTOR, cnt * SECTOR), "p2_tree": p2_digest(path, cache_dir)}
+
+
+def primary_gate(card, source, recorded=None, cache_dir=None):
+    """Refuse an update whose primary source is a different BUILD from the card's: p1 (the
+    kernel) must be the same bytes, p2's content minus this tool's files the same tree, and the
+    card's game script must be the source's plus the hook.  `recorded` (trees.json's primary
+    identity) stands in for the card's own p2 digest when present.  -> the source's identity."""
+    src = primary_identity(source, cache_dir)
+    got = dict(recorded or {})
+    if not got.get("p1_md5") or not got.get("p2_tree"):
+        got = primary_identity(card, cache_dir)
+    why = []
+    if src["p1_md5"] != got["p1_md5"]:
+        why.append("the kernel partition (p1) differs")
+    if src["p2_tree"] != got["p2_tree"]:
+        why.append("the rootfs (p2) differs beyond the boot menu's own files")
+    try:
+        cur = debugfs_cat(select_ref(card), GAME_SCRIPT).decode("utf-8", "replace")
+        t2, s2, c2 = Geometry.from_file(source).part(2)
+        orig = debugfs_cat(fs_ref(source, s2 * SECTOR), GAME_SCRIPT).decode("utf-8", "replace")
+        if strip_hook(cur) != orig:
+            why.append("%s differs beyond the hook" % GAME_SCRIPT)
+    except Refused as e:
+        why.append("the game script could not be compared (%s)" % e)
+    if why:
+        raise Refused("%s is not the primary this card was built from - %s. An update cannot carry that; "
+                      "build a fresh card." % (os.path.basename(source), "; ".join(why)))
+    return src
+
+
+def record_sources(plan, cache_dir=None, progress=None):
+    """trees.json for a BUILD of `plan`: every source's games tree hashed (or from the cache),
+    the primary's identity for the update gate.  -> CardTrees.  Prints one line per source."""
+    ts = _treesync()
+    images = []
+    srcs = [plan.primary] + list(plan.extras)
+    for i, (part, sub) in enumerate(plan.trees):
+        path = srcs[i] if i < len(srcs) else None
+        if not path:
+            continue
+        t0 = time.monotonic()
+        man, how = source_tree(path, cache_dir, progress)
+        took = "" if how == "cached" else " in %.0f s" % (time.monotonic() - t0)
+        say("%s: %d files, %s (%s%s)" % (os.path.basename(path), len(man.tree.files), _gb(man.tree.bytes()), how, took))
+        images.append(ts.ImageTrees(i, device_name(part.num, sub), sub or "", man.tree, man.stamp, man.uuid))
+    return ts.CardTrees(images, primary=primary_identity(plan.primary, cache_dir), layout=plan.layout, version=VERSION)
+
+
+def refuse_if_dirty(card, ref=None):
+    rec = read_trees(card, ref)
+    if rec is not None and rec.dirty:
+        which = ", ".join("p%d" % n for n in rec.dirty)
+        raise Refused("%s is mid-update (partition%s %s dirty): run `update` again to finish or repair it before "
+                      "anything else writes to it" % (os.path.basename(card), "s" if len(rec.dirty) > 1 else "", which))
+
+
+def card_in_use(card):
+    """A sentence when something else holds the card open the way an in-place write would break:
+    a fuse2fs mount of it (the emulator with its cache off mounts the ORIGINAL .raw) or a card
+    cache copier whose command line names it (a dd publishing a torn copy as valid).  None when
+    the card is free.  Linux only; elsewhere None."""
+    if os.name != "posix":
+        return None
+    real = os.path.realpath(card)
+    try:
+        r = subprocess.run(["findmnt", "-rn", "-t", "fuse.fuse2fs,fuse.ext4,fuse", "-o", "SOURCE,TARGET"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        for line in r.stdout.decode("utf-8", "replace").splitlines():
+            parts = line.split()
+            if parts and os.path.realpath(parts[0]) == real:
+                return "%s is mounted at %s (fuse2fs - the emulator?); stop that first" % (
+                    os.path.basename(card), parts[1] if len(parts) > 1 else "?")
+    except OSError:
+        pass
+    home = os.environ.get("PAD_HOME") or os.path.expanduser("~")
+    cache = os.path.join(home, "cardcache")
+    if os.path.isdir(cache):
+        for name in os.listdir(cache):
+            if not name.endswith(".pid"):
+                continue
+            try:
+                with open(os.path.join(cache, name)) as f:
+                    pid = int(f.read().split()[0])
+                with open("/proc/%d/cmdline" % pid, "rb") as f:
+                    cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+            except (OSError, ValueError, IndexError):
+                continue
+            if card in cmd or real in cmd:
+                return "the emulator's card cache is copying %s right now (pid %d); let it finish" % (
+                    os.path.basename(card), pid)
+    return None
+
+
+def bypass_tree_bytes(elf, sdata, gpath, title):
+    """PURE: the validator bypass on a tree's bytes -> (state before, new ELF or None, new .sidx
+    or None, notes).  The ELF is patched when armed; the .sidx record is refreshed whenever its
+    digest disagrees with the ELF as it will be - NEVER gated on the ELF's state (a tree whose
+    game was already patched but whose manifest still says otherwise is exactly the case the
+    spk layer flags)."""
+    valpatch, sidx, _e, _a = _stern_plugins()
+    elf = bytearray(elf)
+    state = bypass_state(elf)
+    notes = ["%s (%d bytes): %s" % (gpath, len(elf), state)]
+    new_elf = None
+    if state == "armed":
+        eoff = valpatch.find_validation_exec(bytes(elf))
+        elf[eoff:eoff + 4] = valpatch._BX_LR
+        new_elf = bytes(elf)
+        notes.append("bx lr at ELF offset 0x%x" % eoff)
+    new_sidx = None
+    if sdata is not None and state in ("armed", "bypassed"):
+        recs, _crc, fmt = sidx.parse_records(sdata)
+        cands = [gpath, "%s/game" % title, "%s/game_real" % title]
+        rec_path = next((c for c in cands if c in recs), None)
+        if rec_path is None:
+            notes.append("the .sidx has no record for %s - the spk layer may flag the game file" % gpath)
+        else:
+            hm, md = sidx.digests(bytes(elf))
+            buf = bytearray(sdata)
+            for foff, rb in sidx.record_field_writes(recs[rec_path], hm, md, fmt):
+                buf[foff:foff + len(rb)] = rb
+            if bytes(buf) != bytes(sdata):
+                new_sidx = bytes(buf)
+                notes.append(".sidx record %r (%s) refreshed" % (rec_path, fmt))
+    return state, new_elf, new_sidx, notes
+
+
+def _find_tree_game(root):
+    """(title, game rel, sidx rel or None) inside a MOUNTED tree at `root`, the way tree_game
+    and tree_sidx find them through the reader."""
+    for name in sorted(os.listdir(root)):
+        d = os.path.join(root, name)
+        if name in ("lost+found", "spk") or not os.path.isdir(d) or os.path.islink(d):
+            continue
+        if not os.path.exists(os.path.join(d, "game")):
+            continue
+        for cand in ("game_real", "game"):
+            p = os.path.join(d, cand)
+            if os.path.isfile(p) and not os.path.islink(p) and os.path.getsize(p) > 0:
+                spath = None
+                idx = os.path.join(root, "spk", "index")
+                if os.path.isdir(idx):
+                    for s in sorted(os.listdir(idx)):
+                        if s.endswith(".sidx") and os.path.isfile(os.path.join(idx, s)) \
+                                and not os.path.islink(os.path.join(idx, s)):
+                            spath = "spk/index/" + s
+                            break
+                return name, "%s/%s" % (name, cand), spath
+    raise Refused("no title directory with a game file in %s" % root)
+
+
+def apply_bypass_fs(ops, prefix):
+    """The validator bypass on the tree at `prefix` through a mounted filesystem (never a raw
+    write behind a mount): the patched ELF and the refreshed .sidx are written tmp + rename
+    with the old files' mode/owner/mtime.  -> (state before, {rel: sha256 of what is now on the
+    card}, notes)."""
+    ts = _treesync()
+    root = ops._p(prefix) if prefix else ops.root
+    title, gpath, spath = _find_tree_game(root)
+    with open(os.path.join(root, gpath), "rb") as f:
+        elf = f.read()
+    sdata = None
+    if spath:
+        with open(os.path.join(root, spath), "rb") as f:
+            sdata = f.read()
+    state, new_elf, new_sidx, notes = bypass_tree_bytes(elf, sdata, gpath, title)
+    written = {}
+    for rel, data in ((gpath, new_elf), (spath, new_sidx)):
+        if data is None or rel is None:
+            continue
+        full = ts._join(prefix, rel)
+        st = ops.lstat(full)
+        tmp = ts.tmp_name(full)
+        ops.write_stream(tmp, [data], st["mode"], st["uid"], st["gid"], st["mtime"])
+        ops.rename(tmp, full)
+        written[rel] = hashlib.sha256(data).hexdigest()
+    return state, written, notes, gpath, spath
+
+
+def verify_trees(card, plan, rec, mode, check, touched=None):
+    """Every recorded tree against trees.json: paths, kinds, mode/owner, symlink targets, and
+    the CONTENT of every file ('full'), of the touched files + game + .sidx ('touched') or of a
+    sample of 32 + game + .sidx ('quick').  The bypass's own digests override the source's for
+    the game and the .sidx."""
+    ts = _treesync()
+    _v, _s, ext4, _a = _stern_plugins()
+    import random
+    for im in rec.images:
+        if im.index >= len(plan.trees):
+            check("image %d %s recorded but not on the card" % (im.index, im.device), False)
+            continue
+        part, sub = plan.trees[im.index]
+        dev = device_name(part.num, sub)
+        want = im.tree
+        by = im.bypass or {}
+        override = {by.get("game_path"): by.get("game"), by.get("sidx_path"): by.get("sidx")}
+        t0 = time.monotonic()
+        with open(card, "rb") as f:
+            r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+            root = tree_root_inode(r, sub)
+            files, links, dirs, nodes = {}, {}, {}, {}
+            for rel, kind, ino, node in r.iter_tree(root):
+                if kind == "file":
+                    files[rel] = node
+                elif kind == "symlink":
+                    links[rel] = r.read_symlink(node)
+                elif kind == "dir":
+                    dirs[rel] = node
+                nodes[rel] = node
+            missing = sorted(set(want.files) - set(files))[:5]
+            extra = sorted(set(files) - set(want.files))[:5]
+            detail = ("missing %r " % missing if missing else "") + ("extra %r" % extra if extra else "")
+            check("image %d %s files: %d recorded, %d on the card" % (im.index, dev, len(want.files), len(files)),
+                  set(files) == set(want.files), detail)
+            links_ok = set(links) == set(want.symlinks) and all(
+                links[k] == want.symlinks[k].target for k in want.symlinks if k in links)
+            check("image %d %s symlinks" % (im.index, dev), links_ok)
+            check("image %d %s directories" % (im.index, dev), set(dirs) == set(want.dirs))
+
+            def attrs_of(rel):
+                return files[rel]["mode"] & 0o7777, files[rel]["uid"], files[rel]["gid"]
+            bad_attr = [rel for rel, rr in want.files.items()
+                        if rel in files and attrs_of(rel) != (rr.mode, rr.uid, rr.gid)]
+            check("image %d %s file mode/owner" % (im.index, dev), not bad_attr, "%r" % bad_attr[:5])
+            if mode == "full":
+                sample = sorted(want.files)
+            else:
+                sample = set((touched or {}).get(im.index, ()))
+                sample |= {k for k in override if k}
+                if mode == "quick":
+                    pool = [k for k in want.files if k not in sample]
+                    random.seed(1)
+                    sample |= set(random.sample(pool, min(32, len(pool))))
+                sample = sorted(k for k in sample if k in want.files)
+            bad = []
+            nbytes = 0
+            for rel in sample:
+                if rel not in files:
+                    continue
+                got = ts.hash_inode(r, files[rel])
+                nbytes += files[rel]["size"]
+                exp = override.get(rel) or want.files[rel].sha256
+                if got != exp:
+                    bad.append(rel)
+            check("image %d %s content: %d of %d files re-hashed (%s, %.0f s)"
+                  % (im.index, dev, len(sample), len(want.files), _gb(nbytes), time.monotonic() - t0),
+                  not bad, "differ: %r" % bad[:5])
+
+
+def trees_report(card, plan, rec, warnings):
+    """inspect's 'trees' block, or None for a card with no record."""
+    if rec is None:
+        return None
+    ts = _treesync()
+    free = None
+    if plan is not None:
+        try:
+            free = sum(fr for fr, _t in games_free(card, plan).values())
+        except (Refused, OSError, struct.error) as e:
+            warnings.append("the games partitions' free space could not be read: %s" % e)
+    images = []
+    for im in rec.images:
+        changed = None
+        if im.stamp and im.stamp.get("path") and os.path.isfile(im.stamp["path"]):
+            changed = not ts.stamps_equal(ts.source_stamp(im.stamp["path"]), im.stamp)
+        images.append(collections.OrderedDict([
+            ("index", im.index), ("device", im.device), ("files", len(im.tree.files)),
+            ("tree_bytes", im.tree.bytes()), ("source_stamp", im.stamp), ("source_changed", changed)]))
+    return collections.OrderedDict([
+        ("recorded", True), ("written", rec.written), ("version", rec.version), ("free_bytes", free),
+        ("synced", rec.synced), ("dirty", rec.dirty), ("images", images)])
+
+
+def _print_update_rows(u):
+    flags = (" dirty" if u["dirty"] else "") + (" unrecorded" if u["unrecorded"] else "")
+    print("update-card %s layout %s%s" % (u["card"], u["layout"], flags))
+    for i, dev, how, base in u["sources"]:
+        print("update-source %d %s %s %s" % (i, dev, how, base or "-"))
+    for i, dev, n, nbytes, action, base in u["files"]:
+        print("update-files %d %s %d %d %s %s" % (i, dev, n, nbytes, action, base or "-"))
+    print("update-inject %s" % ("yes" if u["inject"] else "no"))
+    print("update-size %d" % u["size"])
+    print("update-peak %d" % u["peak"])
+    print("update-free %d" % u["free_after"])
+    print("update-grow %s" % ("p%d %d" % u["grow"] if u["grow"] else "none"))
+    print("update-fits %s" % ("YES" if u["fits"] else "NO"))
+    for note in u["notes"]:
+        print("update-note %s" % note)
+
+
+def update_card(a):
+    """`update`: the card changes in place - only what changed since it was built (or last
+    updated).  The order of business, each step refusing before anything is written:
+    the card is a regular file nobody else holds; the lock; the record (or, for a card built
+    before item 93, its trees hashed once off the card); the primary gate; every source's
+    stamp against the record (an unchanged source is skipped entirely); the diff per tree and
+    the room it needs (the peak, not the net); the dry-run rows.  Then: the p2 backup, the
+    dirty flag, the loop mount(s), the changes, the bypass through the mount, the record
+    written last, the sidecars, verify."""
+    ts = _treesync()
+    card = a.card
+    if os.path.exists(card) and not os.path.isfile(card):
+        raise Refused("%s is not a regular file (a device? flash the finished image instead)" % card)
+    check_output_path(card, [a.conf, a.selector_dir, a.media_dir] + ([a.primary] if a.primary else []) + list(a.extra),
+                      must_exist=True)
+    dry = bool(a.dry_run)
+    if not dry:
+        ok, why = loop_available()
+        if not ok:
+            raise Refused("update writes the card in place through a loop mount and cannot here: %s" % why)
+        busy = card_in_use(card)
+        if busy:
+            raise Refused(busy)
+    elif lock_held(card):
+        raise Refused("card busy: an update of %s is running" % os.path.basename(card))
+    need_tools("debugfs", "e2fsck")
+    lock = CardLock(card) if not dry else None
+    if lock:
+        lock.__enter__()
+    try:
+        if not dry:
+            sweep_stale_loops(card)          # a foreign mount of this card refuses here, by name
+        return _update_locked(a, ts, card, dry)
+    finally:
+        if lock:
+            lock.__exit__(None, None, None)
+
+
+def _update_locked(a, ts, card, dry):
+    workdir = a.workdir or os.path.dirname(os.path.abspath(card))
+    plan = plan_from_card(card)
+    ref = select_ref(card)
+    conf_now = card_conf(card, ref)
+    if conf_now is None:
+        raise Refused("%s carries no boot menu (no images.conf on p2) - not a multi-boot card" % card)
+    warns = []
+    old_build = parse_manifest(read_select_file(ref, BUILD_MANIFEST), BUILD_MANIFEST, warns) or {}
+    old_media = None if a.media_dir else read_select_file(ref, MEDIA_MANIFEST)
+    rec = read_trees(card, ref)
+    dirty = list(rec.dirty) if rec else []
+    unrecorded = rec is None
+    # the requested list: --primary/--extra, else what build.json recorded
+    if a.primary or a.extra:
+        sources = [a.primary] + list(a.extra)
+        if not a.primary:
+            raise Refused("update needs --primary with --extra (or neither, to take both from the card's build.json)")
+    else:
+        sources = [im.get("source") for im in old_build.get("images") or []]
+        if not sources or not all(sources):
+            raise Refused("%s records no source paths; pass --primary/--extra" % os.path.basename(card))
+    devs_now = plan.devices()
+
+    def subdir_for(i):
+        if i == 0:
+            return ""
+        return "img%d" % i if plan.layout == "multi" else (plan.trees[i][1] or "")
+
+    if plan.layout == "parts" and len(sources) != len(plan.trees):
+        raise Refused("a parts-layout card holds its extra image as a whole partition: only its CONTENTS can be "
+                      "updated (%d images recorded, %d given) - to add, remove or reorder images build a fresh card"
+                      % (len(plan.trees), len(sources)))
+    u = {"card": card, "layout": plan.layout, "dirty": dirty, "unrecorded": unrecorded, "sources": [], "files": [],
+         "grow": None, "inject": False, "size": 0, "peak": 0, "free_after": 0, "fits": True, "notes": []}
+    missing = [p for p in sources if not os.path.isfile(p)]
+    if missing:
+        for i, p in enumerate(sources):
+            if p in missing:
+                u["sources"].append((i, devs_now[i] if i < len(devs_now) else "?", "missing", os.path.basename(p)))
+        _print_update_rows(u)
+        raise Refused("image%s %s: the file is not on this machine (%s)" % (
+            "s" if len(missing) > 1 else "", ", ".join(str(i) for i, p in enumerate(sources) if p in missing),
+            ", ".join(missing)))
+    # the card's own trees when it predates the record (hashed once, cached under the card's stamp)
+    if rec is None:
+        say("%s carries no %s: reading its %d tree(s) once" % (os.path.basename(card), TREES_MANIFEST, len(plan.trees)))
+        images = []
+        for i, (part, sub) in enumerate(plan.trees):
+            man, how = card_tree(card, part, sub, a.cache_dir)
+            # a tree the bypass already patched keeps its bypass through an update: without
+            # this a source's stock game would be written over it and the machine would show
+            # GAME VALIDATION ERROR again
+            try:
+                carried = {"carried": True} if tree_state(card, part, sub)[0] == "bypassed" else None
+            except Exception:                            # noqa: BLE001 - an unreadable tree carries nothing
+                carried = None
+            images.append(ts.ImageTrees(i, device_name(part.num, sub), sub or "", man.tree, None, man.uuid, carried))
+            say("image %d %s: %d files, %s (%s%s)"
+                % (i, device_name(part.num, sub), len(man.tree.files), _gb(man.tree.bytes()), how,
+                   "; validator bypassed - kept" if carried else ""))
+        rec = ts.CardTrees(images, primary=None, layout=plan.layout, version=VERSION)
+    if dirty:
+        say("WARNING: %s is dirty (%s) - an earlier update was interrupted; its partitions get e2fsck -fy first"
+            % (os.path.basename(card), ", ".join("p%d" % n for n in dirty)))
+        for n in dirty:
+            for p, _sub in plan.trees:
+                if p.num == n:
+                    r = subprocess.run(["e2fsck", "-fy", fs_ref(card, p.start * SECTOR)], stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT)
+                    say("e2fsck -fy p%d: rc %d" % (n, r.returncode))
+                    if r.returncode not in (0, 1, 2):
+                        raise Refused("e2fsck -fy could not repair p%d (rc=%d):\n%s"
+                                      % (n, r.returncode, r.stdout.decode("utf-8", "replace")[-800:]))
+                    break
+    # the primary gate
+    identity = primary_gate(card, sources[0], rec.primary, a.cache_dir)
+    # every source: unchanged (skipped), cached, or hashed now
+    new_trees = {}                      # index -> (SourceManifest-like tree, stamp, uuid)
+    stamps = []
+    for i, path in enumerate(sources):
+        st = ts.source_stamp(path)
+        stamps.append((i, st))
+    actions = ts.match_trees(rec, [(i, devs_now[i] if i < len(devs_now) else device_name(7, "img%d" % i), st)
+                                   for i, st in stamps], subdir_for)
+    by_index = {a_.index: a_ for a_ in actions if a_.action != "remove"}
+    for i, path in enumerate(sources):
+        act = by_index[i]
+        old_im = rec.image(act.old_index) if act.old_index is not None else None
+        st = stamps[i][1]
+        if old_im is not None and old_im.stamp and ts.stamps_equal(old_im.stamp, st):
+            new_trees[i] = (old_im.tree, st, old_im.uuid, old_im)
+            u["sources"].append((i, act.device, "unchanged", os.path.basename(path)))
+            continue
+        man, how = source_tree(path, a.cache_dir)
+        new_trees[i] = (man.tree, st, man.uuid, old_im)
+        u["sources"].append((i, act.device, how, os.path.basename(path)))
+    for act in actions:
+        if act.action == "remove":
+            im = rec.image(act.old_index)
+            base = os.path.basename((im.stamp or {}).get("path", "")) if im else None
+            u["sources"].append((act.index, act.device, "removed", base))
+    # the version gate on the new list
+    newplan = plan if plan.layout == "parts" else make_plan(sources[0], sources[1:], "multi",
+                                                            multi_sectors=plan.multi_part.count,
+                                                            multi_subdirs=["img%d" % i for i in range(1, len(sources))])
+    versions = plan_identities(newplan, progress=None)
+    report_versions(versions, a.allow_version_mismatch)
+    # the diff per tree and the room per partition
+    free = games_free(card, plan)
+    per_part_adds = {n: 0 for n in free}
+    per_part_freed = {n: 0 for n in free}
+    changes = {}
+    touched = {}
+    for i, path in enumerate(sources):
+        act = by_index[i]
+        tree, st, uuid, old_im = new_trees[i]
+        old_tree = old_im.tree if (old_im is not None and act.action in ("keep", "rename")) else None
+        ch = ts.diff_tree(old_tree, tree)
+        changes[i] = ch
+        part = plan.trees[i][0] if i < len(plan.trees) else plan.multi_part
+        need, peak = ts.room_needed(ch, old_tree, tree, margin=0)
+        adds = sum(c.size for c in ch if c.op == "write")
+        per_part_adds[part.num] = per_part_adds.get(part.num, 0) + adds
+        per_part_freed[part.num] = per_part_freed.get(part.num, 0) + (adds - need)
+        n = len([c for c in ch if c.op != "attr_dir"])
+        touched[i] = [c.rel for c in ch if c.op == "write"]
+        action = act.action if act.action != "keep" else ("sync" if ch else "keep")
+        u["files"].append((i, act.device, n, adds, action, os.path.basename(path)))
+    removed_bytes = 0
+    for act in actions:
+        if act.action == "remove":
+            im = rec.image(act.old_index)
+            if im is not None:
+                removed_bytes += im.tree.bytes()
+                u["files"].append((act.index, act.device, len(im.tree.files), 0, "remove", None))
+    p7 = plan.multi_part.num if plan.multi_part else None
+    u["size"] = sum(per_part_adds.values())
+    peak = 0
+    fits = True
+    grow = None
+    for n, (fr, total) in free.items():
+        adds = per_part_adds.get(n, 0)
+        if n == p7:
+            adds -= removed_bytes                  # whole trees go first and free their bytes
+        # the margin keeps a partition from being filled to its last block; it scales with a
+        # small partition (a synthetic card) and is nothing when nothing is added
+        want = (adds + min(ts.ROOM_MARGIN, total // 20)) if adds > 0 else 0
+        peak = max(peak, want)
+        if want > fr:
+            if n == p7 and plan.layout == "multi":
+                cls = next((k for k, v in STERN_SIZES.items() if v >= os.path.getsize(card)), None)
+                room_in_class = 0
+                if cls:
+                    p7_end = plan.multi_part.start + plan.multi_part.count
+                    room_in_class = (STERN_SIZES[cls] // SECTOR - TAIL - p7_end) * SECTOR
+                extra = want - fr
+                extra = (extra + (1 << 20) - 1) // (1 << 20) * (1 << 20)
+                if extra <= room_in_class:
+                    grow = (n, extra)
+                else:
+                    fits = False
+                    u["notes"].append("p%d needs %s more than its %s free and the %s image size has %s left: build "
+                                      "a fresh card on a larger size"
+                                      % (n, _gb(want - fr), _gb(fr), cls, _gb(room_in_class)))
+            else:
+                fits = False
+                u["notes"].append("p%d needs %s and has %s free: build a fresh card" % (n, _gb(want), _gb(fr)))
+    u["peak"] = peak
+    u["grow"] = grow
+    u["fits"] = fits
+    u["free_after"] = sum(fr for fr, _t in free.values()) - u["size"] + removed_bytes + (grow[1] if grow else 0)
+    # the menu: re-injected when the image list moved or the menu flags say something new
+    list_changed = any(a_.action != "keep" for a_ in actions)
+    media = plan_media(a.media_dir, len(newplan.trees)) if a.media_dir else None
+    newconf = conf_for_plan(newplan, a, existing=conf_now, media=media)
+    u["inject"] = bool(list_changed or a.media_dir or newconf.strip() != render_images_conf_text(conf_now).strip())
+    if a.expect_bytes is not None and u["size"] > a.expect_bytes * (1 + UPDATE_SLACK) + UPDATE_SLACK_BYTES:
+        u["notes"].append("the update would write %s, more than the %s expected: a source changed since it was measured"
+                          % (_gb(u["size"]), _gb(a.expect_bytes)))
+        _print_update_rows(u)
+        raise Refused(u["notes"][-1])
+    _print_update_rows(u)
+    if not fits:
+        raise Refused("; ".join(u["notes"]))
+    if dry:
+        return 0
+    if u["size"] == 0 and not list_changed and not u["inject"] and not dirty and not unrecorded:
+        say("nothing to write: every source is as recorded and the menu is unchanged")
+        return 0
+    if not a.selector_dir and u["inject"]:
+        raise Refused("the menu must be re-injected (the image list or the menu changed): pass --selector-dir")
+    # ---- execute
+    t0 = time.monotonic()
+    # EVERY PARTITION MOUNTED RW IS A SYNCED ONE from here on - a rw mount alone moves the
+    # superblock, so a range md5 against the source can never hold for it again - and only a
+    # partition with something to write is mounted at all
+    touched_set = {(plan.trees[i][0] if i < len(plan.trees) else plan.multi_part).num for i in changes if changes[i]}
+    if list_changed and p7:
+        touched_set.add(p7)
+    touched_set |= set(dirty)
+    touched_parts = sorted(touched_set)
+    bak = p2_backup(card)
+    say("p2 backed up to %s" % bak)
+    rec.dirty = touched_parts
+    write_trees(card, rec, workdir=workdir)
+    PROGRESS.start(u["size"] + 16 << 20, "writing what changed")
+    if grow:
+        plan = grow_last_partition(card, plan.multi_part.count + grow[1] // SECTOR)
+    bypass_digests = {}
+    states = {}
+    # p3 (image 0) then p7 (every extra): one mount each
+    mounts = collections.OrderedDict()
+    for i in changes:
+        if not changes[i]:
+            continue
+        part = plan.trees[i][0] if i < len(plan.trees) else plan.multi_part
+        mounts.setdefault(part.num, []).append(i)
+    if list_changed and p7 and p7 not in mounts:
+        mounts[p7] = []
+    for n in dirty:                     # a dirty partition is mounted for its sweep, changes or not
+        mounts.setdefault(n, [])
+    for n, idxs in mounts.items():
+        part = next(p for p, _s in plan.trees if p.num == n) if n != p7 else plan.multi_part
+        with LoopMount(card, part.start * SECTOR, part.count * SECTOR) as mp:
+            ops = DirOps(mp)
+            if dirty:
+                say("sweeping temporary files an interrupted run left in p%d: %d" % (n, ts.sweep_tmp(ops, "")))
+                ts.sweep_parked(ops)
+            if n == p7:
+                for what, old, new in ts.apply_tree_actions(ops, actions):
+                    say("p%d: %s %s%s" % (n, what, old or "", (" -> " + new) if new else ""))
+            for i in idxs:
+                act = by_index[i]
+                prefix = "" if i == 0 else (act.new_sub or "")
+                tree, st, uuid, old_im = new_trees[i]
+                src_reader_ctx = open(sources[i], "rb")
+                try:
+                    _v, _s, ext4, _a = _stern_plugins()
+                    spart = source_part(sources[i])
+                    r = ext4.Ext4Reader(src_reader_ctx, spart.start * SECTOR, spart.count * SECTOR)
+                    if not tree.inodes:                              # a cached manifest: find the inodes
+                        for rel, kind, ino, _node in r.iter_tree(2):
+                            if kind == "file":
+                                tree.inodes[rel] = ino
+                    PROGRESS.step("writing image %d (%s)" % (i, os.path.basename(sources[i])),
+                                  sum(c.size for c in changes[i] if c.op == "write"))
+                    stats = ts.apply_changes(ops, prefix, changes[i], tree, ts.ReaderSource(r, tree), PROGRESS)
+                finally:
+                    src_reader_ctx.close()
+                say("image %d: %d written (%s), %d removed"
+                    % (i, stats["written"], _gb(stats["bytes"]), stats["removed"]))
+                # the bypass, through the mount, for a tree whose game or .sidx moved (or that was never done)
+                want_bypass = a.bypass_validation or bool(old_im is not None and old_im.bypass)
+                if want_bypass:
+                    state, written, notes, gpath, spath = apply_bypass_fs(ops, prefix)
+                    states[i] = state
+                    for line in notes:
+                        say("image %d bypass: %s" % (i, line))
+                    by = dict(old_im.bypass or {}) if old_im is not None else {}
+                    by["game_path"] = gpath
+                    by["sidx_path"] = spath
+                    for rel, sha in written.items():
+                        by["game" if rel == gpath else "sidx"] = sha
+                    replaced = old_im is not None and old_im.tree.files.get(gpath) != tree.files.get(gpath)
+                    if gpath not in written and by.get("game") and tree.files.get(gpath) and replaced:
+                        by.pop("game", None)              # replaced from the source: its digest is the source's
+                    bypass_digests[i] = by
+                    for rel in written:
+                        touched.setdefault(i, []).append(rel)
+            ops.commit()
+    # the record, last: the new trees, the stamps, synced, dirty cleared
+    images = []
+    for i, path in enumerate(sources):
+        act = by_index[i]
+        tree, st, uuid, old_im = new_trees[i]
+        part = plan.trees[i][0] if i < len(plan.trees) else plan.multi_part
+        sub = "" if i == 0 else (act.new_sub or "")
+        carried = old_im is not None and act.action in ("keep", "rename") and not changes[i]
+        by = bypass_digests.get(i, old_im.bypass if carried else None)
+        images.append(ts.ImageTrees(i, device_name(part.num, sub or None), sub, tree, st, uuid, by))
+    synced = sorted(set(rec.synced) | set(touched_parts))
+    newrec = ts.CardTrees(images, primary=identity, synced=synced, dirty=[], layout=plan.layout, version=VERSION)
+    PROGRESS.step("recording what is on the card")
+    if u["inject"]:
+        media = plan_media(a.media_dir, len(newplan.trees)) if a.media_dir else None
+        manifests = selector_manifests(newplan, newconf, a.media_dir, sources, old_build, old_media,
+                                       versions=versions, trees=newrec)
+        inject_card(card, a.selector_dir, newconf, workdir=workdir, media_files=media["files"] if media else None,
+                    replace_media=bool(a.media_dir), manifests=manifests)
+    else:
+        bj = json.dumps(build_manifest(newplan, conf_now, sources, old_build, versions=versions), indent=1) + "\n"
+        write_trees(card, newrec, build_json=bj, workdir=workdir)
+    for n in touched_parts:
+        side = sidecar_path(card, n)
+        if os.path.isfile(side):
+            os.unlink(side)
+    os.utime(card)
+    PROGRESS.finish()
+    say("updated %s: %s written into %s in %.0f s"
+        % (os.path.basename(card), _gb(u["size"]), ", ".join("p%d" % n for n in touched_parts) or "nothing",
+           time.monotonic() - t0))
+    if a.no_verify:
+        return 0
+    ok = verify_card(card, verify_plan(card, sources), a.selector_dir, a.media_dir, mode="touched", touched=touched)
+    return 0 if ok else 1
+
+
+def verify_plan(card, sources):
+    """The Plan `verify` holds `card` to: the card's own layout with the given SOURCES as the
+    images (a card is no oracle for its own patched p2)."""
+    own = plan_from_card(card)
+    if own.layout == "multi":
+        return make_plan(sources[0], sources[1:], "multi", multi_sectors=own.multi_part.count,
+                         multi_subdirs=own.multi_subdirs)
+    return make_plan(sources[0], sources[1:], "parts")
+
+
+def render_images_conf_text(conf):
+    """images.conf text from a parsed conf (what the card holds), for a like-for-like compare."""
+    return render_images_conf(
+        [d for (d, _t, _s) in conf["images"]], [t for (_d, t, _s) in conf["images"]],
+        [s for (_d, _t, s) in conf["images"]], conf["default"], conf["timeout"], conf["font"],
+        conf["media"], conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"],
+        media_dir=conf.get("media_dir"), theme=conf.get("theme"), colors=conf.get("colors"),
+        machine_volume=conf.get("machine_volume"), debug_log=bool(conf.get("debug_log")))
 
 
 # ============================================================================= reading a card back
@@ -3036,8 +4355,13 @@ def sfdisk_table(image):
     return rows, out
 
 
-def verify_card(card, plan, selector_dir=None, media_dir=None):
+def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touched=None):
+    """`mode` (item 93) says how much of a RECORDED games tree's content is re-hashed against
+    trees.json: 'full' every file (the default of the verify command), 'touched' the files
+    `touched` names {image index: [rel]} plus each tree's game and .sidx (what `update` runs
+    after itself), 'quick' a sample of 32 files plus the game and .sidx."""
     ok = True
+    hash_mode = mode                      # `mode` is reused below as a listing's mode bits
 
     def check(label, good, detail=""):
         nonlocal ok
@@ -3045,6 +4369,12 @@ def verify_card(card, plan, selector_dir=None, media_dir=None):
         print("%-58s %s%s" % (label, "OK" if good else "FAIL", ("  " + detail) if detail else ""))
 
     need_tools("debugfs", "e2fsck", "sfdisk", "fdisk")
+    try:
+        trees_rec = read_trees(card)
+    except Refused as e:
+        trees_rec = None
+        check("trees.json readable", False, str(e))
+    synced = set(trees_rec.synced) if trees_rec else set()
     O = Geometry.from_file(card)
     got = [(n, t, st, cnt) for (n, t, st, cnt) in O.prim] + [(5 + i, t, st, cnt) for i, (_e, t, st, cnt) in enumerate(O.logical)]
     check("table parse-back (own parser)", plan.table() == got, "" if plan.table() == got else "got %r" % (got,))
@@ -3073,6 +4403,13 @@ def verify_card(card, plan, selector_dir=None, media_dir=None):
     for p in plan.prims + plan.logs:
         t0 = time.monotonic()
         if p.num == 2:
+            continue
+        if p.num in synced:
+            # written into in place (item 93): a rw mount stamps the superblock, so a range
+            # md5 can never hold; the record holds it instead, below
+            print("p%d: synced in place - held to %s, not to a range md5%s" % (
+                p.num, TREES_MANIFEST, "" if read_part_sidecar(card, p.num) is None else
+                " (a pre-sync sidecar is beside the card and ignored)"))
             continue
         try:
             want = read_part_sidecar(card, p.num)
@@ -3195,6 +4532,13 @@ def verify_card(card, plan, selector_dir=None, media_dir=None):
                   dirs and has_spk and links.get("game"))
         except Refused as e:
             check("image %d %s root" % (i, dev), False, str(e))
+    # every recorded games tree against trees.json (item 93)
+    if trees_rec is not None:
+        check("%s: not mid-update (dirty %r)" % (TREES_MANIFEST, trees_rec.dirty), not trees_rec.dirty,
+              "an update was interrupted; run update again" if trees_rec.dirty else "")
+        verify_trees(card, plan, trees_rec, hash_mode, check, touched)
+    else:
+        print("%s: none (built before item 93; `update` records it)" % TREES_MANIFEST)
     # every games tree's game code version + node board firmware, read off the CARD (item 90):
     # the same table plan and build print, so a finished card can be held to what it claims
     recs = card_identities(card, plan)
@@ -3267,6 +4611,11 @@ def inspect_card(card, media_out=None):
     build = parse_manifest(read_select_file(ref, BUILD_MANIFEST), BUILD_MANIFEST, warnings)
     media_json = read_select_file(ref, MEDIA_MANIFEST)
     media_man = parse_manifest(media_json, MEDIA_MANIFEST, warnings)
+    try:
+        trees_rec = read_trees(path, ref)
+    except Refused as e:
+        trees_rec = None
+        warnings.append(str(e))
     if build is None:
         warnings.append("no %s on this card (it predates the sidecar, or another tool wrote it): "
                         "the images' source .raw paths are unknown - re-inject with --primary/"
@@ -3372,6 +4721,8 @@ def inspect_card(card, media_out=None):
         ("card", path), ("size", size),
         ("layout", plan.layout if plan else ("multi" if any(":" in d for (d, _t, _s) in conf["images"]) else "parts")),
         ("partitions", parts), ("images", images),
+        # what is on every games tree, and whether its source moved since (item 93)
+        ("trees", trees_report(path, plan, trees_rec, warnings)),
         ("timeout", conf["timeout"]), ("default", conf["default"]),
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
         ("mixer_volume", conf["mixer_volume"]),
@@ -3438,6 +4789,19 @@ def print_inspect(rep):
     for key in ("version_mismatch", "node_fw_mismatch", "unknown_version"):
         if rep.get(key):
             print("VERSION WARNING: %s" % rep[key])
+    tr = rep.get("trees")
+    if tr:
+        print("trees      recorded %s; %s free for updates; synced %s%s"
+              % (tr["written"], _gb(tr["free_bytes"] or 0),
+                 ",".join("p%d" % n for n in tr["synced"]) or "none",
+                 ("; DIRTY %s - an update was interrupted" % tr["dirty"]) if tr["dirty"] else ""))
+        for im in tr["images"]:
+            print("           image %d: %d files, %s%s" % (
+                im["index"], im["files"], _gb(im["tree_bytes"]),
+                {True: " - SOURCE CHANGED on disk since the card was written",
+                 False: " - source unchanged", None: " - source not on this machine"}[im["source_changed"]]))
+    else:
+        print("trees      not recorded (built before item 93; `update` records it)")
     print("media      %d file(s), %d KB of the %d KB budget"
           % (len(rep["media"]), sum(m["bytes"] for m in rep["media"]) >> 10, MEDIA_BUDGET >> 10))
     for m in rep["media"]:
@@ -3997,8 +5361,214 @@ def selftest(d, selector_file=None):
     ok &= [im["built_version"] for im in rep3["images"]] == ["1.59.0", "1.58.0"]
     ok &= [im["node_fw_version"] for im in rep3["images"]] == ["1.33.0", "1.19.0"]
     ok &= rep3["version_mismatch"] and rep3["node_fw_mismatch"] and not rep3["title_mismatch"]
+    print("SELFTEST part 3 (version gate)", "PASS" if ok else "FAIL")
+
+    # ------------------------------------------------- part 4: the record (item 93), any user
+    print("== the record: build wrote trees.json, verify reads it, inject carries it, a dirty card refuses")
+    ts = _treesync()
+    plan3 = verify_plan(out3, [V[0], V[2]])
+    rec3 = read_trees(out3)
+    ok &= rec3 is not None and [im.index for im in rec3.images] == [0, 1]
+    ok &= rec3.layout == "parts" and rec3.synced == [] and rec3.dirty == []
+    ok &= all(im.stamp and im.stamp["size"] == os.path.getsize(im.stamp["path"]) for im in rec3.images)
+    ok &= "turtles_pro/game" in rec3.images[0].tree.files
+    ok &= rec3.images[0].tree.symlinks["game"].target == "turtles_pro/game"
+    ok &= rec3.primary.get("p1_md5") and rec3.primary.get("p2_tree")
+    rep3b = inspect_card(out3)
+    ok &= rep3b["trees"] and rep3b["trees"]["recorded"]
+    ok &= [i["source_changed"] for i in rep3b["trees"]["images"]] == [False, False]
+    print("== verify holds the trees to the record (full)")
+    ok &= verify_card(out3, plan3, sel, mode="full")
+    raw_before = read_select_file(select_ref(out3), TREES_MANIFEST)
+    print("== inject (a menu change) carries trees.json through byte for byte")
+    ok &= main(["inject", "--card", out3, "--selector-dir", sel, "--titles", "One;Two"]) == 0
+    ok &= read_select_file(select_ref(out3), TREES_MANIFEST) == raw_before
+    ok &= card_conf(out3)["images"][0][1] == "One"
+    print("== a dirty record refuses an inject, and verify FAILs it")
+    rec3.dirty = [7]
+    write_trees(out3, rec3, workdir=d)
+    ok &= main(["inject", "--card", out3, "--selector-dir", sel]) == 2
+    ok &= not verify_card(out3, plan3, sel, mode="quick")
+    rec3.dirty = []
+    write_trees(out3, rec3, workdir=d)
+    ok &= verify_card(out3, plan3, sel, mode="quick")
+    print("== plan prints the room for updates")
+    import io
+    import contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        print_plan(plan3)
+    lines = buf.getvalue().splitlines()
+    free_row = [ln for ln in lines if ln.startswith("image-size free ")]
+    ok &= len(free_row) == 1 and int(free_row[0].split()[2]) > 0
+    rows = [int(ln.split()[3]) for ln in lines if ln.startswith("image-size ") and ln.split()[1].isdigit()]
+    over = [int(ln.split()[2]) for ln in lines if ln.startswith("image-size overhead ")]
+    ok &= sum(rows) + int(free_row[0].split()[2]) + over[0] == plan3.total_bytes
+    print("== the p2 write primitive: a small file in, read back, sidecar right, e2fsck clean")
+    write_select_files(out3, {"notes.json": b'{"a": 1}'}, workdir=d)
+    ok &= read_select_file(select_ref(out3), "notes.json") == b'{"a": 1}'
+    want, got = check_p2_sidecar(out3)
+    ok &= want == got
+    print("SELFTEST part 4 (the record)", "PASS" if ok else "FAIL")
+
+    # ------------------------------------------------- part 5: update (item 93), root only
+    avail, why = loop_available()
+    if not avail:
+        print("SELFTEST NOTE: part 5 (update) not exercised - %s; run: wsl -u root python3 %s selftest DIR"
+              % (why, os.path.abspath(__file__)))
+        print("SELFTEST", "PASS" if ok else "FAIL")
+        return bool(ok)
+    print("== update: nothing changed -> nothing written")
+    ok &= main(["update", "--card", out3, "--selector-dir", sel, "--dry-run"]) == 0
+    ok &= main(["update", "--card", out3, "--selector-dir", sel]) == 0
+    print("== update: one file changed in the extra's source -> only that file written")
+    v2 = V[2]
+    _t, st2, cnt2 = Geometry.from_file(v2).part(3)
+    stage_new = os.path.join(d, "newfile.bin")
+    with open(stage_new, "wb") as f:
+        f.write(b"N" * 70000)
+    debugfs_write_script(fs_ref(v2, st2 * SECTOR), ["write %s /turtles_pro/newfile.bin" % dq(stage_new),
+                                                    "set_inode_field /turtles_pro/newfile.bin mode 0100644"])
+    os.utime(v2)                                          # the stamp moves as a rewrite would move it
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["update", "--card", out3, "--selector-dir", sel, "--dry-run"])
+    dry = buf.getvalue()
+    print(dry)
+    ok &= rc == 0
+    files_rows = [ln.split() for ln in dry.splitlines() if ln.startswith("update-files ")]
+    ok &= any(r[1] == "1" and r[3] == "1" and r[4] == "70000" and r[5] == "sync" for r in files_rows), files_rows
+    ok &= any(r[1] == "0" and r[5] == "keep" for r in files_rows)
+    ok &= "update-source 1 /dev/mmcblk0p7 hashed" in dry and "update-source 0 /dev/mmcblk0p3 unchanged" in dry
+    ok &= "update-size 70000" in dry and "update-fits YES" in dry and "update-inject no" in dry
+    ok &= main(["update", "--card", out3, "--selector-dir", sel]) == 0
+    _t, st7, cnt7 = Geometry.from_file(out3).part(7)
+    ok &= debugfs_cat(fs_ref(out3, st7 * SECTOR), "/turtles_pro/newfile.bin") == b"N" * 70000
+    rec3 = read_trees(out3)
+    ok &= rec3.synced == [7] and rec3.dirty == [] and "turtles_pro/newfile.bin" in rec3.images[1].tree.files
+    ok &= ts.stamps_equal(rec3.images[1].stamp, ts.source_stamp(v2))
+    ok &= os.path.isfile(out3 + P2_BACKUP_SUFFIX) and not os.path.isfile(sidecar_path(out3, 7))
+    ok &= verify_card(out3, plan3, sel, mode="full")
+    print("== update: the primary's own tree changes -> p3 synced in place")
+    v0 = V[0]
+    _t, st0, cnt0 = Geometry.from_file(v0).part(3)
+    debugfs_write_script(fs_ref(v0, st0 * SECTOR), ["rm /turtles_pro/conagent",
+                                                    "write %s /turtles_pro/conagent" % dq(stage_new),
+                                                    "set_inode_field /turtles_pro/conagent mode 0100644"])
+    os.utime(v0)
+    ok &= main(["update", "--card", out3, "--selector-dir", sel]) == 0
+    _t, st3, cnt3 = Geometry.from_file(out3).part(3)
+    ok &= debugfs_cat(fs_ref(out3, st3 * SECTOR), "/turtles_pro/conagent") == b"N" * 70000
+    ok &= read_trees(out3).synced == [3, 7]
+    ok &= verify_card(out3, plan3, sel, mode="full")
+    print("== update: a parts card refuses a list change")
+    ok &= main(["update", "--card", out3, "--primary", v0, "--extra", v2, "--extra", V[1], "--dry-run"]) == 2
+    print("== update: a primary that is another build is refused by the gate")
+    other = os.path.join(d, "other.img")
+    shutil.copyfile(v0, other)
+    _t, sto2, cnto2 = Geometry.from_file(other).part(2)
+    debugfs_write_script(fs_ref(other, sto2 * SECTOR), ["write %s /usr/local/OTHER" % dq(stage_new),
+                                                        "set_inode_field /usr/local/OTHER mode 0100644"])
+    ok &= main(["update", "--card", out3, "--primary", other, "--extra", v2, "--dry-run"]) == 2
+    print("== update: a card built before the record is hashed once, then updated")
+    ok &= read_trees(out2) is None
+    ok &= main(["update", "--card", out2, "--primary", A, "--extra", B, "--extra", C, "--selector-dir", sel,
+                "--allow-version-mismatch"]) == 0
+    rec2 = read_trees(out2)
+    ok &= rec2 is not None and [im.sub for im in rec2.images] == ["", "img1", "img2"]
+    print("== update (multi): reorder = renames and no bytes; remove; add")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["update", "--card", out2, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                   "--allow-version-mismatch", "--dry-run"])
+    dry2 = buf.getvalue()
+    ok &= rc == 0 and "update-size 0" in dry2 and "rename" in dry2 and "update-inject yes" in dry2
+    ok &= main(["update", "--card", out2, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                "--allow-version-mismatch"]) == 0
+    ref7 = fs_ref(out2, Geometry.from_file(out2).part(7)[1] * SECTOR)
+    ok &= debugfs_cat(ref7, "/img1/C_title/game") == b"C p3 game\n"
+    ok &= debugfs_cat(ref7, "/img2/B_title/game") == b"B p3 game\n"
+    ok &= card_conf(out2)["images"][1][0] == "/dev/mmcblk0p7:img1"
+    ok &= main(["update", "--card", out2, "--primary", A, "--extra", C, "--selector-dir", sel,
+                "--allow-version-mismatch"]) == 0
+    ok &= not debugfs_exists(ref7, "/img2") and [im.sub for im in read_trees(out2).images] == ["", "img1"]
+    ok &= main(["update", "--card", out2, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                "--allow-version-mismatch"]) == 0
+    ok &= debugfs_cat(ref7, "/img2/B_title/game") == b"B p3 game\n"
+    ok &= verify_card(out2, verify_plan(out2, [A, C, B]), sel, mode="full")
+    print("== grow: p7 gains room in place")
+    before7 = Geometry.from_file(out2).part(7)[2]
+    grow_last_partition(out2, before7 + 4096)
+    ok &= Geometry.from_file(out2).part(7)[2] == before7 + 4096
+    ok &= plan_from_card(out2).multi_part.count == before7 + 4096
+    ok &= verify_card(out2, verify_plan(out2, [A, C, B]), sel, mode="quick")
+    print("== the lock: a held lock refuses an update")
+    holder = subprocess.Popen([sys.executable, "-c",
+                               "import fcntl,os,sys,time; fd=os.open(sys.argv[1], os.O_RDWR|os.O_CREAT); "
+                               "fcntl.flock(fd, fcntl.LOCK_EX); print('held', flush=True); time.sleep(30)",
+                               out2 + LOCK_SUFFIX], stdout=subprocess.PIPE)
+    holder.stdout.readline()
+    try:
+        ok &= lock_held(out2)
+        ok &= main(["update", "--card", out2, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                    "--allow-version-mismatch"]) == 2
+    finally:
+        holder.kill()
+        holder.wait()
+    print("== the crash drill: a writer killed mid-file leaves a mounted loop and a dirty record; update repairs")
+    child = subprocess.Popen([sys.executable, __file__, "selftest-crash", out2], stdout=subprocess.PIPE)
+    line = child.stdout.readline().decode("utf-8", "replace").strip()
+    ok &= line.startswith("mounted ")
+    child.kill()
+    child.wait()
+    r = subprocess.run(["losetup", "-j", os.path.realpath(out2)], stdout=subprocess.PIPE)
+    ok &= bool(parse_losetup_j(r.stdout.decode("utf-8", "replace")))
+    ok &= read_trees(out2).dirty == [7]
+    ok &= not verify_card(out2, verify_plan(out2, [A, C, B]), sel, mode="quick")
+    ok &= main(["update", "--card", out2, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                "--allow-version-mismatch"]) == 0
+    r = subprocess.run(["losetup", "-j", os.path.realpath(out2)], stdout=subprocess.PIPE)
+    ok &= not parse_losetup_j(r.stdout.decode("utf-8", "replace"))
+    ok &= read_trees(out2).dirty == []
+    ok &= not any(ts.is_tmp(n) for n in [e[4] for e in debugfs_ls(ref7, "/img1/C_title")])
+    ok &= verify_card(out2, verify_plan(out2, [A, C, B]), sel, mode="full")
+    print("== a loop of the same file mounted by someone else is refused by name")
+    _t, st7b, cnt7b = Geometry.from_file(out2).part(7)
+    foreign = tempfile.mkdtemp(prefix="foreign_mnt_")
+    loop = _run(["losetup", "--find", "--show", "-o", str(st7b * SECTOR), "--sizelimit", str(cnt7b * SECTOR),
+                 out2]).strip()
+    try:
+        _run(["mount", "-t", "ext4", "-o", "ro", loop, foreign])
+        try:
+            rc = main(["update", "--card", out2, "--primary", A, "--extra", C, "--extra", B, "--selector-dir", sel,
+                       "--allow-version-mismatch"])
+            ok &= rc == 2
+        finally:
+            _run(["umount", foreign])
+    finally:
+        _run(["losetup", "-d", loop])
+        os.rmdir(foreign)
+    print("SELFTEST part 5 (update)", "PASS" if ok else "FAIL")
     print("SELFTEST", "PASS" if ok else "FAIL")
     return bool(ok)
+
+
+def selftest_crash(card):
+    """The crash drill's child: take the dirty flag and a mounted loop of p7, start a slow write,
+    say so, and wait to be killed."""
+    rec = read_trees(card)
+    rec.dirty = [7]
+    write_trees(card, rec)
+    _t, st, cnt = Geometry.from_file(card).part(7)
+    lm = LoopMount(card, st * SECTOR, cnt * SECTOR)
+    mp = lm.__enter__()
+    tmp = os.path.join(mp, "img1", "C_title", "big.bin" + TMP_MARK_CHILD)
+    with open(tmp, "wb") as f:
+        print("mounted %s" % mp, flush=True)
+        while True:
+            f.write(b"x" * 4096)
+            f.flush()
+            time.sleep(0.05)
 
 
 # ============================================================================= CLI
@@ -4061,6 +5631,10 @@ def main(argv=None):
     s = sub.add_parser("build", help="write the sparse multi card and inject the selector into p2")
     _add_images(s, "--out")
     _add_conf_flags(s)
+    s.add_argument("--size", choices=list(STERN_SIZES), help="fill the multi layout's p7 to the end of this Stern "
+                   "image size (room for later updates and images without a re-layout); default: content-sized")
+    s.add_argument("--cache-dir", help="where hashed source manifests are kept (default: the Windows TEMP "
+                   "directory's %s seen from WSL, or $MULTIBOOT_CACHE)" % CACHE_DIRNAME_HINT)
     s.add_argument("--bypass-validation", action="store_true",
                    help="neuter Stern's game validator in EVERY games tree on the output card (+ refresh its .sidx record)")
     s.add_argument("--allow-version-mismatch", action="store_true",
@@ -4093,9 +5667,32 @@ def main(argv=None):
     _add_images(s, None, reach_flag=False, layout_flag=False)
     s.add_argument("--selector-dir", help="also compare the injected files against this directory")
     s.add_argument("--media-dir", help="also compare the media files against this directory")
+    s.add_argument("--quick", action="store_true",
+                   help="re-hash a sample of each recorded tree (plus its game and .sidx) instead of every file")
+    s = sub.add_parser("update", help="write ONLY what changed since the card was built - in place, in about a "
+                                      "minute (root: a loop mount of the card's partitions)")
+    s.add_argument("--card", required=True, help="the multi card to update IN PLACE")
+    s.add_argument("--primary", help="image 0's source (default: what the card's build.json recorded)")
+    s.add_argument("--extra", action="append", default=[], metavar="IMG",
+                   help="the extra images in their new order (default: what build.json recorded)")
+    _add_conf_flags(s)
+    s.add_argument("--bypass-validation", action="store_true",
+                   help="neuter Stern's validator in every tree whose game changed (the others keep their state)")
+    s.add_argument("--allow-version-mismatch", action="store_true", help="as for build")
+    s.add_argument("--dry-run", action="store_true", help="say what an update would write; write nothing")
+    s.add_argument("--expect-bytes", type=int,
+                   help="refuse when the update would write more than this (x1.1 + 64 MiB): the number a dialog "
+                        "showed before the press")
+    s.add_argument("--cache-dir", help="where hashed manifests are kept (see build)")
+    s.add_argument("--workdir", help="scratch directory (default: beside --card)")
+    s.add_argument("--no-verify", action="store_true", help="skip the verify pass after the update")
     s = sub.add_parser("selftest", help="synthetic end-to-end test (needs debugfs/mke2fs/e2fsck/sfdisk/fdisk)")
     s.add_argument("dir")
     s.add_argument("--selector", help="any small file to stand in for the codeselect binary")
+    argv = list(sys.argv[1:]) if argv is None else list(argv)
+    if argv and argv[0] == "selftest-crash":          # the selftest's own child, not a subcommand
+        selftest_crash(argv[1])
+        return 0
     a = ap.parse_args(argv)
     try:
         if a.cmd == "plan":
@@ -4113,7 +5710,7 @@ def main(argv=None):
             check_output_path(a.out, [a.primary] + a.extra + [a.conf, a.selector_dir, a.media_dir], force=a.force)
             if not a.no_inject and not a.selector_dir:
                 raise Refused("build needs --selector-dir (or --no-inject)")
-            plan = make_plan(a.primary, a.extra, a.layout)
+            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size)
             print_plan(plan)
             check_reachable(plan, a.allow_unreachable)       # before a byte is written
             if not a.extra:
@@ -4123,6 +5720,7 @@ def main(argv=None):
             workdir = a.workdir or os.path.dirname(os.path.abspath(a.out))
             os.makedirs(workdir, exist_ok=True)
             conf = media = manifests = None
+            trees = None
             if not a.no_inject:
                 if a.media_dir:
                     media = plan_media(a.media_dir, len(plan.trees))
@@ -4145,6 +5743,10 @@ def main(argv=None):
                     "NO - only its games partition is carried; its rootfs changes are NOT on this card"))
             t0 = time.monotonic()
             tmp = None
+            # THE RECORD (item 93): every source's tree hashed (or taken from the cache) before
+            # the copy, so the card can say what is on it and a later update knows what moved.
+            if not a.no_inject:
+                trees = record_sources(plan, a.cache_dir)
             # THE METER STARTS HERE - the last moment before anything long happens and the
             # first at which every number it needs is known.  Everything above this line
             # refuses in seconds; everything below is the hour the GUI had nothing to show for.
@@ -4165,6 +5767,8 @@ def main(argv=None):
             if not a.no_inject:
                 t1 = time.monotonic()
                 PROGRESS.step("writing the menu into the card")
+                manifests = selector_manifests(plan, conf, a.media_dir, [a.primary] + list(a.extra),
+                                               versions=versions, trees=trees)
                 inject_card(a.out, a.selector_dir, conf, workdir=workdir, media_files=media["files"] if media else None,
                             replace_media=bool(a.media_dir), manifests=manifests)
                 say("injection took %.0f s" % (time.monotonic() - t1))
@@ -4199,11 +5803,14 @@ def main(argv=None):
             warns = []
             old_build = parse_manifest(read_select_file(ref, BUILD_MANIFEST), BUILD_MANIFEST, warns)
             old_media = None if a.media_dir else read_select_file(ref, MEDIA_MANIFEST)
+            old_trees = read_select_file(ref, TREES_MANIFEST)
+            refuse_if_dirty(a.card, ref)
             for w in warns:
                 say("WARNING: " + w)
             conf = conf_for_plan(plan, a, existing=card_conf(a.card, ref), media=media)
             sources = [a.primary] + list(a.extra) if (a.primary or a.extra) else None
-            manifests = selector_manifests(plan, conf, a.media_dir, sources, old_build, old_media)
+            manifests = selector_manifests(plan, conf, a.media_dir, sources, old_build, old_media,
+                                           existing_trees=old_trees)
             say("%s: %s; %s: %s" % (
                 BUILD_MANIFEST,
                 "sources given" if sources else ("sources carried through from the card" if old_build
@@ -4235,6 +5842,8 @@ def main(argv=None):
             if bad:
                 print("[card] %d tree(s) NOT bypassed: %s" % (len(bad), ", ".join("image %d (%s)" % (i, states[i]) for i in bad)))
                 return 1
+        elif a.cmd == "update":
+            return update_card(a)
         elif a.cmd == "verify":
             subs = multi_subdirs_on(a.card, 7)
             if subs:
@@ -4245,7 +5854,8 @@ def main(argv=None):
                                  multi_subdirs=subs)
             else:
                 plan = make_plan(a.primary, a.extra, "parts")
-            return 0 if verify_card(a.card, plan, a.selector_dir, a.media_dir) else 1
+            return 0 if verify_card(a.card, plan, a.selector_dir, a.media_dir,
+                                    mode="quick" if a.quick else "full") else 1
         elif a.cmd == "selftest":
             return 0 if selftest(a.dir, a.selector) else 1
     except Refused as e:

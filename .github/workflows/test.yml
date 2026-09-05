@@ -81,6 +81,14 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py
 
+      # The multi-boot card builder's own end-to-end test (item 93): real ext4
+      # through debugfs/mke2fs/e2fsck, and - as root, which the hosted runner
+      # grants with a passwordless sudo - the loop-mounted in-place update,
+      # its crash drill included.  The only automated run of that path.
+      - name: Multi-boot card selftest (Linux, root)
+        if: runner.os == 'Linux'
+        run: sudo -E env PATH="$PATH" python -m pip install -q pycryptodome && sudo -E env PATH="$PATH" python tools/spike2_emu/mkmulticard.py selftest /tmp/mkmulticard-selftest
+
       - name: Run tests (macOS / Windows)
         if: runner.os != 'Linux'
         run: python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py

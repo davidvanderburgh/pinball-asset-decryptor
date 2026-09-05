@@ -804,7 +804,8 @@ def test_build_cli_refuses_before_reading_anything(mk, tmp_path, capsys):
     assert not (tmp_path / "nope.raw").exists()
 
 
-@pytest.mark.parametrize("cmd", ["plan", "check-stock", "build", "inject", "inspect", "bypass", "verify", "selftest"])
+@pytest.mark.parametrize("cmd", ["plan", "check-stock", "build", "inject", "inspect", "bypass", "verify", "selftest",
+                                 "update"])
 def test_every_subcommand_has_help(mk, cmd, capsys):
     with pytest.raises(SystemExit) as e:
         mk.main([cmd, "--help"])
@@ -1694,13 +1695,16 @@ def test_image_costs_add_up_to_the_card(mk, tmp_path, capsys):
     assert [r[0] for r in rows] == [0, 1]
     assert [r[1] for r in rows] == ["/dev/mmcblk0p3", "/dev/mmcblk0p7"]
     assert [r[3] for r in rows] == [A, B]
-    assert sum(r[2] for r in rows) + overhead == plan.total_bytes
+    room = mk.plan_room(plan)
+    assert sum(r[2] for r in rows) + room + overhead == plan.total_bytes
     assert overhead > 0
+    assert room == 0, "a synthetic card has no superblock to read a free count off"
     # ...and the plan prints them, one line each, under a word the version
-    # table cannot be mistaken for
+    # table cannot be mistaken for - the room for updates (item 93) under one too
     mk.print_plan(plan)
     out = capsys.readouterr().out
     assert "image-size 0 /dev/mmcblk0p3 %d %s" % (rows[0][2], "A.img") in out
+    assert "image-size free %d " % room in out
     assert "image-size overhead %d " % overhead in out
 
 
@@ -1725,9 +1729,12 @@ def test_the_multi_layout_costs_each_game_its_own_used_bytes(mk, tmp_path,
     assert [r[1] for r in rows] == ["/dev/mmcblk0p3", "/dev/mmcblk0p7:img1",
                                     "/dev/mmcblk0p7:img2"]
     assert [r[2] for r in rows[1:]] == plan.multi_each
-    assert sum(r[2] for r in rows) + overhead == plan.total_bytes
-    # p7's slack is the card's overhead, not any one game's
-    assert overhead > plan.multi_part.count * mk.SECTOR - plan.multi_used - 1
+    room = mk.plan_room(plan)
+    assert sum(r[2] for r in rows) + room + overhead == plan.total_bytes
+    # p7's slack is ROOM FOR UPDATES (item 93), not any one game's cost and not
+    # the card's overhead
+    assert room >= plan.multi_part.count * mk.SECTOR - plan.multi_used
+    assert overhead > 0
 
 
 def test_build_work_bytes_counts_the_extraction_and_the_copy(mk, tmp_path,

@@ -185,6 +185,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -194,7 +195,7 @@ from tkinter import colorchooser, filedialog, font as tkfont, messagebox, ttk
 
 from ..core import config
 from . import _rig
-from .emulate_tab import rig_dir
+from .emulate_tab import rig_dir, wsl_home
 from .preview_audio import PreviewAudio
 from .theme import THEMES, dark_titlebar
 from .widgets import _Tooltip, center_over
@@ -1448,6 +1449,37 @@ def inject_args(form, card):
     return args
 
 
+def update_args(form, card, dry_run=False, expect_bytes=None):
+    """``mkmulticard.py update --card``: ONLY what changed since the card was
+    written - into the loaded card, in place (item 93).  The menu flags are
+    inject's (every field spelled out); ``--dry-run`` says what it would
+    write and writes nothing; ``--expect-bytes`` is the number the dialog
+    showed, and the tool refuses when a source moved under it."""
+    titles = [(r.title or "").strip() or suggest_title(r.path)[0]
+              for r in form.images]
+    subtitles = [(r.subtitle or "").strip() for r in form.images]
+    args = [MKMULTICARD, "update",
+            "--card", wsl(card.strip().strip('"'))] + _image_args(form) + [
+            "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
+            "--titles", ";".join(titles),
+            "--subtitles", ";".join(subtitles),
+            "--timeout", str(int(form.timeout)),
+            "--default", str(int(form.default)),
+            "--volume", str(int(form.volume))] + theme_args(form)
+    if form.machine_volume:
+        args.append("--machine-volume")
+    if form.bypass:
+        args.append("--bypass-validation")
+    if form.media_dir:
+        args += ["--media-dir", wsl(form.media_dir)]
+    args += cache_dir_args()
+    if dry_run:
+        args.append("--dry-run")
+    if expect_bytes is not None:
+        args += ["--expect-bytes", str(int(expect_bytes))]
+    return args
+
+
 def inspect_args(card, media_out=None, as_json=False):
     """``mkmulticard.py inspect --card``: what a card carries.  Plain it
     prints a table; ``--json`` prints one object for the tab to read, and
@@ -1513,6 +1545,62 @@ def wsl_command(args, cwd=None, exe="python3"):
     if cwd is None:
         cwd = wsl(repo_dir())
     return wsl_shell(shell_line(args, cwd, exe))
+
+
+def wsl_shell_root(line, home=None):
+    """The argv that runs one shell line AS ROOT: ``wsl -u root`` carrying
+    the desktop user's HOME (root's own is /root, where ``~/spike2root`` is
+    not - the shape the Emulate tab's checkpointable launch uses), ``sudo
+    -n`` on Linux (fails fast rather than waiting for a password a GUI
+    cannot type).  A SEPARATE function, never a flag: a wrong argument must
+    not be able to turn an ordinary run into a root one (_rig.rig_cmd_root's
+    rule)."""
+    if sys.platform == "win32":
+        head = ["wsl.exe", "-u", "root", "-e"]
+        if home:
+            head += ["env", "HOME=" + home]
+        return head + ["bash", "-lc", line]
+    return ["sudo", "-n", "bash", "-lc", line]
+
+
+def wsl_command_root(args, cwd=None, exe="python3", home=None):
+    if cwd is None:
+        cwd = wsl(repo_dir())
+    return wsl_shell_root(shell_line(args, cwd, exe), home)
+
+
+def root_command(args, cwd=None, exe="python3"):
+    """The argv of a tool step that must run as root (build, update: they
+    loop-mount the card's partitions - item 93) - as a CALLABLE the worker
+    resolves just before the step, because the desktop user's WSL home is
+    two ``wsl.exe`` probes (:func:`emulate_tab.wsl_home`) and must never run
+    on the Tk thread.  No home -> the step fails with a sentence, not a
+    hang."""
+    if sys.platform != "win32":
+        return wsl_command_root(args, cwd, exe)
+
+    def later(_texts):
+        home = wsl_home()
+        if not home:
+            raise RuntimeError(
+                "cannot find your WSL home (wsl.exe -e whoami / getent both "
+                "failed) - the card is written as root and needs it to find "
+                "~/spike2root; check that WSL starts, then try again")
+        return wsl_command_root(args, cwd, exe, home=home)
+    return later
+
+
+def cache_dir_args():
+    """``--cache-dir`` for plan/build/update (item 93): where the tools keep
+    the hashed manifests of the source cards - the Windows TEMP directory
+    seen from WSL, so the same cache serves the user's plan and root's
+    build, and nothing lands under either one's $HOME."""
+    d = os.path.join(tempfile.gettempdir(), "pinball_spike2_multiboot")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:                                 # pragma: no cover
+        pass
+    return ["--cache-dir", wsl(d)]
 
 
 def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
@@ -1720,10 +1808,39 @@ def preview_box(avail_w, avail_h, frame_w=FRAME_W, frame_h=FRAME_H,
 
 def build_commands(form, cwd=None):
     """The 'Build & verify' run: plan (the size, before a byte is written),
-    build, verify.  ``[(label, argv), ...]``, run in order, stop on failure."""
+    build - AS ROOT, it loop-mounts nothing yet but records the card the way
+    update needs (item 93) - verify.  ``[(label, argv), ...]``, run in
+    order, stop on failure."""
     return [("plan", wsl_command(plan_args(form), cwd)),
-            ("build", wsl_command(build_args(form), cwd)),
+            ("build", root_command(build_args(form), cwd)),
             ("verify", wsl_command(verify_args(form), cwd))]
+
+
+#: The label of the size check's second step: ``update --dry-run`` on the
+#: loaded card, whose rows say what an in-place update would write.
+DRY_RUN = "dry-run"
+
+
+def measure_commands(form, card=None, cwd=None):
+    """The automatic size check: the plan, and - when a card that can be
+    updated in place is loaded - what an update of it would write.  Both
+    run as the user and write nothing."""
+    cmds = plan_commands(form, cwd)
+    if card:
+        cmds.append((DRY_RUN, wsl_command(update_args(form, card, dry_run=True), cwd)))
+    return cmds
+
+
+def update_commands(form, card, media_dir="", prepare=False, expect_bytes=None, cwd=None):
+    """The in-place update run: the media first when a media field changed,
+    then ``update`` AS ROOT (it re-injects the menu, patches the validator
+    and verifies by itself), then the inspect that reads the card back."""
+    cmds = []
+    if prepare:
+        cmds += prepare_commands(form, media_dir, cwd)
+    cmds.append(("update", root_command(update_args(form, card, expect_bytes=expect_bytes), cwd)))
+    cmds += inspect_commands(card, cwd=cwd)
+    return cmds
 
 
 def prepare_commands(form, media_dir, cwd=None):
@@ -2715,11 +2832,15 @@ def parse_plan(text):
     nothing and is the same number by the same route (David: "the code
     column is not being populated for me when i load in images")."""
     info = {"bytes": None, "fits": {}, "versions": {}, "sizes": [],
-            "overhead": None}
+            "overhead": None, "free": None}
     for line in (text or "").splitlines():
         m = _SIZE_OVER_RE.match(line.strip())
         if m:
             info["overhead"] = int(m.group(1))
+            continue
+        m = _SIZE_FREE_RE.match(line.strip())
+        if m:
+            info["free"] = int(m.group(1))
             continue
         m = _SIZE_ROW_RE.match(line.strip())
         if m:
@@ -2752,6 +2873,73 @@ def parse_plan(text):
 #: game code.
 _SIZE_ROW_RE = re.compile(r"^image-size (\d+) (\S+) (\d+|\?)\s*(.*)$")
 _SIZE_OVER_RE = re.compile(r"^image-size overhead (\d+)")
+#: ...and the room the games partitions keep for in-place updates (item 93):
+#: a WORD where the index goes, so the row above cannot read it as an image.
+_SIZE_FREE_RE = re.compile(r"^image-size free (\d+)")
+
+_UPDATE_FILES_RE = re.compile(r"^update-files (\d+) (\S+) (\d+) (\d+) (\S+)")
+_UPDATE_SOURCE_RE = re.compile(r"^update-source (\d+) (\S+) (\S+)")
+_UPDATE_SIZE_RE = re.compile(r"^update-size (\d+)")
+_UPDATE_PEAK_RE = re.compile(r"^update-peak (\d+)")
+_UPDATE_GROW_RE = re.compile(r"^update-grow (?:(p\d+) (\d+)|none)")
+_UPDATE_FITS_RE = re.compile(r"^update-fits (YES|NO)")
+_UPDATE_INJECT_RE = re.compile(r"^update-inject (yes|no)")
+
+
+def parse_update(text):
+    """What ``mkmulticard.py update --dry-run`` said: ``{"bytes": N or None,
+    "peak": N, "files": {index: (n changed, bytes, action)}, "fits": bool,
+    "inject": bool, "grow": (partition, bytes) or None, "missing": [index]}``.
+    ``bytes`` None means the rows were not there (a refusal, an old tool)."""
+    info = {"bytes": None, "peak": 0, "files": {}, "fits": True,
+            "inject": False, "grow": None, "missing": []}
+    for line in (text or "").splitlines():
+        s = line.strip()
+        m = _UPDATE_FILES_RE.match(s)
+        if m:
+            info["files"][int(m.group(1))] = (
+                int(m.group(3)), int(m.group(4)), m.group(5))
+            continue
+        m = _UPDATE_SOURCE_RE.match(s)
+        if m:
+            if m.group(3) == "missing":
+                info["missing"].append(int(m.group(1)))
+            continue
+        m = _UPDATE_SIZE_RE.match(s)
+        if m:
+            info["bytes"] = int(m.group(1))
+            continue
+        m = _UPDATE_PEAK_RE.match(s)
+        if m:
+            info["peak"] = int(m.group(1))
+            continue
+        m = _UPDATE_GROW_RE.match(s)
+        if m:
+            info["grow"] = (m.group(1), int(m.group(2))) if m.group(1) else None
+            continue
+        m = _UPDATE_FITS_RE.match(s)
+        if m:
+            info["fits"] = m.group(1) == "YES"
+            continue
+        m = _UPDATE_INJECT_RE.match(s)
+        if m:
+            info["inject"] = m.group(1) == "yes"
+    return info
+
+
+def trees_from_inspect(info):
+    """The record a loaded card carries (item 93), as the tab keeps it:
+    ``{"free", "dirty", "synced", "changed": {index: True/False/None}}``,
+    or None for a card that has no record (built before item 93 - an
+    update hashes it once) or none the tool could read."""
+    tr = (info or {}).get("trees")
+    if not isinstance(tr, dict) or not tr.get("recorded"):
+        return None
+    return {"free": tr.get("free_bytes"), "dirty": list(tr.get("dirty") or []),
+            "synced": list(tr.get("synced") or []),
+            "changed": {int(im.get("index", -1)): im.get("source_changed")
+                        for im in (tr.get("images") or []) if isinstance(im, dict)}}
+
 
 #: A line of the build's own work meter.  It is the one line the tab reads for
 #: its progress bar and the one line it keeps OUT of the Log: one a second for
@@ -2838,20 +3026,31 @@ def card_size_view(info):
     else:
         view["over"] = True
         view["scale"] = total
+    games = 0
     for idx, dev, size, src in info.get("sizes") or ():
         if size:
+            games += size
             view["bands"].append(
                 ("Image %d - %s" % (idx, src or dev), size, "image"))
+    free = info.get("free")
+    if free:
+        # the room the games partitions keep for in-place updates (item 93):
+        # a hollow band, because it is space nothing has been put in yet
+        view["bands"].append(("Free for updates", free, "free"))
     over = info.get("overhead")
     if over:
         view["bands"].append(
-            ("Boot, rootfs, /data, /dump and slack", over, "overhead"))
+            ("Boot, rootfs, /data, /dump and metadata", over, "overhead"))
     if view["over"]:
         key, biggest = CARD_SIZES[-1]
         short = -(fits.get(key) or (False, 0))[1]
         view["head"] = "too big"
         view["detail"] = ("%s of code - %s more than a %s card holds. Drop an "
                           "image." % (_gbytes(total), _gbytes(short), biggest))
+    elif free is not None:
+        view["head"] = view["need"]
+        view["detail"] = "%s of games, %s free for updates." % (
+            _gbytes(games), _gbytes(free))
     else:
         view["head"] = view["need"]
         view["detail"] = "%s of code, %s spare on a %s card." % (
@@ -3522,9 +3721,9 @@ class BuildFlashDialog(_Modal):
         self._write_chk.pack(anchor=tk.W)
         if not plan["can_write"]:
             self._write_chk.configure(state=tk.DISABLED)
-        ttk.Label(gw, foreground=th["gray"], wraplength=460,
-                  justify=tk.LEFT, text=plan["write_detail"]).pack(
-            anchor=tk.W, padx=(20, 0), pady=(2, 0))
+        self._write_detail = ttk.Label(gw, foreground=th["gray"], wraplength=460,
+                                       justify=tk.LEFT, text=plan["write_detail"])
+        self._write_detail.pack(anchor=tk.W, padx=(20, 0), pady=(2, 0))
 
         flash = ttk.LabelFrame(b, text="Flash to an SD card")
         flash.pack(fill=tk.X, pady=(10, 0))
@@ -3568,6 +3767,22 @@ class BuildFlashDialog(_Modal):
             pass
         self._sync()
         return self
+
+    def refresh(self, plan):
+        """The tab's measurement landed while this dialog was open (item 93:
+        'working out what has changed…' becomes the number): the words and
+        the state follow it; a tick the person set is left alone."""
+        self._plan = plan
+        try:
+            self._write_chk.configure(
+                text=plan["write_label"],
+                state=tk.NORMAL if plan["can_write"] else tk.DISABLED)
+            self._write_detail.configure(text=plan["write_detail"])
+            if not plan["can_write"]:
+                self._write_var.set(False)
+        except tk.TclError:                             # pragma: no cover
+            pass
+        self._sync()
 
     def _sync(self, *_a):
         """The Start button is live only when there is something to do."""
@@ -3834,6 +4049,12 @@ class MultibootPanel:
         self._run_kind = ""
         self._loaded_form = None
         self._loaded_info = None
+        #: The record the loaded card carries (item 93; trees_from_inspect),
+        #: and what the last dry-run said an update of it would write - or
+        #: {"refused": why} when the tool would not.  Neither is persisted:
+        #: they are the editing baseline's, and a restore reads nothing.
+        self._loaded_trees = None
+        self._update_info = None
         self._armed = False
         self._media_override = ""       # the loaded card's media dir
         self._out_var = tk.StringVar()
@@ -4546,8 +4767,6 @@ class MultibootPanel:
         self.flip_right()
         return "break"
 
-
-
     # -- 3. the images table --------------------------------------------
 
     #: The table's TEXT columns, left to right: ``(id, heading, minwidth,
@@ -4726,10 +4945,12 @@ class MultibootPanel:
         "How big an SD card these images need - measured by the tool, not "
         "guessed from the .raw files, which are all the same size whatever "
         "is inside them. The bar is the card you would have to buy: each "
-        "band is one image's games, and the grey one at the end is what the "
-        "card spends on itself (boot, rootfs, /data, /dump, and the slack "
-        "the shared games partition is built with). It re-measures itself "
-        "whenever the image list changes.")
+        "band is one image's games, a hollow one is room the card keeps for "
+        "updating an image in place, and the grey one at the end is what the "
+        "card spends on itself (boot, rootfs, /data, /dump and the "
+        "filesystems' own bookkeeping). It re-measures itself whenever the "
+        "image list changes, and for a loaded card it also works out what an "
+        "update would write.")
 
     def _build_size(self, parent, th):
         """THE SIZE STRIP - the card these images need, under the images.
@@ -4813,9 +5034,15 @@ class MultibootPanel:
             x = 0.0
             for label, size, kind in view["bands"]:
                 w = width * size / scale
-                canvas.create_rectangle(
-                    x, 0, x + w, height, width=0,
-                    fill=th["gray"] if kind == "overhead" else th["accent"])
+                if kind == "free":
+                    # hollow, dashed: room nothing has been put in yet
+                    canvas.create_rectangle(x + 1, 1, x + w - 1, height - 1,
+                                            width=1, outline=th["gray"],
+                                            dash=(3, 2), fill="")
+                else:
+                    canvas.create_rectangle(
+                        x, 0, x + w, height, width=0,
+                        fill=th["gray"] if kind == "overhead" else th["accent"])
                 if x > 0:               # a hairline, so two bands read as two
                     canvas.create_line(x, 0, x, height, fill=th["trough"])
                 x += w
@@ -4950,16 +5177,19 @@ class MultibootPanel:
 
     BUILD_FLASH_TIP = (
         "Write the card. The dialog decides for you whether that is a full "
-        "build (every image copied - the slow one) or an Apply, which "
-        "rewrites the menu of the card you loaded in seconds, and it can "
-        "flash an SD card in the same step. While the run is going this "
-        "button is its Cancel.")
+        "build (every image copied - the slow one), an update of the card "
+        "you loaded (only what changed since it was written - about a "
+        "minute), or a menu rewrite (seconds), and it can flash an SD card "
+        "in the same step. While the run is going this button is its "
+        "Cancel.")
 
     CANCEL_TIP = (
         "Stop the run in progress. The tool is killed where it stands, so a "
         "card being BUILT is left half-written and has to be built again - "
         "which is the point: a build that is copying three images onto a "
-        "card too small for them is an hour you get back.")
+        "card too small for them is an hour you get back. A card being "
+        "UPDATED keeps what was already written; pressing the button again "
+        "carries on from there.")
 
     def cancel_run(self):
         """Stop the run in flight.  True when there was one to stop.
@@ -6609,7 +6839,8 @@ class MultibootPanel:
         field of the form, so a title, the countdown, the volume or the
         output path cannot change the answer - which is exactly what makes
         it safe to ask this question on every keystroke."""
-        return tuple((r.path or "").strip().strip('"') for r in self._rows)
+        return (tuple((r.path or "").strip().strip('"') for r in self._rows),
+                self._loaded_card if self._loaded_trees else "")
 
     def _maybe_plan(self):
         """Keep the size sentence TRUE, without anyone having to ask.
@@ -6638,10 +6869,11 @@ class MultibootPanel:
             return
         self._plan_for = key
         self._plan_info = None
+        self._update_info = None
         self._plan_failed = False
         self._draw_size()               # the stale number goes NOW, not later
         self._cancel_plan()
-        if len(key) < 1 or not self._auto_plan:
+        if len(key[0]) < 1 or not self._auto_plan:
             return
         try:
             self._plan_job = self._timer().after(self.PLAN_DEBOUNCE_MS,
@@ -6674,26 +6906,36 @@ class MultibootPanel:
         # output path that is still being typed is no reason to leave the
         # size unknown - and a missing .raw is, because the tool would only
         # print a refusal into the Log nobody asked it to.
-        if len(key) < 1 or not all(p and os.path.isfile(p) for p in key):
+        if len(key[0]) < 1 or not all(p and os.path.isfile(p) for p in key[0]):
             return False
         form = self.form()
+        # ...and, for a loaded card that carries a record, what an update
+        # of it would write (item 93): the tool compares every source's
+        # stamp with the record and hashes only what moved.
+        card = (self._loaded_card
+                if self._loaded_trees and self._on_loaded_path() else None)
 
         def step(label, rc, text):
             # An answer about a list that has since moved is dropped rather
             # than shown: _maybe_plan has already blanked the sentence and
             # armed the next one.
-            if label == "plan" and key == self._plan_key():
+            if key != self._plan_key():
+                return
+            if label == "plan":
                 self._plan_step(label, rc, text)
+            elif label == DRY_RUN:
+                self._update_step(rc, text)
 
         def done(rc, failed, _texts):
-            if rc != 0:
+            if rc != 0 and failed == "plan":
                 # NOT ON THE STATUS LINE.  Nobody asked for this run, so a
                 # failure of it must not take the line that is saying what
                 # the buttons would do; the whole of the tool's output is in
-                # the Log, where the reason is.
+                # the Log, where the reason is.  (A dry-run's refusal is an
+                # answer, kept by _update_step, not a failure.)
                 self._write("the size check failed (exit %d) - the sentence "
                             "beside the status line is left blank." % rc)
-        if not self._run_commands(plan_commands(form), on_step=step,
+        if not self._run_commands(measure_commands(form, card), on_step=step,
                                   on_done=done, preview=True):
             # The worker is busy.  Ask again in a moment rather than queue.
             try:
@@ -6723,6 +6965,20 @@ class MultibootPanel:
         # answer, about the same images - keeps the tab from asking twice.
         self._plan_for = self._plan_key()
         self._update_edit_status()          # ...which redraws the size strip
+
+    def _update_step(self, rc, text):
+        """What the dry-run said an update of the loaded card would write -
+        or why it would not (its refusal is the answer, kept for the
+        dialog: 'build a fresh card' has a reason)."""
+        if rc == 0:
+            self._update_info = parse_update(text)
+        else:
+            why = parse_refusal(text, self._loaded_card or "")
+            self._update_info = {"refused": why or "the tool refused (exit %d)" % rc}
+        self._update_edit_status()
+        dlg = self._buildflash_dialog
+        if dlg is not None:
+            dlg.refresh(self._write_plan())
 
     def _take_versions(self, versions):
         """Put the game code versions the tool just read into the table.
@@ -7011,6 +7267,8 @@ class MultibootPanel:
         _ticked, self._armed = bypass_state(info)
         self._loaded_card = card
         self._loaded_info = info
+        self._loaded_trees = trees_from_inspect(info)
+        self._update_info = None
         # THE LOUD ONE.  Everything else a load has to say is a note on the
         # status line; images that are not the same game code get their own
         # strip above the picture, because it is the one finding that costs
@@ -7217,6 +7475,93 @@ class MultibootPanel:
         return self._run_commands(cmds, on_step=step, on_done=done,
                                   quiet=(INSPECT_JSON,))
 
+    def update_card(self, after=None):
+        """The in-place update (item 93): ``update`` writes ONLY what changed
+        since the loaded card was written - a changed image's new files, an
+        added image, a removed one - and the menu with it, as root through a
+        loop mount of the card's partitions; then the inspect that reads
+        the card back.  About a minute.  False when the tab refused."""
+        if not self._loaded_card:
+            self._error("Read a card first - updating in place writes into "
+                        "the card the form was read from.")
+            return False
+        if not self._on_loaded_path():
+            self._error(
+                "'Card image' no longer names %s, the card this form was "
+                "read from, so there is nothing to update. Nothing was "
+                "lost: type that path back and '%s' is offered again."
+                % (self._loaded_card, APPLY_TICK))
+            return False
+        if self._busy:
+            self._error("A run is already in progress.")
+            return False
+        form = self.form()
+        menu, rebuild = diff_forms(self._loaded_form, form)
+        prepare = media_specs_changed(self._loaded_form, form)
+        errs = validate_form(form) + self._apply_blockers(form, prepare)
+        if errs:
+            self._error("\n".join(errs))
+            return False
+        media = self.media_dir()
+        if prepare:
+            try:
+                os.makedirs(media, exist_ok=True)
+            except OSError as exc:
+                self._error("Cannot create %s: %s" % (media, exc))
+                return False
+            form = replace(form, media_dir=media)
+        expect = (self._update_info or {}).get("bytes")
+        cmds = update_commands(form, self._loaded_card, media, prepare=prepare,
+                               expect_bytes=expect)
+        self._ok("Updating %s%s…" % (self._loaded_card, " (media first)" if prepare else ""))
+        name = os.path.basename(self._loaded_card)
+
+        def step(label, rc, text):
+            if label == INSPECT_JSON and rc == 0:
+                info = parse_inspect(text)
+                if isinstance(info, dict):
+                    self._loaded_info = info
+                    self._loaded_trees = trees_from_inspect(info)
+                    _ticked, self._armed = bypass_state(info)
+
+        def done(rc, failed, texts):
+            if rc != 0:
+                if self.run_cancelled():
+                    self._ok("The update was cancelled at %s. %s may be half "
+                             "updated - press %s again: it carries on from "
+                             "what was already written, and the images that "
+                             "were there still boot."
+                             % (failed or "the start", name, WRITE_BUTTON))
+                else:
+                    why = parse_refusal(texts.get(failed or "update", ""),
+                                        self._loaded_card)
+                    if why:
+                        self._update_info = {"refused": why}
+                        self._error("Cannot update %s: %s - point 'Card "
+                                    "image' at a new path to build a fresh "
+                                    "card." % (name, why))
+                    else:
+                        self._error("Updating the card failed at %s (exit %d) "
+                                    "- see the tool output."
+                                    % (failed or "the start", rc))
+                self._update_edit_status()
+                return
+            self._loaded_form = form
+            self._update_info = None
+            self._plan_for = None                   # measure the card again
+            if prepare:
+                self._pv_ready = (media_fingerprint(form), media, True)
+            cost = (_gbytes(expect) + " written" if expect else "nothing to copy")
+            self._ok("Card updated: %s (%s%s)" % (
+                self._loaded_card, cost,
+                ", menu rewritten" if (menu or rebuild) else ""))
+            self._update_edit_status()
+            if after is not None:
+                after()
+        self._run_kind = "update"
+        return self._run_commands(cmds, on_step=step, on_done=done,
+                                  quiet=(INSPECT_JSON,))
+
     def _update_edit_status(self):
         """EVERYTHING THE STATUS ROW AND THE SIZE STRIP SAY, re-decided.
         Called after every keystroke.
@@ -7281,6 +7626,79 @@ class MultibootPanel:
             menu, rebuild)
         editing = kind == "loaded"
         have_card = bool(field and os.path.isfile(field))
+        upd = self._update_info if editing else None
+        refused = (upd or {}).get("refused") if upd else None
+        stale = [i for i, (n, nbytes, action) in ((upd or {}).get("files") or {}).items()
+                 if not refused and (nbytes > 0 or action in ("new", "remove", "rename", "sync"))]
+        updatable = editing and self._loaded_trees is not None
+        if editing and updatable and refused:
+            # THE TOOL WOULD NOT UPDATE THIS CARD IN PLACE, and said why: a
+            # parts-layout list change, a primary that is another build, no
+            # room, a source not on this machine.  The way on is a fresh card
+            # at another path - never a build over the loaded one.
+            name = os.path.basename(self._loaded_card)
+            return {
+                "action": "build",
+                "can_write": False,
+                "default_write": False,
+                "have_card": have_card,
+                "out": field,
+                "write_label": "Build a fresh card",
+                "write_detail": ("%s cannot be updated in place: %s. Point "
+                                 "'Card image' at a new path and %s writes a "
+                                 "fresh card there (every image copied)."
+                                 % (name, refused, WRITE_BUTTON)),
+            }
+        if editing and updatable and (rebuild or stale):
+            # THE IN-PLACE UPDATE (item 93): only what changed since the card
+            # was written goes onto it - a changed image's new files, an
+            # added image, a removed one's space back - and the menu with it.
+            name = os.path.basename(self._loaded_card)
+            what = "; ".join(list(rebuild) + [
+                "image %d changed on disk" % i for i in stale
+                if (upd["files"][i][2] == "sync")])
+            if upd and upd.get("bytes") is not None:
+                nfiles = sum(n for (n, b, a) in upd["files"].values())
+                plural = "" if nfiles == 1 else "s"
+                cost = ("%d file%s, %s to write" % (nfiles, plural, _gbytes(upd["bytes"]))
+                        if upd["bytes"] else "nothing to copy")
+                detail = ("%s: %s - only that goes onto %s, and the menu with "
+                          "it (%s); nothing else is copied."
+                          % (what or "changed", cost, name,
+                             "; ".join(menu) if menu else "no menu change"))
+                if upd.get("grow"):
+                    detail += (" The card grows by %s to make room."
+                               % _gbytes(upd["grow"][1]))
+            else:
+                detail = ("%s - working out what has to be written into %s…"
+                          % (what or "changed", name))
+            return {
+                "action": "update",
+                "can_write": not self._busy,
+                "default_write": True,
+                "have_card": have_card,
+                "out": field,
+                "write_label": "Update the loaded card in place",
+                "write_detail": detail,
+            }
+        if editing and rebuild and not updatable:
+            # A card written before item 93 carries no record: its image
+            # list can only change in a fresh card.  Said here, in the
+            # dialog, rather than by a refusal after the press.
+            name = os.path.basename(self._loaded_card)
+            return {
+                "action": "build",
+                "can_write": False,
+                "default_write": False,
+                "have_card": have_card,
+                "out": field,
+                "write_label": "Build a fresh card",
+                "write_detail": ("The image list changed (%s), and %s was "
+                                 "written before cards could be updated in "
+                                 "place. Point 'Card image' at a new path and "
+                                 "%s writes a fresh card there (every image "
+                                 "copied)." % ("; ".join(rebuild), name, WRITE_BUTTON)),
+            }
         if editing and not rebuild:
             name = os.path.basename(self._loaded_card)
             # THE FAST, INCREMENTAL UPDATE (David, 2026-09-03: "a small text
@@ -7361,8 +7779,11 @@ class MultibootPanel:
         self._forget_build_flash()
         after = (lambda: self._flash()) if do_flash else None
         if do_write:
-            if self._write_plan()["action"] == "apply":
+            action = self._write_plan()["action"]
+            if action == "apply":
                 self.apply_to_card(after=after)
+            elif action == "update":
+                self.update_card(after=after)
             else:
                 self._build_card(after=after)
         elif do_flash:
@@ -9125,14 +9546,16 @@ class MultibootPanel:
     #: Inject, Verify - MainWindow.MULTIBOOT_PHASES).  Both writing buttons
     #: read honestly on it: Build & verify walks all four, Apply to card
     #: only the last two (plus Media when a media field moved).
-    PHASE_OF = {"prepare": 0, "plan": 0, "build": 1, "inject": 2,
-                "bypass": 2, "verify": 3, "inspect": 3, INSPECT_JSON: 3}
+    PHASE_OF = {"prepare": 0, "plan": 0, DRY_RUN: 0, "build": 1, "update": 1,
+                "inject": 2, "bypass": 2, "verify": 3, "inspect": 3,
+                INSPECT_JSON: 3}
 
     #: ...and what the footer's status line says while it is there.
     PHASE_STATUS = {
         "prepare": "Rendering the menu's media…",
         "plan": "Planning the card's layout…",
         "build": "Copying the images into the card…",
+        "update": "Writing what changed into the card…",
         "inject": "Writing the menu into the card…",
         "bypass": "Patching the game validator…",
         "verify": "Verifying the card…",

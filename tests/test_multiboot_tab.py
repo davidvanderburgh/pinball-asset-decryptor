@@ -54,6 +54,13 @@ from pinball_decryptor.gui.multiboot_tab import (
 
 
 @pytest.fixture(autouse=True)
+def _no_wsl_home_probe(monkeypatch):
+    """A root step resolves the desktop user's WSL home on the worker (two
+    wsl.exe probes); no test may reach wsl.exe for it."""
+    monkeypatch.setattr(multiboot_tab, "wsl_home", lambda: "/home/x")
+
+
+@pytest.fixture(autouse=True)
 def _no_real_setup_probe(monkeypatch):
     """Same rule as test_emulate_tab: building an Emulate panel must not
     shell out to WSL for the setup probe."""
@@ -88,7 +95,11 @@ def _form(tmp_path, n, **kw):
 
 
 def _line(argv):
-    """The shell line inside a wsl.exe / bash -lc argv."""
+    """The shell line inside a wsl.exe / bash -lc argv.  A ROOT step's argv
+    is a callable the worker resolves (item 93; root_command) - resolved
+    here the same way, with wsl_home stubbed by the autouse fixture below."""
+    if callable(argv):
+        argv = argv({})
     return argv[-1]
 
 
@@ -215,8 +226,17 @@ def test_two_image_form_builds_plan_build_verify(monkeypatch, tmp_path):
     form = _form(tmp_path, 2)
     cmds = build_commands(form, cwd="/mnt/c/repo")
     assert [label for label, _ in cmds] == ["plan", "build", "verify"]
-    for _label, argv in cmds:
-        assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"], argv
+    for label, argv in cmds:
+        if label == "build":
+            # the build runs AS ROOT (item 93: it records the card the way
+            # update needs, and update loop-mounts it), with the desktop
+            # user's HOME so ~/spike2root is still theirs
+            assert callable(argv)
+            argv = argv({})
+            assert argv[:8] == ["wsl.exe", "-u", "root", "-e", "env",
+                                "HOME=/home/x", "bash", "-lc"], argv
+        else:
+            assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"], argv
         assert _line(argv).startswith("cd /mnt/c/repo && python3 "
                                       "tools/spike2_emu/mkmulticard.py ")
         assert "\\" not in _line(argv)          # Windows paths would not open

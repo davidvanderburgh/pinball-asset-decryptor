@@ -23,7 +23,10 @@ EXT4_EXTENTS_FL = 0x80000
 S_IFMT = 0xF000
 S_IFREG = 0x8000
 S_IFDIR = 0x4000
+S_IFLNK = 0xA000
 INCOMPAT_64BIT = 0x80
+EXT4_EXTENT_UNINIT = 32768          # ee_len above this = an unwritten extent (reads as zeros)
+FAST_SYMLINK_MAX = 60               # a target shorter than i_block lives in the inode itself
 
 
 class Ext4Error(Exception):
@@ -47,6 +50,7 @@ class Ext4Reader:
         sb = self._read(1024, 1024)
         if len(sb) < 1024 or struct.unpack_from("<H", sb, 0x38)[0] != EXT4_MAGIC:
             raise Ext4Error("not an ext2/3/4 superblock")
+        self._sb = bytes(sb)
         self.block_size = 1024 << struct.unpack_from("<I", sb, 0x18)[0]
         self.inodes_per_group = struct.unpack_from("<I", sb, 0x28)[0]
         self.blocks_per_group = struct.unpack_from("<I", sb, 0x20)[0]
@@ -62,6 +66,30 @@ class Ext4Reader:
     def _read_group_desc_layout(self):
         # group descriptor table starts in the block after the superblock block
         self.gdt_block = self.first_data_block + 1
+
+    def uuid(self):
+        """The filesystem's UUID (s_uuid) as 32 hex digits - the identity a card keeps
+        through copies and in-place edits, unlike its path or mtime."""
+        return self._sb[0x68:0x78].hex()
+
+    def feature_words(self):
+        """(compat, incompat, ro_compat, journal_compat, journal_incompat, journal_ro_compat):
+        the superblock's three feature words and, when the filesystem has a journal, the
+        journal superblock's three.  What a foreign kernel could add by mounting rw; a
+        writer records them before a mount and asserts them after."""
+        compat, incompat, ro = struct.unpack_from("<III", self._sb, 0x5C)
+        jc = ji = jr = 0
+        jino = struct.unpack_from("<I", self._sb, 0xE0)[0]
+        if jino:
+            try:
+                node = self.read_inode(jino)
+                runs = self._runs(node)
+                if runs:
+                    jsb = self._read(runs[0][1] * self.block_size, 0x30)
+                    jc, ji, jr = struct.unpack_from(">III", jsb, 0x24)      # jbd2 is big-endian
+            except Exception:
+                pass
+        return (compat, incompat, ro, jc, ji, jr)
 
     def _group_desc_inode_table(self, group):
         off = self.gdt_block * self.block_size + group * self.desc_size
@@ -82,12 +110,29 @@ class Ext4Reader:
                 | (struct.unpack_from("<I", raw, 0x6c)[0] << 32))
         flags = struct.unpack_from("<I", raw, 0x20)[0]
         i_block = raw[0x28:0x28 + 60]
-        return dict(mode=mode, size=size, flags=flags, i_block=i_block)
+        # the rest of the inode, for a tree walk that records ownership and can tell a
+        # fast symlink from a slow one: uid/gid carry a high half in the Linux osd2 area
+        uid = struct.unpack_from("<H", raw, 0x02)[0] | (struct.unpack_from("<H", raw, 0x78)[0] << 16)
+        gid = struct.unpack_from("<H", raw, 0x18)[0] | (struct.unpack_from("<H", raw, 0x7A)[0] << 16)
+        atime, ctime, mtime, dtime = struct.unpack_from("<IIII", raw, 0x08)
+        links = struct.unpack_from("<H", raw, 0x1A)[0]
+        blocks_lo = struct.unpack_from("<I", raw, 0x1C)[0]
+        file_acl = struct.unpack_from("<I", raw, 0x68)[0] | (struct.unpack_from("<H", raw, 0x74)[0] << 32)
+        return dict(mode=mode, size=size, flags=flags, i_block=i_block, uid=uid, gid=gid,
+                    atime=atime, ctime=ctime, mtime=mtime, dtime=dtime, links=links,
+                    blocks_lo=blocks_lo, file_acl=file_acl)
 
     # ---- block runs (file offset -> disk) ----------------------------------
     def _extent_runs(self, i_block):
         """Walk an extent tree -> sorted list of ``(logical_block, phys_block,
-        count)`` runs."""
+        count)`` runs (an unwritten extent's blocks included, as they always were)."""
+        return [(log, phys, cnt) for (log, phys, cnt, _u) in self._extent_runs_flagged(i_block)]
+
+    def _extent_runs_flagged(self, i_block):
+        """As :meth:`_extent_runs`, with a fourth field: True for an UNWRITTEN extent
+        (fallocate'd, never written - the kernel serves zeros for it, whatever the
+        blocks hold).  A hash that read the blocks would disagree with every read
+        through a mounted filesystem, so a reader of file CONTENT must use this."""
         runs = []
 
         def walk(node):
@@ -100,11 +145,12 @@ class Ext4Reader:
                 if depth == 0:
                     log = struct.unpack_from("<I", node, e)[0]
                     ln = struct.unpack_from("<H", node, e + 4)[0]
-                    if ln > 32768:           # uninitialized extent
-                        ln -= 32768
+                    uninit = ln > EXT4_EXTENT_UNINIT
+                    if uninit:
+                        ln -= EXT4_EXTENT_UNINIT
                     start = (struct.unpack_from("<I", node, e + 8)[0]
                              | (struct.unpack_from("<H", node, e + 6)[0] << 32))
-                    runs.append((log, start, ln))
+                    runs.append((log, start, ln, uninit))
                 else:
                     leaf = (struct.unpack_from("<I", node, e + 4)[0]
                             | (struct.unpack_from("<H", node, e + 8)[0] << 32))
@@ -156,6 +202,61 @@ class Ext4Reader:
         if inode["flags"] & EXT4_EXTENTS_FL:
             return self._extent_runs(inode["i_block"])
         return self._classic_runs(inode["i_block"], inode["size"])
+
+    def _runs_flagged(self, inode):
+        """``(logical_block, phys_block, count, unwritten)`` runs; a classic block map
+        has no unwritten blocks."""
+        if inode["flags"] & EXT4_EXTENTS_FL:
+            return self._extent_runs_flagged(inode["i_block"])
+        return [(log, phys, cnt, False) for (log, phys, cnt) in self._classic_runs(inode["i_block"], inode["size"])]
+
+    def read_file_chunks(self, inode, chunk=1 << 20):
+        """Yield ``(file_offset, bytes)`` for a regular file, in file order, exactly as a
+        mounted filesystem would serve it: holes (logical blocks no extent maps) and
+        unwritten extents come out as zeros, and the tail is cut at the inode's size.
+        Reads the card in ``chunk``-sized pieces (1 MiB by default - the size that is
+        fast on every path this reader is used on; 8 MiB reads are not)."""
+        size = inode["size"]
+        bs = self.block_size
+        pos = 0                                   # next file offset to yield
+        for log, phys, cnt, uninit in self._runs_flagged(inode):
+            start = log * bs
+            if start >= size:
+                break
+            if start > pos:                       # a hole before this run
+                for off in range(pos, start, chunk):
+                    n = min(chunk, start - off, size - off)
+                    if n <= 0:
+                        break
+                    yield off, bytes(n)
+                pos = start
+            end = min(start + cnt * bs, size)
+            skip = (pos - start) // bs           # a run overlapping what was yielded (never, sorted)
+            off = pos
+            while off < end:
+                n = min(chunk, end - off)
+                if uninit:
+                    yield off, bytes(n)
+                else:
+                    yield off, self._read((phys + skip) * bs + (off - (start + skip * bs)), n)
+                off += n
+            pos = end
+        if pos < size:                            # a hole at the end (size past the last extent)
+            for off in range(pos, size, chunk):
+                yield off, bytes(min(chunk, size - off))
+
+    def read_symlink(self, inode):
+        """A symlink's target.  A fast symlink keeps it inside the inode (i_block) and owns
+        no data block - the kernel's own test, so an inode whose only block is an xattr
+        block still reads as fast; a slow one stores it in a data block."""
+        if (inode["mode"] & S_IFMT) != S_IFLNK:
+            raise Ext4Error("not a symlink")
+        size = inode["size"]
+        ea_blocks = (self.block_size // 512) if inode.get("file_acl") else 0
+        fast = size < FAST_SYMLINK_MAX and (inode.get("blocks_lo", 0) - ea_blocks) == 0 \
+            and not (inode["flags"] & EXT4_EXTENTS_FL)
+        raw = bytes(inode["i_block"][:size]) if fast else self.read_file_bytes(inode)
+        return raw.decode("utf-8", "surrogateescape")
 
     def disk_ranges(self, inode, file_off, length):
         """Map ``[file_off, file_off+length)`` to absolute disk byte ranges
@@ -223,7 +324,8 @@ class Ext4Reader:
         return out_path
 
     # ---- directory walk -----------------------------------------------------
-    def _iter_dir(self, inode):
+    def _iter_dir_raw(self, inode):
+        """Every live entry of a directory as ``(name bytes, inode number, ftype)``."""
         bs = self.block_size
         for log, phys, cnt in self._runs(inode):
             for j in range(cnt):
@@ -236,13 +338,55 @@ class Ext4Reader:
                     if rec_len < 8:
                         break
                     if child != 0 and name_len:
-                        name = block[p + 8:p + 8 + name_len]
-                        ftype = block[p + 7]
-                        try:
-                            yield name.decode("utf-8"), child, ftype
-                        except UnicodeDecodeError:
-                            pass
+                        yield bytes(block[p + 8:p + 8 + name_len]), child, block[p + 7]
                     p += rec_len
+
+    def _iter_dir(self, inode):
+        """As :meth:`_iter_dir_raw` with UTF-8 names; a name that is not UTF-8 is skipped
+        (the explorer's behaviour since the start - :meth:`iter_tree` is the walk that
+        carries every name)."""
+        for name, child, ftype in self._iter_dir_raw(inode):
+            try:
+                yield name.decode("utf-8"), child, ftype
+            except UnicodeDecodeError:
+                pass
+
+    def iter_tree(self, root_ino=2, skip=("lost+found",)):
+        """Depth-first walk of the tree under ``root_ino`` -> ``(rel, kind, ino, inode)``
+        for EVERY entry, names sorted, ``rel`` relative to the root with no leading slash,
+        ``kind`` one of ``dir``, ``file``, ``symlink``, ``other``.  Names are decoded with
+        ``surrogateescape`` so a name that is not UTF-8 survives the round trip through
+        str and JSON (``.encode("utf-8", "surrogateescape")`` gives the bytes back - not
+        ``os.fsencode``, which Windows maps through surrogatepass); nothing is dropped.
+        ``skip`` names root entries to leave out.  A directory reached twice (a hard link
+        to a directory cannot exist on ext4; a corrupt one could) is walked once."""
+        seen = set()
+
+        def walk(ino, prefix):
+            if ino in seen:
+                return
+            seen.add(ino)
+            node = self.read_inode(ino)
+            ents = [(n.decode("utf-8", "surrogateescape"), c, t) for (n, c, t) in self._iter_dir_raw(node)
+                    if n not in (b".", b"..")]
+            ents.sort()
+            for name, child, _t in ents:
+                if not prefix and name in skip:
+                    continue
+                rel = prefix + name
+                cn = self.read_inode(child)
+                m = cn["mode"] & S_IFMT
+                if m == S_IFDIR:
+                    yield rel, "dir", child, cn
+                    yield from walk(child, rel + "/")
+                elif m == S_IFREG:
+                    yield rel, "file", child, cn
+                elif m == S_IFLNK:
+                    yield rel, "symlink", child, cn
+                else:
+                    yield rel, "other", child, cn
+
+        yield from walk(root_ino, "")
 
     def peek(self, inode, n=16):
         """Return the first ``n`` bytes of a regular file (for magic sniffing)."""

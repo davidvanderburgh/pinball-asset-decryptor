@@ -169,9 +169,14 @@ These have each been violated at least once and each cost a run or a window:
       `valpatch.find_grade_restore`, the overlay carries both patches, the tool
       tells `half` (tick off, restore live) from `bypassed` and re-applies, the
       app's Write path patches both, the tick is ON by default again. David's v3
-      image: both images re-bypassed with the restore off. Proof: the emulator
-      boot with a poisoned NVRAM (F in both slots) reading P/P/P, then the
-      machine. *(David,
+      image: both images re-bypassed with the restore off (update, 37 s, verify
+      PASS). **PROVEN IN THE EMULATOR 2026-09-05:** each image booted through the
+      menu with the EEPROM poisoned to F/F/F in BOTH slots (PAD_NV_POKE) and the
+      module's own bytes read out of the game said GE/CE/ZK = 01 01 01 (P), V =
+      MOD+0 (the init path, not the restore), state 1; the shim's readout agreed;
+      no validation words in the log; attract clean. The machine is the last
+      word: flash the v3 image, boot each image, the banner must be gone, then
+      Insider Connected. *(David,
       2026-09-05, after the v3 two-image card booted and both images ran:
       "there is an existing game validation error that is latched on in the
       machine and stern insider connect is not connecting, so I can't validate

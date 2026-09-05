@@ -6891,7 +6891,8 @@ These have each been violated at least once and each cost a run or a window:
       at `/games`' root and the same-device remount. **Measured on David's
       three cards:** rows 3.35 / 1.65 / 1.59 GB unique, 5.40 GB shared and
       stored once, 7.64 GB free, a 16G card exactly (was 18.06 GB / 32G);
-      build 421 s. **Oracle:** `wsl -u root python3 tools/spike2_emu/mkmulticard.py
+      build 323 s (421 s before the per-file fsync through the loop
+      was dropped). **Oracle:** `wsl -u root python3 tools/spike2_emu/mkmulticard.py
       selftest DIR` part 6 (CI runs it on Linux); `verify` PASS (full) on the
       real card; the emulator booted image 0, 1 and 2 through the menu
       (run 7 in DESIGN.md's proof table: each choice landed, each image drew its OWN attract art, START fed a ball and the glass showed PLAYER 1 - the LE first through Stern's Guided Setup and a coin, its fresh per-title NVRAM). **Not yet done:** one flash to the TMNT (the two

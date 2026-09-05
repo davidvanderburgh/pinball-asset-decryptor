@@ -161,7 +161,9 @@ These have each been violated at least once and each cost a run or a window:
       every tree the tool patched (the tab sends it whenever the tick is off).
       David's v3 card: `update --restore-validation` restores image 0 (2 files,
       6.5 MB), flash, boot the stock image once - it re-grades P and the banner
-      goes; then test Insider on that image. Not proven on the machine yet. *(David,
+      goes; then test Insider on that image. The v3 image IS restored (image 0
+      armed again, 2 files / 6.7 MB in 13 s, verify PASS); the flash and the boot
+      are the proof still to come. *(David,
       2026-09-05, after the v3 two-image card booted and both images ran:
       "there is an existing game validation error that is latched on in the
       machine and stern insider connect is not connecting, so I can't validate

@@ -3568,18 +3568,28 @@ def update_card(a):
             lock.__exit__(None, None, None)
 
 
-def restore_changes(old_im, tree, changes):
-    """The writes that put the SOURCE's own game (and .sidx) back on a tree this tool
-    bypassed (item 98): the record's bypass digests name the files the card holds patched;
-    the source's copies go over them.  Only files the source has, only where the tool
-    itself patched (a digest recorded), and never one the diff already writes."""
+def restore_changes(old_im, tree, changes, live=None):
+    """The writes that put the SOURCE's own game (and .sidx) back on a tree the card holds
+    bypassed (item 98).  Two ways to know: the record's bypass digests (an update patched
+    it through the mount) name the two files; or `live` - (state, title, game path) read off
+    the card, for a tree a BUILD patched with a raw write and never recorded - says
+    'bypassed', and then the game and every spk/index .sidx come from the source (identical
+    bytes when the source is bypassed too: harmless).  Never a file the diff already
+    writes, never one the source lacks."""
     ts = _treesync()
     by = (old_im.bypass or {}) if old_im is not None else {}
     have = {c.rel for c in changes if c.op == "write"}
+    want = []
+    if by.get("game") or by.get("sidx"):
+        for path_key, digest_key in (("game_path", "game"), ("sidx_path", "sidx")):
+            if by.get(digest_key):
+                want.append(by.get(path_key))
+    elif live and live[0] == "bypassed":
+        want.append(live[2])
+        want += [rel for rel in sorted(tree.files) if rel.startswith("spk/index/") and rel.endswith(".sidx")]
     out = []
-    for path_key, digest_key in (("game_path", "game"), ("sidx_path", "sidx")):
-        rel = by.get(path_key)
-        if rel and by.get(digest_key) and rel in tree.files and rel not in have:
+    for rel in want:
+        if rel and rel in tree.files and rel not in have and rel not in {c.rel for c in out}:
             out.append(ts.Change("write", rel, tree.files[rel].size))
     return out
 
@@ -3719,7 +3729,17 @@ def _update_locked(a, ts, card, dry):
         old_tree = old_im.tree if (old_im is not None and act.action in ("keep", "rename")) else None
         ch = ts.diff_tree(old_tree, tree)
         if getattr(a, "restore_validation", False):
-            ch = ch + restore_changes(old_im, tree, ch)
+            live = None
+            if not ((old_im.bypass if old_im is not None else None) or {}).get("game") and i < len(plan.trees):
+                try:
+                    live = tree_state(card, plan.trees[i][0], plan.trees[i][1])
+                    # a source that is bypassed ITSELF (an image this app wrote) has nothing
+                    # stock to put back: the same bytes are on the card already
+                    if live[0] == "bypassed" and tree_state(path, source_part(path), None)[0] == "bypassed":
+                        live = None
+                except Exception:                            # noqa: BLE001 - an unreadable tree restores nothing
+                    live = None
+            ch = ch + restore_changes(old_im, tree, ch, live)
         changes[i] = ch
         part = tree_part(i)
         need, peak = ts.room_needed(ch, old_tree, tree, margin=0)
@@ -3945,12 +3965,19 @@ def verify_plan(card, sources):
 
 def render_images_conf_text(conf):
     """images.conf text from a parsed conf (what the card holds), for a like-for-like compare."""
+    # a card that follows the machine's own volume reads back volume="machine" (item 90):
+    # that is the machine_volume line's job in the render, not a number to range-check
+    mv = conf.get("machine_volume")
+    volume = conf["volume"]
+    if volume == "machine":
+        volume = None
+        mv = mv or {"store": None, "key": MACHINE_VOLUME_KEY, "default": None}
     return render_images_conf(
         [d for (d, _t, _s) in conf["images"]], [t for (_d, t, _s) in conf["images"]],
         [s for (_d, _t, s) in conf["images"]], conf["default"], conf["timeout"], conf["font"],
-        conf["media"], conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"],
+        conf["media"], conf["sound_move"], conf["sound_confirm"], volume, conf["mixer_volume"],
         media_dir=conf.get("media_dir"), theme=conf.get("theme"), colors=conf.get("colors"),
-        machine_volume=conf.get("machine_volume"), debug_log=bool(conf.get("debug_log")))
+        machine_volume=mv, debug_log=bool(conf.get("debug_log")))
 
 
 # ============================================================================= reading a card back

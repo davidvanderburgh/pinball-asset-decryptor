@@ -1892,6 +1892,41 @@ def test_store_plan_costs_are_the_unique_bytes_and_the_shared_row(mk, capsys):
     assert "image-size 1 /dev/mmcblk0p3:img1 1000000000 x.raw" in out
 
 
+def test_the_store_plan_names_each_image_to_the_meter_as_it_hashes_it(mk, monkeypatch):
+    """The compact plan hashes every image the first time (20-30 s for two on David's
+    machine) and used to say nothing meanwhile; now the tool's meter is told which image is
+    being read, so the app's size strip can show the name and the percentage."""
+    seen = []
+
+    class Meter:
+        def step(self, stage, budget=0):
+            seen.append(("step", stage))
+
+        def add(self, n):
+            seen.append(("add", n))
+    monkeypatch.setattr(mk, "source_tree", lambda path, cache_dir=None, progress=None: (
+        seen.append(("hash", os.path.basename(path))) or ("man:" + path, "hashed")))
+    mans = mk.measure_sources(["/x/a.raw", "/x/b.raw"], None, Meter())
+    assert mans == ["man:/x/a.raw", "man:/x/b.raw"]
+    assert seen == [("step", "measuring a.raw"), ("hash", "a.raw"),
+                    ("step", "measuring b.raw"), ("hash", "b.raw")]
+    # without a meter nothing is said, and the budget is the sources' used bytes -
+    # a source that cannot be read counts nothing (the plan says why, not this)
+    seen.clear()
+    assert mk.measure_sources(["/x/a.raw"], None, None) == ["man:/x/a.raw"]
+    assert seen == [("hash", "a.raw")]
+
+    class G:
+        @staticmethod
+        def part(n):
+            return (0x83, 712704, 13402110)
+    monkeypatch.setattr(mk.Geometry, "from_file", staticmethod(
+        lambda path: G() if path != "/x/none.raw" else (_ for _ in ()).throw(OSError(path))))
+    monkeypatch.setattr(mk, "_used_bytes_or_none", lambda path, off: {
+        "/x/a.raw": 3000, "/x/b.raw": None}[path] if off == 712704 * 512 else None)
+    assert mk.measure_total(["/x/a.raw", "/x/b.raw", "/x/none.raw"]) == 3000
+
+
 # ---- item 98: the three validator states the tool tells apart ----------------------------
 def test_bypass_state_tells_a_half_bypass_from_a_whole_one(mk, monkeypatch):
     """A tick already at bx lr whose grade restore is still live is 'half': the bypass

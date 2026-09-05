@@ -4166,6 +4166,16 @@ class MultibootPanel:
         #: ...and whether the last one FAILED, so the strip can say that
         #: instead of showing an empty bar with nothing beside it.
         self._plan_failed = False
+        #: ...and the size check that is ON THE WORKER right now (its plan
+        #: key), the tool's last meter line about it ``(fraction, stage)``,
+        #: and the strip's animation while it waits.  The strip shows it is
+        #: thinking rather than an empty bar: the compact plan hashes every
+        #: image the first time (David: the tick "took around 20-30 seconds
+        #: to compute so we should show the loading state in the size bar").
+        self._measuring = None
+        self._size_progress = None
+        self._size_anim_job = None
+        self._size_anim_phase = 0
         self._auto_plan = os.environ.get("PAD_MULTIBOOT_PLAN", "1") != "0" \
             and os.environ.get("PAD_MULTIBOOT_AUTO", "1") != "0"
         #: The two modals.  Their widgets are built on demand and bound to
@@ -4544,7 +4554,8 @@ class MultibootPanel:
         self._stopped = True
         for attr in ("_drain_job", "_play_job", "_pv_debounce_job",
                      "_probe_job", "_probe_slow_job", "_measure_job",
-                     "_sound_job", "_plan_job", "_select_job", "_black_job"):
+                     "_sound_job", "_plan_job", "_select_job", "_black_job",
+                     "_size_anim_job"):
             job = getattr(self, attr, None)
             if job is not None:
                 try:
@@ -5348,12 +5359,19 @@ class MultibootPanel:
             width = max(1, canvas.winfo_width())
             height = self.SIZE_BAR_H
             if not view or not view["known"]:
-                self._size_need.configure(text=self.SIZE_UNKNOWN,
-                                          foreground=th["gray"])
-                self._size_detail.configure(text=self._size_waiting(),
-                                            foreground=th["gray"])
+                state, text = self._size_state()
+                thinking = state == "measuring"
+                self._size_need.configure(
+                    text=self.SIZE_THINKING if thinking else self.SIZE_UNKNOWN,
+                    foreground=th["gray"])
+                self._size_detail.configure(text=text, foreground=th["gray"])
                 self._size_tip.text = self.SIZE_TIP
+                if thinking:
+                    self._draw_thinking(canvas, width, height, th)
+                else:
+                    self._stop_size_anim()
                 return
+            self._stop_size_anim()      # a number: nothing is thinking
             tone = th["error"] if view["over"] else th["fg"]
             self._size_need.configure(text=view["head"], foreground=tone)
             self._size_detail.configure(
@@ -5421,11 +5439,16 @@ class MultibootPanel:
                 canvas.create_line(ax, ay, bx, by, fill=color)
             k += step
 
-    def _size_waiting(self):
-        """The strip's line while there is no measurement: what it is waiting
-        for, or nothing at all when there is nothing to measure."""
+    #: The head while the strip is thinking: the answer is on its way.
+    SIZE_THINKING = "\u2026"
+
+    def _size_state(self):
+        """``(state, text)`` of a strip with no measurement: ``missing`` (an
+        image is not on this machine), ``measuring`` (the debounce is armed
+        or the check is on the worker - the strip shows it is thinking),
+        ``failed``, or ``idle`` (nothing to measure, nothing to say)."""
         if len(self._rows) < 1:
-            return ""
+            return "idle", ""
         # WHAT IT CANNOT MEASURE COMES FIRST.  A list with a missing .raw
         # still arms the debounce (the check is _plan_now's, a second later),
         # so asking about the job first would say "Measuring..." for ever
@@ -5434,18 +5457,91 @@ class MultibootPanel:
                    if not (r.path or "").strip()
                    or not os.path.isfile((r.path or "").strip().strip(chr(34)))]
         if missing:
-            return ("The images have to be on this machine to be measured."
-                    if len(missing) < len(self._rows) else "")
+            return "missing", ("The images have to be on this machine to be measured."
+                               if len(missing) < len(self._rows) else "")
         if self._plan_job is not None or self._plan_busy():
-            return "Measuring\u2026"
+            return "measuring", self._measuring_text()
         if self._plan_failed:
-            return "The size check failed - see the Log."
-        return ""
+            return "failed", "The size check failed - see the Log."
+        return "idle", ""
+
+    def _size_waiting(self):
+        """The strip's line while there is no measurement: what it is waiting
+        for, or nothing at all when there is nothing to measure."""
+        return self._size_state()[1]
+
+    def _measuring_text(self):
+        """'Measuring…' - and with the compact tick on, WHAT is being measured
+        and how far along it is.  The compact plan hashes every image the
+        first time it sees it (20-30 s for two on David's machine), and a
+        bar that says nothing for that long reads as broken."""
+        compact = bool(self._compact_var.get()) if hasattr(self, "_compact_var") else False
+        text = "Measuring what the images share\u2026" if compact else "Measuring\u2026"
+        prog = self._size_progress
+        if prog is not None and prog[0] > 0:
+            text += " %d%%" % int(prog[0] * 100)
+        return text
 
     def _plan_busy(self):
         """True while the size check itself is on the worker - what tells
         'nobody has measured this' from 'the answer is on its way'."""
-        return bool(self._pv_busy and self._plan_for != self._plan_key())
+        return self._measuring is not None and self._measuring == self._plan_key()
+
+    def size_measuring(self):
+        """The strip's thinking state - the seam the tests read: None when it
+        is not measuring, else ``{"text", "frac"}`` (``frac`` None until the
+        tool's meter has said how far along it is)."""
+        state, text = self._size_state()
+        if state != "measuring":
+            return None
+        prog = self._size_progress
+        return {"text": text, "frac": prog[0] if prog else None}
+
+    #: The thinking band: how often it moves, how far each move, and its
+    #: width as a share of the bar.
+    SIZE_ANIM_MS = 60
+    SIZE_ANIM_STEP = 5
+    SIZE_ANIM_SHARE = 6
+
+    def _draw_thinking(self, canvas, width, height, th):
+        """The strip while the answer is on its way.  With the tool's meter in
+        hand, a hatched band as far as it has got (hatched = provisional; the
+        bar it draws once it knows is solid); before that, a hatched band
+        sweeping across the trough, so a strip that says nothing for 30 s
+        never looks like one that has given up."""
+        prog = self._size_progress
+        if prog is not None and prog[0] > 0:
+            self._stop_size_anim()
+            self._hatch(canvas, 1, max(1.0, width * prog[0]) - 1, height, th["accent"])
+        else:
+            band = max(24, width // self.SIZE_ANIM_SHARE)
+            x0 = (self._size_anim_phase % (width + band)) - band
+            self._hatch(canvas, max(1, x0), min(width - 1, x0 + band), height,
+                        th["accent"])
+            if self._size_anim_job is None and not self._stopped:
+                try:
+                    self._size_anim_job = self._timer().after(
+                        self.SIZE_ANIM_MS, self._size_animate)
+                except tk.TclError:                     # pragma: no cover
+                    self._size_anim_job = None
+        canvas.create_rectangle(0, 0, width - 1, height - 1, outline=th["border"])
+
+    def _size_animate(self):
+        """One frame of the sweeping band; :meth:`_draw_size` re-arms it while
+        the strip is still thinking and drops it the moment it is not."""
+        self._size_anim_job = None
+        if self._stopped:
+            return
+        self._size_anim_phase = (self._size_anim_phase + self.SIZE_ANIM_STEP) % 100000
+        self._draw_size()
+
+    def _stop_size_anim(self):
+        job, self._size_anim_job = self._size_anim_job, None
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except (tk.TclError, ValueError):           # pragma: no cover
+                pass
 
     def _build_actions(self, parent, th):
         """THE ONE ACTION BAR - with the source row at the top, the only
@@ -7120,6 +7216,7 @@ class MultibootPanel:
         # The sentence stays blank until the person moves the list, which
         # is honest: nobody has measured this card in this session.
         self._cancel_plan()
+        self._draw_size()               # ...and the strip stops thinking with it
         # NO RENDER EITHER.  'NO TOOL RUNS' above is the whole point of this
         # method and the render broke it: with the auto-preview remembered
         # ON (its default), a restore was a `make` of the selector and a
@@ -7239,6 +7336,7 @@ class MultibootPanel:
         self._plan_info = None
         self._update_info = None
         self._plan_failed = False
+        self._size_progress = None
         self._draw_size()               # the stale number goes NOW, not later
         self._cancel_plan()
         if len(key[0]) < 1 or not self._auto_plan:
@@ -7294,7 +7392,19 @@ class MultibootPanel:
             elif label == DRY_RUN:
                 self._update_step(rc, text)
 
+        def tick(label, _done, _total, frac, what):
+            # The tool's own meter (the compact plan hashing an image): the
+            # strip shows how far along it is, and the Log never sees it.
+            if label != "plan" or key != self._plan_key():
+                return
+            self._size_progress = (max(0.0, min(1.0, float(frac))), what)
+            self._draw_size()
+
         def done(rc, failed, _texts):
+            if self._measuring == key:
+                self._measuring = None
+                self._size_progress = None
+                self._draw_size()       # nothing is thinking any more
             if rc != 0 and failed == "plan":
                 # NOT ON THE STATUS LINE.  Nobody asked for this run, so a
                 # failure of it must not take the line that is saying what
@@ -7304,7 +7414,7 @@ class MultibootPanel:
                 self._write("the size check failed (exit %d) - the sentence "
                             "beside the status line is left blank." % rc)
         if not self._run_commands(measure_commands(form, card), on_step=step,
-                                  on_done=done, preview=True):
+                                  on_done=done, preview=True, on_tick=tick):
             # The worker is busy.  Ask again in a moment rather than queue.
             try:
                 self._plan_job = self._timer().after(self.PLAN_RETRY_MS,
@@ -7312,6 +7422,8 @@ class MultibootPanel:
             except tk.TclError:                         # pragma: no cover
                 self._plan_job = None
             return False
+        self._measuring = key
+        self._draw_size()               # ...and thinking while it is on the worker
         return True
 
     #: ...and how long it waits before asking again when the worker was
@@ -10028,7 +10140,7 @@ class MultibootPanel:
             pass
 
     def _run_commands(self, cmds, on_step=None, on_done=None, quiet=(),
-                      preview=False):
+                      preview=False, on_tick=None):
         """Run ``[(label, argv), ...]`` in order on a worker, streaming every
         line into the pane; stop at the first failure.  An *argv* may be a
         callable ``fn(texts)`` - evaluated on the worker just before its
@@ -10051,6 +10163,12 @@ class MultibootPanel:
         do not go into the pane while it succeeds: the load's JSON report is
         for the form, and the table beside it is what a person reads.  A
         quiet step that FAILS prints everything it said.
+
+        A run that writes drives the footer's meter with the tool's progress
+        lines.  A ``preview`` run has no footer; with ``on_tick(label, done,
+        total, fraction, what)`` its progress lines go there instead (the
+        size strip, for the compact plan's hashing), and without it they are
+        ordinary output.
         """
         if preview:
             # A render never queues behind anything: it is cheap, and the
@@ -10070,10 +10188,11 @@ class MultibootPanel:
                 self._pending_run = (cmds, on_step, on_done, frozenset(quiet))
                 self._drain()       # the render's finish starts it
                 return True
-        self._start_worker(cmds, on_step, on_done, frozenset(quiet), preview)
+        self._start_worker(cmds, on_step, on_done, frozenset(quiet), preview,
+                           on_tick)
         return True
 
-    def _start_worker(self, cmds, on_step, on_done, quiet, preview):
+    def _start_worker(self, cmds, on_step, on_done, quiet, preview, on_tick=None):
         """The worker itself - see :meth:`_run_commands`, which owns the
         guards.  Split out so a queued action can be started from the
         render's own finish without going through them again."""
@@ -10124,6 +10243,12 @@ class MultibootPanel:
                             # record of anything, and putting it in the Log
                             # would bury the lines that are.
                             self._ui(lambda t=tick: self._progress_tick(*t))
+                            continue
+                        if tick is not None and on_tick is not None:
+                            # A background run's meter (the size check's
+                            # compact plan hashing an image) goes to whoever
+                            # asked for it - the size strip - and nowhere else.
+                            self._ui(lambda lab=label, t=tick: on_tick(lab, *t))
                             continue
                         lines.append(line)
                         if echo:

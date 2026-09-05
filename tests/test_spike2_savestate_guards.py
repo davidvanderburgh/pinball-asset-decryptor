@@ -261,7 +261,13 @@ def test_criu_is_probed_but_never_handed_to_apt():
     # it, and telling a working machine its setup failed is the whole fault
     # this pass exists to stop.
     assert "extras_criu=" in fix
-    assert line_of(fix, 'echo "extras_criu=') < line_of(fix, 'echo "result=ok"'), (
+    # Asked of the FULL run, which is the one that has a criu step.  The file
+    # also carries `--packages`, a step-one-only mode the prerequisite
+    # installers call (PAD-104) that exits with its own `result=` well before
+    # any of this - so the ordering is checked from step 2 down, where the
+    # emulator setup proper begins.
+    full = fix[fix.index("# ---- 2."):]
+    assert line_of(full, 'echo "extras_criu=') < line_of(full, 'echo "result=ok"'), (
         "the criu outcome is reported before the setup's own verdict, so the "
         "app reads the setup's result= last")
 

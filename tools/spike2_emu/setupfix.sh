@@ -31,6 +31,36 @@
 #     /etc/wsl.conf that already has an opinion about systemd.
 #
 # Output is plain lines for the log pane, then a final `result=` line.
+#
+# `--packages [pkg ...]`: STEP 1 ONLY, and it exists so that the PREREQUISITE
+# INSTALLERS can stop carrying their own idea of how to get a package onto a
+# distro. Both of them run `apt-get install`, and when that fails both report
+# a red MISSING and nothing else - which is all a Windows tester was ever told
+# in September 2026: "the qemu-user-static is missing" (PAD-104). Everything
+# that turns that sentence into a fixed machine is already in this file: the
+# index refresh, the `universe` repair, one package at a time so one failure
+# cannot take the others down, the fetch of the one package that Depends on
+# nothing from a release that publishes it, and an explanation built from
+# facts this run established. So the installers hand this the packages
+# instead, and what they gain is not a better message - it is the repair.
+#
+# WITH A LIST, EXACTLY THAT LIST; without one, whatever the emulator is
+# missing. The list matters: a JJP user whose `partclone` would not install
+# must not have 133 MB of ARM emulator installed on his machine as a side
+# effect of being helped. The `universe` question is asked of the MACHINE
+# either way (setupcheck probes ffmpeg and qemu-user-static, both of which
+# Ubuntu keeps in universe), so that repair still fires for a caller whose own
+# package is in `main` and was only ever a casualty of the component being off.
+#
+# The other three steps are NOT in this mode. Registering the kernel handler,
+# writing /etc/wsl.conf and building criu are the Emulate tab's own button,
+# behind its own consent dialog, and a prerequisites run that quietly did them
+# would be doing more than its name says.
+packages_only=0
+if [ "${1:-}" = --packages ]; then
+    packages_only=1
+    shift
+fi
 
 . "$(dirname "$0")/padpath.sh"
 
@@ -63,6 +93,16 @@ facts=$(_facts)
 # WHICH packages is setupcheck.sh's answer, not a second list here: it probes
 # the TOOLS, which is the fact, and knows how apt spells each one.
 pkgs=$(_get "$facts" need)
+
+# ...unless a caller named them. Only `--packages` can, and only a
+# prerequisites installer calls it that way: it already knows which of ITS
+# packages apt would not install, and asking for those is how this helps a
+# machine without also installing an emulator on it. Everything below is
+# unchanged, because none of it was ever specific to the emulator's four - it
+# is how you get ANY package onto an Ubuntu that is being difficult.
+if [ "$packages_only" = 1 ] && [ "$#" -gt 0 ]; then
+    pkgs="$*"
+fi
 
 #: Run a command, show its output indented, and RETURN ITS STATUS - which a
 #: bare `cmd | sed` does not: the status of a pipeline is the status of its
@@ -323,6 +363,31 @@ if [ -n "$pkgs" ]; then
     facts=$(_facts)
 else
     echo "every package the emulator needs is already installed"
+fi
+
+# ...and for a prerequisites run that is the whole job.
+#
+# TWO VERDICTS, because the two callers asked two questions. Given a LIST, the
+# question was "did these install", and reaching this line at all means they
+# did - the block above exits non-zero on anything it could not get. Given no
+# list, the question was the emulator's, and that is answered the way the
+# verdict at the bottom of this file answers it: by re-probing `need` rather
+# than by trusting the steps that were taken, because a package that installs
+# and still does not answer its probe is not an installed package, and this is
+# the only line that would ever notice.
+if [ "$packages_only" = 1 ]; then
+    if [ "$#" -gt 0 ]; then
+        echo "result=ok"
+        exit 0
+    fi
+    facts=$(_facts)
+    if [ -z "$(_get "$facts" need)" ]; then
+        echo "result=ok"
+        exit 0
+    fi
+    echo "still missing: $(_get "$facts" need)"
+    echo "result=incomplete"
+    exit 1
 fi
 
 # ---- 2. the kernel's ARM handler ------------------------------------------

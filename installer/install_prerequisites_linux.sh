@@ -236,6 +236,54 @@ if ! $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     done
 fi
 
+# --- ...and what to do about one apt would not install ------------------
+# A red MISSING in the summary used to be the end of it, on both installers,
+# and that is not even a diagnosis: apt refusing a package because Ubuntu keeps
+# it in a component this distro has switched off is a different fault from a
+# download that failed, it is knowable, and only one of the two is repairable.
+#
+# ALL OF THAT ALREADY EXISTS, in tools/spike2_emu/setupfix.sh - the script the
+# Emulate tab's "Set up emulator..." button runs.  It refreshes the index,
+# turns `universe` on when that is why, installs one at a time, fetches the one
+# package that depends on nothing from a release that publishes it, and says
+# which of those it was when none of them worked.  Handing it the packages is
+# how this script gets all of that without keeping a second, weaker copy of it
+# (PAD-104); `--packages` is step one only, so nothing here registers a kernel
+# handler or builds anything.
+#
+# NAMED, NOT IMPLIED: only the packages that actually failed, so a Spooky user
+# is helped without an ARM emulator arriving on his machine as a side effect.
+still=
+for p in "${all_packages[@]}"; do
+    dpkg -s "$p" >/dev/null 2>&1 || still="$still $p"
+done
+if [ -n "$still" ]; then
+    rig="$SCRIPT_DIR/../tools/spike2_emu"
+    [ -f "$rig/setupfix.sh" ] || rig="$SCRIPT_DIR/tools/spike2_emu"
+    echo ""
+    echo "apt could not install:$still"
+    if [ -f "$rig/setupfix.sh" ]; then
+        echo ""
+        echo "There is more the app can do about that than apt can:"
+        echo "  * refresh the package index and try again, one at a time"
+        echo "  * if this Ubuntu has its 'universe' component switched off"
+        echo "    (where qemu-user-static and ffmpeg live), turn it on"
+        echo "  * for a package this release does not publish at all, fetch"
+        echo "    that one file from Ubuntu 24.04 - only ever a package that"
+        echo "    depends on nothing, which is checked before it is installed"
+        echo "  * and if none of that works, say which of those it was"
+        echo ""
+        read -rp "Try that now? [Y/n] " try
+        case "${try,,}" in
+            ''|y|yes) $SUDO bash "$rig/setupfix.sh" --packages $still || true ;;
+            *)        echo "Skipped." ;;
+        esac
+    else
+        echo "Run this to see apt's own reason:"
+        echo "    sudo apt-get install$still"
+    fi
+fi
+
 # --- Custom post-install steps (downloads that aren't in apt) -----------
 install_gdre_tools() {
     # GDRE Tools (Godot RE Tools) — required for BOF's PCK repack.
@@ -267,13 +315,11 @@ echo ""
 echo "============================================================"
 echo "  Prerequisites Summary"
 echo "============================================================"
-still_missing=()
 for p in "${all_packages[@]}"; do
     if dpkg -s "$p" >/dev/null 2>&1; then
         printf "  %-30s OK\n" "$p"
     else
         printf "  %-30s MISSING\n" "$p"
-        still_missing+=("$p")
     fi
 done
 for p in "${all_pip_packages[@]}"; do
@@ -288,30 +334,9 @@ for p in "${all_pip_packages[@]}"; do
         printf "  %-30s MISSING (pip)\n" "$p"
     fi
 done
-# A PACKAGE BEING MISSING AND APT BEING ABLE TO GET IT ARE TWO FACTS, and the
-# second one is repairable.  Ubuntu keeps qemu-user-static in its `universe`
-# component; a distro with universe switched off answers "has no installation
-# candidate" for it while gcc-arm-linux-gnueabihf beside it in `main` installs
-# fine, so the run above ends one package short with no explanation of which
-# kind of short it is.
-#
-# CLAIMED ONLY WITH EVIDENCE, from apt's own downloaded indexes rather than
-# from the sources config: a distro that has never run `apt-get update` has no
-# index at all, `indextargets` prints nothing, and reading that as "universe is
-# off" would accuse a healthy machine (PAD-42).  The `apt-get update` above is
-# what makes the answer real.  Ubuntu only - on Debian that package is in
-# `main` and an unavailable one means something else entirely.
-if [ "${#still_missing[@]}" -gt 0 ]; then
-    comps=$(apt-get indextargets --format '$(COMPONENT)' 2>/dev/null | sort -u)
-    if [ -n "$comps" ] && grep -qs '^ID=ubuntu' /etc/os-release &&
-       ! printf '%s\n' "$comps" | grep -qx universe; then
-        echo ""
-        echo "This Ubuntu has its 'universe' component switched off, and that"
-        echo "is where qemu-user-static lives.  Turn it on and re-run this:"
-        echo ""
-        echo "    sudo add-apt-repository -y universe"
-    fi
-fi
+# Anything still MISSING here has already been past the repair step above,
+# which is where the explanation lives - the reason is not repeated as a guess
+# down here, where nothing has been checked.
 
 echo ""
 echo "Done.  Launch the app from the AppImage or 'python3 -m pinball_decryptor'."

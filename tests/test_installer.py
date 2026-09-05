@@ -42,6 +42,7 @@ have caught both shipped bugs.
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -613,6 +614,11 @@ def test_linux_installer_one_bad_package_does_not_block_the_others():
     install = src[src.index("# --- Install ---"):
                   src.index("# --- Custom post-install")]
     summary = src[src.index("# --- Summary ---"):]
+    # The one line a test cannot answer, answered — the same substitution
+    # _run_linux_picker makes, and for the same reason: the script arrives on
+    # stdin, so a `read` left in it would eat its own next line.
+    install = re.sub(r'(?m)^\s*read -rp "Try that now.*$', 'try=y', install)
+    assert "try=y" in install, "the repair prompt moved; this test cannot answer it"
     harness = r"""
 set -euo pipefail
 T=$(mktemp -d) || exit 1
@@ -638,13 +644,21 @@ chmod +x "$T/apt-get" "$T/dpkg"
 export PAD_INSTALLED="$T/installed"
 : > "$PAD_INSTALLED"
 export PATH="$T:$PATH"
+# A rig laid out the way a source checkout has it, next to installer/.
+mkdir -p "$T/installer" "$T/tools/spike2_emu"
+cat > "$T/tools/spike2_emu/setupfix.sh" <<'FIX'
+#!/bin/sh
+echo "RIGCALL $*" >> "$PAD_INSTALLED.rig"
+FIX
+SCRIPT_DIR="$T/installer"
 SUDO=""
 all_packages=(qemu-user-static gcc-arm-linux-gnueabihf e2fsprogs ffmpeg)
 all_pip_packages=()
 """
+    tail = '\necho "--- rig ---"; cat "$PAD_INSTALLED.rig" 2>/dev/null\n'
     r = subprocess.run(
         ["bash", "-s"],
-        input=(harness + install + summary).encode("utf-8"),
+        input=(harness + install + summary + tail).encode("utf-8"),
         capture_output=True, timeout=180)
     said = r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
     assert r.returncode == 0, (
@@ -657,6 +671,190 @@ all_pip_packages=()
             f"has no version of:\n{said}")
     # ...and the one it cannot is named rather than swallowed.
     assert re.search(r"^\s+qemu-user-static\s+MISSING$", said, re.M), said
+    # ...and handed to the repair the app already owns, with ONLY the package
+    # that failed - a Spooky user must not get an ARM emulator installed as a
+    # side effect of being helped.
+    rig = said.split("--- rig ---", 1)[-1]
+    assert "RIGCALL --packages qemu-user-static" in rig, (
+        "apt gave up and nothing else was tried; setupfix.sh --packages is "
+        f"where the universe repair and the cross-release fetch live:\n{said}")
+    for pkg in ("gcc-arm-linux-gnueabihf", "e2fsprogs", "ffmpeg"):
+        assert pkg not in rig, (
+            f"{pkg} installed fine and was still handed to the repair:\n{rig}")
+
+
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell not available")
+def test_windows_installer_hands_a_failed_package_to_the_rigs_repair(tmp_path):
+    r"""★ PAD-104, the reporter's own platform.
+
+    "I installed everything but the qemu-user-static is missing" is the whole
+    of what this installer told a Windows user, because a WSL package that apt
+    would not install got `Write-FAIL` and nothing else — one red word in a
+    summary, no reason, and no route.
+
+    The route existed the entire time, in tools\spike2_emu\setupfix.sh: the
+    index refresh, the `universe` repair (Ubuntu keeps qemu-user-static AND
+    ffmpeg there, so a distro with that component off loses exactly the two
+    packages the Emulate tab cannot start without), one package at a time, and
+    the cross-release fetch of the one .deb that depends on nothing.  This is
+    the test that the installer reaches it.
+
+    Runs the real functions against a fake wsl.exe rather than checking the
+    file for the right words, because the next version of this bug will not be
+    spelled the same way.  The fake is laid out like a source checkout so
+    Get-RigSetupFix's own path logic is under test too.
+    """
+    ps1 = PS1.read_text(encoding="utf-8")
+    block = ps1[ps1.index("function Get-RigSetupFix"):
+                ps1.index("# 3. WSL-side packages (apt)")]
+
+    (tmp_path / "installer").mkdir()
+    (tmp_path / "tools" / "spike2_emu").mkdir(parents=True)
+    (tmp_path / "tools" / "spike2_emu" / "setupfix.sh").write_text("#!/bin/bash\n")
+    (tmp_path / "installer" / "block.ps1").write_text(block, encoding="utf-8")
+
+    fake = tmp_path / "fakewsl"
+    fake.mkdir()
+    (fake / "fakewsl.py").write_text(
+        "import sys, os\n"
+        "a = sys.argv[1:]\n"
+        "while a and a[0] in ('-u', 'root', '--'):\n"
+        "    a.pop(0)\n"
+        "if a and a[0] == 'wslpath':\n"
+        "    print('/mnt/c/rig/setupfix.sh')\n"
+        "elif a and a[0] == 'bash':\n"
+        "    d = os.path.dirname(os.path.abspath(__file__))\n"
+        "    open(os.path.join(d, 'argv.txt'), 'w').write(' '.join(a))\n"
+        "    print('result=ok')\n", encoding="utf-8")
+    (fake / "wsl.cmd").write_text(
+        '@echo off\r\n"%s" "%%~dp0fakewsl.py" %%*\r\n' % sys.executable,
+        encoding="ascii")
+
+    harness = r"""
+$ErrorActionPreference = "Stop"
+$env:PATH = "{fake};" + $env:PATH
+$script:results = @()
+function Write-Step($msg) {{ Write-Host "=== $msg ===" }}
+# qemu comes back after the repair; the compiler does not.
+function Test-WslPkg($p)  {{ return ($p.label -eq "qemu-user-static") }}
+. "{block}"
+$failed = @(
+    @{{ label="qemu-user-static"; pkg="qemu-user-static"; probe="qemu-arm-static" }},
+    @{{ label="gcc + libc6-dev";  pkg="gcc libc6-dev";    probe="gcc" }}
+)
+foreach ($p in $failed) {{
+    $script:results += [PSCustomObject]@{{Name=$p.label; Status="Missing"}}
+}}
+Repair-WslPackages $failed
+Write-Host "--- results ---"
+$script:results | ForEach-Object {{ "{{0}}={{1}}" -f $_.Name, $_.Status }}
+""".format(fake=str(fake).replace("\\", "\\\\"),
+           block=str(tmp_path / "installer" / "block.ps1").replace("\\", "\\\\"))
+    harness_file = tmp_path / "harness.ps1"
+    harness_file.write_text(harness, encoding="utf-8")
+
+    r = subprocess.run(
+        [_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-File", str(harness_file)],
+        input=b"\n", capture_output=True, timeout=180)
+    said = r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+
+    # It reached the rig, with the apt NAMES (not the labels: "gcc +
+    # libc6-dev" is one line here and two packages to apt)...
+    argv = (fake / "argv.txt")
+    assert argv.is_file(), (
+        "a WSL package apt would not install is still a dead end — "
+        f"setupfix.sh was never run:\n{said}\n{r.stderr.decode('utf-8', 'replace')}")
+    handed = argv.read_text()
+    assert "--packages" in handed, handed
+    for name in ("qemu-user-static", "gcc", "libc6-dev"):
+        assert name in handed, handed
+
+    # ...and the summary is re-probed afterwards rather than left at the word
+    # the first attempt wrote, which is the whole point of running it.
+    assert "qemu-user-static=Installed" in said, said
+    assert "gcc + libc6-dev=Missing" in said, said
+
+
+def test_setupfix_packages_mode_stops_before_it_changes_the_machine():
+    """`--packages` is step ONE of setupfix.sh and must stay that way.
+
+    Both prerequisite installers now call it when apt will not install
+    something (PAD-104).  Steps 2-4 of that script register the kernel's ARM
+    handler, append `[boot] systemd=true` to /etc/wsl.conf and build criu from
+    source over several minutes — all of them the Emulate tab's own button,
+    behind its own consent dialog.  A prerequisites run that quietly did them
+    would be doing more than its name says, so the early exit has to sit above
+    step 2 and the caller has to be able to name its own packages."""
+    fix = (REPO / "tools" / "spike2_emu" / "setupfix.sh").read_text(
+        encoding="utf-8")
+    assert "--packages" in fix, "setupfix.sh lost the mode both installers call"
+    stop = fix.rindex('if [ "$packages_only" = 1 ]; then')
+    assert stop < fix.index("# ---- 2."), (
+        "setupfix.sh --packages now runs past the packages: a prerequisites "
+        "run would register a binfmt handler / write /etc/wsl.conf / build "
+        "criu without ever saying so.")
+    # An explicit list, so helping a JJP user does not install an emulator.
+    assert re.search(r'packages_only.*=.*1.*\n.*"\$#".*-gt.*0', fix) or \
+        re.search(r'\[ "\$#" -gt 0 \]', fix), (
+        "setupfix.sh --packages no longer accepts the caller's own package "
+        "list, so an installer can only ask for the emulator's four")
+
+
+def test_both_installers_ship_beside_the_repair_they_call():
+    """The repair has to BE there, on both platforms, or it is not a repair.
+
+    Windows: pinball_decryptor.iss puts the rig at {app}\\tools\\spike2_emu and
+    install_prerequisites.ps1 at {app}\\, which is the relative path
+    Get-RigSetupFix walks.
+
+    Linux: the AppImage never carried install_prerequisites_linux.sh at all,
+    so the gear menu's "Install Prerequisites" answered "Could not locate
+    install_prerequisites_linux.sh" and the ONE automated way to install the
+    emulator's packages on Linux was reachable only from a git checkout
+    (PAD-104).  It ships in `installer/`, which is both where app.py looks and
+    where ../tools/spike2_emu lands it on top of the rig."""
+    iss = ISS.read_text(encoding="utf-8", errors="replace")
+    assert re.search(r'DestDir:\s*"\{app\}\\tools\\spike2_emu"', iss), (
+        "the Windows installer no longer ships the rig beside "
+        "install_prerequisites.ps1, so its apt repair cannot be found")
+
+    linux_build = (INSTALLER / "build_linux.sh").read_text(encoding="utf-8")
+    assert "install_prerequisites_linux.sh:installer" in linux_build, (
+        "the AppImage does not carry the prerequisite installer, so Install "
+        "Prerequisites cannot run on a packaged Linux install")
+    assert "install_gdre.sh:installer" in linux_build, (
+        "install_prerequisites_linux.sh runs install_gdre.sh by path; without "
+        "it the BOF step dies in a packaged install")
+    assert "tools/spike2_emu:tools/spike2_emu" in linux_build, (
+        "the AppImage no longer carries the rig the installer's repair calls")
+
+    app = (REPO / "pinball_decryptor" / "app.py").read_text(encoding="utf-8")
+    search = app.split("def _find_prereqs_script_linux",
+                       1)[1].split("\n    def ", 1)[0]
+    assert '"installer", "install_prerequisites_linux.sh"' in search, (
+        "app.py no longer looks in installer/, which is where the AppImage "
+        "puts it")
+
+
+def test_wsl_probe_does_not_traverse_the_windows_path():
+    """A WSL probe must be a shell builtin, not `wsl -- which <prog>`.
+
+    `wsl -- <prog>` runs with no shell, so it searches WSL's appended WINDOWS
+    PATH as well — the traversal that made the GDRE probe report a tool
+    missing on a machine that had it — and `which` is a program (debianutils)
+    that a slim distro image need not carry at all, on which EVERY package
+    here would read as missing.  The rig answers this question with
+    `command -v` (setupcheck.sh's _have); so does the installer now, so the
+    two cannot disagree about what is installed."""
+    ps1 = PS1.read_text(encoding="utf-8")
+    body = ps1.split("function Test-WslPkg", 1)[1].split("\n        }", 1)[0]
+    assert "command -v" in body, (
+        "Test-WslPkg no longer probes with `command -v`")
+    assert not re.search(r"wsl[^\n]*--\s+which\b", body), (
+        "Test-WslPkg is back to `wsl -- which`, which searches the Windows "
+        f"PATH too:\n{body}")
 
 
 def test_both_installers_offer_every_emulator_package_the_tab_names():

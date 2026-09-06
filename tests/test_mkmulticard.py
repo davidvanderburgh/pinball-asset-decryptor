@@ -659,11 +659,36 @@ def test_the_stock_card_validator_is_located_and_reported_armed(mk):
         assert valpatch.find_validation_exec(elf) is not None
         assert mk.bypass_state(elf) == "armed"
         assert mk.tree_sidx(r, 2)[0] == "spk/index/turtles_pro-1_59_0.sidx"
-        state, writes, notes = mk.compute_bypass_writes(r, 2)
+        state, writes, notes, digests = mk.compute_bypass_writes(r, 2)
         # bx lr on the tick + mov r0,#0 on the grade restore (item 98) + the two .sidx digests
         assert state == "armed" and sum(len(b) for (_d, b) in writes) == 4 + 4 + 20 + 16, notes
         assert all(st * 512 <= d < (st + cnt) * 512 for (d, _b) in writes), "every write lands inside p3"
+        # the digests the record will hold are the bytes those raw writes LEAVE on the card:
+        # reconstruct both files through the same extents the writes were mapped through
+        assert digests["game_path"] == gpath and digests["sidx_path"] == "spk/index/turtles_pro-1_59_0.sidx"
+        _s2, snode = mk.tree_sidx(r, 2)
+        assert digests["game"] == hashlib.sha256(_after_disk_writes(r, gnode, writes)).hexdigest()
+        assert digests["sidx"] == hashlib.sha256(_after_disk_writes(r, snode, writes)).hexdigest()
+        assert digests["game"] != hashlib.sha256(elf).hexdigest(), "the record must not hold the source's game"
     assert mk.tree_state(STOCK_CARD, G and mk.Part(3, 0x83, st, cnt, STOCK_CARD, st, None), None)[0] == "armed"
+
+
+def _after_disk_writes(reader, node, writes):
+    """A file's bytes with every raw (disk offset, bytes) write that lands inside it applied -
+    what the card holds once bypass_card has written them.  The extent map is the reader's own,
+    so this is an independent path to the digests compute_bypass_writes reports."""
+    data = bytearray(reader.read_file_bytes(node))
+    spans, off = [], 0
+    for disk, n in reader.disk_ranges(node, 0, len(data)):
+        spans.append((disk, disk + n, off))
+        off += n
+    for d, b in writes:
+        for ds, de, fo in spans:
+            if ds <= d < de:
+                assert d + len(b) <= de, "a write straddles two extents"
+                data[fo + (d - ds):fo + (d - ds) + len(b)] = b
+                break
+    return bytes(data)
 
 
 def test_default_title_strips_the_card_suffixes(mk):

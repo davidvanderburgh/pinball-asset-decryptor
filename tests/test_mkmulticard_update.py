@@ -224,6 +224,71 @@ def test_restore_changes_names_the_patched_game_and_sidx_only(mk):
     assert mk.restore_changes(None, tree, [], ("absent", "t", "t/game")) == []
 
 
+# ---- PAD-106: what a RAW bypass wrote belongs in the record --------------------------
+def _rec_with(ts, *indices):
+    tree = ts.TreeManifest({"t/game": ts.FileRec("a" * 64, 100, 0o755, 0, 0, 1),
+                            "spk/index/t.sidx": ts.FileRec("b" * 64, 20, 0o644, 0, 0, 1)})
+    return ts.CardTrees([ts.ImageTrees(i, "/dev/mmcblk0p%d" % (3 if i == 0 else 7), "", tree) for i in indices],
+                        layout="parts", version="1.2")
+
+
+def test_record_bypass_digests_folds_what_the_raw_bypass_wrote_into_the_record(mk):
+    """The build and `bypass --card` patch the game and its .sidx with a raw write after the
+    record was taken off the SOURCE; without this the record still names the source's bytes and
+    verify reports exactly those two files as differing (Peter's TMNT card)."""
+    ts = mk._treesync()
+    rec = _rec_with(ts, 0, 1)
+    dig = {"game_path": "t/game", "sidx_path": "spk/index/t.sidx", "game": "d" * 64, "sidx": "e" * 64}
+    assert mk.record_bypass_digests(rec, {0: dict(dig), 1: dict(dig)}) == [0, 1]
+    assert rec.image(0).bypass == dig and rec.image(1).bypass == dig
+    # the record survives a round trip through trees.json, which is where verify reads it
+    back = ts.CardTrees.from_json(rec.to_json())
+    assert back.image(1).bypass == dig
+    # idempotent: the same digests again change nothing (so nothing is rewritten to p2)
+    assert mk.record_bypass_digests(rec, {0: dict(dig), 1: dict(dig)}) == []
+    # a tree with no .sidx to refresh: the game's digest lands, no None is written over an
+    # existing path, and an index the record does not hold is skipped
+    rec2 = _rec_with(ts, 0)
+    assert mk.record_bypass_digests(rec2, {0: {"game_path": "t/game", "sidx_path": None, "game": "f" * 64},
+                                           4: dict(dig)}) == [0]
+    assert rec2.image(0).bypass == {"game_path": "t/game", "game": "f" * 64}
+    assert mk.record_bypass_digests(rec2, {}) == [] and mk.record_bypass_digests(None, {0: dig}) == []
+
+
+def test_bypass_explains_only_the_bypasss_own_pair_and_only_when_the_card_agrees(mk, monkeypatch):
+    """A card built before the digests were recorded still verifies: the game and its .sidx
+    differ from the source because THIS tool patched them.  It is allowed only when the pair on
+    the card is exactly what the bypass produces - a bypassed game whose .sidx already matches
+    it - and never for any other file, nor when the record carries its own digest."""
+    monkeypatch.setattr(mk, "tree_game", lambda r, root: ("t", "t/game", 11, {"ino": 11}))
+    monkeypatch.setattr(mk, "tree_sidx", lambda r, root: ("spk/index/t.sidx", {"ino": 12}))
+
+    class R:
+        def read_file_bytes(self, node):
+            return b"bytes of %d" % node["ino"]
+
+    settled = ("bypassed", None, None, [])
+    monkeypatch.setattr(mk, "bypass_tree_bytes", lambda elf, sdata, gpath, title: settled)
+    bad = ["t/game", "spk/index/t.sidx", "t/other"]
+    assert mk.bypass_explains(R(), 2, bad, {}) == {"t/game", "spk/index/t.sidx"}
+    assert mk.bypass_explains(R(), 2, [], {}) == set()
+    # the record has the bypass's own digest for the game: that file was re-hashed against it
+    # already, so a difference is a real one
+    assert mk.bypass_explains(R(), 2, bad, {"game": "d" * 64}) == {"spk/index/t.sidx"}
+    assert mk.bypass_explains(R(), 2, bad, {"game": "d" * 64, "sidx": "e" * 64}) == set()
+    # a game that is still armed, or a .sidx that does not match the game on the card, explains
+    # nothing at all - those are the differences verify must keep reporting
+    for verdict in (("armed", None, None, []), ("bypassed", b"new elf", None, []),
+                    ("bypassed", None, b"new sidx", []), ("absent", None, None, [])):
+        monkeypatch.setattr(mk, "bypass_tree_bytes", lambda e, s, g, t, v=verdict: v)
+        assert mk.bypass_explains(R(), 2, bad, {}) == set()
+
+    def boom(*_a):
+        raise ValueError("not an ELF")
+    monkeypatch.setattr(mk, "bypass_tree_bytes", boom)
+    assert mk.bypass_explains(R(), 2, bad, {}) == set()
+
+
 def test_update_refuses_bypass_and_restore_together(mk, tmp_path):
     card = tmp_path / "x.raw"
     card.write_bytes(bytes(1024))

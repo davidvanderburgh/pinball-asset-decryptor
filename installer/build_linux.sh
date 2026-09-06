@@ -60,7 +60,8 @@ pyinstaller \
     `# and the GL host have nothing Windows-specific in them, and what does -` \
     `# the playfield as a Windows process, the audio bridge - are WSL` \
     `# workarounds the Linux path skips.` \
-    --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \    `# THE PREREQUISITE INSTALLER ITSELF, which this AppImage has never` \
+    --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \
+    `# THE PREREQUISITE INSTALLER ITSELF, which this AppImage has never` \
     `# carried. The gear menu's "Install Prerequisites" looks for it beside` \
     `# the package (app.py::_find_prereqs_script_linux) and an AppImage user` \
     `# therefore got "Could not locate install_prerequisites_linux.sh" - so on` \

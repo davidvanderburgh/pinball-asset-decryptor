@@ -1078,16 +1078,212 @@ int shim_usleep(unsigned int us)
     return real_usleep(us);
 }
 
+/* ★ A printf GIVEN TEXT WHERE A %s POINTER BELONGS NO LONGER KILLS THE RUN
+ * (sword_of_rage_le 1.18.0, David's sweep, 2026-09-06).
+ *
+ * The crash: SIGSEGV in strlen() under libc's vfprintf(), r0 = 0x2e312f31 -
+ * the BYTES "1/1." - the game handed a %s conversion four characters of text
+ * where a pointer to text belonged, about 40 s in, right after the node bus
+ * address scan ended and the audio restarted. Two 2-minute re-runs did not
+ * repeat it: the argument is garbage (uninitialised, or a stale stack slot),
+ * and garbage USUALLY points at something readable, so the same printf
+ * usually prints junk and lives. The machine rolls the same dice.
+ *
+ * So the printf family is interposed here and every %s argument is checked
+ * against readable memory before the real function runs. A bad one REFUSES
+ * the whole message and logs the format string, the pointer's bytes as text
+ * and the caller (lr) - which is also the evidence this crash needed, and
+ * which no stack walk under vfprintf's 1200-byte frame could supply. All
+ * else passes through untouched: a form this walker does not speak
+ * (positional %1$s, %n, wide %ls) passes too, exactly as before. Refusing is
+ * only ever done on a pointer PROVEN unreadable. PAD_PRINTF_GUARD=0 = off. */
+extern void *stdout;
+
+static int pf_guard_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("PAD_PRINTF_GUARD");
+        on = !(e && e[0] == '0' && !e[1]);
+    }
+    return on;
+}
+
+/* Walk the conversions, consuming a COPY of the arguments by type, so the %s
+ * pointers can be inspected without disturbing the real call. 1 = every %s
+ * readable, 0 = one is not (*bad = it, spec = its conversion text), -1 = a
+ * form not walked (the caller trusts the format). ARM EABI: int and long are
+ * 32 bits, long long and double 64 and 8-aligned - va_arg does the aligning,
+ * which is why the walk must consume every argument, not only the strings. */
+static int pf_args_ok(const char *fmt, va_list ap, unsigned long *bad,
+                      char *spec, int specsz)
+{
+    va_list cp;
+    const char *p;
+    int r = 1;
+    va_copy(cp, ap);
+    for (p = fmt; *p && r == 1; p++) {
+        const char *start;
+        int ll = 0, ldbl = 0, lflag = 0, done = 0;
+        if (*p != '%') continue;
+        start = p++;
+        if (*p == '%') continue;
+        while (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0'
+               || *p == '\'') p++;
+        if (*p == '*') { (void)va_arg(cp, int); p++; }
+        else while (*p >= '0' && *p <= '9') p++;
+        if (*p == '$') { r = -1; break; }
+        if (*p == '.') {
+            p++;
+            if (*p == '*') { (void)va_arg(cp, int); p++; }
+            else while (*p >= '0' && *p <= '9') p++;
+        }
+        while (!done) {
+            switch (*p) {
+            case 'h': p++; break;
+            case 'l': if (++lflag >= 2) ll = 1; p++; break;
+            case 'q': case 'j': ll = 1; p++; break;
+            case 'L': ldbl = 1; p++; break;
+            case 'z': case 't': p++; break;
+            default: done = 1;
+            }
+        }
+        switch (*p) {
+        case 'd': case 'i': case 'u': case 'x': case 'X': case 'o': case 'c':
+            if (ll) (void)va_arg(cp, long long); else (void)va_arg(cp, int);
+            break;
+        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G':
+        case 'a': case 'A':
+            if (ldbl) (void)va_arg(cp, long double); else (void)va_arg(cp, double);
+            break;
+        case 'p': (void)va_arg(cp, void *); break;
+        case 'm': break;                       /* strerror(errno): no argument */
+        case 's': {
+            const char *str = va_arg(cp, const char *);
+            if (lflag) { r = -1; break; }      /* %ls is wide: not walked */
+            if (str && !addr_readable(str)) {
+                int k = 0;
+                *bad = (unsigned long)str;
+                while (start + k <= p && k < specsz - 1) { spec[k] = start[k]; k++; }
+                spec[k] = 0;
+                r = 0;
+            }
+            break; }
+        default: r = -1; break;   /* %n, %C, %S, a dangling % - not walked */
+        }
+        if (!*p) break;
+    }
+    va_end(cp);
+    return r;
+}
+
+/* Three lines per format, then silence, so a message the game raises every
+ * frame cannot flood the log; the last line of the three says so. */
+static void pf_refuse(const char *who, const char *fmt, unsigned long bad,
+                      const char *spec, unsigned long ra)
+{
+    static const char *seen[24];
+    static int hits[24], nseen;
+    char b[448], t[5];
+    int i, k = -1;
+    for (i = 0; i < nseen; i++) if (seen[i] == fmt) { k = i; break; }
+    if (k < 0) {
+        if (nseen >= 24) return;
+        k = nseen++;
+        seen[k] = fmt;
+    }
+    if (++hits[k] > 3) return;
+    for (i = 0; i < 4; i++) {
+        unsigned c = (unsigned)(bad >> (8 * i)) & 0xffu;
+        t[i] = (c >= 0x20 && c < 0x7f) ? (char)c : '.';
+    }
+    t[4] = 0;
+    snprintf(b, sizeof b,
+             "[printf] REFUSED a %.12s whose %.14s argument is not a pointer: "
+             "0x%08lx = the bytes \"%s\" - format \"%.140s\" from lr=0x%lx"
+             " (the message is dropped; the machine would crash or print junk)%s\n",
+             who, spec, bad, t, fmt, ra,
+             hits[k] == 3 ? " - last report for this format" : "");
+    logmsg(b);
+}
+
+int shim_vfprintf(void *fp, const char *f, va_list ap) __asm__("vfprintf");
+int shim_vfprintf(void *fp, const char *f, va_list ap)
+{
+    static int (*real_vfprintf)(void *, const char *, va_list);
+    unsigned long bad = 0; char spec[16];
+    if (!real_vfprintf) real_vfprintf = dlsym(RTLD_NEXT, "vfprintf");
+    if (pf_guard_on() && pf_args_ok(f, ap, &bad, spec, sizeof spec) == 0) {
+        pf_refuse("vfprintf", f, bad, spec, (unsigned long)__builtin_return_address(0));
+        return 0;
+    }
+    return real_vfprintf(fp, f, ap);
+}
+
+int shim_vprintf(const char *f, va_list ap) __asm__("vprintf");
+int shim_vprintf(const char *f, va_list ap)
+{
+    static int (*real_vfprintf)(void *, const char *, va_list);
+    unsigned long bad = 0; char spec[16];
+    if (!real_vfprintf) real_vfprintf = dlsym(RTLD_NEXT, "vfprintf");
+    if (pf_guard_on() && pf_args_ok(f, ap, &bad, spec, sizeof spec) == 0) {
+        pf_refuse("vprintf", f, bad, spec, (unsigned long)__builtin_return_address(0));
+        return 0;
+    }
+    return real_vfprintf(stdout, f, ap);
+}
+
+int shim_printf(const char *f, ...) __asm__("printf");
+int shim_printf(const char *f, ...)
+{
+    static int (*real_vfprintf)(void *, const char *, va_list);
+    unsigned long bad = 0; char spec[16];
+    va_list ap; int r;
+    if (!real_vfprintf) real_vfprintf = dlsym(RTLD_NEXT, "vfprintf");
+    va_start(ap, f);
+    if (pf_guard_on() && pf_args_ok(f, ap, &bad, spec, sizeof spec) == 0) {
+        pf_refuse("printf", f, bad, spec, (unsigned long)__builtin_return_address(0));
+        r = 0;
+    } else
+        r = real_vfprintf(stdout, f, ap);
+    va_end(ap);
+    return r;
+}
+
+int shim_fprintf(void *fp, const char *f, ...) __asm__("fprintf");
+int shim_fprintf(void *fp, const char *f, ...)
+{
+    static int (*real_vfprintf)(void *, const char *, va_list);
+    unsigned long bad = 0; char spec[16];
+    va_list ap; int r;
+    if (!real_vfprintf) real_vfprintf = dlsym(RTLD_NEXT, "vfprintf");
+    va_start(ap, f);
+    if (pf_guard_on() && pf_args_ok(f, ap, &bad, spec, sizeof spec) == 0) {
+        pf_refuse("fprintf", f, bad, spec, (unsigned long)__builtin_return_address(0));
+        r = 0;
+    } else
+        r = real_vfprintf(fp, f, ap);
+    va_end(ap);
+    return r;
+}
+
 /* The six validation messages are printf format strings (#4/#5 carry two
  * numbers, #6 three), so whoever raises them almost certainly formats them.
  * The game imports snprintf and vsnprintf; its own sprintf at 0x1c2a4 is local
- * code but reaches vsnprintf through the PLT, so both routes land here. */
+ * code but reaches vsnprintf through the PLT, so both routes land here. Both
+ * also carry the %s guard above: a refused message leaves an EMPTY string. */
 int shim_vsnprintf(char *b, unsigned long n, const char *f, va_list ap) __asm__("vsnprintf");
 int shim_vsnprintf(char *b, unsigned long n, const char *f, va_list ap)
 {
     static int (*real_vsnprintf)(char *, unsigned long, const char *, va_list);
+    unsigned long bad = 0; char spec[16];
     if (!real_vsnprintf) real_vsnprintf = dlsym(RTLD_NEXT, "vsnprintf");
     strwatch_hit("vsnprf", f, (unsigned long)__builtin_return_address(0));
+    if (pf_guard_on() && pf_args_ok(f, ap, &bad, spec, sizeof spec) == 0) {
+        pf_refuse("vsnprintf", f, bad, spec, (unsigned long)__builtin_return_address(0));
+        if (n) b[0] = 0;
+        return 0;
+    }
     return real_vsnprintf(b, n, f, ap);
 }
 
@@ -1095,11 +1291,17 @@ int shim_snprintf(char *b, unsigned long n, const char *f, ...) __asm__("snprint
 int shim_snprintf(char *b, unsigned long n, const char *f, ...)
 {
     static int (*real_vsnprintf)(char *, unsigned long, const char *, va_list);
+    unsigned long bad = 0; char spec[16];
     va_list ap; int r;
     if (!real_vsnprintf) real_vsnprintf = dlsym(RTLD_NEXT, "vsnprintf");
     strwatch_hit("snprf", f, (unsigned long)__builtin_return_address(0));
     va_start(ap, f);
-    r = real_vsnprintf(b, n, f, ap);
+    if (pf_guard_on() && pf_args_ok(f, ap, &bad, spec, sizeof spec) == 0) {
+        pf_refuse("snprintf", f, bad, spec, (unsigned long)__builtin_return_address(0));
+        if (n) b[0] = 0;
+        r = 0;
+    } else
+        r = real_vsnprintf(b, n, f, ap);
     va_end(ap);
     return r;
 }
@@ -2346,6 +2548,77 @@ static unsigned long game_text_end(void)
     return v;
 }
 
+/* THE FRAME THAT NAMES THE CALLER CAN SIT PAST 512 WORDS, AND PAST THE
+ * GAME'S .TEXT (sword_of_rage_le 1.18.0, 2026-09-06). That crash was strlen()
+ * under vfprintf() - a printf given text where a %s pointer belonged - and
+ * vfprintf's own frame is ~1200 bytes, so the game-side return address lay
+ * beyond the 512-word walk above, and the one "hit" its 24 slots showed was a
+ * rodata typeinfo pointer. Nothing in the report said who called printf.
+ *
+ * This second walk goes 4096 words deep and names EVERY executable mapping a
+ * word lands in - the game, libc, libstdc++, the shims - because a return
+ * address into a library is exactly what tells "the game called printf" from
+ * "a library's own thread did", and because Thumb return addresses carry bit
+ * 0 set, which the (v & 3) == 0 test above throws away (libc-2.21 is Thumb-2).
+ * Reads /proc/self/maps raw, as segv_print_header() does, for the same
+ * signal-handler reason. Noisy by construction - a data word can land in a
+ * code range - so read it as candidates, innermost first, not as a stack. */
+static void segv_stack_libs(unsigned long sp)
+{
+    long (*rd)(int, void *, unsigned long) = dlsym(RTLD_NEXT, "read");
+    static char m[16384];
+    static struct { unsigned long lo, hi; const char *name; } ex[96];
+    char b[240];
+    int nex = 0, fd, i, shown = 0;
+    long got, off = 0;
+    char *line;
+    if (!real_open || !rd) return;
+    fd = real_open("/proc/self/maps", 0 /*O_RDONLY*/, 0);
+    if (fd < 0) return;
+    while ((got = rd(fd, m + off, sizeof m - 1 - (unsigned long)off)) > 0) {
+        off += got;
+        if ((unsigned long)off >= sizeof m - 1) break;
+    }
+    m[off] = 0;
+    for (line = m; *line && nex < 96; ) {
+        char *eol = line, *q = line, *nm, save;
+        unsigned long lo = 0, hi = 0;
+        while (*eol && *eol != '\n') eol++;
+        save = *eol;
+        *eol = 0;
+        while ((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'f'))
+            lo = lo * 16 + (unsigned long)(*q <= '9' ? *q - '0' : *q - 'a' + 10), q++;
+        if (*q == '-') q++;
+        while ((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'f'))
+            hi = hi * 16 + (unsigned long)(*q <= '9' ? *q - '0' : *q - 'a' + 10), q++;
+        if (*q == ' ' && q[1] == 'r' && q[3] == 'x') {      /* "r-xp" */
+            nm = eol;
+            while (nm > q && nm[-1] != ' ') nm--;
+            ex[nex].lo = lo; ex[nex].hi = hi;
+            ex[nex].name = (nm < eol) ? nm : "(anon)";
+            nex++;
+        }
+        line = save ? eol + 1 : eol;
+    }
+    for (i = 0; i < 4096 && shown < 40; i++) {
+        unsigned long v, a;
+        int k;
+        if (!gz_word(sp + (unsigned long)i * 4, &v)) break;
+        a = v & ~1ul;
+        for (k = 0; k < nex; k++) {
+            if (a >= ex[k].lo && a < ex[k].hi) {
+                snprintf(b, sizeof b, "[segv]   deep[%4d] = 0x%08lx  %.120s+0x%lx\n",
+                         i, v, ex[k].name, a - ex[k].lo);
+                logmsg(b);
+                shown++;
+                break;
+            }
+        }
+    }
+    snprintf(b, sizeof b, "[segv]   deep walk: %d candidate(s) in %d words\n", shown, i);
+    logmsg(b);
+}
+
 static void segv_handler(int sig, void *info, void *ucv)
 {
     unsigned long *uc = ucv;
@@ -2396,6 +2669,7 @@ static void segv_handler(int sig, void *info, void *ucv)
                 shown++;
             }
         }
+        segv_stack_libs(sp);
     }
 
     /* The scene loader thread (0x447440) does no work at all unless the gate
@@ -2981,6 +3255,76 @@ static const char *nv_path(void)
 }
 static int nv_loaded;
 
+/* ★ THE CABINET IDENTITY RECORD, EEPROM BYTES 0..51 - AND WHY A BLANK ONE
+ * SWITCHED STRANGER THINGS' PROJECTOR OFF (item 80 sweep, 2026-09-05).
+ *
+ * The engine keeps the cabinet's identity in the first 52 bytes of the i2c
+ * EEPROM (slave 0x50), encoded: word 0 seeds a linear congruential generator
+ * (state = state * 0x19660d + 1, key = state >> 8, a zero key reads as 1 -
+ * stranger_things 1.12.0 0x37d738), and each of the next twelve words holds
+ * one record byte as byte * key + junk, decoded by plain division
+ * (0x50b670 is __aeabi_uidiv). The twelve bytes: [0..3] serial, [4..7] the
+ * MODEL CODE, [8..9] a u16, [10..11] the 16-bit byte sum of [0..9]
+ * inverted. Reader 0x238de4; the model codes it is compared with are
+ * Stern's cabinet codes - Q1/Y1 read as Pro, Q2 as Premium, Q3/Y2 as LE
+ * (checker 0x81110, the table it fills at 0x770c1c+0x50) - and a model
+ * beginning "999" is a WILDCARD: the reader substitutes the build's own
+ * compiled-in model (0x71ada4 -> "Q3" on the LE build).
+ *
+ * The donor EEPROM this rig seeds every title from has that record ALL
+ * ZERO - an unconfigured machine. Zeros decode to zeros, the sum check
+ * fails, and the reader burns a retry counter (0x71e994, starts at 5) and
+ * then, for the rest of the run, RETURNS WITHOUT WRITING ITS OUTPUT. The
+ * model checker (0x81110) then compares uninitialised stack against the
+ * codes, lands on "non-empty, unknown" = Pro, and the projector class
+ * (0x811cc, the only caller of the renderer setter 0x3b44b0) clears the
+ * renderer's display-2 byte +0x104 - the same gate mando's topper hangs on
+ * (item 67). Measured live: renderer +0x104 = 0, the identity cache flag
+ * 0x778f44 = 0, the retry counter 0, one 52-byte read of zeros at t=58.
+ *
+ * So: when the record is blank, write one - serial from the ident string
+ * the donor left at 0x100 ("SPI-STR-19358356"), model "999" so the GAME
+ * picks its own model for the card it is (the LE build says LE, a Pro
+ * build says Pro; nothing here names a title), junk 0 so decode is exact.
+ * The format is the engine's, not this title's: the same generator and the
+ * same "999" string sit in the Dungeons & Dragons build. A configured
+ * EEPROM (any non-zero byte in the record) is left alone. */
+static void nv_ident_seed(void)
+{
+    unsigned char *e = store[0];
+    unsigned char rec[12];
+    unsigned serial = 0, state, key, sum = 0, w, i;
+    char m[240];
+    for (i = 0; i < 52; i++) if (e[i]) return;
+    for (i = 0x100; i < 0x120 && e[i]; i++)
+        serial = (e[i] >= '0' && e[i] <= '9') ? serial * 10 + (unsigned)(e[i] - '0') : 0;
+    rec[0] = (unsigned char)serial;        rec[1] = (unsigned char)(serial >> 8);
+    rec[2] = (unsigned char)(serial >> 16); rec[3] = (unsigned char)(serial >> 24);
+    rec[4] = '9'; rec[5] = '9'; rec[6] = '9'; rec[7] = 0;
+    rec[8] = 0; rec[9] = 0;
+    for (i = 0; i < 10; i++) sum += rec[i];
+    sum = ~sum & 0xffffu;
+    rec[10] = (unsigned char)sum; rec[11] = (unsigned char)(sum >> 8);
+    state = 0x50414400u ^ serial;                       /* any seed; "PAD" */
+    e[0] = (unsigned char)state;         e[1] = (unsigned char)(state >> 8);
+    e[2] = (unsigned char)(state >> 16); e[3] = (unsigned char)(state >> 24);
+    for (i = 0; i < 12; i++) {
+        state = state * 0x19660du + 1u;
+        key = state >> 8;
+        if (!key) key = 1;
+        w = rec[i] * key;
+        e[4 + 4 * i]     = (unsigned char)w;
+        e[4 + 4 * i + 1] = (unsigned char)(w >> 8);
+        e[4 + 4 * i + 2] = (unsigned char)(w >> 16);
+        e[4 + 4 * i + 3] = (unsigned char)(w >> 24);
+    }
+    snprintf(m, sizeof m, "[i2c] cabinet identity record was blank (an "
+             "unconfigured machine): wrote one - serial %u, model 999 = the "
+             "game uses its own build's model - so the model check reads this "
+             "card's model, not uninitialised stack\n", serial);
+    logmsg(m);
+}
+
 /* ══ PAD_NV_POKE ═════════════════════════════════════════════════════════
  *
  * PAD_NV_POKE=<lo>[-<hi>]:<val>[,...]   (all hex, e.g. "40-ff:01,200:1e")
@@ -3095,6 +3439,7 @@ static void nv_load(void)
     if (fd < 0) {
         snprintf(m, sizeof m, "[i2c] no saved NVRAM at %s, starting blank\n", path);
         logmsg(m);
+        nv_ident_seed();
         nv_poke_apply();     /* a poke must land on a blank chip too */
         return;
     }
@@ -3106,6 +3451,7 @@ static void nv_load(void)
              seeded ? " (seeding this title's own EEPROM; it is per-title now)"
                     : "");
     logmsg(m);
+    nv_ident_seed();
     nv_poke_apply();
 }
 
@@ -3968,7 +4314,16 @@ static unsigned nb_env_hex(const char *name, unsigned def)
  * registry is indexed by (see nb_hexreg below). File-derived entries carry it
  * from node_ident.txt's type= field; the built-in rows leave it 0 (positional
  * initializers), which just means the registry cannot correct them. */
-struct nb_ident { unsigned char id; unsigned part; unsigned char variant; unsigned fw; unsigned tcrc; };
+struct nb_ident {
+    unsigned char id;
+    unsigned part;          /* MCU part id (LPC chip id) - the class key      */
+    unsigned char variant;
+    unsigned fw;
+    unsigned tcrc;
+    unsigned partno;        /* STERN board part number x100, 520853000 =
+                             * "520-8530-00"; 0 = unknown, answered as zero
+                             * (item 67, see nb_partno_answer)               */
+};
 static const struct nb_ident nb_idents[] = {
     /* id   part id      variant  fw (maj<<16|min<<8|patch)   type / firmware  */
     {  1, 0x00020023u, 0x01, 0x012300u },  /* pinnode    LPC1112_101  1.35.0 */
@@ -4174,6 +4529,12 @@ static void nb_fident_load(void)
             }
             nb_fident[id].tcrc = c ^ 0xffffffffu;
         }
+        /* ITEM 67: the Stern part number of the board the directory expects
+         * at this node, from the game's own catalog (nbdir.catalog_part).
+         * Absent field (a table written before 2026-09-05) = 0 = the old
+         * zero-filled f9 reply. */
+        nb_fident[id].partno = 0;
+        (void)nb_field_dec(line, "partno=", &nb_fident[id].partno);
         nb_fident_have[id] = 1;
         n++;
     }
@@ -4438,6 +4799,19 @@ static void nb_hexreg_scan(void)
                     var = buf[8]; v0 = buf[9]; v1 = buf[10]; v2 = buf[11];
                     src = "image";
                 }
+                /* One slot per (type, class): the answer path rescans when
+                 * a claim misses (see nb_hexreg_answer), and a rescan walks
+                 * the images the first look already recorded. Refresh those
+                 * in place; only a NEW image takes a slot and a log line. */
+                for (i = 0; i < nb_hexreg_n; i++)
+                    if (nb_hexreg[i].tcrc == p[0] && nb_hexreg[i].klass == p[1])
+                        break;
+                if (i < nb_hexreg_n) {
+                    nb_hexreg[i].variant = var;
+                    nb_hexreg[i].fw = ((unsigned)v0 << 16)
+                                    | ((unsigned)v1 << 8) | v2;
+                    continue;
+                }
                 nb_hexreg[nb_hexreg_n].tcrc = p[0];
                 nb_hexreg[nb_hexreg_n].klass = p[1];
                 nb_hexreg[nb_hexreg_n].variant = var;
@@ -4472,10 +4846,19 @@ static unsigned nb_hexreg_class(unsigned part)
  * registry has been found and carries this (type, class). Says so in the log
  * once per node when it actually changed something - the update overlay and
  * these lines are the oracle pair. */
+static int nb_hexreg_find(unsigned tcrc, unsigned klass)
+{
+    int i;
+    for (i = 0; i < nb_hexreg_n; i++)
+        if (nb_hexreg[i].tcrc == tcrc && nb_hexreg[i].klass == klass)
+            return i;
+    return -1;
+}
+
 static void nb_hexreg_answer(unsigned nid, unsigned tcrc, unsigned part,
                              unsigned *var, unsigned *fw)
 {
-    static int on = -1, tries;
+    static int on = -1, tries, misses;
     static unsigned long last_try;
     static unsigned long long said;
     int i;
@@ -4506,9 +4889,44 @@ static void nb_hexreg_answer(unsigned nid, unsigned tcrc, unsigned part,
             return;
         }
     }
-    for (i = 0; i < nb_hexreg_n; i++) {
-        if (nb_hexreg[i].tcrc != tcrc) continue;
-        if (nb_hexreg[i].klass != nb_hexreg_class(part)) continue;
+    i = nb_hexreg_find(tcrc, nb_hexreg_class(part));
+    /* THE REGISTRY GROWS, so one look is not a look. The game decrypts an
+     * image when it first grades a board of that type, not at boot: on
+     * mando_le 1.44.0 (2026-09-05, item 67) the scan at node 1's fe found
+     * TWO images, and hexreg.py read SEVEN off the same process ten minutes
+     * later - hdmi_ws2812node, the topper's board at node 12, among the late
+     * five. This function then never scanned again, node 12 kept its 0x01
+     * guess against a decrypted 0x0c, and the glass looped "UPDATING NODE
+     * BOARD RUNTIME / UPDATE FAILED / 12" while the topper display stayed an
+     * empty scene. Item 55 recorded the same silence on turtles' node 12 and
+     * called it "worth its own look"; this is that look. A miss rescans,
+     * paced and bounded exactly like the first look, and refreshes in place
+     * (the scan de-duplicates by type and class), so an image that arrives
+     * late is graded from the game's own bytes within ~2 s of its first fe. */
+    if (i < 0 && misses >= 0 && nb_hexreg_n < NB_HEXREG_MAX) {
+        unsigned long now = pad_ms();
+        int before = nb_hexreg_n;
+        if (last_try && now - last_try < 2000) return;
+        last_try = now;
+        nb_hexreg_scan();
+        if (nb_hexreg_n > before) {
+            char m[120];
+            snprintf(m, sizeof m, "[nbexp] the game's hex-image registry "
+                     "grew: %d decrypted image(s) now\n", nb_hexreg_n);
+            logmsg(m);
+            misses = 0;
+        } else if (++misses >= NB_HEXREG_TRIES) {
+            char m[160];
+            misses = -1;
+            snprintf(m, sizeof m, "[nbexp] node %u's image type is not in "
+                     "the registry after %d rescans; its claim stays "
+                     "file/table-derived\n", nid, NB_HEXREG_TRIES);
+            logmsg(m);
+        }
+        i = nb_hexreg_find(tcrc, nb_hexreg_class(part));
+    }
+    if (i < 0) return;
+    {
         if ((*var != nb_hexreg[i].variant || *fw != nb_hexreg[i].fw)
                 && nid < 64 && !(said & (1ull << nid))) {
             char m[160];
@@ -9036,6 +9454,81 @@ static void pass_hook_arm(void)
     pad_hook(fn, p[0], p[1], (void *)&pass_note, 1, "passhook");
 }
 
+/* ★ ITEM 67 INSTRUMENT: PAD_REG_HOOK=<hexaddr> (and PAD_REG_HOOK2) - log the
+ * REGISTERS at one address, not just the fact of arrival. pass_hook names the
+ * caller of a function entry; this answers "what is r0 pointing at, and what
+ * is r3 about to call" at any PC-independent instruction pair - built for the
+ * renderer's display-2 draw loop on mando_le (`mov r1,#1; blx r3` at
+ * 0x45278c: r0 is the element, r3 its draw virtual, r1 the display), where
+ * the topper's list had elements every frame and none of them drew. The
+ * trampoline pushes {r0,r1,r2,r3,ip,lr} and hands the logger the ENTRY sp, so
+ * the saved registers sit just below it. Deduplicated on (vtable, r3, r1)
+ * with a count, so the answer is "which classes, which draw functions", once
+ * each, not sixty lines a second. */
+struct reg_seen { unsigned vt, fn, r1, r0; unsigned long n; };
+static void reg_note_common(const char *tag, struct reg_seen *seen, int *nseen,
+                            unsigned lr, const unsigned *entry_sp)
+{
+    unsigned r0, r1, r3, vt = 0;
+    int i;
+    char m[200];
+    if (!entry_sp || !addr_readable(entry_sp - 6)) return;
+    r0 = entry_sp[-6]; r1 = entry_sp[-5]; r3 = entry_sp[-3];
+    if (r0 && addr_readable((const void *)(unsigned long)r0))
+        vt = *(const unsigned *)(unsigned long)r0;
+    for (i = 0; i < *nseen; i++) {
+        if (seen[i].vt != vt || seen[i].fn != r3 || seen[i].r1 != r1) continue;
+        seen[i].n++;
+        if ((seen[i].n & 1023u) == 0) {
+            snprintf(m, sizeof m, "[%s] vtable=0x%08x r3=0x%08x r1=%u "
+                     "seen x%lu\n", tag, vt, r3, r1, seen[i].n);
+            logmsg(m);
+        }
+        return;
+    }
+    if (*nseen < 32) {
+        seen[*nseen].vt = vt; seen[*nseen].fn = r3; seen[*nseen].r1 = r1;
+        seen[*nseen].r0 = r0; seen[*nseen].n = 1;
+        (*nseen)++;
+    }
+    snprintf(m, sizeof m, "[%s] NEW r0=0x%08x vtable=0x%08x r1=%u r3=0x%08x "
+             "lr=0x%08x\n", tag, r0, vt, r1, r3, lr);
+    logmsg(m);
+}
+__attribute__((noinline, used))
+static void reg_note_a(unsigned lr, const unsigned *entry_sp)
+{
+    static struct reg_seen seen[32];
+    static int n;
+    reg_note_common("reghook", seen, &n, lr, entry_sp);
+}
+__attribute__((noinline, used))
+static void reg_note_b(unsigned lr, const unsigned *entry_sp)
+{
+    static struct reg_seen seen[32];
+    static int n;
+    reg_note_common("reghook2", seen, &n, lr, entry_sp);
+}
+static void reg_hook_arm_one(const char *env, void *logger, const char *tag)
+{
+    unsigned fn = 0;
+    const char *e = getenv(env);
+    volatile unsigned *p;
+    if (!e || !*e) return;
+    while (ishex(*e)) fn = fn * 16 + hexval(*e++);
+    if (!fn || !addr_readable((const void *)(unsigned long)fn)) return;
+    p = (volatile unsigned *)(unsigned long)fn;
+    pad_hook(fn, p[0], p[1], logger, 1, tag);
+}
+static void reg_hook_arm(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    reg_hook_arm_one("PAD_REG_HOOK", (void *)&reg_note_a, "reghook");
+    reg_hook_arm_one("PAD_REG_HOOK2", (void *)&reg_note_b, "reghook2");
+}
+
 static void country_gate_bypass(void)
 {
     static int done;
@@ -10917,6 +11410,76 @@ long shim_read(int fd, void *b, unsigned long n)
                 for (i = 0; i < (unsigned long)plen; i++)
                     p[i] = (unsigned char)(0x41 + i);
             }
+            /* ★ ITEM 67: THE BOARD PART NUMBER IS f9 00 BYTES 8..11, AND ZERO
+             * THERE IS WHAT KEPT mando_le's HOLOGRAPHIC TOPPER BLACK.
+             *
+             * Measured on mando_le 1.44.0, 2026-09-05, after node 12 graded
+             * clean and the second display was told its real 1280x800 and
+             * the topper window STILL stayed black through every clip:
+             *
+             *   0x5239a0  the runtime-info parser: sends f9 00 and f9 01 (16
+             *             bytes each) and, of the f9 00 reply, takes bytes
+             *             8..11 as an LE32, sprintf()s it "%09d", splits the
+             *             digits into "ddd-dddd-dd" at record +8 and keeps
+             *             the integer at record +20. The record is the
+             *             48-byte block at node object +40; the game's
+             *             per-node table at 0x765c38 (152 bytes a node)
+             *             holds the same string at +0x30 and integer at
+             *             +0x3c. Live, every node read "000-0000-00" / 0:
+             *             this shim answered f9 with zeros.
+             *   0x4172dc  the reader: table[node].+0x3c / 100 == 5208530,
+             *             i.e. "does node N report part 520-8530". Called
+             *             with N = 12 from four sites in the game's `topper`
+             *             class (RTTI, vtable 0x5a9e68), each of which hands
+             *             the answer to
+             *   0x3dd0f0  renderer->+0x104 = answer. The constructor sets
+             *             that byte to 1; the render thread (0x451910) reads
+             *             it at 0x451ed0 to choose the DISPLAY-2 PASS: set =
+             *             clear to the first element's colour, then per
+             *             element the full Render virtual (vtable +0x24)
+             *             followed by RenderForDisplay(1) (+0x14); clear =
+             *             a constant clear at 0x452740 then RenderForDisplay
+             *             ONLY, which is the no-op 0x31a960 for every class
+             *             the topper scene posts. A register hook on the
+             *             display-2 loop's call site (0x45278c) fired ZERO
+             *             times in a run while the clear came from 0x452744
+             *             every frame: the +0x104 == 0 path, an empty scene.
+             *   catalog   the game's own board catalog gives node 12's type,
+             *             hdmi_ws2812node, part "520-8530-XX" / 520853000
+             *             (records start at the part word; nbdir.py's first
+             *             framing had them name-first and off by one row).
+             *
+             * So the machine renders the topper only when the topper board
+             * reports the part number the directory expects of it, and the
+             * rig had never reported one for any node. nbdir.py now writes
+             * `partno=` per node from the catalog and this answers it, for
+             * every node with a value, in the one place the game reads it.
+             * The other f9 bytes stay zero: nothing has needed them, and a
+             * fabricated serial is the kind of claim item 65 forbids.
+             * PAD_NB_RT (the pattern fill above) still wins for a sweep. */
+            if (nb_req_len > 3 && nb_req[2] == 0xf9 && nb_req[3] == 0x00 &&
+                plen >= 12 && !getenv("PAD_NB_RT")) {
+                unsigned nid = (unsigned)(nb_req[0] & 0x3f);
+                const struct nb_ident *idn = nb_ident_for(nid);
+                if (idn && idn->partno) {
+                    static unsigned char said[64];
+                    unsigned v = idn->partno;
+                    p[8]  = (unsigned char)v;
+                    p[9]  = (unsigned char)(v >> 8);
+                    p[10] = (unsigned char)(v >> 16);
+                    p[11] = (unsigned char)(v >> 24);
+                    if (nid < 64 && !said[nid]) {
+                        char m[120];
+                        said[nid] = 1;
+                        snprintf(m, sizeof m,
+                                 "[nbid] node %u reports part %03u-%04u-%02u"
+                                 " (%u) in its f9 00 runtime info\n",
+                                 nid, v / 1000000u, (v / 100u) % 10000u,
+                                 v % 100u, v);
+                        logmsg(m);
+                    }
+                }
+            }
             /* PAD_NB_SW=<node>:<hex32>[,...] - the SWITCH INPUT WORD of the
              * `ff` probe. node 0 means every node.
              *
@@ -11319,6 +11882,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         screen_install();
         country_trace();
         pass_hook_arm();
+        reg_hook_arm();
         country_gate_bypass();
         nb_maybe_dump();
         alert_maybe_dump();

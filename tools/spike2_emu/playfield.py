@@ -2198,6 +2198,13 @@ def layout_extent(pad=NO_ART_PAD):
 PF_VIEW = (os.environ.get("PAD_PF_VIEW") or "").strip().lower()
 
 
+#: The fewest usable devices (clickable switches + coils + lamps that can
+#: light) a positioned layout must carry before it displaces the Schematic.
+#: The real playfields here carry 59..217; uncanny_xmen_le's cabinet front,
+#: the case this guards, carries 3.
+MIN_USABLE_LAYOUT = 8
+
+
 def layout_is_usable():
     """True when the positional view would actually SHOW something.
 
@@ -2222,9 +2229,20 @@ def layout_is_usable():
         return bool(layout_extent())
     if not layout_extent():
         return False
-    if load_switches() or load_coils():
-        return True
-    return any(L["node"] is not None for L in load_leds())
+    # ★ AND ENOUGH OF THEM TO BE A PLAYFIELD (uncanny_xmen_le 0.97.0, item 80,
+    # 2026-09-06). That title positions exactly THREE devices, all lamps -
+    # SHOOTER BEZEL 1/2/3 - on `System/TestMode/spike_2_cabinet_front_cropped`,
+    # the cabinet-front picture, and nothing at all on a playfield. The image
+    # vote hands over the only layout there is, group 5 resolves to node 1,
+    # and "any lamp that can light" was satisfied by those three: the window
+    # opened as a Field on a blank 448x274 extent - David: "the virtual
+    # playfield is just a large empty black space" - while the Schematic it
+    # displaced had 109 clickable switch rows and the swatch grid. A cabinet
+    # front carries "a handful of each" (devicexy.layout_image); a playfield
+    # carries dozens. So the count of things a person can USE has a floor.
+    usable = (len(load_switches()) + len(load_coils())
+              + sum(1 for L in load_leds() if L["node"] is not None))
+    return usable >= MIN_USABLE_LAYOUT
 
 
 def layout_art():

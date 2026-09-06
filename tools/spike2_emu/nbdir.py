@@ -26,15 +26,31 @@ from game memory at runtime:
       u32 w3           byte2 = NODE ID (0..63), low u16 = board-model CODE
   preceded by an all-zero sentinel record pointing at the "INVALID" cell.
 
-  BOARD-MODEL CATALOG - 0x14-byte records:
+  BOARD-MODEL CATALOG - 0x14-byte records, and THE RECORD STARTS AT THE PART
+  NUMBER, not at the type name:
+      u32 part_number  pointer to "520-XXXX-XX" (RX segment)
+      u32 part_value   the same number as an integer x100: 520853000 is
+                       "520-8530-00". It is what a real board reports in its
+                       f9 00 runtime-info reply, bytes 8..11, and what the
+                       game formats "%09d" and splits into "ddd-dddd-dd"
+                       (mando_le 1.44.0: parser 0x5239a0, reader 0x4172dc)
       u32 type_name    pointer to "pinnode"/"ws2812node"/... (RX segment)
       u32 name_cell
       u32 flags
-      u32 part_number  pointer to "520-XXXX-XX"
-      u32 hash
   indexed by the directory's CODE MINUS 2 (two reserved entries precede it;
-  validated on both titles: code 2 -> pinnode 520-6967 on both, and the CPU
-  record's code lands on the SPIKE2 CPU entry on both).
+  validated on both titles: the CPU record's code lands on the SPIKE2 CPU
+  entry on both). find_catalog() anchors on the TYPE-NAME word, so a row's
+  part fields sit 8 and 4 bytes BEFORE its anchor - catalog_part() reads them.
+
+  MEASURED 2026-09-05 on mando_le 1.44.0 (item 67), three ways: the game's
+  own node table keeps a pointer to each board's catalog record, and that
+  pointer lands on the part-number word (node 12 -> 0x68f5bc = "520-8530-XX",
+  520853000, "hdmi_ws2812node"); the table's first record is {"520-5319-XX",
+  pinnode}; its CPU record is {"520-7031-XX", NULL name, "SPIKE2 CPU" cell}.
+  The first framing of this file put the name first and so credited every
+  type with the NEXT row's part number ("code 2 -> pinnode 520-6967" was
+  that error; it is 520-5319). Nothing downstream read the part until the
+  topper check needed it, which is how it stood for the rig's whole life.
 
 POINTER BIASES, the trap that made this look like garbage on first read: the
 RX LOAD segment maps file+0x8000, the RW LOAD segment maps file+0x10000 (both
@@ -138,9 +154,35 @@ CLASS_BY_NAME = {v: k for k, v in CLASS_NAMES.items()}
 # graded VILLAIN VISION (board 24) as a mismatched image and put every boot
 # through the failed-update walk.
 #
+# ★ hdmi_ws2812node is 0x0c, measured 2026-09-05 with hexreg.py off a LIVE
+# mando_le 1.44.0 game (item 67): the registry's decrypted class-5 image reads
+# variant=0x0c version=1.19.0, with pinnode 0x01 (classes 1, 2 and 5),
+# ws2812node 0x05 and node4 0x03 (classes 4 and 6) reconfirmed in the same
+# pass - the item-55 trust rule again. It is the TOPPER's board ("HDMI SPI
+# WS2812": the holographic topper's HDMI display control plus its 32 RGB
+# LEDs), node 12 on that title. The 0x01 guess graded it status 7 and put the
+# boot through the "UPDATING NODE BOARD RUNTIME / UPDATE FAILED / 12" walk -
+# and the topper display (display 2) stayed an empty scene while it did.
+# Unlike the two rows above, hwshim's nb_hexreg_answer() COULD NOT have
+# caught this one: its one scan ran at node 1's claim, when the game had
+# decrypted only two images, and the topper image was decrypted later. The
+# shim rescans on a miss now; this prior is still what a first boot uses.
+#
+# ★ coil4_lednode is 0x10, measured 2026-09-06 with hexreg.py off a LIVE
+# uncanny_xmen_le 0.97.0 game (item 80 sweep): the registry's decrypted
+# class-5 image reads variant=0x10 version=1.30.0, with pinnode 0x01
+# (classes 1, 2 and 5), ws2812node 0x05 and node4 0x03 (classes 4 and 6)
+# reconfirmed in the same pass - the item-55 trust rule. It is the TOPPER's
+# board on that title (node 12, part 520-6998-00, the three "TOPPER - OPTO"
+# switches), and the 0x01 guess graded it status 7 and put the boot through
+# "UPDATING NODE BOARD RUNTIME / RESETTING 12 / UPDATE FAILED 12" - David's
+# two screenshots. Same shape as mando's row above: the image is decrypted
+# after the shim's first registry scan, so the prior is what a boot needs.
+#
 # Everything else is a GUESS the output marks as one.
 VARIANT_PRIOR = {"pinnode": 0x01, "ws2812node": 0x05, "node4": 0x03,
-                 "tmc5041node": 0x0d, "coil4node": 0x04, "lcdnode": 0x02}
+                 "tmc5041node": 0x0d, "coil4node": 0x04, "lcdnode": 0x02,
+                 "hdmi_ws2812node": 0x0c, "coil4_lednode": 0x10}
 VARIANT_DEFAULT = 0x01
 
 # Class preference PER TYPE, measured pair first: the variant byte lives
@@ -156,6 +198,10 @@ CLASS_PREF = {
     "lcdnode":    (3,),      # the only class any card ships it in (item 82);
                              # variant stays a marked GUESS until hexreg or a
                              # live registry read measures it
+    "hdmi_ws2812node": (5,), # the only class mando_le ships it in, and the
+                             # class the 0x0c above was measured on (item 67)
+    "coil4_lednode": (5,),   # the only class uncanny_xmen_le ships it in, and
+                             # the class the 0x10 above was measured on
 }
 CLASS_PREF_DEFAULT = (5, 1, 4)
 
@@ -304,6 +350,18 @@ def find_catalog(elf, rx, rw):
     return base, entries
 
 
+def catalog_part(elf, cat_base, idx, rx):
+    """(part string, part value) of catalog row `idx`: the two words BEFORE
+    the type-name anchor find_catalog() returns (see the module docstring).
+    (None, 0) for a row with no readable part string."""
+    off = cat_base + idx * 0x14 - 8
+    if off < 0 or off + 8 > len(elf):
+        return None, 0
+    pstr_va, pval = struct.unpack_from("<2I", elf, off)
+    po = va_to_off(pstr_va, rx) if pstr_va else None
+    return (cstr(elf, po) if po is not None else None), pval
+
+
 def _plausible_cat_entry(elf, off, rx, rw):
     """A catalog row whose type-name pointer is not one of the known anchors
     (reserved rows, CPU row): word0 and word3 look like RX string pointers,
@@ -426,8 +484,14 @@ def derive(elf_path, hexdir):
         # too; nothing special-cases it any more.
         var = VARIANT_PRIOR.get(typ, VARIANT_DEFAULT)
         guess = typ not in VARIANT_PRIOR
+        # THE STERN PART NUMBER of the board the directory expects here, from
+        # the catalog row of its type (item 67). The shim answers it in the
+        # f9 00 runtime-info reply; mando_le renders its holographic topper
+        # only when node 12 reports the number its own catalog gives node
+        # 12's type, 520-8530-XX. Zero when the row carries none.
+        _pstr, partno = catalog_part(elf, cat_base, idx, rx)
         rows.append((nid, typ, code, PART_BY_CLASS[pick], pick, var,
-                     fw_word, fw_str, fname, guess))
+                     fw_word, fw_str, fname, guess, partno))
     return rows, skipped
 
 
@@ -435,10 +499,14 @@ def emit(rows, skipped, elf_path, out):
     w = io.open(out, "w", encoding="ascii", newline="\n") if out else sys.stdout
     w.write("# nbdir v1 elf=%s nodes=%d\n"
             % (os.path.basename(elf_path), len(rows)))
-    for (nid, typ, code, part, cls, var, fw, fw_str, fname, guess) in rows:
-        w.write("node=%d type=%s code=%d part=0x%08x class=%d "
+    for (nid, typ, code, part, cls, var, fw, fw_str, fname, guess,
+         partno) in rows:
+        # `part=0x` is the MCU part id (an LPC chip id, the class key);
+        # `partno=` is the Stern board part number x100. hwshim's parser
+        # finds each by its own key, so the order here is for the reader.
+        w.write("node=%d type=%s code=%d part=0x%08x partno=%u class=%d "
                 "variant=0x%02x%s fw=0x%06x hexver=%s hex=%s\n"
-                % (nid, typ, code, part, cls, var,
+                % (nid, typ, code, part, partno, cls, var,
                    " variant_guess=1" if guess else "", fw, fw_str, fname))
     for nid, code, why in skipped:
         w.write("# skipped node=%d code=%d reason=%s\n" % (nid, code, why))
@@ -504,11 +572,10 @@ def dump(elf_path):
     print("# nbdir dump elf=%s" % os.path.basename(elf_path))
     print("# catalog: %d rows at file offset 0x%x" % (len(cat), cat_base))
     for i, t in enumerate(cat):
-        _w0, _w1, fl, w3, h = struct.unpack_from("<5I", elf, cat_base + i * 0x14)
-        po = va_to_off(w3, rx) if w3 else None
-        print("cat[%2d] code=%-3d type=%-16s flags=%08x part=%-14s hash=%08x"
-              % (i, i + 2, t or "-", fl,
-                 (cstr(elf, po) if po is not None else None) or "-", h))
+        fl, = struct.unpack_from("<I", elf, cat_base + i * 0x14 + 8)
+        pstr, pval = catalog_part(elf, cat_base, i, rx)
+        print("cat[%2d] code=%-3d type=%-16s flags=%08x part=%-14s value=%09u"
+              % (i, i + 2, t or "-", fl, pstr or "-", pval))
     print("# node directory: %d records at file offset 0x%x"
           % (len(full), full[0][6] if full else 0))
     for nid, code, fl, _hand, cell, w3, _o in full:

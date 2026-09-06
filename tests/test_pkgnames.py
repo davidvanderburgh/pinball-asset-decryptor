@@ -22,6 +22,25 @@ RIG = REPO / "tools" / "spike2_emu"
 PLUGINS = sorted((REPO / "pinball_decryptor" / "plugins").rglob("manufacturer.py"))
 
 
+def _bash_runs_scripts():
+    """A bash that can run a script fed on stdin - the same guard the
+    installer tests use (HAS_BASH4 in test_installer.py), and for the same
+    reason: a Windows `bash` is git-bash on one host and the WSL launcher on
+    the next, and the launcher on a runner with no distro answers, in
+    UTF-16, "Windows Subsystem for Linux has no installed distributions"
+    and exit 1.  That is what yanked v0.187.0: the test below ran there and
+    read that sentence where it expected `pm=apt`."""
+    try:
+        r = subprocess.run(["bash", "-c", 'echo "${BASH_VERSINFO[0]}"'],
+                           capture_output=True, timeout=30)
+        return int(r.stdout.decode().strip()) >= 4
+    except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+        return False
+
+
+HAS_BASH4 = _bash_runs_scripts()
+
+
 def _manifest(src, name):
     body = src.split(name + "=(", 1)[1].split("\n)", 1)[0]
     return {int(k): v.split() for k, v in
@@ -139,6 +158,7 @@ def test_the_prerequisite_result_carries_the_localized_hint(monkeypatch):
             == "apt-get install zstd python3-zstandard (in WSL)")
 
 
+@pytest.mark.skipif(not HAS_BASH4, reason="no bash 4+ to run the probe with")
 def test_setupcheck_reports_the_package_manager_it_found():
     """The tab's advice is spelled from this fact, and it has to be the
     RIG's answer - the machine the run happens on - not the app's guess."""

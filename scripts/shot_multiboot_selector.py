@@ -54,6 +54,11 @@ def _opt(name, default=""):
 
 SELECTOR_DIR = _opt("--selector-dir", "/tmp/pad105root/usr/local/codeselect")
 STOP_AT = _opt("--stop-at")
+#: ``--show TEXT``: scroll the app's Log so the last line holding TEXT is
+#: at the bottom of the pane before the shot.  A build says thousands of
+#: lines and the pane follows the newest; this is what a person does with
+#: the scrollbar to see the step they are asking about.
+SHOW = _opt("--show")
 SECONDS = int(_opt("--seconds", "240"))
 OUT = os.path.abspath(ARGS[0] if ARGS else "multiboot-selector.png")
 
@@ -82,7 +87,9 @@ os.environ["PAD_MULTIBOOT_PLAN"] = "0"
 #: move the selector directory; there is no box for it).
 os.environ["PAD_MULTIBOOT_SELECTOR"] = SELECTOR_DIR
 
-SHOT_W, SHOT_H = 1360, 900
+#: Tall enough for the tab AND a readable Log under it: the tab asks for
+#: about 640 px, and the run's own lines are the point of the picture.
+SHOT_W, SHOT_H = 1360, 1180
 
 
 def log(msg):
@@ -126,12 +133,7 @@ class BITMAPINFOHEADER(ctypes.Structure):
         ("biClrImportant", wintypes.DWORD)]
 
 
-def snap(path):
-    root.update_idletasks()
-    hwnd = user32.GetAncestor(root.winfo_id(), 2)  # GA_ROOT
-    wrect = wintypes.RECT()
-    user32.GetWindowRect(hwnd, ctypes.byref(wrect))
-    w, h = wrect.right - wrect.left, wrect.bottom - wrect.top
+def _print_window(hwnd, w, h):
     hdc_win = user32.GetWindowDC(hwnd)
     memdc = gdi32.CreateCompatibleDC(hdc_win)
     bmp = gdi32.CreateCompatibleBitmap(hdc_win, w, h)
@@ -147,11 +149,82 @@ def snap(path):
     gdi32.DeleteObject(bmp)
     gdi32.DeleteDC(memdc)
     user32.ReleaseDC(hwnd, hdc_win)
-    img = Image.frombuffer("RGB", (w, h), buf.raw, "raw", "BGRX", 0, 1)
+    return Image.frombuffer("RGB", (w, h), buf.raw, "raw", "BGRX", 0, 1)
+
+
+def snap(path):
+    """shot_multiboot_tab.py's capture, tiles and all.  THE WINDOW IS
+    TALLER THAN THIS DESKTOP on purpose - the tab wants ~640 px and the
+    Log at the foot is what this ticket is about, so the two do not fit on
+    1024x768 - and Tk only paints what Windows says is visible, so the
+    window is walked across the screen a tile at a time and the on-screen
+    slice of each stop goes into one canvas."""
+    root.update_idletasks()
+    hwnd = user32.GetAncestor(root.winfo_id(), 2)  # GA_ROOT
+    wrect = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(wrect))
+    w, h = wrect.right - wrect.left, wrect.bottom - wrect.top
+    vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+    sw, sh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+
+    def offsets(size, span):
+        if size <= span:
+            return [0]
+        return list(range(0, size - span, span)) + [size - span]
+
+    tiles = [(ox, oy) for oy in offsets(h, sh) for ox in offsets(w, sw)]
+    if len(tiles) == 1:
+        img = _print_window(hwnd, w, h)
+    else:
+        log("window %dx%d overhangs the %dx%d desktop: %d tiles"
+            % (w, h, sw, sh, len(tiles)))
+        img = Image.new("RGB", (w, h))
+        SWP = 0x0001 | 0x0004 | 0x0010   # NOSIZE | NOZORDER | NOACTIVATE
+        for ox, oy in tiles:
+            user32.SetWindowPos(hwnd, 0, vx - ox, vy - oy, 0, 0, SWP)
+            for _ in range(3):
+                root.update()
+                time.sleep(0.15)
+            tile = _print_window(hwnd, w, h)
+            box = (ox, oy, min(w, ox + sw), min(h, oy + sh))
+            img.paste(tile.crop(box), box[:2])
+        user32.SetWindowPos(hwnd, 0, wrect.left, wrect.top, 0, 0, SWP)
+        root.update()
     border = user32.GetSystemMetrics(32) + user32.GetSystemMetrics(92)
     img = img.crop((border, 0, w - border, h - border))
     img.save(path)
     log("snapped %s (%dx%d)" % (path, img.width, img.height))
+
+
+def show_in_log(text):
+    """Scroll the app's Log pane so the last line holding *text* is the
+    last one visible.  The pane follows the newest line, and one build
+    step's lines are gone from the tail seconds after it ends - this is
+    the scrollbar, driven from here.
+
+    The pane's own follow-the-tail is switched off first (``see`` is what
+    every appended line calls), or the lines still arriving from the run
+    scroll the picture back to the bottom between this and the shutter."""
+    if not text:
+        return
+    widget = getattr(win, "_log_text", None)
+    if widget is None:
+        log("no log pane to scroll")
+        return
+    root.update_idletasks()
+    widget.see = lambda *_a, **_kw: None
+    hit = widget.search(text, "end", backwards=True, nocase=False)
+    if not hit:
+        log("log has no %r to scroll to" % text)
+        return
+    line = int(str(hit).split(".")[0])
+    # ...as the LAST visible line: yview_moveto is the only way to put a
+    # line at the bottom (see() puts it wherever it is cheapest to).
+    total = int(str(widget.index("end-1c")).split(".")[0])
+    rows = max(1, int(widget.cget("height")))
+    top = max(0, line - rows + 1)
+    widget.yview_moveto(top / float(max(1, total)))
+    log("log scrolled to line %d of %d (%r)" % (line, total, text))
 
 
 STEPS = []
@@ -243,6 +316,7 @@ def s_wait_and_snap():
             for ln in lines[-40:]:
                 log("   | %s" % ln)
             log("status: %r" % panel.message())
+            show_in_log(SHOW)
             root.update_idletasks()
             snap(OUT)
             if panel._busy:

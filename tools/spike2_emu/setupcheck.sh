@@ -251,6 +251,20 @@ _osrel() { sed -n "s/^$1=//p" /etc/os-release 2>/dev/null | tr -d '"' | head -1;
 distro="$(_osrel ID) $(_osrel VERSION_ID) $(_osrel VERSION_CODENAME)"
 echo "distro=$(printf '%s' "$distro" | sed 's/[[:space:]]\{1,\}/ /g;s/^ //;s/ $//')"
 
+#: ...AND WHAT IT INSTALLS PACKAGES WITH. Every package name above is apt's,
+#: and on a Linux desktop the tab prints them for the user to run: on Arch and
+#: its spins (a user ran the app on Omarchy, 2026-09-06) that spelling is
+#: pacman's "target not found", so the tab translates when this says pacman.
+#: apt first when both are present, the order the prerequisite installer
+#: decides in; an older tab that never heard of this line ignores it.
+if command -v apt-get >/dev/null 2>&1; then
+    echo "pm=apt"
+elif command -v pacman >/dev/null 2>&1; then
+    echo "pm=pacman"
+else
+    echo "pm=none"
+fi
+
 entry=$(_pad_binfmt_arm)
 if [ -z "$entry" ]; then
     echo "binfmt=0"

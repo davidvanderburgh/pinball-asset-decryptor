@@ -1814,6 +1814,33 @@ def test_the_printed_commands_lead_with_the_one_that_makes_the_rest_work():
     assert text.index("add-apt-repository universe") < text.index("apt install")
 
 
+def test_on_arch_the_printed_commands_are_pacmans():
+    """setupcheck.sh now says which package manager it found (`pm`).  On a
+    pacman machine the advice is spelled for it - apt's names are "target not
+    found" there - and the cross compiler, which is in no repository pacman
+    has, is named from the AUR on a line of its own rather than dropped or
+    handed to pacman with the rest.  A user on Omarchy (2026-09-06) did this
+    translation by hand; nothing in the tab had a word for that machine."""
+    text = setup_notice(_facts(qemu="0", armgcc="0", nativecc="0",
+                               binfmt="0", pm="pacman"), can_fix=False)
+    for apt in ("apt install", "apt-get", "add-apt-repository"):
+        assert apt not in text, (apt, text)
+    pac = [ln for ln in text.splitlines() if "pacman -S --needed" in ln]
+    assert pac, text
+    for name in ("qemu-user-static", "qemu-user-static-binfmt", "gcc"):
+        assert name in pac[0], (name, pac[0])
+    for debian in ("libc6-dev", "gcc-arm-linux-gnueabihf"):
+        assert debian not in text, (debian, text)
+    aur = [ln for ln in text.splitlines() if "arm-linux-gnueabihf-gcc" in ln]
+    assert aur and "AUR" in aur[0], text
+    # An apt machine, and a rig too old to say, read exactly as before.
+    for facts in (_facts(qemu="0", armgcc="0", binfmt="0", pm="apt"),
+                  _facts(qemu="0", armgcc="0", binfmt="0")):
+        old = setup_notice(facts, can_fix=False)
+        assert "sudo apt install qemu-user-static gcc-arm-linux-gnueabihf" in old, old
+        assert "pacman" not in old, old
+
+
 def test_a_rig_that_never_heard_of_nocand_accuses_nobody():
     """The fact is new.  An older setupcheck.sh, or a probe that timed out,
     must read as "nothing known against them" and not as "none of them can be

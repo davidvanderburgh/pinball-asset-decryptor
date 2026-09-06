@@ -517,8 +517,16 @@ _pad_binfmt_arm() {
 _pad_binfmt_advice() {
     if [ -f /usr/lib/binfmt.d/qemu-arm.conf ]; then
         echo "sudo sh -c 'cat /usr/lib/binfmt.d/qemu-arm.conf > /proc/sys/fs/binfmt_misc/register'"
+    elif [ -f /usr/lib/binfmt.d/qemu-arm-static.conf ]; then
+        # Arch's name for the same file (qemu-user-static-binfmt puts it
+        # there); systemd-binfmt reads the directory, so the registration is
+        # one restart away rather than a cat into /proc.
+        echo "sudo systemctl restart systemd-binfmt.service"
     elif [ -f /usr/share/binfmts/qemu-arm ]; then
         echo "sudo update-binfmts --import qemu-arm"
+    elif ! command -v apt-get >/dev/null 2>&1 &&
+         command -v pacman >/dev/null 2>&1; then
+        echo "sudo pacman -S --needed qemu-user-static qemu-user-static-binfmt"
     else
         echo "sudo apt install qemu-user-static"
     fi

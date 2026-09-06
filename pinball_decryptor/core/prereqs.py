@@ -17,6 +17,8 @@ import sys
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
+from .pkgnames import localize_hint
+
 # Prevent console flashes when launched via pythonw.exe on Windows.
 _CREATE_FLAGS = (subprocess.CREATE_NO_WINDOW
                  if sys.platform == "win32" else 0)
@@ -102,10 +104,16 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
     except Exception as e:
         ok, msg = False, f"{type(e).__name__}: {e}"
 
+    # SPELLED FOR THIS LINUX.  Every plugin's hint says "apt-get install X
+    # (in WSL)", written when Windows was the only desktop: on a Linux desktop
+    # the "(in WSL)" is wrong on every distro, and on Arch the name is too -
+    # a user on Omarchy translated them by hand (2026-09-06).  Done here, the
+    # one place both the tooltip and the log line read from, and a no-op off
+    # Linux and for a hint that names no apt package.
     return PrerequisiteResult(
         name=prereq.name, ok=ok, message=msg,
         reason=prereq.reason,
-        install_hint=hint_override or prereq.install_hint,
+        install_hint=localize_hint(hint_override or prereq.install_hint),
     )
 
 

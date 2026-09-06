@@ -3,11 +3,14 @@
 #
 # Each manufacturer plugin needs a different set of CLI tools.  Pick the
 # manufacturers you actually plan to use; this installs only the union of
-# tools those plugins need (via apt-get).
+# tools those plugins need, through apt-get on Debian and Ubuntu or pacman on
+# Arch and its spins (Omarchy, CachyOS, EndeavourOS, Manjaro).
 #
-# Safe to re-run: apt-get install -y on already-installed packages is a no-op.
+# Safe to re-run: `apt-get install -y` and `pacman -S --needed` are both no-ops
+# on packages already installed.
 #
-# Tested on Ubuntu 22.04 / 24.04 and Debian derivatives.  For other distros,
+# Tested on Ubuntu 22.04 / 24.04 and Debian derivatives; the pacman names were
+# checked against Arch's package database on 2026-09-06.  For other distros,
 # install the equivalent packages manually using the manifest below.
 set -euo pipefail
 
@@ -19,15 +22,32 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if ! command -v apt-get >/dev/null 2>&1; then
-    echo "This installer expects an apt-based distro (Debian / Ubuntu)."
-    echo "For others, install the equivalent of these packages by hand:"
+# --- Which package manager ----------------------------------------------
+# apt on Debian and Ubuntu, pacman on Arch.  This used to stop here for every
+# distro that was not apt, printing the apt names for the user to translate by
+# hand - which is what a user on Omarchy (an Arch spin) did, reporting on
+# 2026-09-06 that the app then ran without a fault.  So Arch is a real target,
+# and the one thing between it and the app's own "Install Missing" button was
+# a package-name table.
+#
+# DETECTED HERE, ABOVE THE MANIFEST, and read everywhere below as `${PM:-apt}`:
+# the tests lift the picker and the install blocks out of this file by their
+# section markers and run them on their own, so those blocks cannot depend on
+# this one having run, and unset has to mean apt - what the script always was.
+if command -v apt-get >/dev/null 2>&1; then
+    PM=apt
+elif command -v pacman >/dev/null 2>&1; then
+    PM=pacman
+else
+    echo "This installer speaks apt (Debian / Ubuntu) and pacman (Arch and its spins)."
+    echo "For another distro, install the equivalent of these by hand"
+    echo "(the apt name, then the Arch name in brackets where it differs):"
     echo "  PB:     e2fsprogs"
-    echo "  Spooky: gnupg ffmpeg partclone e2fsprogs zstd python3-zstandard"
-    echo "  BOF:    gnupg tar curl unzip xvfb webp + GDRE Tools (download from GitHub)"
-    echo "  JJP:    partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard gcc libc6-dev"
-    echo "  CGC:    e2fsprogs xxd"
-    echo "  Stern:  qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk ffmpeg busybox-static"
+    echo "  Spooky: gnupg ffmpeg partclone e2fsprogs zstd python3-zstandard (python-zstandard)"
+    echo "  BOF:    gnupg tar curl unzip xvfb (xorg-server-xvfb) webp (libwebp) + GDRE Tools (download from GitHub)"
+    echo "  JJP:    partclone e2fsprogs xorriso (libisoburn) pigz ffmpeg python3-zstandard (python-zstandard) gcc libc6-dev (glibc)"
+    echo "  CGC:    e2fsprogs xxd (tinyxxd, or vim's) + pip (python-pip)"
+    echo "  Stern:  qemu-user-static (+ qemu-user-static-binfmt) gcc-arm-linux-gnueabihf (arm-linux-gnueabihf-gcc, AUR) gcc libc6-dev (glibc) e2fsprogs fuse3 python3-tk (tk) ffmpeg busybox-static (busybox)"
     exit 1
 fi
 
@@ -94,6 +114,60 @@ declare -A MFR_PACKAGES=(
     #                             now runs the ordinary boot instead, and this
     #                             is what buys the feature back.
     [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk ffmpeg busybox-static"
+)
+
+# The same manifest in pacman's spelling, one entry per manufacturer above - a
+# manufacturer with an apt list and no pacman list would install nothing on
+# Arch and say so only in the summary.  Every name verified against Arch's
+# package database (archlinux.org/packages) on 2026-09-06; all of them are in
+# core or extra.  Where the two distros disagree:
+#   python3-zstandard -> python-zstandard      xvfb    -> xorg-server-xvfb
+#   webp              -> libwebp               xorriso -> libisoburn
+#   libc6-dev         -> (nothing: Arch's glibc ships its headers, gcc pulls it)
+#   xxd               -> tinyxxd, BUT vim and gvim also provide xxd and tinyxxd
+#                        conflicts with them, so it is skipped when an xxd is
+#                        already on the PATH (PM_CMD_OF below)
+#   python3-tk        -> tk (Arch's python grows tkinter once tk is present)
+#   qemu-user-static  -> qemu-user-static + qemu-user-static-binfmt.  Arch
+#                        splits the binfmt registration into its own package,
+#                        and the rig needs the registration, with the F flag:
+#                        Arch generates it with `--persistent yes`, which IS
+#                        that flag, and systemd's 25-systemd-binfmt.hook
+#                        registers it in the same pacman transaction, so
+#                        nothing here has to restart anything.
+#   busybox-static    -> busybox (Arch's is built CONFIG_STATIC=y, and /bin is
+#                        /usr/bin there, so the rig's /bin/busybox probe sees it)
+#   gcc-arm-linux-gnueabihf -> NOT IN THE REPOS.  See MFR_AUR_PACKAGES.
+declare -A MFR_PACMAN_PACKAGES=(
+    [1]="e2fsprogs"
+    [2]="gnupg ffmpeg partclone e2fsprogs zstd python-zstandard"
+    [3]="gnupg tar curl unzip xorg-server-xvfb libwebp"
+    [4]="partclone e2fsprogs libisoburn pigz ffmpeg python-zstandard gcc"
+    # python-pip: Arch's python does not carry pip, and the pip step below is
+    # how CGC's transcribe button gets faster-whisper.
+    [5]="e2fsprogs tinyxxd python-pip"
+    [6]="qemu-user-static qemu-user-static-binfmt gcc e2fsprogs fuse3 tk ffmpeg busybox"
+)
+
+# What pacman cannot supply.  The AUR is not a repository, it is recipes, and
+# building from it takes a helper (yay, paru) or makepkg by hand, neither of
+# which this script should be running as root.  These are NAMED at the end,
+# not installed.  The Spike 2 rig builds its hardware shim and the guest half
+# of its GL bridge with arm-linux-gnueabihf-gcc (buildshim.sh / buildbridge.sh
+# call it by that name), and on Arch that is an AUR toolchain: the source
+# package builds binutils, kernel headers, glibc and then gcc, an hour or more;
+# the *-bin packages beside it are the same compiler prebuilt.
+declare -A MFR_AUR_PACKAGES=(
+    [6]="arm-linux-gnueabihf-gcc"
+)
+
+# A pacman package that exists only to put ONE command on the PATH, and whose
+# command another installed package may already provide.  Installing it then
+# would not be a no-op, it would be a refused conflict (tinyxxd vs vim), so it
+# is skipped when the command is already there, and the summary counts it OK
+# by the command rather than by the package.
+declare -A PM_CMD_OF=(
+    [tinyxxd]="xxd"
 )
 
 # Pip packages -- installed into the same Python that runs the app
@@ -171,11 +245,27 @@ fi
 # --- Dedup the package set ---------------------------------------------
 declare -A pkg_set=()
 for s in "${selected[@]}"; do
-    for p in ${MFR_PACKAGES[$s]}; do
+    if [ "${PM:-apt}" = pacman ]; then
+        list=${MFR_PACMAN_PACKAGES[$s]:-}
+    else
+        list=${MFR_PACKAGES[$s]}
+    fi
+    for p in $list; do
         pkg_set[$p]=1
     done
 done
 all_packages=("${!pkg_set[@]}")
+
+# ...and the ones only the AUR has, which are named rather than installed.
+declare -A aur_set=()
+if [ "${PM:-apt}" = pacman ]; then
+    for s in "${selected[@]}"; do
+        for p in ${MFR_AUR_PACKAGES[$s]:-}; do
+            aur_set[$p]=1
+        done
+    done
+fi
+all_aur_packages=("${!aur_set[@]}")
 
 declare -A pip_set=()
 for s in "${selected[@]}"; do
@@ -191,7 +281,16 @@ for s in "${selected[@]}"; do
     echo "  - ${MFR_NAMES[$s]}"
 done
 echo ""
-echo "Will install (apt): ${all_packages[*]}"
+echo "Will install (${PM:-apt}): ${all_packages[*]}"
+if [ -n "${all_aur_packages[*]:-}" ]; then
+    echo "From the AUR, by hand (pacman cannot): ${all_aur_packages[*]}"
+fi
+if [ "${PM:-apt}" = pacman ]; then
+    echo ""
+    echo "On Arch that is 'pacman -Syu --needed ...': the whole system is brought"
+    echo "up to date first, because pacman does not install into a stale one"
+    echo "(a partial upgrade is the one thing Arch says never to do)."
+fi
 if [ "${#all_pip_packages[@]}" -gt 0 ]; then
     echo "Will install (pip): ${all_pip_packages[*]}"
 fi
@@ -203,40 +302,89 @@ if [ "$proceed" != "y" ]; then
 fi
 
 # --- Install ------------------------------------------------------------
-echo ""
-echo "Refreshing apt indexes..."
-$SUDO apt-get update -qq
+# Installed, by whichever package manager this is.  Defined HERE rather than
+# beside the detection at the top because the tests run this block and the
+# summary below on their own, lifted out by their section markers (see
+# tests/test_installer.py); what they need has to travel with them.
+pkg_installed() {
+    case "${PM:-apt}" in
+        pacman)
+            pacman -Qq "$1" >/dev/null 2>&1 && return 0
+            # ...or the one command it exists for is already on the PATH
+            # (vim's xxd stands in for tinyxxd, which conflicts with it).
+            local cmd=${PM_CMD_OF[$1]:-}
+            [ -n "$cmd" ] && command -v "$cmd" >/dev/null 2>&1 ;;
+        *)  dpkg -s "$1" >/dev/null 2>&1 ;;
+    esac
+}
 
-echo "Installing packages..."
-# ONE UNAVAILABLE NAME MUST NOT TAKE THE OTHERS DOWN WITH IT.  `apt-get install
-# a b c` is all or nothing: if apt has no version of ONE of them the whole
-# command fails and none of the rest are installed - and with `set -e` above,
-# the script dies there, so the summary that would have named the culprit never
-# prints either.  A tester met exactly that on the WSL side of this (PAD-41):
-# ended a run four packages short having been told about one.  So the batch is
-# tried first because it is one download plan and much faster, and only if it
-# fails is each package retried on its own, which is what turns "nothing
-# installed, here is an apt error" into "everything installed except this one",
-# and the summary below then names it.
-#
-# `$SUDO env VAR=...`, NOT `$SUDO VAR=... `: bash decides which leading words
-# are variable assignments while PARSING, before `$SUDO` is expanded, so on a
-# machine already running as root - where SUDO is empty and vanishes -
-# `DEBIAN_FRONTEND=noninteractive` becomes the command word and every install
-# dies with "DEBIAN_FRONTEND=noninteractive: command not found".  `env` also
-# takes the setting past a sudoers policy that would otherwise refuse it.
-if ! $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        "${all_packages[@]}"; then
-    echo ""
-    echo "That did not go through as one command.  Retrying them one at a"
-    echo "time so a package apt cannot get does not block the rest..."
+echo ""
+if [ "${PM:-apt}" = pacman ]; then
+    # Leave out what another package's command already satisfies (PM_CMD_OF):
+    # pacman would not skip it, it would refuse the conflict and the batch.
+    wanted=()
     for p in "${all_packages[@]}"; do
-        $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" \
-            || echo "  apt could not install $p"
+        if [ -n "${PM_CMD_OF[$p]:-}" ] && pkg_installed "$p"; then
+            echo "  $p: already have ${PM_CMD_OF[$p]} - skipping"
+        else
+            wanted+=("$p")
+        fi
     done
+    echo "Installing packages (pacman -Syu --needed)..."
+    # ONE UNKNOWN NAME MUST NOT TAKE THE OTHERS DOWN WITH IT: pacman's "target
+    # not found" fails the whole transaction exactly as apt's "no installation
+    # candidate" does (the apt path below says why that matters), so the same
+    # batch first, then one at a time.  The retries are `-Su`, not `-S`: the
+    # batch's `-y` already refreshed the database - pacman syncs before it
+    # resolves targets, so a refused batch still leaves a fresh one - and a
+    # plain `-S` against a fresh database with no `-u` is the partial upgrade
+    # Arch does not support.
+    if [ -n "${wanted[*]:-}" ] && \
+            ! $SUDO pacman -Syu --needed --noconfirm "${wanted[@]}"; then
+        echo ""
+        echo "That did not go through as one command.  Retrying them one at a"
+        echo "time so a package pacman cannot get does not block the rest..."
+        for p in "${wanted[@]}"; do
+            $SUDO pacman -Su --needed --noconfirm "$p" \
+                || echo "  pacman could not install $p"
+        done
+    fi
+else
+    echo "Refreshing apt indexes..."
+    $SUDO apt-get update -qq
+
+    echo "Installing packages..."
+    # ONE UNAVAILABLE NAME MUST NOT TAKE THE OTHERS DOWN WITH IT.  `apt-get install
+    # a b c` is all or nothing: if apt has no version of ONE of them the whole
+    # command fails and none of the rest are installed - and with `set -e` above,
+    # the script dies there, so the summary that would have named the culprit never
+    # prints either.  A tester met exactly that on the WSL side of this (PAD-41):
+    # ended a run four packages short having been told about one.  So the batch is
+    # tried first because it is one download plan and much faster, and only if it
+    # fails is each package retried on its own, which is what turns "nothing
+    # installed, here is an apt error" into "everything installed except this one",
+    # and the summary below then names it.
+    #
+    # `$SUDO env VAR=...`, NOT `$SUDO VAR=... `: bash decides which leading words
+    # are variable assignments while PARSING, before `$SUDO` is expanded, so on a
+    # machine already running as root - where SUDO is empty and vanishes -
+    # `DEBIAN_FRONTEND=noninteractive` becomes the command word and every install
+    # dies with "DEBIAN_FRONTEND=noninteractive: command not found".  `env` also
+    # takes the setting past a sudoers policy that would otherwise refuse it.
+    if ! $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            "${all_packages[@]}"; then
+        echo ""
+        echo "That did not go through as one command.  Retrying them one at a"
+        echo "time so a package apt cannot get does not block the rest..."
+        for p in "${all_packages[@]}"; do
+            $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" \
+                || echo "  apt could not install $p"
+        done
+    fi
+
 fi
 
-# --- ...and what to do about one apt would not install ------------------
+# --- ...and what to do about one the package manager would not install --
 # A red MISSING in the summary used to be the end of it, on both installers,
 # and that is not even a diagnosis: apt refusing a package because Ubuntu keeps
 # it in a component this distro has switched off is a different fault from a
@@ -255,14 +403,21 @@ fi
 # is helped without an ARM emulator arriving on his machine as a side effect.
 still=
 for p in "${all_packages[@]}"; do
-    dpkg -s "$p" >/dev/null 2>&1 || still="$still $p"
+    pkg_installed "$p" || still="$still $p"
 done
 if [ -n "$still" ]; then
     rig="$SCRIPT_DIR/../tools/spike2_emu"
     [ -f "$rig/setupfix.sh" ] || rig="$SCRIPT_DIR/tools/spike2_emu"
     echo ""
-    echo "apt could not install:$still"
-    if [ -f "$rig/setupfix.sh" ]; then
+    echo "${PM:-apt} could not install:$still"
+    if [ "${PM:-apt}" = pacman ]; then
+        # setupfix.sh's repairs are apt's: the index refresh, the `universe`
+        # component, the one .deb fetched from another Ubuntu release.  None
+        # of them means anything to pacman, whose own message is the best
+        # help there is - and unlike apt's it names the target it lacks.
+        echo "Run this to see pacman's own reason:"
+        echo "    sudo pacman -S --needed$still"
+    elif [ -f "$rig/setupfix.sh" ]; then
         echo ""
         echo "There is more the app can do about that than apt can:"
         echo "  * refresh the package index and try again, one at a time"
@@ -282,6 +437,24 @@ if [ -n "$still" ]; then
         echo "Run this to see apt's own reason:"
         echo "    sudo apt-get install$still"
     fi
+fi
+
+# --- ...and what pacman cannot install at all ---------------------------
+# Named, with the way to get each one, and what it costs to go without.
+if [ -n "${all_aur_packages[*]:-}" ]; then
+    echo ""
+    echo "From the AUR, which pacman does not install from: ${all_aur_packages[*]}"
+    echo "  With an AUR helper:  yay -S ${all_aur_packages[*]}    (or paru -S ...)"
+    for p in "${all_aur_packages[@]}"; do
+        case "$p" in
+            arm-linux-gnueabihf-gcc)
+                echo "  $p is the Spike 2 emulator's cross compiler: the"
+                echo "  Emulate tab builds its hardware shim with it, and nothing else in"
+                echo "  the app needs it.  The source package builds the whole toolchain"
+                echo "  and takes a while; arm-linux-gnueabihf-gcc-bin is the same"
+                echo "  compiler prebuilt." ;;
+        esac
+    done
 fi
 
 # --- Custom post-install steps (downloads that aren't in apt) -----------
@@ -307,7 +480,22 @@ done
 if [ "${#all_pip_packages[@]}" -gt 0 ]; then
     echo ""
     echo "Installing pip packages (python3 -m pip install --user)..."
-    python3 -m pip install --user --upgrade "${all_pip_packages[@]}"
+    # PEP 668.  Arch, and Debian 12 / Ubuntu 23.04 and later, mark the system
+    # Python "externally managed", and pip then refuses even --user with a wall
+    # of text and exit 1 - which, with `set -e` above, ended this script here
+    # with the summary unprinted.  --user installs into ~/.local, the one tree
+    # that marking does not cover; the flag that gets past the refusal is
+    # named for the thing --user does not do.  So: plain first (older pips do
+    # not know the flag), then with it, and a pip that still refuses is named
+    # rather than fatal.
+    if ! python3 -m pip install --user --upgrade "${all_pip_packages[@]}"; then
+        echo ""
+        echo "pip refused - an externally managed Python, most likely.  Retrying"
+        echo "into your user site (~/.local), which that marking does not cover..."
+        python3 -m pip install --user --upgrade --break-system-packages \
+                "${all_pip_packages[@]}" \
+            || echo "  pip could not install: ${all_pip_packages[*]}"
+    fi
 fi
 
 # --- Summary ------------------------------------------------------------
@@ -316,10 +504,19 @@ echo "============================================================"
 echo "  Prerequisites Summary"
 echo "============================================================"
 for p in "${all_packages[@]}"; do
-    if dpkg -s "$p" >/dev/null 2>&1; then
+    if pkg_installed "$p"; then
         printf "  %-30s OK\n" "$p"
     else
         printf "  %-30s MISSING\n" "$p"
+    fi
+done
+# `[*]:+` rather than a bare `[@]`: the array may be unset, not merely empty,
+# and `set -u` treats those differently.
+for p in ${all_aur_packages[*]:+"${all_aur_packages[@]}"}; do
+    if pacman -Qq "$p" >/dev/null 2>&1; then
+        printf "  %-30s OK (AUR)\n" "$p"
+    else
+        printf "  %-30s MISSING (AUR - see above)\n" "$p"
     fi
 done
 for p in "${all_pip_packages[@]}"; do

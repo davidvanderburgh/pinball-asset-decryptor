@@ -514,7 +514,7 @@ def _bash_has_associative_arrays():
 HAS_BASH4 = _bash_has_associative_arrays()
 
 
-def _run_linux_picker(pick):
+def _run_linux_picker(pick, pm=None, through=None):
     """Run install_prerequisites_linux.sh's REAL picker with `pick` typed in.
 
     The manifest, the menu and the selection logic are lifted verbatim, down to
@@ -529,15 +529,23 @@ def _run_linux_picker(pick):
     src = (INSTALLER / "install_prerequisites_linux.sh").read_text(
         encoding="utf-8")
     body = src[src.index("declare -A MFR_NAMES=("):]
-    body = body[:body.index("all_packages=(") + len('all_packages=("${!pkg_set[@]}")')]
+    # The slice ends at the package list unless a later line is asked for
+    # (the AUR dedup sits after it).
+    end = through or 'all_packages=("${!pkg_set[@]}")'
+    body = body[:body.index(end) + len(end)]
     lines = [ln for ln in body.splitlines()
              if not ln.startswith("read -rp")]
     harness = "\n".join(lines) + (
         '\nprintf "selected: %s\\n" "${selected[*]:-}"'
         '\nprintf "packages: %s\\n" "$(printf \'%s\\n\' '
-        '"${all_packages[@]}" | sort | tr \'\\n\' \' \')"\n')
+        '"${all_packages[@]}" | sort | tr \'\\n\' \' \')"'
+        '\nprintf "aur: %s\\n" "${all_aur_packages[*]:-}"\n')
+    # `pm` stands in for the detection at the top of the script, which the
+    # slice starts below: PM=pacman is what it sets on Arch, and unset is apt
+    # exactly as it is in the script.
+    head = "pick=%s\n" % pick + ("PM=%s\n" % pm if pm else "")
     r = subprocess.run(["bash", "-s"],
-                       input=("pick=%s\n" % pick + harness).encode("utf-8"),
+                       input=(head + harness).encode("utf-8"),
                        capture_output=True, timeout=120)
     return r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
 
@@ -682,6 +690,234 @@ all_pip_packages=()
         assert pkg not in rig, (
             f"{pkg} installed fine and was still handed to the repair:\n{rig}")
 
+
+# The Debian spellings that have a different Arch name.  One of these reaching
+# pacman is "target not found", which fails the whole batch.
+_APT_ONLY_SPELLINGS = ("python3-zstandard", "xvfb", "webp", "xorriso",
+                       "libc6-dev", "xxd", "python3-tk", "busybox-static",
+                       "gcc-arm-linux-gnueabihf")
+
+
+def _linux_manifest_ids(src, name):
+    return sorted(int(m) for m in re.findall(
+        r"^\s*\[(\d+)\]=",
+        src.split(name + "=(", 1)[1].split("\n)", 1)[0], re.M))
+
+
+@pytest.mark.skipif(not HAS_BASH4, reason="no bash 4+ to run the picker with")
+def test_linux_installer_speaks_pacman_for_every_manufacturer_it_lists():
+    """★ Arch.  A user on Omarchy (an Arch spin) reported on 2026-09-06 that
+    the app ran from source without a fault - having translated the apt names
+    by hand, because this installer stopped at its first line for any distro
+    without apt-get ("This installer expects an apt-based distro"), and the
+    app's Install Missing button IS this script.  Now it speaks pacman, from a
+    second manifest in Arch's spelling.
+
+    Runs the real picker with PM=pacman - the variable the detection at the
+    top sets on Arch - for every manufacturer the menu lists, and checks that
+    what comes out is Arch's spelling and nothing else: a manufacturer with an
+    apt list and no pacman list would install nothing and say so only in the
+    summary, and one Debian name leaking through is pacman's "target not
+    found", which fails the whole batch."""
+    src = (INSTALLER / "install_prerequisites_linux.sh").read_text(
+        encoding="utf-8")
+    ids = _linux_manifest_ids(src, "MFR_NAMES")
+    # Static parity first: the two manifests list the same manufacturers.
+    assert (_linux_manifest_ids(src, "MFR_PACMAN_PACKAGES")
+            == _linux_manifest_ids(src, "MFR_PACKAGES") == ids), (
+        "the apt and pacman manifests list different manufacturers")
+
+    for i in ids:
+        out = _run_linux_picker(str(i), pm="pacman")
+        pkgs = out.split("packages:")[1].split("\n")[0].split()
+        assert pkgs, f"[{i}] installs nothing on Arch:\n{out}"
+        leaked = [p for p in pkgs if p in _APT_ONLY_SPELLINGS]
+        assert not leaked, (
+            f"[{i}] hands pacman a Debian name: {leaked} - that is "
+            f"'target not found', and the whole batch with it:\n{out}")
+
+    # The one the Windows report (PAD-104) was about, now on Arch: everything
+    # the Emulate tab needs, in Arch's spelling, including the binfmt
+    # registration Arch splits into its own package.
+    stern = _run_linux_picker("6", pm="pacman")
+    stern_pkgs = stern.split("packages:")[1].split("\n")[0].split()
+    for p in ("qemu-user-static", "qemu-user-static-binfmt", "gcc",
+              "e2fsprogs", "fuse3", "tk", "ffmpeg", "busybox"):
+        assert p in stern_pkgs, f"Stern's pacman list lacks {p}:\n{stern}"
+
+    # ...and the apt path is untouched by the second manifest: PM unset is
+    # apt, and none of Arch's spellings reach it.
+    apt = _run_linux_picker("a")
+    apt_pkgs = set(apt.split("packages:")[1].split("\n")[0].split())
+    arch_only = {"qemu-user-static-binfmt", "tinyxxd", "python-zstandard",
+                 "busybox", "tk", "libisoburn", "libwebp", "xorg-server-xvfb"}
+    assert not (apt_pkgs & arch_only), (
+        f"Arch names reached the apt list: {apt_pkgs & arch_only}\n{apt}")
+
+
+@pytest.mark.skipif(not HAS_BASH4, reason="no bash 4+ to run the picker with")
+def test_linux_installer_names_the_aur_cross_compiler_instead_of_failing_on_it():
+    """Arch's repositories have no ARM cross compiler; the AUR does
+    (arm-linux-gnueabihf-gcc), and the AUR is recipes, not packages - nothing
+    an install script running as root should build.  Putting the name in the
+    pacman list would be "target not found" for the whole Stern batch; leaving
+    it out would be a rig that cannot build its shim and no word why.  So it
+    is a third list, NAMED after the install, and only when Stern was picked
+    on Arch."""
+    end = 'all_aur_packages=("${!aur_set[@]}")'
+    stern = _run_linux_picker("6", pm="pacman", through=end)
+    assert "arm-linux-gnueabihf-gcc" in stern.split("aur:")[1], stern
+    assert "arm-linux-gnueabihf-gcc" not in stern.split(
+        "packages:")[1].split("\n")[0], (
+        "the AUR package is in the pacman batch, where it can only fail:\n"
+        + stern)
+    spooky = _run_linux_picker("2", pm="pacman", through=end)
+    assert not spooky.split("aur:")[1].strip(), (
+        "a Spooky user is told to build an ARM toolchain:\n" + spooky)
+    apt = _run_linux_picker("6", through=end)
+    assert not apt.split("aur:")[1].strip(), (
+        "apt users are sent to the AUR:\n" + apt)
+
+
+@pytest.mark.skipif(not HAS_BASH4, reason="no bash 4+ to run the installer with")
+def test_linux_installer_pacman_one_bad_package_does_not_block_the_others():
+    """The pacman path of the install block, against a fake pacman that has no
+    `tk`.  pacman's "target not found" fails the whole transaction exactly as
+    apt's "no installation candidate" does (PAD-104 / PAD-41), so the same
+    batch-then-one-at-a-time, and the same summary naming the one it could
+    not get.  Checked besides:
+
+      * the batch is `-Syu` and the retries `-Su` - a `-S` after a refresh
+        with no `-u` is the partial upgrade Arch does not support;
+      * apt's repair (setupfix.sh) is not reached, and neither apt-get nor
+        dpkg is called: their answers mean nothing here;
+      * a package whose only command is already on the PATH (vim's xxd for
+        tinyxxd, which would CONFLICT with it, not no-op) is skipped and still
+        reads OK;
+      * the AUR cross compiler is named with the way to get it, never handed
+        to pacman, and reads MISSING (AUR) rather than vanishing.
+    """
+    src = (INSTALLER / "install_prerequisites_linux.sh").read_text(
+        encoding="utf-8")
+    install = src[src.index("# --- Install ---"):
+                  src.index("# --- Custom post-install")]
+    summary = src[src.index("# --- Summary ---"):]
+    # apt's repair prompt is in the slice; on Arch it must never be reached,
+    # so it is left in as the `read` it is - reaching it would hang, and the
+    # timeout below is what fails the test then.
+    assert 'read -rp "Try that now' in install
+    harness = r"""
+set -euo pipefail
+T=$(mktemp -d) || exit 1
+cat > "$T/pacman" <<'PM'
+#!/bin/sh
+echo "PACMAN $*" >> "$PAD_INSTALLED.calls"
+if [ "$1" = "-Qq" ]; then grep -qx "$2" "$PAD_INSTALLED" 2>/dev/null; exit $?; fi
+for a in "$@"; do
+  [ "$a" = "tk" ] || continue
+  echo "error: target not found: tk" >&2
+  exit 1
+done
+for a in "$@"; do
+  case "$a" in -*) continue ;; esac
+  echo "$a" >> "$PAD_INSTALLED"
+done
+PM
+cat > "$T/apt-get" <<'APT'
+#!/bin/sh
+echo "APT $*" >> "$PAD_INSTALLED.calls"; exit 99
+APT
+cat > "$T/dpkg" <<'DPKG'
+#!/bin/sh
+echo "DPKG $*" >> "$PAD_INSTALLED.calls"; exit 1
+DPKG
+printf '#!/bin/sh\nexit 0\n' > "$T/xxd"
+chmod +x "$T/pacman" "$T/apt-get" "$T/dpkg" "$T/xxd"
+export PAD_INSTALLED="$T/installed"
+: > "$PAD_INSTALLED"; : > "$PAD_INSTALLED.calls"
+export PATH="$T:$PATH"
+mkdir -p "$T/installer" "$T/tools/spike2_emu"
+cat > "$T/tools/spike2_emu/setupfix.sh" <<'FIX'
+#!/bin/sh
+echo "RIGCALL $*" >> "$PAD_INSTALLED.calls"
+FIX
+SCRIPT_DIR="$T/installer"
+SUDO=""
+PM=pacman
+declare -A PM_CMD_OF=([tinyxxd]="xxd")
+all_packages=(qemu-user-static qemu-user-static-binfmt tk e2fsprogs tinyxxd)
+all_aur_packages=(arm-linux-gnueabihf-gcc)
+all_pip_packages=()
+"""
+    tail = '\necho "--- calls ---"; cat "$PAD_INSTALLED.calls"\n'
+    r = subprocess.run(
+        ["bash", "-s"],
+        input=(harness + install + summary + tail).encode("utf-8"),
+        capture_output=True, timeout=180)
+    said = r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert r.returncode == 0, (
+        "the installer died on a package pacman could not get, so the "
+        "summary naming it never printed:\n"
+        + r.stderr.decode("utf-8", "replace") + said)
+    for pkg in ("qemu-user-static", "qemu-user-static-binfmt", "e2fsprogs"):
+        assert re.search(r"^\s+%s\s+OK$" % re.escape(pkg), said, re.M), (
+            f"{pkg} was taken down by the one package beside it that pacman "
+            f"has no target for:\n{said}")
+    assert re.search(r"^\s+tk\s+MISSING$", said, re.M), said
+    assert "pacman could not install: tk" in said, said
+    assert "sudo pacman -S --needed tk" in said, said
+    # tinyxxd: skipped for the xxd already on the PATH, and still OK.
+    assert "tinyxxd: already have xxd - skipping" in said, said
+    assert re.search(r"^\s+tinyxxd\s+OK$", said, re.M), said
+    # The AUR one: named with the way to get it, and not swallowed.
+    assert "yay -S arm-linux-gnueabihf-gcc" in said, said
+    assert re.search(r"^\s+arm-linux-gnueabihf-gcc\s+MISSING \(AUR", said,
+                     re.M), said
+
+    calls = said.split("--- calls ---", 1)[1]
+    installs = [ln for ln in calls.splitlines()
+                if ln.startswith("PACMAN ") and " -Q" not in ln]
+    assert installs and installs[0].startswith(
+        "PACMAN -Syu --needed --noconfirm "), installs
+    assert "tinyxxd" not in installs[0], (
+        "a package another one already provides was handed to pacman, "
+        "which refuses the conflict and the batch with it: " + installs[0])
+    assert "arm-linux-gnueabihf-gcc" not in " ".join(installs), installs
+    for ln in installs[1:]:
+        assert ln.startswith("PACMAN -Su --needed --noconfirm "), (
+            "a retry with no -u after a refresh is the partial upgrade Arch "
+            "does not support: " + ln)
+    assert "APT " not in calls and "DPKG " not in calls, (
+        "the pacman path reached for apt:\n" + calls)
+    assert "RIGCALL" not in calls, (
+        "apt's repair (setupfix.sh) was run on Arch, where none of its "
+        "repairs mean anything:\n" + calls)
+
+
+@pytest.mark.skipif(not HAS_BASH4, reason="no bash 4+ to run the installer with")
+def test_linux_installer_without_apt_or_pacman_prints_both_spellings():
+    """The hand list for a distro this script does not speak.  It used to be
+    the apt names alone; now every name that differs carries Arch's beside
+    it, so the next distro's user has two spellings to go on rather than one,
+    and the script still stops with a non-zero exit rather than pretending."""
+    src = (INSTALLER / "install_prerequisites_linux.sh").read_text(
+        encoding="utf-8")
+    block = src[src.index("# --- Which package manager"):
+                src.index("# --- Manufacturer manifest")]
+    r = subprocess.run(
+        ["bash", "-s"],
+        input=("set -euo pipefail\nPATH=/nonexistent\n" + block).encode("utf-8"),
+        capture_output=True, timeout=60)
+    out = r.stdout.decode("utf-8", "replace")
+    assert r.returncode == 1, (r.returncode, out, r.stderr)
+    for apt_name, arch_name in (("python3-tk", "tk"),
+                                ("gcc-arm-linux-gnueabihf",
+                                 "arm-linux-gnueabihf-gcc"),
+                                ("xxd", "tinyxxd"),
+                                ("busybox-static", "busybox"),
+                                ("python3-zstandard", "python-zstandard")):
+        assert apt_name in out and arch_name in out, (apt_name, arch_name, out)
+    assert "pacman" in out and "apt" in out, out
 
 @pytest.mark.skipif(_powershell() is None, reason="PowerShell not available")
 def test_windows_installer_hands_a_failed_package_to_the_rigs_repair(tmp_path):

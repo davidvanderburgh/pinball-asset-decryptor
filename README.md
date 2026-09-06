@@ -655,6 +655,11 @@ follows; everything not listed is spelled the same:
 | busybox-static | busybox (Arch's is static) |
 | gcc-arm-linux-gnueabihf | **not in the repositories.** AUR `arm-linux-gnueabihf-gcc` (or `arm-linux-gnueabihf-gcc-bin`, prebuilt). The installer names it rather than failing on it; only the Spike 2 emulator needs it |
 
+The prerequisite strip's hover hints and the Emulate tab's "run this"
+advice are spelled for pacman on such a machine as well, and the CGC
+transcribe step's pip install survives Arch's externally-managed Python by
+installing into your user site.
+
 On any other distro, install the equivalent packages by hand using the
 table in that section; the script prints both spellings when it finds
 neither package manager.
@@ -1431,7 +1436,7 @@ Different plugins need different runtime tools. The prerequisite installer
 lets you pick which manufacturers you care about and installs only what
 those plugins need.
 
-| Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt | Other |
+| Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt (Arch names: see [Linux](#linux)) | Other |
 |---|---|---|---|
 | Barrels of Fun | – | gnupg, tar, curl, unzip, xvfb, webp | **GDRE Tools** — only required for pre-May 2026 firmware; the May 2026+ format (GBOF-magic PCK with RSCC Zstd containers) is handled by the bundled native extractor.  Install Prerequisites auto-downloads GDRE from [GDRETools/gdsdecomp](https://github.com/GDRETools/gdsdecomp/releases) regardless so older `.fun` files still work. |
 | Chicago Gaming Company | ffmpeg *(optional — Cactus Canyon display-art videos)* | e2fsprogs/debugfs, xxd | `faster-whisper` pip package — auto-installed by Install Prerequisites, drives the **Auto-transcribe samples to callouts.csv** checkbox on the Extract tab (tiny.en model by default, ~75 MB downloaded on first use, runs entirely on CPU; larger/more-accurate models selectable via ⚙ → Voice recognition quality). Cactus Canyon DCS audio repack uses the bundled DCSExplorer/DCSEncoder (BSD-3). |

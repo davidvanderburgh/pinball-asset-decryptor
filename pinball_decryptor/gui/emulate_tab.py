@@ -73,7 +73,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from ..core import config
+from ..core import config, pkgnames
 from . import _rig
 from .widgets import _Tooltip
 
@@ -1711,16 +1711,21 @@ def setup_notice(facts, can_fix):
         parts.append(
             "The handler for 32-bit ARM programs is registered but switched "
             "off, and the game is a 32-bit ARM program.")
+    # NAMED AS THIS MACHINE NAMES THEM.  The tables above are apt's spelling;
+    # on Arch (setupcheck.sh's `pm`) that is not what the user will type or
+    # search for, and the commands further down are translated the same way.
+    label = (pkgnames.arch_label if (facts or {}).get("pm") == "pacman"
+             else (lambda pkg: pkg))
     if missing:
         parts.append("Missing:\n" + "\n".join(
-            "     •  %s — %s" % (pkg, why) for pkg, why in missing))
+            "     •  %s — %s" % (label(pkg), why) for pkg, why in missing))
     # LISTED APART FROM THE ONES ABOVE, and it has to be: those stop a run and
     # this one does not.  A run started without it boots normally and simply
     # cannot be frozen (watch.sh says the same thing in the log), so the line
     # says what it costs rather than filing it under "missing".
     if extras:
         parts.append("Save states need:\n" + "\n".join(
-            "     •  %s — %s" % (pkg, why) for pkg, why in extras))
+            "     •  %s — %s" % (label(pkg), why) for pkg, why in extras))
     # NOT INSTALLABLE IS NOT THE SAME AS MISSING, and saying only the first is
     # what sent a tester to press a button that could never work: the tab
     # named qemu-user-static, he pressed “Set up emulator…”, and apt answered
@@ -1844,11 +1849,22 @@ def setup_notice(facts, can_fix):
                    if p not in built_names
                    and (facts.get("universe") == "0" or p not in unavailable)]
         if askable:
-            cmds.append("sudo apt install " + " ".join(askable))
+            if facts.get("pm") == "pacman":
+                # Arch.  Every name above is apt's, which is pacman's "target
+                # not found", and one of them (the cross compiler) is in no
+                # repository pacman has - it is named from the AUR on a line
+                # of its own rather than handed to pacman with the rest.
+                # `pm` is setupcheck.sh's own answer, so it is about the
+                # machine the run happens on; an older rig that never emitted
+                # it reads as apt, which is every rig there was before.
+                cmds.extend(pkgnames.pacman_commands(askable))
+            else:
+                cmds.append("sudo apt install " + " ".join(askable))
         if built_names:
             cmds.append("sudo bash %s" % os.path.join(rig_dir(), "getcriu.sh"))
         if binfmt != "1":
-            cmds.append(facts.get("advice", "sudo apt install qemu-user-static"))
+            cmds.append(facts.get(
+                "advice", pkgnames.binfmt_advice(facts.get("pm"))))
         if cmds:
             parts.append("Run this, then start again:\n" + "\n".join(
                 "     %s" % c for c in cmds))

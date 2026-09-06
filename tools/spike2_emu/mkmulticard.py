@@ -179,6 +179,10 @@ import time
 #: app's own plugins/stern modules, imported lazily so the pure parts need no package.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+#: This rig's own directory - only ever used to NAME a sibling script in a refusal, so the
+#: sentence a person reads is a path they can run rather than a bare file name.
+HERE = os.path.dirname(os.path.abspath(__file__))
+
 #: This tool's own version, stamped into build.json so a card says what wrote it.  Bump it when
 #: the sidecar's SHAPE changes; a reader must accept an older (or missing) one.
 #: 1.1 added each image's "title_dir" / "version" / "node_fw_version" (item 90's version gate).
@@ -2056,7 +2060,12 @@ def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None
     selector_manifests) are the JSON sidecars and land BESIDE images.conf - in SELECT_DIR, never
     in MEDIA_DIR, so the selector's media scan never sees them.  -> [(staged path, card path, mode)]."""
     if not os.path.isdir(selector_dir):
-        raise Refused("selector dir %s is not a directory" % selector_dir)
+        # THE ONE REFUSAL A PERSON WHO HAS NEVER BUILT THE SELECTOR MEETS, so it names the
+        # script that makes one rather than only the directory that is missing (PAD-105: a
+        # user pressed Build, got this after the plan, and had nothing to act on).
+        raise Refused("selector dir %s is not a directory - the boot menu program is built and "
+                      "installed there by %s (or ensureselect.sh, which does it only when it is "
+                      "missing)" % (selector_dir, os.path.join(HERE, "buildselect.sh")))
     items = []
     for name, (card, mode, required) in SELECTOR_FILES.items():
         src = os.path.join(selector_dir, name)
@@ -2065,7 +2074,8 @@ def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None
                 say("selector dir has no font.ttf; using the host's %s" % HOST_FONT)
                 src = HOST_FONT
             elif required:
-                raise Refused("selector dir %s lacks %s" % (selector_dir, name))
+                raise Refused("selector dir %s lacks %s - rebuild it with %s"
+                              % (selector_dir, name, os.path.join(HERE, "buildselect.sh")))
             else:
                 continue
         dst = os.path.join(stage, name)

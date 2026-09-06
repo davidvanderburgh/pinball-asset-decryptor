@@ -215,6 +215,10 @@ TOOL_DIR = "tools/spike2_emu"
 MKMULTICARD = TOOL_DIR + "/mkmulticard.py"
 SELECTMEDIA = TOOL_DIR + "/selectmedia.py"
 CODESELECT_SRC = TOOL_DIR + "/codeselect"
+#: The rig script that makes sure the menu program is INSTALLED where
+#: ``--selector-dir`` looks - ensurebuild.sh's own rules, called rather than
+#: copied (see :func:`install_selector_line`).
+ENSURESELECT = TOOL_DIR + "/ensureselect.sh"
 #: THE MENU'S COLOUR THEMES: the selector's own themes.json, one definition -
 #: the selector compiles it in, mkmulticard.py writes the keys, this tab shows
 #: the picker and the "make your own" colour grid.  Read once, on first use,
@@ -225,11 +229,16 @@ DEFAULT_THEME = "midnight"
 CUSTOM_THEME = "custom"
 CUSTOM_TITLE = "Make your own…"
 
+#: A selector build's home INSIDE the rootfs it was built against - the one
+#: place buildselect.sh installs to, the one place the machine carries it,
+#: and what tells :func:`rootfs_for` a directory is a rootfs's own.
+SELECTOR_SUFFIX = "/usr/local/codeselect"
+
 #: Where the rig installs the ARM selector (buildselect.sh's ``make install
 #: DESTDIR=$ROOT``, ROOT = PAD_ROOT else ~/spike2root).  A WSL path, spelled
 #: with ``~`` on purpose: the app cannot know the WSL user's home without a
 #: probe, and ``~/`` is expanded by bash without a ``$`` for wsl.exe to eat.
-DEFAULT_SELECTOR_DIR = "~/spike2root/usr/local/codeselect"
+DEFAULT_SELECTOR_DIR = "~/spike2root" + SELECTOR_SUFFIX
 
 #: The card rootfs copy the selector is built against and run in (the
 #: Makefile's ROOT, qemu's ``-L``) when the selector build path does not
@@ -339,6 +348,16 @@ APP_CHROME_H = 128
 
 #: What the selector-ensuring step prints in front of the binary it chose.
 SELECTOR_LINE = "[preview] selector:"
+
+#: ...and what the CARD's own selector step (:func:`install_selector_line`)
+#: prints in front of the directory the builder will take the menu out of.
+#: The rig script prints the same line - tests/test_multiboot_tab.py holds
+#: the two spellings together.
+SELECTOR_READY_LINE = "[selector] menu program:"
+#: How that step spells a refusal.  A refusal prefix
+#: (:data:`_REFUSAL_PREFIXES`), so a run that stops there says the sentence
+#: rather than an exit code.
+SELECTOR_ERROR = "[selector] error:"
 
 #: THE PREVIEW'S OWN VOLUME AND MUTE (David, 2026-09-03: "a volume slider
 #: with mute button next to the preview tab so I can mute the audio if I
@@ -841,9 +860,8 @@ def rootfs_for(selector_dir):
     """The rootfs a selector build sits in: ``~/spike2root/usr/local/
     codeselect`` -> ``~/spike2root``; :data:`DEFAULT_ROOTFS` otherwise."""
     d = (selector_dir or "").strip().rstrip("/")
-    suffix = "/usr/local/codeselect"
-    if d.endswith(suffix) and len(d) > len(suffix):
-        return d[:-len(suffix)]
+    if d.endswith(SELECTOR_SUFFIX) and len(d) > len(SELECTOR_SUFFIX):
+        return d[:-len(SELECTOR_SUFFIX)]
     return DEFAULT_ROOTFS
 
 
@@ -1674,6 +1692,63 @@ def parse_selector_path(text):
     return ""
 
 
+def install_selector_line(selector_dir, card="", tool=ENSURESELECT):
+    """THE CARD'S OWN SELECTOR STEP, and the first thing every writing run
+    does: make sure the menu program is INSTALLED in the directory
+    ``--selector-dir`` names, and build it there when it is not.
+
+    The preview's :func:`ensure_selector_line` builds a selector into a
+    scratch directory and installs nothing, so a person could fill this tab
+    in, watch their own menu animate, press Build and get the builder's
+    refusal seconds later - ``selector dir ~/spike2root/usr/local/codeselect
+    is not a directory`` - with nothing in it to act on (PAD-105).  Nothing
+    in the app had ever run buildselect.sh.
+
+    ``ensureselect.sh`` is that, and it is the RIG's own answer rather than
+    a second copy of it: ensurebuild.sh unpacks the guest filesystem from
+    *card* when the machine has none, builds the menu program when it is
+    missing, rebuilds it when this app ships newer sources, and leaves what
+    is installed alone when a rebuild is not possible.  It runs AS THE USER
+    (the build itself needs root; an installed tree owned by root is the
+    next rebuild's permission error), and it writes no card.
+
+    A selector directory that is not a rootfs's own - only
+    ``PAD_MULTIBOOT_SELECTOR`` can make one - is CHECKED and never written
+    into: the app cannot know what somebody pointed that at.
+    """
+    sel = (selector_dir or DEFAULT_SELECTOR_DIR).strip().rstrip("/")
+    rootfs = rootfs_for(sel)
+    if sel != rootfs + SELECTOR_SUFFIX:
+        return ("if [ -x %s ] && [ -f %s ]; then echo %s %s; "
+                "else echo %s; exit 1; fi"
+                % (_q(sel + "/codeselect"), _q(sel + "/select.sh"),
+                   _q(SELECTOR_READY_LINE), _q(sel),
+                   _q("%s %s holds no codeselect and select.sh, so a card "
+                      "built now would carry no menu. PAD_MULTIBOOT_SELECTOR "
+                      "names that directory; clear it to use the one the app "
+                      "builds and installs itself." % (SELECTOR_ERROR, sel))))
+    return "PAD_ROOT=%s bash %s%s" % (_q(rootfs), _q(tool),
+                                      (" " + _q(card)) if card else "")
+
+
+def install_selector_args(form, cwd=None):
+    """The card's 'selector' step argv (see :func:`install_selector_line`).
+    The primary image rides along: it is what the guest filesystem is
+    unpacked from on a machine that has never made one."""
+    if cwd is None:
+        cwd = wsl(repo_dir())
+    card = (form.images[0].path.strip().strip('"') if form.images else "")
+    line = install_selector_line(form.selector_dir,
+                                 wsl(card) if card else "")
+    return wsl_shell("cd %s && %s" % (_q(cwd), line))
+
+
+def install_selector_commands(form, cwd=None):
+    """The 'selector' step, as the one-item command list every writing run
+    starts with."""
+    return [("selector", install_selector_args(form, cwd))]
+
+
 _ANIM_RE = re.compile(
     r"anim: image (\d+) (?:(\d+) frames|stopped after (\d+) frame)")
 
@@ -1840,14 +1915,26 @@ def preview_box(avail_w, avail_h, frame_w=FRAME_W, frame_h=FRAME_H,
     return w, h, max_k
 
 
-def build_commands(form, cwd=None):
-    """The 'Build & verify' run: plan (the size, before a byte is written),
-    build - AS ROOT, it loop-mounts nothing yet but records the card the way
-    update needs (item 93) - verify.  ``[(label, argv), ...]``, run in
-    order, stop on failure."""
-    return [("plan", wsl_command(plan_args(form), cwd)),
-            ("build", root_command(build_args(form), cwd)),
-            ("verify", wsl_command(verify_args(form), cwd))]
+def build_commands(form, cwd=None, prepare=False):
+    """The 'Build & verify' run: the selector (the menu program the card
+    will carry, built and installed when this machine has not got one -
+    :func:`install_selector_line`), the media when *prepare* asks for it,
+    plan (the size, before a byte is written), build - AS ROOT, it
+    loop-mounts nothing yet but records the card the way update needs (item
+    93) - verify.  ``[(label, argv), ...]``, run in order, stop on failure.
+
+    THE SELECTOR GOES FIRST, before even the media: it is the one thing
+    here that a machine can be missing outright, the builder does not ask
+    for it until seconds into the build, and a run that cannot get a menu
+    program must not first spend a minute rendering pictures for one
+    (PAD-105)."""
+    cmds = install_selector_commands(form, cwd)
+    if prepare:
+        cmds += prepare_commands(form, form.media_dir, cwd)
+    return cmds + [
+        ("plan", wsl_command(plan_args(form), cwd)),
+        ("build", root_command(build_args(form), cwd)),
+        ("verify", wsl_command(verify_args(form), cwd))]
 
 
 #: The label of the size check's second step: ``update --dry-run`` on the
@@ -1866,10 +1953,11 @@ def measure_commands(form, card=None, cwd=None):
 
 
 def update_commands(form, card, media_dir="", prepare=False, expect_bytes=None, cwd=None):
-    """The in-place update run: the media first when a media field changed,
-    then ``update`` AS ROOT (it re-injects the menu, patches the validator
-    and verifies by itself), then the inspect that reads the card back."""
-    cmds = []
+    """The in-place update run: the selector (``update`` re-injects the menu
+    program, so it needs one), the media when a media field changed, then
+    ``update`` AS ROOT (it re-injects the menu, patches the validator and
+    verifies by itself), then the inspect that reads the card back."""
+    cmds = install_selector_commands(form, cwd)
     if prepare:
         cmds += prepare_commands(form, media_dir, cwd)
     cmds.append(("update", root_command(update_args(form, card, expect_bytes=expect_bytes), cwd)))
@@ -1942,12 +2030,13 @@ def inject_commands(form, card, cwd=None):
 
 def apply_commands(form, card, media_dir="", prepare=False, bypass=False,
                    refresh=True, cwd=None):
-    """The 'Apply to card' run: the media first when a media field changed
-    (into the dir the load extracted, so selectmedia's cache keeps the
-    unchanged pictures), the menu injected into the card in place, the
-    validator bypass when it is ticked and some tree is still armed, and a
-    last inspect that reads the card back."""
-    cmds = []
+    """The 'Apply to card' run: the selector (the injection writes the menu
+    program itself onto the card, so it needs one), the media when a media
+    field changed (into the dir the load extracted, so selectmedia's cache
+    keeps the unchanged pictures), the menu injected into the card in place,
+    the validator bypass when it is ticked and some tree is still armed, and
+    a last inspect that reads the card back."""
+    cmds = install_selector_commands(form, cwd)
     if prepare:
         cmds += prepare_commands(form, media_dir, cwd)
     cmds += inject_commands(form, card, cwd)
@@ -1986,7 +2075,9 @@ def parse_inspect(text):
 #: is still what its selftest and the ball tools use.  BOTH, because reading
 #: only for the second one is why every failed load on this tab said "see the
 #: tool output" and never the reason - the tool had printed the reason.
-_REFUSAL_PREFIXES = ("[card] error:", "refused:")
+#: ...and ``[selector] error:`` is ensureselect.sh's, the step that gets the
+#: menu program built before any of this runs (:func:`install_selector_line`).
+_REFUSAL_PREFIXES = ("[card] error:", SELECTOR_ERROR, "refused:")
 
 
 def parse_refusal(text, about=""):
@@ -7471,18 +7562,17 @@ class MultibootPanel:
             form.force = True
         self._plan_info = None
         self._update_edit_status()
-        cmds = build_commands(form)
+        # A media set exists: prepare it in full, with THIS form's specs.
+        # The preview leaves a sound-less media.json in the same dir, and
+        # art changed since the last Prepare would otherwise not be on the
+        # card; selectmedia's cache keeps this cheap.
+        cmds = build_commands(form, prepare=bool(form.media_dir))
         if form.media_dir:
-            # A media set exists: prepare it in full first, with THIS form's
-            # specs.  The preview leaves a sound-less media.json in the same
-            # dir, and art changed since the last Prepare would otherwise
-            # not be on the card; selectmedia's cache keeps this cheap.
-            cmds = prepare_commands(form, form.media_dir) + cmds
             self._ok("Preparing the media, then building %s…" % form.out)
         else:
             self._ok("Building %s…" % form.out)
 
-        def done(rc, failed, _text):
+        def done(rc, failed, texts):
             if rc == 0:
                 # WHAT WAS BUILT, kept against the path: a build does not put
                 # the tab into editing mode, so this is the only way the
@@ -7502,8 +7592,15 @@ class MultibootPanel:
                          "not a card; building again writes over it."
                          % (failed or "the start", form.out))
             else:
-                self._error("%s failed (exit %d) - see the tool output."
-                            % (failed or "the build", rc))
+                # THE TOOL'S OWN SENTENCE, not the exit code.  Every step of
+                # this run says why it will not act ("selector dir ... is
+                # not a directory" was the one that sent PAD-105 in), and
+                # "see the tool output" made a person read a wall of build
+                # log for a line the app had already been handed.
+                why = parse_refusal(texts.get(failed, ""), form.out)
+                self._error("%s failed (exit %d) - %s"
+                            % (failed or "the build", rc,
+                               why or "see the tool output."))
         self._run_kind = "build"
         return self._run_commands(cmds, on_step=self._plan_step, on_done=done)
 
@@ -7891,16 +7988,20 @@ class MultibootPanel:
                     self._loaded_info = info
                     _ticked, self._armed = bypass_state(info)
 
-        def done(rc, failed, _texts):
+        def done(rc, failed, texts):
             if rc != 0:
                 if self.run_cancelled():
                     self._ok("The update was cancelled at %s. The card's "
                              "menu may be half written - %s again to finish "
                              "it." % (failed or "the start", WRITE_BUTTON))
                 else:
-                    self._error("Updating the card failed at %s (exit %d) - "
-                                "see the tool output."
-                                % (failed or "the start", rc))
+                    # The step's own sentence when it gave one (the selector
+                    # step always does) - see _build_card's own done.
+                    why = parse_refusal(texts.get(failed, ""),
+                                        self._loaded_card or "")
+                    self._error("Updating the card failed at %s (exit %d) - %s"
+                                % (failed or "the start", rc,
+                                   why or "see the tool output."))
                 self._update_edit_status()
                 return
             # The card now says what the form says: the tools wrote it and
@@ -7987,7 +8088,12 @@ class MultibootPanel:
                 else:
                     why = parse_refusal(texts.get(failed or "update", ""),
                                         self._loaded_card)
-                    if why:
+                    if why and failed == "selector":
+                        # THE MENU PROGRAM, NOT THE CARD.  A fresh card
+                        # would need the very same one, so this refusal
+                        # must not send anybody off to build one.
+                        self._error("Cannot update %s: %s" % (name, why))
+                    elif why:
                         self._update_info = {"refused": why}
                         self._error("Cannot update %s: %s - point 'Card "
                                     "image' at a new path to build a fresh "
@@ -10034,12 +10140,14 @@ class MultibootPanel:
     #: Inject, Verify - MainWindow.MULTIBOOT_PHASES).  Both writing buttons
     #: read honestly on it: Build & verify walks all four, Apply to card
     #: only the last two (plus Media when a media field moved).
-    PHASE_OF = {"prepare": 0, "plan": 0, DRY_RUN: 0, "build": 1, "update": 1,
+    PHASE_OF = {"selector": 0, "prepare": 0, "plan": 0, DRY_RUN: 0,
+                "build": 1, "update": 1,
                 "inject": 2, "bypass": 2, "verify": 3, "inspect": 3,
                 INSPECT_JSON: 3}
 
     #: ...and what the footer's status line says while it is there.
     PHASE_STATUS = {
+        "selector": "Checking the menu program…",
         "prepare": "Rendering the menu's media…",
         "plan": "Planning the card's layout…",
         "build": "Copying the images into the card…",

@@ -41,6 +41,7 @@ from pinball_decryptor.gui.multiboot_tab import (
     manifest_sounds, menu_from_state, parse_snapshot_frames, path_root,
     probe_card_path, rows_from_state,
     edit_status_text, ensure_selector_args, fit_factors, form_from_inspect,
+    install_selector_args, install_selector_line,
     host_path, inject_commands, inspect_commands, list_title,
     loaded_media_dir, media_fingerprint, media_specs_changed,
     eta_text, menu_summary, parse_anim_frames, parse_inspect, parse_plan,
@@ -225,8 +226,14 @@ def test_two_image_form_builds_plan_build_verify(monkeypatch, tmp_path):
     _win(monkeypatch)
     form = _form(tmp_path, 2)
     cmds = build_commands(form, cwd="/mnt/c/repo")
-    assert [label for label, _ in cmds] == ["plan", "build", "verify"]
+    # THE SELECTOR STEP FIRST (PAD-105): the menu program the card carries,
+    # built and installed before a byte of the card is planned or copied.
+    assert [label for label, _ in cmds] == ["selector", "plan", "build",
+                                            "verify"]
     for label, argv in cmds:
+        if label == "selector":
+            assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"], argv
+            continue
         if label == "build":
             # the build runs AS ROOT (item 93: it records the card the way
             # update needs, and update loop-mounts it), with the desktop
@@ -243,11 +250,12 @@ def test_two_image_form_builds_plan_build_verify(monkeypatch, tmp_path):
     prim = multiboot_tab.wsl(form.images[0].path)
     extra = multiboot_tab.wsl(form.images[1].path)
     out = multiboot_tab.wsl(form.out)
-    plan = _tool_words(cmds[0][1])
+    step = dict(cmds)
+    plan = _tool_words(step["plan"])
     assert plan[:2] == ["tools/spike2_emu/mkmulticard.py", "plan"]
     assert plan[2:6] == ["--primary", prim, "--extra", extra]
     assert plan[plan.index("--layout") + 1] == "auto" and "--cache-dir" in plan
-    build = _tool_words(cmds[1][1])
+    build = _tool_words(step["build"])
     assert build[1] == "build"
     assert build[2:6] == ["--primary", prim, "--extra", extra]
     assert build[build.index("--out") + 1] == out
@@ -261,7 +269,7 @@ def test_two_image_form_builds_plan_build_verify(monkeypatch, tmp_path):
     assert "--media-dir" not in build              # nothing prepared
     assert "--force" not in build
     assert "--subtitles" not in build              # none given
-    verify = _tool_words(cmds[2][1])
+    verify = _tool_words(step["verify"])
     assert verify[1:3] == ["verify", "--card"] and verify[3] == out
     assert verify[4:8] == ["--primary", prim, "--extra", extra]
     assert verify[-2:] == ["--selector-dir", DEFAULT_SELECTOR_DIR]
@@ -276,8 +284,8 @@ def test_three_image_form_carries_every_extra_and_the_media(monkeypatch,
                  sound_confirm="none")
     form.images[1].subtitle = "1987 cartoon"
     form.images[1].anim = "auto"
-    cmds = build_commands(form)
-    build = _tool_words(cmds[1][1])
+    cmds = dict(build_commands(form))
+    build = _tool_words(cmds["build"])
     extras = [build[i + 1] for i, w in enumerate(build) if w == "--extra"]
     assert extras == [multiboot_tab.wsl(r.path) for r in form.images[1:]]
     assert "--bypass-validation" in build            # always on
@@ -288,7 +296,7 @@ def test_three_image_form_carries_every_extra_and_the_media(monkeypatch,
     assert build[build.index("--default") + 1] == "2"
     assert build[build.index("--subtitles") + 1] == ";1987 cartoon;"
     assert build[build.index("--volume") + 1] == "35"
-    verify = _tool_words(cmds[2][1])
+    verify = _tool_words(cmds["verify"])
     assert verify.count("--extra") == 2
     assert verify[verify.index("--media-dir") + 1] == multiboot_tab.wsl(
         str(media))
@@ -424,17 +432,17 @@ def test_titles_with_spaces_are_quoted_for_the_shell(monkeypatch, tmp_path):
     form.images[0].title = "STERN 1.59"
     form.images[1].title = "TMNT 1987"
     form.images[1].subtitle = "1987 cartoon upscale (1.59.0)"
-    line = _line(build_commands(form)[1][1])
+    line = _line(dict(build_commands(form))["build"])
     assert "--titles 'STERN 1.59;TMNT 1987'" in line
     assert "--subtitles ';1987 cartoon upscale (1.59.0)'" in line
-    build = _tool_words(build_commands(form)[1][1])
+    build = _tool_words(dict(build_commands(form))["build"])
     assert build[build.index("--titles") + 1] == "STERN 1.59;TMNT 1987"
 
 
 def test_blank_titles_fall_back_to_the_image_name(tmp_path):
     form = _form(tmp_path, 2)
     form.images[0].title = ""
-    build = _tool_words(build_commands(form, cwd="/x")[1][1])
+    build = _tool_words(dict(build_commands(form, cwd="/x"))["build"])
     assert build[build.index("--titles") + 1] == \
         "turtles_pro-1_59_0;IMG 1"
 
@@ -444,11 +452,11 @@ def test_selector_dir_tilde_stays_expandable(monkeypatch, tmp_path):
     ``$HOME`` would be eaten by wsl.exe's re-parse before bash saw it."""
     _win(monkeypatch)
     form = _form(tmp_path, 2)
-    line = _line(build_commands(form)[1][1])
+    line = _line(dict(build_commands(form))["build"])
     assert " --selector-dir ~/spike2root/usr/local/codeselect " in line
     assert "$" not in line
     form.selector_dir = "~/my root/sel dir"
-    line = _line(build_commands(form)[1][1])
+    line = _line(dict(build_commands(form))["build"])
     assert " --selector-dir ~/'my root/sel dir' " in line
 
 
@@ -565,6 +573,75 @@ def test_scaled_size_keeps_the_aspect_ratio_in_both_directions():
     assert scaled_size(1360, 768, 431, 384) == (431, 243)   # no whole step
     assert scaled_size(136, 77, 680, 384) == (678, 384)     # scaled UP
     assert scaled_size(0, 0, 100, 100) == (1, 1)
+
+
+def test_the_card_run_installs_the_menu_program_first(monkeypatch,
+                                                     tmp_path):
+    """PAD-105.  The tab built a selector for its PREVIEW and installed
+    nothing, so a machine that had never run buildselect.sh by hand met the
+    builder's refusal seconds into a build - 'selector dir ... is not a
+    directory' - with nothing to act on.  Every writing run now starts with
+    ensureselect.sh, which is the RIG's own answer (ensurebuild.sh: unpack
+    the guest filesystem from the card when there is none, build the menu
+    program when it is missing, rebuild it when these sources are newer).
+
+    It runs AS THE USER, carries the primary image (what a first-run rootfs
+    is built from) and names the rootfs the selector directory sits in.  No
+    ``$`` anywhere and ``~/`` outside the quotes, like every other line this
+    tab hands to wsl.exe.
+    """
+    _win(monkeypatch)
+    form = _form(tmp_path, 2)
+    argv = install_selector_args(form, cwd="/mnt/c/repo")
+    assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"]      # never root
+    line = _line(argv)
+    assert line == ("cd /mnt/c/repo && PAD_ROOT=~/spike2root bash "
+                    "tools/spike2_emu/ensureselect.sh %s"
+                    % multiboot_tab.wsl(form.images[0].path)), line
+    assert "$" not in line
+    # a selector build under another rootfs names THAT rootfs
+    form.selector_dir = "~/my root/usr/local/codeselect"
+    assert "PAD_ROOT=~/'my root' bash" in _line(install_selector_args(
+        form, cwd="/mnt/c/repo"))
+
+
+def test_a_selector_dir_of_somebody_elses_is_checked_never_written():
+    """PAD_MULTIBOOT_SELECTOR is the only way to move the directory, and a
+    path that is not a rootfs's own ``/usr/local/codeselect`` is not one the
+    app may install into: it is tested, and the refusal says whose variable
+    put it there."""
+    line = install_selector_line("~/somewhere/else", "/mnt/d/card.raw")
+    assert line.startswith("if [ -x ~/somewhere/else/codeselect ] && "
+                           "[ -f ~/somewhere/else/select.sh ]; then"), line
+    assert "ensureselect.sh" not in line and "PAD_ROOT" not in line
+    assert multiboot_tab.SELECTOR_READY_LINE in line
+    assert "PAD_MULTIBOOT_SELECTOR" in line
+    # ...and it refuses in the words the tab reads back as a refusal
+    assert parse_refusal(multiboot_tab.SELECTOR_ERROR + " no menu program")
+    assert line.endswith("; exit 1; fi")
+
+
+def test_the_rig_script_and_the_tab_spell_the_selector_lines_the_same():
+    """ensureselect.sh prints the ready line and the refusals; the tab reads
+    both prefixes (:data:`_REFUSAL_PREFIXES` decides what a failed run says
+    instead of an exit code).  Two files, one spelling - the same rule the
+    selector's own footer follows in scripts/shot_multiboot_tab.py."""
+    path = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(multiboot_tab.__file__))), "..", "tools",
+        "spike2_emu", "ensureselect.sh")
+    with open(os.path.normpath(path), encoding="utf-8") as fh:
+        text = fh.read()
+    assert 'echo "[selector] menu program: $SEL_DIR"' in text
+    assert multiboot_tab.SELECTOR_READY_LINE == "[selector] menu program:"
+    assert 'ERR="%s"' % multiboot_tab.SELECTOR_ERROR in text
+    assert "pad_ensure_rootfs" in text and "pad_ensure_select" in text
+    # ONE LINE PER REFUSAL.  parse_refusal takes the LAST line carrying the
+    # prefix, so a sentence split over three echoes reached the tab as its
+    # last third - 'selector failed (exit 1) - above. Expected at ...',
+    # measured on the way to this ticket's own after shot.
+    echoes = [n for n, ln in enumerate(text.splitlines())
+              if 'echo "$ERR' in ln]
+    assert echoes and all(n + 1 not in echoes for n in echoes), echoes
 
 
 def test_ensure_selector_builds_from_the_checkout_then_falls_back(
@@ -1607,6 +1684,45 @@ def test_invalid_form_surfaces_error_and_builds_nothing(tmp_path,
         root.destroy()
 
 
+def test_a_failed_build_says_the_step_s_own_sentence(tmp_path):
+    """PAD-105.  Every step of a build says why it will not act, and the tab
+    threw all of it away for 'see the tool output' - so the one line a person
+    reads said nothing, while the reason sat in the log above it.  The
+    refusal is now the sentence, and the selector step's own prefix is one
+    the tab reads (:data:`_REFUSAL_PREFIXES`)."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        why = ("the boot menu program could not be built - see the lines "
+               "above.")
+
+        def fail(cmds, on_step=None, on_done=None, quiet=(), preview=False,
+                 on_tick=None):
+            on_done(1, "selector",
+                    {"selector": "make: no arm-linux-gnueabihf-gcc\n"
+                                 + multiboot_tab.SELECTOR_ERROR + " " + why})
+            return True
+
+        panel._run_commands = fail
+        panel._build_card()
+        assert why in panel.message()
+        assert "see the tool output" not in panel.message()
+
+        # ...and a step that said nothing still falls back to the log.
+        def quiet_fail(cmds, on_step=None, on_done=None, quiet=(),
+                       preview=False, on_tick=None):
+            on_done(2, "build", {"build": "traceback, no refusal line"})
+            return True
+
+        panel._run_commands = quiet_fail
+        panel._build_card()
+        assert "build failed (exit 2) - see the tool output." in \
+            panel.message()
+    finally:
+        root.destroy()
+
+
 def test_valid_form_runs_plan_build_verify(tmp_path):
     root, panel = _panel()
     calls = _recorder(panel)
@@ -1615,13 +1731,14 @@ def test_valid_form_runs_plan_build_verify(tmp_path):
             panel.add_image(p)
         panel._build_card()
         assert len(calls) == 1
-        assert [label for label, _ in calls[0]] == ["plan", "build", "verify"]
-        assert "--bypass-validation" in _line(calls[0][1][1])
+        assert [label for label, _ in calls[0]] == ["selector", "plan",
+                                                    "build", "verify"]
+        assert "--bypass-validation" in _line(dict(calls[0])["build"])
         panel._auto_plan = True
         assert panel._plan_now() is True
         assert [label for label, _ in calls[1]] == ["plan"]
         panel._build_card()
-        assert "--bypass-validation" in _line(calls[2][1][1])    # always on
+        assert "--bypass-validation" in _line(dict(calls[2])["build"])
     finally:
         root.destroy()
 
@@ -1645,21 +1762,24 @@ def test_prepared_media_rides_into_the_build_after_a_fresh_prepare(tmp_path):
         assert "--visual-only" not in _line(calls[0][0][1])
         # Not prepared yet (no media.json) -> the build does not name it.
         panel._build_card()
-        assert [label for label, _ in calls[1]] == ["plan", "build", "verify"]
-        assert "--media-dir" not in _line(calls[1][1][1])
+        assert [label for label, _ in calls[1]] == ["selector", "plan",
+                                                    "build", "verify"]
+        assert "--media-dir" not in _line(dict(calls[1])["build"])
         with open(os.path.join(media, "media.json"), "w") as f:
             f.write("{}")
         panel._rows[1].anim = "auto"
         panel._build_card()
         labels = [label for label, _ in calls[2]]
-        assert labels == ["prepare", "plan", "build", "verify"]
-        prep = _tool_words(calls[2][0][1])
+        # the selector before even the media: a run that cannot get a menu
+        # program must not first spend a minute rendering pictures for one
+        assert labels == ["selector", "prepare", "plan", "build", "verify"]
+        prep = _tool_words(dict(calls[2])["prepare"])
         assert prep[prep.index("--out") + 1] == multiboot_tab.wsl(media)
         assert "--visual-only" not in prep
         assert "--sound-move" in prep
         assert "1=auto" in prep
         assert "--media-dir " + multiboot_tab._q(multiboot_tab.wsl(media)) \
-            in _line(calls[2][2][1])
+            in _line(dict(calls[2])["build"])
         assert "Preparing the media, then building" in panel.message()
     finally:
         root.destroy()
@@ -3977,18 +4097,21 @@ def test_apply_commands_add_the_prepare_and_the_bypass_only_when_asked(
     media = str(tmp_path / "media-card.multi")
     form = _form(tmp_path, 2, media_dir=media)
     card = str(tmp_path / "multi" / "card.multi.raw")
+    # the selector leads every writing run: an inject writes the menu
+    # program itself onto the card, so it needs one (PAD-105)
     assert [n for n, _ in apply_commands(form, card, media)] == [
-        "inject", "inspect", INSPECT_JSON]
+        "selector", "inject", "inspect", INSPECT_JSON]
     labels = [n for n, _ in apply_commands(form, card, media, prepare=True,
                                            bypass=True)]
-    assert labels == ["prepare", "inject", "bypass", "inspect", INSPECT_JSON]
+    assert labels == ["selector", "prepare", "inject", "bypass", "inspect",
+                      INSPECT_JSON]
     cmds = apply_commands(form, card, media, prepare=True, bypass=True,
                           refresh=False)
-    prep = _tool_words(cmds[0][1])
+    prep = _tool_words(dict(cmds)["prepare"])
     assert prep[1] == "prepare"
     assert prep[prep.index("--out") + 1] == multiboot_tab.wsl(media)
     assert "--visual-only" not in prep
-    byp = _tool_words(cmds[2][1])
+    byp = _tool_words(dict(cmds)["bypass"])
     assert byp[1:4] == ["bypass", "--card", multiboot_tab.wsl(card)]
 
 
@@ -4935,8 +5058,8 @@ def test_a_menu_change_is_injected_into_the_loaded_card(tmp_path):
         assert _apply_live(panel)
         assert panel.apply_to_card() is True
         labels = [label for label, _ in calls[0]]
-        assert labels == ["inject", "inspect", INSPECT_JSON]
-        words = _tool_words(calls[0][0][1])
+        assert labels == ["selector", "inject", "inspect", INSPECT_JSON]
+        words = _tool_words(dict(calls[0])["inject"])
         assert words[1:4] == ["inject", "--card", multiboot_tab.wsl(card)]
         assert words[words.index("--subtitles") + 1] == \
             "Original Stern code;1987 cartoon, upscaled"
@@ -4972,7 +5095,7 @@ def test_the_build_flash_modal_updates_in_place_not_a_fresh_merge(tmp_path):
         calls = _recorder(panel)
         panel._do_build_flash(True, False)
         assert [label for label, _ in calls[0]] == [
-            "inject", "inspect", INSPECT_JSON]
+            "selector", "inject", "inspect", INSPECT_JSON]
         # only an image-list change makes it a full build
         panel.add_image(_images(tmp_path, 1)[0])
         assert panel._write_plan()["action"] == "build"
@@ -5027,8 +5150,8 @@ def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
         assert "1 menu change (animation)" in panel.check_detail("card")
         assert panel.apply_to_card() is True
         assert [label for label, _ in calls[0]] == [
-            "prepare", "inject", "inspect", INSPECT_JSON]
-        prep = _tool_words(calls[0][0][1])
+            "selector", "prepare", "inject", "inspect", INSPECT_JSON]
+        prep = _tool_words(dict(calls[0])["prepare"])
         assert prep[prep.index("--out") + 1] == multiboot_tab.wsl(media)
         assert "0=auto" in prep and "1=auto@20" in prep
         assert "--visual-only" not in prep
@@ -5048,8 +5171,8 @@ def test_the_bypass_rides_along_while_a_tree_is_still_armed(tmp_path):
         assert panel._armed is True
         assert panel.apply_to_card() is True
         assert [label for label, _ in calls[0]] == [
-            "inject", "bypass", "inspect", INSPECT_JSON]
-        byp = _tool_words(calls[0][1][1])
+            "selector", "inject", "bypass", "inspect", INSPECT_JSON]
+        byp = _tool_words(dict(calls[0])["bypass"])
         assert byp[1:4] == ["bypass", "--card", multiboot_tab.wsl(card)]
     finally:
         root.destroy()
@@ -5112,8 +5235,8 @@ def test_build_and_verify_will_not_write_over_the_loaded_card(tmp_path,
         # the media set the load extracted is prepared again first, from the
         # source specs the card recorded - the same rule as any other build
         assert [label for label, _ in calls[0]] == [
-            "prepare", "plan", "build", "verify"]
-        assert multiboot_tab.wsl(out) in _line(calls[0][2][1])
+            "selector", "prepare", "plan", "build", "verify"]
+        assert multiboot_tab.wsl(out) in _line(dict(calls[0])["build"])
         assert panel._loaded_card == card       # still editing that one
     finally:
         root.destroy()
@@ -5172,8 +5295,8 @@ def test_a_menu_only_apply_is_fine_on_a_card_with_no_sources(tmp_path):
         panel._ed_title.set("STERN 1.59.0")
         assert panel.apply_to_card() is True
         assert [label for label, _ in calls[0]] == [
-            "inject", "inspect", INSPECT_JSON]
-        words = _tool_words(calls[0][0][1])
+            "selector", "inject", "inspect", INSPECT_JSON]
+        words = _tool_words(dict(calls[0])["inject"])
         assert words[words.index("--titles") + 1] == "STERN 1.59.0;1987"
         assert "--media-dir" not in words          # the card carries no
         # media.json, so the inject leaves the media it has alone
@@ -6723,12 +6846,13 @@ def test_the_menu_follows_the_machines_own_volume_by_default(tmp_path):
     from pinball_decryptor.gui.multiboot_tab import inject_args, form_from_inspect
     form = _form(tmp_path, 2, volume=35)
     assert form.machine_volume is True
-    build = _tool_words(build_commands(form)[1][1])
+    build = _tool_words(dict(build_commands(form))["build"])
     assert "--machine-volume" in build
     assert build[build.index("--volume") + 1] == "35"
     assert "--machine-volume" in inject_args(form, "D:/card.raw")
     form.machine_volume = False
-    assert "--machine-volume" not in _tool_words(build_commands(form)[1][1])
+    assert "--machine-volume" not in _tool_words(
+        dict(build_commands(form))["build"])
     assert "--machine-volume" not in inject_args(form, "D:/card.raw")
     # a card read back: volume=machine is the tick, a number is not
     f2, _w = form_from_inspect({"images": [], "volume": "machine"}, "D:/card.raw")

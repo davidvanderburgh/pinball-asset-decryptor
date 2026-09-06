@@ -55,10 +55,11 @@ def test_build_and_update_run_as_root_with_the_desktop_home(monkeypatch, tmp_pat
     assert argv[:8] == ["wsl.exe", "-u", "root", "-e", "env", "HOME=/home/x", "bash", "-lc"]
     assert _line(argv).startswith("cd /mnt/c/repo && python3 tools/spike2_emu/mkmulticard.py build")
     cmds = update_commands(form, str(tmp_path / "c.raw"), cwd="/mnt/c/repo")
-    assert [label for label, _ in cmds] == ["update", "inspect", INSPECT_JSON]
-    assert callable(cmds[0][1]) and not callable(cmds[1][1])
+    # the selector first: update re-injects the menu program (PAD-105)
+    assert [label for label, _ in cmds] == ["selector", "update", "inspect", INSPECT_JSON]
+    assert callable(dict(cmds)["update"]) and not callable(dict(cmds)["inspect"])
     cmds = update_commands(form, str(tmp_path / "c.raw"), media_dir=str(tmp_path), prepare=True, cwd="/mnt/c/repo")
-    assert [label for label, _ in cmds] == ["prepare", "update", "inspect", INSPECT_JSON]
+    assert [label for label, _ in cmds] == ["selector", "prepare", "update", "inspect", INSPECT_JSON]
     assert wsl_shell_root("echo hi") == ["wsl.exe", "-u", "root", "-e", "bash", "-lc", "echo hi"]
     monkeypatch.setattr(multiboot_tab.sys, "platform", "linux")
     assert wsl_shell_root("echo hi", "/home/x") == ["sudo", "-n", "bash", "-lc", "echo hi"]
@@ -237,9 +238,9 @@ def test_update_card_runs_update_then_reads_the_card_back(tmp_path, monkeypatch)
         monkeypatch.setattr(panel, "_run_commands", fake)
         msgs = _messages(panel, monkeypatch)
         assert panel.update_card() is True
-        assert seen["labels"] == ["update", "inspect", INSPECT_JSON]
-        assert callable(seen["argv"][0]) and INSPECT_JSON in seen["quiet"]
-        words = _tool_words(seen["argv"][0]({}))
+        assert seen["labels"] == ["selector", "update", "inspect", INSPECT_JSON]
+        assert callable(seen["argv"][1]) and INSPECT_JSON in seen["quiet"]
+        words = _tool_words(seen["argv"][1]({}))
         assert words[1] == "update" and words[words.index("--expect-bytes") + 1] == "65011712"
         assert panel._run_kind == "update"
         assert panel._update_info is None

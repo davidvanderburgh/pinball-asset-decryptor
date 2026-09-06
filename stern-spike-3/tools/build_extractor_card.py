@@ -53,18 +53,19 @@ except ImportError:
 DUMP_BLOCK = (
     "\n"
     "# === SPIKE3 OTP KEY DUMP (added by build_extractor_card.py) ===\n"
-    "# Write the 64-hex LUKS keyfile to the FAT boot partition (mmcblk0p1)\n"
-    "# so it can be read on any PC. Best-effort; does not affect normal boot.\n"
-    "mkdir -p /fatboot\n"
-    "mount -t vfat /dev/mmcblk0p1 /fatboot 2>/dev/null\n"
-    "xxd -p -c 32 /ktmp > /fatboot/OTP_KEY.TXT 2>/dev/null\n"
-    "sync\n"
-    "umount /fatboot 2>/dev/null\n"
-    "# raw fallback: write the key to the LAST sector of p1 (no filesystem needed)\n"
-    "xxd -p -c 32 /ktmp > /ktmp.hex 2>/dev/null\n"
-    "dd if=/ktmp.hex of=/dev/mmcblk0p1 bs=512 seek=131071 count=1 conv=notrunc 2>/dev/null\n"
-    "rm -f /ktmp.hex\n"
-    "sync\n"
+    "# Best-effort: write the 64-hex LUKS keyfile to the FAT boot partition so a\n"
+    "# PC can read it.  Wrapped so that NO command in here can ever change the\n"
+    "# exit status of /init or disturb the normal boot (even under 'set -e'), and\n"
+    "# it only ever writes through the vfat filesystem - it never dd's a raw\n"
+    "# sector of the live partition.\n"
+    "{\n"
+    "  mkdir -p /fatboot 2>/dev/null || true\n"
+    "  if mount -t vfat /dev/mmcblk0p1 /fatboot 2>/dev/null; then\n"
+    "    xxd -p -c 32 /ktmp > /fatboot/OTP_KEY.TXT 2>/dev/null || true\n"
+    "    sync 2>/dev/null || true\n"
+    "    umount /fatboot 2>/dev/null || true\n"
+    "  fi\n"
+    "} 2>/dev/null || true\n"
     "# === END OTP KEY DUMP ===\n"
 )
 KTMP_MARKER = "xxd -r -p > /ktmp\n"
@@ -233,9 +234,18 @@ def _replace_file16(img, p, entry, new_data):
 # cpio (newc) parse + faithful repack with /init patched
 # ===========================================================================
 def _patch_cpio(cpio):
+    """Parse a newc cpio, splice DUMP_BLOCK into /init, and repack FAITHFULLY.
+
+    The repack preserves EVERY header field of every entry - inode, mode, uid,
+    gid, nlink, mtime, and the device/rdev majors+minors (fields 7..10) - and
+    only changes /init's data and its filesize.  An earlier version reassigned
+    fresh inodes and zeroed the uid/gid/mtime/dev/rdev, which would sever
+    hardlinks (matched on inode+dev) and turn any character/block device node
+    into 0:0.  Stern's current initramfs happens to use devtmpfs and symlinks so
+    that never bit, but a faithful repack is correct for any initramfs."""
     N = len(cpio)
     pos = 0
-    entries = []  # (name, mode, nlink, data)
+    entries = []  # [fields(13), name, data]
     while pos + 110 <= N:
         if cpio[pos:pos + 6] != b"070701":
             nxt = cpio.find(b"070701", pos)
@@ -244,41 +254,41 @@ def _patch_cpio(cpio):
             pos = nxt
             continue
         f = [int(cpio[pos + 6 + i * 8:pos + 6 + (i + 1) * 8], 16) for i in range(13)]
-        mode, fsz, nsz = f[1], f[6], f[11]
+        fsz, nsz = f[6], f[11]
         name = cpio[pos + 110:pos + 110 + nsz - 1].decode("latin1")
         foff = (pos + 110 + nsz + 3) & ~3
         data = cpio[foff:foff + fsz]
         pos = (foff + fsz + 3) & ~3
         if name == "TRAILER!!!":
             break
-        entries.append([name, mode, f[4], data])
+        entries.append([f, name, data])
 
     patched = False
     for e in entries:
-        if e[0] == "init":
-            txt = e[3].decode("latin1")
+        if e[1] == "init":
+            txt = e[2].decode("latin1")
             j = txt.find(KTMP_MARKER)
             if j < 0:
                 raise SystemExit("could not find the /ktmp creation line in /init; "
                                  "is this really a Spike 3 initramfs?")
             j += len(KTMP_MARKER)
-            e[3] = (txt[:j] + DUMP_BLOCK + txt[j:]).encode("latin1")
+            e[2] = (txt[:j] + DUMP_BLOCK + txt[j:]).encode("latin1")
+            e[0][6] = len(e[2])          # c_filesize now matches the new /init
             patched = True
     if not patched:
         raise SystemExit("/init not found in initramfs cpio")
 
     out = bytearray()
-    ino = 1000
-    for name, mode, nlink, data in entries:
+    for f, name, data in entries:
         nb = name.encode("latin1") + b"\x00"
-        fields = [ino, mode, 0, 0, nlink or 1, 0, len(data), 0, 0, 0, 0, len(nb), 0]
-        out += b"070701" + b"".join(b"%08X" % (v & 0xFFFFFFFF) for v in fields) + nb
+        f[11] = len(nb)                  # c_namesize (unchanged, but keep exact)
+        f[12] = 0                        # c_check is always 0 for "newc"
+        out += b"070701" + b"".join(b"%08X" % (v & 0xFFFFFFFF) for v in f) + nb
         while len(out) % 4:
             out += b"\x00"
         out += data
         while len(out) % 4:
             out += b"\x00"
-        ino += 1
     nb = b"TRAILER!!!\x00"
     fields = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, len(nb), 0]
     out += b"070701" + b"".join(b"%08X" % v for v in fields) + nb
@@ -315,6 +325,12 @@ def main(argv=None):
     ap.add_argument("input", help="BOOT.IMG file, or a raw SD card image (*.raw)")
     ap.add_argument("-o", "--outdir", default="extractor_card_out")
     ap.add_argument("--boot-sig", help="path to BOOT.SIG (if input is a bare boot.img)")
+    ap.add_argument("--no-sig", action="store_true",
+                    help="do NOT write boot.sig - the deploy then DELETES boot.sig "
+                         "from the card. On a board that does not enforce secure "
+                         "boot this boots the ramdisk with no signature check at "
+                         "all (the definitive enforced-vs-not test); an enforcing "
+                         "board rejects a missing signature, same as a bad one.")
     args = ap.parse_args(argv)
 
     boot_sig = None
@@ -355,14 +371,24 @@ def main(argv=None):
     print(f"wrote {out_img}  (sha256 {new_hash})")
 
     out_sig = os.path.join(args.outdir, "boot.sig")
-    lines = [new_hash]
-    if boot_sig:
-        for ln in boot_sig.decode("ascii", "replace").splitlines():
-            if ln.startswith("ts:") or ln.startswith("rsa2048:"):
-                lines.append(ln.strip())
-    with open(out_sig, "w", newline="\n") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"wrote {out_sig}  (SHA-256 line regenerated; RSA line carried over)")
+    if args.no_sig:
+        # The enforced-vs-not test: ship NO signature. On a non-enforcing board
+        # (config.txt boot_ramdisk=1) the ramdisk boots with no check at all; an
+        # enforcing board refuses a missing signature. Remove any stale one.
+        if os.path.exists(out_sig):
+            os.remove(out_sig)
+        print("no boot.sig written (--no-sig): DELETE boot.sig from the card, keep "
+              "config.txt, copy only this boot.img. Boots -> not enforced (key "
+              "dumped); no boot -> secure boot enforced.")
+    else:
+        lines = [new_hash]
+        if boot_sig:
+            for ln in boot_sig.decode("ascii", "replace").splitlines():
+                if ln.startswith("ts:") or ln.startswith("rsa2048:"):
+                    lines.append(ln.strip())
+        with open(out_sig, "w", newline="\n") as f:
+            f.write("\n".join(lines) + "\n")
+        print(f"wrote {out_sig}  (SHA-256 line regenerated; RSA line carried over)")
     print("\nDONE. See docs/KEY_EXTRACTION.md for how to deploy + the secure-boot caveat.")
     return 0
 

@@ -352,3 +352,26 @@ def test_frozen_builds_bundle_the_spike3_tools(script):
     # zstandard powers build_extractor_card and ships as data (not analysed),
     # so the frozen builds must collect it explicitly.
     assert "zstandard" in text, "%s must collect zstandard" % script
+
+
+# --- --no-sig (the enforced-board delete-boot.sig test) --------------------
+
+def test_prepare_argv_no_sig_flag():
+    assert "--no-sig" in spike3.prepare_argv("card.raw", "out", no_sig=True)
+    assert "--no-sig" not in spike3.prepare_argv("card.raw", "out")
+
+
+def test_run_prepare_threads_no_sig(monkeypatch):
+    captured = {}
+
+    class _FakeMod:
+        @staticmethod
+        def main(argv):
+            captured["argv"] = argv
+            return 0
+
+    monkeypatch.setattr(spike3, "_load_module", lambda p: _FakeMod)
+    spike3.run_prepare("card.raw", "out", no_sig=True)
+    assert "--no-sig" in captured["argv"]
+    spike3.run_prepare("card.raw", "out", no_sig=False)
+    assert "--no-sig" not in captured["argv"]

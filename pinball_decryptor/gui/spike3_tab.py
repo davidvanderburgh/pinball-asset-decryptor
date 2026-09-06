@@ -61,6 +61,7 @@ class Spike3Panel:
         self.read_var = tk.StringVar()
         self.key_var = tk.StringVar()
         self.header_var = tk.StringVar()
+        self.nosig_var = tk.BooleanVar(value=False)
 
     # ------------------------------------------------------------------
     # Build
@@ -97,6 +98,12 @@ class Spike3Panel:
                                    command=self._on_copy_to_card,
                                    state="disabled")
         self.copy_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+        ttk.Checkbutton(
+            s1, variable=self.nosig_var,
+            text="Board refused the normal card? Build the unsigned test "
+                 "(writes only boot.img; you DELETE boot.sig on the card)").pack(
+            anchor="w", padx=8, pady=(0, 4))
 
         self.instructions = self._text(s1, height=9)
         self.instructions.pack(fill=tk.X, padx=8, pady=(0, 8))
@@ -295,26 +302,30 @@ class Spike3Panel:
             outdir = os.path.join(os.path.dirname(src), "spike3_extractor")
             self.out_var.set(outdir)
 
+        no_sig = bool(self.nosig_var.get())
+
         def work():
             self._ui(lambda: self._status_fn("Spike 3: building extractor "
                                              "files…"))
-            rc, out = spike3.run_prepare(src, outdir, boot_sig=sig)
+            rc, out = spike3.run_prepare(src, outdir, boot_sig=sig,
+                                         no_sig=no_sig)
             self._log_block(out, "info" if rc == 0 else "error")
             img = os.path.join(outdir, "boot.img")
             if rc == 0 and os.path.exists(img):
                 self._prepared_dir = outdir
-                self._ui(self._prepare_ok)
+                self._ui(lambda: self._prepare_ok(no_sig))
             else:
                 self._ui(lambda: self._status_fn(
                     "Spike 3: prepare failed (exit %d) - see the Log." % rc))
         self._start(work)
 
-    def _prepare_ok(self):
+    def _prepare_ok(self, no_sig=False):
         outdir = self._prepared_dir or self.out_var.get()
         self.copy_btn.configure(state="normal")
         self._status_fn("Spike 3: extractor files ready in %s" % outdir)
         self._set_text(self.instructions,
-                       _prep_done_text(outdir))
+                       _prep_done_nosig_text(outdir) if no_sig
+                       else _prep_done_text(outdir))
 
     def _on_copy_to_card(self):
         outdir = self._prepared_dir or self.out_var.get().strip()
@@ -522,5 +533,22 @@ def _prep_done_text(outdir):
         "  6. Either way, put the backup's two files back at the end.\n\n"
         "Use \"Copy onto boot partition...\" to do steps 3-4 automatically on "
         "a card that is in THIS PC (it backs up the originals first)."
+        % outdir
+    )
+
+
+def _prep_done_nosig_text(outdir):
+    return (
+        "DONE (UNSIGNED TEST). Only boot.img is in:\n    %s\n\n"
+        "This is the definitive secure-boot test. On the card's boot partition:\n"
+        "  1. Back up the card's original boot.img and boot.sig first.\n"
+        "  2. Copy this boot.img on (replace it). Leave config.txt alone.\n"
+        "  3. DELETE the boot.sig file from the card entirely.\n"
+        "  4. Put the card back and power on once.\n\n"
+        "Boots and makes OTP_KEY.TXT  -> the board does NOT enforce secure boot; "
+        "you have the key.\n"
+        "Still won't boot             -> secure boot IS enforced; the extractor "
+        "card cannot work on this board. Restore the backup.\n\n"
+        "Either way it is safe - a missing signature just halts the boot."
         % outdir
     )

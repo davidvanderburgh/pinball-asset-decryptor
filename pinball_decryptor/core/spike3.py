@@ -90,16 +90,19 @@ def python_exe():
 
 # --- command lines (pure) --------------------------------------------------
 
-def prepare_argv(source, outdir, boot_sig=None, python=None):
+def prepare_argv(source, outdir, boot_sig=None, no_sig=False, python=None):
     """argv to build the extractor ``boot.img`` + ``boot.sig`` from *source*
     (a raw SD image, or a bare ``boot.img``) into *outdir*.
 
     ``boot_sig`` is only meaningful when *source* is a bare ``boot.img`` - for
-    a whole raw image the tool pulls both files out of partition 1 itself."""
+    a whole raw image the tool pulls both files out of partition 1 itself.
+    ``no_sig`` writes no boot.sig (the enforced-board test - see run_prepare)."""
     argv = [python or python_exe(), build_extractor_tool(), source,
             "-o", outdir]
     if boot_sig:
         argv += ["--boot-sig", boot_sig]
+    if no_sig:
+        argv += ["--no-sig"]
     return argv
 
 
@@ -193,9 +196,15 @@ def _run_module_main(mod, argv):
     return rc, buf.getvalue()
 
 
-def run_prepare(source, outdir, boot_sig=None):
-    """Build the extractor ``boot.img`` + ``boot.sig`` from *source* into
-    *outdir*, in-process.  Returns ``(rc, output_text)``; rc 0 on success."""
+def run_prepare(source, outdir, boot_sig=None, no_sig=False):
+    """Build the extractor ``boot.img`` (+ ``boot.sig``) from *source* into
+    *outdir*, in-process.  Returns ``(rc, output_text)``; rc 0 on success.
+
+    ``no_sig`` builds the enforced-board TEST variant: it writes no ``boot.sig``
+    at all, so the deploy is "copy this boot.img, keep config.txt, and DELETE
+    boot.sig from the card".  A board that does not enforce secure boot boots the
+    ramdisk with no signature check and dumps the key; an enforcing board rejects
+    a missing signature, which is the definitive confirmation that it enforces."""
     mod = _load_module(build_extractor_tool())
     if mod is None:
         return 1, ("Cannot load build_extractor_card.py. The Spike 3 tools did "
@@ -203,6 +212,8 @@ def run_prepare(source, outdir, boot_sig=None):
     argv = [source, "-o", outdir]
     if boot_sig:
         argv += ["--boot-sig", boot_sig]
+    if no_sig:
+        argv += ["--no-sig"]
     return _run_module_main(mod, argv)
 
 

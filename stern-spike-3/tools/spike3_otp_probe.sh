@@ -6,9 +6,10 @@
 #
 #   1. Secure boot: reports whether the board ENFORCES Raspberry Pi secure boot.
 #      That is the single fact that decides whether the extractor-card route
-#      (tools/build_extractor_card.py) can ever boot. It is also the "row 90"
+#      (tools/build_extractor_card.py) can ever boot. (The CM4/BCM2711 customer
+#      key-hash lives in OTP rows 47-54; "row 90" is the Pi 5 / BCM2712 spot.)
 #      question - here we read it from the authoritative source (the bootloader
-#      config + the customer-key-hash OTP rows) rather than eyeballing one row.
+#      config + the customer-key-hash OTP rows 47-54) rather than one row.
 #
 #   2. The key: reads the 256-bit customer OTP that unlocks the LUKS2 volumes,
 #      exactly the way Stern's own initramfs /init does (vcmailbox 0x00030021,
@@ -102,11 +103,12 @@ else
 fi
 
 # The customer key hash (burned only when a signing key is provisioned) lives in
-# the customer-key-hash OTP rows. Any non-zero value there means a key is fused.
+# OTP rows 47-54 on the CM4 (BCM2711). Any non-zero value there means a key is
+# fused, i.e. secure boot is permanently enforced.
 CKH_NONZERO=""
 if [ -n "$OTP" ]; then
     CKH_NONZERO="$(printf '%s\n' "$OTP" \
-        | awk -F: '/^(0*(4[5-9]|5[0-6])):/ {
+        | awk -F: '/^(0*(4[7-9]|5[0-4])):/ {
               v=$2; gsub(/[^0-9a-fA-F]/,"",v);
               if (v ~ /[1-9a-fA-F]/) print }' )"
 fi
@@ -128,7 +130,7 @@ else
 fi
 
 if [ -n "$OTP" ]; then
-    echo "full otp_dump (send this back - it settles the row-90 question):"
+    echo "full otp_dump (send this back - it settles the enforcement question):"
     printf '%s\n' "$OTP" | sed 's/^/    /'
 fi
 

@@ -64,9 +64,9 @@ def test_secure_boot_not_enforced_verdict():
 def test_customer_key_hash_fallback():
     """With no bootloader_config, a non-zero customer-key-hash row flags enforcement."""
     out = _run({"SPIKE3_FAKE_VCMAILBOX": RAW,
-                "SPIKE3_FAKE_OTP_DUMP": "17:00000000\n45:a1b2c3d4\n46:00000000"}).stdout
+                "SPIKE3_FAKE_OTP_DUMP": "46:00000000\n47:a1b2c3d4\n48:00000000"}).stdout
     assert "customer key hash IS fused" in out
-    assert "45:a1b2c3d4" in out
+    assert "47:a1b2c3d4" in out
 
 
 def test_malformed_framing_refuses():

@@ -27,7 +27,9 @@ with Stern's private key. That has two consequences:
 
 Enforcement **cannot be determined from the SD image** — it depends on OTP fuses
 and the EEPROM config that live on the board. On a board you control you can check
-it directly: `vcgencmd otp_dump` (secure-boot/customer-key rows). Given Stern went
+it directly: `vcgencmd otp_dump` (the CM4/BCM2711 customer-key-hash rows are
+47–54; non-zero there = fused = enforced) plus `vcgencmd bootloader_config`
+(`SIGNED_BOOT=1` = enforced). Given Stern went
 to the trouble of LUKS + OTP, enforcement is *likely* but not certain — so
 Method A is a cheap, safe test, and Methods B/C are the fallback if it's enforced.
 
@@ -58,18 +60,21 @@ Deploy + read back (≈10 min, zero risk if you keep backups):
    mounts anywhere; the rest look unreadable (encrypted) — ignore them.
 2. **Back up** the card's original `boot.img` and `boot.sig`.
 3. Copy the patched `boot.img` + `boot.sig` onto that partition, overwriting.
-   (Alternatively, delete `boot.sig` entirely — some non-secure-boot configs boot
-   a ramdisk without a sig. Keep your backup either way.)
 4. Put the card back, power on.
    - **Boots to the game** → key was dumped (step 5). (Secure boot is *not*
      enforced.)
-   - **Won't boot / blank** → secure boot **is** enforced. Power off, restore the
-     backup. Method A is closed; use Method B/C. (No harm done — a failed
-     signature check just halts.)
+   - **Won't boot / blank** → the signature check rejected the modified image.
+     Do the **definitive test** (step 4b) before concluding.
+4b. **The enforced-vs-not test (also the last shot for Method A).** Build with
+    `--no-sig` (or tick "build the unsigned test" in the app), copy that
+    `boot.img` on, keep `config.txt`, and **delete `boot.sig`** from the card.
+    A board that does not enforce secure boot boots a ramdisk with no signature
+    at all and dumps the key; an enforcing board rejects a missing signature the
+    same way it rejects a bad one. So: **boots → not enforced (key dumped); still
+    won't boot → secure boot is enforced, Method A is closed, use Method B/C.**
+    Harmless either way — restore the backup.
 5. Power off, bring the card to a PC, read `OTP_KEY.TXT` (64 hex chars) from the
-   FAT partition. If it's missing but the machine booted, the key was also written
-   raw to the **last 512-byte sector** of the FAT partition as a fallback (read
-   that sector's first 64 hex chars).
+   FAT partition.
 6. Restore the original `boot.img` + `boot.sig` so the machine updates normally.
 
 The patch only adds a key-dump and never alters the encrypted partitions or game
@@ -90,7 +95,7 @@ Rather than run that raw one-liner, use the packaged probe
 [../tools/spike3_otp_probe.sh](../tools/spike3_otp_probe.sh) — copy it to the
 board and run it as root. It is strictly **read-only** (no writes, no partition
 access, no `shred`), and in one shot it (a) reports whether secure boot is
-enforced (settles the row-90 question from the authoritative source — the
+enforced (settles it from the authoritative source — the
 bootloader config and the customer-key-hash OTP rows) and (b) reads the key,
 validating it two independent ways and refusing to emit a partial/mis-framed key
 instead of a wrong one. It prints a `SPIKE3_KEY=<64hex>` line to paste straight

@@ -632,9 +632,32 @@ named, with the offer to try the app's own repair (index refresh, the
 `universe` component, or a single dependency-free package fetched from a
 release that publishes it).
 
-The installer expects an apt-based distro (Debian / Ubuntu); on other
-distros, install the equivalent packages manually using the table in that
-section.
+The installer speaks **apt** (Debian / Ubuntu) and **pacman** (Arch and
+its spins: Omarchy, CachyOS, EndeavourOS, Manjaro). A user reported the app
+running without a fault on Omarchy from source, having translated the
+package names by hand; that translation is now the installer's job, so
+**Install Missing** works there too. On Arch the install is
+`pacman -Syu --needed`, a full system update first, because pacman does
+not install into a stale system. The apt names in the
+[per-manufacturer table](#per-manufacturer-prerequisites) map to Arch as
+follows; everything not listed is spelled the same:
+
+| apt | Arch |
+|---|---|
+| python3-zstandard | python-zstandard |
+| xvfb | xorg-server-xvfb |
+| webp | libwebp |
+| xorriso | libisoburn |
+| xxd | tinyxxd, skipped when vim already provides `xxd` (the two conflict) |
+| gcc + libc6-dev | gcc (Arch's glibc ships its headers) |
+| python3-tk | tk |
+| qemu-user-static | qemu-user-static + qemu-user-static-binfmt, which registers the ARM handler with the F flag the emulator needs, in the same transaction |
+| busybox-static | busybox (Arch's is static) |
+| gcc-arm-linux-gnueabihf | **not in the repositories.** AUR `arm-linux-gnueabihf-gcc` (or `arm-linux-gnueabihf-gcc-bin`, prebuilt). The installer names it rather than failing on it; only the Spike 2 emulator needs it |
+
+On any other distro, install the equivalent packages by hand using the
+table in that section; the script prints both spellings when it finds
+neither package manager.
 
 ### From source
 

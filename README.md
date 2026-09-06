@@ -632,8 +632,9 @@ named, with the offer to try the app's own repair (index refresh, the
 `universe` component, or a single dependency-free package fetched from a
 release that publishes it).
 
-The installer speaks **apt** (Debian / Ubuntu) and **pacman** (Arch and
-its spins: Omarchy, CachyOS, EndeavourOS, Manjaro). A user reported the app
+The installer speaks **apt** (Debian / Ubuntu) and, from v0.187.0,
+**pacman** (Arch and its spins: Omarchy, CachyOS, EndeavourOS, Manjaro).
+A user reported the app
 running without a fault on Omarchy from source, having translated the
 package names by hand; that translation is now the installer's job, so
 **Install Missing** works there too. On Arch the install is

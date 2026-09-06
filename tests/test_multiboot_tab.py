@@ -635,6 +635,13 @@ def test_the_rig_script_and_the_tab_spell_the_selector_lines_the_same():
     assert multiboot_tab.SELECTOR_READY_LINE == "[selector] menu program:"
     assert 'ERR="%s"' % multiboot_tab.SELECTOR_ERROR in text
     assert "pad_ensure_rootfs" in text and "pad_ensure_select" in text
+    # ONE LINE PER REFUSAL.  parse_refusal takes the LAST line carrying the
+    # prefix, so a sentence split over three echoes reached the tab as its
+    # last third - 'selector failed (exit 1) - above. Expected at ...',
+    # measured on the way to this ticket's own after shot.
+    echoes = [n for n, ln in enumerate(text.splitlines())
+              if 'echo "$ERR' in ln]
+    assert echoes and all(n + 1 not in echoes for n in echoes), echoes
 
 
 def test_ensure_selector_builds_from_the_checkout_then_falls_back(

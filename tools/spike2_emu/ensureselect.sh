@@ -41,6 +41,11 @@ SEL_DIR=$ROOT/usr/local/codeselect
 #: How this script spells a refusal. The app reads this prefix off the log and
 #: shows the sentence behind it instead of an exit code, so every one of them
 #: is written to be read by somebody who has just pressed a button.
+#:
+#: ONE LINE EACH, however long. The app takes the LAST line carrying this
+#: prefix, so a sentence split over three of them reached the tab as its last
+#: third ("selector failed (exit 1) - above. Expected at ...") - measured, in
+#: this ticket's own before/after run.
 ERR="[selector] error:"
 
 if [ -n "${1:-}" ]; then
@@ -57,14 +62,11 @@ if [ ! -d "$ROOT/usr/lib" ]; then
     echo "[selector] own filesystem, and this PC has not unpacked one yet."
 fi
 if ! pad_ensure_rootfs; then
-    echo "$ERR there is no guest filesystem at $ROOT for the boot menu" >&2
-    echo "$ERR program to be built against, and it could not be made -" >&2
-    echo "$ERR see the lines above." >&2
+    echo "$ERR there is no guest filesystem at $ROOT to build the boot menu program against, and it could not be made - see the lines above" >&2
     exit 1
 fi
 if ! pad_ensure_select; then
-    echo "$ERR the boot menu program could not be built - see the lines" >&2
-    echo "$ERR above. Expected at $PAD_SELECT_BIN." >&2
+    echo "$ERR the boot menu program could not be built - see the lines above. It belongs at $PAD_SELECT_BIN" >&2
     exit 1
 fi
 
@@ -77,8 +79,7 @@ for f in codeselect select.sh; do
     [ -e "$SEL_DIR/$f" ] || missing="$missing $f"
 done
 if [ -n "$missing" ]; then
-    echo "$ERR $SEL_DIR has no$missing in it, so a card built now would" >&2
-    echo "$ERR carry no menu." >&2
+    echo "$ERR $SEL_DIR has no$missing in it, so a card built now would carry no menu" >&2
     exit 1
 fi
 echo "[selector] menu program: $SEL_DIR"

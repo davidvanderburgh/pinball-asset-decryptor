@@ -28,7 +28,10 @@ tree on the OUTPUT card (p3's title dir, p7's title dir, or each p7/imgN/<title>
 game self/asset validator neutered exactly as the app's Write does (plugins/stern/valpatch.py:
 find the routine by signature, `bx lr` at its entry, refresh that tree's .sidx record of the
 game file); 'validator: bypassed' / 'validator: none on this build' is printed per tree, the
-partition's md5 sidecar is rewritten, and verify reports the bypass state per tree.
+partition's md5 sidecar is rewritten, and verify reports the bypass state per tree.  The patch
+happens BEFORE the record is written and its sha256s go into trees.json beside the source's
+(record_bypass_digests): those two files are the only ones on the card the tool itself changes
+after the copy, and verify re-hashes them.
 
 MEDIA (--media-dir DIR, item 90 v2).  DIR/media.json (written by selectmedia.py) names per image
 an art PNG, an animated GIF, a music WAV and a confirm WAV of its own (any of them null) plus the
@@ -3458,11 +3461,43 @@ def verify_store(card, plan, rec, check, mode="full"):
                   not bad, "%r" % bad[:3])
 
 
+def bypass_explains(reader, root_ino, rels, by):
+    """Which of `rels` (files whose content differs from what the record holds) are the
+    validator bypass's own work on a card whose record does not name it - every card a
+    version before this one built, where the record was injected before the raw bypass
+    patched the game and its .sidx.
+
+    A file qualifies only when it is THIS tree's game or THIS tree's .sidx, the record holds
+    no bypass digest of its own for it, and the pair on the card is exactly what the bypass
+    produces: the game reads 'bypassed' and its .sidx record already matches that very ELF,
+    so bypass_tree_bytes has nothing left to write.  Anything else stays a FAIL."""
+    out = set()
+    if not rels:
+        return out
+    try:
+        title, gpath, _gino, gnode = tree_game(reader, root_ino)
+        spath, snode = tree_sidx(reader, root_ino)
+        elf = reader.read_file_bytes(gnode)
+        sdata = reader.read_file_bytes(snode) if snode is not None else None
+        state, new_elf, new_sidx, _notes = bypass_tree_bytes(elf, sdata, gpath, title)
+    except Exception:                        # noqa: BLE001 - a pair that cannot be read explains nothing
+        return out
+    if state != "bypassed" or new_elf is not None or new_sidx is not None:
+        return out
+    for rel in rels:
+        if rel == gpath and not by.get("game"):
+            out.add(rel)
+        elif spath is not None and rel == spath and not by.get("sidx"):
+            out.add(rel)
+    return out
+
+
 def verify_trees(card, plan, rec, mode, check, touched=None):
     """Every recorded tree against trees.json: paths, kinds, mode/owner, symlink targets, and
     the CONTENT of every file ('full'), of the touched files + game + .sidx ('touched') or of a
     sample of 32 + game + .sidx ('quick').  The bypass's own digests override the source's for
-    the game and the .sidx."""
+    the game and the .sidx; on a card built before the build recorded them, bypass_explains
+    tells the bypass's own two files from a difference that matters."""
     ts = _treesync()
     _v, _s, ext4, _a = _stern_plugins()
     import random
@@ -3523,9 +3558,14 @@ def verify_trees(card, plan, rec, mode, check, touched=None):
                 exp = override.get(rel) or want.files[rel].sha256
                 if got != exp:
                     bad.append(rel)
+            explained = bypass_explains(r, root, bad, by)
+            bad = [rel for rel in bad if rel not in explained]
+            detail = "differ: %r" % bad[:5] if bad else (
+                "the validator bypass patched %s after the record was taken" % ", ".join(sorted(explained))
+                if explained else "")
             check("image %d %s content: %d of %d files re-hashed (%s, %.0f s)"
                   % (im.index, dev, len(sample), len(want.files), _gb(nbytes), time.monotonic() - t0),
-                  not bad, "differ: %r" % bad[:5])
+                  not bad, detail)
 
 
 def trees_report(card, plan, rec, warnings):
@@ -4327,14 +4367,20 @@ def compute_bypass_writes(reader, root_ino):
     """Neuter the tree's validator and refresh its .sidx record, as plugins/stern/valpatch's
     compute_writes does for a whole partition - but rooted at `root_ino` so a multi layout's
     imgN tree patches ITS game and ITS manifest.  -> (state before, [(disk offset, bytes)],
-    notes).  No writes when the state is not 'armed'."""
+    notes, digests).  No writes when the state is not 'armed'.
+
+    `digests` is what these writes LEAVE on the card: {"game_path", "sidx_path"} plus a
+    "game" / "sidx" sha256 for each of the two files they change.  The record keeps them
+    (record_bypass_digests) because after a raw bypass those two files are no longer the
+    source's bytes, and verify re-hashes them against the record."""
     valpatch, sidx, _e, _adj = _stern_plugins()
     title, gpath, gino, gnode = tree_game(reader, root_ino)
     elf = bytearray(reader.read_file_bytes(gnode))
     state = bypass_state(elf)
     notes = ["%s (%d bytes)" % (gpath, len(elf))]
+    digests = {"game_path": gpath, "sidx_path": None}
     if state not in ("armed", "half"):
-        return state, [], notes
+        return state, [], notes, digests
     overlay, _status = valpatch.bypass_overlay(bytes(elf))
     writes = []
     for poff, b in sorted(overlay.items()):
@@ -4342,6 +4388,7 @@ def compute_bypass_writes(reader, root_ino):
         for disk, n in reader.disk_ranges(gnode, poff, len(b)):
             writes.append((disk, b[:n]))
             b = b[n:]
+    digests["game"] = hashlib.sha256(bytes(elf)).hexdigest()
     roff = valpatch.find_grade_restore(bytes(elf))
     notes.append("bx lr at ELF offset 0x%x%s" % (valpatch.find_validation_exec(bytes(elf)),
                                                  (", grade restore off at 0x%x" % roff) if roff is not None
@@ -4349,7 +4396,8 @@ def compute_bypass_writes(reader, root_ino):
     spath, snode = tree_sidx(reader, root_ino)
     if snode is None:
         notes.append("no .sidx manifest in this tree - the spk layer may flag the game file")
-        return state, writes, notes
+        return state, writes, notes, digests
+    digests["sidx_path"] = spath
     sdata = reader.read_file_bytes(snode)
     recs, _crc, fmt = sidx.parse_records(sdata)
     # the manifest names the game file by its path in the tree; match by inode (extent block)
@@ -4365,14 +4413,39 @@ def compute_bypass_writes(reader, root_ino):
         rec_path = gpath
     if rec_path is None:
         notes.append("%s has no record for %s - the spk layer may flag the game file" % (spath, gpath))
-        return state, writes, notes
+        return state, writes, notes, digests
     hm, md = sidx.digests(bytes(elf))
+    buf = bytearray(sdata)
     for foff, rb in sidx.record_field_writes(recs[rec_path], hm, md, fmt):
+        buf[foff:foff + len(rb)] = rb
         for disk, n in reader.disk_ranges(snode, foff, len(rb)):
             writes.append((disk, rb[:n]))
             rb = rb[n:]
+    if bytes(buf) != bytes(sdata):
+        digests["sidx"] = hashlib.sha256(bytes(buf)).hexdigest()
     notes.append("%s record %r (%s) refreshed" % (spath, rec_path, fmt))
-    return state, writes, notes
+    return state, writes, notes, digests
+
+
+def record_bypass_digests(rec, digests):
+    """Fold {image index: digests} from a raw bypass into a CardTrees record -> the indices
+    changed.  This is what keeps verify honest after `build --bypass-validation` or `bypass
+    --card`: the record's tree still holds the SOURCE's sha256 for the game and the .sidx
+    (it was taken before the patch), and without these two digests beside it verify re-hashes
+    the card and reports exactly those two files as differing."""
+    changed = []
+    for i, by in sorted((digests or {}).items()):
+        im = rec.image(i) if rec is not None else None
+        if im is None:
+            continue
+        new = dict(im.bypass or {})
+        for key in ("game_path", "sidx_path", "game", "sidx"):
+            if by.get(key) is not None:
+                new[key] = by[key]
+        if new != (im.bypass or {}):
+            im.bypass = new
+            changed.append(i)
+    return changed
 
 
 def card_trees(card, plan=None):
@@ -4831,10 +4904,12 @@ def check_versions(recs, allow=False, flag="--allow-version-mismatch"):
 
 def bypass_card(card, plan=None, dry_run=False):
     """Apply the validator bypass to every games tree on `card`, rewrite the sidecar of every
-    partition written into, print one line per tree.  -> {index: state after}."""
+    partition written into, print one line per tree.  -> ({index: state after}, {index: the
+    digests of what was written}) - the second belongs in the card's record, through
+    record_bypass_digests, or verify holds the two patched files to the source's bytes."""
     _v, _s, ext4, _adj = _stern_plugins()
     plan = plan or plan_from_card(card)
-    states = {}
+    states, digests = {}, {}
     touched = []
     for i, part, sub in card_trees(card, plan):
         dev = device_name(part.num, sub)
@@ -4842,7 +4917,7 @@ def bypass_card(card, plan=None, dry_run=False):
             with open(card, "rb") as f:
                 r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
                 root = tree_root_inode(r, sub)
-                before, writes, notes = compute_bypass_writes(r, root)
+                before, writes, notes, dig = compute_bypass_writes(r, root)
         except Refused as e:
             print("image %d %s: validator: SKIPPED (%s)" % (i, dev, e))
             states[i] = "error"
@@ -4854,6 +4929,7 @@ def bypass_card(card, plan=None, dry_run=False):
                     f.write(b)
                 f.flush()
             touched.append(part.num)
+            digests[i] = dig
             after = "bypassed"
         else:
             after = before
@@ -4868,7 +4944,7 @@ def bypass_card(card, plan=None, dry_run=False):
         states[i] = after
     for n in sorted(set(touched)):
         say("p%d md5 %s recorded in %s" % (n, write_part_sidecar(card, n), sidecar_path(card, n)))
-    return states
+    return states, digests
 
 
 # ============================================================================= verify
@@ -5842,8 +5918,8 @@ def selftest(d, selector_file=None):
         ok &= ents["%s_title" % tag][2] == 0 and ents["spk"][2] == 0
     print("== bypass on trees whose game is not an ELF: 'none on this build', nothing written")
     before = md5_file(out2)
-    states = bypass_card(out2)
-    ok &= states == {0: "absent", 1: "absent", 2: "absent"} and md5_file(out2) == before
+    states, digests = bypass_card(out2)
+    ok &= states == {0: "absent", 1: "absent", 2: "absent"} and md5_file(out2) == before and digests == {}
     print("== verify (multi)")
     ok &= verify_card(out2, plan2, sel)
     ref2 = fs_ref(out2, plan2.prims[1].start * SECTOR)
@@ -5925,6 +6001,16 @@ def selftest(d, selector_file=None):
     ok &= main(["inject", "--card", out3, "--selector-dir", sel]) == 2
     ok &= not verify_card(out3, plan3, sel, mode="quick")
     rec3.dirty = []
+    write_trees(out3, rec3, workdir=d)
+    ok &= verify_card(out3, plan3, sel, mode="quick")
+    # what a RAW bypass wrote goes into the record (record_bypass_digests) and IS what verify
+    # holds those two files to: a wrong digest there must FAIL the very file it names
+    print("== the record carries the bypass's own digests: verify holds the game to THEM")
+    rec3.image(0).bypass = {"game_path": "turtles_pro/game", "sidx_path": None, "game": "0" * 64}
+    write_trees(out3, rec3, workdir=d)
+    ok &= (read_trees(out3).image(0).bypass or {}).get("game") == "0" * 64
+    ok &= not verify_card(out3, plan3, sel, mode="quick")
+    rec3.image(0).bypass = None
     write_trees(out3, rec3, workdir=d)
     ok &= verify_card(out3, plan3, sel, mode="quick")
     print("== plan prints the room for updates")
@@ -6468,9 +6554,21 @@ def main(argv=None):
                 if a.bypass_validation:
                     bypass_store(a.out, plan, trees)
                 trees.synced = [3]                       # written in place: held to the record, never a range md5
+            # THE BYPASS BEFORE THE RECORD IS INJECTED (item 90): it patches the game ELF and
+            # that tree's .sidx with a raw write, so those two files stop being the source's
+            # bytes the record was taken from.  Its digests go into the record below; without
+            # them verify re-hashes the card and reports exactly those two files as differing.
+            bypassed = {}
+            if a.bypass_validation and plan.layout != "store":
+                _states, bypassed = _bypass_after_build(a.out, plan)
             if plan.layout == "multi":
                 say("p%d md5 %s recorded in %s" % (plan.multi_part.num, write_part_sidecar(a.out, plan.multi_part.num),
                                                   sidecar_path(a.out, plan.multi_part.num)))
+            if trees is not None:
+                done = record_bypass_digests(trees, bypassed)
+                if done:
+                    say("%s holds the patched game and .sidx of image%s %s" % (
+                        TREES_MANIFEST, "s" if len(done) > 1 else "", ", ".join(str(i) for i in done)))
             if not a.no_inject:
                 t1 = time.monotonic()
                 PROGRESS.step("writing the menu into the card")
@@ -6482,8 +6580,6 @@ def main(argv=None):
             else:
                 # stock p2, still recorded: verify then has something to hold p2 against
                 say("p2 md5 %s recorded in %s" % (write_p2_sidecar(a.out), p2_sidecar_path(a.out)))
-            if a.bypass_validation and plan.layout != "store":
-                _bypass_after_build(a.out, plan)
             PROGRESS.finish()
             alloc = allocated_bytes(a.out)
             say("wrote %s: %d bytes apparent%s in %.0f s" % (a.out, plan.total_bytes,
@@ -6547,7 +6643,18 @@ def main(argv=None):
             if plan.layout == "store":
                 raise Refused("a store card's trees share their files: the bypass is applied through the mount by "
                               "build --bypass-validation and by update, never by a raw write")
-            states = bypass_card(a.card, plan, dry_run=a.dry_run)
+            states, digests = bypass_card(a.card, plan, dry_run=a.dry_run)
+            # the card carries its own record: the two files this just patched are no longer
+            # the source's, and verify holds them to trees.json
+            if digests:
+                try:
+                    rec = read_trees(a.card)
+                    if rec is not None and record_bypass_digests(rec, digests):
+                        write_trees(a.card, rec)
+                        say("%s updated: it holds the patched game and .sidx now" % TREES_MANIFEST)
+                except (Refused, OSError) as e:
+                    say("WARNING: %s could not be updated (%s) - verify will report this card's game and "
+                        ".sidx as differing from its sources until it is rebuilt" % (TREES_MANIFEST, e))
             bad = [i for i, st in states.items() if st not in ("bypassed", "absent")]
             if bad:
                 print("[card] %d tree(s) NOT bypassed: %s" % (len(bad), ", ".join("image %d (%s)" % (i, states[i]) for i in bad)))

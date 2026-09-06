@@ -160,6 +160,12 @@ static int id_tex = 1, id_buf = 1, id_fbo = 1, id_vao = 1, id_obj = 1;
 static int blend_src = 1, blend_dst = 0;          /* shadowed: read back per frame */
 static int fb_w = 1920, fb_h = 1080;
 static int frame_no;
+static void viv_probe_own(void);          /* item 67, defined with viv_tab */
+static unsigned cur_unit;                /* tentative: defined with its comment below */
+static unsigned cur_tex2d[16];
+static unsigned cur_fbo_shadow;          /* item 67: the bound framebuffer */
+static void caller_note(const char *what, unsigned long ra, unsigned a,
+                        unsigned b, unsigned c);
 
 static int envint(const char *n, int dflt)
 {
@@ -195,6 +201,7 @@ void pad_present(void)
     unsigned int v[1];
     if (!bridge_init()) return;
     frame_no++;
+    viv_probe_own();                                     /* item 67 */
     v[0] = (unsigned int)frame_no;
     emit_u(PADGL_SWAP, v, 1);
     hdr->frame_seq++;
@@ -260,7 +267,12 @@ int glClearColor(float r, float g, float b, float a)
 { float v[4]; v[0]=r; v[1]=g; v[2]=b; v[3]=a; emit(PADGL_CLEARCOLOR, v, 16, 0, 0); return 0; }
 
 int glClear(unsigned int mask)
-{ const unsigned int op_ = PADGL_CLEAR; U(mask); return 0; }
+{ const unsigned int op_ = PADGL_CLEAR;
+  if (cur_fbo_shadow)                                  /* item 67 */
+      caller_note("clear offscreen fbo",
+                  (unsigned long)__builtin_return_address(0),
+                  cur_fbo_shadow, cur_tex2d[cur_unit & 15u], mask);
+  U(mask); return 0; }
 
 int glEnable(unsigned int cap)  { const unsigned int op_ = PADGL_ENABLE;  U(cap); return 0; }
 int glDisable(unsigned int cap) { const unsigned int op_ = PADGL_DISABLE; U(cap); return 0; }
@@ -316,6 +328,52 @@ int glDeleteTextures(int n, const unsigned int *ids)
 static unsigned cur_unit;                /* index, not the GL_TEXTURE0 enum */
 static unsigned cur_tex2d[16];
 
+/* ★ ITEM 67 (mando_le's holographic topper, display 2). The host census
+ * showed display 2 drawing ONE thing for a whole run - a program sampling
+ * texture 2, the 1360x768 buffer glTexDirectVIV handed out at boot - and
+ * texture 2's fill counters at zero on every upload path, while the guest
+ * decoded the topper's 1280x800 clips and handed 30 frames/s to the game.
+ * The only bridge complaint in the run was one "Invalidate on a texture
+ * that never registered" at boot, after which that moan was silenced for
+ * good. Three things follow, all here:
+ *   - the 2D shadow above only follows GL_TEXTURE_2D binds; remember the
+ *     LAST bind on ANY target too, say which non-2D targets are bound, and
+ *     let an Invalidate that misses the 2D shadow fall back to a
+ *     registration under the last-bound name;
+ *   - say what every early miss was bound to, and keep counting;
+ *   - probe the allocated buffers themselves once every 30 frames: if the
+ *     game writes topper frames into one with the CPU and never says so
+ *     (the Vivante driver samples the memory live, so on the machine it
+ *     needs no Invalidate), the bytes change, and this is the only place
+ *     that can see it. */
+static unsigned last_bind_t, last_bind_id, last_bind_unit;
+
+/* item 67, round five: the game composes the topper scene EMPTY - the op dump
+ * shows "clear FBO 1, present texture 2" and no draw into FBO 1 ever, with
+ * the display size right. So the question is WHICH GAME CODE renders that
+ * layer and why it draws nothing, and the cheapest answer is the game's own
+ * return addresses: who clears an off-screen FBO, who attaches which texture
+ * to it, who Maps/Invalidates a direct texture, who draws. Said once per
+ * (what, call site), capped, as guest virtual addresses ready for the
+ * disassembly. */
+static void caller_note(const char *what, unsigned long ra, unsigned a,
+                        unsigned b, unsigned c)
+{
+    static unsigned long seen[48];
+    static const char *seen_what[48];
+    static int n;
+    int i;
+    for (i = 0; i < n; i++)
+        if (seen[i] == ra && seen_what[i] == what) return;
+    if (n < 48) { seen[n] = ra; seen_what[n] = what; n++; }
+    {
+        char m[128];
+        snprintf(m, sizeof m, "[bridge] item67: %s from 0x%lx (fbo %u tex %u "
+                 "arg %u)\n", what, ra, a, b, c);
+        say(m);
+    }
+}
+
 /* item 51: two guest texture names can wrap ONE buffer (star_wars allocates
  * its playfield-LCD framebuffer through glTexDirectVIV on one name and Maps
  * the returned pointer under another - render target and sampler of the
@@ -327,6 +385,17 @@ static unsigned viv_alias(unsigned name);
 int glBindTexture(unsigned int t, unsigned int id)
 { const unsigned int op_ = PADGL_BINDTEX;
   if (t == 0x0DE1u) cur_tex2d[cur_unit & 15u] = id;   /* GL_TEXTURE_2D */
+  else {                                               /* item 67 */
+      static int said;
+      if (said < 8) {
+          char m[96];
+          said++;
+          snprintf(m, sizeof m, "[bridge] item67: bind target 0x%x tex %u "
+                   "on unit %u\n", t, id, cur_unit);
+          say(m);
+      }
+  }
+  last_bind_t = t; last_bind_id = id; last_bind_unit = cur_unit;
   U(t,viv_alias(id)); return 0; }
 int glActiveTexture(unsigned int u)
 { const unsigned int op_ = PADGL_ACTIVETEX; cur_unit = (u - 0x84C0u) & 15u; U(u); return 0; }
@@ -589,19 +658,30 @@ int glGenFramebuffers(int n, unsigned int *ids)
 { int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_GENFBO;
     ids[i] = (unsigned int)next_of(&id_fbo, 256); U(ids[i]); } return 0; }
 int glBindFramebuffer(unsigned int t, unsigned int id)
-{ const unsigned int op_ = PADGL_BINDFBO; U(t,id); return 0; }
+{ const unsigned int op_ = PADGL_BINDFBO; cur_fbo_shadow = id; U(t,id); return 0; }
 int glFramebufferTexture2D(unsigned int t, unsigned int att, unsigned int tt,
                            unsigned int tex, int level)
 { const unsigned int op_ = PADGL_FBOTEX;
+  caller_note("attach texture to fbo",                 /* item 67 */
+              (unsigned long)__builtin_return_address(0),
+              cur_fbo_shadow, tex, att);
   U(t,att,tt,viv_alias(tex),(unsigned)level); return 0; }   /* item 51 */
 int glCheckFramebufferStatus(unsigned int t) { (void)t; return 0x8CD5; }
 
 /* ---- draws ---- */
 int glDrawArrays(unsigned int mode, int first, int count)
-{ const unsigned int op_ = PADGL_DRAWARRAYS; U(mode,(unsigned)first,(unsigned)count); return 0; }
+{ const unsigned int op_ = PADGL_DRAWARRAYS;
+  caller_note("draw",                                  /* item 67 */
+              (unsigned long)__builtin_return_address(0),
+              cur_fbo_shadow, cur_tex2d[cur_unit & 15u], (unsigned)count);
+  U(mode,(unsigned)first,(unsigned)count); return 0; }
 
 int glDrawElements(unsigned int mode, int count, unsigned int type, const void *idx)
-{ const unsigned int op_ = PADGL_DRAWELEMENTS; U(mode,(unsigned)count,type,(unsigned long)idx); return 0; }
+{ const unsigned int op_ = PADGL_DRAWELEMENTS;
+  caller_note("draw",                                  /* item 67 */
+              (unsigned long)__builtin_return_address(0),
+              cur_fbo_shadow, cur_tex2d[cur_unit & 15u], (unsigned)count);
+  U(mode,(unsigned)count,type,(unsigned long)idx); return 0; }
 
 int glDrawRangeElements(unsigned int mode, unsigned int s, unsigned int e,
                         int count, unsigned int type, const void *idx)
@@ -740,6 +820,60 @@ static struct viv_reg *viv_find(void)
     return 0;
 }
 
+/* item 67: the same lookup by an explicit name (the last bind on any target). */
+static struct viv_reg *viv_find_name(unsigned name)
+{
+    int i;
+    if (!name) return 0;
+    for (i = 0; i < VIVMAX; i++)
+        if (viv_tab[i].used && viv_tab[i].name == name) return &viv_tab[i];
+    return 0;
+}
+
+/* item 67: does any buffer this file handed out through glTexDirectVIV
+ * change under the game with nobody telling GL? Sampled every 30 frames,
+ * ~4096 bytes spread across each buffer, so a frame written into it moves
+ * the hash; said once when first seen and for the first twelve changes. */
+static void viv_probe_own(void)
+{
+    static unsigned last_hash[VIVMAX];
+    static int primed[VIVMAX], said[VIVMAX];
+    int i;
+    if (frame_no % 30) return;
+    for (i = 0; i < VIVMAX; i++) {
+        const unsigned char *b;
+        unsigned long n, k, step;
+        unsigned h = 2166136261u;
+        int nz = 0;
+        char m[120];
+        if (!viv_tab[i].used || !viv_tab[i].own || !viv_tab[i].ownsz) continue;
+        b = viv_tab[i].own; n = viv_tab[i].ownsz;
+        step = n / 4096; if (!step) step = 1;
+        for (k = 0; k < n; k += step) {
+            h = (h ^ b[k]) * 16777619u;
+            if (b[k]) nz = 1;
+        }
+        if (!primed[i]) {
+            primed[i] = 1; last_hash[i] = h;
+            snprintf(m, sizeof m, "[bridge] item67: texture %04x own buffer "
+                     "(%lu bytes) at frame %d: %s\n", viv_tab[i].name, n,
+                     frame_no, nz ? "has non-zero bytes" : "all zero");
+            say(m);
+            continue;
+        }
+        if (h != last_hash[i]) {
+            if (said[i] < 12) {
+                said[i]++;
+                snprintf(m, sizeof m, "[bridge] item67: texture %04x own "
+                         "buffer CHANGED at frame %d (%s)\n", viv_tab[i].name,
+                         frame_no, nz ? "non-zero" : "all zero");
+                say(m);
+            }
+            last_hash[i] = h;
+        }
+    }
+}
+
 /* Say each texture's registration ONCE, with its name, so a run can be judged
  * from the log without a screenshot: the menu's DMD texture must appear with
  * its own size and format (1024x256 GL_RGBA = 0x1908) and not the video's
@@ -796,6 +930,8 @@ void glTexDirectVIVMap(unsigned int target, int w, int h, unsigned int fmt,
                        void **logical, const unsigned int *physical)
 {
     struct viv_reg *r = viv_slot();
+    caller_note("direct map", (unsigned long)__builtin_return_address(0),
+                cur_fbo_shadow, cur_tex2d[cur_unit & 15u], (unsigned)w);
     (void)target; (void)physical;
     if (!r) return;
     r->w = (unsigned)w; r->h = (unsigned)h; r->fmt = fmt;
@@ -855,6 +991,8 @@ void glTexDirectVIV(unsigned int target, int w, int h, unsigned int fmt,
     unsigned need = viv_frame_bytes(fmt, (unsigned)w, (unsigned)h);
 
     (void)target;
+    caller_note("direct alloc", (unsigned long)__builtin_return_address(0),
+                cur_fbo_shadow, cur_tex2d[cur_unit & 15u], (unsigned)w);
     if (logical) *logical = 0;
     if (!r) return;
     if (!need) {
@@ -908,14 +1046,35 @@ void glTexDirectInvalidateVIV(unsigned int target)
     unsigned int bytes;
     long off = -1;
     (void)target;
+    caller_note("direct invalidate", (unsigned long)__builtin_return_address(0),
+                cur_fbo_shadow, cur_tex2d[cur_unit & 15u], r ? r->w : 0);
     if (!r) {
-        static int moaned;
-        if (!moaned) {
-            moaned = 1;
-            say("[bridge] glTexDirectInvalidateVIV on a texture that never "
-                "registered - sending nothing (item 43)\n");
+        /* item 67: name the miss, keep counting, and try the last bind on
+         * ANY target before giving up - a bind through GL_TEXTURE_EXTERNAL
+         * or a target the 2D shadow above does not follow lands here. */
+        static int misses;
+        struct viv_reg *alt = viv_find_name(last_bind_id);
+        misses++;
+        if (misses <= 8 || misses % 3000 == 0) {
+            char m[220];
+            int n, i;
+            n = snprintf(m, sizeof m, "[bridge] item67: Invalidate #%d on "
+                         "unregistered tex %u (unit %u; last bind target 0x%x "
+                         "tex %u; registered:", misses,
+                         cur_tex2d[cur_unit & 15u], cur_unit, last_bind_t,
+                         last_bind_id);
+            for (i = 0; i < VIVMAX && n > 0 && n < (int)sizeof m - 24; i++)
+                if (viv_tab[i].used)
+                    n += snprintf(m + n, sizeof m - (unsigned long)n, " %u",
+                                  viv_tab[i].name);
+            if (n > 0 && n < (int)sizeof m - 40)
+                snprintf(m + n, sizeof m - (unsigned long)n, ")%s\n",
+                         alt ? " - using the last-bound name"
+                             : " - sending nothing");
+            say(m);
         }
-        return;
+        if (!alt) return;
+        r = alt;
     }
     if (!r->px || !r->w || !r->h) return;
     bytes = viv_frame_bytes(r->fmt, r->w, r->h);

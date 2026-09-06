@@ -25,6 +25,20 @@
 #     child, which here is a setsid wrapper, so the guest survives it.
 set -u
 . "$(dirname "$0")/padpath.sh"
+
+# ★ RIG-LOCAL EXTRA ENVIRONMENT (item 67). The app assembles the run's
+# environment and has no field for "one more PAD_* knob", so an instrument
+# that is armed by one (PAD_REG_HOOK, PAD_PEEK, PAD_PASS_HOOK, PAD_GL2_W...)
+# had no way in from the Start button. `$PAD_HOME/.pad_env` (PAD_ENV_FILE to
+# point elsewhere) is sourced here with every assignment exported, and named
+# in the log so a run carrying one can never pass as a plain run. Delete the
+# file to go back to a plain run.
+PAD_ENV_FILE=${PAD_ENV_FILE:-$PAD_HOME/.pad_env}
+if [ -f "$PAD_ENV_FILE" ]; then
+    set -a; . "$PAD_ENV_FILE"; set +a
+    echo "[watch] EXTRA ENVIRONMENT from $PAD_ENV_FILE:" \
+         "$(grep -v '^#' "$PAD_ENV_FILE" | grep . | tr '\n' ' ')"
+fi
 . "$(dirname "$0")/ensurebuild.sh"
 cd "$HOME"
 
@@ -339,6 +353,25 @@ else
         echo "[watch] node identity: derivation failed; the shim keeps its" \
              "built-in (godzilla) table"
     fi
+fi
+# ★ THE SECOND DISPLAY'S GEOMETRY IS THE BACKBOX'S, AND THAT IS READ OFF
+# THE GAME (items 65 and 67, settled 2026-09-05 on mando_le). The render
+# thread presents display 2 through a viewport of DISPLAY 0's size
+# (0x4519f4 -> the glViewport at 0x45201c) while it builds display 2's FBO,
+# ortho and presenter quad from display 2's own geometry - which only comes
+# out whole when the two geometries are equal. Told 1280x800 (the fb2
+# FB_SetTiming record display2.py reads), the topper lost 80 columns and 32
+# rows; told 1360x768 it was complete. So the FB_SetTiming record is the
+# PANEL's timing request, not the geometry EGL reports back, and eglshim's
+# default - every display answers the backbox's size - is the game's own
+# assumption. Nothing is exported here; PAD_GL2_W/H from the caller still
+# override for a sweep, and display2.py stays as the reader of what the
+# panel is asked to run at, named on the pane so the two are never confused.
+if [ -f "$GAME_ELF" ]; then
+    _d2all=$(python3 "$RIG/display2.py" "$GAME_ELF" 2>/dev/null)
+    echo "[watch] display 2: answered the backbox's size, which the game's" \
+         "own present assumes (panel timing records: ${_d2all:-none})"
+    unset _d2all
 fi
 # WHICH NODE IS THE lcdnode (item 83, batman's VILLAIN VISION = node 24).
 # From the derived table so it is per-title and empty on titles without one -
@@ -1876,6 +1909,11 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # turtles_pro crashes to that gap - the pane showed qemu s bare
         # "uncaught target signal 11" and nothing that said where.
         /\[segv\]/               { print "[event] " $0; fflush(); next }
+        # [printf] is the shim REFUSING a printf whose %s argument is not a
+        # pointer (sword_of_rage_le, 2026-09-06): the one line that names the
+        # format string and the caller of a crash the machine would have
+        # taken, and the run goes on without it. Three lines per format.
+        /\[printf\]/             { print "[event] " $0; fflush(); next }
         # [align] is the shim doing the kernel s alignment fixup for an
         # unaligned LDRD/STRD/LDM/STM (led_zeppelin_le, item 80). Budgeted at
         # the source - the first eight and every 4096th - so forwarding it is

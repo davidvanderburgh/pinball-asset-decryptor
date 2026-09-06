@@ -633,11 +633,132 @@ static unsigned long xwin2;
 static int win2_on;                      /* the second window exists         */
 static int win2_w, win2_h;               /* its current drawable size        */
 static int fb2_w, fb2_h;                 /* display-2 render size            */
+/* ★ ITEM 67: IS DISPLAY 2 A PANEL VIEWED IN A REFLECTION? -1 = not yet read
+ * off the game, 0 = no, 1 = yes: the [display 2] window then shows the
+ * OPTICAL image, un-mirrored. Read from the quad the game's display-2
+ * PRESENT draws with (d2_mirror_from_draw), or forced by PAD_GL2_MIRROR=0/1.
+ *
+ * The engine presents an FBO-backed display through one 96-byte buffer:
+ * six (x, y, u, v) vertices of the unit square in a fixed order (mando_le
+ * 1.44.0: template 0x602b18, builder 0x52eaac), and the builder takes two
+ * flags: the first rewrites u to 1-x, the second v to 1-y. The second is
+ * the ordinary FBO orientation correction (the display pass renders with a
+ * y-down ortho into the texture); the FIRST is a left-right mirror of the
+ * whole picture, and the game asks for it, as a constant, for display 2:
+ * the holographic topper is a panel seen in a Pepper's-ghost reflection,
+ * so the panel must carry the mirror image for the viewer to read it. This
+ * window is a viewer, not the panel.
+ *
+ * The SAME builder makes quads for other sprites with other flags, and the
+ * first one this renderer saw (u = x, uploaded before display 2 was even
+ * targeted) answered a whole run wrongly. So every 96-byte upload is
+ * CLASSIFIED by buffer name, each VAO remembers the array buffer its
+ * attributes were pointed at, and the answer is taken from the buffer the
+ * display-2 present draw (target 2, guest FBO 0, six vertices) uses. */
+static int d2_mirror = -1;
+static unsigned char  buf_quad[MAXNAME];   /* 0 other, 1 u = x, 2 u = 1-x   */
+static unsigned short vao_abuf[1024];      /* guest array buffer per VAO     */
+static unsigned       cur_array_buf_g;     /* guest name bound to ARRAY_BUFFER */
+static int d2_quad_kind(const float *f)
+{
+    static const float tmpl[6][2] = {{0,1},{1,0},{0,0},{0,1},{1,1},{1,0}};
+    int i, u_rev = 1, u_id = 1;
+    for (i = 0; i < 6; i++) {
+        if (f[i*4] != tmpl[i][0] || f[i*4+1] != tmpl[i][1]) return 0;
+        if (f[i*4+2] != 1.f - tmpl[i][0]) u_rev = 0;
+        if (f[i*4+2] != tmpl[i][0])       u_id = 0;
+    }
+    return u_rev ? 2 : u_id ? 1 : 0;
+}
+static void d2_mirror_from_draw(unsigned vao)
+{
+    unsigned b = vao ? (vao < 1024 ? vao_abuf[vao] : 0) : cur_array_buf_g;
+    int k = (b && b < MAXNAME) ? buf_quad[b] : 0;
+    if (!k) return;
+    d2_mirror = (k == 2);
+    fprintf(stderr, k == 2
+            ? "[padglhost] display 2 is presented through a quad that maps u "
+              "to 1-x (buffer %u): the game MIRRORS this display - a panel "
+              "viewed in a reflection (item 67); the [display 2] window shows "
+              "it un-mirrored (PAD_GL2_MIRROR=0/1 overrides)\n"
+            : "[padglhost] display 2 is presented through a quad that maps u "
+              "to x (buffer %u): drawn as-is, no mirror applied\n", b);
+}
 static unsigned tex_screen2, fbo_screen2;
 static int cur_tgt;                      /* display index ops belong to now  */
 static int tgt2_disp = -1;               /* which display index slot 2 holds */
 static long frames2_done;
 static int egl_use(EGLSurface s);        /* defined after win_present()      */
+
+/* ★ ITEM 67: WHAT DOES THE SECOND DISPLAY DRAW, AND WAS THAT TEXTURE EVER
+ * FILLED. mando_le's topper (display 2) swapped with draws on every frame and
+ * the picture oracle read it black for a whole run, while the guest decoded
+ * the topper's own 1280x800 clips and handed 30 frames/s to the game - and
+ * the TEXDIRECT count never rose above the backbox channel's 30/s. So the
+ * frames reach the game and never reach a texture, or reach one nothing on
+ * display 2 samples. This names the texture each display-2 draw samples, its
+ * storage size, and how many times each upload path has filled it - once per
+ * (program, texture, guest fbo), and re-reported six times ~15 s apart so a
+ * counter that GROWS names a live upload path and one that stays put names a
+ * texture nothing feeds. Always on, bounded, prefixed "display" so the app
+ * pane's filter carries it. */
+static unsigned short d2t_w[MAXNAME], d2t_h[MAXNAME];
+static unsigned long  d2t_img[MAXNAME], d2t_sub[MAXNAME], d2t_dir[MAXNAME];
+static unsigned cur_prog_name;           /* the guest's current program name */
+static struct { unsigned prog, tex, fbo; } d2d_seen[24];
+static int  d2d_seen_n, d2d_lines, d2d_reports, d2u_lines;
+static long d2d_next_report;
+
+static void d2_draw_note(void)
+{
+    unsigned b = cur_tex_unit_binding & (MAXNAME - 1);
+    int i;
+    for (i = 0; i < d2d_seen_n; i++)
+        if (d2d_seen[i].prog == cur_prog_name
+                && d2d_seen[i].tex == cur_tex_unit_binding
+                && d2d_seen[i].fbo == cur_guest_fbo)
+            break;
+    if (i == d2d_seen_n) {
+        if (d2d_seen_n < (int)(sizeof d2d_seen / sizeof d2d_seen[0])) {
+            d2d_seen[d2d_seen_n].prog = cur_prog_name;
+            d2d_seen[d2d_seen_n].tex  = cur_tex_unit_binding;
+            d2d_seen[d2d_seen_n].fbo  = cur_guest_fbo;
+            d2d_seen_n++;
+        }
+        if (d2d_lines < 40) {
+            d2d_lines++;
+            fprintf(stderr, "[padglhost] display %d draw: prog %u tex %u "
+                    "(%ux%u, filled img/sub/direct %lu/%lu/%lu) guest_fbo %u "
+                    "frame %ld\n", cur_tgt, cur_prog_name, cur_tex_unit_binding,
+                    d2t_w[b], d2t_h[b], d2t_img[b], d2t_sub[b], d2t_dir[b],
+                    cur_guest_fbo, frames2_done);
+        }
+    }
+    if (frames2_done >= d2d_next_report && d2d_reports < 6) {
+        d2d_reports++;
+        d2d_next_report = frames2_done + 900;      /* ~15 s at 60 swaps/s */
+        for (i = 0; i < d2d_seen_n; i++) {
+            unsigned t = d2d_seen[i].tex & (MAXNAME - 1);
+            fprintf(stderr, "[padglhost] display 2 draw census at frame %ld: "
+                    "prog %u tex %u (%ux%u) filled img/sub/direct "
+                    "%lu/%lu/%lu guest_fbo %u\n", frames2_done,
+                    d2d_seen[i].prog, d2d_seen[i].tex, d2t_w[t], d2t_h[t],
+                    d2t_img[t], d2t_sub[t], d2t_dir[t], d2d_seen[i].fbo);
+        }
+    }
+}
+
+/* The upload half: any plain upload a topper-sized frame could travel by
+ * (1000 px wide or more) says which display it landed under, twelve times. */
+static void d2_upload_note(const char *how, unsigned w, unsigned h,
+                           unsigned x, unsigned y, unsigned fmt)
+{
+    if (w < 1000 || d2u_lines >= 12) return;
+    d2u_lines++;
+    fprintf(stderr, "[padglhost] display %d upload: %s tex %u %ux%u at %u,%u "
+            "fmt 0x%x frame %ld\n", cur_tgt, how, cur_tex_unit_binding,
+            w, h, x, y, fmt, frames_done);
+}
 
 static int win_on;                       /* PAD_GL_WINDOW=1                  */
 static XDisplay *xdpy;
@@ -662,10 +783,12 @@ static const char *BLIT_FS =
     "precision mediump float;\n"
     "uniform sampler2D u_tex;\n"
     "uniform float u_flip;\n"
+    "uniform float u_mirror;\n"
     "in vec2 v_uv;\n"
     "out vec4 o_col;\n"
     "void main(){\n"
-    "  vec2 uv = vec2(v_uv.x, mix(v_uv.y, 1.0 - v_uv.y, u_flip));\n"
+    "  vec2 uv = vec2(mix(v_uv.x, 1.0 - v_uv.x, u_mirror),\n"
+    "                 mix(v_uv.y, 1.0 - v_uv.y, u_flip));\n"
     "  o_col = vec4(texture(u_tex, uv).rgb, 1.0);\n"
     "}\n";
 
@@ -1739,6 +1862,7 @@ static int win_open(void)
     int scr;
     if (!t || t[0] != '1') return 0;
     if ((e = getenv("PAD_GL_FLIP")))     win_flip  = e[0] == '1';
+    if ((e = getenv("PAD_GL2_MIRROR")))  d2_mirror = e[0] == '1';   /* item 67 */
     if ((e = getenv("PAD_GL_WIN_EVERY")) && atoi(e) > 0) win_every = atoi(e);
 
     xdpy = XOpenDisplay(0);
@@ -2348,7 +2472,9 @@ static void win_present(void)
     p_glBindTexture(0x0DE1, tex_screen);
     if (blit_tex_loc >= 0) p_glUniform1i(blit_tex_loc, 0);
     {   int fl = p_glGetUniformLocation(blit_prog, "u_flip");
-        if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f); }
+        if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f);
+        fl = p_glGetUniformLocation(blit_prog, "u_mirror");
+        if (fl >= 0) p_glUniform1f(fl, 0.f); }        /* the backbox: never */
     p_glDrawArrays(0x0005, 0, 4);      /* TRIANGLE_STRIP                     */
     /* ★ ITEM 11's PER-SWAP TICK, PAD_GL_TICK=1.
      *
@@ -2597,7 +2723,9 @@ static void win2_present(void)
     p_glBindTexture(0x0DE1, tex_screen2);
     if (blit_tex_loc >= 0) p_glUniform1i(blit_tex_loc, 0);
     {   int fl = p_glGetUniformLocation(blit_prog, "u_flip");
-        if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f); }
+        if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f);
+        fl = p_glGetUniformLocation(blit_prog, "u_mirror");
+        if (fl >= 0) p_glUniform1f(fl, d2_mirror > 0 ? 1.f : 0.f); } /* item 67 */
     p_glDrawArrays(0x0005, 0, 4);
     /* The d2 window went black while its FBO measured fully lit, with no
      * EGL call reporting failure - so this path checks what nothing else
@@ -4295,6 +4423,14 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
         p_glTexImage2D(0x0DE1,(int)u[0],(int)u[1],(int)u[2],(int)u[3],0,u[4],u[5],
                        u[6] ? pl + 28 : 0);
+        {   /* item 67 */
+            unsigned b = cur_tex_unit_binding & (MAXNAME - 1);
+            if (u[0] == 0) { d2t_w[b] = (unsigned short)u[2];
+                             d2t_h[b] = (unsigned short)u[3]; }
+            if (u[6]) d2t_img[b]++;
+            d2_upload_note(u[6] ? "teximage" : "teximage(storage only)",
+                           u[2], u[3], 0, 0, u[4]);
+        }
         if (u[0] == 0)                       /* level 0 defines storage */
             tex_stored[cur_tex_unit_binding & (MAXNAME-1)] = 1;
         /* GLES samples BLACK from a texture that has only level 0 while
@@ -4321,6 +4457,11 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         unsigned w = u[0], h = u[1], fmt = u[2], src = u[3];
         const unsigned char *yuv = 0, *rgba;
         tex_stored[cur_tex_unit_binding & (MAXNAME-1)] = 1;   /* item 51 */
+        {   /* item 67 */
+            unsigned b = cur_tex_unit_binding & (MAXNAME - 1);
+            d2t_dir[b]++;
+            d2t_w[b] = (unsigned short)w; d2t_h[b] = (unsigned short)h;
+        }
         /* ITEM 11's STAGE COUNTER. David's screen recording measured 22.7%
          * repeated frames against a 0.0% pristine control while every guest
          * and host counter read clean, so the question is WHICH STAGE stops
@@ -4468,6 +4609,8 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     case PADGL_TEXSUBIMAGE:
         p_glTexSubImage2D(0x0DE1,(int)u[0],(int)u[1],(int)u[2],(int)u[3],(int)u[4],
                           u[5],u[6], u[7] ? pl + 32 : 0);
+        d2t_sub[cur_tex_unit_binding & (MAXNAME - 1)]++;          /* item 67 */
+        d2_upload_note("texsubimage", u[3], u[4], u[1], u[2], u[5]);
         break;
     case PADGL_TEXCOMPRESSED:
         p_glCompressedTexImage2D(0x0DE1,(int)u[0],u[1],(int)u[2],(int)u[3],0,
@@ -4510,7 +4653,10 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         break;
     case PADGL_BINDBUF: {
         unsigned host = u[1] < MAXNAME ? map_buf[u[1]] : 0;
-        if (u[0] == 0x8892)      cur_array_buf = host;              /* ARRAY_BUFFER */
+        if (u[0] == 0x8892) {                                       /* ARRAY_BUFFER */
+            cur_array_buf = host;
+            cur_array_buf_g = u[1] < MAXNAME ? u[1] : 0;            /* item 67 */
+        }
         else if (u[0] == 0x8893) vao_elem[cur_vao_g] = host ? 1 : 0; /* ELEMENT_ARRAY */
         p_glBindBuffer(u[0], host); break;
     }
@@ -4525,6 +4671,9 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                         u[0], u[2], f[0],f[1],f[2],f[3], f[4],f[5],f[6],f[7]);
             }
         }
+        if (u[0] == 0x8892 && cur_array_buf_g)                      /* item 67 */
+            buf_quad[cur_array_buf_g] = (u[2] == 96 && len >= 12 + 96)
+                ? (unsigned char)d2_quad_kind((const float *)(pl + 12)) : 0;
         p_glBufferData(u[0], (long)u[2], len > 12 ? pl + 12 : 0, u[1]);
         break;
     case PADGL_BUFSUBDATA:      p_glBufferSubData(u[0], (long)u[1], (long)u[2],
@@ -4539,6 +4688,8 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                                 p_glBindVertexArray(u[0] < 1024 ? map_vao[u[0]] : 0); break;
     case PADGL_VERTEXATTRIB: {
         int idx = attr_resolve(u[0]);
+        if (cur_vao_g < 1024)                                       /* item 67 */
+            vao_abuf[cur_vao_g] = (unsigned short)cur_array_buf_g;
         if (idx >= 0) {
             /* Record whether this attribute has a REAL buffer behind it.  A
              * VertexAttribPointer with ARRAY_BUFFER 0 records u[5] as a
@@ -4639,7 +4790,10 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             if (uni_name[g][k][0]) uni_loc[g][k] = p_glGetUniformLocation(map_obj[g], uni_name[g][k]); }
         break;
     }
-    case PADGL_USEPROGRAM:      if (u[0] < MAXNAME) p_glUseProgram(map_obj[u[0]]); break;
+    case PADGL_USEPROGRAM:
+        cur_prog_name = u[0];                    /* item 67 */
+        if (u[0] < MAXNAME) p_glUseProgram(map_obj[u[0]]);
+        break;
     case PADGL_REGUNIFORM: {
         unsigned g = u[0], slot = u[1], n = len > 8 ? len - 8 : 0;
         if (g >= MAXPROG || slot >= MAXUNI) break;
@@ -4746,6 +4900,9 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             break;
         }
         swap_draws++;                            /* item 27: this frame drew */
+        if (cur_tgt) d2_draw_note();             /* item 67                  */
+        if (cur_tgt && !cur_guest_fbo && u[2] == 6 && d2_mirror < 0)
+            d2_mirror_from_draw(cur_vao_g);      /* item 67: the present draw */
         draw_say(u[2], u[1], 0, 0, 0, 0);        /* item 43                  */
         p_glDrawArrays(u[0],(int)u[1],(int)u[2]);
         /* ★ ITEM 51: WHICH STAGE OF A TWO-STAGE SCENE GOES BLACK. The
@@ -4781,6 +4938,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             break;
         }
         swap_draws++;                            /* item 27: this frame drew */
+        if (cur_tgt) d2_draw_note();             /* item 67                  */
         {   /* item 43: the indices come from the mirrored element buffer the
              * journal keeps for this VAO, so an indexed quad reports the same
              * box a direct one would. */

@@ -5319,6 +5319,13 @@ These have each been violated at least once and each cost a run or a window:
       out the Insider state forces it.
 
 - [ ] **65. The second-display window is sized from the BACKBOX, so four
+      **2026-09-05, from item 67: THE SIZE HALF HAS ITS SOURCE.** The game
+      carries both display sizes as the static FB_SetTiming records for
+      `/dev/fb0` and `/dev/fb2` (mando_le: 1360x768 and 1280x800);
+      `display2.py` reads them out of the ELF and watch.sh exports
+      PAD_GL2_W/H from them. Still open here: the rotation half (venom),
+      and Bond's DISPLAY 0 (fb0 is read too - `display2.py game` prints
+      it - but PAD_GL_W/H are not yet driven from it).
       titles come up stretched or ringed in black — and Venom's is on its
       side.** `S3 D2`
       *(Filed 2026-08-23 from PAD-81, the tester who asked for the Compare
@@ -5455,6 +5462,239 @@ These have each been violated at least once and each cost a run or a window:
       — S3: cosmetic, does not block play. D3: mostly measurement, and this is
       the third pass at the same window; the fix cannot be designed until a
       run says which of "never fed" or "fed late" it is.
+      **★ 2026-09-05, David's sweep, mando_le 1.44.0 live: MEASURED, it is
+      "never fed", and the cause is a node board.** `pic2_check` said
+      `d2 STILL BLACK after 417 presented frames - the game is composing this
+      display's scene and the scene is empty` (padglhost.log, the 13:52 run;
+      the guest asked `fbGetDisplayByIndex(2)`, mapped a 1360x768 texture
+      to it and swapped it every frame). The same run's glass looped
+      `UPDATING NODE BOARD RUNTIME / UPDATE FAILED / 12`, and **node 12 on
+      this title is `hdmi_ws2812node` — the topper's OWN board** ("HDMI SPI
+      WS2812": the holographic display's control plus the TOPPER 1..32 RGB
+      LEDs). `node_ident.txt` carried `variant=0x01 variant_guess=1`;
+      `hexreg.py` off the live process read **variant 0x0c** (class 5,
+      1.19.0) with pinnode 0x01 / ws2812node 0x05 / node4 0x03 reconfirmed
+      in the same pass — item 55's trust rule, fourth title. So the game
+      graded the topper board status 7 and walked the update forever, and
+      the topper scene stayed empty while it did.
+      **Shipped, uncommitted on main:** `nbdir.VARIANT_PRIOR["hdmi_ws2812node"]
+      = 0x0c` + `CLASS_PREF (5,)`; hwshim `nb_hexreg_answer()` RESCANS on a
+      miss and the scan de-duplicates by (type, class) — its single scan ran
+      at node 1's fe when the game had decrypted only 2 images, 7 exist ten
+      minutes later, and it never looked again. **That is why the safety net
+      was silent here AND on turtles' node 12, the gap item 55 flagged.**
+      New `tests/test_spike2_nbdir_variants.py` pins every measured row;
+      mando's table regenerated (diff = node 12 only); shim rebuilt.
+      **Open:** whether a cleanly graded node 12 makes the game compose the
+      topper scene — the next mando run's `picture: d2` line answers it;
+      acceptance above unchanged (three runs).
+      **The 2026-08-19 "content from frame 2" run is now DOUBTED:** its
+      `d2 FIRST at frame 2 (98511 of 1044480 pixels)` is the SAME count as
+      this run's PRIMARY `picture: FIRST at frame 4 (98511 of 1044480)` —
+      the boot frame — so that reading most likely saw display 0's frame
+      through the display-2 texture (item 51's Map aliasing), not topper
+      content. Treat this item as never yet having seen the topper draw.
+      **★ 2026-09-05, SECOND RUN (David, 14:11): node 12 grades clean, no
+      update overlay, and display 2 is STILL EMPTY** (`d2 STILL BLACK after
+      427 presented frames`, no `d2 FIRST` in 20 min). So the node was a
+      real fault and not the gate. What the run proves instead:
+      1. **The topper scene RUNS.** Video channel 1 decodes 1280x800 clips
+         out of scene `ed4ec8f0...`, whose radium names
+         `Topper_RazorCrestHologram` and `Topper_VideoTest`, and hands the
+         game 30 frames/s while a clip plays (short clips, long idle gaps).
+      2. **Those frames never reach a texture.** The host's TEXDIRECT rate
+         stayed at the backbox channel's 30/s with channel 1 (and 2)
+         streaming; the bridge registered no 1280x800 Map or alloc, ever;
+         `swap content d2` is mask 0 on every swap (draws, no video). The
+         game runs the topper's clip and does not upload it.
+      3. **Ruled out**: `/dev/mxc_hdmi` (0x3ddf24 opens it, ioctl 0x4803
+         forces a hot-plug event, sleeps 500 ms, and carries on identically
+         when the open fails - fire-and-forget); `/dev/fb2` (only FB_SetTiming
+         opens it - a mode set, no pixels); the IPU (`libipu.so.0` in the
+         rootfs is a 1.6 KB stub nothing in the game imports); a second
+         render thread (the shim caps `target ->` at 4 lines; the game
+         alternates displays from one thread); node 3 (the game probes it
+         fe/fe/fa at 20 s - the directory has no node 3, and its OWN
+         directory names node 12 `TOPPER`); the fiber `do_stack_unwind`
+         throws at clip start (ordinary screen unwinds).
+      4. **Where the topper clips travel in the engine**:
+         `Radium::Video::ExtraVideoPlayer` (an ARRAY, `extraVideoPlayer[i]`,
+         `PresetClipInternal`/`SetClipInternal`) and
+         `Radium::VideoClipFrameCallbackData` - the extra-display player is
+         its own class beside `SpiVideoStreamDecoder`; its upload path is
+         the open question.
+      **Instrument shipped (padglhost.c, always on, bounded, on the pane):**
+      `[padglhost] display 2 draw: prog P tex T (WxH, filled
+      img/sub/direct a/b/c) guest_fbo F` once per (program, texture, fbo),
+      a `display 2 draw census` re-report six times ~15 s apart, and
+      `display N upload: teximage|texsubimage tex T WxH ...` for the first
+      twelve plain uploads 1000 px wide or more. A fill counter that GROWS
+      names the live upload path; one that stays put names a texture nothing
+      feeds. **Next: David restarts mando and reads those lines.**
+      **★ THIRD RUN (David, 14:34-15:10), the census answered:** display 2
+      draws exactly ONE thing for the whole run - `prog 6 tex 2 (0x0,
+      filled img/sub/direct 0/0/0) guest_fbo 0` - and no `display N
+      upload:` line ever printed. Texture 2 is the 1360x768 RGBA buffer
+      `glTexDirectVIV` handed out at boot (item 51's render-target name,
+      Mapped again as texture 3 and aliased back); the presenter samples it
+      every frame and NOTHING ever fills it on the host: no TEXIMAGE, no
+      TEXSUBIMAGE, no TEXDIRECT. The game gets its topper frame into that
+      buffer some way the bridge does not carry. The one clue is the single
+      `glTexDirectInvalidateVIV on a texture that never registered` at boot
+      (~14 s, before any video, right when display 2's textures were set
+      up), after which the bridge silenced that moan for good - so every
+      later Invalidate on an unrecognised bind was dropped in silence.
+      **Instrument shipped in glbridge.c (guest, rebuilt + stamped):**
+      binds on any target other than GL_TEXTURE_2D are logged (`[bridge]
+      item67: bind target 0x.. tex N`); every Invalidate miss is named and
+      counted (`item67: Invalidate #n on unregistered tex ..; last bind
+      target ..; registered: ..`) and FALLS BACK to a registration under
+      the last-bound name of any target - the likely fix if the topper
+      texture is bound through GL_TEXTURE_EXTERNAL_OES or another target
+      the 2D shadow never followed; and every glTexDirectVIV buffer is
+      hashed every 30 frames (`item67: texture 0002 own buffer CHANGED`)
+      so a CPU-written frame the game never announces (the Vivante driver
+      samples that memory live, so on the machine no Invalidate is needed)
+      becomes visible. **Next: restart mando, grep gzwatch.log for
+      `item67`.** If the buffer CHANGES with no Invalidate, the fix is a
+      bridge-side upload of the buffer on every display-2 present; if the
+      Invalidate fell back to the last-bound name, the fix is already in
+      and `d2 FIRST` should print.
+      **★ FOURTH RUN (15:10): neither.** The buffers never change (`texture
+      0002 own buffer ... all zero`, no CHANGED line in minutes) and the
+      Invalidate misses are boot-time noise (one on tex 32, seven on tex 0
+      = unbound). Then the LIVE OP DUMP (`touch /tmp/padgl_dumpseq`, armed
+      three times during a topper clip) showed the whole topper pass:
+      `BINDFBO 1 / VIEWPORT / CLEARCOLOR 0,0,0,1 / CLEAR / BINDFBO 0 /
+      TARGET 2 / USEPROGRAM 6 / BINDTEX 2 / DRAWARRAYS 6 / SWAP` - the game
+      CLEARS the topper's FBO and presents it, and draws NOTHING into it,
+      clip streaming or not. Zero draws into any guest FBO but 0 in three
+      dumped frames. The topper scene is composed EMPTY.
+      **The one thing this rig tells the game differently from the machine:
+      display 2 is 1360x768** (eglshim's fbGetDisplayGeometry falls through
+      to the backbox size when PAD_GL2_W/H are unset - item 65's exact
+      complaint for this title). The topper panel and every topper clip are
+      1280x800. **And the game carries both sizes itself**: its display
+      setup (0x3ddf24) calls FB_SetTiming (0x52e030) with a static 44-byte
+      timing record per framebuffer - `/dev/fb0` -> 1360x768 @16bpp,
+      `/dev/fb2` -> 1280x800 @16bpp (xres at +16, yres at +32, read off
+      how FB_SetTiming fills fb_var_screeninfo). **Shipped:**
+      `tools/spike2_emu/display2.py` reads those records out of any title's
+      ELF by resolving the movw/movt pairs beside the `/dev/fbN` string
+      references (nearest r1 pair to the r0 site - the two call sites are
+      back to back and "last in window" picked the neighbour, caught by the
+      test), and watch.sh exports PAD_GL2_W/H from it when the caller left
+      them unset; no fb2 record = no export = old behaviour. This is the
+      card-derived size item 65 asked for, not the table it forbade.
+      `tests/test_spike2_display2.py` covers the resolver on synthetic A32
+      code. **Next: David restarts mando; the pane should say `display 2:
+      1280x800, read from the game's own framebuffer timing`, the
+      [display 2] window should open 1280x800, and `picture: d2 FIRST`
+      decides whether the geometry was the gate.**
+      **★ FIFTH RUN (16:14, size right, node clean): STILL BLACK - and the
+      gate is now READ, not guessed.** Two register hooks (PAD_REG_HOOK /
+      PAD_REG_HOOK2, new in the shim: pad_hook with a logger that reads the
+      pushed r0..r3 off the entry sp) on the render thread's two per-display
+      draw loops: the display-0 site (0x452164) fired once all run (a
+      `NuklearScene`), the display-2 site (0x45278c) fired ZERO times while
+      the bridge saw the display-2 clear from 0x452744 every frame. Read
+      again, the clear runs BEFORE the emptiness check (my "the list is
+      non-empty every frame" was wrong), and the display-2 pass has TWO
+      paths on renderer byte +0x104 (0x451ed0): set = clear to the first
+      element's colour, then per element the full Render virtual (vtable
+      +0x24) and RenderForDisplay(1) (+0x14); clear = a constant clear
+      (0x452740) and RenderForDisplay(1) ONLY, which is the base no-op
+      0x31a960 for every class the topper scene posts. 0x452744 is the
+      clear path. The constructor sets +0x104 = 1; the setter 0x3dd0f0 is
+      called from four sites in the game's `topper` class (RTTI, vtable
+      0x5a9e68), each with the result of 0x4172dc(12): `node_table[12].+0x3c
+      / 100 == 5208530` - "does node 12 report Stern part 520-8530". Live
+      (a root /proc read of the 152-byte-a-node table at 0x765c38): every
+      node's part string read `000-0000-00`, integer 0. That string is the
+      f9 00 runtime-info reply (parser 0x5239a0: bytes 8..11 as LE32,
+      sprintf "%09d", split "ddd-dddd-dd" at record +8, integer at +20 -
+      the 48-byte block at node object +40 hwshim's own notes describe),
+      and the shim had answered f9 with zeros since it learned the command.
+      **And the number is the game's own:** its board catalog (nbdir.py's)
+      gives node 12's type `hdmi_ws2812node` part `520-8530-XX` = 520853000
+      once the record is framed right - it starts at the PART word, not the
+      type name (the game's per-node record pointer lands on it; the first
+      row is {520-5319-XX, pinnode}; the CPU row {520-7031-XX, NULL, "SPIKE2
+      CPU"}), so nbdir had credited every type with the NEXT row's part for
+      its whole life, unnoticed because nothing read the part until this
+      check. **Shipped:** nbdir.py reframed (`catalog_part()`, docstring,
+      `--dump` prints `value=`) and `node_ident.txt` gains `partno=<value>`
+      per node; hwshim parses it and answers f9 00 bytes 8..11 with it for
+      every node that has one, logging `[nbid] node N reports part
+      ddd-dddd-dd` once per node (PAD_NB_RT's pattern fill still wins for a
+      sweep). `tests/test_spike2_nbdir_catalog.py` pins the framing and the
+      field on a synthetic table; the variants test passes unchanged. Shim
+      rebuilt 16:41; the identity file regenerates on every start. The
+      register-hook knob (`~/.pad_env`) is removed; watch.sh keeps the
+      extra-environment hook, named on the pane whenever it fires. **Next:
+      David restarts mando; the pane should show `[nbid] node 12 reports
+      part 520-8530-00` and, on the first topper clip, `picture: d2 FIRST`.**
+      If it stays black with the part answered, the four `topper` call sites
+      (0x1b8590, 0x1b86e0, 0x1ba654, 0x1ba670) are the next read - they run
+      at moments the class chooses, and +0x104 could be re-cleared later.
+      **★ SIXTH RUN (16:14 restart): THE TOPPER DRAWS.** `[nbid] node 12
+      reports part 520-8530-00` on the pane, `picture: d2 FIRST at frame
+      277`, and the window shows the hologram scene - mirrored, and with its
+      right edge cut. Both read off the game's PRESENT step (op dump): the
+      display-2 pass itself is right (FBO 1280x800, ortho 2/1280); then the
+      present draws the FBO texture through a unit-square quad whose builder
+      (0x52eaac, template 0x602b18) is handed two constant flags (1, 1) at
+      0x451b84 - the first rewrites u to 1-x, the second v to 1-y. The
+      second is the usual FBO orientation correction (the pass renders with
+      a y-down ortho into the texture); the FIRST mirrors the whole picture:
+      the topper is a Pepper's-ghost panel and must carry the mirror image.
+      The window is a viewer, not the panel, so padglhost now reads that
+      quad (a 96-byte array-buffer upload matching the template with u
+      reversed -> `d2_mirror`, logged once) and un-mirrors the [display 2]
+      blit (`u_mirror` beside `u_flip`; PAD_GL2_MIRROR=0/1 overrides). The
+      CROP is the game's own: the present viewport is DISPLAY 0's size
+      (0x4519f4: `[r7+4]->+16/+20` -> glViewport 1360x768) while the quad
+      and its ortho are display 2's 1280x800, so the texture is stretched to
+      1360x768 and a 1280x800 window loses 80 columns and 32 rows. Stern
+      shipped that, so on the machine the two geometries must be EQUAL: the
+      topper's HDMI runs at the backbox's 1360x768, and `FB_SetTiming
+      /dev/fb2` (which the game's own log shows failing in the rig) is a
+      panel-timing request, not the geometry the EGL side reports. So
+      display2.py's export was the wrong oracle for the GL geometry. Being
+      tested on the next run with `~/.pad_env` = `PAD_GL2_W=1360
+      PAD_GL2_H=768` (display2.py's export defers to a set PAD_GL2_W).
+      **If the HUD is complete and un-squashed: drop the export from
+      watch.sh (display2.py stays as the timing-record reader + its test),
+      and the display-2 geometry rule becomes "display 0's, because the
+      game presents display 2 through display 0's viewport" - read off the
+      game's code, item 65 kept.**
+      **★ SEVENTH RUN (19:47): geometry SETTLED, mirror read off the wrong
+      buffer.** At 1360x768 nothing is cut - so the display-2 geometry IS
+      the backbox's, the fb2 FB_SetTiming record is the panel's timing
+      request, and watch.sh's export is retired (display2.py stays as the
+      timing reader, named on the pane; its docstring says what it is not).
+      The picture was still mirrored: the host's probe had answered "u = x"
+      on the FIRST unit quad it saw - the engine's builder makes those for
+      other sprites too, and one arrived before display 2 was targeted.
+      Rewritten: every 96-byte upload is classified by buffer name, each
+      VAO remembers the array buffer its attributes point at, and the
+      answer is read from the buffer the display-2 PRESENT draw (target 2,
+      guest FBO 0, six vertices) actually uses. Host rebuilt 19:52; 551
+      launch/rig tests pass. **Next: restart; the pane should say
+      `display 2 is presented through a quad that maps u to 1-x ... the
+      game MIRRORS this display`, and the text should read the right way.**
+      **★ EIGHTH RUN (David, 2026-09-05 evening): VERIFIED.** `display 2 is
+      presented through a quad that maps u to 1-x (buffer 2): the game
+      MIRRORS this display`, `picture: d2 FIRST at frame 277`, `[nbid] node
+      12 reports part 520-8530-00`, and David: "text reads correctly now".
+      The holographic topper draws, complete, the right way round. Three
+      layers, all read off the game and none typed per title: node 12's
+      variant (0x0c, measured), its board part number (the catalog's, in
+      the f9 00 reply), and the presenter's mirror (its own quad). The
+      display-2 geometry is the backbox's, as the game's present assumes.
+      Still open from this thread, not blockers: item 65's rotation half
+      and Bond's display-0 size; the 30/s `Invalidate on tex 0` is unbound
+      boot noise and stays silent after eight per run.
 
 - [ ] **68. Neither playfield window says how many switches and lights the
       title actually has.** `S3 D1`
@@ -8392,8 +8632,166 @@ rewriting it.**
         restored to No.
         **★ VERDICT: ✅ CLEAN, David's green check, 2026-09-01** — "ok this
         is fixed. king kong gets the green check mark." Both fixes shipped
-        in v0.178.0. **Resume: the next title alphabetically after
-        king_kong_le, once David reports it.**
+        in v0.178.0.
+      - **mando_le 1.44.0 — ❌ black holographic topper + `UPDATE FAILED 12`
+        on the glass, ✅ CLEAN after a same-day fix, David's green check,
+        2026-09-05.** The whole thread is item 67's 2026-09-05 blocks (eight
+        runs): node 12's variant (0x0c, measured off the live registry, and
+        the shim's registry safety net made to rescan); the board PART
+        NUMBER the game wants reported in the f9 00 runtime-info reply
+        (its own catalog's 520-8530 for `hdmi_ws2812node` — nbdir had
+        framed those records one row off since it was written; the game
+        renders the topper only when node 12 reports it); the presenter's
+        MIRROR (a Pepper's-ghost panel; read off the game's own quad at the
+        display-2 present draw, the window un-mirrors); and the display-2
+        GEOMETRY (the backbox's, because the game presents display 2
+        through display 0's viewport — the fb2 timing record is panel
+        timing, its export retired). Two layers were real bugs that were
+        not the gate; measurement, not the hypothesis list, told them
+        apart each time. David: "text reads correctly now" / "mando and
+        metallica get the green check mark".
+      - **metallica_spike 1.03.0 — ✅ CLEAN**, David's own green check,
+        2026-09-05, nothing reported.
+      - **munsters_le 1.27.0 — ✅ CLEAN**, David's own green check,
+        2026-09-05, nothing reported.
+      - **rush_le 1.18.0 — ✅ CLEAN**, David's own green check, 2026-09-05,
+        nothing reported.
+      - **star_wars_le 1.30.0 — ✅ CLEAN**, David's own green check,
+        2026-09-05, nothing reported ("munsters and rush and star wars gets
+        the green check mark"). **Resume: the next title alphabetically
+        after star_wars_le, once David reports it.**
+      - **stranger_things_le 1.12.0 — ✅ VERIFIED 2026-09-05: "restarted,
+        projector video is showing up now. stranger things gets the green
+        check mark".** Was ❌ projector video not on display 2
+        (David, 2026-09-05 20:04: "stranger things projector video is not
+        showing up in the second display"). `picture: d2 STILL BLACK after
+        450 presented frames`, and the bridge's clear came from the
+        display-2 pass's SIMPLE path - renderer byte +0x104 clear, the mando
+        topper's gate (item 67) again, but not its cause: the part-number
+        query exists in this build and nothing calls it. The ONLY caller of
+        the +0x104 setter (0x3b44b0) is the projector's MODEL check
+        (0x811cc): it asks the cabinet identity reader (0x238de4) for the
+        4-char model code and clears the gate on class 1 - Q1/Y1 (Pro) or
+        "non-empty unknown". The identity lives in EEPROM bytes 0..51,
+        LCG-keyed (state*0x19660d+1, key = state>>8, word = byte*key, decode
+        = word/key, 12 bytes {serial, model, u16, ~sum16}); model "999" is a
+        wildcard the reader replaces with the build's own model (0x71ada4 ->
+        "Q3" = LE here). The rig's donor EEPROM has that block ALL ZERO: the
+        read fails the sum, burns the 5-count retry (0x71e994), and every
+        later reader call RETURNS WITHOUT WRITING its output, so the checker
+        compares uninitialised stack - "unknown" - Pro - projector off.
+        Measured live: renderer +0x104 = 0, cache flag 0x778f44 = 0, counter
+        0, one 52-byte read of zeros at t=58. The same generator and "999"
+        sit in the D&D build, so the format is the engine's. **Shipped:**
+        hwshim `nv_ident_seed()` writes a record when the block is blank -
+        serial from the donor's ident string at 0x100, model "999" so the
+        GAME names the model for the card it is, junk 0 (Python self-test:
+        encode -> the game's decode is byte-exact). Shim rebuilt 20:38.
+        Restart: the projector clip is on display 2.
+      - **sword_of_rage_le 1.18.0 — ✅ VERIFIED 2026-09-06: "restarted,
+        sword of rage stays up now, green check mark" (no `[printf]
+        REFUSED` line reported, so that restart's dice rolled clean; the
+        guard stands for the next roll).** Was ❌ SEGV ~40 s after start
+        (David, 2026-09-06 08:28: "swords of rage segfaults"). The report: pc in
+        libc-2.21 strlen() under _IO_vfprintf (lr = vfprintf+0x3688, its %s
+        branch), r0 = r8 = 0x2e312f31 = the BYTES "1/1." - a printf handed
+        four characters of text where a %s pointer belonged. The one stack
+        hit the reporter showed (0x54276c) was rodata, the typeinfo name
+        "27do_stack_unwind_exception_t", not a return address: vfprintf's
+        ~1200-byte frame sits past the 512-word walk. Timeline (game.out):
+        the node bus starts at t=30 s, right after autoattract's Service
+        Back; fe/f9/fc identify nodes 1,2,4,8,9,12,13 (the directory holds
+        exactly those 7 records - node 2 flags 0xc, 4/12/13 optional 0x4,
+        NO node 3); then the game ADDRESS-SCANS the whole bus, fe to 3..31,
+        100 tries each (PAD_NB_TRACE, rig run 1), the shim refuses the
+        undeclared addresses (the D&D rule) and the game prints 3574 x
+        "ExchangeData: read failed (received 0, expected length=13/3/12),
+        timed out" over 7 s - the normal LOCATING NODE BOARDS cost of an
+        empty address, the same on the machine, NOT the bug. The scan ends
+        at 38.8 s, the boot proceeds (ff/14/46/72/48/40 service loop, switch
+        scans 39.3 s, light show 39.6 s, "[alsa] playing" = the audio
+        restarts) and the segv lands ~40.4 s, right after node 12's first
+        cmd 96. THREE 2-minute rig re-runs (audio off; audio on, muted at
+        the player; playfield on) did NOT reproduce it: the %s argument is
+        garbage - an uninitialised or stale slot - that usually points at
+        readable memory, so the same printf usually prints junk and lives.
+        **Shipped (hwshim.c, watch.sh):** (1) the printf family - printf,
+        fprintf, vprintf, vfprintf, snprintf, vsnprintf - is interposed and
+        every %s argument is checked against readable memory before the
+        real call (a walker that consumes every argument by type so the
+        64-bit ones stay aligned; positional/%n/%ls forms pass through
+        untouched); a bad one REFUSES the message and logs `[printf]
+        REFUSED a printf whose %s argument is not a pointer: 0x2e312f31 =
+        the bytes "1/1." - format "..." from lr=0x...` (3 per format,
+        PAD_PRINTF_GUARD=0 off; host test of the walker 14/14) - the run
+        survives and the line names the format and the caller, the
+        evidence the next occurrence needs; (2) the segv reporter's deep
+        walk: 4096 words, every executable mapping named (`deep[N] = ...
+        libc-2.21.so+0x...`), Thumb bit 0 tolerated; (3) the pane forwards
+        `[printf]`. Restart: the game stayed up.
+      - **turtles — ✅ David's green check 2026-09-06** ("turtles gets the
+        green check mark"; the build was not named - the sweep ran the
+        card the app holds as turtles_le).
+      - **uncanny_xmen_le 0.97.0 — ✅ VERIFIED 2026-09-06: "xmen boots clean
+        now" + "xmen gets the green check mark"** (after the question "no
+        playfield image or switch positions really?" - confirmed on the
+        card: 16 generic test-mode cabinet pictures, no playfield drawing
+        among 132 PNGs, 337 of 340 device records unpositioned; the
+        Schematic is everything this 0.97 build can give). Was ❌ two
+        issues (David, 2026-09-06 ~08:57,
+        two screenshots + "the virtual playfield is just a large empty
+        black space"). (1) The glass loops "UPDATING NODE BOARD RUNTIME /
+        RESETTING 12 / UPDATE FAILED 12": node 12 is the TOPPER's
+        coil4_lednode (part 520-6998-00, the three "TOPPER - OPTO"
+        switches), a type nbdir had NO measured variant for, so it claimed
+        the 0x01 guess (`variant_guess=1` in node_ident.txt); hexreg.py off
+        the LIVE game read the registry's decrypted class-5 image at
+        variant=0x10 version=1.30.0 (pinnode 0x01 x3, ws2812node 0x05,
+        node4 0x03 x2 reconfirmed in the same pass), so the game graded
+        node 12 status 7 and walked the update - the tmc5041/hdmi_ws2812node
+        shape again (items 55/67). The shim's own registry rescan did not
+        catch it: its scan found 2 decrypted images (both node4) and the
+        topper image was decrypted later. **Shipped:** VARIANT_PRIOR
+        coil4_lednode = 0x10 + CLASS_PREF (5,) in nbdir.py, the variants
+        test row; nbdir on the card's ELF now derives node 12 at 0x10 with
+        no guess flag; watch.sh re-derives node_ident.txt on every start.
+        (2) The playfield window was a blank black field: this title
+        positions exactly THREE devices - SHOOTER BEZEL 1/2/3 lamps on
+        `System/TestMode/spike_2_cabinet_front_cropped`, the cabinet-front
+        picture - and nothing on a playfield (device_xy.txt: 340 records,
+        3 positioned, all on that image). The image vote hands over the
+        only layout there is, group 5 -> node 1 so the lamps "can light",
+        and layout_is_usable()'s "any lamp that can light" said Field: a
+        blank 448x274 extent instead of the Schematic's 109 clickable
+        switch rows + swatch grid. **Shipped:** the gate now needs
+        MIN_USABLE_LAYOUT = 8 usable devices (clickable switches + coils +
+        lightable lamps; the real playfields carry 59..217, this cabinet
+        front 3); tests/test_spike2_playfield_usable.py (3 tests: the
+        X-Men shape, a real lamp layout, elvira's unlit topper). Also the
+        first run had no switch dump yet ("clickable switches will appear
+        on the next run") - switch_list.txt landed during the run. 20/20
+        on the touched tests. Restart: boots clean, no banner.
+      - **venom_le — ✅ David's green check 2026-09-06** ("venom gets the
+        green check mark"; the build was not named - the card the app
+        holds as venom_le). **venom_le is the last title alphabetically:
+        the sweep's alphabet is complete.**
+      **★ SWEEP STATUS, 2026-09-06, after venom_le.** The README Titles
+      table's `E2E play (item 80)` column now carries David's green check
+      on every title he reported in this pass. Seven rows still read
+      otherwise, and none of them is a new finding - they are the rows
+      this pass never got a verdict for, or whose verdict is a filed item:
+      `godzilla_pro` (a MODIFIED ELF, its own row note), `john_wick_le`
+      (⚠️ plays, the car-mech screech = item 88), `james_bond_60th_le`
+      (the 60th card, distinct from the james_bond_le that got the check
+      2026-09-01), `king_kong_le` (node 9's switches were the finding above;
+      no green check on record), `batman` (item 82 at 90%, no green check on
+      record), `turtles_pro` (David's "turtles" check went to the turtles_le
+      row - the app's card), `elvira3` (never reported). Item 80 itself
+      CLOSED 2026-09-01 at David's word; this log kept receiving titles
+      after it because David kept sweeping. The fixes this stretch shipped
+      (cabinet identity seeding, the printf guard + deep crash walk, the
+      coil4_lednode prior, the playfield gate, the nbdir catalog reframe)
+      are UNCOMMITTED on main - David's /finish.
 
 - [x] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
       background.** `S3 D2` **CLOSED 2026-09-01 at David’s call** — "66 is

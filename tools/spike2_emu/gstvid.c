@@ -632,6 +632,14 @@ void pad_vid_note_handoff(void *sink, void *fn, void *data)
     s->sinkpad = (get_pad && sink) ? get_pad(sink, "sink") : 0;
     s->handoff = (void (*)(void *, void *, void *, void *))fn;
     s->handoff_data = data;
+    /* item 67: WHICH OBJECT gets this channel's frames. The handoff is one
+     * static (SpiVideoStreamDecoderBase::CompletedFrameStatic) for every
+     * channel and dispatches through the object's vtable, so the vtable
+     * pointer names the class - and the class is where a backbox player and
+     * the topper's ExtraVideoPlayer part ways. */
+    VLOG("[vid] ch%d handoff fn=0x%lx data=0x%lx vtable=0x%lx\n", chan_of(s),
+         (unsigned long)fn, (unsigned long)data,
+         data ? (unsigned long)*(const unsigned *)data : 0ul);
 }
 
 void pad_vid_note_decoder(void *p) { if (last_created) last_created->decoder = p; }

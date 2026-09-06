@@ -1453,7 +1453,10 @@ HELP_CONTENT = {
          "pulls a click and a stinger from the primary image, synth "
          "generates tones), the volume, the countdown (0 = wait for "
          "START), which image is highlighted at power-up, and the WSL "
-         "path of the built selector."),
+         "path of the built selector — which you do not have to fill in. "
+         "Leave it alone and the app builds and installs the menu program "
+         "there itself; point it somewhere of your own and that directory "
+         "is checked and never written into."),
         ("The preview",
          "It redraws itself. Change anything — a title, the countdown, the "
          "art, the highlighted image — and about a third of a second after "
@@ -1511,7 +1514,14 @@ HELP_CONTENT = {
          "else changed it and throws unapplied edits away. Below the "
          "choice, tick Flash to an SD card to write the finished image "
          "onto a card in the reader in the same run — Windows asks for "
-         "administrator access for that."),
+         "administrator access for that. Every one of these runs starts "
+         "with a selector step: the menu program the card will carry is "
+         "built and installed when this machine has not got one, unpacked "
+         "from the image being built, and rebuilt when the app ships newer "
+         "sources. It goes before the media, so a run that cannot get a "
+         "menu program does not first spend a minute rendering pictures "
+         "for one — and if any step refuses, the Log line it refused with "
+         "is what the tab says, naming the step."),
         ("The size strip and Compact build",
          "The strip under the table says which Stern card size the images "
          "need, before a byte is written: the tab asks the tool by itself "

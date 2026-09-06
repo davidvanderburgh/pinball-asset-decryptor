@@ -80,13 +80,6 @@ Source: "{#ProjectDir}\tools\spike2_emu\*"; DestDir: "{app}\tools\spike2_emu"; \
 Source: "{#ProjectDir}\tools\spike1_emu\*"; DestDir: "{app}\tools\spike1_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.raw,*.cap,*.bin,rootfs\*,game\*"
-; The Spike 3 key tools (stern-spike-3/tools) back the Spike 3 tab.  They are
-; pure Python and the app runs them IN-PROCESS (core.spike3), but the FILES must
-; ship or the tab has nothing to load — the omission that broke the first Spike 3
-; build in the field.  Just the tools; the tests/fixtures/docs stay out.
-Source: "{#ProjectDir}\stern-spike-3\tools\*"; DestDir: "{app}\stern-spike-3\tools"; \
-    Flags: recursesubdirs ignoreversion; \
-    Excludes: "__pycache__\*,*.pyc,*.pyo"
 
 ; --- Entry point + bundled launcher --------------------------------------
 Source: "{#ProjectDir}\Pinball Asset Decryptor.pyw"; DestDir: "{app}"; Flags: ignoreversion

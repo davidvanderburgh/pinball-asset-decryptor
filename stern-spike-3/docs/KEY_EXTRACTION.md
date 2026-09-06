@@ -66,7 +66,7 @@ Deploy + read back (≈10 min, zero risk if you keep backups):
    - **Won't boot / blank** → the signature check rejected the modified image.
      Do the **definitive test** (step 4b) before concluding.
 4b. **The enforced-vs-not test (also the last shot for Method A).** Build with
-    `--no-sig` (or tick "build the unsigned test" in the app), copy that
+    `build_extractor_card.py --no-sig`, copy that
     `boot.img` on, keep `config.txt`, and **delete `boot.sig`** from the card.
     A board that does not enforce secure boot boots a ramdisk with no signature
     at all and dumps the key; an enforcing board rejects a missing signature the
@@ -126,12 +126,17 @@ either a live machine to probe or one decrypted `rootfs` to read.
 ## Method C — Serial console (follow-up; survives secure boot)
 
 `config.txt` enables UART (`enable_uart=1`, console on `tty1` / `ttyS0`, plus the
-aux ports `ttyAMA4/5`). With a USB-TTL adapter on the Spike 3 service UART you may
-get a console. If the booted OS offers a login or the boot drops to a shell, run
-the same `vcmailbox … | awk … | xxd` one-liner. Whether a usable login exists
-depends on the rootfs config (see Method B — reading the decrypted rootfs answers
-this too). Lower-effort than full RE, but needs physical access to the board's
-UART header.
+aux ports `ttyAMA4/5`). With a **3.3 V** USB-TTL adapter on the Spike 3 service
+UART you may get a console. On the Spike 3 CPU board (**PN 199-1071-00B**) that is
+the **`RX TX GND` header on the bottom-edge centre** (3.3 V, ~115200 8N1); wire
+adapter RX↔board TX, TX↔board RX, GND↔GND, VCC unconnected, and — since the pads
+are bare — use pogo pins for a solder-free read. If the booted OS offers a login
+or the boot drops to a shell, run the same `vcmailbox … | awk … | xxd` one-liner.
+**Caveat:** `cmdline.txt` routes the console to `tty1` (HDMI), so serial may show
+only boot/kernel logs unless a getty runs on the UART — whether a usable login
+exists depends on the rootfs config (see Method B — reading the decrypted rootfs
+answers this too). Lower-effort than full RE, but needs physical access to the
+board's UART header. Physical companion notes: `plans/spike_serial_console.md`.
 
 ---
 

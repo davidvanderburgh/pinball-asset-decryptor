@@ -103,14 +103,6 @@ class Capabilities:
     # builder needs no emulator, and a plugin with an Emulate tab does not
     # necessarily have a multi-image card layout.  Used by Stern Spike 2.
     multiboot: bool = False
-    # Spike 3 key tab: a self-contained helper for reading the LUKS/OTP key off
-    # a Stern Spike 3 (Raspberry Pi CM4) board.  It preps a card image into an
-    # extractor boot.img the owner runs once, then reads the dumped key back and
-    # verifies it - it drives the pure-Python tools in ``stern-spike-3/tools``
-    # via ``core.spike3`` (no WSL, no loaded project).  Its own flag rather than
-    # a rider on ``emulate``: Spike 3 has no emulator, and this tab works on a
-    # supplied file regardless of what era/game is selected.  Used by Stern.
-    spike3_key: bool = False
     # Auto-transcribe path: run faster-whisper across the extracted
     # audio files and emit a ``callouts.csv`` mapping each WAV to its
     # spoken text (non-speech samples are skipped via VAD).  Used by

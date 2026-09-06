@@ -1552,7 +1552,7 @@ def test_era_switcher_pills_flip_era_and_input_label(app, manufacturers_by_key):
         win.apply_manufacturer(stern, reset_era=False)
         app.root.update()
         assert set(win._era_badge_widgets) == {"spike2", "spike1",
-                                               "whitestar", "spike3"}
+                                               "whitestar"}
         assert stern.current_era == "spike2"
         assert win._extract_input_lbl.cget("text") == "Card image:"
 
@@ -1571,19 +1571,6 @@ def test_era_switcher_pills_flip_era_and_input_label(app, manufacturers_by_key):
         assert win._extract_input_lbl.cget("text") == "ROM zip:"
         assert win.extract_input_var.get() == ""   # cleared on era switch
         assert kicked and kicked[-1].current_era == "whitestar"  # check re-run
-
-        # Spike 3 is its OWN era (not a Spike 2 tab): a BETA-flagged pill that
-        # shows ONLY the Spike 3 key tab - it has neither an extract nor a
-        # capture flow, so even the normally-always-present Extract tab hides,
-        # and the selection lands on Spike 3 rather than a blank pane.
-        win._on_era_badge_click("spike3")
-        app.root.update()
-        assert stern.current_era == "spike3"
-        assert "spike3" in win._era_badge_flags          # the BETA chip
-        assert win._era_badge_flags["spike3"].cget("text") == "BETA"
-        assert win._tab_visible("Spike 3")
-        assert not win._tab_visible("Extract")
-        assert win._current_tab_key() == "Spike 3"       # not left blank
 
         # A single-era plugin surfaces no pills.
         app._on_back_to_picker()

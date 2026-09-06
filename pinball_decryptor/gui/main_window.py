@@ -2346,7 +2346,6 @@ class MainWindow:
         self._tab_jjp_emulate = ttk.Frame(self._notebook)
         self._tab_spike1_emulate = ttk.Frame(self._notebook)
         self._tab_multiboot = ttk.Frame(self._notebook)
-        self._tab_spike3 = ttk.Frame(self._notebook)
 
         # Order: Extract → the Replace tabs → Default Settings (set defaults
         # before building) → Write → Mod Pack → Partitions.  Display labels are
@@ -2380,11 +2379,6 @@ class MainWindow:
             # Emulate or Write: it makes a CARD out of several images, and
             # neither of those tabs is about that.
             (self._tab_multiboot, "Multi-boot", "Multi-boot"),
-            # The Spike 3 OTP-key helper (Stern, gated by ``spike3_key``).  A
-            # self-contained utility - it preps an extractor card and reads the
-            # key back, working on a supplied file rather than the loaded
-            # project, so it is neither Extract nor Emulate.
-            (self._tab_spike3, "Spike 3", "Spike 3"),
         ]
         self._tab_keys = {}
         for _frame, _label, _key in _tabs:
@@ -2403,7 +2397,6 @@ class MainWindow:
         self._build_compare_tab()
         self._build_emulate_tab()
         self._build_multiboot_tab()
-        self._build_spike3_tab()
         self._build_jjp_emulate_tab()
         self._build_spike1_emulate_tab()
 
@@ -14010,24 +14003,6 @@ class MainWindow:
             status_fn=self.set_status)
         self._multiboot_panel.build(self._tab_multiboot)
 
-    def _build_spike3_tab(self):
-        """Build the 'Spike 3' tab: read the OTP/LUKS key off a Stern Spike 3
-        board and verify it, all from the app.
-
-        The seam only.  Everything of substance is in
-        :mod:`..gui.spike3_tab`, which drives the pure-Python tools in
-        ``stern-spike-3/tools`` through :mod:`..core.spike3`.  Unlike the
-        Emulate / Multi-boot tabs it needs no WSL and no loaded project - it
-        works on a card image (or a returned OTP_KEY.TXT) the user picks."""
-        from .spike3_tab import Spike3Panel
-        self._spike3_panel = Spike3Panel(
-            self._tab_spike3,
-            log=self.append_log,
-            theme_fn=lambda: self._current_theme,
-            status_fn=self.set_status,
-            resize_fn=self._resize_notebook_to_current_tab)
-        self._spike3_panel.build(self._tab_spike3)
-
     def _build_jjp_emulate_tab(self):
         """Build the 'Emulate JJP' tab: run a Jersey Jack game on this PC.
 
@@ -15902,9 +15877,9 @@ class MainWindow:
                 pill.configure(background=c["accent"], foreground="#ffffff")
             else:
                 pill.configure(background=c["button"], foreground=c["gray"])
-        # Preview badges (e.g. Spike 3's "BETA") stay amber in both themes and
-        # whether or not their era is the active one - the point is that they
-        # always read as "not finished".
+        # Preview badges (a future BETA era's flag) stay amber in both themes
+        # and whether or not their era is the active one - the point is that
+        # they always read as "not finished".
         for badge in getattr(self, "_era_badge_flags", {}).values():
             badge.configure(background=c["warning"], foreground="#1a1a1a")
 
@@ -16168,9 +16143,9 @@ class MainWindow:
             _lbl.configure(width=col_w)
 
         # Show/hide tabs by capability.  Extract is normally the always-present
-        # home tab, but an era with neither an extract nor a capture flow (Stern
-        # Spike 3, the OTP-key preview) has nothing to put in it, so gate it too
-        # - hidden only when both are off, so Whitestar (capture-only) keeps it.
+        # home tab, but an era with neither an extract nor a capture flow has
+        # nothing to put in it, so gate it too - hidden only when both are off,
+        # so Whitestar (capture-only) keeps it.
         self._configure_tab("Extract", getattr(caps, "extract", False)
                             or getattr(caps, "capture", False))
         self._configure_tab("Replace Audio", caps.replace_audio)
@@ -16189,9 +16164,8 @@ class MainWindow:
         self._configure_tab("Emulate Spike1",
                             getattr(caps, "emulate_spike1", False))
         self._configure_tab("Multi-boot", getattr(caps, "multiboot", False))
-        self._configure_tab("Spike 3", getattr(caps, "spike3_key", False))
         # If the tab that was selected just got hidden (e.g. Extract when
-        # switching to the Spike 3 era), move to the first visible tab so the
+        # switching to a capture-only era), move to the first visible tab so the
         # working view is never left showing a blank hidden pane.
         self._ensure_visible_selection()
         # The Mod Pack tab is shared, but the "Transfer Mods to New Version"

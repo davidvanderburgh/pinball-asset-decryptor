@@ -8190,6 +8190,61 @@ rewriting it.**
 
 ## Done
 
+- [x] **102. The emulation matrix's remaining rows: a switch list that
+      survives a new build, X-Men's playfield, a topper mounted sideways, the
+      one-screen cabinets, and a switch to turn a topper off.** `S2 D3`
+      **CLOSED 2026-09-07 at David's word** ("do the venom rotation first,
+      then... make sure to fix everything in one go so we can be done with all
+      these open items"). `item/102`.
+      *(From the tester's emulation matrix and his 2026-09-07 mail, with
+      photographs of his own Venom LE and a screenshot of X-Men.)*
+      **THE SWITCH LIST SURVIVES A NEW BUILD.** `swelf.py`'s readers were keyed
+      on addresses measured from ONE build of each title, so a new build moved
+      every one of them: munsters_le 1.27 -> 103 rows / 1.28 -> nothing,
+      foo_fighters_le 1.03 -> 105 / 1.04 -> nothing, and jurassic_park_le 1.15
+      -> 107 / 1.16 -> nothing, which nobody had reported because a title only
+      looks broken once somebody runs the build that broke it. There is a
+      reader now that stores no address: the device array from a switch name
+      every Spike 2 machine has, the board array by item 57's method against
+      the node set the title's own directory declares. The 48-byte generation
+      is decoded here for the first time - and its `kind` for a switch is 1
+      where the old shape says 7, so a reader that fixed the offsets and kept
+      the constant would have returned a confident table of coils. All twelve
+      titles with a stored address produce byte-identical output.
+      **X-MEN'S PLAYFIELD, and the cause was not where anyone looked.** The
+      artwork is found, copied and 185 of 239 records sit on it - and the
+      window drew a blank field anyway, because `layout_art()` accepted a
+      picture only if it contained EVERY positioned device and one of the 185
+      sits past the right edge of a 321-wide drawing. Judged on proportion
+      now; the refutation it exists for still works, because 0.97's
+      cabinet-front picture puts MOST markers outside, not one.
+      **VENOM'S TOPPER TURNS** - portrait 480x800, the picture turned into it,
+      the letterbox fitting the rotated aspect. ★ The first attempt had the
+      DIRECTION backwards (the quad's v runs bottom-up, so the mapping that
+      turns it clockwise on the glass reads anticlockwise as algebra); settled
+      by rotating the owner's photograph upright and holding the window
+      against it.
+      **THE ONE-SCREEN CABINETS** (James Bond 60th, Star Wars Home Edition,
+      Jurassic Park The Pin) get an 800x480 window, and **the topper can be
+      switched off** from the Emulate tab - a machine without the accessory is
+      a real machine, and on some titles it also takes the topper-only modes
+      out. All four facts that cannot be derived live in
+      `display2.REPORTED_PANELS` with their evidence and the argument for the
+      exception: they are NOT IN THE BINARY (established, not assumed - the
+      one-screen builds reference no `/dev/fb*` at all and carry no 800x480,
+      and no binary carries its own screen size), each only moves a host
+      window, and each is wrong in a way anybody can see.
+      Stranger Things needed nothing: its own record says 848x480 and the
+      reporter now agrees the projector is 854x480 - his 368x214 was the
+      projector CLIP.
+      **Left open, and it is not on the matrix:** uncanny_xmen_le 0.98,
+      jurassic_park_le 1.16 and jurassic_park_the_pin 1.05 share a FOURTH
+      record shape (32-byte stride, a switch-only entry table with
+      `SWITCH #NNN` placeholders). It is the CURRENT generation, so every new
+      title will land in it and get no switch list. Three specimens are
+      identified and the framing is half-read; it wants its own item rather
+      than a guessed layout.
+
 - [x] **101. peanuts' emulation matrix: Rush's minute-long start, and the
       second display's size.** `S2 D3` **CLOSED 2026-09-07 at David's word**
       ("ok all looks good"). Merge commit below; `item/101`.

@@ -2,7 +2,7 @@
 """display2.py [--shell] <game-elf> - a title's PANEL TIMINGS, read out of the game.
 
     python3 display2.py game            -> fb0 1360x768  fb2 1280x800
-    python3 display2.py --shell game    -> PAD_GL2_W=1280 PAD_GL2_H=800
+    python3 display2.py --shell game    -> PAD_GL2_WIN_W=1280 PAD_GL2_WIN_H=800
 
 WHERE THE NUMBERS COME FROM, because item 65 forbids the alternative. The
 second display's size used to be nowhere: eglshim answered every display with
@@ -156,8 +156,14 @@ def main(argv):
         raise SystemExit(__doc__)
     geo = fb_geometry(args[0])
     if shell:
+        # ★ PAD_GL2_WIN_W/H, NOT PAD_GL2_W/H. This printed the render-size
+        # names until 2026-09-07, and they are the one thing this record is
+        # NOT - exporting them as the render size is precisely what cropped
+        # mando_le's topper, and the paragraph above exists because of it.
+        # The record is the PANEL, so it names the window, which is the
+        # separate knob padglhost grew for it (item 65, peanuts' matrix).
         if "fb2" in geo:
-            print("PAD_GL2_W=%d PAD_GL2_H=%d" % geo["fb2"][:2])
+            print("PAD_GL2_WIN_W=%d PAD_GL2_WIN_H=%d" % geo["fb2"][:2])
         return 0 if "fb2" in geo else 1
     if not geo:
         print("no framebuffer timing records found")

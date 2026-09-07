@@ -381,14 +381,65 @@ fi
 # rows; told 1360x768 it was complete. So the FB_SetTiming record is the
 # PANEL's timing request, not the geometry EGL reports back, and eglshim's
 # default - every display answers the backbox's size - is the game's own
-# assumption. Nothing is exported here; PAD_GL2_W/H from the caller still
-# override for a sweep, and display2.py stays as the reader of what the
-# panel is asked to run at, named on the pane so the two are never confused.
+# assumption. PAD_GL2_W/H from the caller still override for a sweep.
+#
+# ★ WHAT THE PANEL RECORD *IS* GOOD FOR IS THE WINDOW (item 65, peanuts'
+# matrix 2026-09-07). The ruling above is about the geometry the GAME is told.
+# The window it is shown in is a different question, and this rig was
+# answering it with the same number - so a Mandalorian topper, a Star Wars
+# playfield LCD and a Stranger Things projector all opened as a 1360x768 box,
+# which is the shape of none of them. The title's own FB_SetTiming record is
+# exactly the panel that render is scaled onto, and it agrees with what was
+# reported from the machines:
+#
+#     mando_le         record fb2 1280x800   reported "should be 1280 x 800"
+#     star_wars_le     record fb2  480x272   reported "expected: 480 x 272"
+#     venom_le         record fb2  800x480   reported 480x800 - the same panel,
+#                                            mounted in portrait (see below)
+#     stranger_things  record fb2  848x480   reported 368x214
+#
+# So it is EXPORTED as a window size and never as the render size, and
+# PAD_GL2_WIN_W/H is a separate pair from PAD_GL2_W/H for that reason alone.
+# padglhost letterboxes the render into the window already, so this changes
+# nothing the guest can see: the game is told the same thing it was told
+# before, and the picture keeps its aspect.
+#
+# ★ IT IS THE TITLE'S OWN DECLARATION, NOT A TABLE. Item 65 carried five rows
+# inferred from how big the content looked, with its own warning that a wrong
+# table is worse than none - and stranger_things is why that warning was
+# right: the number in the queue is 368x214 and the panel this title asks for
+# is 848x480. Nothing here is committed per title, so a build that changes its
+# panel says so itself.
+#
+# ORIENTATION IS NOT IN THE RECORD and is not guessed at here. venom_le's
+# topper is a portrait-mounted panel whose timing record is its native
+# landscape 800x480, so its window comes out the right SIZE and still on its
+# side. Rotating it needs the direction measured off a frame, the way item 67
+# measured the mirror, and that has not been done - see the queue.
 if [ -f "$GAME_ELF" ]; then
     _d2all=$(python3 "$RIG/display2.py" "$GAME_ELF" 2>/dev/null)
-    echo "[watch] display 2: answered the backbox's size, which the game's" \
-         "own present assumes (panel timing records: ${_d2all:-none})"
-    unset _d2all
+    # BOTH OR NEITHER, and the caller still wins: a sweep that sets one of
+    # them by hand gets exactly what it asked for, and a half-set pair is
+    # never assembled out of one hand-typed number and one derived one.
+    _d2w=$(python3 "$RIG/display2.py" "$GAME_ELF" --shell 2>/dev/null \
+           | sed -n 's/^PAD_GL2_WIN_W=\([0-9]*\) .*/\1/p')
+    _d2h=$(python3 "$RIG/display2.py" "$GAME_ELF" --shell 2>/dev/null \
+           | sed -n 's/.* PAD_GL2_WIN_H=\([0-9]*\)$/\1/p')
+    if [ -z "${PAD_GL2_WIN_W:-}${PAD_GL2_WIN_H:-}" ] \
+            && [ -n "$_d2w" ] && [ -n "$_d2h" ]; then
+        export PAD_GL2_WIN_W="$_d2w" PAD_GL2_WIN_H="$_d2h"
+    fi
+    if [ -n "${PAD_GL2_WIN_W:-}" ] && [ -n "${PAD_GL2_WIN_H:-}" ]; then
+        echo "[watch] display 2: the game is told the backbox's size, which" \
+             "its own present assumes; its WINDOW opens at the" \
+             "${PAD_GL2_WIN_W}x${PAD_GL2_WIN_H} panel this title asks for" \
+             "(panel timing records: ${_d2all:-none})"
+    else
+        echo "[watch] display 2: answered the backbox's size, which the" \
+             "game's own present assumes (panel timing records:" \
+             "${_d2all:-none})"
+    fi
+    unset _d2all _d2w _d2h
 fi
 # WHICH NODE IS THE lcdnode (item 83, batman's VILLAIN VISION = node 24).
 # From the derived table so it is per-title and empty on titles without one -

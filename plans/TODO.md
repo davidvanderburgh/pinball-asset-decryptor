@@ -5322,10 +5322,42 @@ These have each been violated at least once and each cost a run or a window:
       **2026-09-05, from item 67: THE SIZE HALF HAS ITS SOURCE.** The game
       carries both display sizes as the static FB_SetTiming records for
       `/dev/fb0` and `/dev/fb2` (mando_le: 1360x768 and 1280x800);
-      `display2.py` reads them out of the ELF and watch.sh exports
-      PAD_GL2_W/H from them. Still open here: the rotation half (venom),
-      and Bond's DISPLAY 0 (fb0 is read too - `display2.py game` prints
-      it - but PAD_GL_W/H are not yet driven from it).
+      `display2.py` reads them out of the ELF.
+      **2026-09-07, item 101 — THAT NOTE WAS ALREADY STALE WHEN IT WAS
+      WRITTEN, and the SIZE HALF IS NOW DONE.** watch.sh did export
+      PAD_GL2_W/H from the record for one run, and the same day item 67
+      withdrew it: exported as the geometry the GAME is told, it cropped
+      mando_le's topper by 80 columns and 32 rows, because the game presents
+      display 2 through display 0's viewport. The record is the PANEL, and
+      the panel is the WINDOW - a different question this rig was answering
+      with the same number. So `padglhost` grew `win2_want_w/h` and the
+      host-only pair `PAD_GL2_WIN_W/H`, watch.sh derives them per title, and
+      `display2.py --shell` prints them under those names so the two can
+      never be confused again. The game is told exactly what it was told
+      before; win2_present() already letterboxed, so the guest cannot see
+      this. Measured off the titles' own binaries, against what was
+      reported:
+          mando_le         record 1280x800   reported 1280x800   AGREES
+          star_wars_le     record  480x272   reported  480x272   AGREES
+          venom_le         record  800x480   reported  800x480   AGREES
+          stranger_things  record  848x480   reported  368x214   DIFFERS
+      stranger_things is why this is derived and not a table: 368x214 is its
+      projector CLIP's resolution, not its panel's, and the black borders in
+      that report are the clip inside the panel - a smaller window would crop
+      the panel instead of fixing anything.
+      **Still open: (a) the ROTATION half.** venom_le's topper is a portrait
+      panel whose timing record is its native landscape 800x480, so its
+      window is now the right size and still on its side. The direction is in
+      the report above - "90 degrees clockwise" - but rotation is not in any
+      record, so it needs the direction confirmed off a frame the way item 67
+      confirmed the mirror, plus transposed letterbox maths in win2_present().
+      **(b) DISPLAY 0 on the small cabinets.** james_bond_60th_le and
+      jurassic_park_the_pin (peanuts' "Jurassic Park Home Edition", 1.05) are
+      both reported as 800x480 single-screen, and BOTH yield `no framebuffer
+      timing records found` - their binaries do not reference /dev/fb0 the way
+      display2.py's reader expects, so there is nothing to derive from yet.
+      Note PAD_GL_W/H is not the same shape of change as PAD_GL2_WIN_W/H: it
+      is the guest's render target as well as the window.
       titles come up stretched or ringed in black — and Venom's is on its
       side.** `S3 D2`
       *(Filed 2026-08-23 from PAD-81, the tester who asked for the Compare

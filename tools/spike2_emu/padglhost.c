@@ -633,6 +633,24 @@ static unsigned long xwin2;
 static int win2_on;                      /* the second window exists         */
 static int win2_w, win2_h;               /* its current drawable size        */
 static int fb2_w, fb2_h;                 /* display-2 render size            */
+/* ★ THE PANEL THE SECOND DISPLAY IS SHOWN ON, WHICH IS NOT THE SIZE THE GAME
+ * RENDERS IT AT. Item 67 settled the render size and it must not move: the
+ * game builds display 2's FBO, ortho and presenter quad from display 2's own
+ * geometry while presenting it through DISPLAY 0's viewport, so the two have
+ * to be equal or the picture is cropped - told 1280x800, mando_le's topper
+ * lost 80 columns and 32 rows. That ruling is about what the GAME is told,
+ * which is PAD_GL2_W/H, read here and in eglshim.c from the same two
+ * variables precisely so the two sides cannot disagree.
+ *
+ * The WINDOW is a separate question, and it is peanuts' 2026-09-07 matrix: a
+ * real cabinet scales that render onto a panel of its OWN size, and this
+ * window was opening at the render size, so every second display came up as a
+ * 1360x768 box whatever it really is - "the resolution of the second screen
+ * (topper) should be 1280 x 800", "expected: 480 x 272", "368 x 214".
+ * win2_present() already letterboxes fb2 into the window, so sizing the
+ * window alone changes nothing the guest can see or the game can measure.
+ * 0 = unset = the old behaviour, the render size. */
+static int win2_want_w, win2_want_h;     /* the panel's size, host side only  */
 /* ★ ITEM 67: IS DISPLAY 2 A PANEL VIEWED IN A REFLECTION? -1 = not yet read
  * off the game, 0 = no, 1 = yes: the [display 2] window then shows the
  * OPTICAL image, un-mirrored. Read from the quad the game's display-2
@@ -2567,12 +2585,20 @@ static void win2_open(int disp)
         return;
     }
     scr = XDefaultScreen(xdpy);
+    /* THE PANEL'S SIZE IF THE TITLE DECLARED ONE, else the render size, which
+     * is what this always used. See win2_want_w above for why the two are
+     * different questions and why only this one is safe to move. */
+    if (win2_want_w > 0 && win2_want_h > 0) {
+        win2_w = win2_want_w; win2_h = win2_want_h;
+    } else {
+        win2_w = fb2_w; win2_h = fb2_h;
+    }
     /* Beside the game window by default. No remembered position in v1: the
      * delayed-restore state machine in win_pump() is per-window-pair
      * hardcoded and this window is fine wherever the compositor puts it. */
     xwin2 = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr),
                                 win_w + 16, 0,
-                                (unsigned)fb2_w, (unsigned)fb2_h, 0,
+                                (unsigned)win2_w, (unsigned)win2_h, 0,
                                 XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
     {   /* "[display N]" between game and suffix: zorder.py and padwinpos.py
          * key on it, ahead of their generic "- Stern Spike 2 emulator"
@@ -2615,7 +2641,9 @@ static void win2_open(int disp)
         XFlush(xdpy);
         return;
     }
-    win2_w = fb2_w; win2_h = fb2_h;
+    /* win2_w/win2_h were set from the panel above, before the window was
+     * created at that size; ConfigureNotify and eglQuerySurface keep them
+     * true from here on. */
     /* Vsync OFF for this surface, deliberately asymmetric: the main window's
      * swap already paces the drain loop at 60 Hz, and a second vsync'd swap
      * in the same thread could park the whole pipeline for a second refresh
@@ -2630,8 +2658,18 @@ static void win2_open(int disp)
         egl_use(egl_surf);
     }
     win2_on = 1;
-    fprintf(stderr, "[padglhost] display %d window opened %dx%d\n",
-            disp, fb2_w, fb2_h);
+    /* BOTH NUMBERS, because they are no longer the same one. This printed
+     * fb2_w x fb2_h and called it "window opened", which was true only while
+     * the window was the render size - it read 1360x768 over a window that
+     * had just been created at mando_le's 1280x800 panel. The render size is
+     * what the game was told; the window is what the panel is. */
+    if (win2_w != fb2_w || win2_h != fb2_h)
+        fprintf(stderr, "[padglhost] display %d window opened %dx%d - the "
+                "panel; the game's %dx%d render is scaled into it\n",
+                disp, win2_w, win2_h, fb2_w, fb2_h);
+    else
+        fprintf(stderr, "[padglhost] display %d window opened %dx%d\n",
+                disp, win2_w, win2_h);
 }
 
 /* The display-2 twin of main()'s tex_screen/fbo_screen block. Runs inside
@@ -4324,9 +4362,33 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                     int w2 = ew ? atoi(ew) : 0, h2 = eh ? atoi(eh) : 0;
                     if (w2 > 0 && h2 > 0) { fb2_w = w2; fb2_h = h2; }
                 }
+                {   /* THE PANEL, host side only - watch.sh reads it out of
+                     * the title's own framebuffer timing record. BOTH or
+                     * NEITHER for the same reason as above: one axis from the
+                     * panel and one from the render size is a shape neither
+                     * machine nor game ever has. Bounded because this is a
+                     * window size and a typo here is a window nobody can
+                     * find; out of range falls back to the render size. */
+                    const char *ew = getenv("PAD_GL2_WIN_W");
+                    const char *eh = getenv("PAD_GL2_WIN_H");
+                    int w2 = ew ? atoi(ew) : 0, h2 = eh ? atoi(eh) : 0;
+                    if (w2 >= 160 && h2 >= 120 && w2 <= 7680 && h2 <= 4320) {
+                        win2_want_w = w2; win2_want_h = h2;
+                    } else if (w2 || h2) {
+                        fprintf(stderr, "[padglhost] display %d: ignoring "
+                                "PAD_GL2_WIN_%s=%dx%d - out of range; its "
+                                "window opens at the render size\n",
+                                d, (w2 && h2) ? "W/H" : "W or H", w2, h2);
+                    }
+                }
                 fprintf(stderr, "[padglhost] display %d targeted by the "
                         "guest; routing it to its own %dx%d texture and "
                         "window\n", d, fb2_w, fb2_h);
+                if (win2_want_w > 0)
+                    fprintf(stderr, "[padglhost] display %d: its panel is "
+                            "%dx%d, so the window opens at that and the "
+                            "%dx%d render is scaled into it\n",
+                            d, win2_want_w, win2_want_h, fb2_w, fb2_h);
                 win2_open(d);
                 if (!tgt2_create() && win2_on) {
                     /* Window up, render target failed: hide the window

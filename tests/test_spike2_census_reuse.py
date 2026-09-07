@@ -357,3 +357,79 @@ def test_emit_writes_a_src_the_reuse_can_read_back(nbdir, tmp_path):
     out = tmp_path / "out.txt"
     assert nbdir.reuse(str(have), str(out), str(elf), str(tmp_path)) is True
     assert out.read_text() == have.read_text()
+
+
+# ------------------------------------------------ the playfield drawing ------
+
+@pytest.fixture(scope="module")
+def gameinfo():
+    import gameinfo as mod
+    return mod
+
+
+def _title(tmp_path, monkeypatch, title, *names):
+    """A title laid out where gameinfo.game_dir() falls back to looking:
+    $PAD_ROOT/games/<title>/assets/nuk/images/TestMode."""
+    d = tmp_path / "games" / title / "assets" / "nuk" / "images" / "TestMode"
+    d.mkdir(parents=True)
+    for n in names:
+        (d / n).write_bytes(b"\x89PNG\r\n\x1a\x08")
+    monkeypatch.setenv("PAD_ROOT", str(tmp_path))
+    monkeypatch.setenv("PAD_GAME", title)
+    return title
+
+
+def _pick(gameinfo, title):
+    got = gameinfo.find_playfield_art(title)
+    return os.path.basename(got) if got else None
+
+
+def test_an_le_takes_the_premium_playfield_not_the_alphabet(gameinfo, tmp_path,
+                                                            monkeypatch):
+    """uncanny_xmen_le 0.98 ships `xmen_pre_...` and `xmen_pro_...` and names
+    neither of them `le`. The right answer is the Premium drawing - one
+    playfield serves LE and Premium - and before this it was reached only by
+    found[0] happening to sort `pre` before `pro`. peanuts' matrix had this
+    title down as "playfield artwork: No"."""
+    t = _title(tmp_path, monkeypatch, "uncanny_xmen_le",
+               "xmen_pre_playfield_scaled.png", "xmen_pro_playfield_scaled.png")
+    assert _pick(gameinfo, t) == "xmen_pre_playfield_scaled.png"
+
+
+def test_the_alphabet_no_longer_decides_it(gameinfo, tmp_path, monkeypatch):
+    """The same two drawings with the Pro sorting FIRST - the case
+    find_playfield_art's own docstring says it must not lose: "It would have
+    picked the Pro drawing for an LE machine as soon as the alphabetical
+    order changed"."""
+    t = _title(tmp_path, monkeypatch, "uncanny_xmen_le",
+               "a_pro_playfield.png", "z_premium_playfield.png")
+    assert _pick(gameinfo, t) == "z_premium_playfield.png"
+
+
+def test_a_pro_title_never_takes_a_premium_drawing(gameinfo, tmp_path,
+                                                   monkeypatch):
+    """One way only: Pro has its own playfield and must not borrow."""
+    t = _title(tmp_path, monkeypatch, "uncanny_xmen_pro",
+               "xmen_pre_playfield_scaled.png", "xmen_pro_playfield_scaled.png")
+    assert _pick(gameinfo, t) == "xmen_pro_playfield_scaled.png"
+
+
+def test_an_explicit_le_drawing_still_wins(gameinfo, tmp_path, monkeypatch):
+    """jaws_le's own spelling keeps first claim over the premium fallback, so
+    no title measured before this changes its pick."""
+    t = _title(tmp_path, monkeypatch, "jaws_le",
+               "jaws_le_playfield_scaled.png",
+               "jaws_premium_playfield_scaled.png",
+               "jaws_pro_playfield_scaled.png")
+    assert _pick(gameinfo, t) == "jaws_le_playfield_scaled.png"
+
+
+def test_the_2025_generation_names_both_models_in_one_file(gameinfo, tmp_path,
+                                                           monkeypatch):
+    """dungeons_and_dragons_le's own spelling is the evidence that LE and
+    Premium share one playfield - and it carries `le`, so it matches earlier
+    and never reaches the new branch."""
+    t = _title(tmp_path, monkeypatch, "dungeons_and_dragons_le",
+               "Rope_LE-Premium-X8-X9_TOP_playfield.png",
+               "Rope_PRO-X7_TOP_playfield.png")
+    assert _pick(gameinfo, t) == "Rope_LE-Premium-X8-X9_TOP_playfield.png"

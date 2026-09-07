@@ -874,7 +874,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    confirm dialog opens — every sound that moved to a new index (with
    both ends of the move) and everything that can't be carried, with the
    reason — so you never have to diff two folders by hand to find out
-   what didn't make it. Image
+   what didn't make it. From v0.187.5, leaving the optional clean
+   old-version extract empty says so in the log as well as in the
+   confirm dialog: that the compare can then carry images and video
+   only, and which sounds or strings it could not match, so a
+   finished transfer's "0 audio, 0 text" does not read as a failure
+   once the dialog is gone. Image
    edits (including single-character font-glyph edits) and your renamed
    image-group names ride along too, matched by their on-card identity so
    they land on the right slot even when the new firmware re-baked the art

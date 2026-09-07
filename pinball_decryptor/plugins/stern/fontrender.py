@@ -254,7 +254,7 @@ def _space_advance(font):
     return 0.6 * (sum(advs) / len(advs)) if advs else 8.0
 
 
-def _fit_to_metrics(img, glyph):
+def _fit_to_metrics(img, glyph, scale=1.0):
     """Scale a glyph's atlas bitmap to the box its METRICS say it occupies.
 
     The atlas cell is the font's master art and is not necessarily the size
@@ -268,15 +268,30 @@ def _fit_to_metrics(img, glyph):
     On TMNT and Munsters the cell already equals the metrics box exactly (ratio
     1.000 over all 113 glyphs of the clock screen's HelveticaNeueBlack), which
     is why drawing at native size looked right for two years and this went
-    unnoticed.  There it is a no-op."""
-    tw, th = int(round(glyph["lw"])), int(round(glyph["lh"]))
+    unnoticed.  There it is a no-op.
+
+    *scale* multiplies the metrics box (a pending font-size edit, see
+    :func:`render_text`); at 1.0 the box is exactly the stored one."""
+    tw = int(round(glyph["lw"] * scale))
+    th = int(round(glyph["lh"] * scale))
     if not (1 <= tw <= 4096 and 1 <= th <= 4096) or (tw, th) == img.size:
         return img
     Image = _pil()
     return img.resize((tw, th), Image.LANCZOS)
 
 
-def render_text(font, text, slice_loader=None, tracking=0):
+def _metric_scale(value):
+    """A caller's *metric_scale* as a usable positive float (1.0 for junk)."""
+    try:
+        ms = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    if not (0.0 < ms < float("inf")):
+        return 1.0
+    return ms
+
+
+def render_text(font, text, slice_loader=None, tracking=0, metric_scale=1.0):
     """Composite *text* (``\\n`` = new line) with *font*'s current glyph
     bitmaps, laid out by the stored metrics: ink at ``pen + bearing_x``,
     ``baseline − bearing_y``; pen advances by ``advance``.
@@ -284,12 +299,26 @@ def render_text(font, text, slice_loader=None, tracking=0):
     *slice_loader* (glyph → RGBA or None) overrides the default disk loader —
     the import preview passes candidate bitmaps through here.  Returns
     ``(RGBA image, missing)`` where *missing* is the set of characters the
-    font has no glyph for (rendered as a gap)."""
+    font has no glyph for (rendered as a gap).
+
+    *metric_scale* multiplies every stored metric — advances, bearings,
+    kerning adjusts, ascent/descent and the box each bitmap is fitted to —
+    which is exactly what a scene's font-SIZE edit does to its glyph table
+    (:mod:`text_layout`), so the preview of a pending size shows the line the
+    way the machine will draw it.  The atlas art is the master and is fitted
+    to the scaled box, as :func:`_fit_to_metrics` already does at 1.0.  At 1.0
+    the output is byte-identical to what it has always been.  *tracking* is
+    in output pixels and is not scaled."""
     Image = _pil()
     loader = slice_loader or (lambda g: load_slice(g))
+    ms = _metric_scale(metric_scale)
     asc, desc = font["ascent"], font["descent"]
-    line_h = asc + desc + LINE_GAP
     sp_adv = _space_advance(font)
+    if ms != 1.0:
+        # Scaled only off 1.0, so the unscaled path keeps its integer ascent
+        # and descent (and with them its exact canvas height) untouched.
+        asc, desc, sp_adv = asc * ms, desc * ms, sp_adv * ms
+    line_h = asc + desc + LINE_GAP
     missing = set()
     placed = []                     # (x, y, img)
     min_x, max_x = 0.0, 1.0
@@ -303,29 +332,34 @@ def render_text(font, text, slice_loader=None, tracking=0):
             nxt = ord(line[ci + 1]) if ci + 1 < len(line) else None
             kern = (g["kern"].get(nxt, 0.0)
                     if g is not None and nxt is not None else 0.0)
+            if g is not None:
+                adv, bx, by = g["adv"], g["bx"], g["by"]
+                if ms != 1.0:
+                    adv, bx, by, kern = adv * ms, bx * ms, by * ms, kern * ms
+            else:
+                adv, bx, by = sp_adv, 0.0, 0.0
             if g is None or g["lh"] <= 1:
                 if g is None and ch != " ":
                     missing.add(ch)
-                pen += ((g["adv"] if g is not None else sp_adv)
-                        + kern + tracking)
+                pen += adv + kern + tracking
                 continue
             try:
                 img = loader(g)
             except (OSError, FontError):
                 missing.add(ch)
-                pen += g["adv"] + kern + tracking
+                pen += adv + kern + tracking
                 continue
-            img = _fit_to_metrics(img, g)
-            x = pen + g["bx"]
-            y = base_y - g["by"]
+            img = _fit_to_metrics(img, g, ms)
+            x = pen + bx
+            y = base_y - by
             placed.append((x, y, img))
             min_x = min(min_x, x)
-            max_x = max(max_x, x + img.size[0], pen + g["adv"])
-            pen += g["adv"] + kern + tracking
+            max_x = max(max_x, x + img.size[0], pen + adv)
+            pen += adv + kern + tracking
         max_x = max(max_x, pen)
     n_lines = text.count("\n") + 1
     W = max(1, int(round(max_x - min_x)))
-    H = max(1, n_lines * line_h - LINE_GAP)
+    H = max(1, int(round(n_lines * line_h - LINE_GAP)))
     canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     for x, y, img in placed:
         ix, iy = int(round(x - min_x)), int(round(y))

@@ -495,6 +495,28 @@ HELP_CONTENT = {
          "tint it), and a font offers \"Blank this font in this scene\" or "
          "everywhere it is used — one atlas is shared by every scene that "
          "draws it, so prefer the scoped one."),
+        ("Text layout (move, alignment, font size)",
+         "The same right-click on a text line also offers \"Move…\", an "
+         "\"Alignment\" submenu (Left / Centre / Right) and \"Font size…\". "
+         "All three are per-scene, in-place, size-neutral edits of that "
+         "scene's file, exactly like a text colour: a move shifts the "
+         "line's box by the pixels you type, alignment rewrites the flag "
+         "the scene keeps beside it, and the preview follows every change "
+         "as you make it. \"Font size\" here means the size THIS scene "
+         "bakes the font at — each scene carries its own copy of the "
+         "glyph metrics for every face it draws — so it is a percentage "
+         "of the scene's own size, and the dialog shows the pixels it "
+         "comes to next to the scene's original. Shrinking is lossless; "
+         "enlarging past the size of the master art blurs, because the "
+         "atlas is only scaled, never redrawn. Two things to know: the "
+         "edit applies to every keyframe of that string in the scene "
+         "(the outline drawn under a title moves with its fill), and a "
+         "size change resizes every OTHER line in that scene drawn with "
+         "the same font, because they share the one metric table — the "
+         "log names them when you write. \"Back to the original layout\" "
+         "drops the edit; nothing touches the card until the Write tab, "
+         "where layout edits ride the same path as text colour and show "
+         "up in its preview and the list of changes to write."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
          "original slot's byte budget — a small enough image drops "

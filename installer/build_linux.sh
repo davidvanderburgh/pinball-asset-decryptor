@@ -116,6 +116,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.scene_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_render" \
     --hidden-import "pinball_decryptor.plugins.stern.text_colors" \
+    --hidden-import "pinball_decryptor.plugins.stern.text_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.dds" \
     --hidden-import "pinball_decryptor.plugins.stern.spine" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2" \

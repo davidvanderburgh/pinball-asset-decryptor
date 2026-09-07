@@ -18491,6 +18491,21 @@ class MainWindow:
                         "text", "Pending (text colour)", scan_id,
                         tag="pending")
                     n += 1
+            # Re-laid-out text (moved / re-aligned / resized) is the same kind
+            # of scene edit in its own manifest, and rides the same Write
+            # path — list it or a layout-only build looks like nothing.
+            try:
+                from ..plugins.stern import text_layout
+                relaid = text_layout.load(assets_path)
+            except Exception:
+                relaid = {}
+            for _path, per_text in relaid.items():
+                for text, edit in per_text.items():
+                    self._add_write_preview_row(
+                        "%s  —  %s" % (text, text_layout.describe(edit)),
+                        "text", "Pending (text layout)", scan_id,
+                        tag="pending")
+                    n += 1
         return n
 
     def _add_write_preview_row(self, rel, ext, status, scan_id, tag="modified"):
@@ -19181,6 +19196,13 @@ class MainWindow:
             parts.append(sorted(
                 (p, sorted(per.items()))
                 for p, per in text_colors.load(assets_path).items()))
+        except Exception:
+            parts.append(None)
+        try:
+            from ..plugins.stern import text_layout
+            parts.append(sorted(
+                (p, sorted((t, sorted(e.items())) for t, e in per.items()))
+                for p, per in text_layout.load(assets_path).items()))
         except Exception:
             parts.append(None)
         return parts

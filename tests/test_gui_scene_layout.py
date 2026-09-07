@@ -195,3 +195,114 @@ def test_scene_browser_layout_needs_a_recorded_layout(app, tmp_path,
     assert text_layout.load(str(tmp_path)) == {}
     sb._close()
     app.root.update()
+
+
+def _wait_for_render(app, captured, want):
+    """Pump the loop until the worker's render call for *want* text edits
+    has been captured (or give up after a few seconds)."""
+    import time
+    deadline = time.time() + 8.0
+    while time.time() < deadline:
+        app.root.update()
+        if any(kw.get("text_edits") == want for kw in captured):
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_text_tab_edit_shows_in_the_scenes_window(app, tmp_path, monkeypatch):
+    """David: "changes here would propagate everywhere and I would be able to
+    easily view them to confirm it looks good."  Apply on the Text tab
+    re-renders an open Scenes window with the pending replacement: the row
+    says what the line now shows (not built yet) and the render job is handed
+    the edit; Revert takes it away again."""
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    from pinball_decryptor.gui import scene_browser as sb_mod
+    from pinball_decryptor.plugins.stern import scene_render
+    from pinball_decryptor.core import text_manifest
+    from tests.test_gui_smoke import _load_text_rows
+
+    captured = []
+    real = scene_render.render_layout
+
+    def spy(assets_dir, layout, **kw):
+        captured.append(dict(kw))
+        return real(assets_dir, layout, **kw)
+
+    monkeypatch.setattr(scene_render, "render_layout", spy)
+    # a refused edit would surface as a warning box: make that a failure
+    monkeypatch.setattr(sb_mod.messagebox, "showwarning",
+                        lambda *a, **k: pytest.fail("warning: %r" % (a,)))
+    from pinball_decryptor.gui import main_window as mw_mod
+    monkeypatch.setattr(mw_mod.messagebox, "showwarning",
+                        lambda *a, **k: pytest.fail("warning: %r" % (a,)))
+
+    w, sb = _open(app, tmp_path)
+    assert _wait_for_render(app, captured, {})       # the stock render
+    assert "right-click to recolour" in _text_row(sb)
+    assert "shows:" not in _text_row(sb)
+
+    # The Text tab, on the same folder, with the fixture's row selected.
+    _load_text_rows(w, str(tmp_path))
+    iid = next(str(i) for i, r in enumerate(w._text_rows)
+               if r["original"] == TEXT)
+    w._text_tree.selection_set(iid)
+    w._text_on_tree_select()
+    new = "TIME NOT SET"                    # fits today's in-place budget
+    w.text_new_var.set(new)
+    captured.clear()
+    w._text_apply_edit()
+    assert text_manifest.changed(str(tmp_path)) == {CARD: [(TEXT, new)]}
+    # ...the Scenes window redrew with the edit and its row says so
+    assert _wait_for_render(app, captured, {TEXT: new})
+    info = _text_row(sb)
+    assert 'shows: "%s"' % new in info and "not built yet" in info
+    assert sb._pending_texts(CARD) == {TEXT: new}
+
+    # A longer edit written to the manifest by other means (a future Write
+    # path that grows the radium) previews the same way once the window is
+    # told: the renderer does not care about the slot.
+    longer = "THE CLOCK HAS NOT BEEN SET YET"
+    text_manifest.save(str(tmp_path), [
+        {"path": CARD, "original": TEXT, "replacement": longer}])
+    captured.clear()
+    sb.text_edits_changed()
+    assert _wait_for_render(app, captured, {TEXT: longer})
+    assert 'shows: "%s"' % longer in _text_row(sb)
+
+    # A game-program row whose original this scene draws reaches it too
+    text_manifest.save(str(tmp_path), [
+        {"path": CARD, "original": TEXT, "replacement": ""},
+        {"path": "/g/game", "original": TEXT, "replacement": "CLOCK UNSET",
+         "budget": 96}])
+    captured.clear()
+    sb.text_edits_changed()
+    assert _wait_for_render(app, captured, {TEXT: "CLOCK UNSET"})
+    assert 'shows: "CLOCK UNSET"' in _text_row(sb)
+
+    # Revert on the Text tab: the row and the render lose the edit
+    _load_text_rows(w, str(tmp_path))
+    iid = next(str(i) for i, r in enumerate(w._text_rows)
+               if r["original"] == TEXT and r["path"] == "/g/game")
+    w._text_tree.selection_set(iid)
+    w._text_on_tree_select()
+    w.text_new_var.set(TEXT)
+    captured.clear()
+    w._text_apply_edit()
+    assert text_manifest.changed(str(tmp_path)) == {}
+    assert _wait_for_render(app, captured, {})
+    assert "shows:" not in _text_row(sb)
+    assert "right-click to recolour" in _text_row(sb)
+
+    # A Scenes window on a DIFFERENT folder is left alone
+    sb.assets_dir = str(tmp_path / "elsewhere")
+    captured.clear()
+    w.text_new_var.set("CLOCK UNSET")
+    w._text_apply_edit()
+    app.root.update()
+    assert captured == []
+    sb.assets_dir = str(tmp_path)
+
+    sb._close()
+    app.root.update()

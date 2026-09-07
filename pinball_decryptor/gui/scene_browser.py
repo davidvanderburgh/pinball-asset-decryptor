@@ -268,6 +268,7 @@ class SceneBrowserWindow:
         self._bulk = None          # {"cancel": bool} while every scene saves
         self._live_layout = None   # (card, text, edit) a layout dialog previews
         self._layout_dialog = None  # the open Move… / Font size… dialog
+        self._text_changes = None  # text_manifest.changed(), read on demand
         self._sans, _mono = platform_font()
         self._build()
         self.reload(preselect, focus_text)
@@ -586,6 +587,7 @@ class SceneBrowserWindow:
         # Glyph slices may have changed since the last look (a font import),
         # so drop the cache and re-read them on the next preview.
         self._fonts = None
+        self._text_changes = None
         if not self._scenes:
             self._hint.configure(
                 text="No scene manifests found in this project folder. Run "
@@ -727,13 +729,17 @@ class SceneBrowserWindow:
         stock, picked = self._scene_text_colors(sel[0])
         card, _lay = scene_render.layout_for_scene_dir(self._layouts, sel[0])
         layouts = self._pending_layouts(card)
+        texts = self._pending_texts(card, _lay)
         for i, s in enumerate(sc["texts"]):
             # The colour is the scene's, not the font's, so it belongs on the
             # line and not in the Fonts window — say what it is and what it
             # will become.  A pending layout edit (moved / re-aligned /
-            # resized) is a scene property too and sits beside it.
+            # resized) is a scene property too and sits beside it, and so
+            # does a Replace Text edit that reaches this line (its own row,
+            # or a game-program row whose original this scene draws).
             src = stock.get(s)
             lay = layouts.get(s)
+            shown = texts.get(s)
             if src is None:
                 info = "double-click: find on Replace Text"
             elif s in picked:
@@ -743,7 +749,10 @@ class SceneBrowserWindow:
                 info = text_colors.to_hex(src)
             if lay:
                 info = "%s · %s" % (info, text_layout.describe(lay))
-            if s in picked or lay:
+            if shown is not None:
+                info = ('shows: "%s"' % shown
+                        + (" · " + info if src is not None else ""))
+            if s in picked or lay or shown is not None:
                 info += " (not built yet)"
             elif src is not None:
                 info += " · right-click to recolour"
@@ -798,6 +807,7 @@ class SceneBrowserWindow:
         bg = self._background_name()
         colors = self._pending_colors(card)
         layout_edits = self._pending_layouts(card)
+        text_edits = self._pending_texts(card, layout)
         # A different scene starts at its first state; re-rendering the SAME
         # one (a state pick, a backdrop change) keeps where the user is.
         if scene_dir != getattr(self, "_preview_dir", None):
@@ -816,7 +826,8 @@ class SceneBrowserWindow:
                 n = scene_render.frame_count(layout, 0, group)
                 frames = [self._render_layout(
                     layout, fonts=self._fonts, frame=i, background=bg,
-                    colors=colors, group=group, layout_edits=layout_edits)
+                    colors=colors, group=group, layout_edits=layout_edits,
+                    text_edits=text_edits)
                     for i in range(min(n, _MAX_PREVIEW_FRAMES))]
             except Exception:
                 frames = []
@@ -911,6 +922,66 @@ class SceneBrowserWindow:
             else:
                 out[live[1]] = dict(live[2])
         return out
+
+    # -- pending Replace Text edits ----------------------------------------
+
+    def _load_text_changes(self):
+        """``text_manifest.changed()`` for this folder, read once and kept
+        until the Text tab says it changed (``text_edits_changed``) or the
+        window reloads."""
+        if self._text_changes is None:
+            try:
+                from ..core import text_manifest
+                self._text_changes = text_manifest.changed(self.assets_dir)
+            except Exception:
+                self._text_changes = {}
+        return self._text_changes
+
+    def _pending_texts(self, card, layout=None):
+        """``{display string: replacement}`` the preview of *card* should draw:
+        the scene's own Replace Text rows, plus every GAME-PROGRAM row (the
+        manifest path that is not a ``.radium`` — the game ELF) whose original
+        is a string this scene's layout draws.  That second kind is how the
+        game uses a scene: its Text node is a placeholder the code overwrites
+        at runtime (Godzilla's battle intro), so a program edit is what the
+        machine will show there and it wins over a radium row for the same
+        string.  Program rows are manifest-encoded (``\\n`` two characters),
+        the layout's strings are not, so both sides are decoded."""
+        if not card:
+            return {}
+        changed = self._load_text_changes()
+        if not changed:
+            return {}
+        out = {}
+        for orig, rep in changed.get(card) or ():
+            out[orig] = rep
+        if layout is None:
+            layout = self._layouts.get(card)
+        drawn = {tx.get("text") for tx in (layout or {}).get("texts") or ()}
+        drawn.discard(None)
+        if not drawn:
+            return out
+        from ..plugins.stern import progtext
+        for path, pairs in changed.items():
+            if (path or "").lower().endswith(".radium"):
+                continue
+            for orig, rep in pairs:
+                o = progtext.decode_text(orig)
+                if o in drawn:
+                    out[o] = progtext.decode_text(rep)
+        return out
+
+    def text_edits_changed(self):
+        """The Text tab applied / reverted an edit: forget the cached manifest
+        and redraw the selected scene (the same call the colour pick and the
+        layout Apply make — it re-lists the rows AND re-renders)."""
+        self._text_changes = None
+        try:
+            if not self.win.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        self._on_select()
 
     def _scene_text_facts(self, scene_dir):
         """``{text: (font px, align name)}`` as the recorded layout draws each
@@ -1418,6 +1489,7 @@ class SceneBrowserWindow:
                                                        self._preview_dir)
         colors = self._pending_colors(card)
         layout_edits = self._pending_layouts(card)
+        text_edits = self._pending_texts(card, _lay)
         state = self._export = {"cancel": False}
         self._save_btn.configure(text="Cancel")
         self._set_caption("Writing %s — frame 1 of %d…"
@@ -1430,7 +1502,8 @@ class SceneBrowserWindow:
                         return
                     yield self._render_layout(
                         layout, fonts=self._fonts, frame=i, background=bg,
-                        colors=colors, group=group, layout_edits=layout_edits)
+                        colors=colors, group=group, layout_edits=layout_edits,
+                        text_edits=text_edits)
 
             try:
                 n = video.encode_frames_to_mp4(
@@ -1584,7 +1657,8 @@ class SceneBrowserWindow:
                             layout, fonts=self._fonts, frame=0,
                             background=bg,
                             colors=self._pending_colors(card), group=None,
-                            layout_edits=self._pending_layouts(card))
+                            layout_edits=self._pending_layouts(card),
+                            text_edits=self._pending_texts(card, layout))
                     except Exception:
                         img = None
                 if img is None:

@@ -1429,10 +1429,19 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
                          "Scanning the game program for display text")
             entries = progtext.enumerate_program_strings(
                 reader.read_file_bytes(fw_node))
-            prog_rows = [
-                {"path": fw_path, "original": e["text"], "replacement": "",
-                 "budget": e["budget"]}
-                for e in entries]
+            prog_rows = []
+            for e in entries:
+                row = {"path": fw_path, "original": e["text"],
+                       "replacement": "", "budget": e["budget"]}
+                # The manifest's 5th-column flags (text_manifest.FLAG_*):
+                # a growable row may take longer text (placed in a new
+                # area of the game program on Write); a row with no
+                # reference found is dead text the game never draws.
+                if e.get("growable"):
+                    row["grow"] = True
+                if e.get("unused") or e.get("refs") == 0:
+                    row["unused"] = True
+                prog_rows.append(row)
         except Exception as e:
             log("Couldn't scan the game program for display text (%s); "
                 "program strings skipped." % e, "warning")
@@ -2640,10 +2649,12 @@ def _changed_radium_text(assets_dir):
     return text_manifest.changed(assets_dir)
 
 
-def _program_text_writes(reader, node, card_path, pairs, patched_fw, log):
+def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
+                         grow=None):
     """Resolve game-program (ELF) display-text edits for one firmware file.
 
-    Two composition modes, mirroring how the firmware itself reaches the card:
+    Three composition modes, mirroring how the firmware itself reaches the
+    card:
 
     * normally the ELF is untouched on disk, so the string/pointer patches are
       emitted as in-place disk writes plus a file-relative overlay for the
@@ -2652,9 +2663,20 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log):
       staged whole-file copy that later replaces the on-card ELF), an in-place
       disk write would be undone by that copy, so the edits are applied
       directly INTO the staged file instead; its ``.sidx`` record is computed
-      from the file, so the digests cover the text automatically.
+      from the file, so the digests cover the text automatically;
+    * when an edit is LONGER than its slot and *grow* allows it
+      (``{"ok": bool, "why": str, "dir": scratch dir}`` — see
+      :func:`_text_grow_gate`), the original bytes stay, the new text goes
+      into the ELF's program-text extension segment (appended here, or
+      extended when a previous Write left one — including one riding next to
+      the cave's) and every reference is repointed; the validator bypass is
+      baked into the same bytes when no cave did that already, and the whole
+      grown file is staged 0755 under ``grow["dir"]`` for the ext4 grow job,
+      exactly the cave's delivery.  A fitting edit still patches in place.
 
-    Returns ``(writes, n_strings, overlays)`` like the radium helper."""
+    Returns ``(writes, n_strings, overlays, grown)`` — *grown* is ``None``
+    unless the firmware was grown, else ``{"node", "path", "valpatch_mode",
+    "new"}`` (*valpatch_mode* only when the bypass was baked here)."""
     from . import progtext
 
     if patched_fw is not None:
@@ -2662,9 +2684,38 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log):
             raw = f.read()
     else:
         raw = reader.read_file_bytes(node)
-    file_writes, n = progtext.plan_writes(raw, dict(pairs), log)
+    edits = dict(pairs)
+    # Only an edit longer than its original can need new space (a longer
+    # standalone name grows its host line too, and is itself longer).
+    over = [o for o, n in edits.items() if len(n) > len(o)]
+    reloc = None
+    if over and grow is not None:
+        if grow.get("ok"):
+            reloc, why = _text_reloc_plan(raw)
+            if reloc is None:
+                log("Program text: %d edit(s) are longer than the original and "
+                    "can't be placed in new space in %s (%s); they are skipped "
+                    "— same-length edits still land in place."
+                    % (len(over), card_path, why), "warning")
+        else:
+            log("Program text: %d edit(s) are longer than the original and "
+                "can't be placed in new space for this write (%s); they are "
+                "skipped — same-length edits still land in place."
+                % (len(over), grow.get("why") or "growth unavailable"),
+                "warning")
+    file_writes, n, blob = progtext.plan_writes(raw, edits, log, reloc=reloc)
+    if blob:
+        try:
+            grown = _grow_program_text(raw, file_writes, blob, reloc,
+                                       patched_fw, grow["dir"], node, log)
+            return [], n, {}, grown
+        except Exception as e:                  # never fail a Write over this
+            log("Program text: couldn't place the longer text in new space "
+                "(%s); those edits are skipped and the rest patched in place."
+                % e, "warning")
+            file_writes, n, blob = progtext.plan_writes(raw, edits, log)
     if not file_writes:
-        return [], n, {}
+        return [], n, {}, None
     if patched_fw is not None:
         buf = bytearray(raw)
         for off, b in file_writes:
@@ -2673,7 +2724,7 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log):
             f.write(bytes(buf))
         log("Program text: %d string edit(s) baked into the rebuilt firmware."
             % n, "info")
-        return [], n, {}
+        return [], n, {}, None
     writes = []
     ov = {}
     ib = bytes(node["i_block"])
@@ -2683,39 +2734,143 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log):
             writes.append((disk, payload[:cnt]))
             payload = payload[cnt:]
         ov.setdefault(ib, (node, {}))[1][off] = b
-    return writes, n, ov
+    return writes, n, ov, None
 
 
-def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None):
+def _grow_program_text(raw, file_writes, blob, reloc, patched_fw, grow_dir,
+                       node, log):
+    """Build the grown firmware: *blob* into the extension segment (appended,
+    or extended after its used part), *file_writes* applied, the validator
+    bypass baked in when no cave has already (the cave's staged file carries
+    it), the whole file staged 0755.  Returns the ``grown`` record
+    :func:`_program_text_writes` hands back."""
+    from . import progreloc
+    buf = bytearray(raw)
+    stock_len = len(raw)
+    seg = _find_extension_segment(buf)
+    if seg is None:
+        va, off, _gap = _append_extension_segment(
+            buf, progreloc.EXT_HEADER_LEN + len(blob), 4, near_fn=None,
+            allow_above=False, what="program-text segment",
+            slots=(_PT_GNU_STACK, _PT_NOTE))
+        used = progreloc.EXT_HEADER_LEN
+        if va != reloc["base_va"]:
+            raise RuntimeError(
+                "the text segment landed at 0x%x, not the planned 0x%x"
+                % (va, reloc["base_va"]))
+        how = "in a new segment"
+    else:
+        va, off, _size, used = _extend_extension_segment(buf, len(blob))
+        how = "appended to the existing segment"
+    buf[off + used:off + used + len(blob)] = blob
+    buf[off:off + progreloc.EXT_HEADER_LEN] = progreloc.extension_header(
+        used + len(blob))
+    for o, b in file_writes:
+        buf[o:o + len(b)] = b
+    vmode = None
+    if patched_fw is None:
+        # The whole file is copied onto the card, so the validator bypass has
+        # to be in these bytes (the in-place bypass write is skipped by the
+        # caller whenever a staged firmware exists).
+        from . import valpatch as _vp
+        overlay, vmode = _vp.bypass_overlay(bytes(buf))
+        for o, b in overlay.items():
+            buf[o:o + len(b)] = b
+        _vp.log_status(log, vmode)
+        staged = os.path.join(grow_dir, "game_text_grown")
+    else:
+        staged = patched_fw
+    with open(_lp(staged), "wb") as f:
+        f.write(bytes(buf))
+    # The card's game_monitor execs this file: 0644 (open's default) would be
+    # EACCES and "RESTARTING GAME" forever on a host whose ext4 path creates
+    # the inode with the source's mode (macOS debugfs).
+    os.chmod(_lp(staged), 0o755)
+    log("Program text: %d byte(s) of longer text placed in the game program's "
+        "extension segment at 0x%x (%s, file+0x%x, read-only); the game "
+        "program grows %d -> %d bytes and is written whole. No card built "
+        "this way has been booted on a machine yet — it is proven in the PC "
+        "emulator only."
+        % (len(blob), va + used, how, off + used, stock_len, len(buf)),
+        "warning")
+    return {"node": node, "path": staged, "valpatch_mode": vmode,
+            "new": patched_fw is None}
+
+
+def _text_grow_gate(dest_is_device):
+    """``(ok, why)`` — may this write place longer display text in new space
+    (a grown game ELF / a re-serialised scene)?  Mirrors
+    :func:`_pathA_preflight`: a longer file only reaches the card through the
+    Linux ext4 driver, so never on a direct-SD write and never on a host
+    without one.  ``PAD_STERN_TEXT_GROW=0`` is the kill switch (on by
+    default)."""
+    if os.environ.get("PAD_STERN_TEXT_GROW", "1") == "0":
+        return False, "PAD_STERN_TEXT_GROW=0"
+    if dest_is_device:
+        return False, ("a direct-SD write can't grow the game program; build "
+                       "an image file")
+    from ...core import ext4_grow
+    ok, why = ext4_grow.available()
+    if not ok:
+        return False, ("this system can't grow files inside an ext4 image "
+                       "(%s)" % why)
+    return True, ""
+
+
+def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
+                        grow_dir=None, dest_is_device=False):
     """Resolve the user's display-text edits to a flat list of in-place writes
     ``[(disk_offset, bytes), ...]`` (same form ``_compute_patches`` collects).
 
     For each changed radium: resolve its inode, read it back, **re-enumerate**
     the unchanged on-card bytes for the authoritative offsets, and for every
     edit ``(original -> replacement)`` patch **all** display-text occurrences
-    whose value equals ``original``.  A replacement is rejected (skipped with a
-    warning, the radium left unchanged) unless it fits the original's byte
-    budget; it is space-padded to the exact original length so the file size and
-    every other offset stay byte-identical.
+    whose value equals ``original``.  A replacement that fits the original's
+    byte budget is space-padded to the exact original length so the file size
+    and every other offset stay byte-identical.  One that does NOT fit either
+    sends the whole scene to growth — every one of that scene's edits is
+    re-serialised at its exact length (:mod:`.radium_grow`), the file grows,
+    and it is copied onto the card whole — or, when growth is off for this
+    write (:func:`_text_grow_gate`), is skipped with a warning and the radium
+    left unchanged.
 
     Rows whose path resolves to the ARM-ELF game firmware are game-program
     strings, routed to :func:`_program_text_writes` (in-place C-string patch +
     name-group pointer moves; *patched_fw* composes with the blip-free
-    firmware rebuild).
+    firmware rebuild; a longer edit grows the ELF).
 
-    Returns ``(writes, n_strings, overlays, fw_overlay)`` where ``n_strings``
-    is the number of unique (asset, original) strings actually patched,
-    ``overlays`` is ``{i_block: (node, {file_offset: bytes})}`` for every
-    patched inode (so the caller can recompute its ``.sidx`` digest), and
+    *grow_dir* is the scratch dir a grown file is staged in (``None`` = no
+    growth offered); *dest_is_device* says this is a direct-SD write.
+
+    Returns ``(writes, n_strings, overlays, fw_overlay, grown)`` where
+    ``n_strings`` is the number of unique (asset, original) strings actually
+    patched, ``overlays`` is ``{i_block: (node, {file_offset: bytes})}`` for
+    every patched inode (so the caller can recompute its ``.sidx`` digest),
     ``fw_overlay`` is the game ELF's own ``{file_offset: bytes}`` — the
     validator bypass is the LAST writer of that file's ``.sidx`` record, so it
-    has to fold these edits into the digest it computes."""
+    has to fold these edits into the digest it computes — and ``grown`` is
+    ``{"fw": record | None, "radium": {card_path: (node, {original:
+    replacement})}}``: the grown firmware (see :func:`_program_text_writes`)
+    and the scenes the caller must re-serialise (:func:`_stage_grown_radiums`)
+    once every other in-place scene edit is known."""
     from . import radium as _radium
 
+    grown = {"fw": None, "radium": {}}
     edits = _changed_radium_text(assets_dir)
     if not edits:
-        return [], 0, {}, {}
+        return [], 0, {}, {}, grown
     nodes = _resolve_card_nodes(reader, list(edits.keys()), cancel)
+
+    # The growth gate is asked once, and only when some edit is longer than
+    # its original (the ext4 probe reaches for WSL; a write of same-length
+    # edits never pays for it).
+    over_any = any(len(n) > len(o) for prs in edits.values() for o, n in prs)
+    if over_any and grow_dir:
+        g_ok, g_why = _text_grow_gate(dest_is_device)
+    else:
+        g_ok, g_why = False, ("no scratch space was offered for a longer copy"
+                              if over_any else "")
+    grow = {"ok": g_ok, "why": g_why, "dir": grow_dir}
 
     writes = []
     overlays = {}   # i_block -> (node, {file_off: bytes})
@@ -2734,13 +2889,18 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None):
         except Exception:
             is_fw = False
         if is_fw:
-            pw, pn, pov = _program_text_writes(
-                reader, node, card_path, pairs, patched_fw, log)
+            pw, pn, pov, pgrown = _program_text_writes(
+                reader, node, card_path, pairs, patched_fw, log, grow=grow)
             writes += pw
             n_strings += pn
             _merge_radium_overlays(overlays, pov)
             for _n, _ov in pov.values():
                 fw_overlay.update(_ov)
+            if pgrown is not None:
+                grown["fw"] = pgrown
+                # Later firmware edits in this same write compose into the
+                # staged file, exactly as they do with the cave's.
+                patched_fw = pgrown["path"]
             continue
         ib = bytes(node["i_block"])
         data = reader.read_file_bytes(node)
@@ -2748,6 +2908,37 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None):
         for e in _radium.enumerate_strings(data):
             if e["kind"] == "display-text":
                 occ_by_text.setdefault(e["text"], []).append(e)
+        over = [(o, r) for o, r in pairs
+                if len(r.encode("latin1", "replace"))
+                > len(o.encode("latin1", "replace"))]
+        if over and grow["ok"]:
+            # The scene is re-serialised: every edit at its exact length.
+            todo = {}
+            for original, replacement in pairs:
+                if original not in occ_by_text:
+                    log("Display text in %s: \"%s\" wasn't found in the "
+                        "current radium; skipped." % (card_path, original),
+                        "warning")
+                    continue
+                todo[original] = replacement
+            if todo:
+                grown["radium"][card_path] = (node, todo)
+                n_strings += len(todo)
+                for original, replacement in todo.items():
+                    log("Display text in %s: \"%s\" -> \"%s\" (%d occurrence(s); "
+                        "%s than the original, so the scene is re-serialised "
+                        "at the new length and written whole)."
+                        % (card_path, original, replacement,
+                           len(occ_by_text[original]),
+                           "longer" if (original, replacement) in over
+                           else "with an edit longer"), "info")
+            continue
+        if over:
+            log("Display text in %s: %d edit(s) are longer than the original "
+                "and the scene can't be grown for this write (%s); they are "
+                "skipped — same-length edits still land in place."
+                % (card_path, len(over), grow["why"] or "growth unavailable"),
+                "warning")
         for original, replacement in pairs:
             orig_bytes = original.encode("latin1", "replace")
             new_bytes = replacement.encode("latin1", "replace")
@@ -2776,7 +2967,63 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None):
             n_strings += 1
             log("Display text in %s: \"%s\" -> \"%s\" (%d occurrence(s))."
                 % (card_path, original, replacement, len(occs)), "info")
-    return writes, n_strings, overlays, fw_overlay
+    return writes, n_strings, overlays, fw_overlay, grown
+
+
+def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log):
+    """Re-serialise every scene in *grown_radium* (``{card_path: (node,
+    {original: replacement})}``, from :func:`_radium_text_writes`) with its
+    longer text and stage the result whole under *grow_dir*.
+
+    Composition: the scene's OTHER in-place edits this write makes (colours,
+    layout, embedded images — all computed at stock-file offsets) are taken
+    out of *radium_overlays* and applied to the stock bytes FIRST, then the
+    text is grown, so the staged file carries everything and the ``.sidx``
+    digest comes from the file rather than from an overlay.  Returns
+    ``(jobs, grown_files)``: the ``(card_rel, staged)`` grow jobs and
+    ``{i_block: staged}`` for the manifest refresh."""
+    from . import radium_grow
+    jobs, grown_files = [], {}
+    for i, (card_path, (node, edits)) in enumerate(sorted(grown_radium.items())):
+        ib = bytes(node["i_block"])
+        buf = bytearray(reader.read_file_bytes(node))
+        ov = radium_overlays.pop(ib, None)
+        if ov:
+            for off, b in ov[1].items():
+                buf[off:off + len(b)] = b
+        new, occ, _shift = radium_grow.grow(bytes(buf), edits)
+        if not occ:
+            log("Display text in %s: none of the longer lines were found when "
+                "re-serialising; the scene is left unchanged." % card_path,
+                "warning")
+            if ov:
+                radium_overlays[ib] = ov
+            continue
+        staged = os.path.join(grow_dir, "scene_%02d.radium" % i)
+        with open(_lp(staged), "wb") as f:
+            f.write(new)
+        jobs.append((card_path.lstrip("/"), staged))
+        grown_files[ib] = staged
+        log("Display text in %s: re-serialised %d line(s) at their new length "
+            "(%d occurrence(s)); the scene grows %d -> %d bytes and is "
+            "written whole. Whether the game loads a longer scene this way is "
+            "proven in the PC emulator only." %
+            (card_path, len(occ), sum(occ.values()), len(buf), len(new)),
+            "warning")
+    return jobs, grown_files
+
+
+def _drop_writes_in(writes, reader, node):
+    """*writes* (``[(disk_off, bytes)]``) without those landing inside
+    *node*'s extents — a file that is written whole must not also be patched
+    in place (the copy would undo it, and an override set would list the
+    file twice)."""
+    try:
+        runs = reader.disk_ranges(node, 0, node["size"])
+    except Exception:
+        return writes
+    return [(d, b) for d, b in writes
+            if not any(lo <= d < lo + n for lo, n in runs)]
 
 
 def _changed_radium_text_colors(assets_dir):
@@ -3481,14 +3728,18 @@ def _merge_radium_overlays(dst, src):
 
 def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
                          full_repl, radium_overlays, log,
-                         fw_node=None, fw_patched_path=None):
+                         fw_node=None, fw_patched_path=None, grown_files=None):
     """Produce the on-disk writes that refresh the ``.sidx`` manifest records for
     every file this Write changed, so the card passes Stern SD validation.
 
     Covers ``image.bin`` (cat-0 audio), the per-song ``image-scNN.bin`` banks,
-    full-replacement assets (video / image / texture), and in-place ``scene.radium``
+    full-replacement assets (video / image / texture), in-place ``scene.radium``
     edits (display text + embedded images) via their file-relative
-    ``radium_overlays`` (``{i_block: (node, {file_off: bytes})}``)."""
+    ``radium_overlays`` (``{i_block: (node, {file_off: bytes})}``), the
+    rebuilt firmware (*fw_node* / *fw_patched_path*) and any other file this
+    write replaces WHOLE at a new length (*grown_files*, ``{i_block: staged
+    path}`` — a re-serialised scene); the last two get their stored size
+    rewritten alongside the digests."""
     from . import sidx
     sidx_path, sidx_node = sidx.find_sidx(reader)
     if sidx_node is None:
@@ -3526,6 +3777,11 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
                 blob = f.read()
             modified[p] = sidx.digests(blob)
             resized[p] = len(blob)
+    for ib, staged in (grown_files or {}).items():
+        p = ipath.get(ib)
+        if p:
+            modified[p] = sidx.digests_file(_lp(staged))
+            resized[p] = os.path.getsize(_lp(staged))
     if music_patches:
         banks = {}
         for sc_node, body_off, body in music_patches:
@@ -3979,7 +4235,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # A video / image / text-only write (or one whose audio turned out
         # unsupported) still needs a reader to resolve the loose-file inodes.
         if reader is None:
-            reader, _fw_node, _img_node = _locate(disk_f, parts)
+            # The firmware inode is kept: a longer program-text edit grows
+            # the game ELF on a text-only write too.
+            reader, fw_node, _img_node = _locate(disk_f, parts)
 
         # Radium edits patch the scene.radium inode in place; collect per-inode
         # file-relative overlays alongside the flat disk writes so the .sidx
@@ -3993,14 +4251,29 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # bypass below is the last writer of that file's .sidx record, so it
         # needs them to compute a digest of the firmware that actually ships.
         fw_text_overlay = {}
+        # Longer text than the original: the grown game ELF and the scenes to
+        # re-serialise (see _radium_text_writes).  Either is staged whole in
+        # the grow scratch dir and copied onto the card by the grow job, like
+        # the cave's firmware.
+        grown_text = None
         if text_edits:
             if progress:
                 progress(95, 100, "Preparing display text...")
-            text_writes, n_text, _t_ov, fw_text_overlay = _radium_text_writes(
-                reader, assets_dir, log, cancel, patched_fw=patched_gr)
+            grow_work = grow_work or _work_dir(label, base="spike2_grow_")
+            (text_writes, n_text, _t_ov, fw_text_overlay,
+             grown_text) = _radium_text_writes(
+                reader, assets_dir, log, cancel, patched_fw=patched_gr,
+                grow_dir=grow_work, dest_is_device=dest_is_device)
             _merge_radium_overlays(radium_overlays, _t_ov)
             if cancel():
                 return None, None, None, None
+            gfw = grown_text.get("fw")
+            if gfw is not None:
+                patched_gr = gfw["path"]
+                if fw_node is None:
+                    fw_node = gfw["node"]
+                if gfw.get("valpatch_mode") is not None:
+                    valpatch_mode = gfw["valpatch_mode"]
 
         # Recoloured display text -> the same kind of in-place radium patch,
         # on different bytes of the same scenes, so the two compose.
@@ -4042,6 +4315,22 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             _merge_radium_overlays(radium_overlays, _i_ov)
             if cancel():
                 return None, None, None, None
+
+        # Scenes whose text outgrew its slot are re-serialised now, AFTER the
+        # colour / layout / image writers, so their in-place edits (all at
+        # stock offsets) fold into the grown bytes; the grown scene is then
+        # written whole and its in-place writes are dropped.
+        radium_grow_jobs, grown_files = [], {}
+        if grown_text and grown_text.get("radium"):
+            radium_grow_jobs, grown_files = _stage_grown_radiums(
+                reader, grown_text["radium"], radium_overlays, grow_work, log)
+            for _gnode, _gedits in grown_text["radium"].values():
+                if bytes(_gnode["i_block"]) not in grown_files:
+                    continue
+                text_writes = _drop_writes_in(text_writes, reader, _gnode)
+                color_writes = _drop_writes_in(color_writes, reader, _gnode)
+                layout_writes = _drop_writes_in(layout_writes, reader, _gnode)
+                radimg_writes = _drop_writes_in(radimg_writes, reader, _gnode)
 
         video_patches = []     # (inode, payload bytes == inode size)
         video_grow_jobs = []   # (card_rel, source_file) — grown via ext4 driver
@@ -4087,7 +4376,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 and not video_grow_jobs and not image_patches
                 and not texture_patches and not radimg_writes
                 and not text_writes and not color_writes
-                and not layout_writes):
+                and not layout_writes and not radium_grow_jobs
+                and patched_gr is None):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
                 "video or image could be fit to its original slot, and no "
@@ -4127,7 +4417,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             writes += _compute_sidx_writes(
                 reader, disk_f, img_node, audio_patches, music_patches,
                 full_repl, radium_overlays, log,
-                fw_node=fw_node, fw_patched_path=patched_gr)
+                fw_node=fw_node, fw_patched_path=patched_gr,
+                grown_files=grown_files)
         except Exception as e:
             log("SD-validation manifest update failed (%s); the card may report "
                 "a validation error until re-validated." % e, "warning")
@@ -4151,9 +4442,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 log("Validation bypass skipped (%s)." % e, "warning")
 
         # Grown videos aren't flat disk writes — they're copied in by the ext4
-        # driver after the in-place writes land.  The rebuilt firmware rides the
-        # same mechanism, because it too is longer than the file it replaces.
-        grow_jobs = list(video_grow_jobs)
+        # driver after the in-place writes land.  Re-serialised scenes and the
+        # rebuilt firmware ride the same mechanism, because they too are
+        # longer than the file they replace.  The firmware goes LAST: jobs
+        # fail from the end, so anything short of the full count means the
+        # firmware didn't land (write_image reads it that way).
+        grow_jobs = list(video_grow_jobs) + list(radium_grow_jobs)
         if patched_gr is not None and fw_node is not None:
             from .valpatch import _game_manifest_path
             fw_rel = _game_manifest_path(reader, fw_node)
@@ -4165,15 +4459,15 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # ``cleanup`` is the scratch dir holding the rebuilt firmware; it has to
         # survive until the caller has copied it onto the card, so the caller
         # removes it (see the note where grow_work is created).
+        uses_work = bool(radium_grow_jobs) or patched_gr is not None
         grow_plan = ({"offset": reader.base, "jobs": grow_jobs,
                       "n_video": len(video_grow_jobs),
-                      "cleanup": grow_work}
+                      "cleanup": grow_work if uses_work else None}
                      if grow_jobs else None)
-        # Only a plan that actually carries the firmware job owns that dir; a
-        # video-only plan doesn't, and neither does a build whose cave was
-        # dropped after being written.
-        grow_work_handed_off = bool(grow_plan and grow_work
-                                    and patched_gr is not None)
+        # Only a plan that actually carries a staged file (the firmware, a
+        # re-serialised scene) owns that dir; a video-only plan doesn't, and
+        # neither does a build whose cave was dropped after being written.
+        grow_work_handed_off = bool(grow_plan and grow_work and uses_work)
 
         # Scene textures + radium-embedded images fold into the image count
         # (they ARE images) so the (audio, video, image, text) summary tuple
@@ -4311,17 +4605,22 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     n_vid_jobs = grow_plan.get("n_video", n_planned) if grow_plan else 0
     if n_grown < n_planned:
         if n_planned > n_vid_jobs:
-            # Serious: the .sidx record already describes the rebuilt firmware,
-            # so the card now claims a game binary it doesn't have.
-            log("The blip-free game firmware could NOT be written to the card. "
-                "Its SD-validation record was already updated to match, so this "
-                "card will fail validation — re-run the Write, or build with "
-                "PAD_STERN_SKIP_KEYPATCH=1 for a standard (firmware-untouched) "
-                "build.", "error")
+            # Serious: the .sidx record already describes the rebuilt firmware
+            # (or re-serialised scene), so the card now claims a file it
+            # doesn't have.
+            log("A rebuilt game file (the game program with longer text or "
+                "the blip-free cave, or a re-serialised scene) could NOT be "
+                "written to the card. Its SD-validation record was already "
+                "updated to match, so this card will fail validation — re-run "
+                "the Write, or build with PAD_STERN_TEXT_GROW=0 (and "
+                "PAD_STERN_SKIP_KEYPATCH=1 for the cave) for a standard "
+                "(size-neutral) build.", "error")
             # The completion dialog must not claim a blip-free card either.
-            audio_mode = ("standard", "the rebuilt blip-free firmware could "
-                          "not be copied onto the card (see the build log; "
-                          "this image will fail SD validation until rebuilt)")
+            if audio_mode and audio_mode[0] == "blip-free":
+                audio_mode = ("standard", "the rebuilt blip-free firmware "
+                              "could not be copied onto the card (see the "
+                              "build log; this image will fail SD validation "
+                              "until rebuilt)")
         n_vid_failed = max(0, n_vid_jobs - n_grown)
         if n_vid_failed:
             # The summary must not claim videos that never landed: every grow
@@ -4598,6 +4897,12 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                     dest = _override_path(out_dir, card_path)
                     os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
                     shutil.copyfile(_lp(source), _lp(dest))
+                    try:
+                        # A grown game ELF is staged 0755; the emulator on a
+                        # non-Windows host execs the override copy.
+                        shutil.copymode(_lp(source), _lp(dest))
+                    except OSError:
+                        pass
                     size = _size(_lp(dest))
                     log("Override: %s (%.1f MB, full size — it outgrew its "
                         "slot on the card)" % (card_path, size / 1e6), "info")
@@ -7479,55 +7784,120 @@ def _append_cave_segment(raw, need, fn):
       last position and undo the .bss property above, and none of it can be
       confirmed without a machine.
     """
-    PAGE = 0x1000
+    return _append_extension_segment(raw, need, 7, near_fn=fn, allow_above=True,
+                                     what="cave")
+
+
+# --------------------------------------------------------------------------
+# The appended "extension" segment: a repurposed advisory program header
+# mapping bytes appended after the section headers and the 20-byte trailer.
+# Two consumers, each with a segment of its own:
+#
+# * the blip-free cave (flags 7, placed within branch reach of the window-
+#   read function, anywhere unclaimed -- above .bss included), which takes
+#   PT_GNU_STACK exactly as it always has;
+# * the longer program strings (flags 4, the text/data hole ONLY, never
+#   above .bss: above-bss is the Bond shape, the one structural axis the
+#   boot-looping cards differ on, and a passive read-only page has no reason
+#   to go there).  PT_GNU_STACK when it is still there; PT_NOTE when the cave
+#   already took it (nothing on the card reads PT_NOTE -- kernel 3.14 and
+#   glibc 2.21 walk PT_LOAD / PT_INTERP / PT_GNU_STACK / PT_DYNAMIC / PT_TLS).
+#
+# Sharing the cave's segment was the alternative and was rejected: the text
+# segment's identity IS its header (``PADTXT01`` + u32 first-free offset at
+# the segment's FIRST byte, :func:`progreloc.extension_segment` /
+# :func:`progtext.enumerate_program_strings` read it there so a re-Extract
+# of a relocated card lists the live strings, and a second Write appends
+# after them instead of opening another slot), and the cave's code occupies
+# a shared segment's first byte.  A second header costs one more mapped
+# read-only page, which is the mapping the text segment is anyway.
+# --------------------------------------------------------------------------
+_PT_NOTE = 4
+_EXT_PAGE = 0x1000
+_EXT_ABOVE = 32 << 20              # synthetic region above the highest PT_LOAD
+
+
+def _free_regions(raw, allow_above=True):
+    """``[(lo, hi)]`` page-aligned virtual ranges no PT_LOAD covers: the gaps
+    between consecutive segments and, when *allow_above*, 32 MB above the
+    highest one.  Raises when the ELF maps nothing."""
+    PAGE = _EXT_PAGE
     loads = [(va, mz) for _ph, va, _o, _fz, mz, _fl in _iter_phdrs(raw)]
     if not loads:
         raise RuntimeError("no PT_LOAD segments in the firmware ELF.")
     loads.sort()
-
-    # Address space no PT_LOAD covers: the gaps between consecutive segments,
-    # then everything above the highest one.
     frees = []
     for i, (va, mz) in enumerate(loads):
         lo = (va + mz + PAGE - 1) & ~(PAGE - 1)
-        hi = (loads[i + 1][0] & ~(PAGE - 1)) if i + 1 < len(loads) else lo + (32 << 20)
+        if i + 1 < len(loads):
+            hi = loads[i + 1][0] & ~(PAGE - 1)
+        elif allow_above:
+            hi = lo + _EXT_ABOVE
+        else:
+            continue
         if hi > lo:
             frees.append((lo, hi))
+    return frees
 
-    # Prefer a region within a single ARM branch (+/-32 MB) of the window-read
-    # function, which is the only kind of region caves were placed in before --
-    # a build that placed then still places identically, same VA, same entry
-    # instruction.  Falling back to a region out of branch reach costs only the
-    # two long hops (see _asm_derive_redirect_cave and the caller's entry
-    # patch), and it is what makes a real-sized build possible at all: the cave
-    # carries a stock copy of every redirected window, ~1 KB per replaced sound,
-    # so Led Zeppelin LE 1.22's 28 KB text/data gap holds about 27 sounds and
-    # its only other free region is 64 MB up.  PAD-56 replaced 201 sounds, blip-
-    # free silently fell back to the standard build, and every one of those
-    # sounds kept the scrap the option exists to remove.
-    want = (need + PAGE - 1) & ~(PAGE - 1)
+
+def _pick_region(frees, want, near_fn=None):
+    """The free region a *want*-byte extent goes in: the first within ARM
+    branch reach of *near_fn* (the cave's preference, so a build that placed
+    before still places identically), else the lowest that fits, else
+    ``None``."""
     fits = [(lo, hi) for lo, hi in frees if hi - lo >= want]  # padded extent
-    near = [f for f in fits if abs(f[0] - (fn + 8)) < _CAVE_MAX_BRANCH]
-    pick = near[0] if near else (fits[0] if fits else None)
-    if pick is None:
-        raise RuntimeError(
-            "no unclaimed address space fits a %d-byte cave -- using the "
-            "standard build." % need)
-    cave_va, gap_hi = pick
-    gap = gap_hi - cave_va
+    near = ([f for f in fits if abs(f[0] - (near_fn + 8)) < _CAVE_MAX_BRANCH]
+            if near_fn is not None else [])
+    return near[0] if near else (fits[0] if fits else None)
 
-    slot = None
+
+def _spare_phdr_slot(raw, types=(_PT_GNU_STACK,)):
+    """File offset of the first program header whose type is in *types*
+    (in *types* order), or ``None``."""
     e_phoff = struct.unpack_from("<I", raw, 0x1c)[0]
     e_phentsize = struct.unpack_from("<H", raw, 0x2a)[0]
     e_phnum = struct.unpack_from("<H", raw, 0x2c)[0]
-    for i in range(e_phnum):
-        o = e_phoff + i * e_phentsize
-        if struct.unpack_from("<I", raw, o)[0] == _PT_GNU_STACK:
-            slot = o
-            break
+    for t in types:
+        for i in range(e_phnum):
+            o = e_phoff + i * e_phentsize
+            if struct.unpack_from("<I", raw, o)[0] == t:
+                return o
+    return None
+
+
+def _append_extension_segment(raw, need, flags, near_fn=None, allow_above=True,
+                              what="segment", slots=(_PT_GNU_STACK,)):
+    """Append *need* bytes to the ELF *raw* and map them with a PT_LOAD of
+    their own (``p_flags`` = *flags*) at a virtual address no existing segment
+    claims, repurposing the first advisory header in *slots*.
+
+    The generalisation of :func:`_append_cave_segment` (which calls this with
+    ``flags=7, near_fn=fn, allow_above=True`` and is byte-identical to what it
+    produced before).  The program-text segment calls it with ``flags=4,
+    near_fn=None, allow_above=False, slots=(PT_GNU_STACK, PT_NOTE)``:
+    read-only, the lowest gap that fits, never the synthetic region above
+    .bss, and PT_NOTE when the cave has already spent PT_GNU_STACK.
+
+    Returns ``(seg_va, append_off, gap_bytes)`` -- *gap_bytes* being the size
+    of the free region the segment went in, which is how much it could still
+    grow by (:func:`_extend_extension_segment`).  Raises ``RuntimeError`` when
+    there is no repurposable header or no free region large enough."""
+    PAGE = _EXT_PAGE
+    frees = _free_regions(raw, allow_above)
+    want = (need + PAGE - 1) & ~(PAGE - 1)
+    pick = _pick_region(frees, want, near_fn)
+    if pick is None:
+        raise RuntimeError(
+            "no unclaimed address space fits a %d-byte %s -- using the "
+            "standard build." % (need, what))
+    seg_va, gap_hi = pick
+    gap = gap_hi - seg_va
+
+    slot = _spare_phdr_slot(raw, slots)
     if slot is None:
         raise RuntimeError(
-            "firmware has no PT_GNU_STACK header to repurpose for the cave.")
+            "firmware has no PT_GNU_STACK header to repurpose for the %s."
+            % what)
 
     # Page-align the appended data so p_offset == p_vaddr (mod PAGE), which the
     # loader requires, and pad the file out to the whole declared extent -- a
@@ -7537,13 +7907,112 @@ def _append_cave_segment(raw, need, fn):
     struct.pack_into("<8I", raw, slot,
                      1,              # p_type = PT_LOAD
                      append_off,     # p_offset
-                     cave_va,        # p_vaddr
-                     cave_va,        # p_paddr
+                     seg_va,         # p_vaddr
+                     seg_va,         # p_paddr
                      want,           # p_filesz
                      want,           # p_memsz
-                     7,              # p_flags = R|W|X (BASEVAR is written)
+                     flags,          # p_flags
                      PAGE)           # p_align
-    return cave_va, append_off, gap
+    return seg_va, append_off, gap
+
+
+def _find_extension_segment(raw):
+    """The program-text extension segment a previous Write left in *raw*, as
+    ``(va, off, size, used)``, or ``None`` on an ELF without one (stock, or
+    cave-only).
+
+    It is the PT_LOAD whose first bytes are the ``PADTXT01`` header
+    (:data:`progreloc.EXT_MAGIC`) -- the same test
+    :func:`progreloc.extension_segment` applies, so the engine, the program-
+    text planner and a re-Extract all agree on which segment it is.  *used*
+    is the header's u32: the first free offset from the segment's start, the
+    12 header bytes included.  New strings go at ``off + used``."""
+    from . import progreloc
+    ext = progreloc.extension_segment(raw)
+    if ext is None:
+        return None
+    return ext["base_va"], ext["seg_off"], ext["capacity"], ext["used"]
+
+
+def _extension_room(raw, va):
+    """How many bytes of virtual address space the segment at *va* could
+    occupy before the next PT_LOAD above it (page-aligned start); 32 MB when
+    nothing sits above it."""
+    above = [v & ~(_EXT_PAGE - 1)
+             for _ph, v, _o, _fz, _mz, _fl in _iter_phdrs(raw) if v > va]
+    return (min(above) - va) if above else _EXT_ABOVE
+
+
+def _extend_extension_segment(raw, need):
+    """Grow the program-text extension segment so *need* more bytes fit
+    after its used part; returns the new ``(va, off, size, used)``.
+
+    The segment has to be the last thing in the file (it always is: it was
+    appended at EOF, and the only other appended segment -- the cave -- is
+    built from the STOCK firmware, so it can never land after a text segment),
+    and it stays there: the file is padded to the page-rounded extent and
+    the PT_LOAD's ``p_filesz``/``p_memsz`` follow.  Raises ``RuntimeError``
+    when there is no segment, it is not at EOF, or the next segment's
+    address space is in the way."""
+    seg = _find_extension_segment(raw)
+    if seg is None:
+        raise RuntimeError("the firmware has no extension segment to extend.")
+    va, off, size, used = seg
+    if off + size != len(raw):
+        raise RuntimeError(
+            "the firmware's extension segment is not at the end of the file, "
+            "so it can't be extended.")
+    PAGE = _EXT_PAGE
+    want = (used + need + PAGE - 1) & ~(PAGE - 1)
+    if want <= size:
+        return seg
+    if want > _extension_room(raw, va):
+        raise RuntimeError(
+            "the firmware's extension segment can't grow to %d bytes: the "
+            "next segment's address space is in the way." % want)
+    raw.extend(b"\0" * (off + want - len(raw)))
+    for ph, v, _o, _fz, _mz, _fl in _iter_phdrs(raw):
+        if v == va:
+            struct.pack_into("<I", raw, ph + 16, want)   # p_filesz
+            struct.pack_into("<I", raw, ph + 20, want)   # p_memsz
+            break
+    return va, off, want, used
+
+
+def _text_reloc_plan(raw):
+    """Where longer program text would go in *raw*: ``(reloc, why)`` with
+    *reloc* the ``{"base_va", "capacity", "used"}`` dict
+    :func:`progtext.plan_writes` takes (``None`` when the ELF can't take a
+    text segment, *why* saying so).
+
+    An existing text segment is reused (``used`` = its first free offset,
+    ``capacity`` = the address space it can grow into); otherwise the
+    placement is the one :func:`_append_extension_segment` will make -- the
+    lowest page-aligned gap between the PT_LOADs, never above .bss -- so the
+    plan's pointer values are final before a byte of the file changes."""
+    from . import progreloc
+    seg = _find_extension_segment(raw)
+    if seg is not None:
+        va, off, size, used = seg
+        if off + size != len(raw):
+            return None, ("its extension segment is not at the end of the "
+                          "file, so it can't be extended")
+        return {"base_va": va, "capacity": _extension_room(raw, va),
+                "used": used}, ""
+    if _spare_phdr_slot(raw, (_PT_GNU_STACK, _PT_NOTE)) is None:
+        return None, ("the game program has no spare program header to map "
+                      "new space with")
+    try:
+        frees = _free_regions(raw, allow_above=False)
+    except RuntimeError as e:
+        return None, str(e)
+    pick = _pick_region(frees, _EXT_PAGE)
+    if pick is None:
+        return None, ("the game program has no free address space between "
+                      "its text and data segments")
+    lo, hi = pick
+    return {"base_va": lo, "capacity": hi - lo,
+            "used": progreloc.EXT_HEADER_LEN}, ""
 
 
 def _cave_entry_patch(fn, cave_va):

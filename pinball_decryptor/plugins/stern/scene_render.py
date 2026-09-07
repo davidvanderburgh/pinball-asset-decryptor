@@ -459,7 +459,8 @@ def _layout_edit(layout_edits, text):
 
 
 def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
-                  colors=None, state=0, group=None, layout_edits=None):
+                  colors=None, state=0, group=None, layout_edits=None,
+                  text_edits=None):
     """Composite *layout* into an RGB ``PIL.Image``, or ``None`` if nothing
     could be drawn.  Pass *fonts* (``fontrender.load_fonts`` output) to render
     many scenes without re-reading the glyph manifest each time, and *frame* to
@@ -475,6 +476,16 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
     things the Write path patches into the radium.  Unlike a colour, a layout
     edit applies to the OUTLINE pass too: the border has to move and grow
     with its fill or the pair comes apart.
+
+    *text_edits* is ``{display string: replacement}`` of pending Replace Text
+    edits that reach this scene (its own radium rows, and game-program rows
+    whose original is a placeholder this scene draws): a line whose string is
+    a key is drawn with the REPLACEMENT — same rect, alignment, font, size,
+    colour and outline pair, only the letters change.  A longer replacement
+    simply runs on inside (or past) its box, exactly as the machine would
+    draw it; nothing is re-fitted.  Colours and layout edits stay keyed on
+    the ORIGINAL string, which is how ``colors.tsv`` / ``layout.tsv`` name
+    their rows.
     """
     try:
         import numpy as np
@@ -534,8 +545,12 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
             edit = _layout_edit(layout_edits, tx.get("text"))
             dx, dy, align_pick, scale = edit if edit else (0.0, 0.0, None,
                                                             1.0)
+            # A replacement typed on the Text tab but not built yet: draw
+            # the new letters in the old line's place.  Every other lookup
+            # below stays on the ORIGINAL string (the manifests' key).
+            shown = (text_edits or {}).get(tx["text"]) or tx["text"]
             try:
-                ink, _missing = fr.render_text(font, tx["text"],
+                ink, _missing = fr.render_text(font, shown,
                                                metric_scale=scale)
             except Exception:
                 continue
@@ -588,13 +603,14 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
 
 
 def render_scene(assets_dir, card_path, fonts=None, layouts=None,
-                 background=None, colors=None, state=0, layout_edits=None):
+                 background=None, colors=None, state=0, layout_edits=None,
+                 text_edits=None):
     """Preview for one scene by its ``scene.radium`` card path, or ``None``."""
     if layouts is None:
         layouts = load_layouts(assets_dir)
     return render_layout(assets_dir, layouts.get(card_path), fonts=fonts,
                          background=background, colors=colors, state=state,
-                         layout_edits=layout_edits)
+                         layout_edits=layout_edits, text_edits=text_edits)
 
 
 def layout_for_scene_dir(layouts, scene_dir):

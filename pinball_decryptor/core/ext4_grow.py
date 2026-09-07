@@ -341,6 +341,20 @@ def _debugfs_file_size(tools, dev, card_rel, timeout):
     return int(m.group(1)) if (rc == 0 and m) else None
 
 
+def _wants_exec(src):
+    """Should the inode debugfs creates for *src* be executable?  An ELF
+    (the game program) always; anything else only when the host copy already
+    carries an execute bit.  Content-based first so the verdict is the same
+    on a Windows host, whose stat reports no execute bits at all."""
+    try:
+        with open(src, "rb") as f:
+            if f.read(4) == b"\x7fELF":
+                return True
+        return bool(os.stat(src).st_mode & 0o111)
+    except OSError:
+        return False
+
+
 def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
     """macOS growth: replace each asset inside the ext4 partition via debugfs
     (``kill_file`` frees the old blocks, ``rm`` drops the entry, ``write``
@@ -402,6 +416,16 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
                 raise Ext4GrowError(
                     "debugfs wrote %s B of %s B for %s — the file was left "
                     "incomplete on the card image." % (got, want, card_rel))
+            if _wants_exec(src):
+                # debugfs ``write`` creates the inode with the HOST file's
+                # mode, and a staged game ELF opened "wb" is 0644 unless the
+                # engine chmod'ed it: the card's game_monitor then execs it,
+                # gets EACCES, and shows RESTARTING GAME forever.  Stock cards
+                # carry the game at 0100775 and every asset at 0100664, so
+                # only an executable (an ELF, or a source already marked
+                # executable) is promoted -- a grown video keeps its mode.
+                _debugfs(tools, dev,
+                         "set_inode_field %s mode 0100755" % tgt, 120)
             grown += 1
             log("  grew %s" % card_rel, "info")
     except Ext4GrowError as e:

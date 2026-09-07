@@ -436,8 +436,31 @@ def _pick(elements, state, group):
     return _in_group(elements, group)
 
 
+def _layout_edit(layout_edits, text):
+    """The pending layout edit for display string *text* as
+    ``(dx, dy, align code or None, metric scale)``, or ``None`` when the
+    string has none (or the edit is neutral) — so the untouched path stays
+    exactly the render it has always been."""
+    if not layout_edits or not text:
+        return None
+    edit = layout_edits.get(text)
+    if not edit:
+        return None
+    from . import text_layout as tl
+    try:
+        e = tl.normalize(edit)
+    except Exception:
+        return None
+    if tl.is_neutral(e):
+        return None
+    align = tl.align_code(e["align"]) if e["align"] is not None else None
+    scale = (e["size"] / 100.0) if e["size"] else 1.0
+    return e["dx"], e["dy"], align, scale
+
+
 def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
-                  colors=None, state=0, group=None):
+                  colors=None, state=0, group=None, layout_edits=None,
+                  text_edits=None):
     """Composite *layout* into an RGB ``PIL.Image``, or ``None`` if nothing
     could be drawn.  Pass *fonts* (``fontrender.load_fonts`` output) to render
     many scenes without re-reading the glyph manifest each time, and *frame* to
@@ -446,6 +469,23 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
     *background* names one of :data:`BACKGROUNDS` (default black, the machine's
     own).  *colors* is ``{display string: (r, g, b)}`` of pending text-colour
     edits, so the preview shows a colour the user has picked but not built yet.
+    *layout_edits* is ``{display string: edit}`` of pending text-LAYOUT edits
+    (:mod:`text_layout` rows: ``dx``/``dy``/``align``/``size``) for this
+    scene: a matching line is drawn shifted by ``dx, dy``, aligned as the edit
+    says, with its glyph metrics scaled by ``size / 100`` — the same three
+    things the Write path patches into the radium.  Unlike a colour, a layout
+    edit applies to the OUTLINE pass too: the border has to move and grow
+    with its fill or the pair comes apart.
+
+    *text_edits* is ``{display string: replacement}`` of pending Replace Text
+    edits that reach this scene (its own radium rows, and game-program rows
+    whose original is a placeholder this scene draws): a line whose string is
+    a key is drawn with the REPLACEMENT — same rect, alignment, font, size,
+    colour and outline pair, only the letters change.  A longer replacement
+    simply runs on inside (or past) its box, exactly as the machine would
+    draw it; nothing is re-fitted.  Colours and layout edits stay keyed on
+    the ORIGINAL string, which is how ``colors.tsv`` / ``layout.tsv`` name
+    their rows.
     """
     try:
         import numpy as np
@@ -500,8 +540,18 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
             # one it uses.  Without this the preview drew every scene on the
             # card at whichever size the extract happened to keep first.
             font = fr.font_at_size(font, tx.get("font_px") or 0)
+            # A layout the user has changed but not built yet: move, align
+            # and size, exactly the bytes the Write path rewrites.
+            edit = _layout_edit(layout_edits, tx.get("text"))
+            dx, dy, align_pick, scale = edit if edit else (0.0, 0.0, None,
+                                                            1.0)
+            # A replacement typed on the Text tab but not built yet: draw
+            # the new letters in the old line's place.  Every other lookup
+            # below stays on the ORIGINAL string (the manifests' key).
+            shown = (text_edits or {}).get(tx["text"]) or tx["text"]
             try:
-                ink, _missing = fr.render_text(font, tx["text"])
+                ink, _missing = fr.render_text(font, shown,
+                                               metric_scale=scale)
             except Exception:
                 continue
             rgba = list(tx.get("rgba") or (1, 1, 1, 1))
@@ -521,21 +571,27 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
             # two independent scenes (CLOCK and a 199px "LINE 1" screen) centre
             # their text on exactly 680.00 of a 1360-wide stage, where the
             # width reading gives 679 and 694.3.
-            left = rect[0] + tx.get("x", 0)
-            right = rect[2] + tx.get("x", 0)
+            # A move is a shift of the keyframe's rect, which the drawn box
+            # follows edge for edge (the Write path adds dx/dy to L,T,R,B).
+            left = rect[0] + tx.get("x", 0) + dx
+            right = rect[2] + tx.get("x", 0) + dx
             # The align word picks the edge: 0 left, 1 centre, 2 right — read
             # off the boot screen, where "U.S.A." is 0 and sits left while
             # "V0.01" is 2 and sits right, cross-checked against CLOCK being 1
             # and verified centred.  Centring everything mis-placed the rest.
             align = tx.get("align", 1)
+            if align_pick is not None:
+                align = align_pick
             if align == 0:
                 x = left
             elif align == 2:
                 x = right - ink.size[0]
             else:
                 x = left + (right - left - ink.size[0]) / 2.0
-            # the track y is the baseline, so lift by the font's ascent
-            y = tx.get("y", 0) - font.get("ascent", 0)
+            # the track y is the baseline, so lift by the font's ascent (the
+            # scaled one when a size is pending: the baseline stays put and
+            # the ink grows up from it, as it does when the table is scaled)
+            y = tx.get("y", 0) + dy - font.get("ascent", 0) * scale
             # BC1 ink adds (black draws nothing, as on the machine); alpha
             # glyphs lay OVER the frame — the outline pass under a title is
             # black and would otherwise vanish into whatever it covers.
@@ -547,12 +603,14 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
 
 
 def render_scene(assets_dir, card_path, fonts=None, layouts=None,
-                 background=None, colors=None, state=0):
+                 background=None, colors=None, state=0, layout_edits=None,
+                 text_edits=None):
     """Preview for one scene by its ``scene.radium`` card path, or ``None``."""
     if layouts is None:
         layouts = load_layouts(assets_dir)
     return render_layout(assets_dir, layouts.get(card_path), fonts=fonts,
-                         background=background, colors=colors, state=state)
+                         background=background, colors=colors, state=state,
+                         layout_edits=layout_edits, text_edits=text_edits)
 
 
 def layout_for_scene_dir(layouts, scene_dir):

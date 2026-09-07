@@ -10,8 +10,8 @@ showing EBIRAH, because the intro title is drawn from the ELF's string table.
 Two structures matter (validated on Godzilla 1.15 Pro):
 
 * **String spans** — plain NUL-terminated ASCII in the PT_LOAD file ranges.
-  Patched IN PLACE like radium text: replacement must fit the original's byte
-  length and is NUL-padded (a C string ends at the first NUL, so unlike the
+  Patched IN PLACE like radium text when the replacement fits the original's
+  byte length; NUL-padded (a C string ends at the first NUL, so unlike the
   radium patch there is no visible space padding).
 
 * **Name groups with interior pointers** — the UI references strings through
@@ -26,21 +26,46 @@ Two structures matter (validated on Godzilla 1.15 Pro):
   ``"BIOLLANTE"`` lands the pointers on ``+6``.  A tail row's byte budget is
   therefore its HOST string's length, not its own.
 
-Only words that sit inside a run of >= 5 identical dwords are ever treated as
-(or patched as) name-group pointers — a lone data word that happens to equal a
-string's address is left alone, so a false positive cannot corrupt code or
-data.  Everything here is best-effort: an ELF that doesn't parse yields no
-rows, and any edit that can't be resolved safely is skipped with a warning
-rather than partially applied.
+**Longer than the original.**  A replacement that does NOT fit its slot can
+still be applied when the caller offers an extension segment (``reloc`` in
+:func:`plan_writes`): the original bytes stay untouched, ``new_text + NUL``
+goes into a blob the caller maps as a new read-only ``PT_LOAD`` (in the
+text/data hole, through the repurposed ``PT_GNU_STACK`` header — the
+mechanism ``plans/spike2_longer_program_text.md`` proved under qemu), and
+EVERY reference the census can see is retargeted at the copy: the name
+groups, lone pointer words (adjustment captions, high-score default records,
+per-monster structs, literal pools) and ``movw``/``movt`` immediate pairs in
+code.  :mod:`.progreloc` is that census and the instruction codecs; a span
+with no visible reference is not growable (nothing could be repointed, so a
+longer copy would never be shown) and keeps the in-place rule.  A reference
+INTO the string (a tail) is retargeted to ``copy + new_delta`` and needs the
+new text to END with the (possibly edited) tail, the same rule the in-place
+tail move already enforces.
+
+Reuse of an extension segment: the caller stores ``b"PADTXT01" + u32 used``
+at the segment's start (:func:`progreloc.extension_segment` reads it back)
+and passes ``reloc = {"base_va", "capacity", "used"}``; the blob is placed
+from ``used`` on, so a second Write (or a Write onto a re-extracted, already
+relocated card) extends rather than clobbers.  ``base_va = 0`` is a legal
+sizing pass — the blob and the set of applied edits do not depend on the
+base, only the pointer values do — so the caller may size first, allocate,
+then plan again with the real base.
+
+Everything here is best-effort: an ELF that doesn't parse yields no rows, and
+any edit that can't be resolved safely is skipped with a warning rather than
+partially applied.
 """
 
 import re
 import struct
 
+from . import progreloc
 from .radium import _has_letter, _is_identifier_like
 
 # Longest string offered for editing.  Longer runs are EULA / service-menu
 # paragraphs and engine diagnostics — not the display text a modder retitles.
+# It is also the longest RELOCATED replacement (the extension segment's blob
+# holds ~1000 lines of that size in a 28 KB hole).
 MAX_EDIT_LEN = 96
 # Spans shorter than this with no spaces are too ambiguous to expose (raw
 # tokens, file stems, enum words).
@@ -124,11 +149,18 @@ def _seg_funcs(raw):
 
 def _display_spans(raw, ranges):
     """Every display-candidate string span: ``[(file_off, text)]``, file order.
-    *ranges* is the sorted PT_LOAD list from :func:`_load_ranges`."""
+    *ranges* is the sorted PT_LOAD list from :func:`_load_ranges`.  The
+    header of a text extension segment (:data:`progreloc.EXT_MAGIC`) is not
+    a string, however printable it looks."""
+    ext = progreloc.extension_segment(raw)
+    hdr = ((ext["seg_off"], ext["seg_off"] + progreloc.EXT_HEADER_LEN)
+           if ext else None)
     out = []
     for m in _SPAN_RE.finditer(raw):
         off = m.start()
         if not any(lo <= off < hi for lo, hi in ranges):
+            continue
+        if hdr and hdr[0] <= off < hdr[1]:
             continue
         s = m.group().decode("latin1")
         if is_display_string(s):
@@ -153,70 +185,95 @@ def _group_pointer_words(raw):
     return {int(i) * 4: int(a[i]) for i in idx}
 
 
-def _tail_map(raw, spans):
-    """``{host_off: [(delta, tail_text, [ptr_word_offsets])]}`` for every
-    display span that a name-group points INTO (delta > 0)."""
+def _census(raw, spans):
+    """:func:`progreloc.reference_census` over *raw*, ``{}`` when the ELF's
+    program headers don't parse."""
     try:
-        off2va, va2off = _seg_funcs(raw)
+        segs = progreloc.load_segments(raw)
+        return progreloc.reference_census(raw, spans, segs)
     except Exception:
         return {}
-    ptr_words = _group_pointer_words(raw)
-    if not ptr_words:
-        return {}
-    import bisect
-    starts = [o for o, _s in spans]
-    by_target = {}                      # target file_off -> [word_off]
-    for woff, val in ptr_words.items():
-        fo = va2off(val)
-        if fo is not None:
-            by_target.setdefault(fo, []).append(woff)
+
+
+def _tail_map(raw, spans, census=None):
+    """``{host_off: [(delta, tail_text, [refs])]}`` for every display span
+    that some reference points INTO (delta > 0), one entry per delta — name
+    groups as before, and now lone words and movw/movt pairs too (*refs* are
+    :func:`progreloc.reference_census` records)."""
+    if census is None:
+        census = _census(raw, spans)
+    by_off = dict(spans)
     tails = {}
-    for tgt, woffs in by_target.items():
-        i = bisect.bisect_right(starts, tgt) - 1
-        if i < 0:
+    for off, refs in census.items():
+        text = by_off.get(off)
+        if text is None:
             continue
-        host_off, host_text = spans[i]
-        delta = tgt - host_off
-        if delta <= 0 or delta >= len(host_text):
-            continue
-        tails.setdefault(host_off, []).append(
-            (delta, host_text[delta:], sorted(woffs)))
-    for v in tails.values():
-        v.sort()
+        per = {}
+        for r in refs:
+            d = r["delta"]
+            if 0 < d < len(text):
+                per.setdefault(d, []).append(r)
+        if per:
+            tails[off] = sorted(((d, text[d:], rs) for d, rs in per.items()),
+                                key=lambda t: t[0])
     return tails
 
 
 def enumerate_program_strings(raw):
     """The editable program-text rows for the manifest:
-    ``[{"text", "budget", "tail_of"}]`` in file order, deduped by text.
+    ``[{"text", "budget", "tail_of", "growable", "refs"}]`` in file order,
+    deduped by text.
 
-    ``budget`` is the byte length a replacement must fit (a tail row's budget
-    is its host's length — the tail can move within the host).  ``tail_of``
-    names the host text for tail rows, ``None`` for plain strings.  ``text`` /
-    ``tail_of`` are in manifest form (:func:`encode_text`); ``budget`` counts
-    the raw on-card bytes."""
+    ``budget`` is the byte length a replacement must fit: :data:`MAX_EDIT_LEN`
+    for a *growable* row (every reference to the string is visible to the
+    census, so a longer replacement can be placed in new space and pointed
+    at — see the module docstring), otherwise the original's own length (a
+    tail row's budget is its host's).  ``tail_of`` names the host text for
+    tail rows, ``None`` for plain strings; a tail row inherits its host's
+    ``growable``.  ``refs`` counts the references the census found (a
+    five-word name group counts once) — 0 means nothing in the program
+    points at the string, which is what a dead original looks like after a
+    relocation.  ``text`` / ``tail_of`` are in manifest form
+    (:func:`encode_text`); ``budget`` counts the raw on-card bytes."""
     ranges = _load_ranges(raw)
     if not ranges:
         return []
     spans = _display_spans(raw, ranges)
-    tails = _tail_map(raw, spans)
+    census = _census(raw, spans)
+    tails = _tail_map(raw, spans, census)
     by_off = dict(spans)
     rows = []
     seen = {}
     for off, text in spans:
-        if text not in seen:
-            seen[text] = {"text": encode_text(text), "budget": len(text),
-                          "tail_of": None}
-            rows.append(seen[text])
+        n = len(census.get(off, []))
+        r = seen.get(text)
+        if r is None:
+            r = {"text": encode_text(text), "budget": len(text),
+                 "tail_of": None, "growable": n > 0, "refs": n}
+            seen[text] = r
+            rows.append(r)
+        else:
+            # A duplicate span of the same text: an edit patches every copy,
+            # so the row is growable only when each copy can be repointed.
+            r["refs"] += n
+            if n == 0:
+                r["growable"] = False
+    for r in rows:
+        if r["growable"]:
+            r["budget"] = MAX_EDIT_LEN
     for host_off, tinfos in sorted(tails.items()):
         host_text = by_off.get(host_off)
-        for _delta, ttext, _ptrs in tinfos:
+        host = seen.get(host_text)
+        for _delta, ttext, trefs in tinfos:
             if not is_display_string(ttext):
                 continue        # '.'-style fragment: not worth a row of its own
             r = seen.get(ttext)
             if r is None:
-                r = {"text": encode_text(ttext), "budget": len(host_text),
-                     "tail_of": encode_text(host_text)}
+                growable = bool(host and host["growable"])
+                r = {"text": encode_text(ttext),
+                     "budget": MAX_EDIT_LEN if growable else len(host_text),
+                     "tail_of": encode_text(host_text),
+                     "growable": growable, "refs": len(trefs)}
                 seen[ttext] = r
                 rows.append(r)
             elif r["tail_of"] is None:
@@ -226,7 +283,7 @@ def enumerate_program_strings(raw):
     return rows
 
 
-def _settings_captions(table, mode, buf):
+def _settings_captions(table, mode, buf, extra=None):
     """``{adjustment_id: caption text}`` read through *buf* (the ELF bytes,
     possibly with pending writes applied) at the descriptor offsets *table*
     found in the pristine bytes.
@@ -237,18 +294,25 @@ def _settings_captions(table, mode, buf):
     layout always comes from the pristine *table* — a text edit never moves a
     descriptor — except the five-language indirection word, which IS a name
     group and can be repointed by the very writes being checked, so it is
-    re-read from *buf*."""
+    re-read from *buf*.  *extra* = ``(base_va, blob_bytes)`` maps a planned
+    extension segment (text relocated OUT of the pristine segments) so a
+    repointed caption still reads as its new text."""
     from .adjustments import OFF_MENU_LABEL, _is_caption
+    ext_lo, ext_bytes = extra if extra else (None, b"")
 
     def cstr(va):
+        src = buf
         o = table._off(va)
         if o is None:
-            return None
-        e = buf.find(b"\x00", o, o + 96)
+            if ext_lo is not None and ext_lo <= va < ext_lo + len(ext_bytes):
+                src, o = ext_bytes, va - ext_lo
+            else:
+                return None
+        e = src.find(b"\x00", o, o + 96)
         if e < 0:
             return None
         try:
-            s = bytes(buf[o:e]).decode("latin1")
+            s = bytes(src[o:e]).decode("latin1")
         except Exception:
             return None
         return s if s.isprintable() else None
@@ -336,32 +400,77 @@ def _new_caption_collisions(captions, final):
                   if len(idxs) > 1 and len({captions[i] for i in idxs}) > 1)
 
 
-def plan_writes(raw, edits, log=None):
+class _Blob(object):
+    """The extension segment's new bytes for one plan: strings appended
+    ``text + NUL`` at 4-aligned offsets from ``reloc["used"]`` on, deduped
+    by text, refused once ``capacity`` would be exceeded.  Layout depends on
+    the edits and ``used`` only — never on ``base_va`` — which is what makes
+    a sizing pass at base 0 and the real pass agree byte for byte."""
+
+    def __init__(self, reloc):
+        self.base_va = int(reloc.get("base_va", 0))
+        self.capacity = int(reloc.get("capacity", 0))
+        self.used = max(0, int(reloc.get("used", 0)))
+        self.data = bytearray()
+        self._where = {}
+
+    def place(self, text):
+        """The VA the copy of *text* gets, or ``None`` when it doesn't fit."""
+        if text in self._where:
+            return self.base_va + self.used + self._where[text]
+        pad = (-(self.used + len(self.data))) & 3
+        body = text.encode("latin1", "replace") + b"\x00"
+        if self.used + len(self.data) + pad + len(body) > self.capacity:
+            return None
+        self.data.extend(b"\x00" * pad)
+        off = len(self.data)
+        self.data.extend(body)
+        self._where[text] = off
+        return self.base_va + self.used + off
+
+
+def plan_writes(raw, edits, log=None, reloc=None):
     """Resolve *edits* (``{original: replacement}``) against the ELF *raw*
-    and return ``(writes, n_applied)`` where *writes* is a flat
-    ``[(file_offset, bytes)]`` patch list.
+    and return ``(writes, n_applied, blob)`` where *writes* is a flat
+    ``[(file_offset, bytes)]`` patch list and *blob* the bytes to place in
+    the extension segment (``b""`` unless *reloc* is given and an edit
+    needed it).
+
+    *reloc* = ``None`` (every edit must fit its slot) or ``{"base_va": int,
+    "capacity": int, "used": int}`` describing the extension segment the
+    caller has (or will) map at *base_va*: *capacity* bytes, the first
+    *used* of them taken (the ``PADTXT01`` header and any earlier blob).
+    The blob starts at ``base_va + used``.
 
     Rules per host span (see the module docstring):
 
       * plain span, edit fits -> in-place overwrite, NUL-padded.
+      * edit longer than the slot, *reloc* given and the span growable
+        (every reference visible) -> the original bytes stay, ``new + NUL``
+        joins the blob, and every reference — name-group words, lone words,
+        movw/movt pairs — is retargeted at the copy (tails at
+        ``copy + new_delta``).  Refused over :data:`MAX_EDIT_LEN` bytes or
+        when the blob would exceed *capacity*.
       * span with pointer tails: the (possibly edited) tail text must be a
-        suffix of the (possibly edited) full text; the group pointers move to
-        the suffix position.  A tail-only edit rewrites the host as
-        ``prefix + new_tail`` when that fits.
+        suffix of the (possibly edited) full text; the tail references move
+        to the suffix position.  A tail-only edit rewrites the host as
+        ``prefix + new_tail`` (relocating it when that no longer fits and the
+        host is growable).
       * any conflict (too long, tail not a suffix, '%'-tokens changed) skips
         the whole span with a warning — never a partial patch.
       * an edit that would leave two operator settings with the same caption
         is skipped (:func:`_drop_caption_collisions` — the machine refuses to
         boot such a card), and if a collision still arrives sideways (e.g. a
         standalone-name rename inside a caption) the WHOLE plan is withheld
-        rather than shipped.
+        rather than shipped.  The check reads captions through the planned
+        writes AND the blob, so a relocated caption is still seen.
     """
     log = log or (lambda *a, **k: None)
     ranges = _load_ranges(raw)
     if not ranges:
         log("Program text: the game binary didn't parse as an ELF; "
             "no program strings patched.", "warning")
-        return [], 0
+        return [], 0, b""
     # Manifest rows arrive in encoded form (\n escapes); resolve raw-vs-raw.
     edits = {decode_text(k): decode_text(v) for k, v in edits.items()}
     # The settings-caption census, for the duplicate-name boot guard.  Builds
@@ -380,11 +489,13 @@ def plan_writes(raw, edits, log=None):
     if captions:
         edits = _drop_caption_collisions(captions, edits, log)
     spans = _display_spans(raw, ranges)
-    tails = _tail_map(raw, spans)
+    census = _census(raw, spans)
+    tails = _tail_map(raw, spans, census)
     try:
         off2va, _va2off = _seg_funcs(raw)
     except Exception:
-        return [], 0
+        return [], 0, b""
+    blob = _Blob(reloc) if reloc is not None else None
 
     applied = set()
     writes = []
@@ -399,14 +510,23 @@ def plan_writes(raw, edits, log=None):
             % (enc(old), enc(new), where), "warning")
         return False
 
+    def _retarget(ref, new_va):
+        """Writes moving *ref* to *new_va*, provided it still encodes the
+        address the census saw (defensive: it always should)."""
+        if progreloc.reference_value(raw, ref) != ref["va"]:
+            return []
+        return progreloc.retarget_writes(raw, ref, new_va)
+
     for off, text in spans:
         full_new = edits.get(text)
         tinfos = tails.get(off, [])
-        tail_edits = [(d, tt, ptrs, edits.get(tt)) for (d, tt, ptrs) in tinfos]
+        tail_edits = [(d, tt, refs, edits.get(tt)) for (d, tt, refs) in tinfos]
         if full_new is None and not any(tn is not None
                                         for (_d, _t, _p, tn) in tail_edits):
             continue
         budget = len(text)
+        refs = census.get(off, [])
+        growable = blob is not None and bool(refs)
 
         new_full = full_new
         if new_full is None:
@@ -419,26 +539,41 @@ def plan_writes(raw, edits, log=None):
                 continue
             d, tt, _ptrs, tn = edited[0]
             new_full = text[:d] + tn
-            if len(new_full) > budget:
+            if len(new_full) > budget and not growable:
                 log('Program text: renaming "%s" to "%s" makes "%s" %d bytes '
                     "but only %d fit. Edit the full line too (any text ending "
                     'in "%s", e.g. shorten the part before the name).'
                     % (enc(tt), enc(tn), enc(new_full), len(new_full),
                        budget, enc(tn)), "warning")
                 continue
-        if len(new_full) > budget:
-            log('Program text: "%s" -> "%s" is %d bytes but the original is '
-                "only %d; skipped. Use a shorter replacement."
+        if len(new_full) > budget and not growable:
+            # The Text tab offers longer text on any program row it has not
+            # been told is immovable (a project extracted before the tool
+            # measured them carries no such flag), so this warning is where
+            # the user learns WHICH string that was — it has to say why,
+            # not just that it is too long.
+            log('Program text: "%s" -> "%s" is %d bytes but only %d fit, and '
+                "the game reads this line in a way the tool can't follow, so "
+                "it is patched in place and can't be made longer; skipped. "
+                "Use a shorter replacement."
                 % (enc(text), enc(new_full), len(new_full), budget),
+                "warning")
+            continue
+        if len(new_full) > MAX_EDIT_LEN:
+            log('Program text: "%s" -> "%s" is %d bytes; the longest a line '
+                "can be is %d bytes. Skipped."
+                % (enc(text), enc(new_full), len(new_full), MAX_EDIT_LEN),
                 "warning")
             continue
         if not _fmt_ok(text, new_full, "full line"):
             continue
+        relocate = len(new_full) > budget
 
-        # Every pointer tail must land on a suffix of the new text.
-        ptr_moves = []
+        # Every reference INTO the string must land on a suffix of the new
+        # text; collect (ref, new_delta) for the ones that have to move.
+        tail_moves = []
         ok = True
-        for d, tt, ptrs, tn in tail_edits:
+        for d, tt, trefs, tn in tail_edits:
             want = tn if tn is not None else tt
             if tn is not None and not _fmt_ok(tt, tn, "standalone name"):
                 ok = False
@@ -452,31 +587,53 @@ def plan_writes(raw, edits, log=None):
                 ok = False
                 break
             new_delta = len(new_full) - len(want)
-            if new_delta != d:
-                va = off2va(off)
-                if va is None:
-                    ok = False
-                    break
-                old_ptr = struct.pack("<I", va + d)
-                new_ptr = struct.pack("<I", va + new_delta)
-                for w in ptrs:
-                    if raw[w:w + 4] == old_ptr:
-                        ptr_moves.append((w, new_ptr))
+            if relocate or new_delta != d:
+                tail_moves.extend((r, new_delta) for r in trefs)
         if not ok:
             continue
 
-        if new_full != text:
-            writes.append((off, new_full.encode("latin1", "replace")
-                           .ljust(budget, b"\x00")))
-        writes.extend(ptr_moves)
+        moved = 0
+        if relocate:
+            copy_va = blob.place(new_full)
+            if copy_va is None:
+                log('Program text: "%s" -> "%s" is longer than the original '
+                    "and the free space for longer text (%d KB) is used up; "
+                    "skipped. Shorten it, or fewer long edits."
+                    % (enc(text), enc(new_full),
+                       (blob.capacity + 1023) // 1024), "warning")
+                continue
+            span_writes = []
+            for r in refs:
+                if r["delta"] == 0:
+                    span_writes.extend(_retarget(r, copy_va))
+            for r, nd in tail_moves:
+                span_writes.extend(_retarget(r, copy_va + nd))
+            moved = len(span_writes)
+        else:
+            va = off2va(off)
+            span_writes = []
+            if new_full != text:
+                span_writes.append((off, new_full.encode("latin1", "replace")
+                                    .ljust(budget, b"\x00")))
+            if tail_moves and va is None:
+                continue
+            for r, nd in tail_moves:
+                ws = _retarget(r, va + nd)
+                span_writes.extend(ws)
+                moved += len(ws)
+
+        writes.extend(span_writes)
         applied.add(text if full_new is not None else None)
         for d, tt, _p, tn in tail_edits:
             if tn is not None:
                 applied.add(tt)
         if new_full != text:
-            log('Program text: "%s" -> "%s"%s.'
-                % (enc(text), enc(new_full),
-                   " (standalone-name pointer moved)" if ptr_moves else ""),
+            if relocate:
+                how = (" (longer than the original: placed in new space, "
+                       "%d reference word(s) repointed)" % moved)
+            else:
+                how = " (standalone-name pointer moved)" if moved else ""
+            log('Program text: "%s" -> "%s"%s.' % (enc(text), enc(new_full), how),
                 "info")
 
     applied.discard(None)
@@ -485,18 +642,23 @@ def plan_writes(raw, edits, log=None):
             log('Program text: "%s" wasn\'t found in the game program; '
                 "skipped." % original, "warning")
 
+    blob_bytes = bytes(blob.data) if blob is not None else b""
+
     # Backstop for the caption guard: a collision can arrive SIDEWAYS — a
     # standalone-name (tail) rename rewrites its host string, and when that
     # host is a settings caption the pre-plan check above never saw the
     # caption's text in the edit keys.  Re-read every caption through the
-    # planned writes; if two settings would end up sharing a name, withhold
-    # the whole plan rather than ship a card the machine refuses to boot.
+    # planned writes (and the blob); if two settings would end up sharing a
+    # name, withhold the whole plan rather than ship a card the machine
+    # refuses to boot.
     if writes and captions:
         buf = bytearray(raw)
         for off, b in writes:
             buf[off:off + len(b)] = b
+        extra = ((blob.base_va + blob.used, blob_bytes)
+                 if blob_bytes else None)
         clashes = _new_caption_collisions(
-            captions, _settings_captions(table, mode, buf))
+            captions, _settings_captions(table, mode, buf, extra))
         if clashes:
             log("Program text: these edits would leave two operator settings "
                 'named "%s", and a machine with two identically-named '
@@ -506,5 +668,5 @@ def plan_writes(raw, edits, log=None):
                 "program-text edit was applied. Rename one of the colliding "
                 "settings and Write again." % encode_text(clashes[0]),
                 "warning")
-            return [], 0
-    return writes, len(applied)
+            return [], 0, b""
+    return writes, len(applied), blob_bytes

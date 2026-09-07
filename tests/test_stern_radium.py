@@ -174,7 +174,7 @@ def test_replace_patches_all_occurrences_size_neutral(tmp_path):
     reader = _FakeReader({"/g/a.radium": buf})
     _write_tsv(tmp_path, [("/g/a.radium", original, "OK")])
 
-    writes, n, _ov, _fw = engine._radium_text_writes(
+    writes, n, _ov, _fw, _grown = engine._radium_text_writes(
         reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
     assert n == 1
     # one write per occurrence (4), each exactly the original byte length
@@ -196,7 +196,7 @@ def test_replace_rejects_over_length(tmp_path):
     _write_tsv(tmp_path, [("/g/a.radium", original, "EXTRA BALL LIT")])  # longer
 
     msgs = []
-    writes, n, _ov, _fw = engine._radium_text_writes(
+    writes, n, _ov, _fw, _grown = engine._radium_text_writes(
         reader, str(tmp_path),
         log=lambda m, lvl=None: msgs.append((lvl, m)), cancel=lambda: False)
     assert writes == []
@@ -212,7 +212,7 @@ def test_replace_round_trip_reenumerate_reads_new_value(tmp_path):
     reader = _FakeReader({"/g/a.radium": buf})
     _write_tsv(tmp_path, [("/g/a.radium", original, "SHOOT RIGHT")])
 
-    writes, n, _ov, _fw = engine._radium_text_writes(
+    writes, n, _ov, _fw, _grown = engine._radium_text_writes(
         reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
     assert n == 1
     patched = _apply(buf, writes)
@@ -230,7 +230,7 @@ def test_replace_skips_missing_radium(tmp_path):
     reader = _FakeReader({"/g/present.radium": _make_radium("HELLO WORLD", 1)})
     _write_tsv(tmp_path, [("/g/missing.radium", "HELLO WORLD", "BYE WORLD")])
     msgs = []
-    writes, n, _ov, _fw = engine._radium_text_writes(
+    writes, n, _ov, _fw, _grown = engine._radium_text_writes(
         reader, str(tmp_path),
         log=lambda m, lvl=None: msgs.append((lvl, m)), cancel=lambda: False)
     assert writes == [] and n == 0
@@ -244,7 +244,7 @@ def test_radium_text_writes_emit_digest_overlays(tmp_path):
     buf = _make_radium(original, 3)
     reader = _FakeReader({"/g/a.radium": buf})
     _write_tsv(tmp_path, [("/g/a.radium", original, "OK")])
-    writes, n, ov, _fw = engine._radium_text_writes(
+    writes, n, ov, _fw, _grown = engine._radium_text_writes(
         reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
     assert n == 1
     # one overlay entry per patched inode (i_block keyed), with one file-offset
@@ -309,3 +309,31 @@ def test_compute_sidx_writes_refreshes_radium_record():
     assert fmt == "FINF"
     assert rec[21:41] == exp_h
     assert rec[41:57] == exp_m
+
+
+def test_re_extract_keeps_the_edits_already_in_the_manifest(tmp_path):
+    """David (2026-09-07): his Godzilla LE manifest predates the 'grows'
+    budgets and needs a Text re-extract to pick them up -- which used to
+    blank every replacement.  A re-extract now rewrites budgets and flags
+    from the card but carries the typed replacements over by (scene,
+    original); a row no longer on the card drops out."""
+    from pinball_decryptor.core import text_manifest
+    reader = _FakeReader({
+        "/g/scene/a.radium": _make_radium("CLOCK NOT SET", 5),
+        "/g/scene/b.radium": _make_radium("PLAYER 1", 2),
+    })
+    assert engine.extract_radium_text(reader, str(tmp_path)) == 2
+    rows = text_manifest.load(str(tmp_path))
+    for r in rows:
+        if r["original"] == "CLOCK NOT SET":
+            r["replacement"] = "CLOCK IS NOT SET YET"
+    rows.append({"path": "/g/scene/gone.radium", "original": "OLD",
+                 "replacement": "NEW"})
+    text_manifest.save(str(tmp_path), rows)
+
+    assert engine.extract_radium_text(reader, str(tmp_path)) == 2
+    again = {(r["path"], r["original"]): r["replacement"]
+             for r in text_manifest.load(str(tmp_path))}
+    assert again[("/g/scene/a.radium", "CLOCK NOT SET")] ==         "CLOCK IS NOT SET YET"
+    assert again[("/g/scene/b.radium", "PLAYER 1")] == ""
+    assert ("/g/scene/gone.radium", "OLD") not in again

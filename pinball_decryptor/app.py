@@ -245,6 +245,10 @@ class App:
         # seed) — experiment levers for the Spike 2 click hunt.
         self._apply_audio_advanced_env(
             self._settings.get("audio_advanced") or {})
+        # Write tab, Advanced: grow the game program for longer on-screen
+        # text (default on).  Mirrored to PAD_STERN_TEXT_GROW before any
+        # Write / Build / emulator-override run can read it.
+        self._apply_text_grow_env(self._text_grow_setting())
 
         # First-launch disclaimer.  Boolean flag, unversioned: once the
         # user accepts, they never see it again — including across app
@@ -353,6 +357,8 @@ class App:
             on_update_interval_change=self._on_update_interval_change,
             initial_audio_advanced=self._settings.get("audio_advanced") or {},
             on_audio_advanced_change=self._on_audio_advanced_change,
+            initial_text_grow=self._text_grow_setting(),
+            on_text_grow_change=self._on_text_grow_change,
             on_detected_game_change=self._on_detected_game_change,
             on_audio_profile=self._on_audio_profile_request,
             on_partition_image_opened=self._on_partition_image_opened,
@@ -1869,6 +1875,10 @@ class App:
         # Machine-render previews (Advanced audio options) land next to this
         # build's output; must be set before the pipeline spawns workers.
         self._apply_audio_preview_env(output_path)
+        # The Write tab's grow-the-game-program option, re-mirrored right
+        # before the pipeline reads it (belt and braces: it is also set at
+        # startup and on every toggle).
+        self._apply_text_grow_env(self.window.text_grow_enabled())
         self._chain_flash_after_build = (
             (chain_flash_device, output_path) if chain_flash_device else None)
         self.pipeline = self._current_mfr.make_write_pipeline(
@@ -5212,6 +5222,31 @@ class App:
         """Persist + apply the Advanced audio options."""
         self._settings["audio_advanced"] = dict(cfg or {})
         self._apply_audio_advanced_env(cfg)
+        self._save_settings()
+
+    #: Settings key for the Write tab's "grow the game program for longer
+    #: text" option (plans/spike2_longer_program_text.md).  Default ON.
+    _TEXT_GROW_KEY = "text_grow"
+
+    def _text_grow_setting(self):
+        """The persisted grow option (True when never set)."""
+        val = self._settings.get(self._TEXT_GROW_KEY)
+        return True if val is None else bool(val)
+
+    @staticmethod
+    def _apply_text_grow_env(on):
+        """Mirror the grow option into ``PAD_STERN_TEXT_GROW`` ("1" / "0"):
+        the engine's over-long program-text edits take the new-segment path
+        only when it reads "1"; "0" makes them skip with a named reason and
+        leaves every fitting edit patched in place.  Env, like the audio
+        options, so spawned workers and the emulator's override build see
+        the same answer without threading a flag through every signature."""
+        os.environ["PAD_STERN_TEXT_GROW"] = "1" if on else "0"
+
+    def _on_text_grow_change(self, on):
+        """Persist + apply the Write tab's grow option."""
+        self._settings[self._TEXT_GROW_KEY] = bool(on)
+        self._apply_text_grow_env(bool(on))
         self._save_settings()
 
     def _apply_audio_preview_env(self, output_path):

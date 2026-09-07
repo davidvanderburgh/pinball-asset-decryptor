@@ -118,10 +118,13 @@ pyinstaller \
     --hidden-import "pinball_decryptor.core.rawdevice" \
     --hidden-import "pinball_decryptor.plugins.stern.radium" \
     --hidden-import "pinball_decryptor.plugins.stern.progtext" \
+    --hidden-import "pinball_decryptor.plugins.stern.progreloc" \
+    --hidden-import "pinball_decryptor.plugins.stern.radium_grow" \
     --hidden-import "pinball_decryptor.plugins.stern.fontrender" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_render" \
     --hidden-import "pinball_decryptor.plugins.stern.text_colors" \
+    --hidden-import "pinball_decryptor.plugins.stern.text_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.dds" \
     --hidden-import "pinball_decryptor.plugins.stern.spine" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2" \

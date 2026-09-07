@@ -194,6 +194,49 @@ def test_debugfs_grow_sequence_and_fsck(monkeypatch, tmp_path):
     assert any("/x/e2fsck" in s and "-fy" in s for s in flat)
 
 
+def test_debugfs_grow_makes_a_game_elf_executable(monkeypatch, tmp_path):
+    """debugfs ``write`` creates the inode with the host file's mode, so a
+    staged game ELF (opened "wb", 0644) would reach the card non-executable
+    and game_monitor would loop on RESTARTING GAME.  After the write the ELF's
+    inode is set to 0100755; a grown video (stock 0100664) is left alone."""
+    elf = tmp_path / "game"
+    elf.write_bytes(b"\x7fELF" + b"\x00" * 4996)
+    vid = tmp_path / "big.mp4"
+    vid.write_bytes(b"x" * 5000)
+
+    calls = []
+
+    def fake_run_tool(argv, timeout, what):
+        calls.append(argv)
+        tool = os.path.basename(argv[0])
+        if "stats -h" in argv:
+            return 0, "Block size: 4096\nFree blocks: 999999\n"
+        if tool == "e2fsck":
+            return 0, "clean"
+        if any(a.startswith("stat ") for a in argv):
+            return 0, "Size: 5000"
+        return 0, "debugfs 1.47.0"
+
+    monkeypatch.setattr(ext4_grow, "_find_e2fsprogs", _fake_tools)
+    monkeypatch.setattr(ext4_grow, "_run_tool", fake_run_tool)
+
+    grown = ext4_grow._grow_files_debugfs(
+        str(tmp_path / "card.raw"), 0,
+        [("gz/game", str(elf)), ("video/a.mov", str(vid))],
+        lambda *a, **k: None, lambda: False, 600)
+    assert grown == 2
+    flat = [" ".join(c) for c in calls]
+    modes = [s for s in flat if "set_inode_field" in s]
+    assert len(modes) == 1
+    assert '-w -R set_inode_field "/gz/game" mode 0100755' in modes[0]
+    assert "video" not in modes[0]
+    # ...and only AFTER that file's write landed.
+    i_write = next(i for i, s in enumerate(flat)
+                   if 'write "' in s and "gz/game" in s)
+    i_mode = next(i for i, s in enumerate(flat) if "set_inode_field" in s)
+    assert i_write < i_mode
+
+
 def test_debugfs_grow_enospc_fails_before_writing(monkeypatch, tmp_path):
     src = tmp_path / "big.mp4"
     src.write_bytes(b"x" * 5000)

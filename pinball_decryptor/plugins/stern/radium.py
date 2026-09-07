@@ -267,10 +267,13 @@ def _parse_glyph_records(data, off, chars, count=None):
     """Parse glyph records at *off*; every field is validated, so a false
     anchor cannot survive.  Returns ``(glyphs, end_off)`` with ``glyphs =
     [(char, (u0, v0, u1, v1), tex_ref, inline_atlas_or_None, metrics, rot,
-    kern)]`` -- ``metrics = (w, h, bearing_x, bearing_y, advance)``, ``rot``
-    true when the bitmap is stored rotated 90° CW in the atlas, ``kern =
-    {right_char: advance_adjust}`` (usually empty) -- or ``None`` on any
-    mismatch.
+    kern, metrics_off, kern_offs)]`` -- ``metrics = (w, h, bearing_x,
+    bearing_y, advance)``, ``rot`` true when the bitmap is stored rotated 90°
+    CW in the atlas, ``kern = {right_char: advance_adjust}`` (usually empty),
+    ``metrics_off`` the file offset of the five metric floats and ``kern_offs
+    = {right_char: file offset of that adjust float}`` (the scene-layout
+    editor rewrites those floats in place to resize a line) -- or ``None`` on
+    any mismatch.
 
     Two callers: with *chars* (records must match the char array 1:1 -- the
     common table form) or with ``chars=None`` and *count* (ARRAY-LESS tables,
@@ -295,7 +298,8 @@ def _parse_glyph_records(data, off, chars, count=None):
             prev_ch = ch
         elif ch != want:
             return None
-        metrics = struct.unpack_from("<5f", data, off + 6)
+        metrics_off = off + 6
+        metrics = struct.unpack_from("<5f", data, metrics_off)
         rot = bool(data[off + 6 + 28] & 1)
         u0, v0, u1, v1 = struct.unpack_from("<4f", data, off + _GLYPH_RECT_OFF)
         for v in (u0, v0, u1, v1):
@@ -332,14 +336,16 @@ def _parse_glyph_records(data, off, chars, count=None):
             return None
         pos += 8
         kern = {}
+        kern_offs = {}
         for _k in range(kn):
             kch = struct.unpack_from("<H", data, pos)[0]
             if charset is not None and kch not in charset:
                 return None
             kern[kch] = struct.unpack_from("<f", data, pos + 2)[0]
+            kern_offs[kch] = pos + 2
             pos += 6
         glyphs.append((ch, (u0, v0, u1, v1), tex & 0xFFFFFF, atlas,
-                       metrics, rot, kern))
+                       metrics, rot, kern, metrics_off, kern_offs))
         off = pos
     if arrayless:
         # kerning chars were unchecked during the walk (the charset wasn't
@@ -371,6 +377,22 @@ def _nearest_name_before(data, off, window=4096):
     return best
 
 
+def _glyph_dict(g, by_off, by_handle):
+    """One parsed record tuple -> the glyph dict :func:`parse_glyph_tables`
+    publishes.  ``kern_offs`` only appears on a glyph that has kerning pairs,
+    so a table without kerning (the common case) is dict-for-dict what it was
+    before the offsets were exposed."""
+    ch, rect, ref, inl, metrics, rot, kern, metrics_off, kern_offs = g
+    d = {"char": ch, "rect": rect,
+         "atlas": (by_off.get(inl["data_off"]) if inl
+                   else by_handle.get(ref) if ref else None),
+         "metrics": metrics, "rot": rot, "kern": kern,
+         "metrics_off": metrics_off}
+    if kern_offs:
+        d["kern_offs"] = kern_offs
+    return d
+
+
 def parse_glyph_tables(data, images):
     """Find every Font glyph table in a ``scene.radium``.
 
@@ -382,10 +404,14 @@ def parse_glyph_tables(data, images):
 
     Returns ``[{"name", "table_off", "table_end", "glyphs"}]`` with ``glyphs =
     [{"char": int, "rect": (u0, v0, u1, v1), "atlas": image-dict-or-None,
-    "metrics": (w, h, bearing_x, bearing_y, advance), "rot": bool}]``
-    (``atlas is None`` for glyphs with no bitmap, e.g. the space; ``rot``
-    means the atlas rect holds the bitmap rotated 90° CW -- see the format
-    comment above)."""
+    "metrics": (w, h, bearing_x, bearing_y, advance), "rot": bool,
+    "kern": {right_char: adjust}, "metrics_off": int}]`` (``atlas is None``
+    for glyphs with no bitmap, e.g. the space; ``rot`` means the atlas rect
+    holds the bitmap rotated 90° CW -- see the format comment above).
+    ``metrics_off`` is the file offset of the five metric floats, and a glyph
+    WITH kerning pairs also carries ``"kern_offs": {right_char: file offset of
+    that adjust float}`` -- the byte addresses a scene-scoped resize rewrites
+    (:func:`scene_layout.text_layout_patches`)."""
     by_handle = {}
     by_off = {}
     ranges = []
@@ -407,12 +433,7 @@ def parse_glyph_tables(data, images):
             # end of every decoded region, because a table's metric floats
             # mimic node handles and strings in a naive scan.
             "table_end": end,
-            "glyphs": [
-                {"char": ch, "rect": rect,
-                 "atlas": (by_off.get(inl["data_off"]) if inl
-                           else by_handle.get(ref) if ref else None),
-                 "metrics": metrics, "rot": rot, "kern": kern}
-                for ch, rect, ref, inl, metrics, rot, kern in glyphs],
+            "glyphs": [_glyph_dict(g, by_off, by_handle) for g in glyphs],
         })
         spans.append((j, end))
 

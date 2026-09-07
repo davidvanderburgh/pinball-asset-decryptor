@@ -25,7 +25,7 @@ import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
 from ..core import video
-from ..plugins.stern import scene_render, text_colors
+from ..plugins.stern import scene_render, text_colors, text_layout
 from .theme import THEMES, platform_font
 from .widgets import _Tooltip, center_over
 
@@ -266,6 +266,9 @@ class SceneBrowserWindow:
         self._rebuild = None       # {"cancel": bool} while a rebuild runs
         self._export = None        # {"cancel": bool} while an MP4 is written
         self._bulk = None          # {"cancel": bool} while every scene saves
+        self._live_layout = None   # (card, text, edit) a layout dialog previews
+        self._layout_dialog = None  # the open Move… / Font size… dialog
+        self._text_changes = None  # text_manifest.changed(), read on demand
         self._sans, _mono = platform_font()
         self._build()
         self.reload(preselect, focus_text)
@@ -563,6 +566,11 @@ class SceneBrowserWindow:
         # PNGs appearing in a folder minutes after the window went away.
         if self._bulk is not None:
             self._bulk["cancel"] = True
+        dlg = self._layout_dialog
+        if dlg is not None:
+            self._layout_dialog = None
+            dlg._finish()               # no re-render: the canvas is going
+        self._cancel_live_job()         # a debounced preview still queued
         try:
             self.win.destroy()
         except tk.TclError:
@@ -579,6 +587,7 @@ class SceneBrowserWindow:
         # Glyph slices may have changed since the last look (a font import),
         # so drop the cache and re-read them on the next preview.
         self._fonts = None
+        self._text_changes = None
         if not self._scenes:
             self._hint.configure(
                 text="No scene manifests found in this project folder. Run "
@@ -718,19 +727,35 @@ class SceneBrowserWindow:
         n_t = det.insert("", tk.END, text="Text (%d)" % len(sc["texts"]),
                          open=len(sc["texts"]) <= 12)
         stock, picked = self._scene_text_colors(sel[0])
+        card, _lay = scene_render.layout_for_scene_dir(self._layouts, sel[0])
+        layouts = self._pending_layouts(card)
+        texts = self._pending_texts(card, _lay)
         for i, s in enumerate(sc["texts"]):
             # The colour is the scene's, not the font's, so it belongs on the
             # line and not in the Fonts window — say what it is and what it
-            # will become.
+            # will become.  A pending layout edit (moved / re-aligned /
+            # resized) is a scene property too and sits beside it, and so
+            # does a Replace Text edit that reaches this line (its own row,
+            # or a game-program row whose original this scene draws).
             src = stock.get(s)
+            lay = layouts.get(s)
+            shown = texts.get(s)
             if src is None:
                 info = "double-click: find on Replace Text"
             elif s in picked:
-                info = "%s → %s (not built yet)" % (text_colors.to_hex(src),
-                                                    text_colors.to_hex(
-                                                        picked[s]))
+                info = "%s → %s" % (text_colors.to_hex(src),
+                                    text_colors.to_hex(picked[s]))
             else:
-                info = "%s · right-click to recolour" % text_colors.to_hex(src)
+                info = text_colors.to_hex(src)
+            if lay:
+                info = "%s · %s" % (info, text_layout.describe(lay))
+            if shown is not None:
+                info = ('shows: "%s"' % shown
+                        + (" · " + info if src is not None else ""))
+            if s in picked or lay or shown is not None:
+                info += " (not built yet)"
+            elif src is not None:
+                info += " · right-click to recolour"
             det.insert(n_t, tk.END, iid="txt::%d" % i, text=s, values=(info,))
         n_v = det.insert("", tk.END, text="Videos (%d)" % len(sc["videos"]),
                          open=True)
@@ -781,6 +806,8 @@ class SceneBrowserWindow:
         # not safe to touch from one.
         bg = self._background_name()
         colors = self._pending_colors(card)
+        layout_edits = self._pending_layouts(card)
+        text_edits = self._pending_texts(card, layout)
         # A different scene starts at its first state; re-rendering the SAME
         # one (a state pick, a backdrop change) keeps where the user is.
         if scene_dir != getattr(self, "_preview_dir", None):
@@ -797,9 +824,10 @@ class SceneBrowserWindow:
                     from ..plugins.stern import fontrender as fr
                     self._fonts = fr.load_fonts(self.assets_dir)
                 n = scene_render.frame_count(layout, 0, group)
-                frames = [scene_render.render_layout(
-                    self.assets_dir, layout, fonts=self._fonts, frame=i,
-                    background=bg, colors=colors, group=group)
+                frames = [self._render_layout(
+                    layout, fonts=self._fonts, frame=i, background=bg,
+                    colors=colors, group=group, layout_edits=layout_edits,
+                    text_edits=text_edits)
                     for i in range(min(n, _MAX_PREVIEW_FRAMES))]
             except Exception:
                 frames = []
@@ -869,6 +897,230 @@ class SceneBrowserWindow:
             return
         self._folder_state_written()
         self._on_select()               # re-lists the rows AND re-renders
+
+    # -- text layout (move / align / size) ----------------------------------
+
+    def _render_layout(self, layout, **kw):
+        """``scene_render.render_layout`` on this folder — the one call every
+        preview, MP4 export and bulk save goes through, so all of them show
+        the pending colours AND layout the same way."""
+        return scene_render.render_layout(self.assets_dir, layout, **kw)
+
+    def _pending_layouts(self, card):
+        """``{text: edit}`` the preview should apply: the manifest's rows for
+        this scene, with the value an open Move… / Font size… dialog is
+        showing laid over them (the preview follows the spinbox, the file
+        only changes on Apply)."""
+        try:
+            out = text_layout.layout_for(self.assets_dir, card) if card else {}
+        except Exception:
+            out = {}
+        live = self._live_layout
+        if live and card and live[0] == card:
+            if text_layout.is_neutral(live[2]):
+                out.pop(live[1], None)
+            else:
+                out[live[1]] = dict(live[2])
+        return out
+
+    # -- pending Replace Text edits ----------------------------------------
+
+    def _load_text_changes(self):
+        """``text_manifest.changed()`` for this folder, read once and kept
+        until the Text tab says it changed (``text_edits_changed``) or the
+        window reloads."""
+        if self._text_changes is None:
+            try:
+                from ..core import text_manifest
+                self._text_changes = text_manifest.changed(self.assets_dir)
+            except Exception:
+                self._text_changes = {}
+        return self._text_changes
+
+    def _pending_texts(self, card, layout=None):
+        """``{display string: replacement}`` the preview of *card* should draw:
+        the scene's own Replace Text rows, plus every GAME-PROGRAM row (the
+        manifest path that is not a ``.radium`` — the game ELF) whose original
+        is a string this scene's layout draws.  That second kind is how the
+        game uses a scene: its Text node is a placeholder the code overwrites
+        at runtime (Godzilla's battle intro), so a program edit is what the
+        machine will show there and it wins over a radium row for the same
+        string.  Program rows are manifest-encoded (``\\n`` two characters),
+        the layout's strings are not, so both sides are decoded."""
+        if not card:
+            return {}
+        changed = self._load_text_changes()
+        if not changed:
+            return {}
+        out = {}
+        for orig, rep in changed.get(card) or ():
+            out[orig] = rep
+        if layout is None:
+            layout = self._layouts.get(card)
+        drawn = {tx.get("text") for tx in (layout or {}).get("texts") or ()}
+        drawn.discard(None)
+        if not drawn:
+            return out
+        from ..plugins.stern import progtext
+        for path, pairs in changed.items():
+            if (path or "").lower().endswith(".radium"):
+                continue
+            for orig, rep in pairs:
+                o = progtext.decode_text(orig)
+                if o in drawn:
+                    out[o] = progtext.decode_text(rep)
+        return out
+
+    def text_edits_changed(self):
+        """The Text tab applied / reverted an edit: forget the cached manifest
+        and redraw the selected scene (the same call the colour pick and the
+        layout Apply make — it re-lists the rows AND re-renders)."""
+        self._text_changes = None
+        try:
+            if not self.win.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        self._on_select()
+
+    def _scene_text_facts(self, scene_dir):
+        """``{text: (font px, align name)}`` as the recorded layout draws each
+        line — what the Font size… dialog and the Alignment menu start from."""
+        _card, layout = scene_render.layout_for_scene_dir(self._layouts,
+                                                          scene_dir)
+        out = {}
+        for tx in (layout or {}).get("texts") or ():
+            text = tx.get("text") or ""
+            if not text or text in out:
+                continue
+            try:
+                px = int(tx.get("font_px") or 0)
+            except (TypeError, ValueError):
+                px = 0
+            out[text] = (px, text_layout.align_name(tx.get("align", 1)))
+        return out
+
+    def _layout_target(self, text, title):
+        """The card path this edit goes to, or ``None`` after telling the user
+        why the line can't be laid out (no recorded layout for it — the same
+        gate the colour pick has)."""
+        sel = self._tree.selection()
+        if not sel:
+            return None
+        card, _layout = scene_render.layout_for_scene_dir(self._layouts,
+                                                          sel[0])
+        if card is None or text not in self._scene_text_facts(sel[0]):
+            messagebox.showinfo(
+                title,
+                "This line isn't in the recorded scene layout, so there is "
+                "nothing to move it from.\n\nRun \"Rebuild previews…\" (or "
+                "re-extract with Images enabled) and try again.",
+                parent=self.win)
+            return None
+        return card
+
+    def _set_text_layout(self, text, dx=None, dy=None, align=None,
+                         size=None):
+        """Merge layout fields into one line's row of the selected scene
+        (``None`` = leave that field alone), then refresh the row and the
+        preview and tell the main window.  Returns the stored row."""
+        card = self._layout_target(text, "Text layout")
+        if card is None:
+            return None
+        try:
+            row = text_layout.set_layout(self.assets_dir, card, text, dx=dx,
+                                         dy=dy, align=align, size=size)
+        except OSError as e:
+            messagebox.showerror("Text layout", str(e), parent=self.win)
+            return None
+        self._folder_state_written()
+        self._on_select()               # re-lists the rows AND re-renders
+        return row
+
+    def _align_text(self, text, name):
+        """The Alignment submenu: left / center / right for one line."""
+        return self._set_text_layout(text, align=name)
+
+    def _reset_layout(self, text):
+        """Back to the original layout: drop the line's row."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        card, _layout = scene_render.layout_for_scene_dir(self._layouts,
+                                                          sel[0])
+        if card is None:
+            return
+        try:
+            text_layout.reset(self.assets_dir, card, text)
+        except OSError as e:
+            messagebox.showerror("Text layout", str(e), parent=self.win)
+            return
+        self._folder_state_written()
+        self._on_select()
+
+    def _move_text(self, text):
+        """Move…: dx/dy spinboxes with a live preview.  Returns the dialog."""
+        return self._open_layout_dialog(text, "move")
+
+    def _size_text(self, text):
+        """Font size…: a percent of the size this scene bakes, shown as the
+        resulting px.  Returns the dialog."""
+        return self._open_layout_dialog(text, "size")
+
+    def _open_layout_dialog(self, text, kind):
+        title = "Move" if kind == "move" else "Font size"
+        card = self._layout_target(text, title)
+        if card is None:
+            return None
+        if self._layout_dialog is not None:
+            self._layout_dialog.cancel()
+        sel = self._tree.selection()
+        px = self._scene_text_facts(sel[0]).get(text, (0, None))[0]
+        edit = self._pending_layouts(card).get(text) or text_layout.normalize(
+            {})
+        dlg = _LayoutDialog(self, card, text, edit, kind, px=px)
+        self._layout_dialog = dlg
+        return dlg
+
+    def _preview_layout(self, card, text, edit):
+        """A dialog value changed: draw the scene with it, debounced so a
+        held-down spinbox arrow doesn't queue a render per tick."""
+        self._live_layout = (card, text, dict(edit))
+        self._cancel_live_job()
+        try:
+            self._live_job = self.win.after(120, self._live_rerender)
+        except tk.TclError:
+            self._live_job = None
+
+    def _cancel_live_job(self):
+        """Drop a queued debounced preview render, so it can't fire into a
+        window that has since been closed (Tk logs an ``after`` script whose
+        command is gone)."""
+        job = getattr(self, "_live_job", None)
+        self._live_job = None
+        if job is not None:
+            try:
+                self.win.after_cancel(job)
+            except tk.TclError:
+                pass
+
+    def _live_rerender(self):
+        self._live_job = None
+        try:
+            self._rerender()
+        except tk.TclError:
+            pass                        # the window went away first
+
+    def _layout_dialog_done(self, dlg, edit):
+        """Apply (an *edit* dict) or Cancel (``None``) from the dialog."""
+        if self._layout_dialog is dlg:
+            self._layout_dialog = None
+        self._live_layout = None
+        self._cancel_live_job()         # the final render below is enough
+        if edit is None:
+            self._rerender()
+            return
+        self._set_text_layout(dlg.text, **{k: edit.get(k) for k in dlg.keys})
 
     def _folder_state_written(self):
         """Tell the main window this project folder's pending edits changed, so
@@ -1236,6 +1488,8 @@ class SceneBrowserWindow:
         card, _lay = scene_render.layout_for_scene_dir(self._layouts,
                                                        self._preview_dir)
         colors = self._pending_colors(card)
+        layout_edits = self._pending_layouts(card)
+        text_edits = self._pending_texts(card, _lay)
         state = self._export = {"cancel": False}
         self._save_btn.configure(text="Cancel")
         self._set_caption("Writing %s — frame 1 of %d…"
@@ -1246,9 +1500,10 @@ class SceneBrowserWindow:
                 for i in range(n_all):
                     if state["cancel"]:
                         return
-                    yield scene_render.render_layout(
-                        self.assets_dir, layout, fonts=self._fonts, frame=i,
-                        background=bg, colors=colors, group=group)
+                    yield self._render_layout(
+                        layout, fonts=self._fonts, frame=i, background=bg,
+                        colors=colors, group=group, layout_edits=layout_edits,
+                        text_edits=text_edits)
 
             try:
                 n = video.encode_frames_to_mp4(
@@ -1398,10 +1653,12 @@ class SceneBrowserWindow:
                 img = None
                 if layout is not None:
                     try:
-                        img = scene_render.render_layout(
-                            self.assets_dir, layout, fonts=self._fonts,
-                            frame=0, background=bg,
-                            colors=self._pending_colors(card), group=None)
+                        img = self._render_layout(
+                            layout, fonts=self._fonts, frame=0,
+                            background=bg,
+                            colors=self._pending_colors(card), group=None,
+                            layout_edits=self._pending_layouts(card),
+                            text_edits=self._pending_texts(card, layout))
                     except Exception:
                         img = None
                 if img is None:
@@ -1614,6 +1871,32 @@ class SceneBrowserWindow:
                 m.add_command(
                     label="Back to the original colour",
                     command=lambda: self._pick_text_color(text, reset=True))
+            # Where the line sits, how it is aligned and how big it is are
+            # the scene's too (its keyframe rect / align word / baked glyph
+            # table), so they are edited here beside the colour.
+            card, _lay = (scene_render.layout_for_scene_dir(
+                self._layouts, sel[0]) if sel else (None, None))
+            layouts = self._pending_layouts(card)
+            facts = self._scene_text_facts(sel[0]) if sel else {}
+            m.add_separator()
+            m.add_command(label="Move…",
+                          command=lambda: self._move_text(text))
+            al = tk.Menu(m, tearoff=0)
+            cur = (layouts.get(text) or {}).get("align") or facts.get(
+                text, (0, None))[1] or ""
+            self._align_menu_var = tk.StringVar(value=cur)
+            for name, label in (("left", "Left"), ("center", "Centre"),
+                                ("right", "Right")):
+                al.add_radiobutton(
+                    label=label, value=name, variable=self._align_menu_var,
+                    command=lambda n=name: self._align_text(text, n))
+            m.add_cascade(label="Alignment", menu=al)
+            m.add_command(label="Font size…",
+                          command=lambda: self._size_text(text))
+            if text in layouts:
+                m.add_command(
+                    label="Back to the original layout",
+                    command=lambda: self._reset_layout(text))
             m.add_separator()
             m.add_command(label="Find on the Replace Text tab",
                           command=lambda: self._jump(iid))
@@ -1738,6 +2021,160 @@ class SceneBrowserWindow:
         sel = self._detail.selection()
         if sel:
             self._jump(sel[0])
+
+
+class _LayoutDialog:
+    """The Move… / Font size… dialog for one line of scene text.
+
+    Spinboxes over the pending row's values; every change is previewed live
+    (through ``SceneBrowserWindow._preview_layout``, which lays the dialog's
+    value over the manifest without writing it), Apply records it, Cancel
+    puts the preview back.  *kind* is ``"move"`` (dx/dy) or ``"size"``
+    (percent, shown as the px it makes of the scene's *px*)."""
+
+    def __init__(self, browser, card, text, edit, kind, px=0):
+        self.browser = browser
+        self.card = card
+        self.text = text
+        self.kind = kind
+        self.px = int(px or 0)
+        self.keys = ("dx", "dy") if kind == "move" else ("size",)
+        self._orig = text_layout.normalize(edit)
+        self.vars = {}
+        self._done = False
+        win = tk.Toplevel(browser.win)
+        self.win = win
+        win.withdraw()
+        short = text if len(text) <= 40 else text[:39] + "…"
+        win.title(("Move \"%s\"" if kind == "move" else
+                   "Font size for \"%s\"") % short)
+        win.transient(browser.win)
+        win.resizable(False, False)
+        frm = ttk.Frame(win, padding=10)
+        frm.pack(fill=tk.BOTH, expand=True)
+        first = None
+        if kind == "move":
+            for i, (key, label) in enumerate((("dx", "Right (px):"),
+                                              ("dy", "Down (px):"))):
+                ttk.Label(frm, text=label).grid(row=i, column=0, sticky="w",
+                                                pady=2)
+                var = tk.StringVar(value=_fmt_num(self._orig[key]))
+                sb = ttk.Spinbox(frm, from_=-4096, to=4096, increment=1,
+                                 width=8, textvariable=var,
+                                 command=self._changed)
+                sb.grid(row=i, column=1, sticky="w", padx=(6, 0), pady=2)
+                self.vars[key] = var
+                first = first or sb
+            ttk.Label(frm, text="Negative moves the line left / up.",
+                      foreground="#6b6b76").grid(
+                row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        else:
+            ttk.Label(frm, text="Size (%):").grid(row=0, column=0,
+                                                  sticky="w", pady=2)
+            var = tk.StringVar(value=str(self._orig["size"] or 100))
+            sb = ttk.Spinbox(frm, from_=25, to=400, increment=5, width=8,
+                             textvariable=var, command=self._changed)
+            sb.grid(row=0, column=1, sticky="w", padx=(6, 0), pady=2)
+            self.vars["size"] = var
+            first = sb
+            self.px_lbl = ttk.Label(frm, text="")
+            self.px_lbl.grid(row=1, column=0, columnspan=2, sticky="w",
+                             pady=(4, 0))
+            ttk.Label(frm, text="Every line this scene draws with the same "
+                                "font at this size changes with it.",
+                      foreground="#6b6b76", wraplength=260,
+                      justify=tk.LEFT).grid(
+                row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        for var in self.vars.values():
+            var.trace_add("write", lambda *_a: self._changed())
+        btns = ttk.Frame(frm)
+        btns.grid(row=3, column=0, columnspan=2, sticky="e", pady=(10, 0))
+        ttk.Button(btns, text="Cancel", command=self.cancel).pack(
+            side=tk.RIGHT)
+        ttk.Button(btns, text="Apply", command=self.apply).pack(
+            side=tk.RIGHT, padx=(0, 6))
+        win.bind("<Return>", lambda _e: self.apply())
+        win.bind("<Escape>", lambda _e: self.cancel())
+        win.protocol("WM_DELETE_WINDOW", self.cancel)
+        self._refresh_px()
+        center_over(browser.win, win)
+        win.deiconify()
+        try:
+            first.focus_set()
+        except (tk.TclError, AttributeError):
+            pass
+
+    def current(self):
+        """The edit the dialog shows: the pending row with this dialog's
+        fields replaced by the spinbox values."""
+        fields = dict(self._orig)
+        for key, var in self.vars.items():
+            try:
+                fields[key] = var.get()
+            except tk.TclError:
+                pass
+        return text_layout.normalize(fields)
+
+    def result(self):
+        """What Apply hands ``set_layout``: only this dialog's fields, with a
+        neutral value spelled out (0 / 100) so a field put back is stored
+        as put back, not left as it was."""
+        cur = self.current()
+        out = {}
+        for key in self.keys:
+            v = cur.get(key)
+            out[key] = (100 if v is None else v) if key == "size" else (
+                v or 0)
+        return out
+
+    def _refresh_px(self):
+        lbl = getattr(self, "px_lbl", None)
+        if lbl is None:
+            return
+        pct = self.current().get("size") or 100
+        if self.px:
+            txt = "%d px → %d px" % (self.px,
+                                     int(round(self.px * pct / 100.0)))
+        else:
+            txt = "%d %% of the size this scene draws it at" % pct
+        try:
+            lbl.configure(text=txt)
+        except tk.TclError:
+            pass
+
+    def _changed(self):
+        if self._done:
+            return
+        self._refresh_px()
+        self.browser._preview_layout(self.card, self.text, self.current())
+
+    def _finish(self):
+        self._done = True
+        try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
+
+    def apply(self):
+        if self._done:
+            return
+        res = self.result()
+        self._finish()
+        self.browser._layout_dialog_done(self, res)
+
+    def cancel(self):
+        if self._done:
+            return
+        self._finish()
+        self.browser._layout_dialog_done(self, None)
+
+
+def _fmt_num(f):
+    """A float for a spinbox: ``10.0`` shows as ``10``."""
+    try:
+        return "%g" % float(f or 0)
+    except (TypeError, ValueError):
+        return "0"
 
 
 def open_scene_browser(app, assets_dir, preselect=None, focus_text=None):

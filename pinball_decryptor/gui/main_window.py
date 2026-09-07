@@ -1297,6 +1297,179 @@ class _VideoPreviewPane:
         self._draw_playhead()
 
 
+class _TextReplaceDialog:
+    """Replace Text → "Replace everywhere…": Find / Replace with / Match case
+    over every row of the list (David, 2026-09-07: "changes here would
+    propagate everywhere").
+
+    The plan is MainWindow._text_replace_plan (Tk-free) recomputed on every
+    keystroke: the count line says how many matching rows fit their Max, the
+    table below lists the ones that would NOT fit (they are skipped on
+    Apply, never truncated), and Apply lands the fitting rows through the
+    same method per-row Apply uses.  Modeless-with-grab, never wait_window:
+    the caller gets the dialog back so tests can drive ``apply()``."""
+
+    #: How many misfit rows the table lists before "… and N more".
+    MAX_LISTED = 200
+
+    def __init__(self, win, find="", repl=""):
+        self.win = win
+        self.plan = []
+        root = win._tk_root()
+        dlg = tk.Toplevel(root)
+        self.dlg = dlg
+        dlg.title("Replace everywhere")
+        dlg.transient(root)
+        win._theme_toplevel(dlg)
+        self.find_var = tk.StringVar(value=find or "")
+        self.repl_var = tk.StringVar(value=repl or "")
+        self.case_var = tk.BooleanVar(value=True)
+        self.count_var = tk.StringVar(value="")
+
+        ttk.Label(
+            dlg,
+            text="Every row whose ORIGINAL text contains the word gets the "
+                 "replacement — a battle title, its bare-name tail row and "
+                 "its settings caption in one go. Rows whose new text would "
+                 "not fit their Max are listed below and skipped.",
+            font=(_SANS_FONT, 9, "italic"), wraplength=560,
+            justify=tk.LEFT).grid(row=0, column=0, columnspan=3, sticky="w",
+                                  padx=12, pady=(12, 6))
+        ttk.Label(dlg, text="Find:").grid(row=1, column=0, sticky="w",
+                                          padx=(12, 4), pady=2)
+        self.find_entry = ttk.Entry(dlg, textvariable=self.find_var, width=48)
+        self.find_entry.grid(row=1, column=1, sticky="ew", pady=2)
+        ttk.Label(dlg, text="Replace with:").grid(
+            row=2, column=0, sticky="w", padx=(12, 4), pady=2)
+        self.repl_entry = ttk.Entry(dlg, textvariable=self.repl_var, width=48)
+        self.repl_entry.grid(row=2, column=1, sticky="ew", pady=2)
+        ttk.Checkbutton(dlg, text="Match case", variable=self.case_var).grid(
+            row=1, column=2, rowspan=2, sticky="w", padx=(10, 12))
+        self.count_lbl = ttk.Label(dlg, textvariable=self.count_var,
+                                   font=(_SANS_FONT, 9))
+        self.count_lbl.grid(row=3, column=0, columnspan=3, sticky="w",
+                            padx=12, pady=(6, 2))
+
+        frame = ttk.Frame(dlg)
+        frame.grid(row=4, column=0, columnspan=3, sticky="nsew",
+                   padx=12, pady=(0, 6))
+        dlg.grid_rowconfigure(4, weight=1)
+        dlg.grid_columnconfigure(1, weight=1)
+        self.misfit_tree = ttk.Treeview(
+            frame, columns=("new", "bytes", "max", "scene"), height=6,
+            selectmode="browse")
+        self.misfit_tree.heading("#0", text="Won't fit — original",
+                                 anchor=tk.W)
+        self.misfit_tree.heading("new", text="Would become", anchor=tk.W)
+        self.misfit_tree.heading("bytes", text="Bytes", anchor=tk.W)
+        self.misfit_tree.heading("max", text="Max", anchor=tk.W)
+        self.misfit_tree.heading("scene", text="Scene", anchor=tk.W)
+        self.misfit_tree.column("#0", width=220, minwidth=120)
+        self.misfit_tree.column("new", width=220, minwidth=120)
+        self.misfit_tree.column("bytes", width=50, minwidth=40,
+                                stretch=False)
+        self.misfit_tree.column("max", width=84, minwidth=50, stretch=False)
+        self.misfit_tree.column("scene", width=140, minwidth=80)
+        sb = ttk.Scrollbar(frame, orient=tk.VERTICAL,
+                           command=self.misfit_tree.yview)
+        self.misfit_tree.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.misfit_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        btns = ttk.Frame(dlg)
+        btns.grid(row=5, column=0, columnspan=3, sticky="ew",
+                  padx=12, pady=(0, 12))
+        self.apply_btn = ttk.Button(btns, text="Apply", command=self.apply,
+                                    state=tk.DISABLED)
+        self.apply_btn.pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=self.close).pack(
+            side=tk.RIGHT, padx=(0, 6))
+
+        for var in (self.find_var, self.repl_var, self.case_var):
+            var.trace_add("write", lambda *_a: self.recompute())
+        dlg.bind("<Return>", lambda _e: self.apply())
+        dlg.bind("<Escape>", lambda _e: self.close())
+        dlg.protocol("WM_DELETE_WINDOW", self.close)
+        self.recompute()
+        (self.repl_entry if find else self.find_entry).focus_set()
+        center_over(root, dlg)
+        try:
+            dlg.grab_set()
+        except tk.TclError:
+            pass
+
+    def recompute(self):
+        """Re-plan from the three fields: count line, Apply enable, misfit
+        table."""
+        W = self.win
+        try:
+            find = self.find_var.get()
+            repl = self.repl_var.get()
+            case = bool(self.case_var.get())
+        except tk.TclError:
+            return
+        self.plan = W._text_replace_plan(W._text_rows, find, repl, case)
+        fits = [p for p in self.plan if p["fits"]]
+        n, m = len(fits), len(self.plan)
+        already = sum(1 for p in fits
+                      if p["row"].get("replacement")
+                      and p["row"]["replacement"] != p["new"])
+        if not find:
+            text = "Type the word to look for."
+        else:
+            text = "%d of %d matching rows fit" % (n, m)
+            if m and n < m:
+                text += " — %d listed below would not, and will be skipped" \
+                        % (m - n)
+            if already:
+                text += " (%d already edited: their edit is replaced)" % already
+        self.count_var.set(text)
+        try:
+            self.apply_btn.configure(state=tk.NORMAL if n else tk.DISABLED)
+        except tk.TclError:
+            return
+        tree = self.misfit_tree
+        try:
+            tree.delete(*tree.get_children())
+            misfits = [p for p in self.plan if not p["fits"]]
+            for p in misfits[:self.MAX_LISTED]:
+                r = p["row"]
+                tree.insert(
+                    "", tk.END, text=r["original"],
+                    values=(p["new"], W._text_row_len(r, p["new"]),
+                            W._text_row_max_label(r),
+                            W._text_scene_label(r["path"])))
+            if len(misfits) > self.MAX_LISTED:
+                tree.insert("", tk.END,
+                            text="… and %d more"
+                            % (len(misfits) - self.MAX_LISTED))
+        except tk.TclError:
+            pass
+
+    def apply(self):
+        """Land the fitting rows (one manifest save) and name the skipped
+        ones; the dialog closes either way.  Returns ``(applied, skipped)``
+        or None when nothing fits."""
+        fits = [p for p in self.plan if p["fits"]]
+        if not fits:
+            return None
+        plan = list(self.plan)
+        self.close()
+        return self.win._text_replace_apply(plan)
+
+    def close(self):
+        try:
+            self.dlg.grab_release()
+        except tk.TclError:
+            pass
+        try:
+            self.dlg.destroy()
+        except tk.TclError:
+            pass
+        if getattr(self.win, "_text_replace_dlg", None) is self:
+            self.win._text_replace_dlg = None
+
+
 class MainWindow:
     """Single-window Tk GUI; manufacturer-aware via apply_manufacturer()."""
 
@@ -1328,6 +1501,8 @@ class MainWindow:
                  on_update_interval_change=None,
                  initial_audio_advanced=None,
                  on_audio_advanced_change=None,
+                 initial_text_grow=True,
+                 on_text_grow_change=None,
                  on_detected_game_change=None,
                  on_audio_profile=None,
                  on_partition_image_opened=None,
@@ -1467,6 +1642,16 @@ class MainWindow:
         # what had it landing on Elvira's node board table.)
         self._audio_advanced = dict(initial_audio_advanced or {})
         self._on_audio_advanced_change = on_audio_advanced_change
+        # Write tab, Advanced: grow the game program for longer text (the
+        # plan in plans/spike2_longer_program_text.md).  On by default; the
+        # App persists it and mirrors it to PAD_STERN_TEXT_GROW ("1"/"0")
+        # so the engine sees it on Write / Build / emulator overrides.  The
+        # checkbox itself is built by _build_write_tab and packed by
+        # apply_manufacturer for plugins with replace_text.
+        self.write_text_grow_var = tk.BooleanVar(
+            value=True if initial_text_grow is None else bool(initial_text_grow))
+        self._on_text_grow_change = on_text_grow_change
+        self._text_replace_dlg = None
         # Fired with a short caption ("Led Zeppelin v1.22 LE") when the
         # Extract input detects a game, and with None when it no longer does —
         # the App shows it in the title bar (batch 20: the tab's "Detected:"
@@ -3158,6 +3343,33 @@ class MainWindow:
         self._write_filename_lbl = ttk.Label(f, text="",
                                              font=(_SANS_FONT, 9, "italic"))
         self._write_filename_lbl.pack(anchor=tk.W, padx=10)
+
+        # Advanced (Stern, replace_text plugins): grow the game program for
+        # longer on-screen text.  Pack-managed by apply_manufacturer (it sits
+        # under the Build Image row, beside nothing else on the Write tab —
+        # the blip-free option lives in the Audio tab's Advanced dialog).
+        # Default ON, as plans/spike2_longer_program_text.md item 6 asks,
+        # with the caveat in the label: no machine has booted such a build.
+        self._write_text_grow_row = ttk.Frame(f)
+        self._write_text_grow_chk = ttk.Checkbutton(
+            self._write_text_grow_row,
+            text="Advanced: grow the game program / a scene for longer text "
+                 "(default on; a machine has not booted such a build yet)",
+            variable=self.write_text_grow_var,
+            command=self._on_write_text_grow_toggle)
+        self._write_text_grow_chk.pack(side=tk.LEFT)
+        _Tooltip(
+            self._write_text_grow_chk,
+            "On: a Replace Text edit longer than its original slot (a row "
+            "whose Max reads \"96 (grows)\") is placed in a new read-only "
+            "area of the game program with every reference pointed at it, "
+            "or — for scene text — the scene file is rewritten at the new "
+            "length; either needs the card built as an image, not a "
+            "Direct-SD write. Off: every row keeps its original budget and "
+            "over-long edits are skipped with a named reason in the build "
+            "log. Proven in the PC emulator only; keep the stock card to "
+            "hand. Mirrored to PAD_STERN_TEXT_GROW for the build.",
+            lambda: self._current_theme)
 
         # JJP Direct-SSD-only: "Modified Files Preview" — same shape
         # as the standalone JJP decryptor.  Walks the assets folder
@@ -14597,10 +14809,14 @@ class MainWindow:
                  "(mode titles, battle names — Scene column: \"game program\"). "
                  "Pick your extracted folder, click a string, type the new "
                  "text, and Apply. Each replacement must fit its byte budget "
-                 "(the Max column). Some names are the tail end of a longer "
-                 "line (EBIRAH inside GODZILLA VS EBIRAH) — edit both rows so "
-                 "the line ends with the new name. Build the update on the "
-                 "Write tab when you're done.",
+                 "(the Max column; a game-program row marked \"96 (grows)\" "
+                 "may take longer text — it is placed in a new area of the "
+                 "game program when you build an image). Some names are the "
+                 "tail end of a longer line (EBIRAH inside GODZILLA VS "
+                 "EBIRAH) — edit both rows so the line ends with the new "
+                 "name, or use Replace everywhere… to change a word in every "
+                 "row at once. Build the update on the Write tab when you're "
+                 "done.",
             font=(_SANS_FONT, 9, "italic"),
             wraplength=720, justify=tk.LEFT)
         _text_desc.pack(anchor=tk.W, **pad)
@@ -14622,6 +14838,24 @@ class MainWindow:
             side=tk.LEFT, padx=(4, 12))
         ttk.Button(tools, text="Clear all edits",
                    command=self._text_clear_all).pack(side=tk.LEFT)
+        # David (2026-09-07): "changes here would propagate everywhere" — one
+        # Find / Replace over every row whose ORIGINAL contains the word, so
+        # a battle title, its bare-name tail row and its settings caption
+        # change together instead of one Apply each.
+        self._text_replace_btn = ttk.Button(
+            tools, text="Replace everywhere…",
+            command=self._text_replace_everywhere)
+        self._text_replace_btn.pack(side=tk.LEFT, padx=(8, 0))
+        _Tooltip(
+            self._text_replace_btn,
+            "Find / Replace across the whole list: every row whose ORIGINAL "
+            "text contains the word gets the replacement (EBIRAH → "
+            "BIOLLANTE reaches the battle title, its tail row and the "
+            "settings caption in one go). Rows whose new text would not fit "
+            "their Max are listed and skipped, not applied. Opened from a "
+            "row you have already edited, Find and Replace are pre-filled "
+            "with the one word you changed.",
+            lambda: self._current_theme)
         # a tester: "Could you jump from the text tab into the scene?"  The
         # Scenes window already jumps here; this is the way back, and it is
         # how you get from a line of text to a picture of where it appears.
@@ -14687,7 +14921,9 @@ class MainWindow:
         # sat hundreds of pixels from its own numbers and the numbers ended
         # up hard against the Scene column — they read as part of it (batch
         # 29).  Header and numbers now sit together and stay put.
-        self._text_tree.column("max", width=56, minwidth=44, anchor=tk.W,
+        # Wide enough for "96 (grows)" — a game-program row the Write step
+        # may move to a new area of the program when the text runs long.
+        self._text_tree.column("max", width=84, minwidth=56, anchor=tk.W,
                                stretch=False)
         self._text_tree.column("scene", width=170, minwidth=90, stretch=False)
         self._text_tree.column("name", width=170, minwidth=90)
@@ -14817,11 +15053,130 @@ class MainWindow:
             s = s.replace("\\n", "\n")
         return cls._text_byte_len(s)
 
+    #: The longest a scene line may be typed: the same one-line cap as the
+    #: game program's (progtext.MAX_EDIT_LEN).  A scene string has no slot
+    #: limit of its own — Write re-serialises the scene at the new length
+    #: (engine._radium_text_writes / radium_grow) — but its box on screen is a
+    #: fixed template, so a Max the user can see beats an open-ended one.
+    _TEXT_SCENE_MAX = 96
+
     @staticmethod
-    def _text_row_budget(r):
-        """The row's replacement byte budget: the explicit game-program budget
-        when present, else the original's own length (radium in-place rule)."""
-        return r.get("budget") or len(r["original"].encode("latin1", "replace"))
+    def _text_row_is_scene(r):
+        """True for a scene (.radium) row, False for a game-program row."""
+        return (r.get("path") or "").lower().endswith(".radium")
+
+    @classmethod
+    def _text_row_grows(cls, r):
+        """True when a replacement longer than the original's slot is still
+        accepted: EVERY scene row (Write rewrites the scene at the new
+        length), a game-program row flagged ``grows`` (every reference to the
+        string is visible, so Write places the new text in a new area of the
+        program) — and a game-program row with NO flag at all, which means
+        nobody has looked yet.
+
+        That last case is the one a user meets: a project extracted before
+        the flags existed carries the original length as every program row's
+        budget, and reading "no flag" as "cannot grow" made the tab refuse
+        text the Write step would have placed happily (David, 2026-09-07:
+        "it still shows too long in red").  Being optimistic here costs
+        nothing — :func:`progtext.plan_writes` decides from the card at Write
+        time and says so per string — while being pessimistic silently hides
+        the feature.  A row a card scan found immovable carries ``fixed``
+        (text_manifest.FLAG_FIXED) and is refused as before."""
+        if cls._text_row_is_scene(r):
+            return True
+        if r.get("fixed"):
+            return False
+        return True
+
+    @classmethod
+    def _text_row_budget(cls, r):
+        """The row's replacement byte budget: on a row that grows, its own
+        budget or :data:`_TEXT_SCENE_MAX`, whichever is longer (a scanned
+        program row already carries 96; an unscanned one carries the
+        original's length, which is not its limit); on a fixed program row,
+        the explicit budget from the scan, else the original's own length."""
+        own = len(r["original"].encode("latin1", "replace"))
+        if cls._text_row_grows(r):
+            return max(r.get("budget") or own, cls._TEXT_SCENE_MAX)
+        return r.get("budget") or own
+
+    @classmethod
+    def _text_row_max_label(cls, r):
+        """The Max column's cell: the budget, marked ``(grows)`` on a row
+        whose longer text the Write step places in a new area of the game
+        program, or a scene it rewrites at the new length, instead of
+        refusing it (:meth:`_text_row_grows`)."""
+        budget = cls._text_row_budget(r)
+        return "%d (grows)" % budget if cls._text_row_grows(r) else "%d" % budget
+
+    @classmethod
+    def _text_row_outgrows(cls, r, s):
+        """True when *s* is longer than row *r*'s ORIGINAL slot — the case a
+        growable game-program row hands to the new-area path on Write (a
+        fitting edit is still patched in place)."""
+        return cls._text_row_len(r, s) > cls._text_row_len(r, r["original"])
+
+    @classmethod
+    def _text_replace_plan(cls, rows, find, repl, match_case=True):
+        """The Replace-everywhere plan, Tk-free: for every row whose ORIGINAL
+        contains *find*, ``{"index", "row", "new", "fits"}`` with ``new`` =
+        the original with every occurrence replaced and ``fits`` = whether
+        that text is within the row's budget.  Keyed on originals (like
+        "Apply to every scene") so a row already renamed to coincidentally
+        contain the word is not swept up by its edit; program rows are
+        matched in their manifest-encoded form (``\\n`` two characters),
+        which is what the list shows.  An empty *find* plans nothing."""
+        out = []
+        if not find:
+            return out
+        if match_case:
+            def _hit(s):
+                return find in s
+
+            def _sub(s):
+                return s.replace(find, repl)
+        else:
+            rx = re.compile(re.escape(find), re.IGNORECASE)
+
+            def _hit(s):
+                return rx.search(s) is not None
+
+            def _sub(s):
+                return rx.sub(lambda _m: repl, s)
+        for i, r in enumerate(rows):
+            orig = r["original"]
+            if not _hit(orig):
+                continue
+            new = _sub(orig)
+            out.append({
+                "index": i, "row": r, "new": new,
+                "fits": cls._text_row_len(r, new) <= cls._text_row_budget(r)})
+        return out
+
+    @staticmethod
+    def _text_split_edit(original, new):
+        """``(find, repl)`` when *new* differs from *original* by exactly one
+        contiguous run (GODZILLA VS EBIRAH STARTED → GODZILLA VS BIOLLANTE
+        STARTED gives ``("EBIRAH", "BIOLLANTE")``), else None — the pre-fill
+        for Replace everywhere opened from an edited row.  The run is what
+        is left after the longest common prefix and suffix are stripped;
+        an edit that is a pure insertion (an empty find) is not a search."""
+        if not original or not new or original == new:
+            return None
+        p = 0
+        lim = min(len(original), len(new))
+        while p < lim and original[p] == new[p]:
+            p += 1
+        s = 0
+        while (s < lim - p and original[len(original) - 1 - s]
+               == new[len(new) - 1 - s]):
+            s += 1
+        find = original[p:len(original) - s]
+        repl = new[p:len(new) - s]
+        if not find:
+            return None
+        return find, repl
 
     def _text_is_edited(self, r):
         return bool(r["replacement"]) and r["replacement"] != r["original"]
@@ -15077,6 +15432,23 @@ class MainWindow:
                 loaded, err = text_manifest.load(assets_path), None
             except Exception as e:
                 loaded, err = [], e
+            # A project extracted before the tool measured which program
+            # strings can take longer text carries no flag on any of them.
+            # The list shows those rows as growable either way, but the exact
+            # limits are worth having, and the card the project came from is
+            # usually still there — so re-read them once, here, off the scan
+            # thread.  Best effort: no card, no change (engine logs why), and
+            # the rows already reflect the optimistic default.
+            if err is None and any(
+                    not (r.get("path") or "").lower().endswith(".radium")
+                    and not r.get("grow") and not r.get("fixed")
+                    for r in loaded):
+                try:
+                    from ..plugins.stern import engine as _stern_engine
+                    if _stern_engine.refresh_program_text_flags(assets_path):
+                        loaded = text_manifest.load(assets_path)
+                except Exception:
+                    pass                   # keep the manifest as it loaded
             if self._text_scan_id != scan_id:
                 return
             try:
@@ -15109,6 +15481,15 @@ class MainWindow:
             # name can outgrow its own text — it lives inside a longer line).
             if r.get("budget"):
                 row["budget"] = r["budget"]
+            # Manifest flags: the row may grow (longer text goes to a new
+            # area of the game program on Write) / nothing in the game
+            # refers to it (dead text — an edit changes nothing on screen).
+            if r.get("grow"):
+                row["grow"] = True
+            if r.get("fixed"):
+                row["fixed"] = True
+            if r.get("unused"):
+                row["unused"] = True
             rows.append(row)
         self._text_rows = rows
         if not self._same_folder(scan_dir, self._text_scan_dir):
@@ -15215,7 +15596,7 @@ class MainWindow:
         for i, r in visible:
             tree.insert(
                 "", tk.END, iid=str(i), text=r["original"],
-                values=(r["replacement"], self._text_row_budget(r),
+                values=(r["replacement"], self._text_row_max_label(r),
                         self._text_scene_label(r["path"]),
                         self._text_scene_name(r["path"])),
                 tags=("assigned",) if self._text_is_edited(r) else ())
@@ -15248,18 +15629,52 @@ class MainWindow:
         if (r["path"] or "").lower().endswith(".radium"):
             name = self._text_scene_name(r["path"])
             self._text_scene_full_var.set(
-                ("Scene “%s”: " % name if name else "Scene: ") + r["path"])
+                ("Scene “%s”: " % name if name else "Scene: ") + r["path"]
+                + " — text that still fits is patched in place; a longer "
+                "line has the scene rewritten at the new length on Write "
+                "(image build, not a Direct-SD write; not yet booted on a "
+                "machine). Its box is the scene's fixed template: check a "
+                "longer line in the Scenes window.")
         else:
-            self._text_scene_full_var.set(
-                "Game program: %s — drawn by game code (mode titles, battle "
-                "names). \\n in a string is a real line break. Names shown on "
-                "their own may be the END of a longer line; edit both rows so "
-                "the line ends with the new name." % r["path"])
+            self._text_scene_full_var.set(self._text_program_note(r))
         # Pre-fill the entry with the current effective text (the edit, or the
         # original if untouched) so the user edits from what's shown today.
         self.text_new_var.set(r["replacement"] or r["original"])
         self._text_enable_edit(True)
         self._text_update_budget()
+
+    @staticmethod
+    def _text_program_note(r):
+        """The note under the editor for a game-program row: what draws it,
+        and — from the manifest's flags — whether longer text can be placed
+        in a new area of the program, or whether the game never uses the
+        line at all."""
+        note = ("Game program: %s — drawn by game code (mode titles, battle "
+                "names). \\n in a string is a real line break." % r["path"])
+        if r.get("unused"):
+            note += (" (not used by the game) — no reference to this line "
+                     "was found in the game program, so changing it changes "
+                     "nothing on screen.")
+        if r.get("grow") or not r.get("fixed"):
+            note += (" This row can grow: longer text is placed in a new "
+                     "area of the game program and every reference is "
+                     "pointed at it; that needs an image build (not a "
+                     "Direct-SD write), and no machine has booted such a "
+                     "build yet — text that still fits is patched in place "
+                     "as before.")
+            if not r.get("grow"):
+                note += (" This project was extracted before the tool "
+                         "measured which strings can move, so the exact "
+                         "limit is checked against the card when you build "
+                         "— a string the game reads in a way the tool "
+                         "can't follow is left alone and the build says so. "
+                         "Scan re-reads the limits when the card image is "
+                         "still where it was.")
+        else:
+            note += (" Names shown on their own may be the END of a longer "
+                     "line; edit both rows so the line ends with the new "
+                     "name.")
+        return note
 
     def _text_on_tree_double(self, _event=None):
         if not self._double_click_on_rows(self._text_tree, _event):
@@ -15284,6 +15699,9 @@ class MainWindow:
             pass
         menu.add_command(label="Edit…",
                          command=lambda: self._text_new_entry.focus_set())
+        menu.add_command(
+            label="Replace everywhere…",
+            command=lambda r=row: self._text_replace_everywhere(r))
         menu.add_command(label="Show in Scenes…",
                          command=lambda r=row: self._text_show_in_scene(r))
         menu.add_command(label="Name this scene…",
@@ -15369,11 +15787,22 @@ class MainWindow:
         except (ValueError, IndexError):
             return
         orig_len = self._text_row_budget(r)
-        new_len = self._text_row_len(r, self.text_new_var.get())
+        new = self.text_new_var.get()
+        new_len = self._text_row_len(r, new)
         over = new_len > orig_len
-        self.text_budget_var.set(
-            "%d / %d bytes%s" % (new_len, orig_len,
-                                 "  — too long" if over else ""))
+        if over:
+            tail = "  — too long"
+        elif self._text_row_grows(r) and self._text_row_outgrows(r, new):
+            # Within the 96-byte cap but past the original's slot: the Write
+            # step moves it (image build), so say so where the number is.
+            tail = ("  — the scene is rewritten at the new length"
+                    if self._text_row_is_scene(r)
+                    else "  — placed in a new area of the game program")
+        else:
+            tail = ""
+        if r.get("unused"):
+            tail += "  (not used by the game)"
+        self.text_budget_var.set("%d / %d bytes%s" % (new_len, orig_len, tail))
         c = THEMES.get(self._current_theme, {})
         lbl.configure(foreground="#d04040" if over else c.get("fg", "#888888"))
         if hasattr(self, "_text_apply_btn"):
@@ -15391,47 +15820,175 @@ class MainWindow:
         orig = r["original"]
         new = self.text_new_var.get()
         if self._text_row_len(r, new) > self._text_row_budget(r):
-            messagebox.showwarning(
-                "Replacement too long",
-                "“%s” is %d bytes but only %d fit. On-screen text is patched "
-                "in place, so a replacement has to fit the available length "
-                "— use a shorter string."
-                % (new, self._text_row_len(r, new), self._text_row_budget(r)))
+            messagebox.showwarning("Replacement too long",
+                                   self._text_too_long_message(r, new))
             return
         eff = "" if new == orig else new       # new == orig => unchanged
-        prev = r.get("replacement") or ""
         if self.text_apply_all_var.get():
             targets = [rr for rr in self._text_rows if rr["original"] == orig]
         else:
             targets = [r]
-        for rr in targets:
+        self._text_set_replacements([(rr, eff) for rr in targets], iid)
+
+    @classmethod
+    def _text_too_long_message(cls, r, new):
+        """Why an edit is refused — two different rules.  A row that grows
+        (a growable game-program row, any scene row) is capped only by the
+        96-byte line limit; a game-program row the tool can't move is
+        patched in place and must fit its slot."""
+        new_len = cls._text_row_len(r, new)
+        budget = cls._text_row_budget(r)
+        if cls._text_row_grows(r):
+            return ("“%s” is %d bytes; the longest a line can be is %d "
+                    "bytes." % (new, new_len, budget))
+        return ("“%s” is %d bytes but only %d fit. This line is used in "
+                "a way the tool can't move, so it is patched in place "
+                "and has to fit the available length — use a shorter "
+                "string." % (new, new_len, budget))
+
+    def _text_set_replacements(self, changes, reselect_iid=None):
+        """The one way an edit lands: set each ``(row, effective)`` in
+        *changes* ("" = back to the original), save the manifest ONCE (which
+        is what the Write tab's pending list, its fingerprint and an open
+        Scenes window key off), record the project history and the log,
+        refresh the list and put the selection back.  Per-row Apply and
+        Replace everywhere both come through here."""
+        from ..core import history_log
+        # Group by (original, effective) so a same-text sweep records one
+        # history line with a copies count, exactly as per-row Apply did.
+        groups = {}
+        order = []
+        for rr, eff in changes:
+            prev = rr.get("replacement") or ""
             rr["replacement"] = eff
+            key = (rr["original"], eff)
+            if key not in groups:
+                groups[key] = {"prev": prev, "n": 0, "changed": False}
+                order.append(key)
+            groups[key]["n"] += 1
+            if eff != prev:
+                groups[key]["changed"] = True
         self._save_text_manifest()
         # Project history (batch 24): full strings, not ellipsized — the file
         # is for grepping months later.
-        if eff != prev:
-            from ..core import history_log
-            copies = ("  (%d copies)" % len(targets)
-                      if len(targets) > 1 else "")
-            was = ('  (was: "%s")' % prev) if prev else ""
-            history_log.record(
-                self._text_scan_dir,
+        events = []
+        for key in order:
+            orig, eff = key
+            g = groups[key]
+            if not g["changed"]:
+                continue
+            copies = ("  (%d copies)" % g["n"]) if g["n"] > 1 else ""
+            was = ('  (was: "%s")' % g["prev"]) if g["prev"] else ""
+            events.append(
                 ('text  "%s"  changed to: "%s"%s%s' % (orig, eff, was, copies))
                 if eff else
                 ('text  "%s"  reverted to original%s%s' % (orig, was, copies)))
-        if eff:
-            self.append_log(
-                'Replace Text: "%s" → "%s"%s'
-                % (self._ellipsize(orig), self._ellipsize(eff),
-                   " (%d copies)" % len(targets) if len(targets) > 1 else ""),
-                "info")
+            if eff:
+                self.append_log(
+                    'Replace Text: "%s" → "%s"%s'
+                    % (self._ellipsize(orig), self._ellipsize(eff),
+                       " (%d copies)" % g["n"] if g["n"] > 1 else ""),
+                    "info")
+        if events:
+            history_log.record(self._text_scan_dir, events)
         self._refresh_text_list()
-        try:
-            self._text_tree.selection_set(iid)
-            self._text_tree.see(iid)
-        except tk.TclError:
-            pass
+        if reselect_iid is None:
+            reselect_iid = self._text_current_iid
+        if reselect_iid is not None:
+            try:
+                self._text_tree.selection_set(reselect_iid)
+                self._text_tree.see(reselect_iid)
+            except tk.TclError:
+                pass
+            # The selection handler re-fills the entry from the row; the
+            # caller already put the row's new text there, so only refresh
+            # the readout.
         self._text_update_budget()
+
+    def _text_replace_everywhere(self, iid=None):
+        """Open the Find / Replace dialog over the whole list.  Opened from a
+        row (right-click, or with one selected) it pre-fills Find with the
+        one word the row's New text changed — or the whole original when
+        the row is untouched.  Returns the dialog (tests drive it)."""
+        if not self._text_rows:
+            messagebox.showinfo(
+                "Replace everywhere",
+                "Scan the project folder first — there are no strings to "
+                "search yet.")
+            return None
+        find, repl = "", ""
+        if iid is None:
+            sel = self._text_tree.selection()
+            iid = sel[0] if sel else self._text_current_iid
+        try:
+            r = self._text_rows[int(iid)]
+        except (TypeError, ValueError, IndexError):
+            r = None
+        if r is not None:
+            typed = (self.text_new_var.get()
+                     if str(iid) == str(self._text_current_iid)
+                     else (r["replacement"] or ""))
+            pair = self._text_split_edit(r["original"], typed)
+            if pair is None and r["replacement"]:
+                pair = self._text_split_edit(r["original"], r["replacement"])
+            if pair is not None:
+                find, repl = pair
+            else:
+                find = r["original"]
+        dlg = _TextReplaceDialog(self, find, repl)
+        self._text_replace_dlg = dlg
+        return dlg
+
+    def _text_replace_apply(self, plan):
+        """Replace everywhere → Apply: land every fitting row through the
+        same path as per-row Apply, then name the rows that were skipped
+        with their budgets so the user can shorten them by hand.  Returns
+        ``(applied, skipped)``."""
+        fits = [p for p in plan if p["fits"]]
+        skipped = [p for p in plan if not p["fits"]]
+        if fits:
+            self._text_set_replacements(
+                [(p["row"], "" if p["new"] == p["row"]["original"]
+                  else p["new"]) for p in fits])
+        if skipped:
+            lines = []
+            for p in skipped[:12]:
+                lines.append("• %s → %s  (%d bytes, Max %d)" % (
+                    p["row"]["original"], p["new"],
+                    self._text_row_len(p["row"], p["new"]),
+                    self._text_row_budget(p["row"])))
+            if len(skipped) > 12:
+                lines.append("… and %d more" % (len(skipped) - 12))
+            messagebox.showinfo(
+                "Replace everywhere",
+                "%d row(s) changed. %d row(s) were skipped because the new "
+                "text would not fit their Max — shorten those by hand:\n\n%s"
+                % (len(fits), len(skipped), "\n".join(lines)))
+        return fits, skipped
+
+    def _on_write_text_grow_toggle(self):
+        """Write tab → Advanced "grow the game program" checkbox: hand the
+        App the value to persist and mirror into PAD_STERN_TEXT_GROW, and
+        re-list the pending rows (a longer edit's status names the path it
+        takes)."""
+        try:
+            on = bool(self.write_text_grow_var.get())
+        except tk.TclError:
+            return
+        if self._on_text_grow_change:
+            self._on_text_grow_change(on)
+        try:
+            self._refresh_pending_text_rows()
+        except Exception:
+            pass
+
+    def text_grow_enabled(self):
+        """Whether the Write tab's "grow the game program for longer text"
+        option is on (default on)."""
+        try:
+            return bool(self.write_text_grow_var.get())
+        except (AttributeError, tk.TclError):
+            return True
 
     def _text_clear_selected(self):
         """Revert the selected string (and same-text siblings if 'apply to all'
@@ -15516,7 +16073,20 @@ class MainWindow:
                 "Couldn't save",
                 "Couldn't write the on-screen-text manifest:\n%s" % e)
             return 0
+        self._refresh_scene_browser_text()
         return sum(1 for r in self._text_rows if self._text_is_edited(r))
+
+    def _refresh_scene_browser_text(self):
+        """Keep an open Scenes window in step with a Replace Text edit: its
+        preview draws the pending replacement (David: "changes here would
+        propagate everywhere and I would be able to easily view them")."""
+        sb = getattr(self, "_scene_browser", None)
+        try:
+            if sb is not None and sb.win.winfo_exists() and self._same_folder(
+                    getattr(sb, "assets_dir", ""), self._text_scan_dir):
+                sb.text_edits_changed()
+        except Exception:
+            pass
 
     def _build_phase_steps(self, parent, phases, mode):
         labels = []
@@ -16314,6 +16884,17 @@ class MainWindow:
                     before=self._write_output_row_ref)
         else:
             self._write_editable_hint.pack_forget()
+
+        # Advanced "grow the game program for longer text" — plugins with
+        # editable on-screen text only (Stern); sits under the Build Image
+        # row.
+        if getattr(caps, "replace_text", False) and caps.write:
+            if not self._write_text_grow_row.winfo_ismapped():
+                self._write_text_grow_row.pack(
+                    fill=tk.X, padx=10, pady=(2, 2),
+                    after=self._write_filename_lbl)
+        else:
+            self._write_text_grow_row.pack_forget()
 
         # Update-version date control (BOF) — sits just above the output
         # row.  Refresh its concrete date from the current assets folder.
@@ -18404,6 +18985,85 @@ class MainWindow:
         # top of this method — just launch the walk.
         threading.Thread(target=_scan, daemon=True).start()
 
+    #: Write-tab status strings for pending on-screen-text edits.
+    _PENDING_TEXT = "Pending (Replace Text)"
+    _PENDING_TEXT_GROWS = "Pending (text, game program grows)"
+    _PENDING_TEXT_GROWS_SCENE = "Pending (text, scene grows)"
+    _PENDING_TEXT_GROW_OFF = "Pending (Replace Text — too long, grow is off)"
+
+    @classmethod
+    def _pending_text_status(cls, row, grow_on=True):
+        """The status a pending text edit shows on the Write tab.  A
+        game-program row flagged ``grow`` whose replacement is longer than
+        the original's slot takes the new-area path on Write ("game program
+        grows"); a scene row's longer replacement has its scene rewritten
+        at the new length ("scene grows"); with the Advanced option off
+        either edit is skipped by the build, and the row says so instead of
+        promising a change."""
+        rep = row.get("replacement") or ""
+        if cls._text_row_grows(row) and rep and cls._text_row_outgrows(row, rep):
+            if not grow_on:
+                return cls._PENDING_TEXT_GROW_OFF
+            return (cls._PENDING_TEXT_GROWS_SCENE if cls._text_row_is_scene(row)
+                    else cls._PENDING_TEXT_GROWS)
+        return cls._PENDING_TEXT
+
+    def _add_pending_text_rows(self, assets_path, scan_id):
+        """Edited on-screen text persists straight to text/strings.tsv (no
+        in-memory assignment), so read the edits back from the manifest and
+        list each changed string as a pending "original → new" row.
+        Returns the count added."""
+        from ..core import text_manifest
+        try:
+            rows = text_manifest.load(assets_path)
+        except Exception:
+            rows = []
+        grow_on = self.text_grow_enabled()
+        n = 0
+        for row in rows:
+            rep = row.get("replacement") or ""
+            if not rep or rep == row["original"]:
+                continue
+            self._add_write_preview_row(
+                f"{row['original']}  →  {rep}", "text",
+                self._pending_text_status(row, grow_on), scan_id,
+                tag="pending")
+            n += 1
+        return n
+
+    def _refresh_pending_text_rows(self):
+        """Re-list the pending text rows in place (the Advanced grow option
+        changed their status) without the minutes-long MD5 rescan a full
+        _scan_write_preview would run."""
+        tree = getattr(self, "_write_preview_tree", None)
+        if tree is None:
+            return
+        assets_path = (self.write_assets_var.get() or "").strip()
+        # Only the strings.tsv rows: colour / layout edits list under their
+        # own statuses and are not re-added here.
+        mine = (self._PENDING_TEXT, self._PENDING_TEXT_GROWS,
+                self._PENDING_TEXT_GROWS_SCENE,
+                self._PENDING_TEXT_GROW_OFF)
+        keep = []
+        try:
+            for item in tree.get_children():
+                vals = tree.item(item, "values")
+                if len(vals) >= 2 and vals[0] == "text" and vals[1] in mine:
+                    tree.delete(item)
+            for rel, ext, status, tag in self._write_preview_rows:
+                if not (ext == "text" and status in mine):
+                    keep.append((rel, ext, status, tag))
+        except tk.TclError:
+            return
+        self._write_preview_rows = keep
+        mfr = self._current_mfr
+        if assets_path and mfr is not None and getattr(
+                mfr.capabilities, "replace_text", False):
+            self._add_pending_text_rows(assets_path,
+                                        self._write_preview_scan_id)
+        self._update_revert_btn_state()
+        self._update_write_preview_count()
+
     def _add_pending_preview_rows(self, assets_path, scan_id):
         """List in-memory Replace-Audio / Replace-Video assignments for
         *assets_path* as "Pending" preview rows (they're staged to disk only at
@@ -18463,17 +19123,7 @@ class MainWindow:
         mfr = self._current_mfr
         if mfr is not None and getattr(
                 mfr.capabilities, "replace_text", False):
-            try:
-                from ..core import text_manifest
-                changed = text_manifest.changed(assets_path)
-            except Exception:
-                changed = {}
-            for _path, pairs in changed.items():
-                for original, repl in pairs:
-                    self._add_write_preview_row(
-                        f"{original}  →  {repl}", "text",
-                        "Pending (Replace Text)", scan_id, tag="pending")
-                    n += 1
+            n += self._add_pending_text_rows(assets_path, scan_id)
             # Recoloured text lives in its own manifest (the colour is a scene
             # property, not a font one) but it is still a pending text edit and
             # belongs in the same list, or a colour-only build looks like
@@ -18489,6 +19139,21 @@ class MainWindow:
                         "%s  —  %s → %s" % (text, text_colors.to_hex(src),
                                             text_colors.to_hex(dst)),
                         "text", "Pending (text colour)", scan_id,
+                        tag="pending")
+                    n += 1
+            # Re-laid-out text (moved / re-aligned / resized) is the same kind
+            # of scene edit in its own manifest, and rides the same Write
+            # path — list it or a layout-only build looks like nothing.
+            try:
+                from ..plugins.stern import text_layout
+                relaid = text_layout.load(assets_path)
+            except Exception:
+                relaid = {}
+            for _path, per_text in relaid.items():
+                for text, edit in per_text.items():
+                    self._add_write_preview_row(
+                        "%s  —  %s" % (text, text_layout.describe(edit)),
+                        "text", "Pending (text layout)", scan_id,
                         tag="pending")
                     n += 1
         return n
@@ -19155,7 +19820,9 @@ class MainWindow:
         sets, and a counter bumped after every finished run (build / export /
         revert all stage or restore files on disk)."""
         assets_path = (self.write_assets_var.get() or "").strip()
-        parts = [assets_path, getattr(self, "_write_disk_epoch", 0)]
+        parts = [assets_path, getattr(self, "_write_disk_epoch", 0),
+                 # The grow option changes what a pending text row says.
+                 self.text_grow_enabled()]
         for getter in (self.pending_audio_assignments,
                        self.pending_video_assignments,
                        self.pending_image_assignments):
@@ -19181,6 +19848,13 @@ class MainWindow:
             parts.append(sorted(
                 (p, sorted(per.items()))
                 for p, per in text_colors.load(assets_path).items()))
+        except Exception:
+            parts.append(None)
+        try:
+            from ..plugins.stern import text_layout
+            parts.append(sorted(
+                (p, sorted((t, sorted(e.items())) for t, e in per.items()))
+                for p, per in text_layout.load(assets_path).items()))
         except Exception:
             parts.append(None)
         return parts

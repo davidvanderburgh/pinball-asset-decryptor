@@ -997,6 +997,34 @@ def parse_scene_layout(data, images, tables=None):
 _KF_RGBA_AT = 32
 
 
+def _text_keyframes(data, start):
+    """Every keyframe block that CARRIES a display string, as ``(offset, kf)``
+    in file order: the Text node's keyframes before the stage header AND the
+    instance keyframes after it.
+
+    The layout parser reads a line's text, rect, colour and alignment from
+    whichever of the two holds the string (``linked or kf`` in
+    :func:`_parse_scene_layout`), so an edit has to land on that same block.
+    The colour and layout offset scans used to stop at the stage header, and
+    on Godzilla's score HUD that found 6 of its 16 lines: ``CREDITS  0`` and
+    ``BALL 0`` are instance keyframes 46 KB past the stage, and a recolour or
+    a move of them was reported as "not drawn in this scene".  The stage
+    header itself never parses as a keyframe (its first word is no 0x80
+    handle), so the walk simply continues through it to the end of the file;
+    ``_MAX_ELEMENTS`` still bounds it."""
+    j, n = start, 0
+    while j < len(data) and n < _MAX_ELEMENTS:
+        got = _parse_keyframe(data, j)
+        if got is None:
+            j += 1
+            continue
+        kf, end = got
+        if kf["text"]:
+            yield j, kf
+            n += 1
+        j = end
+
+
 def text_color_offsets(data, images, tables=None):
     """``{display string: [(file offset of the keyframe RGBA, rgba), ...]}``.
 
@@ -1022,22 +1050,303 @@ def text_color_offsets(data, images, tables=None):
         found = _find_stage(data, start)
         if found is None:
             return out
-        _stage, after_stage = found
-        j, n = start, 0
-        while j < after_stage and n < _MAX_ELEMENTS:
-            got = _parse_keyframe(data, j)
-            if got is None:
-                j += 1
-                continue
-            kf, end = got
-            if kf["text"]:
-                out.setdefault(kf["text"], []).append(
-                    (j + _KF_RGBA_AT, list(kf["rgba"])))
-                n += 1
-            j = end
+        for j, kf in _text_keyframes(data, start):
+            out.setdefault(kf["text"], []).append(
+                (j + _KF_RGBA_AT, list(kf["rgba"])))
     except Exception:
         return out
     return out
+
+
+# Where the other editable fields sit inside a keyframe block (see
+# ``_parse_keyframe``): the rect follows handle (4) + seq (4) + the zero u64
+# (8); the u32 alignment follows rect (16) + rgba (16) + a u16 (2); the f32
+# line spacing follows the alignment.
+_KF_RECT_AT = 16
+_KF_ALIGN_AT = 50
+_KF_SPACING_AT = 54
+# The u32 the keyframe stores per alignment; the manifest names them.
+_ALIGN_CODES = {"left": 0, "center": 1, "centre": 1, "right": 2}
+_METRIC_COUNT = 5             # w, h, bearing_x, bearing_y, advance
+# The phrase every collateral-resize note carries (a resize that reaches
+# other lines drawn with the same table); the engine logs such notes at
+# info and every other note at warning, keyed on this constant.
+COLLATERAL_NOTE_MARK = "also resizes"
+
+
+def _tables_by_name(tables):
+    """``{font name: table dict}`` for the scene's NAMED tables, under the
+    same rule as :func:`_font_tables_by_name`: a name baked at more than one
+    size in one scene resolves to nothing rather than to a guess (which, for
+    a resize, would scale the wrong glyphs)."""
+    per = {}
+    for t in tables or ():
+        name = t.get("name")
+        if name and t.get("glyphs"):
+            per.setdefault(name, []).append(t)
+    out = {}
+    for name, ts in per.items():
+        if len({_radium.table_size_px(t) for t in ts}) == 1:
+            out[name] = ts[0]
+    return out
+
+
+def text_layout_offsets(data, images, tables=None):
+    """``{display string: [keyframe, ...]}`` -- where a line's LAYOUT lives.
+
+    Each keyframe is ``{"off", "rect_off", "rect", "align_off", "align",
+    "spacing_off", "spacing", "font_name", "table"}``: the block's start, the
+    file offsets and current values of its rect (four floats, L T R B), its
+    alignment (u32: 0 left, 1 centre, 2 right) and its line spacing (f32), the
+    font name the line draws with and the glyph table that name resolves to in
+    THIS scene (``None`` when the line names no font or the name is baked at
+    several sizes here).
+
+    Moving a line, re-aligning it and resizing it are all size-neutral
+    rewrites of these bytes, so this is to :func:`text_layout_patches` what
+    :func:`text_color_offsets` is to a recolour, and it is the SAME scan: the
+    keyframes the Scenes window drew are the ones that get patched.  A string
+    with several keyframes (per animation frame, and the outline instance
+    drawn under the fill) lists them all; a layout edit applies to every one.
+
+    Never raises: an unreadable scene yields ``{}``."""
+    out = {}
+    try:
+        start = _tail_start(images, tables)
+        if start <= 0 or start >= len(data):
+            return out
+        found = _find_stage(data, start)
+        if found is None:
+            return out
+        _stage, after_stage = found
+        by_name = _tables_by_name(tables)
+        for j, kf in _text_keyframes(data, start):
+            out.setdefault(kf["text"], []).append({
+                "off": j,
+                "rect_off": j + _KF_RECT_AT, "rect": list(kf["rect"]),
+                "align_off": j + _KF_ALIGN_AT, "align": kf["align"],
+                "spacing_off": j + _KF_SPACING_AT,
+                "spacing": kf["spacing"],
+                "font_name": kf["font_name"],
+                "table": by_name.get(kf["font_name"] or ""),
+            })
+    except Exception:
+        return out
+    return out
+
+
+def _align_code(value):
+    """The keyframe u32 for a manifest alignment (``'left'`` / ``'center'`` /
+    ``'right'``, or already a code); ``None`` for "unchanged" or junk."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 0 <= value <= 2 else None
+    try:
+        return _ALIGN_CODES.get(str(value).strip().lower())
+    except Exception:
+        return None
+
+
+def _offset(value):
+    """A manifest dx/dy as a float; ``''``, ``None`` and junk are 0."""
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _size_factor(value):
+    """A manifest size (integer percent of the scene's baked size) as a scale
+    factor, or ``None`` when it changes nothing."""
+    if value is None or value == "":
+        return None
+    try:
+        pct = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pct <= 0 or abs(pct - 100.0) < 1e-9:
+        return None
+    return pct / 100.0
+
+
+def _put(patches, data, off, payload):
+    """Queue a size-neutral write, unless the file already holds it (a field
+    edited back to what the scene has is not a change).  True when queued."""
+    if off < 0 or off + len(payload) > len(data):
+        return False
+    if bytes(data[off:off + len(payload)]) == payload:
+        return False
+    patches.append((off, payload))
+    return True
+
+
+def _scale_table(data, table, factor, patches):
+    """Scale every glyph's five metric floats and every kerning adjust of one
+    glyph table by *factor* -- the scene-scoped resize.  The atlas is the
+    font's MASTER art and the game fits it to the metrics box, so the bitmap
+    is untouched.  Returns how many glyph records were rewritten."""
+    n = 0
+    for g in table.get("glyphs") or ():
+        moff = g.get("metrics_off")
+        m = g.get("metrics")
+        if moff is None or not m or len(m) < _METRIC_COUNT:
+            continue
+        payload = struct.pack("<%df" % _METRIC_COUNT,
+                              *[float(v) * factor for v in m[:_METRIC_COUNT]])
+        if _put(patches, data, moff, payload):
+            n += 1
+        for kch, koff in (g.get("kern_offs") or {}).items():
+            adj = (g.get("kern") or {}).get(kch)
+            if adj is None:
+                continue
+            _put(patches, data, koff, struct.pack("<f", float(adj) * factor))
+    return n
+
+
+def text_layout_patches(data, images, tables, edits, log=None):
+    """Size-neutral writes that apply *edits* -- ``{display string: {"dx",
+    "dy", "align", "size"}}`` for ONE scene -- to its ``scene.radium``.
+
+    Returns ``(patches, n_lines, notes)``: ``patches = [(file offset,
+    bytes)]``, every one the same length as what it replaces, so the file
+    never changes size and the overlay / ``.sidx`` machinery a text or colour
+    edit uses applies unchanged; ``n_lines`` = strings that had at least one
+    keyframe rewritten; ``notes`` = human strings for the log (a string not in
+    the scene, a font this scene bakes at several sizes, a resize that also
+    reaches other lines).  When *log* is given each note is also passed to it
+    as it arises.
+
+    Per string, every keyframe gets the same treatment (the outline instance
+    under the fill included): ``dx``/``dy`` shift the rect, ``align`` rewrites
+    the u32, and ``size`` (percent of the scene's baked size) scales the
+    keyframe's line spacing and the metrics + kerning of every glyph in the
+    table the keyframe's font name resolves to -- once per table, however
+    many keyframes or strings name it.  One table can only be scaled one way:
+    a second string asking a different size of the same table keeps the first
+    edit and is noted.
+
+    Never raises: a malformed scene yields ``([], 0, [])``."""
+    patches, notes = [], []
+    n_lines = 0
+
+    def note(msg):
+        notes.append(msg)
+        if log is not None:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    try:
+        if not edits:
+            return patches, 0, notes
+        offs = text_layout_offsets(data, images, tables)
+        if not offs:
+            # Not a readable scene (or one with no text at all): nothing to
+            # patch and nothing to say per string -- the caller sees
+            # ``n_lines == 0`` against its edits and warns the way a stale
+            # colour edit is warned about.
+            return [], 0, []
+        # which strings draw with which table, for the collateral note
+        users = {}
+        for text, kfs in offs.items():
+            for kf in kfs:
+                t = kf.get("table")
+                if t is not None:
+                    users.setdefault(t["table_off"], set()).add(text)
+        scaled = {}                   # table_off -> (factor, first string)
+        for text, edit in edits.items():
+            try:
+                edit = edit or {}
+                kfs = offs.get(text)
+                if not kfs:
+                    note("'%s' is not drawn in this scene; left alone"
+                         % text)
+                    continue
+                dx = _offset(edit.get("dx"))
+                dy = _offset(edit.get("dy"))
+                align = _align_code(edit.get("align"))
+                factor = _size_factor(edit.get("size"))
+                touched = False
+                for kf in kfs:
+                    if dx or dy:
+                        L, T, R, B = kf["rect"]
+                        touched |= _put(
+                            patches, data, kf["rect_off"],
+                            struct.pack("<4f", L + dx, T + dy, R + dx,
+                                        B + dy))
+                    if align is not None:
+                        touched |= _put(patches, data, kf["align_off"],
+                                        struct.pack("<I", align))
+                if factor is not None:
+                    # The size lives in the glyph table the keyframe's font
+                    # name resolves to; the keyframe's own line spacing rides
+                    # with it, and only with it -- a keyframe whose table
+                    # cannot be resized keeps its spacing too, so the line
+                    # never ends up half-scaled.
+                    seen = set()
+                    skipped = set()
+                    unnamed = 0
+                    for kf in kfs:
+                        t = kf.get("table")
+                        if t is None:
+                            unnamed += 1
+                            continue
+                        toff = t["table_off"]
+                        if toff in skipped:
+                            continue
+                        prior = scaled.get(toff)
+                        if prior is not None and abs(prior[0] - factor) > 1e-9:
+                            skipped.add(toff)
+                            note("'%s': %s is already resized to %d %% "
+                                 "for '%s' in this scene; one size per "
+                                 "font per scene, so this line's %d %% "
+                                 "is skipped"
+                                 % (text, t.get("name") or "its font",
+                                    round(prior[0] * 100), prior[1],
+                                    round(factor * 100)))
+                            continue
+                        touched |= _put(
+                            patches, data, kf["spacing_off"],
+                            struct.pack("<f", float(kf["spacing"]) * factor))
+                        if toff in seen or prior is not None:
+                            continue          # this table is already scaled
+                        seen.add(toff)
+                        scaled[toff] = (factor, text)
+                        if _scale_table(data, t, factor, patches):
+                            touched = True
+                        others = sorted(users.get(toff, set()) - {text})
+                        if others:
+                            note("'%s': %s %d other line(s) in "
+                                 "this scene drawn with %s (%d px): %s"
+                                 % (text, COLLATERAL_NOTE_MARK, len(others),
+                                    t.get("name") or "the same font",
+                                    _radium.table_size_px(t),
+                                    ", ".join("'%s'" % o for o in others)))
+                    if unnamed:
+                        name = next((kf["font_name"] for kf in kfs
+                                     if kf["font_name"]), "")
+                        if name:
+                            note("'%s': %s is baked at several sizes in this "
+                                 "scene, so which glyphs to resize is "
+                                 "ambiguous; %d keyframe(s) keep their size"
+                                 % (text, name, unnamed))
+                        else:
+                            note("'%s': %d keyframe(s) name no font in this "
+                                 "scene; their size is left alone"
+                                 % (text, unnamed))
+                if touched:
+                    n_lines += 1
+            except Exception:
+                note("'%s': this scene's layout could not be patched; "
+                     "left alone" % text)
+                continue
+    except Exception:
+        return [], 0, []
+    return patches, n_lines, notes
 
 
 def _glyph_atlas_offs(tables):

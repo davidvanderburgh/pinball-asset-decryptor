@@ -217,7 +217,7 @@ def _progress_step(nrec):
     return max(1, -(-n // PROGRESS_UPDATES))
 
 
-def _record_write_addr(md_range, r9):
+def _record_write_addr(md_range, r9, rec_idx=None):
     """Where the chain replay may write a master-directory record, or None.
 
     :meth:`Spike2Emu._drive_step` hands each record back to the band build by
@@ -232,13 +232,30 @@ def _record_write_addr(md_range, r9):
     wrong-codec signature).  Big catalogs get hit hardest because each record is
     another dart: TMNT 1.58 (2067 sounds) lost only ~0.7%.
 
-    The record already sits in the record array, so writing it back inside the
-    array is a no-op and writing it anywhere else is corruption — allow the
-    write only when all 24 bytes land inside ``md_range`` (``(lo, hi)``, the
-    record array; ``(0, 0)`` when unknown, which allows nothing)."""
+    The record already sits in the record array, and the ONE address where
+    writing it back is provably a no-op is its own slot — ``lo + rec_idx*24``,
+    which is where the validated build's cursor points on every record
+    (measured: TMNT 1.58 writes slot N on record N, all N).  Anywhere else is
+    corruption, INCLUDING inside the array: bounding the dart to the record
+    array was not enough, because a misaligned hit straddles two records and
+    rewrites them with a third record's bytes.  Beatles 1.29 threw exactly one
+    accepted dart in 933 records, during record 66, at ``md+10062`` — slot
+    419.25 — clobbering slots 419 and 420.  Record 419's band object came out
+    structurally impossible (length 3011441464, stride 8, band-0 key offset 0)
+    and the chain never recovered: all 514 records from 419 to the end of the
+    catalog decoded to stationary noise, 55% of the card, which is what made a
+    user's mods for those sounds fail to transfer onto it (PAD-108).
+
+    So: allow the write only when it lands exactly on *rec_idx*'s own slot
+    inside ``md_range`` (``(lo, hi)``, the record array; ``(0, 0)`` when
+    unknown, which allows nothing).  ``rec_idx`` omitted -> nothing is allowed,
+    since without it no address can be shown to be a no-op."""
     lo, hi = md_range
+    if hi <= lo or rec_idx is None:
+        return None
     dst = (r9 - 8) & 0xffffffff
-    if hi > lo and lo <= dst and dst + 24 <= hi:
+    slot = lo + rec_idx * 24
+    if dst == slot and lo <= dst and dst + 24 <= hi:
         return dst
     return None
 
@@ -1069,7 +1086,7 @@ class Spike2Emu:
                 rec = md[idx * 24: idx * 24 + 24]
                 dw0 = _u32(rec, 0)
                 length = (self.LENGTH_XOR ^ _u32(rec, 16)) & 0xffffffff
-                obj, nxt = self._drive_step(cur, rec)
+                obj, nxt = self._drive_step(cur, rec, rec_idx=idx)
                 if obj is None:
                     break
                 row = dict(
@@ -1103,7 +1120,7 @@ class Spike2Emu:
                 self.extra.pop(a, None)
         return rows
 
-    def _drive_step(self, cur, record_bytes, limit=4_000_000):
+    def _drive_step(self, cur, record_bytes, limit=4_000_000, rec_idx=None):
         mu = self.mu
         sp = cur["sp"]
         self._ensure_range(sp, 0x2a0)
@@ -1112,7 +1129,7 @@ class Spike2Emu:
             mu.reg_write(r, cur["regs"][i])
         mu.reg_write(UC_ARM_REG_SP, sp)
         mu.reg_write(UC_ARM_REG_LR, cur["regs"][14])
-        rec_at = _record_write_addr(self._md_range, cur["regs"][9])
+        rec_at = _record_write_addr(self._md_range, cur["regs"][9], rec_idx)
         if rec_at is not None:
             self._ensure_range(rec_at, 24)
             mu.mem_write(rec_at, record_bytes)

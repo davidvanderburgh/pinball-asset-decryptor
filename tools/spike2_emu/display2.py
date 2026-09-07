@@ -149,6 +149,47 @@ def fb_geometry(elf_path):
     return find_records(elf[rx_off:rx_off + rx_size], rx_va, read_va)
 
 
+#: ★ WHAT THE BINARY CANNOT TELL US, REPORTED FROM REAL MACHINES.
+#:
+#: Everything else in this file is DERIVED, and that is the point of it - a
+#: hand-typed per-title table is the trap items 55, 57 and 61 each fell into
+#: once. These facts are here because they are not in the binary AT ALL, which
+#: was established rather than assumed (2026-09-07): the small-cabinet builds
+#: reference no `/dev/fb*` string of any kind and carry no 800x480 anywhere -
+#: and neither does a FULL cabinet carry its own 1360x768, which came from
+#: watching the game's post-boot scissor rect at RUNTIME. A panel's mounting
+#: angle is not in there either; the game renders the same landscape frame
+#: whichever way round the glass is screwed on.
+#:
+#: WHAT MAKES THEM SAFE TO KEEP. Each only ever moves a WINDOW on the host: it
+#: cannot reach the guest, cannot change what the game is told, and a wrong
+#: entry is visible the instant anyone looks - the opposite of the
+#: silent-missing-devices failure the no-tables rule exists to prevent. And
+#: each is a measurement from a machine someone owns, not a guess:
+#:
+#:   * the 800x480 single screen - three separate cabinets, three separate
+#:     reports, the same number (James Bond 60th, Star Wars Home Edition,
+#:     Jurassic Park The Pin, all one-screen models).
+#:   * venom_le's quarter turn - the report said "90 degrees clockwise", and a
+#:     photograph of that machine shows its topper carrying the same service
+#:     screen as the backbox, a quarter turn from it.
+#:
+#: A title that grows a real timing record later needs no entry: the derived
+#: reading is what sizes the second display, and this only fills the gap.
+REPORTED_PANELS = {
+    "james_bond_60th_le":    {"screen": (800, 480)},
+    "star_wars_elg":         {"screen": (800, 480)},
+    "jurassic_park_the_pin": {"screen": (800, 480)},
+    "venom_le":              {"rot2": 90},
+}
+
+
+def reported(title):
+    """The reported facts for `title`, or {} - keyed on the title the card
+    names itself, which is what watch.sh already has."""
+    return dict(REPORTED_PANELS.get(title or "", {}))
+
+
 def main(argv):
     shell = "--shell" in argv
     args = [a for a in argv[1:] if a != "--shell"]

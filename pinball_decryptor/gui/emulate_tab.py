@@ -2093,6 +2093,12 @@ class EmulatePanel:
         #: the main thread the moment one is picked) and this box shows what
         #: was decided; changing it is how you say otherwise.
         self._select_var = tk.BooleanVar(value=False)
+        #: The topper is an ACCESSORY on most of these titles, and a
+        #: cabinet without one loses its topper-only modes too - so
+        #: switching it off here is playing the machine somebody
+        #: actually has, not hiding a window. On by default, because
+        #: that is the machine the code was written for.
+        self._topper_var = tk.BooleanVar(value=True)
         #: What the probe found for the card now in the box: True it carries a
         #: menu, False it does not, None nobody could tell (no rig, no WSL,
         #: macOS, an unreadable file, or the answer has not come back yet).
@@ -3669,6 +3675,17 @@ class EmulatePanel:
         self._select_chk.pack(side=tk.LEFT, padx=(6, 0))
         self._select_tip = _Tooltip(self._select_chk, self._SELECT_TIP_IDLE,
                                     self._theme_fn, place="side")
+        self._topper_chk = ttk.Checkbutton(row, text="Topper",
+                                           variable=self._topper_var)
+        self._topper_chk.pack(side=tk.LEFT, padx=(6, 0))
+        _Tooltip(self._topper_chk,
+                 "The second screen a topper adds — a Mandalorian's hologram, "
+                 "a Venom's, a Stranger Things projector. Untick it to run the "
+                 "machine without one: the window stays shut, and the game "
+                 "behaves as it does on a cabinet where the topper is not "
+                 "fitted, which on some titles also takes its topper-only "
+                 "modes out of play.",
+                 self._theme_fn, place="side")
         # The probe: on every card change, and once now for a card the project
         # remembered.  Registered AFTER the widgets it fills in, so an early
         # trace cannot reach a half-built row.
@@ -4236,7 +4253,13 @@ class EmulatePanel:
         if not os.path.isfile(path):
             self._hint.configure(text="No such image: %s" % path)
             return None
-        return ["PAD_CARD=%s" % _wsl_path(path)]
+        env = ["PAD_CARD=%s" % _wsl_path(path)]
+        # Only when it is OFF: the rig's own default is on, so an
+        # untouched tab hands watch.sh exactly what it handed it
+        # before this tickbox existed.
+        if not self._topper_var.get():
+            env.append("PAD_TOPPER=0")
+        return env
 
     # ------------------------------------------------------------------
     # PAD-103: the user's edits, without rebuilding the card

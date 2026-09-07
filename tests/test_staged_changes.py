@@ -130,3 +130,23 @@ def test_dropped_assignments_skips_empty_entries(tmp_path):
 
 def test_dropped_assignments_handles_none():
     assert staged_changes.dropped_assignments(None, {}) == []
+
+
+def test_load_prunes_manifest_keyed_assignments(tmp_path):
+    """PAD-107 self-heal: a sidecar an affected version already wrote carries
+    an image assignment keyed on ``scene_layout.json``, which matches no slot,
+    so every Replace-Image scan reported it as unrestorable.  Load drops it —
+    real slots are untouched."""
+    staged_changes.save(str(tmp_path), {
+        "image": {"images/logo.png": r"C:\repl\logo.png",
+                  "images/scene_textures/scene_layout.json":
+                      r"C:\old\scene_layout.json"},
+        "video": {"video/manifest.txt": r"C:\old\manifest.txt"},
+        "audio": {"audio/idx0001.wav": r"C:\repl\song.mp3"},
+        "audio_trim": True})
+
+    loaded = staged_changes.load(str(tmp_path))
+    assert list(loaded["image"]) == ["images/logo.png"]
+    assert loaded["video"] == {}
+    assert list(loaded["audio"]) == ["audio/idx0001.wav"]
+    assert loaded["audio_trim"] is True

@@ -393,6 +393,54 @@ def test_plan_direct_diff_images_videos_no_baseline(tmp_path):
         os.path.join(mod, "images", "backglass.png"))
 
 
+def test_direct_diff_never_stages_the_extractor_manifests(tmp_path):
+    """PAD-107: ``images/scene_textures/scene_layout.json`` is the Scenes
+    preview's bookkeeping, not an image slot.
+
+    It records per-scene positions and the content-hashed PNG names around
+    them, so it differs between ANY two extracts — the byte diff staged it as
+    an image "mod", and because no image slot has that rel, the Replace-Image
+    scan then reported it as an unrestorable saved replacement (a red line at
+    the end of every transfer, and on every scan afterwards).
+    """
+    mod, tgt = str(tmp_path / "modded127"), str(tmp_path / "stock129")
+    _mk_extract(mod, {}, images={
+        "images/backglass.png": b"MODDED-ART",
+        "images/scene_textures/scene_layout.json": b'{"Attract": ["old"]}',
+        "images/scene_textures/glyph_scope.txt": b"old scope",
+        "video/intro.mp4": b"MODDED-VIDEO"})
+    _mk_extract(tgt, {}, images={
+        "images/backglass.png": b"STOCK-ART-129",
+        "images/scene_textures/scene_layout.json": b'{"Attract": ["new"]}',
+        "images/scene_textures/glyph_scope.txt": b"new scope",
+        "video/intro.mp4": b"STOCK-VIDEO-129"})
+
+    plan = mod_transfer.plan_direct_diff(mod, tgt)
+    staged = [e["rel"] for e in plan["image"]["matched"]]
+    assert staged == ["images/backglass.png"]
+    assert plan["notes"]["image_old_only"] == 0     # not counted as orphans
+    assert [e["rel"] for e in plan["video"]["matched"]] == ["video/intro.mp4"]
+
+    mod_transfer.apply_transfer(mod, tgt, plan, src_saved={})
+    assert list(staged_changes.load(tgt)["image"]) == ["images/backglass.png"]
+
+
+def test_baked_diff_never_stages_the_extractor_manifests(tmp_path):
+    # Same trap on the field-3 route: a modded extract's scene_layout.json
+    # names its own (content-hashed) PNGs, so it differs from the stock
+    # same-version one even though nothing about it is a mod.
+    mod, stk = str(tmp_path / "modded"), str(tmp_path / "stock")
+    _mk_extract(mod, {}, images={
+        "images/logo.png": b"MODDED-ART",
+        "images/scene_textures/scene_layout.json": b'{"Attract": ["mod"]}'})
+    _mk_extract(stk, {}, images={
+        "images/logo.png": b"STOCK-ART",
+        "images/scene_textures/scene_layout.json": b'{"Attract": ["stk"]}'})
+
+    diff = mod_transfer.diff_baked_mods(mod, stk)
+    assert list(diff["saved"]["image"]) == ["images/logo.png"]
+
+
 def test_baseline_excludes_vendor_rebake_that_direct_diff_carries(tmp_path):
     """A file the VENDOR re-baked between versions but the user never modded:
 

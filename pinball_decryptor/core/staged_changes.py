@@ -29,6 +29,36 @@ import os
 # rule the ``.extract_source.json`` / ``.checksums.md5`` sidecars rely on.
 SIDE_CAR = ".staged_changes.json"
 
+#: Extensions the extractor's own bookkeeping files carry — ``manifest.txt``,
+#: ``radium_images.txt``, ``glyph_images.txt``, ``glyph_scope.txt`` and
+#: ``images/scene_textures/scene_layout.json``.  NO replaceable slot ever has
+#: one (audio slots are ``.wav``, video slots a movie container, image slots an
+#: image format), so an assignment keyed on one can only have come from a byte
+#: diff that mistook a manifest for an asset — which is exactly what Mod
+#: Transfer's no-baseline compare used to do with ``scene_layout.json``
+#: (PAD-107).  Also the skip list for walking an extract's asset folders (see
+#: ``mod_transfer._walk_rels``): these files name content-hashed filenames and
+#: per-version offsets, so they ALWAYS differ between two extracts.
+NON_SLOT_EXTS = (".txt", ".json")
+
+
+def _prune_non_slot_keys(data):
+    """Drop assignment entries keyed on a :data:`NON_SLOT_EXTS` file, in place.
+
+    Self-heal for a sidecar an affected version already wrote: the entry can
+    never match a slot, so the Replace tab reported it as an unrestorable
+    replacement on every single scan.  Pruning at load means the next save
+    writes it out for good.
+    """
+    for kind in ("audio", "video", "image"):
+        m = data.get(kind)
+        if not isinstance(m, dict):
+            continue
+        for rel in [r for r in m if isinstance(r, str)
+                    and r.lower().endswith(NON_SLOT_EXTS)]:
+            del m[rel]
+    return data
+
 
 def load(assets_dir):
     """Return the staged-changes mapping recorded for *assets_dir*, or ``{}``.
@@ -44,7 +74,7 @@ def load(assets_dir):
             data = json.load(f)
     except (OSError, ValueError):
         return {}
-    return data if isinstance(data, dict) else {}
+    return _prune_non_slot_keys(data) if isinstance(data, dict) else {}
 
 
 def save(assets_dir, payload):

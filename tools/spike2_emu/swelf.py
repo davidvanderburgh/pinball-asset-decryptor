@@ -329,6 +329,233 @@ def _rows_nonum(e, dev, brd, max_dev=400):
     return out
 
 
+# --------------------------------------------------------------------------
+# ★ THE 48-BYTE GENERATION, AND IT IS DERIVED - NO ADDRESS IS STORED FOR IT.
+#
+# Everything above is keyed on an address measured from ONE build of a title,
+# and a new build of the SAME title moves every one of them. That is not
+# hypothetical: munsters_le 1.28.0 and foo_fighters_le 1.04.0 both return
+# nothing at all from the tables above, while 1.27.0 and 1.03.0 return 103 and
+# 105 rows - which is what "the switch list is incomplete" in a 2026-09-07
+# field report turned out to mean. An address table cannot be right about a
+# build it has never seen, and this rig ships to people whose machines run
+# newer code than anything on this disk.
+#
+# So this half finds the arrays by SHAPE and by the title's own declarations,
+# and stores nothing per title. Measured on both new builds:
+#
+#     +0   u32  the switch NUMBER - the number in the Stern manual, which the
+#               24-byte shape above does not carry at all (ROOTS_NONUM serves
+#               NUM_PLACEHOLDER instead). This generation has it.
+#     +4   u32  -> the English name, directly
+#     +8   u32  -> the 5-language name cell (English first), as the old shape
+#     +12  u32  }  one shared pointer, the same value on every record
+#     +16  u32  }
+#     +20  u16  slot (low)  u16 bit (high)
+#     +24  u16  kind (low): 1 = switch, 2 = coil, 3 = lamp
+#
+# ★ KIND CHANGED VALUE. A switch is 7 in the old shape and 1 in this one, so a
+# reader that kept the old constant and merely fixed the offsets would return a
+# confident, wrong table of coils. That is why the anchor below is a NAME and
+# not a field: the names are the one thing that did not move.
+#
+# HOW EACH ARRAY IS FOUND, and neither is a guess:
+#
+#   * THE DEVICE ARRAY, from a name every Spike 2 machine has. Find the string,
+#     find the cell that points at it, find the record that points at the cell,
+#     then walk out to both ends of the run of records whose own name cells
+#     resolve. Nothing about the address is assumed - the array identifies
+#     itself by containing LEFT SLINGSHOT.
+#   * THE BOARD ARRAY (slot -> node), by item 57's method, which still works:
+#     among the addresses something in the image holds a literal pointer to,
+#     take the one whose table maps every slot the switches actually use to a
+#     DISTINCT node that this title's own node directory declares. nbdir.py
+#     supplies that node set from the same binary, so no run and no card is
+#     involved. Measured: EXACTLY ONE address satisfies it on each of the two
+#     titles - and on munsters_le 1.28.0 it is the same address, and the same
+#     map, that the previous build's trusted switch list pins by name.
+#
+# The board struct itself did NOT change: 16-byte stride, node at +14, exactly
+# as above. Only its address moved.
+# --------------------------------------------------------------------------
+
+GEN2_STRIDE = 48
+GEN2_NUM, GEN2_CELL, GEN2_SLOTBIT, GEN2_KIND = 0, 8, 20, 24
+GEN2_KIND_SWITCH = 1
+
+#: ★ AND THE SAME ANCHOR FINDS THE OLDER SHAPES TOO, which matters because the
+#: 48-byte generation is not the only one a new build moves out from under the
+#: stored addresses. jurassic_park_le is in ROOTS and reads 107 rows on 1.15.0
+#: and NOTHING on 1.16.0 - the 24-byte shape, same title, addresses all moved -
+#: and nobody had reported it, because a title only looks broken once someone
+#: runs the build that broke it. So the layout is a parameter and every known
+#: shape is tried, in the order they were measured. Fields:
+#:
+#:      (stride, name cell, slot|bit word, kind word, the kind that means
+#:       SWITCH, the offset of the real switch number or None)
+#:
+#: `slot` is the LOW half of the slot|bit word and `bit` the high half on all
+#: three - the old readers spell those as two u16s at +16/+18 and +4/+6, which
+#: is the same two halves of the same word.
+DERIVED_LAYOUTS = (
+    # the 48-byte generation: carries its own number
+    dict(stride=48, cell=8, slotbit=20, kind=24, switch=1, num=0),
+    # ROOTS' shape: number lives in the separate entry table, not the record
+    dict(stride=24, cell=12, slotbit=16, kind=20, switch=7, num=None),
+    # ROOTS_NONUM's shape: no number anywhere - see that table's docstring
+    dict(stride=24, cell=0, slotbit=4, kind=8, switch=7, num=None),
+)
+
+#: Switch names every Spike 2 machine carries. More than one, so a title that
+#: spells any single one differently still anchors.
+GEN2_ANCHORS = (b"LEFT SLINGSHOT", b"RIGHT SLINGSHOT", b"SHOOTER LANE",
+                b"TROUGH 1", b"LEFT FLIPPER BUTTON")
+
+
+def _gen2_name(e, rec, lay=None):
+    cell = e.u32(rec + (GEN2_CELL if lay is None else lay["cell"]))
+    if not cell:
+        return None
+    first = e.u32(cell)
+    return e.cstr(first) if first else None
+
+
+def _gen2_words(e):
+    """{value: [va, ...]} over the loaded image, in one pass.
+
+    Only values that could be a pointer INTO the image are kept: on a title
+    whose data segment is hundreds of megabytes (rush_le's is 184.6 MB) an
+    index of every distinct word would cost more than the walk it serves.
+    """
+    lo = min(b for b, _o, _s in e.segs)
+    hi = max(b + s for b, _o, s in e.segs)
+    idx = {}
+    for base, off, size in e.segs:
+        for i in range(off, off + size - 4, 4):
+            v = struct.unpack_from("<I", e.d, i)[0]
+            if lo <= v < hi:
+                idx.setdefault(v, []).append(base + (i - off))
+    return idx
+
+
+def _gen2_va_of(e, off):
+    for base, o, size in e.segs:
+        if o <= off < o + size:
+            return base + (off - o)
+    return None
+
+
+def _gen2_find_dev(e, idx, lay):
+    """(start, count) of the device array under `lay`, or None."""
+    for anchor in GEN2_ANCHORS:
+        off = e.d.find(anchor + b"\x00")
+        if off < 0:
+            continue
+        sva = _gen2_va_of(e, off)
+        if sva is None:
+            continue
+        for cell in idx.get(sva, []):
+            for cellref in idx.get(cell, []):
+                rec = cellref - lay["cell"]
+                if _gen2_name(e, rec, lay) is None:
+                    continue
+                start = rec
+                while _gen2_name(e, start - lay["stride"], lay) is not None:
+                    start -= lay["stride"]
+                n = 0
+                while _gen2_name(e, start + n * lay["stride"], lay) is not None:
+                    n += 1
+                if n >= 32:
+                    return start, n
+    return None
+
+
+def _gen2_find_board(e, idx, slots, nodes):
+    """The board table, and ONLY if exactly one address qualifies.
+
+    Two candidates means the evidence does not pick one, and this file's
+    standing rule is that an honestly missing table beats a plausible wrong
+    one - see ROOTS's docstring.
+    """
+    hit = None
+    for va in idx:
+        if e.off(va) is None:
+            continue
+        got = {}
+        for s in slots:
+            v = e.u16(va + BOARD_STRIDE * s + 14)
+            if v is None or (v & 0xFF) not in nodes:
+                got = None
+                break
+            got[s] = v & 0xFF
+        if got and len(set(got.values())) == len(got):
+            if hit is not None:
+                return None
+            hit = va
+    return hit
+
+
+def _rows_gen2(e):
+    """The switch list, derived entirely - no stored address for this build.
+
+    Every known record layout is tried and the FIRST that yields a coherent
+    table wins. Coherent is not "decodes": the board table has to be the one
+    and only referenced address that maps the slots these switches use into
+    the node set the title's own directory declares, and enough rows have to
+    come out named. A layout that half-fits produces nothing rather than a
+    partial table, which is this file's standing rule.
+    """
+    try:
+        import nbdir
+        rx, rw = nbdir.load_segments(e.d)
+        nodes = {nid for nid, _c in nbdir.find_node_directory(e.d, rx, rw)}
+    except (OSError, SystemExit, ValueError, ImportError):
+        return []
+    if not nodes:
+        return []
+    idx = _gen2_words(e)
+    for lay in DERIVED_LAYOUTS:
+        out = _rows_for_layout(e, idx, nodes, lay)
+        if out:
+            return out
+    return []
+
+
+def _rows_for_layout(e, idx, nodes, lay):
+    dev = _gen2_find_dev(e, idx, lay)
+    if not dev:
+        return []
+    start, count = dev
+    sw = []
+    for i in range(count):
+        r = start + i * lay["stride"]
+        if (e.u16(r + lay["kind"]) or 0) != lay["switch"]:
+            continue
+        slot = e.u16(r + lay["slotbit"])
+        bit = e.u16(r + lay["slotbit"] + 2)
+        if slot is None or bit is None or bit > 255:
+            continue
+        num = e.u32(r + lay["num"]) if lay["num"] is not None else 0
+        sw.append((i, num or 0, slot, bit, _gen2_name(e, r, lay) or "?"))
+    if len(sw) < 16:
+        return []
+    brd = _gen2_find_board(e, idx, sorted({s[2] for s in sw}), nodes)
+    if brd is None:
+        return []
+    slot_node = {}
+    for s in range(16):
+        n = e.u16(brd + BOARD_STRIDE * s + 14)
+        if n is None:
+            break
+        slot_node[s] = n & 0xFF
+    out = [(i, num, slot_node[slot], bit, name)
+           for i, num, slot, bit, name in sw if slot in slot_node]
+    named = sum(1 for r in out if r[4] != "?")
+    if len(out) < 16 or named < len(out) // 2:
+        return []
+    return out
+
+
 def rows(elf_path, title):
     """[(id, num, node, bit, name)] - the same tuples swtable.read() returns.
 
@@ -337,15 +564,26 @@ def rows(elf_path, title):
     """
     roots = ROOTS.get(title)
     nonum_roots = ROOTS_NONUM.get(title)
-    if not roots and not nonum_roots:
-        return []
     try:
         e = Elf(elf_path)
     except (OSError, struct.error):
         return []
+    # THE DERIVED READER RUNS LAST, AND ONLY WHEN THE ADDRESSES FAIL. Every
+    # title that works today keeps the exact table it has always produced -
+    # the stored addresses are a measurement of that build and nothing here
+    # second-guesses them. It is a NEW BUILD, whose addresses have all moved,
+    # and a title that was never in the tables at all, that reach this.
     if nonum_roots:
-        dev_addr, brd_addr = nonum_roots
-        return _rows_nonum(e, dev_addr, brd_addr)
+        out = _rows_nonum(e, *nonum_roots)
+        return out or _rows_gen2(e)
+    if not roots:
+        return _rows_gen2(e)
+    return _rows_roots(e, roots) or _rows_gen2(e)
+
+
+def _rows_roots(e, roots):
+    """The address-keyed reader: exactly what this file has always done for a
+    title whose build the stored addresses were measured on."""
     ent_root, dev_root, brd_root = roots
     dev = e.u32(dev_root)
     brd = e.u32(brd_root)

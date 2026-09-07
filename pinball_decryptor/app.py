@@ -2728,6 +2728,17 @@ class App:
                  "%d text."
                  % (n_found, len(saved["audio"]), len(saved["video"]),
                     len(saved["image"]), len(diff["text_rows"])))
+        # Say when part of the text couldn't be lined up between the two
+        # extracts, so a low (or zero) text count isn't read as "no text mods"
+        # (PAD-108 — the log line from diff_baked_mods says the same thing).
+        unpaired = (diff["notes"].get("unpaired_text", 0)
+                    + diff["notes"].get("skipped_text_assets", 0))
+        if unpaired:
+            intro += ("\n\n%d string(s) couldn't be lined up between the two "
+                      "old-version extracts and were skipped — the count "
+                      "above is only what could be compared.  Extracting "
+                      "both old-version folders with this same app version "
+                      "lines them up." % unpaired)
         self._confirm_apply_transfer(stock_dir, target_dir, plan,
                                      src_saved=saved, intro=intro,
                                      source_label=modded_dir)
@@ -2840,7 +2851,9 @@ class App:
         for level, line in mod_transfer.plan_detail_lines(plan):
             self.window.append_log(line, level)
 
-        summary = self._format_transfer_summary(plan)
+        origin = source_label or source_dir
+        prior_n = mod_transfer.prior_transfer_size(target_dir, origin)
+        summary = self._format_transfer_summary(plan, prior_n)
         if intro:
             summary = intro + "\n\n" + summary
         if not messagebox.askyesno("Transfer mods?", summary):
@@ -2859,7 +2872,7 @@ class App:
         try:
             res = mod_transfer.apply_transfer(
                 source_dir, target_dir, plan, include_flagged=include_flagged,
-                src_saved=src_saved)
+                src_saved=src_saved, origin=origin)
         except Exception as e:
             messagebox.showerror("Transfer failed",
                                  "Couldn't write the transferred mods:\n%s" % e)
@@ -2869,6 +2882,16 @@ class App:
                      else ", %d group name(s)" % res["group_tags"])
         if res.get("defaults"):
             tags_note += ", %d staged default(s)" % res["defaults"]
+        # An earlier transfer of the same mods onto this folder is replaced,
+        # not added to — say so, and say it in the log as well as the dialog
+        # (PAD-108: the run that fixes the first run's over-broad result must
+        # be visibly the only one still staged).
+        superseded_note = ""
+        if res.get("superseded"):
+            superseded_note = (
+                "Replaced %d assignment(s) left on this folder by an earlier "
+                "transfer of the same mods." % res["superseded"])
+            self.window.append_log(superseded_note, "info")
         self.window.append_log(
             "Transferred mods from %s: %d audio, %d video, %d image, %d text%s."
             % (source_label or source_dir, res["audio"], res["video"],
@@ -2917,9 +2940,11 @@ class App:
 
         messagebox.showinfo(
             "Transfer complete",
-            "Transferred: %d audio, %d video, %d image, %d text%s.\n\n%s%s\n\n%s"
+            "Transferred: %d audio, %d video, %d image, %d text%s.\n\n"
+            "%s%s%s\n\n%s"
             % (res["audio"], res["video"], res["image"], res["text"],
                tags_note,
+               (superseded_note + "\n" if superseded_note else ""),
                ("The Mod Folder now points at the new extract.\n"
                 if moved_folder else ""),
                ("The Write tab's base image is set to the new version.\n"
@@ -2927,7 +2952,7 @@ class App:
                next_step))
 
     @staticmethod
-    def _format_transfer_summary(plan):
+    def _format_transfer_summary(plan, prior_n=0):
         a = plan["audio"]; v = plan["video"]; i = plan["image"]; t = plan["text"]
         flagged = len(a["flagged"])
         lines = ["Move your mods onto the new extract:", ""]
@@ -2964,8 +2989,15 @@ class App:
             lines.append("The log behind this dialog names them slot by slot "
                          "(what moved where, and what can't come across).")
         lines.append("")
-        lines.append("Your existing edits on the new extract are kept. "
-                     "Proceed?")
+        if prior_n:
+            lines.append("This folder already holds %d assignment(s) from an "
+                         "earlier transfer of the same mods — this run "
+                         "REPLACES them, so only what it finds stays staged. "
+                         "Edits you made yourself are kept. Proceed?"
+                         % prior_n)
+        else:
+            lines.append("Your existing edits on the new extract are kept. "
+                         "Proceed?")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------

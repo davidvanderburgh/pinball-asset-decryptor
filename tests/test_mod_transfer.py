@@ -1395,3 +1395,183 @@ def test_the_lead_in_fallback_does_not_pair_a_different_sound(tmp_path):
 
     plan = mod_transfer.plan_transfer(src, tgt)
     assert len(plan["audio"]["dropped"]) == 1 and not plan["audio"]["remapped"]
+
+
+# ---- PAD-108: text pairing survives a manifest whose row list moved ---------
+
+def test_text_mod_survives_a_dedup_split_in_the_modded_manifest(tmp_path):
+    # The extractor dedups an asset's rows by text, so patching ONE of two
+    # identical stock strings turns one stock row into two modded ones.  The
+    # count no longer matches; the mod must still be found.
+    mod, stk = str(tmp_path / "modded"), str(tmp_path / "stock")
+    _mk_extract(mod, {}, strings=[
+        ("game_real", "ATTRACT", ""),
+        ("game_real", "NORWEGIAN WOOD", ""),
+        ("game_real", "HIGH SCORE", ""),
+        ("game_real", "TICKET TO RIDE", ""),
+    ])
+    _mk_extract(stk, {}, strings=[
+        ("game_real", "ATTRACT", ""),
+        ("game_real", "TICKET TO RIDE", ""),
+        ("game_real", "HIGH SCORE", ""),
+    ])
+    diff = mod_transfer.diff_baked_mods(mod, stk)
+    assert diff["text_rows"] == [{"path": "game_real",
+                                  "original": "TICKET TO RIDE",
+                                  "replacement": "NORWEGIAN WOOD"}]
+    assert diff["notes"]["unpaired_text"] == 1
+
+
+def test_text_pairing_never_invents_a_lopsided_edit(tmp_path):
+    # A block where the two sides have different lengths is a real add/remove:
+    # guessing which new string replaced which old one would stage an edit the
+    # user never made, so it is counted instead.
+    mod, stk = str(tmp_path / "modded"), str(tmp_path / "stock")
+    _mk_extract(mod, {}, strings=[("a.radium", "KEEP", ""),
+                                  ("a.radium", "NEW ONE", ""),
+                                  ("a.radium", "NEW TWO", ""),
+                                  ("a.radium", "TAIL", "")])
+    _mk_extract(stk, {}, strings=[("a.radium", "KEEP", ""),
+                                  ("a.radium", "OLD ONE", ""),
+                                  ("a.radium", "TAIL", "")])
+    diff = mod_transfer.diff_baked_mods(mod, stk)
+    assert diff["text_rows"] == []
+    assert diff["notes"]["unpaired_text"] == 2
+
+
+def test_text_asset_missing_from_the_modded_extract_is_counted(tmp_path):
+    mod, stk = str(tmp_path / "modded"), str(tmp_path / "stock")
+    _mk_extract(mod, {}, strings=[("a.radium", "KEEP", "")])
+    _mk_extract(stk, {}, strings=[("a.radium", "KEEP", ""),
+                                  ("gone.radium", "ANYTHING", "")])
+    diff = mod_transfer.diff_baked_mods(mod, stk)
+    assert diff["notes"]["skipped_text_assets"] == 1
+
+
+# ---- PAD-108: a second transfer of the same mods replaces the first ---------
+
+def _transfer(src, tgt, origin=None):
+    plan = mod_transfer.plan_transfer(src, tgt)
+    return mod_transfer.apply_transfer(src, tgt, plan, origin=origin)
+
+
+def test_second_transfer_supersedes_the_first_runs_picks(tmp_path):
+    # The ticket's sequence: a first, over-broad run stages two slots; the
+    # user re-runs the accurate route, which finds only one.  The other must
+    # not be left staged.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={"images/a.png": b"A", "images/b.png": b"B"})
+    _mk_extract(tgt, {}, images={"images/a.png": b"A", "images/b.png": b"B"})
+    staged_changes.save(src, {"image": {"images/a.png": r"C:\r\a.png",
+                                        "images/b.png": r"C:\r\b.png"}})
+    _transfer(src, tgt)
+    assert len(staged_changes.load(tgt)["image"]) == 2
+
+    staged_changes.save(src, {"image": {"images/a.png": r"C:\r\a.png"}})
+    res = _transfer(src, tgt)
+    assert res["superseded"] == 1
+    assert staged_changes.load(tgt)["image"] == {"images/a.png": r"C:\r\a.png"}
+
+
+def test_supersede_keeps_a_pick_the_user_repointed_himself(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={"images/a.png": b"A", "images/b.png": b"B"})
+    _mk_extract(tgt, {}, images={"images/a.png": b"A", "images/b.png": b"B"})
+    staged_changes.save(src, {"image": {"images/a.png": r"C:\r\a.png",
+                                        "images/b.png": r"C:\r\b.png"}})
+    _transfer(src, tgt)
+    # The user re-points b himself, then re-runs a transfer that no longer
+    # claims it: his own choice must survive.
+    keep = staged_changes.load(tgt)
+    keep["image"]["images/b.png"] = r"C:\mine\b.png"
+    staged_changes.save(tgt, keep)
+    staged_changes.save(src, {"image": {"images/a.png": r"C:\r\a.png"}})
+
+    res = _transfer(src, tgt)
+    assert res["superseded"] == 0
+    assert (staged_changes.load(tgt)["image"]["images/b.png"]
+            == r"C:\mine\b.png")
+
+
+def test_a_transfer_from_another_folder_is_left_alone(tmp_path):
+    src_a, src_b = str(tmp_path / "olda"), str(tmp_path / "oldb")
+    tgt = str(tmp_path / "new")
+    for d in (src_a, src_b, tgt):
+        _mk_extract(d, {}, images={"images/a.png": b"A", "images/b.png": b"B"})
+    staged_changes.save(src_a, {"image": {"images/a.png": r"C:\r\a.png"}})
+    staged_changes.save(src_b, {"image": {"images/b.png": r"C:\r\b.png"}})
+    _transfer(src_a, tgt)
+    _transfer(src_b, tgt)
+    # Re-running A's transfer must not touch what B's transfer staged.
+    res = _transfer(src_a, tgt)
+    assert res["superseded"] == 0
+    assert staged_changes.load(tgt)["image"] == {
+        "images/a.png": r"C:\r\a.png", "images/b.png": r"C:\r\b.png"}
+
+
+def test_supersede_restores_a_slot_the_first_run_had_built(tmp_path):
+    # A built folder holds the replacement in the slot file and the pristine
+    # bytes in .orig/ — dropping the assignment has to put the file back too,
+    # or the folder keeps content nothing records.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={"images/b.png": b"B"})
+    _mk_extract(tgt, {}, images={"images/b.png": b"B"})
+    staged_changes.save(src, {"image": {"images/b.png": r"C:\r\b.png"}})
+    _transfer(src, tgt)
+    # Simulate the build: snapshot the original, write the replacement over it.
+    assert staged_originals.snapshot(tgt, "images/b.png", None)
+    _wav(os.path.join(tgt, "images", "b.png"), b"REPLACEMENT")
+
+    staged_changes.save(src, {"image": {}})
+    res = _transfer(src, tgt)
+    assert res["superseded"] == 1
+    with open(os.path.join(tgt, "images", "b.png"), "rb") as f:
+        assert f.read() == b"B"
+    assert not staged_originals.has_snapshot(tgt, "images/b.png")
+
+
+def test_second_transfer_clears_the_first_runs_text_edit(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, strings=[("a.radium", "ONE", "UNO"),
+                                  ("a.radium", "TWO", "DOS")])
+    _mk_extract(tgt, {}, strings=[("a.radium", "ONE", ""),
+                                  ("a.radium", "TWO", "")])
+    _transfer(src, tgt)
+    assert {r["original"]: r["replacement"]
+            for r in text_manifest.load(tgt)} == {"ONE": "UNO", "TWO": "DOS"}
+
+    _mk_extract(src, {}, strings=[("a.radium", "ONE", "UNO"),
+                                  ("a.radium", "TWO", "")])
+    res = _transfer(src, tgt)
+    assert res["superseded"] == 1
+    assert {r["original"]: r["replacement"]
+            for r in text_manifest.load(tgt)} == {"ONE": "UNO", "TWO": ""}
+
+
+def test_prior_transfer_size_counts_what_is_still_staged(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={"images/a.png": b"A"})
+    _mk_extract(tgt, {}, images={"images/a.png": b"A"})
+    staged_changes.save(src, {"image": {"images/a.png": r"C:\r\a.png"}})
+    assert mod_transfer.prior_transfer_size(tgt, src) == 0
+    _transfer(src, tgt)
+    assert mod_transfer.prior_transfer_size(tgt, src) == 1
+    assert mod_transfer.prior_transfer_size(tgt, str(tmp_path / "other")) == 0
+
+
+def test_the_baked_route_records_the_modded_folder_as_the_origin(tmp_path):
+    # The baked route's plan source is the STOCK baseline, but what the user
+    # picked in field 1 — and re-picks when he runs it again — is the modded
+    # extract, so that is the folder the record has to be keyed on.
+    mod, stk, tgt = (str(tmp_path / "modded"), str(tmp_path / "stock"),
+                     str(tmp_path / "new"))
+    _mk_extract(mod, {}, images={"images/a.png": b"MODDED"})
+    _mk_extract(stk, {}, images={"images/a.png": b"STOCK"})
+    _mk_extract(tgt, {}, images={"images/a.png": b"STOCK"})
+    diff = mod_transfer.diff_baked_mods(mod, stk)
+    plan = mod_transfer.plan_transfer(stk, tgt, saved=diff["saved"],
+                                      src_text_rows=diff["text_rows"])
+    mod_transfer.apply_transfer(stk, tgt, plan, src_saved=diff["saved"],
+                                origin=mod)
+    assert mod_transfer.prior_transfer_size(tgt, mod) == 1
+    assert mod_transfer.prior_transfer_size(tgt, stk) == 0

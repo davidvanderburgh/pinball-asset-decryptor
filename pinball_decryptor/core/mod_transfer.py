@@ -1014,10 +1014,12 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
         elif _stock_exists(target_dir, src_rel):
             flagged.append({"src_rel": src_rel, "repl": repl,
                             "reason": "the sound at %s differs in the new "
-                                      "version (index reused)" % src_rel})
+                                      "version (index reused)" % src_rel,
+                            **_why_no_match(src_sig, size_to_rels)})
         else:
             dropped.append({"src_rel": src_rel, "repl": repl,
-                            "reason": "no matching sound in the new version"})
+                            "reason": "no matching sound in the new version",
+                            **_why_no_match(src_sig, size_to_rels)})
     if n_shifted:
         log("%d sound(s) paired despite a one-sample difference at the head "
             "left by an older extract of one of the two folders." % n_shifted)
@@ -1026,6 +1028,30 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
             "version repacked its audio, which changes the first sample of "
             "every sound and none of the rest." % n_lead_in)
     return matched, remapped, flagged, dropped
+
+
+# How many same-length near misses a failure line names before it summarises.
+_NEAR_CAP = 3
+
+
+def _why_no_match(src_sig, size_to_rels):
+    """Evidence fields for an audio replacement that found no counterpart:
+    ``size`` (the modded slot's stock byte length) and ``near`` (new-version
+    slots of exactly that length, whose content nonetheless differs).
+
+    A bare list of filenames says a mod was left behind but not why, which is
+    the difference between "Stern re-recorded that callout" and "one of these
+    two folders decoded wrong".  A tester hit the second and had no way to see
+    it: all 11 of his uncarried sounds had a byte-identical-length twin in the
+    new version, every one of them at an index inside the range PAD-108 was
+    decoding to noise, while all 9 that did carry sat below it.  Length is the
+    tell because a decoded WAV's byte count is the sound's length in samples --
+    two unrelated sounds agreeing on it to the byte is not a coincidence.
+    """
+    if src_sig is None:
+        return {"size": None, "near": []}
+    return {"size": src_sig[0],
+            "near": sorted(size_to_rels.get(src_sig[0], ()))}
 
 
 def _plan_image(source_dir, target_dir, saved_map, to_target=None):
@@ -1290,6 +1316,57 @@ def _detail_block(out, level, header, entries, label, cap):
         out.append((level, "    ...and %d more" % (len(entries) - cap)))
 
 
+def _audio_fail_line(e):
+    """One log line for an audio replacement that could not be placed: the slot,
+    its stock byte length, and the new-version slots of that same length.
+
+    A tester asked for exactly this after a run told him some of his sounds did
+    not match and named nothing else: "there is no detail log or anything to see
+    which ones actually failed with details of size, index etc."
+    """
+    parts = []
+    size = e.get("size")
+    if size:
+        parts.append("%s bytes" % format(size, ","))
+    near = e.get("near") or []
+    if near:
+        shown = ", ".join(_slot_name(r) for r in near[:_NEAR_CAP])
+        if len(near) > _NEAR_CAP:
+            shown += " and %d more" % (len(near) - _NEAR_CAP)
+        parts.append("same length as %s in the new version, but the audio "
+                     "differs" % shown)
+    elif size:
+        parts.append("nothing of that length in the new version")
+    return e["src_rel"] + ("  (%s)" % "; ".join(parts) if parts else "")
+
+
+def _slot_name(rel):
+    """Just the filename of an ``audio/...`` rel — the leading folder is the
+    same for every one of them and only costs line width."""
+    return rel.rpartition("/")[2] or rel
+
+
+def _same_length_note(a):
+    """The one line worth drawing from a whole block of failures: how many of
+    them the new version *does* have at exactly the same length.
+
+    Sounds that pair by length and not by content are the signature of a decode
+    that went wrong on one side, not of a version that re-recorded them — and
+    that is a thing the user can fix by re-extracting, unlike a genuinely
+    re-recorded callout.  Silent when nothing lines up that way.
+    """
+    fails = list(a.get("dropped") or ()) + list(a.get("flagged") or ())
+    n = sum(1 for e in fails if e.get("near"))
+    if not n:
+        return []
+    return [("error",
+             "Transfer: %d of those sound(s) DO exist in the new version at "
+             "exactly the same length, only with different audio. That "
+             "normally means one of the two folders was extracted by an older "
+             "release rather than that the sound changed — re-extract both "
+             "folders with this version and run the transfer again." % n)]
+
+
 def plan_detail_lines(plan, cap=_DETAIL_CAP):
     """Name, slot by slot, what a transfer plan can't carry — and where the
     sounds that moved index landed.  Returns ``[(log_level, text), ...]``,
@@ -1316,12 +1393,13 @@ def plan_detail_lines(plan, cap=_DETAIL_CAP):
         "Transfer: %d audio replacement(s) can NOT be carried — no sound in "
         "the new version has identical audio (re-recorded, or only on the "
         "other model).  Re-pick these by hand on the Replace Audio tab:",
-        a.get("dropped"), lambda e: e["src_rel"], cap)
+        a.get("dropped"), _audio_fail_line, cap)
     _detail_block(
         out, "error",
         "Transfer: %d audio replacement(s) flagged — that index now holds a "
         "DIFFERENT sound, so applying them would replace the wrong sound:",
-        a.get("flagged"), lambda e: e["src_rel"], cap)
+        a.get("flagged"), _audio_fail_line, cap)
+    out.extend(_same_length_note(a))
     _detail_block(
         out, "error",
         "Transfer: %d video replacement(s) can NOT be carried — the new "

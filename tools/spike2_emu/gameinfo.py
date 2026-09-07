@@ -399,6 +399,27 @@ def find_playfield_art(name=None):
     for f in found:
         if model and model in _tokens(f):
             return os.path.join(d, f)
+    # ★ AN LE MACHINE'S PLAYFIELD IS THE PREMIUM'S, and a title that ships
+    # only the two drawings names neither of them "le". uncanny_xmen_le 0.98
+    # is the live case (peanuts' matrix, 2026-09-07, "playfield artwork: No"):
+    # its TestMode folder holds `xmen_pre_playfield_scaled.png` and
+    # `xmen_pro_playfield_scaled.png`, so both tests above miss and the pick
+    # fell through to found[0] - the right file, by the alphabet, which is
+    # exactly the accident this function's own docstring says it will not
+    # rely on ("It would have picked the Pro drawing for an LE machine as
+    # soon as the alphabetical order changed"). One rename and an LE gets the
+    # Pro playfield with nothing to show it happened.
+    #
+    # Stern builds one playfield for LE and Premium and one for Pro - the
+    # 2025 generation says so in a single filename, dungeons_and_dragons_le's
+    # `Rope_LE-Premium-X8-X9_TOP_...` beside `Rope_PRO-X7_TOP_...` - so the
+    # relationship is the title's, not this rig's guess, and it is one-way:
+    # a `pro` title never falls back to a premium drawing.
+    if model == "le":
+        for alias in ("premium", "prem", "pre"):
+            for f in found:
+                if alias in _tokens(f):
+                    return os.path.join(d, f)
     return os.path.join(d, found[0])
 
 

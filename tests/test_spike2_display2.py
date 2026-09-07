@@ -121,7 +121,16 @@ def test_shell_output_names_only_the_second_display(display2, monkeypatch, capsy
                         lambda path: {"fb0": (1360, 768, 16, 1),
                                       "fb2": (1280, 800, 16, 2)})
     assert display2.main(["display2.py", "--shell", "x"]) == 0
-    assert capsys.readouterr().out.strip() == "PAD_GL2_W=1280 PAD_GL2_H=800"
+    # ★ IT NAMES THE WINDOW, NOT THE RENDER SIZE. This printed PAD_GL2_W/H
+    # until 2026-09-07, which is the one thing a panel timing record is NOT:
+    # exported as the render size it cropped mando_le's topper by 80 columns
+    # and 32 rows, which is why watch.sh had stopped exporting it at all. The
+    # record is the panel, the panel is the window, and PAD_GL2_WIN_W/H is the
+    # host-only knob padglhost grew for it - so the name has to keep saying
+    # which of the two it means.
+    out = capsys.readouterr().out.strip()
+    assert out == "PAD_GL2_WIN_W=1280 PAD_GL2_WIN_H=800"
+    assert "PAD_GL2_W=" not in out and "PAD_GL2_H=" not in out
     monkeypatch.setattr(display2, "fb_geometry",
                         lambda path: {"fb0": (1360, 768, 16, 1)})
     assert display2.main(["display2.py", "--shell", "x"]) == 1

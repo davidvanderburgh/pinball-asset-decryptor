@@ -2,6 +2,7 @@
 the per-node identity claims the shim should make on the node bus.
 
     python3 nbdir.py <game-elf> [--hexdir DIR] [--out FILE] [--check-godzilla]
+    python3 nbdir.py <game-elf> --out F --reuse F   # skip the scan if F is current
     python3 nbdir.py <game-elf> --dump      # every field, for reading by eye
 
 WHY THIS FILE EXISTS. hwshim.c answers the game's 0xfe identity request from
@@ -87,6 +88,7 @@ The shim (hwshim.c) reads this through /dump/tables/<PAD_GAME>/node_ident.txt
 inside the guest and falls back to the built-in godzilla table when absent -
 so a title with no derived table behaves exactly as before this file existed.
 """
+import hashlib
 import io
 import os
 import re
@@ -495,10 +497,98 @@ def derive(elf_path, hexdir):
     return rows, skipped
 
 
-def emit(rows, skipped, elf_path, out):
+def source_id(elf_path, hexdir):
+    """What a derived table was built FROM, as one line, from stat() alone.
+
+    THE POINT IS TO SKIP A SCAN THAT CANNOT HAVE CHANGED ITS ANSWER.
+    find_node_directory() walks the whole RW segment four bytes at a time,
+    which is a few hundred milliseconds on an ordinary title and NINE SECONDS
+    on rush_le, whose `.data` is 184.6 MB (godzilla_le's entire binary is 8.0).
+    That walk runs on every single start of a card whose binary has not moved,
+    so `--reuse` compares this line against the one in an existing table and
+    copies it instead. Measured on rush_le 1.18.0: 11.2 s -> 0.05 s.
+
+    ★ THE HEX FILES ARE PART OF THE SOURCE, not just the ELF. Half of every row
+    here (variant, fw, hexver, hex) comes from the firmware images NEXT TO the
+    binary, and PAD's own blip-free patch REWRITES those - so a key naming only
+    the ELF would serve a table describing firmware that is no longer on the
+    card. Names and sizes, not contents: a patched image changes size or name
+    in practice, and reading 8 MB of hex to decide whether to skip a 9 s scan
+    would give most of the saving back.
+
+    Sizes rather than mtimes for the ELF, for the reason devicexy.binary_id()
+    records: a card's files carry the IMAGE's mtimes, not the copy's, so a
+    different card for the same title is routinely OLDER than the table built
+    from a previous one and a timestamp never sees the swap.
+
+    ★ THE HEXES ARE HASHED, NOT LISTED, BECAUSE THIS LINE HAS A C READER.
+    Listing them by name spelled rush_le's header out to 604 bytes, and
+    hwshim.c's nb_fident_load() reads this file through `char line[256]`: fgets
+    would hand it the header in three pieces, of which only the first starts
+    with the `#` that makes the parser skip it. The other two went on to the
+    `node=` test and were saved only by the accident that a hex filename spells
+    `node-` and `node4-` but never `node=`. The count stays in the clear so a
+    reader can still see what was weighed.
+    """
+    try:
+        parts = ["%s %d bytes" % (os.path.basename(elf_path),
+                                  os.path.getsize(elf_path))]
+    except (OSError, TypeError):
+        return None
+    hexes = []
+    try:
+        for nm in sorted(os.listdir(hexdir or "")):
+            if nm.endswith(".hex"):
+                hexes.append("%s:%d" % (nm, os.path.getsize(
+                    os.path.join(hexdir, nm))))
+    except OSError:
+        return None
+    parts.append("hex[%d files sha1:%s]"
+                 % (len(hexes),
+                    hashlib.sha1(",".join(hexes).encode()).hexdigest()[:12]))
+    return " ".join(parts)
+
+
+def reuse(existing, out, elf_path, hexdir):
+    """True when `existing` was derived from exactly this source and has been
+    copied to `out`. Anything unexpected answers False and the caller derives,
+    which is the safe direction: a re-derivation costs seconds, a wrong table
+    costs the node identities the shim answers with."""
+    want = source_id(elf_path, hexdir)
+    if not want or not existing or not os.path.exists(existing):
+        return False
+    try:
+        with io.open(existing, "r", encoding="ascii", errors="replace") as f:
+            head = f.readline()
+            if head.partition(" src=")[2].rstrip("\n") != want:
+                return False
+            body = head + f.read()
+    except OSError:
+        return False
+    if "\nnode=" not in body and not body.startswith("node="):
+        return False               # a table with no rows proves nothing
+    if not out:
+        sys.stdout.write(body)
+        return True
+    try:
+        with io.open(out, "w", encoding="ascii", newline="\n") as w:
+            w.write(body)
+    except OSError:
+        return False
+    # SAY SO, because the caller's log line does. "8 boards derived from this
+    # title's own node directory" is what watch.sh prints, and a table that was
+    # copied was not derived this run - the reader who is trying to work out
+    # why a board claims what it claims needs to know which start built it.
+    sys.stdout.write("reused\n")
+    return True
+
+
+def emit(rows, skipped, elf_path, out, src=None):
     w = io.open(out, "w", encoding="ascii", newline="\n") if out else sys.stdout
-    w.write("# nbdir v1 elf=%s nodes=%d\n"
-            % (os.path.basename(elf_path), len(rows)))
+    # `src=` is LAST because it contains spaces - reuse() reads it as the rest
+    # of the line, so nothing here may be appended after it.
+    w.write("# nbdir v1 elf=%s nodes=%d src=%s\n"
+            % (os.path.basename(elf_path), len(rows), src or "unknown"))
     for (nid, typ, code, part, cls, var, fw, fw_str, fname, guess,
          partno) in rows:
         # `part=0x` is the MCU part id (an LPC chip id, the class key);
@@ -591,6 +681,7 @@ def main(argv):
     elf_path = None
     hexdir = None
     out = None
+    existing = None
     check = False
     want_dump = False
     it = iter(argv[1:])
@@ -599,6 +690,8 @@ def main(argv):
             hexdir = next(it)
         elif a == "--out":
             out = next(it)
+        elif a == "--reuse":
+            existing = next(it)
         elif a == "--check-godzilla":
             check = True
         elif a == "--dump":
@@ -612,10 +705,15 @@ def main(argv):
         return
     if hexdir is None:
         hexdir = os.path.dirname(os.path.abspath(elf_path))
+    # --reuse is checked BEFORE --check-godzilla so the labelled example keeps
+    # deriving for real: `nbdir.py --check-godzilla` is the test, and a test
+    # that can be answered out of a cache is not one.
+    if existing and not check and reuse(existing, out, elf_path, hexdir):
+        return
     rows, skipped = derive(elf_path, hexdir)
     if check:
         check_godzilla(rows)
-    emit(rows, skipped, elf_path, out)
+    emit(rows, skipped, elf_path, out, source_id(elf_path, hexdir))
 
 
 if __name__ == "__main__":

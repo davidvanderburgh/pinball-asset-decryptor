@@ -2771,6 +2771,21 @@ class App:
                 "the new version and were skipped."
                 % (notes["video_old_only"], notes["image_old_only"]))
 
+        # Say the route's hard limit in the LOG, not only in a modal that is
+        # gone the moment it's answered.  The finished transfer reports "0
+        # audio, 0 text" whatever the user modded, and with the reason living
+        # only in a dismissed dialog that zero reads as a failure (PAD-107).
+        self.window.append_log(
+            "No stock old-version extract, so this compare can carry images "
+            "and video only: audio and text will transfer as 0 even if you "
+            "modded them, because without that baseline a difference can't "
+            "be told apart from the factory's own version-to-version "
+            "changes.  To carry audio and text too, cancel and fill field 3 "
+            "with a STOCK (unmodified) extract of the OLD version.",
+            "warning")
+        for line in caveats:
+            self.window.append_log(line, "warning")
+
         if plan["totals"]["transfer"] == 0:
             messagebox.showinfo(
                 "No image or video differences",

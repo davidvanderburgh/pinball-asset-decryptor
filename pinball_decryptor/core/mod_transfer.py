@@ -282,15 +282,17 @@ def _audio_by_slot_key(root):
 def _walk_rels(root, topdir):
     """Forward-slash rel paths of every file under *root*/*topdir*
     (recursive — images nest, e.g. ``images/scene_textures/``), skipping
-    dot-entries and ``.txt`` files (the extractor's ``manifest.txt`` /
-    ``radium_images.txt`` bookkeeping lists names + sizes, so they always
-    differ across versions — never slots).  Empty when the folder doesn't
-    exist."""
+    dot-entries and the extractor's own bookkeeping files
+    (:data:`staged_changes.NON_SLOT_EXTS` — ``manifest.txt``,
+    ``radium_images.txt``, ``scene_layout.json`` …: they list content-hashed
+    names and per-version offsets, so they ALWAYS differ between two extracts,
+    and they are never slots).  Empty when the folder doesn't exist."""
     rels = []
     for dirpath, dirnames, filenames in os.walk(os.path.join(root, topdir)):
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for fn in filenames:
-            if fn.startswith(".") or fn.lower().endswith(".txt"):
+            if (fn.startswith(".")
+                    or fn.lower().endswith(staged_changes.NON_SLOT_EXTS)):
                 continue
             rel = os.path.relpath(os.path.join(dirpath, fn), root)
             rels.append(rel.replace(os.sep, "/"))

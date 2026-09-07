@@ -879,7 +879,18 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    confirm dialog: that the compare can then carry images and video
    only, and which sounds or strings it could not match, so a
    finished transfer's "0 audio, 0 text" does not read as a failure
-   once the dialog is gone. Image
+   once the dialog is gone. From v0.189.1, transferring the same old
+   extract onto the same folder a second time REPLACES the first run
+   instead of stacking on top of it: whatever that run staged and this
+   one no longer finds goes back to the slot's own original, while any
+   slot you have since re-pointed yourself is left alone, and how many
+   assignments are being replaced is named in the confirm dialog, the
+   completion dialog and the log — so a sloppy first attempt can simply
+   be redone rather than unpicked by hand. The same release lines the
+   two old-version text lists up on the strings they share rather than
+   by position, so a run whose string lists differ in length now carries
+   every string it can match (and names the ones it skipped) instead of
+   dropping the text side altogether. Image
    edits (including single-character font-glyph edits) and your renamed
    image-group names ride along too, matched by their on-card identity so
    they land on the right slot even when the new firmware re-baked the art

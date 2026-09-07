@@ -298,6 +298,19 @@ auto-installed by **Install Prerequisites** (same flow as the WSL
 tools). The model itself (~75 MB) downloads on first transcribe-run
 and is cached in `%USERPROFILE%\.cache\huggingface\`.
 
+Transcribing runs several worker processes, each holding its own model,
+so a busy machine (a second copy of this app extracting at the same time
+will do it) can leave a clip with no memory to run in. From v0.189.2
+that is no longer recorded as a finding: an allocation failure is
+retried in place after a short wait, and anything still failing when the
+workers finish is re-run one clip at a time with the box to itself,
+which usually clears it. Whatever is left comes back as `error` in the
+CSV — not `non-speech` — keeps its original filename, and is counted on
+its own line in the finish summary, so a run that lost clips to memory
+pressure no longer reads exactly like a run that found that many more
+sound effects. Re-running Auto-name call-outs on the same folder with
+less else running picks them up.
+
 ### Group duplicate sounds (Pulp Fiction)
 
 Pulp Fiction ships the same recording at several bank slots at once —
@@ -890,7 +903,15 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    two old-version text lists up on the strings they share rather than
    by position, so a run whose string lists differ in length now carries
    every string it can match (and names the ones it skipped) instead of
-   dropping the text side altogether. Image
+   dropping the text side altogether. From v0.189.2 every audio
+   replacement the transfer can NOT carry says why on its own log line:
+   the byte length of the stock sound it was replacing, and which slots
+   in the new version are exactly that length but hold different audio.
+   When a whole block of failures lines up that way, one extra line says
+   how many — that pattern means one of the two folders was extracted by
+   an older release rather than that the sound was re-recorded, so
+   re-extracting both with this version and running the transfer again
+   is the fix. Image
    edits (including single-character font-glyph edits) and your renamed
    image-group names ride along too, matched by their on-card identity so
    they land on the right slot even when the new firmware re-baked the art

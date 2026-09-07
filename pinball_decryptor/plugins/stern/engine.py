@@ -2469,7 +2469,8 @@ def _intact_copy_source(src, staged, fname, slot_size, log):
     user doesn't find out until the game is running.
 
     So a source only goes on the card untouched when it really is a drop-in
-    for the clip already there: same container family, H.264, 8-bit 4:2:0, the
+    for the clip already there: an ISO-BMFF container (MP4 or QuickTime, the
+    machine reads either), H.264, 8-bit 4:2:0, the
     slot's own resolution and frame rate, and an H.264 profile no higher than
     the slot's own (that clip is a decode CEILING — every re-encode is pinned
     to it, so the intact path can't be the one place a higher one gets
@@ -2519,18 +2520,21 @@ def _intact_copy_source(src, staged, fname, slot_size, log):
             "info")
         return staged
 
-    # Container: the extract extension records the brand the card itself used
-    # (".mov" for QuickTime-branded clips, ".mp4" for the rest).
+    # Container: ISO-BMFF or nothing.  The MP4-vs-QuickTime BRAND inside it is
+    # not part of the test, though — the machine reads both.  This gate used to
+    # demand the card's own brand (".mov" slots wanted "qt  "), on the
+    # reasonable-sounding theory that the wrapper is part of what the VPU's
+    # demuxer reads.  It isn't: a tester copied MP4-branded clips straight onto
+    # his Beatles card in place of the QuickTime ones and "they all played back
+    # without an issue", and PAD's own extract of that working card names 228
+    # of them .mp4 — 228 clips a machine has been playing for months.  The
+    # brand cost him every one of those: each was rejected here, so the app's
+    # own re-encode went on instead, a generation of quality lost (and most of
+    # them BIGGER than the clip they replaced) to fix four bytes of ftyp.
     brand = _video.isobmff_brand(src)
     if brand is None:
         return _reject("%s isn't an MP4/QuickTime container like the clip it "
                        "replaces" % os.path.basename(src))
-    want_qt = os.path.splitext(fname)[1].lower() == ".mov"
-    if (brand == b"qt  ") != want_qt:
-        return _reject("%s is a %s file but this slot holds %s"
-                       % (os.path.basename(src),
-                          "QuickTime" if brand == b"qt  " else "MP4",
-                          "QuickTime" if want_qt else "MP4"))
 
     info = _video.detect_video_info(src)
     if info is None:
@@ -7210,8 +7214,15 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
     import multiprocessing as mp
 
     from .spike2.parallel import encode_one, encode_probe, init_encode_worker
-    log("Re-encoding %d sound(s) across %d process(es)..."
-        % (len(edits), nworkers), "info")
+    # Say what this step IS, not just that it is running.  A tester whose
+    # replacements came off a working modded card asked why the app was
+    # re-encoding sounds it had itself extracted, and guessed "a safety check".
+    # It isn't: the extract hands you decoded WAV, and the card holds the
+    # game's own compressed format, so every replaced sound has to be encoded
+    # back into that slot's codec whatever it came from.
+    log("Encoding %d replacement sound(s) into the card's own format across "
+        "%d process(es) (the extract is decoded audio, so every replacement "
+        "is encoded back)..." % (len(edits), nworkers), "info")
     ctx = mp.get_context("spawn")
     # Per-clip loudness rides in the worker's INITARGS rather than in each
     # task: the task tuple is the cache's edit list too, and one dict per

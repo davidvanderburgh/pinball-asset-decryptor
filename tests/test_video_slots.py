@@ -520,6 +520,44 @@ def test_copy_through_refuses_a_profile_above_the_slots(tmp_path, monkeypatch):
     assert vs._already_matches(slot, str(rep), ".mp4") is True
 
 
+def test_stream_mismatch_names_the_one_property_that_differs(tmp_path,
+                                                             monkeypatch):
+    # A re-encode the log can't explain is a re-encode a tester has to guess
+    # at ("I am wondering why its re-encoding..."), so the check that forces
+    # one now hands back the property that decided it.
+    from pinball_decryptor.core import video_slots as vs
+    slot = _slot_with(tmp_path, "intro.mov", b"qt  ")
+    rep = tmp_path / "rep.mp4"
+    rep.write_bytes(_ftyp(b"isom"))
+
+    def _why(**kw):
+        _probe_as(monkeypatch, **kw)
+        return vs._remux_verdict(slot, str(rep))[1]
+
+    assert _why() is None                              # a drop-in: no reason
+    assert _why(width=320, height=240) == \
+        "it's 320x240 and this slot's clip is 160x120"
+    assert _why(vcodec="hevc") == "it's HEVC and this slot's clip is H264"
+    assert _why(fps=25.0) == "it runs at 25 fps and this slot's clip is 10 fps"
+    assert _why(pix_fmt="yuv420p10le") == \
+        "it's yuv420p10le and this slot's clip is yuv420p"
+    assert _why(profile="High") == \
+        "it's H.264 High profile and this slot's clip is Main"
+
+
+def test_stream_mismatch_reports_an_unreadable_slot(tmp_path, monkeypatch):
+    # No probe of the slot means no proof of a match — still a re-encode, but
+    # say which side couldn't be read rather than nothing at all.
+    from pinball_decryptor.core import video_slots as vs
+    slot = _slot_with(tmp_path, "intro.mov", b"qt  ")
+    slot.info = None
+    rep = tmp_path / "rep.mp4"
+    rep.write_bytes(_ftyp(b"isom"))
+    _probe_as(monkeypatch)
+    assert vs._remux_verdict(slot, str(rep))[1] == \
+        "the app couldn't read this slot's own video settings"
+
+
 def test_matching_extension_is_not_a_matching_container(tmp_path, monkeypatch):
     # A ".mov" some encoder wrote with an MP4 brand is a different wrapper than
     # the QuickTime one the card uses — repackage it, don't copy it through.
@@ -567,6 +605,37 @@ def test_stage_repackages_a_wrong_container_without_re_encoding(tmp_path):
 
     assert _elementary(slot, str(tmp_path / "a.h264")) == \
         _elementary(rep, str(tmp_path / "b.h264"))   # not re-encoded
+
+
+def test_stage_logs_why_a_clip_had_to_be_re_encoded(tmp_path):
+    # The ✓ line used to name only what the clip was converted TO, so a
+    # transfer that re-encoded 228 videos read as the app converting files for
+    # no stated reason.  Now the line says which property forced it.
+    from pinball_decryptor.core.video import find_ffmpeg, find_ffprobe
+    if not (find_ffmpeg() and find_ffprobe()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    slot = str(tmp_path / "clips" / "intro.mov")
+    if not _make_testsrc(slot, seconds=1.0, width=160, height=120, fps=10,
+                         ext="mov"):
+        pytest.skip("ffmpeg could not render the test clip")
+    rep = str(tmp_path / "src" / "rep.mp4")
+    if not _make_testsrc(rep, seconds=1.0, width=320, height=240, fps=10,
+                         ext="mp4"):
+        pytest.skip("ffmpeg could not render the replacement clip")
+
+    slots = {s.rel_path: s for s in scan_video_slots(
+        str(tmp_path), roots=[str(tmp_path / "clips")], exts=(".mov",))}
+    rel = "clips/intro.mov"
+    msgs = []
+    staged, failures = stage_replacements(
+        {rel: slots[rel]}, {rel: rep},
+        log_cb=lambda t, l="info": msgs.append(t))
+    assert staged == 1 and failures == []
+    done = [m for m in msgs if m.lstrip().startswith("✓")]
+    assert done and "re-encoded because" in done[0]
+    assert "320x240" in done[0] and "160x120" in done[0]
+    assert "→160x120" in done[0]        # and still what it converted TO
 
 
 def test_stage_reencodes_when_resolution_differs(tmp_path):

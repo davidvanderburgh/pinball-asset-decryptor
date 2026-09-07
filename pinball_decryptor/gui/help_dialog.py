@@ -1082,6 +1082,15 @@ HELP_CONTENT = {
          "then verifies nothing survived — and if leftovers are stuck where "
          "nothing inside WSL can clear them, Stop says so and offers the "
          "WSL restart that does."),
+        ("Topper",
+         "Some machines have a second screen above the backbox — a "
+         "Mandalorian's hologram, a Venom's, a Stranger Things projector — and "
+         "the emulator opens a window for it, at the size that title's own "
+         "panel really is. Untick this to run the machine WITHOUT one, which "
+         "is a real configuration: the topper is an accessory on most of these "
+         "titles, and a cabinet that has not got it also loses the modes that "
+         "need it. The game is not lied to either way; unticked, the window "
+         "simply never opens."),
         ("Reset windows",
          "Puts the emulator's windows back where they started. The rig "
          "remembers where you last dragged each one and restores it on the "

@@ -1221,7 +1221,8 @@ def test_detail_lines_name_every_mod_that_cannot_transfer(tmp_path):
     assert "images/logo.png" in text
     # dropped/flagged read as errors, the move as ordinary progress
     levels = dict((t, lvl) for lvl, t in mod_transfer.plan_detail_lines(plan))
-    assert levels["    audio/idx0002.wav"] == "error"
+    dropped_line = next(t for t in levels if t.startswith("    audio/idx0002"))
+    assert levels[dropped_line] == "error"
     assert levels["    audio/idx0001.wav  ->  audio/idx0009.wav"] == "info"
 
 

@@ -181,6 +181,32 @@ def _plan_workers(model_size, ncpu, nwavs, avail_ram_gb=None):
     return max(1, min(hard, mem_cap))
 
 
+def _new_counts():
+    """Fresh per-run tally.  ``error`` counts clips that could not be
+    transcribed at all; ``oom`` remembers which of those ran out of memory, so
+    :meth:`TranscribePipeline._retry_out_of_memory` knows what to retry once the
+    worker pool has released its models."""
+    return {"speech": 0, "music": 0, "non": 0, "error": 0, "oom": []}
+
+
+def _tally(counts, kind):
+    """Add one *kind* to a :func:`_new_counts` dict."""
+    if kind in ("speech", "music", "error"):
+        counts[kind] += 1
+    else:
+        counts["non"] += 1
+
+
+def _row_tag(kind, text):
+    """The one-line log tag for a finished file."""
+    if kind == "error":
+        return "[not transcribed]"
+    if kind == "music":
+        return "[music]"
+    display = text if len(text) <= 80 else text[:77] + "..."
+    return display if display else "[no speech]"
+
+
 class TranscribePipeline(BasePipeline):
     """Walk an extracted assets dir, transcribe speech-bearing WAVs.
 
@@ -250,9 +276,19 @@ class TranscribePipeline(BasePipeline):
                 self._log(f"  Parallel transcribe unavailable ({e}); using a "
                           f"single process.", "info")
                 result = None
+        pooled = result is not None
         if result is None:
             result = self._transcribe_serial(wavs)
-        rows, speech_count, non_speech_count, music_count = result
+        rows, counts = result
+        # Only after a pooled run: what the box could not fit was the workers'
+        # models, and those are released by now.  Retrying serially after an
+        # already-serial run would just walk into the same wall a second time.
+        if pooled:
+            rows = self._retry_out_of_memory(rows, counts)
+        speech_count = counts["speech"]
+        non_speech_count = counts["non"]
+        music_count = counts["music"]
+        error_count = counts["error"]
 
         # Optional Phase 3: rename speech files using their transcripts
         # so the file explorer view shows the spoken text inline.
@@ -334,11 +370,24 @@ class TranscribePipeline(BasePipeline):
 
         music_summary = (f" Tagged {music_count} long clip(s) as music."
                          if music_count else "")
+        # Say it out loud.  These used to be filed as non-speech and vanish into
+        # the skipped count, so a run that lost 180 clips to memory pressure
+        # read exactly like a run that found 180 more sound effects.
+        error_summary = ""
+        if error_count:
+            error_summary = (
+                f"\n\n{error_count} sample(s) could not be transcribed and are "
+                f"marked 'error' in the CSV — they keep their original "
+                f"names. Almost always this is memory: close other heavy "
+                f"programs (a second copy of this app extracting at the same "
+                f"time will do it) and run Auto-name call-outs again on this "
+                f"folder. Settings ⚙ → Voice recognition quality "
+                f"→ a smaller model also needs less.")
         self._log("Done.", "success")
         self._done(True,
             f"Transcribed {speech_count} speech sample(s); "
             f"skipped {non_speech_count} non-speech sample(s).{music_summary}"
-            f"{rename_summary}\n\n"
+            f"{rename_summary}{error_summary}\n\n"
             f"Output: {out_path}\n\n"
             f"Each row pairs a WAV (folder / file / play seconds) with its "
             f"detected English text (or 'music'). Open in Excel / a CSV "
@@ -517,37 +566,83 @@ class TranscribePipeline(BasePipeline):
     def _emit_file_row(self, n, total, rel, kind, text, errored, counts):
         """Tally one transcribed file, drive progress, and log its line.
         ``n`` is the 1-based completion count; ``counts`` is a mutable
-        ``{'speech','music','non'}`` dict.  Returns the ``(rel, kind, text)``
-        CSV row.  Shared by the serial + parallel paths so they report alike."""
+        :func:`_new_counts` dict.  Returns the ``(rel, kind, text)`` CSV row.
+        Shared by the serial + parallel paths so they report alike."""
         if errored:
-            self._log(f"  {rel}: transcribe error ({errored}); marking as "
-                      f"non-speech.", "info")
-        if kind == "speech":
-            counts["speech"] += 1
-        elif kind == "music":
-            counts["music"] += 1
-        else:
-            counts["non"] += 1
+            if _looks_like_out_of_memory(errored):
+                counts["oom"].append(rel)
+                self._log(f"  {rel}: ran out of memory while transcribing "
+                          f"({errored}).", "info")
+            else:
+                self._log(f"  {rel}: transcribe error ({errored}); leaving it "
+                          f"unnamed.", "info")
+        _tally(counts, kind)
         self._progress(n, total,
                        f"{counts['speech']} speech / {counts['music']} music / "
                        f"{counts['non']} skipped")
-        display = text if len(text) <= 80 else text[:77] + "..."
-        tag = ("[music]" if kind == "music"
-               else (display if display else "[no speech]"))
-        self._log(f"  [{n}/{total}] {rel}: {tag}", "info")
+        self._log(f"  [{n}/{total}] {rel}: {_row_tag(kind, text)}", "info")
         return (rel, kind, text)
+
+    def _retry_out_of_memory(self, rows, counts):
+        """Re-transcribe, one file at a time in this process, every clip the
+        worker pool could not get memory for.  Returns the patched *rows*.
+
+        Each pool worker holds its own model and they peak together on the long
+        clips, so anything else heavy on the box at the same time starves them:
+        a tester ran two copies of the app to extract two versions at once and
+        180 of his 927 clips came back with allocation errors.  By the time this
+        runs the pool is gone, so one model on its own normally fits and the
+        clip transcribes as it should have the first time.  A rescue pass only
+        -- a clip that fails again keeps its error row and is counted as such.
+        """
+        rels = list(dict.fromkeys(counts.get("oom") or ()))
+        if not rels:
+            return rows
+        self._log(f"{len(rels)} sample(s) ran out of memory while the workers "
+                  f"were running; retrying them one at a time...", "info")
+        try:
+            model = self._load_model()
+        except PipelineError as e:
+            self._log(f"  Could not reload the model for the retry ({e}).",
+                      "info")
+            return rows
+        first = {}
+        for i, (rel, _kind, _text) in enumerate(rows):
+            first.setdefault(rel, i)
+        recovered = 0
+        for n, rel in enumerate(rels, 1):
+            self._check_cancel()
+            abs_path = os.path.join(self.assets_dir, *rel.split("/"))
+            _rel, kind, text, errored = _transcribe_one(
+                model, rel, abs_path, self.music_min_seconds, oom_retries=0)
+            i = first.get(rel)
+            if i is None:
+                continue
+            counts["error"] -= 1
+            _tally(counts, kind)
+            rows[i] = (rel, kind, text)
+            if kind == "error":
+                self._log(f"  [{n}/{len(rels)}] {rel}: still out of memory "
+                          f"({errored}).", "info")
+                continue
+            recovered += 1
+            self._log(f"  [{n}/{len(rels)}] {rel}: {_row_tag(kind, text)}",
+                      "info")
+        self._log(f"  Recovered {recovered} of {len(rels)} sample(s) on the "
+                  f"retry.", "success" if recovered else "info")
+        counts["oom"] = []
+        return rows
 
     def _transcribe_serial(self, wavs):
         """Single-process transcription loop (the original path; also the
-        fallback when a pool can't start).  Returns
-        ``(rows, speech_count, non_speech_count, music_count)``."""
+        fallback when a pool can't start).  Returns ``(rows, counts)``."""
         self._log("Loading faster-whisper model...", "info")
         model = self._load_model()
         self._log(f"  Model loaded ({self.model_size}, int8 CPU).", "success")
         self._set_phase(1)
         self._log(f"Transcribing {len(wavs)} sample(s) "
                   f"(non-speech files skip Whisper via VAD)...", "info")
-        counts = {"speech": 0, "music": 0, "non": 0}
+        counts = _new_counts()
         rows = []
         total = len(wavs)
         for i, abs_path in enumerate(wavs):
@@ -557,7 +652,7 @@ class TranscribePipeline(BasePipeline):
                 model, rel, abs_path, self.music_min_seconds)
             rows.append(self._emit_file_row(i + 1, total, rel, kind, text,
                                             errored, counts))
-        return rows, counts["speech"], counts["non"], counts["music"]
+        return rows, counts
 
     def _transcribe_parallel(self, wavs):
         """Transcribe across a spawn pool — one WhisperModel per worker, one task
@@ -596,7 +691,7 @@ class TranscribePipeline(BasePipeline):
             rel = os.path.relpath(abs_path, self.assets_dir).replace("\\", "/")
             tasks.append((i, rel, abs_path))
         rows_by_idx = [None] * len(wavs)
-        counts = {"speech": 0, "music": 0, "non": 0}
+        counts = _new_counts()
         total = len(wavs)
         done = 0
         try:
@@ -620,28 +715,85 @@ class TranscribePipeline(BasePipeline):
             pool.terminate()
             pool.join()
         rows = [r for r in rows_by_idx if r is not None]
-        return rows, counts["speech"], counts["non"], counts["music"]
+        return rows, counts
 
 
-def _transcribe_one(model, rel, abs_path, music_min_seconds):
+# An inference run that could not get memory.  Whisper reaches three different
+# allocators -- ctranslate2/oneDNN for the model, ONNX Runtime for the Silero
+# VAD, numpy for the audio buffer -- and each words the same failure its own
+# way; none of them raises ``MemoryError``, so the only thing they share is the
+# text.  A tester extracting two cards in two copies of the app at once got all
+# five of these in one run (163 x mkl_malloc, 12 x "could not create a memory
+# object", plus one each from ONNX, numpy and errno 12).
+_OOM_MARKERS = (
+    "mkl_malloc",
+    "failed to allocate",
+    "cannot allocate memory",
+    "could not create a memory object",
+    "bad allocation",
+    "bad_alloc",
+    "unable to allocate",
+    "out of memory",
+    "insufficient memory",
+    "memoryerror",
+)
+
+
+def _looks_like_out_of_memory(exc):
+    """True if *exc* (an exception or an already-stringified one) is an
+    allocation failure rather than a real problem with the audio.
+
+    Worth telling apart because the two want opposite handling: a bad WAV will
+    fail again forever, an allocation failure is a moment of contention that a
+    retry usually clears."""
+    msg = str(exc).lower()
+    return any(m in msg for m in _OOM_MARKERS)
+
+
+# Waits between in-worker retries of an allocation failure, jittered so eight
+# workers that hit the wall on the same long clip don't march back into it
+# together.
+_OOM_RETRY_WAITS = (1.5, 4.0)
+
+
+def _transcribe_one(model, rel, abs_path, music_min_seconds, oom_retries=2):
     """Transcribe one WAV with VAD and classify it as speech / music /
     non-speech.  Returns ``(rel, kind, text, errored)`` where ``errored`` is
     ``None`` or the error string.  Module-level with the model passed in so the
     serial loop AND the spawned workers run the IDENTICAL logic → identical rows.
+
+    An allocation failure is retried up to *oom_retries* times after a short
+    jittered wait: the workers all peak together on the long clips, so the
+    squeeze is usually over in seconds.  What it will not do is call the clip
+    non-speech -- that wrote a guess into callouts.csv as though it were a
+    finding, and left the file unnamed with nothing in the summary to say why.
+    A clip that runs out of memory to the end comes back as kind ``"error"``.
     """
-    try:
-        segments, info = model.transcribe(
-            abs_path,
-            language="en",
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 250},
-            beam_size=1,
-            best_of=1,
-            condition_on_previous_text=False,
-        )
-        segments = list(segments)
-    except Exception as e:
-        return (rel, "non-speech", "", str(e))
+    import random
+    import time
+    last = None
+    for attempt in range(oom_retries + 1):
+        try:
+            segments, info = model.transcribe(
+                abs_path,
+                language="en",
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 250},
+                beam_size=1,
+                best_of=1,
+                condition_on_previous_text=False,
+            )
+            segments = list(segments)
+            last = None
+            break
+        except Exception as e:
+            last = e
+            if attempt >= oom_retries or not _looks_like_out_of_memory(e):
+                break
+            wait = _OOM_RETRY_WAITS[min(attempt, len(_OOM_RETRY_WAITS) - 1)]
+            time.sleep(wait * (0.5 + random.random()))
+    if last is not None:
+        return (rel, "error", "", str(last))
 
     text = " ".join(s.text.strip() for s in segments).strip()
     if text:

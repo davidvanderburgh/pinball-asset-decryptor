@@ -8190,6 +8190,59 @@ rewriting it.**
 
 ## Done
 
+- [x] **101. peanuts' emulation matrix: Rush's minute-long start, and the
+      second display's size.** `S2 D3` **CLOSED 2026-09-07 at David's word**
+      ("ok all looks good"). Merge commit below; `item/101`.
+      *(From the Emulation sheet peanuts keeps on David's Desktop, 2026-09-07:
+      "I've tested PAD 0.187.1, the only regression I have seen in emulation
+      is that Rush doesn't run in this version", revised in his own next pass
+      to "Much longer than any other game to start".)*
+      **RUSH: 96 s to `running.` became 37 s cold and 2.3 s warm.** Its game
+      binary is 190.8 MB, of which `.data` is 184.6 MB - godzilla_le's ENTIRE
+      binary is 8.0 MB - and four places walked that RW segment for answers
+      they already had. `watch.sh` asked `nodecensus.py` for its three values
+      with three separate runs (61 s of the 77 s before the game process
+      started, for three copies of one answer); `nodecensus --cache` now keeps
+      the verdict beside the identity of every input that produced it;
+      `nbdir --reuse` copies a derived node directory whose ELF and node
+      firmware have not moved (11.2 s -> 0.03 s); and `mktables` stopped
+      asking the binary for a device table it had already been told was empty
+      - that branch is gated on `switch_xy.txt` not existing, which a title
+      with zero device records can never write, so it re-scanned on every
+      start for ever. Verified against the old code on 9 titles x both
+      nodedir-fresh states: identical verdicts, byte-identical directories.
+      NOT the 0.187.1 regression it was filed as - the three-call shape dates
+      from item 52 (2026-08-18) and Rush is simply the first title whose
+      binary made it visible. The matrix's PAD-version column is when a row
+      was last LOOKED AT, not when a fault appeared.
+      **THE SECOND DISPLAY OPENS AT THE PANEL THE TITLE ASKS FOR** - the size
+      half of item 65, which stays open for the rest. One knob was answering
+      two questions: `PAD_GL2_W/H` is what the GAME is told and item 67
+      settled that it must stay the backbox's, so the WINDOW was getting the
+      same 1360x768 whatever the panel is. `padglhost` grew `win2_want_w/h`
+      and the host-only `PAD_GL2_WIN_W/H`, `watch.sh` derives them from each
+      title's own FB_SetTiming record, and `display2.py --shell` prints them
+      under those names so the two can never be confused again. Measured live
+      with xdotool, not believed from a log: mando_le 1280x800 (topper
+      complete and un-mirrored - the title item 67's cropping was measured
+      on), star_wars_le 480x272, venom_le 800x480.
+      **AN LE MACHINE TAKES THE PREMIUM PLAYFIELD DRAWING.**
+      uncanny_xmen_le 0.98 ships `xmen_pre_playfield_scaled.png` beside
+      `xmen_pro_...` and names neither "le", so both model tests missed and
+      the pick fell through to `found[0]` - the right file, by the alphabet,
+      which is the accident `find_playfield_art`'s own docstring says it will
+      not rely on. One rename and an LE gets the Pro playfield silently.
+      **What this did NOT close, and why** (all recorded on item 65 or below):
+      venom_le's topper ROTATION (not derivable - its present quad maps u to
+      x with no mirror or transpose, and its attract loop is an abstract
+      creature with no text to read an orientation off; "90 degrees
+      clockwise" is the reporter's word and wants confirming); DISPLAY 0 on
+      james_bond_60th_le and jurassic_park_the_pin, both reported 800x480 and
+      both yielding "no framebuffer timing records found"; Star Wars HE,
+      whose card is on no disk here; and the two "switch list is incomplete"
+      rows (foo_fighters, munsters), where the cards here are older than the
+      builds tested and both lists read structurally normal.
+
 - [x] **80. Live, alphabetical, game-by-game E2E compatibility pass — David
       plays, this session triages.** `S2 D4` *(Filed 2026-08-24 at David's ask,
       **CLOSED 2026-09-01 at David’s word** — “i have validated this

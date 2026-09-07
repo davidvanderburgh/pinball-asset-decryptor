@@ -439,7 +439,48 @@ if [ -f "$GAME_ELF" ]; then
              "game's own present assumes (panel timing records:" \
              "${_d2all:-none})"
     fi
-    unset _d2all _d2w _d2h
+    # THE FACTS THE BINARY DOES NOT CARRY - the one-screen cabinets' panel and
+    # venom_le's quarter turn. Reported from real machines, host side only, and
+    # kept in display2.py beside the derived reading with the evidence for each;
+    # see REPORTED_PANELS there for why these four lines are not the per-title
+    # table this rig otherwise refuses to keep.
+    _rep=$(python3 - "$GAME" <<'PYREP' 2>/dev/null
+import sys, os
+sys.path.insert(0, os.environ.get("RIG", "."))
+import display2
+r = display2.reported(sys.argv[1])
+if r.get("screen"):
+    print("PAD_GL_WIN_W=%d" % r["screen"][0])
+    print("PAD_GL_WIN_H=%d" % r["screen"][1])
+if r.get("rot2"):
+    print("PAD_GL2_ROT=%d" % r["rot2"])
+PYREP
+)
+    for _kv in $_rep; do
+        case "$_kv" in
+            PAD_GL_WIN_W=*)  export PAD_GL_WIN_W=${PAD_GL_WIN_W:-${_kv#*=}} ;;
+            PAD_GL_WIN_H=*)  export PAD_GL_WIN_H=${PAD_GL_WIN_H:-${_kv#*=}} ;;
+            PAD_GL2_ROT=*)   export PAD_GL2_ROT=${PAD_GL2_ROT:-${_kv#*=}} ;;
+        esac
+    done
+    if [ -n "${PAD_GL_WIN_W:-}" ]; then
+        echo "[watch] screen: this cabinet has ONE screen and it is"              "${PAD_GL_WIN_W}x${PAD_GL_WIN_H} - reported from the machine, not"              "in the binary; the game still renders at ${PAD_GL_W}x${PAD_GL_H}"
+    fi
+    if [ -n "${PAD_GL2_ROT:-}" ] && [ "${PAD_GL2_ROT}" != 0 ]; then
+        echo "[watch] display 2: its panel is mounted a quarter turn"              "(${PAD_GL2_ROT} degrees clockwise), so its window is the panel"              "transposed and the picture is turned into it"
+    fi
+    unset _d2all _d2w _d2h _rep _kv
+fi
+
+# ★ THE TOPPER CAN BE TURNED OFF (asked for 2026-09-07: "it would be cool to
+# have a toggle to enable/disable the topper"). A machine without the topper
+# accessory is a real configuration - it is an extra on most of these titles -
+# and on some of them it also takes the topper-exclusive modes out of the game.
+# PAD_TOPPER=0 stops the second display's window ever opening; the guest is
+# untouched, so the game still composes it and simply nobody looks.
+if [ "${PAD_TOPPER:-1}" = 0 ]; then
+    export PAD_GL2_OFF=1
+    echo "[watch] topper: OFF (PAD_TOPPER=0) - no second-display window"
 fi
 # WHICH NODE IS THE lcdnode (item 83, batman's VILLAIN VISION = node 24).
 # From the derived table so it is per-title and empty on titles without one -

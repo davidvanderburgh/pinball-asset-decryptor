@@ -2175,11 +2175,38 @@ def layout_extent(pad=NO_ART_PAD):
     not fit, so both it and Jaws refused their own correct art the first time
     this was written.
     """
-    pts = [(r["x"], r["y"]) for kind in ("led", "switch", "coil")
-           for r in layout_rows(kind)]
+    pts = layout_points()
     if not pts:
         return None
     return (max(p[0] for p in pts) + pad, max(p[1] for p in pts) + pad)
+
+
+def layout_points():
+    """Every positioned device, in the layout's own pixels."""
+    return [(r["x"], r["y"]) for kind in ("led", "switch", "coil")
+            for r in layout_rows(kind)]
+
+
+#: How much of a title's own layout a picture must contain before it is
+#: accepted as that layout's artwork.
+#:
+#: ★ IT IS NOT "ALL OF IT", AND REQUIRING THAT COST A TITLE ITS PLAYFIELD.
+#: uncanny_xmen_le 0.98.0 positions 185 devices on `playfield` and ships
+#: `xmen_pre_playfield_scaled.png` at 321x710 to draw them on - the right
+#: picture, found by the right route. ONE of those 185 sits at x=383, past the
+#: right-hand edge, so the max-extent test made the layout 383 wide, the
+#: picture failed by 62 pixels, and the window fell back to a blank field with
+#: markers on it. David, 2026-09-07, looking at exactly that: "running xmen on
+#: main right now has no artwork" - and the same window in a tester's
+#: screenshot the same evening.
+#:
+#: The refutation this test exists for still works, because it is about
+#: PROPORTION and the case it catches is nothing like one stray. The case is
+#: uncanny_xmen_le 0.97.0's cabinet front (448x274) under playfield
+#: coordinates that reach y=626: not one point over the edge but most of them,
+#: which lands far below this floor. A single misplaced device is a wrong ROW,
+#: and losing a whole playfield to one wrong row is the worse trade.
+ART_FIT_MIN = 0.95
 
 
 #: PAD_PF_VIEW=schematic forces the switch-list-and-swatch-grid view on ANY
@@ -2263,11 +2290,12 @@ def layout_art():
     """
     if not PF_PNG or not os.path.exists(PF_PNG):
         return None
-    ext = layout_extent(pad=0)
+    pts = layout_points()
     wh = gameinfo.png_size(PF_PNG)
-    if not ext or not wh:
+    if not pts or not wh:
         return None
-    return PF_PNG if wh[0] >= ext[0] and wh[1] >= ext[1] else None
+    inside = sum(1 for x, y in pts if 0 <= x <= wh[0] and 0 <= y <= wh[1])
+    return PF_PNG if inside >= len(pts) * ART_FIT_MIN else None
 
 
 class LedRing:

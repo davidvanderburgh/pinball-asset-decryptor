@@ -651,6 +651,23 @@ static int fb2_w, fb2_h;                 /* display-2 render size            */
  * window alone changes nothing the guest can see or the game can measure.
  * 0 = unset = the old behaviour, the render size. */
 static int win2_want_w, win2_want_h;     /* the panel's size, host side only  */
+/* ★ AND A PANEL CAN BE MOUNTED ON ITS SIDE. venom_le's topper is a PORTRAIT
+ * panel: its timing record is the native landscape 800x480, the game renders
+ * landscape, and the cabinet turns the glass a quarter turn CLOCKWISE. So the
+ * window is the panel transposed - 480x800 - and the picture is turned into it.
+ *
+ * THIS ONE IS NOT DERIVABLE, and is not pretended to be. Nothing in a game
+ * binary says which way round a panel is screwed to a cabinet; the game renders
+ * the same landscape frame either way. It is REPORTED, and it is on record
+ * twice: the original field report said "90 degrees clockwise", and a
+ * photograph of the real Venom LE (2026-09-07) shows the topper carrying the
+ * same service screen as the backbox, a quarter turn from it. Two independent
+ * readings of one physical fact.
+ *
+ * The blast radius is a window. A wrong rotation is instantly visible and
+ * costs nothing, which is why a reported number is acceptable here and would
+ * NOT be for, say, silencing a node board. PAD_GL2_ROT overrides. */
+static int win2_rot;                     /* 0, 90, 180, 270 - clockwise      */
 /* ★ ITEM 67: IS DISPLAY 2 A PANEL VIEWED IN A REFLECTION? -1 = not yet read
  * off the game, 0 = no, 1 = yes: the [display 2] window then shows the
  * OPTICAL image, un-mirrored. Read from the quad the game's display-2
@@ -802,11 +819,28 @@ static const char *BLIT_FS =
     "uniform sampler2D u_tex;\n"
     "uniform float u_flip;\n"
     "uniform float u_mirror;\n"
+    "uniform float u_rot;\n"
     "in vec2 v_uv;\n"
     "out vec4 o_col;\n"
     "void main(){\n"
     "  vec2 uv = vec2(mix(v_uv.x, 1.0 - v_uv.x, u_mirror),\n"
     "                 mix(v_uv.y, 1.0 - v_uv.y, u_flip));\n"
+    /* A QUARTER TURN, and the sense is the one a person standing at the
+     * machine would name: u_rot=90 puts on screen what a topper mounted 90
+     * degrees CLOCKWISE shows.
+     *
+     * ★ MEASURED, NOT REASONED, and the first version had it backwards. The
+     * quad's v runs bottom-up, so the mapping that turns the picture clockwise
+     * on the glass is the one that reads anticlockwise as algebra - which is
+     * exactly the trap. It was settled against a photograph of the real Venom
+     * LE: on the machine the symbiote sits in the UPPER third with the pale
+     * glow below it, and the first attempt put the symbiote low with the glow
+     * on top - the same picture, 180 degrees out. These two are swapped from
+     * that attempt. If this ever needs changing again, take a shot of the
+     * [display 2] window and hold it against the photo; do not derive it. */
+    "  if (u_rot > 225.0)      uv = vec2(uv.y, 1.0 - uv.x);\n"
+    "  else if (u_rot > 135.0) uv = vec2(1.0 - uv.x, 1.0 - uv.y);\n"
+    "  else if (u_rot > 45.0)  uv = vec2(1.0 - uv.y, uv.x);\n"
     "  o_col = vec4(texture(u_tex, uv).rgb, 1.0);\n"
     "}\n";
 
@@ -1892,6 +1926,27 @@ static int win_open(void)
     }
     scr  = XDefaultScreen(xdpy);
     win_w = fb_w; win_h = fb_h;
+    {   /* ★ THE SMALL CABINETS' SCREEN, host side only (2026-09-07). A Home
+         * Edition, a 60th and a The Pin have ONE screen and it is 800x480, not
+         * the 1360x768 backbox every other title has - reported from three
+         * separate machines. Same split as display 2's: the GAME still renders
+         * at PAD_GL_W/H (that is the guest's render target and its ring header,
+         * and moving it would relocate every save slot), and only the window it
+         * is shown in changes. win_present() letterboxes fb into the window
+         * already, so the guest cannot see this.
+         *
+         * Bounded, and out of range falls back to the render size - a typo here
+         * is otherwise a window nobody can find. */
+        const char *ew = getenv("PAD_GL_WIN_W");
+        const char *eh = getenv("PAD_GL_WIN_H");
+        int w0 = ew ? atoi(ew) : 0, h0 = eh ? atoi(eh) : 0;
+        if (w0 >= 160 && h0 >= 120 && w0 <= 7680 && h0 <= 4320) {
+            win_w = w0; win_h = h0;
+            fprintf(stderr, "[padglhost] this cabinet's screen is %dx%d, so the "
+                    "window opens at that and the %dx%d render is scaled into "
+                    "it\n", w0, h0, fb_w, fb_h);
+        }
+    }
     {   /* Reopen where - and at the size - the window was last left. The SIZE
          * requested at create time is honored, so that half really happens
          * here; the POSITION is not (WSLg ignores it), so that half is only
@@ -2492,6 +2547,10 @@ static void win_present(void)
     {   int fl = p_glGetUniformLocation(blit_prog, "u_flip");
         if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f);
         fl = p_glGetUniformLocation(blit_prog, "u_mirror");
+        if (fl >= 0) p_glUniform1f(fl, 0.f);
+        /* The two windows share one program, so this must be cleared here or
+         * the game window inherits the topper's quarter turn. */
+        fl = p_glGetUniformLocation(blit_prog, "u_rot");
         if (fl >= 0) p_glUniform1f(fl, 0.f); }        /* the backbox: never */
     p_glDrawArrays(0x0005, 0, 4);      /* TRIANGLE_STRIP                     */
     /* ★ ITEM 11's PER-SWAP TICK, PAD_GL_TICK=1.
@@ -2579,6 +2638,20 @@ static int egl_use(EGLSurface s)
 static void win2_open(int disp)
 {
     int scr;
+    {   /* ★ THE TOPPER CAN BE ABSENT, and on a real machine often is - it is an
+         * accessory on most of these titles, and a cabinet without one also
+         * loses the modes that need it. PAD_TOPPER=0 (watch.sh turns it into
+         * this) means the window never opens. The GUEST is untouched: the game
+         * still targets the display and still composes its scene, exactly as it
+         * would with the panel unplugged, and nothing here pretends otherwise -
+         * this is a window that is not shown, not a display that is not there. */
+        const char *off = getenv("PAD_GL2_OFF");
+        if (off && *off && *off != '0') {
+            fprintf(stderr, "[padglhost] display %d: its window is off "
+                    "(PAD_GL2_OFF) - the game still composes it\n", disp);
+            return;
+        }
+    }
     if (!win_on || !xdpy) {
         fprintf(stderr, "[padglhost] display %d: headless run, its feed "
                 "decodes but is not presented\n", disp);
@@ -2592,6 +2665,12 @@ static void win2_open(int disp)
         win2_w = win2_want_w; win2_h = win2_want_h;
     } else {
         win2_w = fb2_w; win2_h = fb2_h;
+    }
+    /* A QUARTER TURN MAKES A PORTRAIT WINDOW OF A LANDSCAPE PANEL. The panel's
+     * own record is its native, unrotated size; the cabinet decides which way
+     * up it hangs, so the window is the transpose. */
+    if (win2_rot == 90 || win2_rot == 270) {
+        int t = win2_w; win2_w = win2_h; win2_h = t;
     }
     /* Beside the game window by default. No remembered position in v1: the
      * delayed-restore state machine in win_pump() is per-window-pair
@@ -2744,9 +2823,17 @@ static void win2_present(void)
     p_glActiveTexture(0x84C0);
     p_glGetIntegerv(0x8069, &tex0);
 
-    dw = win2_w; dh = (int)((long)win2_w * fb2_h / (fb2_w ? fb2_w : 1));
-    if (dh > win2_h) { dh = win2_h; dw = (int)((long)win2_h * fb2_w / (fb2_h ? fb2_h : 1)); }
-    dx = (win2_w - dw) / 2; dy = (win2_h - dh) / 2;
+    {   /* Fit the picture AS IT WILL BE SEEN: a quarter turn swaps which of
+         * its sides is the wide one, so the aspect the letterbox works from is
+         * the rotated one. Getting this wrong does not crop - it just wastes
+         * the window, which is exactly what a portrait topper showing a
+         * letterboxed landscape strip looks like. */
+        int sw = fb2_w, sh = fb2_h;
+        if (win2_rot == 90 || win2_rot == 270) { sw = fb2_h; sh = fb2_w; }
+        dw = win2_w; dh = (int)((long)win2_w * sh / (sw ? sw : 1));
+        if (dh > win2_h) { dh = win2_h; dw = (int)((long)win2_h * sw / (sh ? sh : 1)); }
+        dx = (win2_w - dw) / 2; dy = (win2_h - dh) / 2;
+    }
 
     egl_use(egl_surf2);
     p_glBindFramebuffer(0x8D40, 0);
@@ -2763,7 +2850,9 @@ static void win2_present(void)
     {   int fl = p_glGetUniformLocation(blit_prog, "u_flip");
         if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f);
         fl = p_glGetUniformLocation(blit_prog, "u_mirror");
-        if (fl >= 0) p_glUniform1f(fl, d2_mirror > 0 ? 1.f : 0.f); } /* item 67 */
+        if (fl >= 0) p_glUniform1f(fl, d2_mirror > 0 ? 1.f : 0.f); /* item 67 */
+        fl = p_glGetUniformLocation(blit_prog, "u_rot");
+        if (fl >= 0) p_glUniform1f(fl, (float)win2_rot); }
     p_glDrawArrays(0x0005, 0, 4);
     /* The d2 window went black while its FBO measured fully lit, with no
      * EGL call reporting failure - so this path checks what nothing else
@@ -4369,6 +4458,12 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                      * machine nor game ever has. Bounded because this is a
                      * window size and a typo here is a window nobody can
                      * find; out of range falls back to the render size. */
+                    const char *er = getenv("PAD_GL2_ROT");
+                    int r = er ? atoi(er) : 0;
+                    r = ((r % 360) + 360) % 360;
+                    win2_rot = (r % 90) ? 0 : r;   /* only quarter turns */
+                }
+                {
                     const char *ew = getenv("PAD_GL2_WIN_W");
                     const char *eh = getenv("PAD_GL2_WIN_H");
                     int w2 = ew ? atoi(ew) : 0, h2 = eh ? atoi(eh) : 0;

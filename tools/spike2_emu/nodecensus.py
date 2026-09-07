@@ -7,6 +7,33 @@
     nodecensus.py --silent           # just the PAD_NB_SILENT value, for watch.sh
     nodecensus.py --silent-ff        # the PAD_NB_SILENT_FF value: the silenced
                                      # nodes that still answer the ff status poll
+    nodecensus.py --values           # all three at once - what watch.sh asks for
+    nodecensus.py --values --cache F # ...and reuse F when the inputs match
+
+THE COST OF ASKING THREE TIMES, measured on rush_le 1.18.0 (2026-09-07, from
+peanuts' emulation matrix: "much longer than any other game to start").
+
+watch.sh needed three values from this file - the silence list, the ff list and
+the reason - and asked for each with its own run, because each had its own
+flag. Every one of those runs reads the game binary from scratch: census()
+scans it for the device table and optional_node4_nodes() scans it again for the
+node directory. On an ordinary title that is a second or two and nobody
+noticed. On rush_le it is 20.4 seconds, three times over:
+
+    rush_le    .text 4.9 MB   .data 184.6 MB    binary 190.8 MB
+    godzilla_le                                 binary   8.0 MB
+
+Rush's `.data` is twenty-three times godzilla's whole binary, and both scans
+walk it. The three runs cost 61 s of the 77 s that passed between the emulator
+starting and the game starting - so a title that boots to attract in 16 s
+(v0.153.0's measurement) appeared to take a minute and a quarter to do nothing.
+
+Nothing about the three answers differed: they are one function of one set of
+inputs, computed three times and thrown away twice. `--values` prints all three
+from one reading, and `--cache` keeps the verdict beside the identity of every
+input that produced it, so the SECOND start of a card that has not changed
+pays nothing at all. 61 s -> 20 s -> 0.1 s. No decision here changed; see
+cache_key() for why a served verdict is a verdict for these inputs.
 
 WHAT THIS IS FOR. The shim answers the node bus for all 64 addresses, so every
 address the game polls looks populated - including boards the machine does not
@@ -96,6 +123,7 @@ so finding neither means the table was not read, however many records came back.
 """
 import argparse
 import collections
+import hashlib
 import io
 import os
 import re
@@ -341,6 +369,104 @@ def silent_nodes(counts, swnodes=None, dirnodes=None):
                     % ", ".join("node %d" % n for n in absent))
 
 
+def _file_id(path):
+    """`<name> <n> bytes sha1:<12 hex>` for a small input file, or `absent`.
+
+    Hashed rather than stat'd because these two are SMALL and both are
+    rewritten in place by the rig itself: switch_list.txt is re-dumped by the
+    shim on every run of a title, node_ident.txt by nbdir on every start. A
+    size or an mtime would miss a same-length rewrite of exactly the kind this
+    rig performs; a few kilobytes of sha1 costs nothing next to the scan the
+    key exists to skip.
+    """
+    try:
+        with open(path, "rb") as f:
+            b = f.read()
+    except (OSError, TypeError):
+        return "absent"
+    return "%s %d bytes sha1:%s" % (os.path.basename(path), len(b),
+                                    hashlib.sha1(b).hexdigest()[:12])
+
+
+def cache_key(a):
+    """The identity of EVERY input this verdict was reached from, or None when
+    it cannot be formed and nothing may be cached.
+
+    ★ THE KEY IS THE WHOLE SAFETY ARGUMENT. A silenced board that is really
+    there loses its devices with no message at all - the failure this file's
+    header is mostly about - so a verdict served from a cache has to be a
+    verdict for the inputs in front of it, not merely for the same title. All
+    four are here because all four move the answer: the binary (the device
+    table and the node4 flags), the switch list (the fallback branch), the
+    node directory (the item 51 guard), and whether that directory was derived
+    THIS run (item 82 answers an optional node4 whose row is fresh and
+    silences the same board when it is stale).
+    """
+    binid = devicexy.binary_id(a.elf)
+    if not binid:
+        return None            # no binary named: --game mode, or an unreadable
+    return "elf[%s] switches[%s] nodedir[%s] fresh[%s]" % (
+        binid, _file_id(a.switches), _file_id(a.nodedir), a.nodedir_fresh)
+
+
+def cache_read(path, key):
+    """(nodes, ff, why) from a cache written for exactly `key`, or None."""
+    if not path or not key:
+        return None
+    try:
+        with open(path) as f:
+            got = dict(ln.rstrip("\n").split("=", 1)
+                       for ln in f if not ln.startswith("#") and "=" in ln)
+    except (OSError, ValueError):
+        return None
+    if got.get("inputs") != key:
+        return None
+    try:
+        nodes = [int(n) for n in got["silent"].split(",") if n]
+        ff = [int(n) for n in got["silent-ff"].split(",") if n]
+        return nodes, ff, got["because"]
+    except (KeyError, ValueError):
+        return None
+
+
+def cache_write(path, key, nodes, ff, why):
+    """Record the verdict beside its inputs. Failure is silent on purpose: a
+    cache that cannot be written costs seconds on the next start, and there is
+    nothing a run can usefully do about a read-only tables directory."""
+    if not path or not key:
+        return
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write("# nodecensus v1 - the verdict, and the inputs it was "
+                    "reached from.\n"
+                    "# Any difference in `inputs` and the binary is read "
+                    "again; see nodecensus.cache_key().\n")
+            f.write("inputs=%s\n" % key)
+            f.write("silent=%s\n" % ",".join(str(n) for n in nodes))
+            f.write("silent-ff=%s\n" % ",".join(str(n) for n in ff))
+            f.write("because=%s\n" % why.replace("\n", " "))
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def emit_values(a, nodes, ff, why):
+    """The machine-readable answer, in whichever of the three shapes was asked
+    for. `--values` prints all three because they are ONE reading of the
+    binary - see THE COST OF ASKING THREE TIMES in the header."""
+    if a.values:
+        print("silent=%s" % ",".join(str(n) for n in nodes))
+        print("silent-ff=%s" % ",".join(str(n) for n in ff))
+        print("because=%s" % why.replace("\n", " "))
+    elif a.silent:
+        print(",".join(str(n) for n in nodes))
+    else:
+        print(",".join(str(n) for n in ff))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--game", help="title name; default is the active one")
@@ -365,6 +491,15 @@ def main():
                          "table because its games dir is a bare ELF symlink, "
                          "and ITS node4 image is encrypted - the case the "
                          "silence exists for.")
+    ap.add_argument("--values", action="store_true",
+                    help="print silent=, silent-ff= and because= - every "
+                         "value watch.sh needs - from ONE reading of the "
+                         "binary. See THE COST OF ASKING THREE TIMES.")
+    ap.add_argument("--cache", metavar="FILE",
+                    help="reuse FILE's verdict when it was reached from "
+                         "exactly these inputs, and write it there otherwise. "
+                         "Omitted (the default, and every by-hand run) reads "
+                         "the binary as it always did.")
     ap.add_argument("--silent", action="store_true",
                     help="print only the PAD_NB_SILENT value (may be empty)")
     ap.add_argument("--silent-ff", action="store_true",
@@ -378,6 +513,19 @@ def main():
                          "identity until t=100 s (measured 2026-08-22)")
     a = ap.parse_args()
 
+    # THE MACHINE MODES CAN BE SERVED FROM THE CACHE; THE REPORT NEVER IS.
+    # `nodecensus.py` with no flag is what a person runs to see the table, the
+    # counts and the named/total spread, and none of that is in the cache -
+    # nor should it be, because the report is the thing you reach for when you
+    # doubt the verdict.
+    key = cache_key(a)
+    quiet = a.values or a.silent or a.silent_ff
+    hit = cache_read(a.cache, key) if quiet else None
+    if hit:
+        nodes, ff, why = hit
+        return emit_values(a, nodes, ff, why)
+
+    read_the_binary = True
     try:
         counts, unattributed, total = census(a.game, a.elf)
     except (OSError, SystemExit) as e:
@@ -385,6 +533,7 @@ def main():
         # still get to the switch-list fallback: the titles whose binary cannot
         # be parsed are exactly the ones that need it.
         counts, unattributed, total = {}, {}, 0
+        read_the_binary = False
         if not a.silent:
             print("no device table: %s" % e, file=sys.stderr)
 
@@ -424,12 +573,19 @@ def main():
     # re-probed in 90-probe bursts every ~15 s until t=100 s (2026-08-22).
     ff = sorted(opt4 & set(nodes))
 
-    if a.silent:
-        print(",".join(str(n) for n in nodes))
-        return 0
-    if a.silent_ff:
-        print(",".join(str(n) for n in ff))
-        return 0
+    if quiet:
+        # ONLY A VERDICT THE BINARY WAS ACTUALLY READ FOR IS KEPT. A census
+        # that threw fell back to the switch list, which is the right answer
+        # for a title whose table cannot be parsed and the WRONG one to freeze
+        # for a title whose card simply was not readable for a moment - and
+        # the two are indistinguishable from here. A cache miss costs the next
+        # start a scan; a frozen fallback costs a real board its devices.
+        # ★ A census that read the binary and found NOTHING is not this case:
+        # zero records is an answer (rush_le, and it is the whole reason any
+        # of this is cached), and census() returns it rather than raising.
+        if read_the_binary:
+            cache_write(a.cache, key, nodes, ff, why)
+        return emit_values(a, nodes, ff, why)
 
     print("%d device records" % total)
     print("%-8s %-7s %-6s %-6s %-6s %s"

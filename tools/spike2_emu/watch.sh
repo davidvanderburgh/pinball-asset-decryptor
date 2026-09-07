@@ -338,12 +338,29 @@ PROV=$(python3 "$RIG/gameinfo.py" --provenance "$GAME_ELF" 2>/dev/null)
 NBID="$PAD_TABLES/$GAME/node_ident.txt"
 mkdir -p "$PAD_TABLES/$GAME" 2>/dev/null
 NBID_FRESH=0
-if python3 "$RIG/nbdir.py" "$GAME_ELF" --hexdir "${GAME_ELF%/*}" \
-        --out "$NBID.tmp" 2>/dev/null && grep -q '^node=' "$NBID.tmp"; then
+# --reuse: the derivation walks the binary's whole RW segment, which is 184.6 MB
+# on rush_le (godzilla_le's ENTIRE binary is 8.0 MB) and 11.2 s of a start that
+# has nothing else to do. The table records what it was built from - the ELF's
+# name and size AND the hex firmware beside it, because PAD's own blip-free
+# patch rewrites those - and is copied instead when that has not moved. Still
+# FRESH: "derived from this title's own hexes" (item 82) is a fact about the
+# source, not about the clock, and the key is the source. See nbdir.source_id().
+if NBID_HOW=$(python3 "$RIG/nbdir.py" "$GAME_ELF" --hexdir "${GAME_ELF%/*}" \
+        --reuse "$NBID" --out "$NBID.tmp" 2>/dev/null) \
+        && grep -q '^node=' "$NBID.tmp"; then
     mv -f "$NBID.tmp" "$NBID"
     NBID_FRESH=1
-    echo "[watch] node identity: $(grep -c '^node=' "$NBID") boards derived" \
-         "from $GAME's own node directory"
+    # WHICH START BUILT THIS TABLE, in the words of the one that printed the
+    # line. A reader working out why a board claims what it claims should not
+    # have to know that "derived" sometimes means "copied".
+    if [ "$NBID_HOW" = reused ]; then
+        echo "[watch] node identity: $(grep -c '^node=' "$NBID") boards from" \
+             "$GAME's own node directory (unchanged since the last start -" \
+             "same binary, same node firmware, so the table was not re-read)"
+    else
+        echo "[watch] node identity: $(grep -c '^node=' "$NBID") boards derived" \
+             "from $GAME's own node directory"
+    fi
 else
     rm -f "$NBID.tmp" 2>/dev/null
     if [ -f "$NBID" ]; then
@@ -449,10 +466,22 @@ fi
 # previous run of the title, so it needs no address and no binary parsing.
 # nodecensus.silent_nodes() documents exactly how this weaker evidence could be
 # wrong and why no known title trips it.
-NB_SILENT_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
-    --switches "$PAD_TABLES/$GAME/switch_list.txt" \
-    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" --silent 2>/dev/null)
-export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
+#
+# ONE RUN FOR ALL THREE VALUES. This asked three times - --silent, then the
+# report for the reason, then --silent-ff - and every one of them read the game
+# binary from scratch. That is a second or two on an ordinary title and 20.4 s
+# on rush_le, whose `.data` is 184.6 MB against godzilla_le's 8.0 MB WHOLE
+# BINARY: 61 s of the 77 s that passed before Rush's game process started, for
+# three copies of one answer. peanuts' matrix had it as "much longer than any
+# other game to start" (2026-09-07) and it was, by a minute.
+#
+# --cache keeps the verdict next to the identity of every input that produced
+# it - binary, switch list, node directory, and whether that directory was
+# derived this run - so a second start of an unchanged card pays nothing. A
+# verdict is NEVER served for inputs that differ: silencing a board that is
+# really there loses its devices with no message at all, which is the failure
+# nodecensus.py's header is mostly about. See nodecensus.cache_key().
+#
 # WHY, in the run's own log. The item that asked for this asked for the evidence
 # as well as the decision, and a silenced board is invisible by construction -
 # if it is ever wrong, this line is the only place that will say so.
@@ -463,10 +492,13 @@ export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # read at all, and whose answer came from the switch list. A log line that
 # names the wrong source is worse than one that names none, because the whole
 # point of printing it is that a silenced board is otherwise invisible.
-NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
+NB_VALUES=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
-    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" 2>/dev/null \
-    | sed -n 's/^because: //p')
+    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" \
+    --cache "$PAD_TABLES/$GAME/node_census.txt" --values 2>/dev/null)
+NB_SILENT_DEFAULT=$(printf '%s\n' "$NB_VALUES" | sed -n 's/^silent=//p')
+NB_WHY=$(printf '%s\n' "$NB_VALUES" | sed -n 's/^because=//p')
+export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # WHICH SILENCED NODES STILL ANSWER THE ff STATUS POLL - PER NODE, not the
 # item-52 everywhere. Measured 2026-08-22 on the Heisei card (godzilla_le):
 # with its silenced node 2 answering `ff`, bring-up re-probed node 2's
@@ -478,9 +510,7 @@ NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
 # carve-out was built for (the optional node4 class, stranger_things), and
 # every other silenced node is totally silent again. 0 = none; 1 = every
 # silenced node, kept as the A/B knob for exactly this comparison.
-NB_FF_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
-    --switches "$PAD_TABLES/$GAME/switch_list.txt" \
-    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" --silent-ff 2>/dev/null)
+NB_FF_DEFAULT=$(printf '%s\n' "$NB_VALUES" | sed -n 's/^silent-ff=//p')
 export PAD_NB_SILENT_FF=${PAD_NB_SILENT_FF:-${NB_FF_DEFAULT:-0}}
 if [ -n "${PAD_NB_SILENT:-}" ]; then
     echo "[watch] node census: silencing node(s) $PAD_NB_SILENT on $GAME -" \

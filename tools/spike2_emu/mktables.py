@@ -491,7 +491,41 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     # join the nameless list made impossible) is stale by construction.
     if (force or repaired or not os.path.exists(sw_xy)) \
             and os.path.exists(sw_list):
-        if recs is None and os.path.exists(dev_dest):
+        # ★ A TABLE WITH NO DEVICES IN IT IS AN ANSWER, AND THIS ASKED THE
+        # BINARY AGAIN ON EVERY START FOR EVER (rush_le, 2026-09-07).
+        #
+        # Reaching here with `recs is None` means the branch above did not
+        # rebuild, which means device_xy.txt passed both _stale() and
+        # _built_from() - it is the table THIS binary yields. When that table
+        # holds no records, re-deriving it can only produce no records again,
+        # `if recs:` below is false, and switch_xy.txt is not written. But the
+        # gate on this branch is `not os.path.exists(sw_xy)`, so nothing ever
+        # closes it: the next start scans the binary to be told the same
+        # nothing, and so does the one after that.
+        #
+        # On an ordinary title that is a second wasted. rush_le's `.data` is
+        # 184.6 MB - godzilla_le's ENTIRE binary is 8.0 MB - so it was 9.6 s,
+        # twice per start (mktables runs a pass before the window opens and a
+        # second one for the switch list), on a title already spending a minute
+        # of node-census scans it did not need either.
+        #
+        # This is the trap _built_from() was written for, one level up: an
+        # empty result that IS the answer, read as a cache miss. Asking the
+        # cheap file first is the whole fix - the scan still happens for every
+        # title that has something to find, and those close the gate by writing
+        # switch_xy.txt exactly as before.
+        #
+        # NOT `recs = read_table(dev_dest)`, which is the tempting version and
+        # is WRONG: the text file is a LOSSY copy of the records. Its name
+        # column is whitespace-separated, so jaws_le's `RIGHT RAMP  MADE OPTO`
+        # comes back with one space (which, being what the live switch list
+        # calls it, silently JOINS TWO MORE ROWS than the ELF does); and a
+        # table cached before a parser improvement stays cached, so
+        # john_wick_le's file holds 503 of the 520 records its binary yields
+        # today. Either would change what the playfield draws, which is not
+        # something a speed fix may decide.
+        if recs is None and os.path.exists(dev_dest) \
+                and devicexy.read_table(dev_dest):
             try:
                 recs = devicexy.build(game)
             except (OSError, SystemExit):

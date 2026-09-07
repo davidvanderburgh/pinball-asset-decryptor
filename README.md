@@ -776,7 +776,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    bitrate and key-frame settings stay yours. Get everything
    but the container right and nothing is re-encoded: a clip that is
    already this slot's video in the wrong wrapper is repackaged with a
-   stream copy, so every frame survives untouched. The **Convert**
+   stream copy, so every frame survives untouched. On Stern Spike 2 the
+   MP4-vs-QuickTime wrapper is not a difference at all: the machine
+   plays either, so a clip that is otherwise a drop-in for the slot goes
+   on the card as your own bytes even when the card's own clip was
+   written in the other one. And when a clip really does have to be
+   re-encoded, the line for it says which property forced that — "it's
+   640x480 and this slot's clip is 720x540" — instead of naming only
+   the shape it was converted to. The **Convert**
    column tells you which of the three you are getting — `As-is`,
    `Repackage` or `Re-encode` — before you build.
 7. **Write tab** — the original image and project folder carry over

@@ -309,3 +309,31 @@ def test_compute_sidx_writes_refreshes_radium_record():
     assert fmt == "FINF"
     assert rec[21:41] == exp_h
     assert rec[41:57] == exp_m
+
+
+def test_re_extract_keeps_the_edits_already_in_the_manifest(tmp_path):
+    """David (2026-09-07): his Godzilla LE manifest predates the 'grows'
+    budgets and needs a Text re-extract to pick them up -- which used to
+    blank every replacement.  A re-extract now rewrites budgets and flags
+    from the card but carries the typed replacements over by (scene,
+    original); a row no longer on the card drops out."""
+    from pinball_decryptor.core import text_manifest
+    reader = _FakeReader({
+        "/g/scene/a.radium": _make_radium("CLOCK NOT SET", 5),
+        "/g/scene/b.radium": _make_radium("PLAYER 1", 2),
+    })
+    assert engine.extract_radium_text(reader, str(tmp_path)) == 2
+    rows = text_manifest.load(str(tmp_path))
+    for r in rows:
+        if r["original"] == "CLOCK NOT SET":
+            r["replacement"] = "CLOCK IS NOT SET YET"
+    rows.append({"path": "/g/scene/gone.radium", "original": "OLD",
+                 "replacement": "NEW"})
+    text_manifest.save(str(tmp_path), rows)
+
+    assert engine.extract_radium_text(reader, str(tmp_path)) == 2
+    again = {(r["path"], r["original"]): r["replacement"]
+             for r in text_manifest.load(str(tmp_path))}
+    assert again[("/g/scene/a.radium", "CLOCK NOT SET")] ==         "CLOCK IS NOT SET YET"
+    assert again[("/g/scene/b.radium", "PLAYER 1")] == ""
+    assert ("/g/scene/gone.radium", "OLD") not in again

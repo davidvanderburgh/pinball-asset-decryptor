@@ -1456,13 +1456,37 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
 
     from ...core import text_manifest
     text_dir = os.path.join(output_dir, text_manifest.RELDIR)
+    # A RE-EXTRACT KEEPS THE USER'S EDITS.  The manifest is rewritten from the
+    # card (budgets, the grows/unused flags and any new rows come from THIS
+    # scan), but a replacement already typed for a (scene, original) pair is
+    # carried over -- re-extracting used to blank every edit, which is the
+    # one thing a user refreshing an old manifest for the new 'grows' budgets
+    # cannot afford (David, 2026-09-07: his Godzilla LE project predates the
+    # flag).  A row that no longer exists on the card simply drops out.
+    kept = {}
     try:
-        # replacement column left BLANK -- the user fills in only the strings
-        # they want to change (blank = leave unchanged), so the manifest never
-        # looks like every row is already duplicated.
-        text_manifest.save(output_dir, [
+        for r in text_manifest.load(output_dir):
+            if r.get("replacement"):
+                kept[(r.get("path", ""), r.get("original", ""))] =                     r["replacement"]
+    except Exception:
+        kept = {}
+    try:
+        # replacement column left BLANK unless the user had already filled it
+        # in -- blank = leave unchanged, so the manifest never looks like every
+        # row is already duplicated.
+        all_rows = [
             {"path": card_path, "original": original, "replacement": ""}
-            for card_path, original in rows] + prog_rows)
+            for card_path, original in rows] + prog_rows
+        n_kept = 0
+        for row in all_rows:
+            prev = kept.get((row["path"], row["original"]))
+            if prev and not row.get("replacement"):
+                row["replacement"] = prev
+                n_kept += 1
+        if n_kept:
+            log("Kept %d display-text edit(s) already in text/strings.tsv."
+                % n_kept, "info")
+        text_manifest.save(output_dir, all_rows)
     except Exception as e:
         log("Couldn't write display-text manifest (%s)." % e, "warning")
         return 0

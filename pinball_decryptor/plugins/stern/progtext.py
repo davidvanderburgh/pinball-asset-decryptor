@@ -547,8 +547,15 @@ def plan_writes(raw, edits, log=None, reloc=None):
                        budget, enc(tn)), "warning")
                 continue
         if len(new_full) > budget and not growable:
-            log('Program text: "%s" -> "%s" is %d bytes but the original is '
-                "only %d; skipped. Use a shorter replacement."
+            # The Text tab offers longer text on any program row it has not
+            # been told is immovable (a project extracted before the tool
+            # measured them carries no such flag), so this warning is where
+            # the user learns WHICH string that was — it has to say why,
+            # not just that it is too long.
+            log('Program text: "%s" -> "%s" is %d bytes but only %d fit, and '
+                "the game reads this line in a way the tool can't follow, so "
+                "it is patched in place and can't be made longer; skipped. "
+                "Use a shorter replacement."
                 % (enc(text), enc(new_full), len(new_full), budget),
                 "warning")
             continue

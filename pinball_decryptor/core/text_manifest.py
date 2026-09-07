@@ -28,14 +28,22 @@ HEADER = (
     "# Rows with a 4th (max_bytes) column may exceed the original's length up to\n"
     "# that budget (game-program strings; \\n in them is a real line break).\n"
     "# A 5th column holds flags: 'grows' = longer text is placed in a new area\n"
-    "# of the game program on Write (needs an image build); 'unused' = no\n"
-    "# reference to the line was found in the game program.\n"
+    "# of the game program on Write (needs an image build); 'fixed' = the game\n"
+    "# reads the line in a way the tool can't move, so it is patched in place\n"
+    "# and has to fit; 'unused' = no reference to the line was found in the\n"
+    "# game program.\n"
     "# asset_path\toriginal\treplacement\tmax_bytes\tflags\n")
 
 #: 5th-column flag tokens (space-separated; unknown tokens are ignored, and a
-#: manifest without the column loads with neither flag set).
+#: manifest without the column loads with none of them set).
 FLAG_GROWS = "grows"
 FLAG_UNUSED = "unused"
+#: Written for a game-program row a card scan found NOT growable.  It exists so
+#: that "no flags at all" keeps its older meaning of "nobody has looked yet":
+#: a manifest written before the flags existed must not read as "every program
+#: string is stuck at its original length", which is exactly what made the Text
+#: tab refuse longer text on a project extracted by an older build.
+FLAG_FIXED = "fixed"
 
 
 def manifest_path(assets_dir):
@@ -86,6 +94,8 @@ def load(assets_dir):
                 flags = set(cols[4].split())
                 if FLAG_GROWS in flags:
                     row["grow"] = True
+                if FLAG_FIXED in flags:
+                    row["fixed"] = True
                 if FLAG_UNUSED in flags:
                     row["unused"] = True
             rows.append(row)
@@ -113,6 +123,8 @@ def save(assets_dir, rows):
                 budget = r.get("budget")
                 if r.get("grow"):
                     flags.append(FLAG_GROWS)
+                if r.get("fixed"):
+                    flags.append(FLAG_FIXED)
                 if r.get("unused"):
                     flags.append(FLAG_UNUSED)
             else:

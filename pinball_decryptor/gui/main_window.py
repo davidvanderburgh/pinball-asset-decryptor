@@ -15068,26 +15068,38 @@ class MainWindow:
     @classmethod
     def _text_row_grows(cls, r):
         """True when a replacement longer than the original's slot is still
-        accepted: a game-program row flagged ``grow`` (manifest flag
-        ``grows``, text_manifest.FLAG_GROWS — every reference to the string
-        is visible, so Write places the new text in a new area of the
-        program), and EVERY scene row (Write rewrites the scene at the new
-        length).  Older manifests carry no flag for scene rows, so the rule
-        keys on the path, not on the manifest."""
-        return bool(r.get("grow")) or cls._text_row_is_scene(r)
+        accepted: EVERY scene row (Write rewrites the scene at the new
+        length), a game-program row flagged ``grows`` (every reference to the
+        string is visible, so Write places the new text in a new area of the
+        program) — and a game-program row with NO flag at all, which means
+        nobody has looked yet.
+
+        That last case is the one a user meets: a project extracted before
+        the flags existed carries the original length as every program row's
+        budget, and reading "no flag" as "cannot grow" made the tab refuse
+        text the Write step would have placed happily (David, 2026-09-07:
+        "it still shows too long in red").  Being optimistic here costs
+        nothing — :func:`progtext.plan_writes` decides from the card at Write
+        time and says so per string — while being pessimistic silently hides
+        the feature.  A row a card scan found immovable carries ``fixed``
+        (text_manifest.FLAG_FIXED) and is refused as before."""
+        if cls._text_row_is_scene(r):
+            return True
+        if r.get("fixed"):
+            return False
+        return True
 
     @classmethod
     def _text_row_budget(cls, r):
-        """The row's replacement byte budget: the explicit game-program budget
-        when present; a scene row's own length or :data:`_TEXT_SCENE_MAX`,
-        whichever is longer; else the original's own length (a game-program
-        row the tool can't move — patched in place)."""
+        """The row's replacement byte budget: on a row that grows, its own
+        budget or :data:`_TEXT_SCENE_MAX`, whichever is longer (a scanned
+        program row already carries 96; an unscanned one carries the
+        original's length, which is not its limit); on a fixed program row,
+        the explicit budget from the scan, else the original's own length."""
         own = len(r["original"].encode("latin1", "replace"))
-        if r.get("budget"):
-            return r["budget"]
-        if cls._text_row_is_scene(r):
-            return max(own, cls._TEXT_SCENE_MAX)
-        return own
+        if cls._text_row_grows(r):
+            return max(r.get("budget") or own, cls._TEXT_SCENE_MAX)
+        return r.get("budget") or own
 
     @classmethod
     def _text_row_max_label(cls, r):
@@ -15420,6 +15432,23 @@ class MainWindow:
                 loaded, err = text_manifest.load(assets_path), None
             except Exception as e:
                 loaded, err = [], e
+            # A project extracted before the tool measured which program
+            # strings can take longer text carries no flag on any of them.
+            # The list shows those rows as growable either way, but the exact
+            # limits are worth having, and the card the project came from is
+            # usually still there — so re-read them once, here, off the scan
+            # thread.  Best effort: no card, no change (engine logs why), and
+            # the rows already reflect the optimistic default.
+            if err is None and any(
+                    not (r.get("path") or "").lower().endswith(".radium")
+                    and not r.get("grow") and not r.get("fixed")
+                    for r in loaded):
+                try:
+                    from ..plugins.stern import engine as _stern_engine
+                    if _stern_engine.refresh_program_text_flags(assets_path):
+                        loaded = text_manifest.load(assets_path)
+                except Exception:
+                    pass                   # keep the manifest as it loaded
             if self._text_scan_id != scan_id:
                 return
             try:
@@ -15457,6 +15486,8 @@ class MainWindow:
             # refers to it (dead text — an edit changes nothing on screen).
             if r.get("grow"):
                 row["grow"] = True
+            if r.get("fixed"):
+                row["fixed"] = True
             if r.get("unused"):
                 row["unused"] = True
             rows.append(row)
@@ -15624,13 +15655,21 @@ class MainWindow:
             note += (" (not used by the game) — no reference to this line "
                      "was found in the game program, so changing it changes "
                      "nothing on screen.")
-        if r.get("grow"):
+        if r.get("grow") or not r.get("fixed"):
             note += (" This row can grow: longer text is placed in a new "
                      "area of the game program and every reference is "
                      "pointed at it; that needs an image build (not a "
                      "Direct-SD write), and no machine has booted such a "
                      "build yet — text that still fits is patched in place "
                      "as before.")
+            if not r.get("grow"):
+                note += (" This project was extracted before the tool "
+                         "measured which strings can move, so the exact "
+                         "limit is checked against the card when you build "
+                         "— a string the game reads in a way the tool "
+                         "can't follow is left alone and the build says so. "
+                         "Scan re-reads the limits when the card image is "
+                         "still where it was.")
         else:
             note += (" Names shown on their own may be the END of a longer "
                      "line; edit both rows so the line ends with the new "

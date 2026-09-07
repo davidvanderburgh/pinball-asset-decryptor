@@ -565,7 +565,12 @@ HELP_CONTENT = {
          "(PAD_STERN_TEXT_GROW=0 in the environment) if you would rather "
          "every row kept its original budget. The few rows the tool can't "
          "move (a line it can't find every reference to) keep the old "
-         "rule and say so when an edit is refused."),
+         "rule and say so when an edit is refused. A project extracted "
+         "before the tool measured which strings can move shows its "
+         "game-program rows as growable too — Scan re-reads the exact "
+         "limits from the card the project came out of when it is still "
+         "where it was, and the build checks every string against the "
+         "card either way."),
         ("Replace everywhere",
          "\"Replace everywhere…\" (a button beside Search, and on the "
          "right-click menu) is Find / Replace over the whole list: every "

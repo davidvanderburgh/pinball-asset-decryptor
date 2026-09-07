@@ -1436,9 +1436,14 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
                 # The manifest's 5th-column flags (text_manifest.FLAG_*):
                 # a growable row may take longer text (placed in a new
                 # area of the game program on Write); a row with no
-                # reference found is dead text the game never draws.
+                # reference found is dead text the game never draws.  The
+                # NOT-growable case is written out too ("fixed"), because
+                # a row with no flags at all has to keep meaning "this
+                # manifest predates the scan" — see FLAG_FIXED.
                 if e.get("growable"):
                     row["grow"] = True
+                else:
+                    row["fixed"] = True
                 if e.get("unused") or e.get("refs") == 0:
                     row["unused"] = True
                 prog_rows.append(row)
@@ -1506,6 +1511,109 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
                       ("plus %d game-program string(s) " % len(prog_rows))
                       if prog_rows else "", text_dir), "success")
     return len(rows) + len(prog_rows)
+
+
+def refresh_program_text_flags(assets_dir, log=None, cancel=None):
+    """Refresh the game-program rows of an existing ``text/strings.tsv`` from
+    the card the project was extracted from, and return how many rows were
+    updated (0 when there is nothing to do).
+
+    A project extracted before the growable/fixed flags existed carries the
+    ORIGINAL length as every program row's budget, so the Text tab used to
+    refuse longer text on strings the Write step can in fact relocate.  The
+    tab now treats an unflagged program row as growable (the Write checks
+    each one against the card anyway), and this fills in the exact answer:
+    the budgets, ``grows`` / ``fixed`` and ``unused`` come from a fresh
+    :func:`.progtext.enumerate_program_strings` of the card's own game ELF.
+
+    Only the program rows are touched -- scene rows, the row order and every
+    replacement the user has already typed are preserved -- so this is safe to
+    run behind a Scan.  Best effort throughout: a project with no source card
+    recorded, a card that has moved or changed size, an unreadable ELF or an
+    unwritable manifest all return 0 without raising."""
+    import json
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    from ...core import text_manifest
+    from ...core.extract_source import SIDE_CAR
+
+    try:
+        rows = text_manifest.load(assets_dir)
+    except Exception:
+        return 0
+    prog = [r for r in rows
+            if not (r.get("path") or "").lower().endswith(_RADIUM_EXT)]
+    if not prog or cancel():
+        return 0
+
+    # The card this project came out of, and a cheap identity check: a
+    # different image at the same path would answer for the wrong build.
+    try:
+        with open(_lp(os.path.join(assets_dir, SIDE_CAR)),
+                  "r", encoding="utf-8") as f:
+            src = json.load(f)
+        card = src.get("input_path") or ""
+        want = src.get("size")
+    except Exception:
+        return 0
+    try:
+        ok = bool(card) and os.path.isfile(_lp(card)) and (
+            not want or os.path.getsize(_lp(card)) == want)
+    except OSError:
+        ok = False
+    if not ok:
+        log("The card image this project was extracted from isn't where it "
+            "was (%s), so the game program's exact text limits couldn't be "
+            "re-read; longer text is still offered and the Write step "
+            "checks each string against the card." % (card or "not recorded"),
+            "info")
+        return 0
+
+    try:
+        parts = _linux_partitions(card)
+        with open(_lp(card), "rb") as disk_f:
+            reader, fw_node, _img = _locate(disk_f, parts)
+            if fw_node is None or cancel():
+                return 0
+            raw = reader.read_file_bytes(fw_node)
+        from . import progtext
+        entries = progtext.enumerate_program_strings(raw)
+    except Exception as e:
+        log("Couldn't re-read the game program's text limits (%s); longer "
+            "text is still offered and the Write step checks each string "
+            "against the card." % e, "info")
+        return 0
+    if cancel():
+        return 0
+
+    by_text = {e["text"]: e for e in entries}
+    n = 0
+    for r in prog:
+        e = by_text.get(r.get("original"))
+        if e is None:
+            continue
+        r["budget"] = e["budget"]
+        r.pop("grow", None)
+        r.pop("fixed", None)
+        r.pop("unused", None)
+        if e.get("growable"):
+            r["grow"] = True
+        else:
+            r["fixed"] = True
+        if e.get("unused") or e.get("refs") == 0:
+            r["unused"] = True
+        n += 1
+    if not n:
+        return 0
+    try:
+        text_manifest.save(assets_dir, rows)
+    except Exception as e:
+        log("Couldn't update the display-text manifest (%s)." % e, "warning")
+        return 0
+    n_grow = sum(1 for r in prog if r.get("grow"))
+    log("Re-read the game program's text limits from the card: %d string(s), "
+        "%d of them able to take longer text." % (n, n_grow), "info")
+    return n
 
 
 def _write_wav(path, L, R, stereo):

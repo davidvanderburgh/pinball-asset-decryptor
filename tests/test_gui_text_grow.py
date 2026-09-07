@@ -25,12 +25,14 @@ SCENE = "/godzilla_le/assets/lcd/auto_loaded/aaaa1111bbbb2222/scene.radium"
 
 
 def _row(path, original, replacement="", budget=None, grow=False,
-         unused=False):
+         unused=False, fixed=False):
     r = {"path": path, "original": original, "replacement": replacement}
     if budget:
         r["budget"] = budget
     if grow:
         r["grow"] = True
+    if fixed:
+        r["fixed"] = True
     if unused:
         r["unused"] = True
     return r
@@ -92,7 +94,8 @@ def test_grow_and_unused_flags_round_trip_in_the_manifest(tmp_path):
 
 def test_max_label_budget_and_outgrows_are_tk_free():
     grow = _row(GAME, "GODZILLA VS EBIRAH", budget=96, grow=True)
-    fixed = _row(GAME, "BATTLE VS MEGALON SHOT TIMER", budget=28)
+    fixed = _row(GAME, "BATTLE VS MEGALON SHOT TIMER", budget=28,
+                 fixed=True)
     scene = _row(SCENE, "TILT")
     assert W._text_row_budget(grow) == 96
     assert W._text_row_max_label(grow) == "96 (grows)"
@@ -125,8 +128,8 @@ def test_replace_plan_scopes_on_originals_and_reports_fits():
         _row(GAME, "BATTLE VS EBIRAH SHOT TIMER", budget=96, grow=True),
         _row(SCENE, "EBIRAH RULES"),                     # scene: grows
         _row(SCENE, "Ebirah wins", "EBIRAH!"),           # edited, lower-case
-        _row(GAME, "TILT", budget=4),
-        _row(GAME, "EBIRAH!", budget=7),                 # fixed slot
+        _row(GAME, "TILT", budget=4, fixed=True),
+        _row(GAME, "EBIRAH!", budget=7, fixed=True),      # fixed slot
     ]
     plan = W._text_replace_plan(rows, "EBIRAH", "BIOLLANTE")
     assert [p["index"] for p in plan] == [0, 1, 2, 3, 6]
@@ -163,7 +166,7 @@ def test_pending_text_status_names_the_grow_path():
     longer = _row(GAME, "GODZILLA VS EBIRAH", "GODZILLA VS BIOLLANTE", 96,
                   grow=True)
     same = _row(GAME, "TILT", "TOLT", 96, grow=True)
-    fixed = _row(GAME, "EBIRAH", "GIGAN!", 18)
+    fixed = _row(GAME, "EBIRAH", "GIGAN!", 18, fixed=True)
     assert W._pending_text_status(longer) == W._PENDING_TEXT_GROWS
     assert W._pending_text_status(longer, grow_on=False) == \
         W._PENDING_TEXT_GROW_OFF
@@ -224,7 +227,8 @@ def test_apply_refuses_30_bytes_on_a_28_byte_row_that_cannot_grow(
     assets = str(tmp_path)
     w = app.window
     _load(w, assets, [
-        _row(GAME, "BATTLE VS MEGALON SHOT TIMER", budget=28)])
+        _row(GAME, "BATTLE VS MEGALON SHOT TIMER", budget=28,
+                   fixed=True)])
     iid = _select(w, "BATTLE VS MEGALON SHOT TIMER")
     assert w._text_tree.set(iid, "max") == "28"
     assert "can grow" not in w._text_scene_full_var.get()
@@ -262,7 +266,7 @@ def test_replace_everywhere_updates_three_rows_and_skips_one(
         _row(GAME, "BATTLE VS EBIRAH SHOT TIMER", budget=96, grow=True),
         _row(SCENE, "EBIRAH RULES"),                    # scene: grows
         _row(SCENE, "TILT"),
-        _row(GAME, "EBIRAH!", budget=7),                # fixed 7-byte slot
+        _row(GAME, "EBIRAH!", budget=7, fixed=True),    # fixed 7-byte slot
     ])
     fp_before = w._current_write_fingerprint()
     # Opened from a row whose New text changed one word: Find / Replace are
@@ -388,3 +392,47 @@ def test_write_tab_pending_row_says_the_game_program_grows(app, tmp_path):
     w._on_write_text_grow_toggle()
     assert W._PENDING_TEXT_GROWS in [
         s for _r, _e, s, _t in w._write_preview_rows]
+
+
+def test_a_program_row_from_an_older_project_still_takes_longer_text(
+        app, tmp_path):
+    """David, 2026-09-07, on a project extracted by an older build: "on the
+    text tab, it still shows too long in red".
+
+    Its manifest carries every game-program string's ORIGINAL length as the
+    budget and no flags at all, which used to read as "this line cannot
+    move" — so the tab refused text the Write step would have placed.  No
+    flag now means nobody has measured yet: the row offers the 96-byte line
+    cap, and Write checks the string against the card."""
+    assets = str(tmp_path)
+    w = app.window
+    _load(w, assets, [_row(GAME, "BATTLE VS SPACE G TIMER", budget=23)])
+    iid = _select(w, "BATTLE VS SPACE G TIMER")
+    assert w._text_tree.set(iid, "max") == "96 (grows)"
+    note = w._text_scene_full_var.get()
+    assert "can grow" in note and "checked against the card" in note
+    w.text_new_var.set("BATTLE VS SPACE GODZILLA TIMER")        # 30 bytes
+    w._text_update_budget()
+    assert w.text_budget_var.get().startswith("30 / 96 bytes")
+    assert "too long" not in w.text_budget_var.get()
+    assert _state(w._text_apply_btn) == "normal"
+    w._text_apply_edit()
+    assert tm.changed(assets) == {
+        GAME: [("BATTLE VS SPACE G TIMER", "BATTLE VS SPACE GODZILLA TIMER")]}
+
+
+def test_an_unflagged_row_grows_but_a_scanned_fixed_one_does_not():
+    """Tk-free twin of the above, and the line it must not blur: a row the
+    scan measured and found immovable carries ``fixed`` and keeps its slot."""
+    old = _row(GAME, "BATTLE VS SPACE G TIMER", budget=23)
+    scanned = _row(GAME, "BATTLE VS SPACE G TIMER", budget=23, fixed=True)
+    assert W._text_row_grows(old) and W._text_row_budget(old) == 96
+    assert W._text_row_max_label(old) == "96 (grows)"
+    assert not W._text_row_grows(scanned)
+    assert W._text_row_budget(scanned) == 23
+    assert W._text_row_max_label(scanned) == "23"
+    # and the fixed flag survives a manifest round trip
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        tm.save(d, [scanned])
+        assert tm.load(d)[0].get("fixed") is True

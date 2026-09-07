@@ -160,6 +160,32 @@ def _own_preview_knob(tmp_path, monkeypatch):
                         str(tmp_path / "preview_audio_ctl.json"))
 
 
+@pytest.fixture(autouse=True)
+def _debounce_never_fires_by_itself(monkeypatch):
+    """The preview debounce is DRIVEN here, never waited for.
+
+    ``_panel``'s own docstring already names the hazard - the auto preview
+    "would otherwise fire ~350 ms into any test that pumps the loop" - and
+    that is exactly what it did on a loaded machine.  Setup in these tests
+    writes image files and GIFs before it states what it is measuring, and
+    on a quiet box all of that lands inside 350 ms so the debounce never
+    goes off; on a busy one it does, and ``_auto_render`` runs early.  It
+    then does two perfectly correct things at the worst possible moment: it
+    records a render the test is about to assert has NOT happened yet, and,
+    when the clips are playing over a frame whose form has since moved, it
+    stops the ticks (multiboot_tab, "THE CLIPS ARE PLAYING over the frame
+    that is up").  Both read as the app misbehaving; both were the app
+    behaving and the test racing its own fixture.
+
+    So the timer is pushed out of reach for the whole module and
+    ``_fire_debounce`` stays the only thing that runs it - which it already
+    did by cancelling the job and calling ``_auto_render`` directly, so no
+    test loses coverage.  Nothing asserts the 350 itself, and no test here
+    waits out a real one.
+    """
+    monkeypatch.setattr(multiboot_tab, "PREVIEW_DEBOUNCE_MS", 10 * 60 * 1000)
+
+
 def _fake_audio(monkeypatch):
     """Every player the tab makes from now on is a :class:`_FakeAudio`."""
     made = []
@@ -2321,6 +2347,21 @@ def test_an_edit_during_a_slow_animation_is_not_thrown_away(tmp_path):
         panel._pv_totals[(before, 1)] = 3
         panel._pv_rects[(before, 1)] = {1: (10, 10, 32, 8)}
         panel._pv_cache[(before, 1, 0)] = ppm
+        # STATE THE PRECONDITION, do not inherit it.  Every edit above -
+        # add_image, the anim, the default - schedules the 350 ms debounce,
+        # and _auto_render() stops the ticks when it finds the form has moved
+        # under them (multiboot_tab, "THE CLIPS ARE PLAYING over the frame
+        # that is up").  On a quiet box the setup finishes long inside 350 ms
+        # and the debounce never fires; on a loaded one the three file writes
+        # here do not, so _auto_render ran BEFORE _play_fp was set, stopped
+        # the ticks, and _play_toggled() - whose contract is "apply the var",
+        # not "flip it" - then stopped them again and the assert below failed.
+        # That was a flaky test, not a flaky app: the app was right both
+        # times.  So drop the setup's debounce and say what is being started.
+        if panel._pv_debounce_job is not None:
+            job, panel._pv_debounce_job = panel._pv_debounce_job, None
+            root.after_cancel(job)
+        panel._play_var.set(True)
         panel._play_toggled()
         assert panel._play_var.get() is True
         # ...now type a title, and let the DEBOUNCE fire (350 ms), which is

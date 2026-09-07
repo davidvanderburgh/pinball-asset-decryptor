@@ -332,6 +332,14 @@ PHOTO_CACHE_MAX = 32
 #: Every change inside the window is one render, not N.
 PREVIEW_DEBOUNCE_MS = 350
 
+#: How long the card-image PROBE waits before asking about the text that was
+#: just typed.  The same 350 ms, and deliberately its OWN constant: these are
+#: two unrelated waits that happened to want the same number, and sharing one
+#: knob meant neither could be moved without moving the other - which is how a
+#: test that pushes the preview debounce out of reach (so it can drive it by
+#: hand rather than race it) also silenced the probe it was still waiting for.
+PROBE_DEBOUNCE_MS = 350
+
 #: The most height the tab may ask for on a 1024x768 desktop - what is
 #: left inside the notebook once the app's own title bar, header, tab
 #: strip, footer and a line of Log have taken theirs.  The tab is never
@@ -6507,7 +6515,7 @@ class MultibootPanel:
                 pass
         try:
             self._probe_job = self._timer().after(
-                PREVIEW_DEBOUNCE_MS, lambda: self._start_probe(refresh))
+                PROBE_DEBOUNCE_MS, lambda: self._start_probe(refresh))
         except tk.TclError:                             # pragma: no cover
             self._probe_job = None
 

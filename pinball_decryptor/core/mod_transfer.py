@@ -46,9 +46,12 @@ swapped, which is what :func:`_model_remap` does — see its docstring for why t
 rest of the path lines up exactly.
 
 ``plan_transfer`` computes a reconciliation report without touching anything;
-``apply_transfer`` merges the resolved edits into the target folder.  Nothing
-here re-encodes or writes card data — the user still runs Write against the new
-extract afterwards, which re-encodes each replacement for the new firmware.
+``apply_transfer`` merges the resolved edits into the target folder — and
+records what it wrote under the source folder's key, so transferring the same
+old extract onto the same folder a second time replaces that result rather
+than stacking a second one on top of it.  Nothing here re-encodes or writes
+card data — the user still runs Write against the new extract afterwards,
+which re-encodes each replacement for the new firmware.
 
 There is also a second source of mods this module can recover: game code that
 was modded *outside* this app (another tool wrote the replacements into the
@@ -68,6 +71,7 @@ metadata without touching a pixel — so those are skipped (and counted) rather
 than staged.
 """
 
+import bisect
 import hashlib
 import os
 import re
@@ -554,6 +558,86 @@ def _image_rel_remap(src_dir, tgt_dir, to_target=None):
     return remap, identified
 
 
+def _longest_monotone(anchors):
+    """The longest run of *anchors* (``[(i, j), ...]``, ``i`` ascending) whose
+    ``j`` also ascends — an alignment can only use matches that keep both
+    lists in order.
+
+    Patience sorting, so the run it keeps is the one hugging the diagonal:
+    among equally long candidates the smallest-tail rule prefers the anchor
+    NEAR where it sits in the other list over one far away, which is what
+    keeps a duplicate that moved to the end of the modded list from dragging
+    the alignment with it."""
+    tails, tails_at, parent = [], [], [-1] * len(anchors)
+    for k, (_i, j) in enumerate(anchors):
+        pos = bisect.bisect_left(tails, j)
+        parent[k] = tails_at[pos - 1] if pos else -1
+        if pos == len(tails):
+            tails.append(j)
+            tails_at.append(k)
+        else:
+            tails[pos] = j
+            tails_at[pos] = k
+    out = []
+    k = tails_at[-1] if tails_at else -1
+    while k != -1:
+        out.append(anchors[k])
+        k = parent[k]
+    out.reverse()
+    return out
+
+
+def _pair_text_lists(stock, modded):
+    """Pair one asset's stock strings with the modded extract's, returning
+    ``([(stock_s, modded_s), ...], n_unpaired)``.
+
+    A baked text mod is an IN-PLACE, same-length patch, so a modded string
+    sits where in the asset's row list the stock string it replaced sat — but
+    the two lists are not always the same LENGTH:
+
+    * the extractor dedups each asset's rows by text (``engine`` for radium
+      scenes, ``progtext.enumerate_program_strings`` for the game program), so
+      patching ONE of two identical stock strings splits a single stock row
+      into two modded ones;
+    * the two folders can be extracts made by different app versions, and what
+      counts as an editable string has changed more than once.
+
+    Pairing by position under an all-or-nothing count guard threw the whole
+    asset away when either happened — and the game program is ONE asset
+    holding thousands of strings, so a single extra row silently dropped
+    EVERY program-text mod on the card (PAD-108: a re-theme's mode titles all
+    came across as "0 text").
+
+    Instead, anchor on the strings that are unambiguous — present exactly once
+    in each list, so there is only one thing they can be — and pair what lies
+    between consecutive anchors by position.  Only an equal-length run is
+    paired: same-length in place is what a text patch looks like, and a
+    lopsided run is a genuine add/remove where guessing which new string
+    replaced which old one would invent an edit the user never made.  Those
+    are counted, not paired.  With no anchors at all (every string repeats)
+    two equal-length lists still pair straight through, as they always did.
+    """
+    counts_s, counts_m = {}, {}
+    for s in stock:
+        counts_s[s] = counts_s.get(s, 0) + 1
+    for k, s in enumerate(modded):
+        counts_m[s] = counts_m.get(s, 0) + 1
+    at_m = {s: k for k, s in enumerate(modded)}
+    anchors = [(i, at_m[s]) for i, s in enumerate(stock)
+               if counts_s[s] == 1 and counts_m.get(s) == 1]
+
+    pairs, unpaired = [], 0
+    i = j = 0
+    for a_i, a_j in _longest_monotone(anchors) + [(len(stock), len(modded))]:
+        n_s, n_m = a_i - i, a_j - j
+        if n_s == n_m:
+            pairs.extend(zip(stock[i:a_i], modded[j:a_j]))
+        else:
+            unpaired += max(n_s, n_m)
+        i, j = a_i + 1, a_j + 1
+    return pairs, unpaired
+
+
 def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
     """Detect mods that are BAKED INTO an extract (the game code itself was
     modded, e.g. with another tool, before extraction) by diffing it against a
@@ -563,7 +647,8 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
                    "video": {...}, "image": {...}},
          "text_rows": [{path, original, replacement}, ...],
          "notes": {"paired_audio": int, "unpaired_audio": int,
-                   "skipped_text_assets": int, "image_rebake_skipped": int}}
+                   "skipped_text_assets": int, "unpaired_text": int,
+                   "image_rebake_skipped": int}}
 
     ``image_rebake_skipped`` counts image pairs whose bytes differ but whose
     pixels are identical (a re-encode, not a mod — see
@@ -572,15 +657,16 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
     ``saved`` is shaped like the staged-changes sidecar with the *stock*
     extract's rels as keys and the *modded* extract's files as the replacement
     sources — ready to feed ``plan_transfer(stock_dir, target_dir,
-    saved=...)``.  ``text_rows`` pairs the two manifests positionally per
-    asset (original = stock string, replacement = modded string).
+    saved=...)``.  ``text_rows`` pairs the two manifests per asset (original =
+    stock string, replacement = modded string) — see :func:`_pair_text_lists`
+    for how, and for what ``skipped_text_assets`` / ``unpaired_text`` count.
     *log_cb(text, level="info")* streams progress (see
     :func:`plan_direct_diff` — run off the UI thread).
     """
     log = log_cb or (lambda *_a, **_k: None)
     saved = {"audio": {}, "video": {}, "image": {}}
     notes = {"paired_audio": 0, "unpaired_audio": 0, "skipped_text_assets": 0,
-             "image_rebake_skipped": 0}
+             "unpaired_text": 0, "image_rebake_skipped": 0}
 
     mod_keys = _audio_by_slot_key(modded_dir)
     stk_keys = _audio_by_slot_key(stock_dir)
@@ -641,9 +727,7 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
         log("%s: %d differ.%s"
             % (cat.capitalize(), len(saved[cat]), extra))
 
-    # Text: pair the manifests positionally per asset.  Text patches are
-    # same-length in-place edits, so both extracts see the same string count
-    # per asset; a count mismatch means we can't pair reliably — skip it.
+    # Text: pair the two manifests per asset (see _pair_text_lists).
     stk_by_path, mod_by_path = {}, {}
     for r in text_manifest.load(stock_dir):
         stk_by_path.setdefault(r["path"], []).append(r["original"])
@@ -653,14 +737,25 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
     for path, stk_originals in stk_by_path.items():
         mod_originals = mod_by_path.get(path)
         if mod_originals is None:
-            continue
-        if len(mod_originals) != len(stk_originals):
             notes["skipped_text_assets"] += 1
             continue
-        for stock_s, modded_s in zip(stk_originals, mod_originals):
+        pairs, unpaired = _pair_text_lists(stk_originals, mod_originals)
+        notes["unpaired_text"] += unpaired
+        for stock_s, modded_s in pairs:
             if modded_s != stock_s:
                 text_rows.append({"path": path, "original": stock_s,
                                   "replacement": modded_s})
+    if stk_by_path:
+        extra = []
+        if notes["skipped_text_assets"]:
+            extra.append("%d asset(s) the modded extract doesn't carry"
+                         % notes["skipped_text_assets"])
+        if notes["unpaired_text"]:
+            extra.append("%d string(s) that couldn't be paired"
+                         % notes["unpaired_text"])
+        log("Text: %d string(s) differ.%s"
+            % (len(text_rows),
+               ("  Skipped " + " and ".join(extra) + ".") if extra else ""))
 
     return {"saved": saved, "text_rows": text_rows, "notes": notes}
 
@@ -1250,18 +1345,61 @@ def plan_detail_lines(plan, cap=_DETAIL_CAP):
     return out
 
 
+def _origin_key(path):
+    """Sidecar key identifying the folder a transfer's mods came FROM."""
+    return os.path.normcase(os.path.abspath(path)) if path else ""
+
+
+def prior_transfer_size(target_dir, origin):
+    """How many assignments *target_dir* still holds from an earlier transfer
+    of *origin*'s mods (0 when there was none).
+
+    Lets the caller say so before it applies another one — those entries are
+    about to be replaced by the new run's result."""
+    rec = (staged_changes.load(target_dir).get("transfers")
+           or {}).get(_origin_key(origin)) or {}
+    return sum(len(v) for v in rec.values() if isinstance(v, dict))
+
+
 def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
-                   src_saved=None):
+                   src_saved=None, origin=None):
     """Merge *plan*'s transferable edits into *target_dir*'s sidecar + text
     manifest.  Existing target edits are preserved unless a transferred entry
     targets the same slot/string.  ``include_flagged`` also applies the audio
     entries whose index was reused (off by default — those are the risky ones).
     ``src_saved`` overrides the source sidecar (pairs with ``plan_transfer``'s
     ``saved``).  Returns ``{"audio", "video", "image", "text", "group_tags",
-    "defaults"}`` counts actually written."""
+    "defaults", "superseded"}`` counts actually written.
+
+    *origin* is the folder the mods CAME FROM as the user named it — field 1
+    of the Mod Pack tab, which for a baked-in-mods transfer is the modded
+    extract rather than *source_dir* (the stock baseline the plan was keyed
+    off).  What each transfer wrote is recorded under that folder's key in the
+    target's sidecar, and re-transferring the SAME old extract onto the SAME
+    folder now REPLACES that record instead of piling a second set of
+    assignments on top of it: entries the earlier run staged and this one did
+    not are removed (and their slot restored, if the earlier run had also been
+    built into the folder), counted as ``superseded``.
+
+    That is the difference between the two routes doing what the app tells the
+    user they do and not.  Running the no-baseline compare first and then the
+    accurate one with a stock old-version extract in field 3 — the app's own
+    advice when the first run reports hundreds of images (PAD-108) — used to
+    leave every one of those first-run assignments in place, so the folder
+    still carried the vendor's between-version re-bakes that field 3 exists to
+    filter out, with nothing on screen saying so.  An assignment the user has
+    since re-pointed themselves is left alone: only an entry still holding
+    exactly what that transfer wrote is superseded.
+    """
     if src_saved is None:
         src_saved = staged_changes.load(source_dir)
     tgt = staged_changes.load(target_dir)
+    key = _origin_key(origin or source_dir)
+    transfers = dict(tgt.get("transfers") or {})
+    prior = transfers.get(key) or {}
+    # What THIS run writes, per category — the record that supersedes the
+    # previous one.
+    record = {"audio": {}, "video": {}, "image": {}, "text": {}}
 
     src_loop = src_saved.get("audio_loop") or {}
     src_keep = src_saved.get("audio_keep") or {}
@@ -1273,6 +1411,7 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
 
     def _put_audio(src_rel, tgt_rel, repl):
         tgt_audio[tgt_rel] = repl
+        record["audio"][tgt_rel] = repl
         if src_rel in src_loop:
             tgt_loop[tgt_rel] = src_loop[src_rel]
         if src_rel in src_keep:
@@ -1290,26 +1429,45 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
         for e in plan["audio"]["flagged"]:
             _put_audio(e["src_rel"], e["src_rel"], e["repl"])
             n_audio += 1
-    if tgt_audio:
-        tgt["audio"] = tgt_audio
-    if tgt_loop:
-        tgt["audio_loop"] = tgt_loop
-    if tgt_keep:
-        tgt["audio_keep"] = tgt_keep
-    if tgt_levels:
-        tgt["audio_levels"] = tgt_levels
 
     tgt_video = dict(tgt.get("video") or {})
     for e in plan["video"]["matched"]:
         tgt_video[e["rel"]] = e["repl"]
-    if tgt_video:
-        tgt["video"] = tgt_video
+        record["video"][e["rel"]] = e["repl"]
 
     tgt_image = dict(tgt.get("image") or {})
     for e in plan["image"]["matched"]:
         tgt_image[e["rel"]] = e["repl"]
-    if tgt_image:
-        tgt["image"] = tgt_image
+        record["image"][e["rel"]] = e["repl"]
+
+    # Drop what the previous transfer of the same mods staged and this one
+    # didn't — but only where the entry still holds that transfer's own
+    # replacement, so an assignment the user re-pointed by hand survives.  A
+    # slot the earlier run had already been built into carries a pristine
+    # snapshot; putting it back is what makes the folder match the sidecar
+    # again.
+    n_superseded = 0
+    for kind, current in (("audio", tgt_audio), ("video", tgt_video),
+                          ("image", tgt_image)):
+        for rel, repl in (prior.get(kind) or {}).items():
+            if rel in record[kind] or current.get(rel) != repl:
+                continue
+            del current[rel]
+            n_superseded += 1
+            if kind == "audio":
+                tgt_loop.pop(rel, None)
+                tgt_keep.pop(rel, None)
+                tgt_levels.pop(rel, None)
+            staged_originals.revert(target_dir, rel)
+
+    for kind, current in (("audio", tgt_audio), ("video", tgt_video),
+                          ("image", tgt_image), ("audio_loop", tgt_loop),
+                          ("audio_keep", tgt_keep),
+                          ("audio_levels", tgt_levels)):
+        if current:
+            tgt[kind] = current
+        else:
+            tgt.pop(kind, None)
 
     # Renamed image groups: a name the user already gave a group on the
     # TARGET extract wins over the transferred one (same rule as toggles).
@@ -1338,20 +1496,41 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
         if merged:
             tgt[k] = merged
 
-    staged_changes.save(target_dir, tgt)
-
-    # Text: fill matching originals in the target manifest.
+    # Text: fill matching originals in the target manifest, and blank the ones
+    # the previous transfer filled that this one no longer claims.
     n_text = 0
     new_by_original = {e["original"]: e["new"] for e in plan["text"]["matched"]}
-    if new_by_original:
+    stale_text = {o: v for o, v in (prior.get("text") or {}).items()
+                  if o not in new_by_original}
+    if new_by_original or stale_text:
         rows = text_manifest.load(target_dir)
+        touched = False
         for r in rows:
             if r["original"] in new_by_original:
                 r["replacement"] = new_by_original[r["original"]]
+                record["text"][r["original"]] = r["replacement"]
                 n_text += 1
-        if n_text:
+                touched = True
+            elif r["replacement"] and r["replacement"] == stale_text.get(
+                    r["original"]):
+                r["replacement"] = ""
+                n_superseded += 1
+                touched = True
+        if touched:
             text_manifest.save(target_dir, rows)
+
+    written = {k: v for k, v in record.items() if v}
+    if written:
+        transfers[key] = written
+    else:
+        transfers.pop(key, None)
+    if transfers:
+        tgt["transfers"] = transfers
+    else:
+        tgt.pop("transfers", None)
+    staged_changes.save(target_dir, tgt)
 
     return {"audio": n_audio, "video": len(plan["video"]["matched"]),
             "image": len(plan["image"]["matched"]), "text": n_text,
-            "group_tags": n_tags, "defaults": n_defaults}
+            "group_tags": n_tags, "defaults": n_defaults,
+            "superseded": n_superseded}

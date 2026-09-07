@@ -340,9 +340,11 @@ class CatEmu(Spike2Emu):
                 return None
             self._ensure_range(cap["mddst"], n * 24)
             md = bytes(mu.mem_read(cap["mddst"], n * 24))
-            # Bounds the per-record write-back in _drive_step; without it the
-            # replay scribbles 24 bytes at a pseudo-random address per record
-            # (see emulator._record_write_addr).
+            # Bounds the per-record write-back in _drive_step to each record's
+            # own slot; without it the replay scribbles 24 bytes at a
+            # pseudo-random address per record, and bounding it to the array
+            # alone still lets a misaligned hit straddle two records (see
+            # emulator._record_write_addr).
             self._md_range = (cap["mddst"], cap["mddst"] + n * 24)
             return self._chain_records(md, n, cap["state"])
         finally:
@@ -373,7 +375,7 @@ class CatEmu(Spike2Emu):
         try:
             for idx in range(n):
                 rec = md[idx * 24: idx * 24 + 24]
-                obj, nxt = self._drive_step(cur, rec)
+                obj, nxt = self._drive_step(cur, rec, rec_idx=idx)
                 if obj is None:
                     break
                 rows.append(dict(idx=idx, body_off=_u32(obj, 0x00),

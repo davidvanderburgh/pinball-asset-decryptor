@@ -83,7 +83,13 @@ _MUSIC_WAV_RE = re.compile(r"(music_cat\d+_\d+)", re.IGNORECASE)
 #      enough to take a hit cached wrong codec params -- Deadpool Pro 1.16 had
 #      3461 of 8175 sounds decoding to noise.  rev-1 caches are the unsuffixed
 #      files written before this scheme existed.
-_DERIVE_REV = 2
+#   3: that write is now allowed ONLY on the record's own slot.  Bounding it to
+#      the record array still let a misaligned dart straddle two records and
+#      rewrite them: Beatles 1.29 took one during record 66, at slot 419.25,
+#      and every one of the 514 records from 419 to the end of its catalog
+#      decoded to noise -- 55% of the card (PAD-108).  A rev-2 cache for any
+#      card that took such a hit holds those wrong params.
+_DERIVE_REV = 3
 _REV_TAG = ".r%d" % _DERIVE_REV
 # Everything this module keeps in the cache directory, as (current-rev suffix,
 # regex matching that file kind at ANY revision including the unsuffixed rev-1).

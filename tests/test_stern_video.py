@@ -262,12 +262,25 @@ def test_intact_copy_allows_a_profile_below_the_slots(tmp_path, monkeypatch):
     assert _decide(src, staged, "a.mov") == str(src)
 
 
-def test_intact_copy_rejects_a_brand_the_slot_does_not_use(
-        tmp_path, monkeypatch):
-    # Slot extension ".mp4" means the card's own clip was ISO-branded.
-    src, staged = _sources(tmp_path, qt=True)      # user supplied QuickTime
+def test_intact_copy_takes_either_isobmff_brand(tmp_path, monkeypatch):
+    # The MP4-vs-QuickTime brand is NOT part of what the machine reads: Stern
+    # ships jaws_le-1_02_0 with 530 mp42-branded clips and beatles-1_29_0 with
+    # 355 QuickTime ones, and a community Godzilla card carries all three
+    # brands at once.  Demanding the slot's own brand cost one tester every
+    # clip in a 228-video transfer, each replaced by the app's own re-encode.
+    src = tmp_path / "src.mp4"                     # user supplied MP4
+    src.write_bytes(_isobmff(qt=False) + b"S" * 64)
+    staged = tmp_path / "a.mov"                    # slot is QuickTime
+    staged.write_bytes(_isobmff(qt=True) + b"T" * 64)
+    _probe_map(monkeypatch, {"src.mp4": _Info(), "a.mov": _Info()})
+    msgs = []
+    assert _decide(src, staged, "a.mov", msgs) == str(src)
+    assert msgs and msgs[0][1] == "info" and "intact" in msgs[0][0]
+
+    # ...and the other way round: QuickTime into an MP4-branded slot.
+    src2, staged2 = _sources(tmp_path, qt=True)    # src.mov (qt), a.mov
     _probe_map(monkeypatch, {"src.mov": _Info(), "a.mov": _Info()})
-    assert _decide(src, staged, "a.mp4") == str(staged)
+    assert _decide(src2, staged2, "a.mp4") == str(src2)
 
 
 def test_intact_copy_flags_an_unconverted_file_as_an_error(tmp_path,
@@ -275,11 +288,11 @@ def test_intact_copy_flags_an_unconverted_file_as_an_error(tmp_path,
     # Nothing converted it (as-is ticked, or no ffmpeg), so the staged bytes
     # ARE the user's bytes: there's no format-matched copy to fall back to and
     # the machine gets an unplayable clip — say so as an error (batch 23).
-    src = tmp_path / "src.mp4"
-    src.write_bytes(_isobmff(qt=False) + b"S" * 64)
+    src = tmp_path / "src.mkv"
+    src.write_bytes(b"\x1a\x45\xdf\xa3" + b"S" * 64)   # Matroska, no ftyp
     staged = tmp_path / "a.mov"
     staged.write_bytes(src.read_bytes())           # byte-for-byte copy
-    _probe_map(monkeypatch, {"src.mp4": _Info(), "a.mov": _Info()})
+    _probe_map(monkeypatch, {"src.mkv": _Info(), "a.mov": _Info()})
     msgs = []
     assert _decide(src, staged, "a.mov", msgs) == str(staged)
     assert len(msgs) == 1 and msgs[0][1] == "error"

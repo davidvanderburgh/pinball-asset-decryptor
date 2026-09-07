@@ -179,14 +179,22 @@ def _remove(path: str) -> None:
             pass
 
 
-def _stream_matches(slot: VideoSlot, ri: Optional[VideoInfo],
-                    match_length: bool = False, fps_tol: float = 0.05) -> bool:
-    """Whether the probed replacement *ri* is the same VIDEO as the slot's own
-    clip — codec, resolution, frame rate, alpha, pixel format and (H.264)
-    profile — ignoring the container it is wrapped in.
+def _stream_mismatch(slot: VideoSlot, ri: Optional[VideoInfo],
+                     match_length: bool = False,
+                     fps_tol: float = 0.05) -> Optional[str]:
+    """The ONE property that stops the probed replacement *ri* from being the
+    same VIDEO as the slot's own clip — codec, resolution, frame rate, alpha,
+    pixel format and (H.264) profile, ignoring the container it is wrapped in.
+    ``None`` when it is a match.
 
-    Deliberately strict: any unknown/ambiguous field returns False so we fall
-    back to a (lossy but correct) re-encode rather than staging a file that
+    The string is written to be read in the log by whoever assigned the clip:
+    "it's 640x480 and this slot's clip is 720x540".  Without it a re-encode is
+    invisible — a tester watching 228 clips go through one asked outright why
+    the app was converting files it had itself just extracted, and the log had
+    no answer beyond the resolution it converted them TO.
+
+    Deliberately strict: any unknown/ambiguous field counts as a mismatch so we
+    fall back to a (lossy but correct) re-encode rather than staging a file that
     might not drop cleanly into the slot.  Pixel format and profile are part of
     the test because the machine's decoder is an embedded VPU, not a desktop
     player: hand it 10-bit, 4:2:2, or a profile above the one the slot's clip
@@ -196,23 +204,44 @@ def _stream_matches(slot: VideoSlot, ri: Optional[VideoInfo],
     """
     si = slot.info
     if si is None or not si.width or not si.height:
-        return False                      # can't prove a match → re-encode
+        # Can't prove a match → re-encode.
+        return "the app couldn't read this slot's own video settings"
     if ri is None:
-        return False
+        return "the app couldn't read your file's video settings"
     if (ri.width, ri.height) != (si.width, si.height):
-        return False
+        return ("it's %dx%d and this slot's clip is %dx%d"
+                % (ri.width, ri.height, si.width, si.height))
     if (ri.vcodec or "").lower() != (si.vcodec or "").lower():
-        return False
+        return ("it's %s and this slot's clip is %s"
+                % ((ri.vcodec or "an unknown codec").upper(),
+                   (si.vcodec or "an unknown codec").upper()))
     if si.fps > 0 and abs(ri.fps - si.fps) > fps_tol:
-        return False
+        return ("it runs at %.4g fps and this slot's clip is %.4g fps"
+                % (ri.fps, si.fps))
     if bool(ri.has_alpha) != bool(si.has_alpha):
-        return False
+        return ("it has transparency and this slot's clip has none"
+                if ri.has_alpha else
+                "it has no transparency and this slot's clip has it")
     if not same_pix_fmt(ri.pix_fmt, si.pix_fmt):
-        return False
+        return ("it's %s and this slot's clip is %s"
+                % (ri.pix_fmt or "an unknown pixel format",
+                   si.pix_fmt or "an unknown pixel format"))
     rank, slot_rank = profile_rank(ri), profile_rank(si)
     if rank is not None and slot_rank is not None and rank > slot_rank:
-        return False
+        return ("it's H.264 %s profile and this slot's clip is %s"
+                % (ri.profile, si.profile))
     if match_length and si.duration > 0 and abs(ri.duration - si.duration) > 0.05:
+        return ("it runs %.3g s and this slot's clip is %.3g s (lengths are "
+                "being matched)" % (ri.duration, si.duration))
+    return None
+
+
+def _stream_matches(slot: VideoSlot, ri: Optional[VideoInfo],
+                    match_length: bool = False, fps_tol: float = 0.05) -> bool:
+    """Whether the probed replacement *ri* is the same VIDEO as the slot's own
+    clip — see :func:`_stream_mismatch`, which is this test plus the reason."""
+    if _stream_mismatch(slot, ri, match_length=match_length,
+                        fps_tol=fps_tol) is not None:
         return False
     return True
 
@@ -256,10 +285,21 @@ def _remuxable(slot: VideoSlot, replacement_path: str,
     Only reached once :func:`_already_matches` has said no, so a True here
     means the container (extension or ISO-BMFF brand) is the *only* difference.
     """
+    return _remux_verdict(slot, replacement_path, match_length=match_length,
+                          fps_tol=fps_tol)[0]
+
+
+def _remux_verdict(slot: VideoSlot, replacement_path: str,
+                   match_length: bool = False, fps_tol: float = 0.05):
+    """:func:`_remuxable`, plus the reason when it says no — ``(ok, why)``,
+    *why* being None when *ok*.  Staging logs it so a re-encode never happens
+    for a reason the user can't see."""
     if backend_for(slot.abs_path) is not None:
-        return False                      # .cdmd and friends must be encoded
-    return _stream_matches(slot, detect_video_info(replacement_path),
+        # .cdmd and friends must be encoded.
+        return False, "%s is a format that has to be re-encoded" % slot.ext
+    why = _stream_mismatch(slot, detect_video_info(replacement_path),
                            match_length=match_length, fps_tol=fps_tol)
+    return (why is None), why
 
 
 def stage_replacement(slot: VideoSlot, replacement_path: str,
@@ -340,7 +380,9 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
             # .mp4 for a QuickTime slot).  Repackaging keeps every coded frame
             # bit-for-bit; only a real mismatch is worth a re-encode.
             repacked = False
-            if _remuxable(slot, replacement_path, match_length=trim_to_length):
+            can_remux, why = _remux_verdict(slot, replacement_path,
+                                            match_length=trim_to_length)
+            if can_remux:
                 ok, detail = remux_video_to(replacement_path, tmp, slot.info,
                                             cancel_cb=cancel_cb)
                 repacked = ok
@@ -350,6 +392,7 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                         return False, detail
                     # Anything else (an ffmpeg that won't take the stream) is
                     # not fatal — fall through to the re-encode.
+                    why = "ffmpeg wouldn't repackage it as-is"
             if not repacked:
                 ok, detail = transcode_video_to(
                     replacement_path, tmp, slot.info,
@@ -358,6 +401,12 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                 if not ok:
                     _remove(tmp)
                     return False, detail
+                # Say WHY the clip had to be re-encoded rather than copied or
+                # repackaged.  Every other outcome names itself in *detail*;
+                # this one used to report only what it converted the clip TO.
+                if why:
+                    detail = ("re-encoded because %s%s"
+                              % (why, "; " + detail if detail else ""))
         elif rep_ext == slot.ext:
             # No ffmpeg, but the user supplied the same container — copy it
             # through unchanged (it won't be resolution/codec-matched).

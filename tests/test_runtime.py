@@ -352,3 +352,18 @@ def test_systemd_is_on_in_the_full_image_so_the_arm_handler_survives():
     df = DOCKERFILE.read_text(encoding="utf-8")
     assert "systemd=true" in df
     assert "binfmt.d" in df, "say why it is on, beside it"
+
+
+def test_the_runtime_release_can_never_become_the_latest_release():
+    """★ PAD-116.  These releases carry no app, but every installed copy asks
+    GitHub for the LATEST release and compares that tag to its own version -
+    so an asset holder in the top slot tells every user they are up to date.
+    A tester on v0.191.0 was never offered v0.192.0 because runtime-1 had just
+    been published.  Prerelease is the only flag that keeps a release out of
+    /releases/latest; --latest=false merely un-pins it and GitHub recomputes
+    by date, landing right back on it."""
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    assert "--prerelease" in wf
+    assert 'gh release edit "${{ inputs.tag }}" --prerelease' in wf, (
+        "an existing release must be corrected on a re-run, not only created "
+        "correctly the first time")

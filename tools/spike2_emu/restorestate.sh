@@ -70,6 +70,37 @@ if grep -q '^tty .*(deleted)' "$DDIR/restore.env"; then
     echo "[restore] hold fix). Save again on a current session."
     exit 1
 fi
+# THE RENDER SIZE MUST STILL BE THE ONE THE CHECKPOINT WAS TAKEN AT.
+# PAD_GL_W/H sizes the guest's EGL surface, the GL ring header and every
+# texture the scene is composed into, and all of that is inside the
+# checkpoint - so a slot saved at one size cannot be restored into a session
+# running another. This became possible on 2026-09-08, when the one-screen
+# cabinets (james_bond_60th_le, star_wars_elg, jurassic_park_the_pin) began
+# rendering at their own 800x480 panel instead of the backbox's 1360x768:
+# every slot those three carry from before that is a 1360x768 checkpoint.
+# Slots from before this check carry no `render` line and are not checked -
+# on every other title the size has never moved, so there is nothing to catch.
+# Refused HERE, with the live guest still playing, for the same reason as
+# every other line in this pre-flight.
+SLOT_RENDER=$(sed -n 's/^render \([0-9]* [0-9]*\)$/\1/p' "$DDIR/restore.env" | head -1)
+if [ -n "$SLOT_RENDER" ] && [ -f "$R/dump/padgl" ]; then
+    NOW_RENDER=$(od -An -tu4 -j48 -N8 "$R/dump/padgl" 2>/dev/null \
+                 | tr -s ' \n' ' ' | sed 's/^ *//; s/ *$//')
+    if [ -n "$NOW_RENDER" ] && [ "$NOW_RENDER" != "$SLOT_RENDER" ]; then
+        echo "[restore] this save cannot be loaded into this session: it was"
+        echo "[restore] taken with the game rendering at ${SLOT_RENDER% *}x${SLOT_RENDER#* },"
+        echo "[restore] and this session renders at ${NOW_RENDER% *}x${NOW_RENDER#* }. That size is"
+        echo "[restore] baked into the checkpoint - the guest's own drawing"
+        echo "[restore] surface and every texture in it - so it cannot be"
+        echo "[restore] resized on the way back in."
+        echo "[restore] This cabinet's screen size was corrected in a later"
+        echo "[restore] release, so slots from before it are the old size."
+        echo "[restore] Save again on this session. The running game is"
+        echo "[restore] untouched."
+        exit 1
+    fi
+fi
+
 while read -r kind a b c; do
     [ "$kind" = card ] || continue
     c=$(unesc "$c")

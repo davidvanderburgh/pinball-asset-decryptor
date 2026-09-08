@@ -195,6 +195,38 @@ def _built_from(dest, source):
     return _recorded_binary(dest) == devicexy.binary_id(source)
 
 
+#: The header swtable.text() writes when swnames' STATIC name source has
+#: already been consulted for the binary named beside it.
+STATIC_TAG = "# static-names: "
+
+
+def _static_names_asked(dest, source):
+    """Whether `dest` records having already asked the static switch table
+    about the binary that is there NOW.
+
+    The one expensive name source (swnames.static_switch_names - ten seconds
+    on a 117 MB binary, and nothing at all to show for it on a title whose
+    table it cannot read) meets a list that keeps its `?` names and is
+    therefore re-offered to swnames on EVERY start. Without this memo that is
+    ten seconds on every run of such a title, for ever - the shape of the cost
+    item 101 spent a whole pass removing from rush_le's boot. Same identity
+    string and same reader as `# binary:`, so a new build clears it too.
+    """
+    if not os.path.exists(dest) or not source or not os.path.exists(source):
+        return False
+    want = devicexy.binary_id(source)
+    try:
+        with open(dest) as f:
+            for line in f:
+                if not line.startswith("#"):
+                    return False       # past the header, nothing found
+                if line.startswith(STATIC_TAG):
+                    return line[len(STATIC_TAG):].strip() == want
+    except OSError:
+        return False
+    return False
+
+
 def _write(path, text):
     """Write ATOMICALLY - tmp in the same dir, then replace (item 49).
 
@@ -384,26 +416,39 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
         # game's own names never has one replaced (swnames' own rule).
         rows = _read_list(sw_list)
         if any(r[4] == "?" for r in rows):
-            filled, _report = swnames.fill(rows, game, elf)
-            if filled != rows:
+            # ★ AND THE STATIC TABLE IS ASKED HERE TOO, ONCE (2026-09-08,
+            # peanuts: "for Foo Fighters and The Munsters, the list of
+            # Switches is still incomplete with some question marks").
+            # A list cached by an older build is exactly the case that cannot
+            # heal by itself: it names the binary that is running, so
+            # _built_from is satisfied and this branch is the only one that
+            # ever touches it again. Modelled on foo_fighters_le 1.04.0 - the
+            # build he tested - a `?`-named roster comes out of the device
+            # table with 60 of its 105 rows still unnamed, and with the static
+            # table 0.
+            asked = _static_names_asked(sw_list, elf)
+            filled, _report = swnames.fill(rows, game, elf, use_static=not asked)
+            if filled != rows or not asked:
                 try:
-                    _write(sw_list, swtable.text(game, filled, elf))
-                    repaired = True
+                    _write(sw_list, swtable.text(game, filled, elf,
+                                                 static_asked=True))
+                    repaired = filled != rows
                     made["switch_list.txt"] = sw_list
                     # "filled", not "from the device table": on a title whose
                     # device table cannot be read the fill is platform labels
                     # alone, and a log line naming the wrong source is worse
                     # than one naming none (the NB_WHY lesson in watch.sh).
                     say("  switches     (cached) - filled %d of its %d `?` "
-                        "names (swnames: device table + platform labels)"
+                        "names (swnames: device table, the title's static "
+                        "switch table, platform labels)"
                         % (sum(1 for a, b in zip(rows, filled)
                                if a[4] != b[4]), len(rows)))
                 except OSError as exc:
                     say("  switches     FAILED to repair %s: %s"
                         % (sw_list, exc))
             else:
-                say("  switches     (cached; %d `?` names the device table "
-                    "cannot fill)" % sum(1 for r in rows if r[4] == "?"))
+                say("  switches     (cached; %d `?` names no source here can "
+                    "fill)" % sum(1 for r in rows if r[4] == "?"))
         else:
             say("  switches     (cached)")
     else:
@@ -463,7 +508,11 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
         # docstring promises it never raises for a missing part; this was
         # the one write that could.
         try:
-            _write(sw_list, swtable.text(game, live_rows, elf))
+            # static_asked: fill() above ran with its default, so the static
+            # table HAS been consulted for this binary and the next start must
+            # not pay for it again.
+            _write(sw_list, swtable.text(game, live_rows, elf,
+                                         static_asked=True))
         except OSError as exc:
             say("  switches     FAILED to write %s: %s" % (sw_list, exc))
             say("  switches     (a root-owned tables dir from an old run? a "

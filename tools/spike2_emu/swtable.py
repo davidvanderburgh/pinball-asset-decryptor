@@ -57,8 +57,18 @@ def by_name(rows):
             for sid, _num, node, bit, name in rows if name and name != "?"}
 
 
-def text(game, rows, elf=None):
+def text(game, rows, elf=None, static_asked=False):
     """switch_list.txt, as a string.
+
+    ★ THE `# static-names:` LINE IS A MEMO, NOT A PROVENANCE (2026-09-08).
+    swnames' third source - the title's own STATIC switch table - is the one
+    that costs real time: the derived reader indexes the whole image, which is
+    ten seconds on a 117 MB binary, and on a title it cannot read it costs that
+    to answer nothing. A list with `?` names is re-offered to swnames on every
+    single start, so without somewhere to remember the question that would be
+    ten seconds added to every run of metallica_spike, for ever. This line says
+    "the static table has been asked about THIS binary"; mktables skips the
+    walk when it matches, and a new build clears it along with everything else.
 
     ★ THE `# binary:` LINE IS WHAT MAKES THIS CACHE REFUSABLE (2026-09-01,
     jurassic_park_le). device_xy.txt has carried one since 2026-08-21 and
@@ -72,11 +82,14 @@ def text(game, rows, elf=None):
     reader as the device table, so one test answers for both.
     """
     nodes = sorted({r[2] for r in rows})
+    binary = devicexy.binary_id(elf) or "(unknown)"
     lines = ["# %s switch list, from the shim's reading of the game's own table."
              % game,
-             "# binary: %s" % (devicexy.binary_id(elf) or "(unknown)"),
-             "# %d switches on nodes %s." % (len(rows), nodes),
-             "# %-4s %-5s %-5s %-4s %s" % ("id", "num", "node", "bit", "name")]
+             "# binary: %s" % binary]
+    if static_asked:
+        lines.append("# static-names: %s" % binary)
+    lines += ["# %d switches on nodes %s." % (len(rows), nodes),
+              "# %-4s %-5s %-5s %-4s %s" % ("id", "num", "node", "bit", "name")]
     for sid, num, node, bit, name in rows:
         lines.append("%-6d %-5d %-5d %-4d %s" % (sid, num, node, bit, name))
     return "\n".join(lines) + "\n"

@@ -143,3 +143,119 @@ def test_reported_hands_back_a_copy():
     got = display2.reported("venom_le")
     got["rot2"] = 270
     assert display2.REPORTED_PANELS["venom_le"]["rot2"] == 90
+
+
+# ------------------------------- the panel is the RENDER size --------------
+#
+# ★ THE CORRECTION OF 2026-09-08 (peanuts: "the screen resolution for Star
+# Wars Home Edition, Jurassic Park The Pin and James Bond 60th are still
+# wrong", against a release that had already given all three an 800x480
+# WINDOW). Sizing the window alone could never have worked: these games draw
+# their scene at its authored size in the corner of whatever framebuffer they
+# are handed - his star_wars_elg screenshot has the service screen at 800x480
+# in the top-left of a 1360x768 window with the rest black - so a smaller
+# window scales that same wrong picture down. The panel has to be what the
+# GAME is told.
+
+
+def _rig_text(name):
+    with open(os.path.join(RIG, name), encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def test_a_one_screen_cabinet_gets_the_panel_as_its_render_size():
+    """The half the first attempt was missing. PAD_GL_W/H is what the game is
+    told; without it the picture stays in the corner however small the window
+    is made."""
+    display2 = pytest.importorskip("display2")
+    for title in ("james_bond_60th_le", "star_wars_elg",
+                  "jurassic_park_the_pin"):
+        got = display2.reported_exports(title)
+        assert "PAD_GL_W=800" in got and "PAD_GL_H=480" in got, title
+        # and the window too, which is also padglhost's signal that this run's
+        # size is a reported panel rather than the rig's 1360x768 default
+        assert "PAD_GL_WIN_W=800" in got and "PAD_GL_WIN_H=480" in got, title
+
+
+def test_a_reported_rotation_never_resizes_the_guest():
+    """venom_le's topper is mounted on its side, which is a fact about a
+    cabinet and not about a framebuffer. A rotation that reached the guest
+    would be a rotation applied twice."""
+    display2 = pytest.importorskip("display2")
+    got = display2.reported_exports("venom_le")
+    assert got == ["PAD_GL2_ROT=90"]
+    assert not [g for g in got if g.startswith("PAD_GL_W")]
+
+
+def test_a_title_nobody_reported_exports_nothing():
+    display2 = pytest.importorskip("display2")
+    assert display2.reported_exports("godzilla_le") == []
+    assert display2.reported_exports("") == []
+    assert display2.reported_exports(None) == []
+
+
+def test_watch_sh_knows_every_knob_the_table_can_ask_for():
+    """The shell reads what reported_exports prints. A fact that grows a new
+    knob and is then silently dropped by the loop is the failure this pins -
+    the whole point of moving the decision into Python was that the two halves
+    can disagree.
+    """
+    display2 = pytest.importorskip("display2")
+    names = set()
+    for title in display2.REPORTED_PANELS:
+        names |= {kv.split("=")[0] for kv in display2.reported_exports(title)}
+    assert names  # the table is not empty
+    watch = _rig_text("watch.sh")
+    for name in names:
+        assert "%s=*)" % name in watch, \
+            "watch.sh has no case branch for %s" % name
+
+
+def test_a_caller_that_names_the_render_size_by_hand_still_wins():
+    """A sweep that sets PAD_GL_W/H must get exactly what it asked for - the
+    reported panel is a default for a title, not an override of a person.
+    PAD_GL_W is already set by the time the reported block runs, so the
+    'was it the caller' answer has to be recorded before the default lands.
+    """
+    watch = _rig_text("watch.sh")
+    assert "GL_WH_FROM_CALLER=0" in watch
+    assert ('if [ -n "${PAD_GL_W:-}${PAD_GL_H:-}" ]; then '
+            'GL_WH_FROM_CALLER=1; fi') in watch
+    # and the two branches that set it are guarded by that answer
+    for name in ("PAD_GL_W", "PAD_GL_H"):
+        i = watch.index("%s=*)" % name)
+        branch = watch[i:watch.index(";;", i)]
+        assert 'GL_WH_FROM_CALLER" = 0' in branch, name
+
+
+def test_a_window_size_remembered_around_another_picture_is_dropped():
+    """~/.pad_windows outlives a change to what the window frames. Every line
+    the three one-screen cabinets have was saved around a 1360x768 render, and
+    replaying it would hand the fix a window nearly twice the panel - the same
+    "window too large" the reporter already has.
+    """
+    src = _rig_text("padglhost.c")
+    # the render size is written WITH the window size, so the size can be read
+    assert r'fprintf(f, "%s %d %d %d %d %d %d\n", key, x, y, w, h,' in src
+    # ... and a line without one is only distrusted where the size is a
+    # reported panel; every other title keeps what it was left at
+    assert "win_reported_panel" in src
+    assert "int matched = gfw ? (gfw == fb_w && gfh == fb_h)" in src
+
+
+def test_the_save_slot_records_the_render_size_and_a_restore_checks_it():
+    """PAD_GL_W/H sizes the guest's own drawing surface, so it is inside the
+    checkpoint. Making it per-title means a slot saved before this release
+    cannot load after it, and criu finds that out only after the live guest
+    has been killed - so it is refused in the pre-flight, where a refusal
+    still costs nothing.
+    """
+    save = _rig_text("savestate.sh")
+    restore = _rig_text("restorestate.sh")
+    assert 'echo "render $RENDER" >> "$DDIR/restore.env"' in save
+    assert "SLOT_RENDER" in restore and "NOW_RENDER" in restore
+    # Refused BEFORE the live guest is killed. The kill itself, not the
+    # comment about it: a refusal that lands afterwards takes the whole
+    # session with it, which is the lesson this pre-flight was built on.
+    head = restore[:restore.index("pkill -9 -x game")]
+    assert "SLOT_RENDER" in head, "the render check runs after the kill"

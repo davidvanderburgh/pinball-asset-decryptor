@@ -57,9 +57,25 @@ process-group kill). Neither needs root.
 Needs root (via `wsl -u root`, passwordless on WSL) for CUSE + binfmt.
 
 ```bash
+# NORMALLY YOU BUILD NEITHER OF THESE.  The app installs the binaries we build
+# and pin in CI (pinball_decryptor/core/payloads.py + .github/workflows/
+# payloads.yml): a static qemu-arm and a static s1hwshim, verified against a
+# SHA-256 the app carries, dropped exactly where the two commands below would
+# have put them.  `prereqcheck.sh` says which of the two are installed, where
+# each came from (our build or this machine's), and what is missing.
+#
+# The from-source path below is for working ON the rig.
 # one-time: build the patched qemu-user (generic ioctl passthrough) and the
-# CUSE hardware-shim daemon.  Build deps (as root): apt-get install -y meson
-# ninja-build libglib2.0-dev pkg-config flex bison gcc libfuse3-dev
+# CUSE hardware-shim daemon.  Build deps are NOT listed here: prereqs.sh probes
+# for them and names the ones THIS machine lacks, in apt's or pacman's spelling
+# (`. prereqs.sh; s1_prereq_report qemu shim`).  start.sh asks it before either
+# build, so a first Start names all of them at once instead of one per attempt.
+# On Debian/Ubuntu the usual answer is:
+#   apt-get install -y ninja-build libglib2.0-dev pkg-config flex bison gcc \
+#                      libfuse3-dev python3-venv wget xz-utils
+# python3-venv is the one that is easy to miss and stops the build dead: qemu's
+# configure installs its own meson into a private venv, so meson is NOT needed
+# and the venv is.
 bash build_qemu.sh                                   # -> ~/qemubuild/qemu-arm
 gcc -O2 -o s1hwshim s1hwshim.c $(pkg-config --cflags --libs fuse3)
 

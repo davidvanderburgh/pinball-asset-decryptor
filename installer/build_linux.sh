@@ -26,7 +26,7 @@ echo "Installing build deps..."
 # AppImage silently ships without it (this is how Stern's unicorn/capstone/
 # numpy went missing on the frozen builds).  Absolute path: this runs before
 # the `cd "$ROOT_DIR"` below.
-pip3 install --user -r "$ROOT_DIR/requirements.txt" pyinstaller UnityPy fsb5 pyogg faster-whisper imageio-ffmpeg
+pip3 install --user -r "$ROOT_DIR/requirements.txt" -r "$ROOT_DIR/requirements-build.txt"
 
 echo "Running PyInstaller..."
 cd "$ROOT_DIR"

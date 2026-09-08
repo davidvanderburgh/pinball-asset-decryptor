@@ -44,6 +44,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import _rig
+from ..core import payloads
 # The volume/mute control FILE and its load/store belong to the Spike 2 tab
 # (item 56) and are deliberately shared, not copied: one knob value, one file,
 # read by the one padplay.py speaker implementation both rigs launch.
@@ -308,6 +309,17 @@ class Spike1EmulatePanel:
                  "Look at the rig without changing anything — build state, "
                  "extracted game, and whether it is running — and print it to "
                  "the log.", self._theme_fn)
+
+        self._fix_btn = ttk.Button(btns, text="Fix setup",
+                                   command=self._fix_setup, width=11)
+        self._fix_btn.pack(side=tk.LEFT, padx=(6, 0))
+        _Tooltip(self._fix_btn,
+                 "Install whatever the emulator is missing: the ARM emulator "
+                 "and device model we build and verify ourselves, downloaded "
+                 "and checked against the exact version this app expects. "
+                 "Nothing is compiled on your machine, and no terminal is "
+                 "needed. Offers a file picker if the download is blocked.",
+                 self._theme_fn)
 
         # The volume trio, mirroring the Spike 2 tab's row (and sharing its
         # control file — see the import note).  The knob is the emulator's OWN
@@ -792,6 +804,22 @@ class Spike1EmulatePanel:
 
         def work():
             try:
+                # SELF-HEALING BEFORE IT IS ASKED FOR.  A machine missing the
+                # emulator gets the binaries we built and verified, here, now,
+                # without anyone pressing Fix setup first - that button exists
+                # for the machine where this fails, not for the ordinary one.
+                # A failure is logged and start.sh still runs: it can still
+                # build from source, and its preflight says what that needs.
+                try:
+                    got = self._install_payloads()
+                    if got:
+                        self._log("Spike 1: installed the emulator (%s) — "
+                                  "nothing had to be compiled here."
+                                  % ", ".join(got))
+                except Exception as exc:                    # noqa: BLE001
+                    self._log("Spike 1: could not install the shipped "
+                              "emulator (%s). Falling back to building it on "
+                              "this machine." % exc)
                 if self._info.get("qemu_built") != "1":
                     self._log("Spike 1: first run — building the emulator, this "
                               "takes a few minutes. Each step is shown below.")
@@ -816,7 +844,18 @@ class Spike1EmulatePanel:
                 rc = self._run_streaming(rig_cmd_root("start.sh", *args,
                                                       env=env),
                                          timeout=1800)
-                if rc not in (0, None):
+                if rc == 2:
+                    # start.sh's exit 2 is the one-time BUILD: either this
+                    # machine is missing build tools (its preflight has just
+                    # listed them, with the install command) or the build
+                    # itself died and printed why.  Say which lines to read —
+                    # a bare "exit 2" under a wall of build output is what
+                    # sent a user's log to the author instead of to apt.
+                    self._log("Spike 1: the one-time emulator build did not "
+                              "finish. The lines just above name what this "
+                              "machine still needs — install those, then "
+                              "press Start again.")
+                elif rc not in (0, None):
                     self._log("Spike 1: start failed (exit %d)." % rc)
             except Exception as exc:                       # noqa: BLE001
                 self._log("Spike 1: start failed: %s" % exc)
@@ -1054,6 +1093,84 @@ class Spike1EmulatePanel:
         if self._viewers is not None:
             self._viewers.reset()
         self._log("Spike 1: DMD and switch windows reopened.")
+
+    #: The binaries this rig needs and does not build on a user's machine any
+    #: more.  Named here rather than inside the worker so the tests can ask the
+    #: panel what it will install without running anything.
+    PAYLOAD_KEYS = ("spike1-qemu", "spike1-hwshim")
+
+    def _install_payloads(self, log=None):
+        """Fetch and install any missing shipped binary.  Returns the keys it
+        installed, or raises with a sentence for the log.
+
+        Called from BOTH the Fix button and Start, because a repair the user
+        has to know to ask for is not a repair: the ordinary path is that
+        pressing Start on a fresh machine installs what is missing and gets on
+        with it."""
+        return payloads.ensure(list(self.PAYLOAD_KEYS), log=log or self._log)
+
+    def _offer_file_install(self, exc):
+        """The blocked-download path, on the UI thread.
+
+        A managed machine can have GitHub unreachable and no way to change
+        that; what it does have is a person who can copy a file onto it.  The
+        same SHA-256 is checked either way, so this is a different DELIVERY,
+        not a lower standard."""
+        want = [payloads.PAYLOADS[k] for k in self.PAYLOAD_KEYS
+                if payloads.is_published(payloads.PAYLOADS[k])]
+        if not want or not messagebox.askyesno(
+                "Fix setup",
+                "%s\n\nIf you can copy the file onto this machine another "
+                "way, choose it now — it is checked against the same "
+                "checksum before it is installed.\n\nChoose a file?" % exc):
+            return
+        for p in want:
+            path = filedialog.askopenfilename(
+                title="Choose the downloaded %s" % p.filename,
+                initialfile=p.filename)
+            if not path:
+                return
+            try:
+                payloads.install_from_file(p, path, log=self._log)
+            except Exception as e:                          # noqa: BLE001
+                self._log("Spike 1: %s" % e)
+                return
+
+    def _fix_setup(self):
+        """Install what is missing, then say what is left — one button, no
+        terminal.  The looking half is the rig's own prereqcheck.sh, so this
+        button and Start cannot disagree about what a ready machine is."""
+        if self._busy:
+            return
+        self._fix_btn.configure(state=tk.DISABLED)
+
+        def work():
+            try:
+                self._log("Spike 1: checking the emulator install…")
+                try:
+                    got = self._install_payloads()
+                    if got:
+                        self._log("Spike 1: installed %s."
+                                  % ", ".join(got))
+                except Exception as exc:                    # noqa: BLE001
+                    self._log("Spike 1: %s" % exc)
+                    self._timer().after(
+                        0, lambda e=exc: self._offer_file_install(e))
+                try:
+                    out = subprocess.run(
+                        rig_cmd("prereqcheck.sh"), stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, timeout=120,
+                        creationflags=_rig.CREATE_FLAGS)
+                    for line in out.stdout.decode("utf-8", "replace").splitlines():
+                        if line.strip():
+                            self._log("Spike 1: %s" % line.rstrip())
+                except Exception as exc:                    # noqa: BLE001
+                    self._log("Spike 1: could not check the rig: %s" % exc)
+            finally:
+                self._timer().after(
+                    0, lambda: self._fix_btn.configure(state=tk.NORMAL))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _check_setup(self):
         """Read-only: print the rig's state to the log (build, extracted game,

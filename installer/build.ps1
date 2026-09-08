@@ -169,11 +169,15 @@ $sitePackages = Join-Path $PythonDir "Lib\site-packages"
 # of his own at all, so the pip command the app used to print named a program
 # (`py`) his PC did not have.  Existing installs pick it up through
 # install_prerequisites.ps1's Stern pip list.
+# The two lists are FILES, not an array typed in here: this same set was
+# written out inline in five places (three release jobs, build_linux.sh,
+# build_macos.sh and this line), which is how a dependency gets added to the
+# app on one platform only.  Both files pin exact versions - see their headers.
 $reqFile = Join-Path $ProjectDir "requirements.txt"
-$pipExtras = @("UnityPy", "fsb5", "pyogg", "imageio-ffmpeg", "sounddevice")
-Write-Host "  Installing deps from requirements.txt + extras ($($pipExtras -join ', '))..."
+$winFile = Join-Path $ProjectDir "requirements-windows.txt"
+Write-Host "  Installing pinned deps from requirements.txt + requirements-windows.txt..."
 $ErrorActionPreference = "Continue"
-& $pythonExe -m pip install --no-warn-script-location --target $sitePackages -r $reqFile @pipExtras 2>&1 | ForEach-Object { Write-Host "    $_" }
+& $pythonExe -m pip install --no-warn-script-location --target $sitePackages -r $reqFile -r $winFile 2>&1 | ForEach-Object { Write-Host "    $_" }
 $ErrorActionPreference = "Stop"
 if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip dependencies"; exit 1 }
 Write-Host "  Dependencies installed successfully" -ForegroundColor Green

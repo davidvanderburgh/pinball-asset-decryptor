@@ -36,7 +36,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          pip install -r requirements.txt pyinstaller UnityPy fsb5 pyogg faster-whisper imageio-ffmpeg
+          pip install -r requirements.txt -r requirements-build.txt
           brew install create-dmg
 
       - name: Build DMG

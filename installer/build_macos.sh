@@ -34,7 +34,7 @@ cd "$ROOT_DIR"
 # UnityPy/fsb5/pyogg but never unicorn/capstone/numpy, so all 4 Stern prereqs
 # showed missing in a bundle that pip can't fix.  No `|| true` -- a failed dep
 # install must abort the build, not silently ship a broken bundle.
-pip3 install -r "$ROOT_DIR/requirements.txt" pyinstaller UnityPy fsb5 pyogg faster-whisper imageio-ffmpeg
+pip3 install -r "$ROOT_DIR/requirements.txt" -r "$ROOT_DIR/requirements-build.txt"
 
 # --add-data lines bundle the per-plugin Dockerfiles so the macOS
 # DockerExecutor in spooky / jjp can find them at runtime.

@@ -719,3 +719,118 @@ def test_audio_format_ignores_a_malformed_marker(panel, tmp_path, monkeypatch):
     monkeypatch.setattr(spike1_emulate_tab, "wsl_unc",
                         lambda distro, p: str(tmp_path / p.rsplit("/", 1)[-1]))
     assert panel._audio_format() == ("44100", "2")
+
+
+# ------------------------------------------------- the one-time build fails --
+
+def test_a_failed_one_time_build_points_at_the_lines_that_name_the_fix(
+        panel, monkeypatch):
+    """start.sh's exit 2 is the BUILD, and the rig's preflight has just printed
+    what this machine is missing and the command that installs it.  A bare
+    "start failed (exit 2)" under that is what sent a user's whole log to the
+    author on 2026-09-08 instead of sending them to apt."""
+    logged = []
+    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
+    monkeypatch.setattr(panel, "_run_streaming", lambda *a, **k: 2)
+    monkeypatch.setattr(panel, "_release", lambda: None)
+    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd_root",
+                        lambda *a, **k: ["cmd"])
+    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
+                        lambda target, daemon=None: SimpleNamespace(
+                            start=target))
+    panel._info = {"game_ready": "1", "qemu_built": "0"}
+    panel._start_async()
+    assert any("did not finish" in m and "press Start again" in m
+               for m in logged), logged
+    assert not any("exit 2" in m for m in logged), logged
+
+
+def test_any_other_failure_still_names_its_exit_code(panel, monkeypatch):
+    """Everything past the build keeps the code: 4 is "no card", 5 is the
+    extraction, 6 is the node-bus responder, and the number is how the log
+    says which."""
+    logged = []
+    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
+    monkeypatch.setattr(panel, "_run_streaming", lambda *a, **k: 5)
+    monkeypatch.setattr(panel, "_release", lambda: None)
+    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd_root",
+                        lambda *a, **k: ["cmd"])
+    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
+                        lambda target, daemon=None: SimpleNamespace(
+                            start=target))
+    panel._info = {"game_ready": "1", "qemu_built": "1"}
+    panel._start_async()
+    assert any("start failed (exit 5)" in m for m in logged), logged
+
+
+# ---------------------------------------- the emulator we ship, not build --
+
+def test_start_installs_the_shipped_emulator_before_it_runs_anything(
+        panel, monkeypatch):
+    """Self-healing without being asked.  A machine missing the emulator gets
+    the binaries we built and verified as part of pressing Start — the Fix
+    setup button is for the machine where THAT fails, not for the ordinary
+    one."""
+    calls = []
+    monkeypatch.setattr(panel, "_log", lambda m: None)
+    monkeypatch.setattr(panel, "_install_payloads",
+                        lambda log=None: calls.append("payloads") or [])
+    monkeypatch.setattr(panel, "_run_streaming",
+                        lambda *a, **k: calls.append("start.sh") or 0)
+    monkeypatch.setattr(panel, "_release", lambda: None)
+    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd_root", lambda *a, **k: ["cmd"])
+    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
+                        lambda target, daemon=None: SimpleNamespace(start=target))
+    panel._info = {"game_ready": "1", "qemu_built": "1"}
+    panel._start_async()
+    assert calls == ["payloads", "start.sh"], calls
+
+
+def test_a_blocked_download_does_not_stop_start(panel, monkeypatch):
+    """The rig can still build from source, and its preflight names what that
+    needs — so a firewall costs the user the fast path, not the emulator."""
+    logged, ran = [], []
+    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
+
+    def boom(log=None):
+        raise RuntimeError("could not download qemu-arm: blocked")
+
+    monkeypatch.setattr(panel, "_install_payloads", boom)
+    monkeypatch.setattr(panel, "_run_streaming",
+                        lambda *a, **k: ran.append(1) or 0)
+    monkeypatch.setattr(panel, "_release", lambda: None)
+    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd_root", lambda *a, **k: ["cmd"])
+    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
+                        lambda target, daemon=None: SimpleNamespace(start=target))
+    panel._info = {"game_ready": "1", "qemu_built": "0"}
+    panel._start_async()
+    assert ran, "start.sh must still run when the download is blocked"
+    assert any("Falling back to building it" in m for m in logged), logged
+
+
+def test_fix_setup_installs_then_reports_what_is_left(panel, monkeypatch):
+    """One button: it installs what it can and then prints the rig's own
+    read-only verdict, so the user never has to type anything."""
+    logged, cmds = [], []
+    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
+    monkeypatch.setattr(panel, "_install_payloads", lambda log=None: ["spike1-qemu"])
+    monkeypatch.setattr(spike1_emulate_tab, "rig_cmd",
+                        lambda *a, **k: cmds.append(a) or ["cmd"])
+    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
+                        lambda target, daemon=None: SimpleNamespace(start=target))
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: SimpleNamespace(
+            returncode=0, stdout=b"The emulator is ready - nothing to install.\n"))
+    panel._fix_setup()
+    assert ("prereqcheck.sh",) in cmds, cmds
+    assert any("installed spike1-qemu" in m for m in logged), logged
+    assert any("nothing to install" in m for m in logged), logged
+
+
+def test_the_panel_only_asks_for_payloads_the_app_actually_pins():
+    """A key the registry does not carry would raise KeyError the first time a
+    user pressed Start on a fresh machine."""
+    from pinball_decryptor.core import payloads as core_payloads
+    for key in Spike1EmulatePanel.PAYLOAD_KEYS:
+        assert key in core_payloads.PAYLOADS

@@ -35,6 +35,19 @@ ARCH_NAMES = {
     "python3-tk": "tk",
     "qemu-user-static": "qemu-user-static qemu-user-static-binfmt",
     "busybox-static": "busybox",
+    # The Spike 1 rig's BUILD tools (tools/spike1_emu/prereqs.sh, which is
+    # held against this table by tests/test_spike1_prereqs.py).  python3-venv
+    # is the same kind of "" as libc6-dev above and for the same reason: Arch
+    # ships one complete python, ensurepip included, so there is nothing to
+    # install for it - which is exactly what a Debian-family machine does NOT
+    # do, and how a user's first Start died on 2026-09-08.
+    "python3": "python",
+    "python3-venv": "",
+    "ninja-build": "ninja",
+    "pkg-config": "pkgconf",
+    "libglib2.0-dev": "glib2",
+    "libfuse3-dev": "fuse3",
+    "xz-utils": "xz",
 }
 
 #: apt name -> the AUR package that carries it.  The AUR is not a repository,

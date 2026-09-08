@@ -1,0 +1,23 @@
+# What the RELEASE builds need on top of requirements.txt, pinned.
+#
+# ONE LIST, TWO WORKFLOWS.  This set used to be typed into the `pip install`
+# line of every build job — three in release.yml and one in
+# release-intel-mac.yml — so adding a dependency meant remembering four places,
+# and none of them said which versions the shipped installers were actually
+# built with.  Now the workflows install `-r requirements-build.txt`, and this
+# file is what an installer was made from.
+#
+# WHY THESE ARE NOT IN requirements.txt: none of them is imported by the app at
+# runtime.  pyinstaller freezes it; the rest are optional format handlers that
+# PyInstaller bundles so the frozen build can use them if a card needs them.
+#
+# TO UPGRADE: edit a version, push, and read the release build's log — these
+# are the ones the tests workflow does NOT exercise, because it never freezes
+# an app.  A wheel that does not exist for a platform fails the build BEFORE
+# any asset is published, which is the safe direction for this to fail in.
+pyinstaller==6.22.2
+UnityPy==1.25.3
+fsb5==1.0
+pyogg==0.6.14a1
+faster-whisper==1.2.1
+imageio-ffmpeg==0.6.0

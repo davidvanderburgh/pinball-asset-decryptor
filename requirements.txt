@@ -1,5 +1,19 @@
 # Pinball Asset Decryptor — Python dependencies
 #
+# EXACT VERSIONS, NOT FLOORS.  These were `>=` until 2026-09-08, which meant
+# two builds of the SAME app version could bundle different libraries: the
+# installer a user downloads is whatever pip happened to resolve on the day CI
+# ran it.  That is the same class of problem as the emulator compiling itself
+# on a user's machine (see pinball_decryptor/core/payloads.py) — the thing we
+# ship stops being the thing we tested — and it is fixed the same way: pin it,
+# and make an upgrade a deliberate edit with a test run behind it.
+#
+# TO UPGRADE: change the version here, push, and let the tests workflow build
+# it on Windows, Linux and macOS before it goes anywhere near a release.  Only
+# DIRECT dependencies are pinned; their own dependencies resolve per platform
+# on purpose (the Intel-mac build needs an older onnxruntime than Apple
+# Silicon, and hard-pinning that here would break one of the two).
+#
 # The main application uses mostly the Python standard library.
 # Pillow regenerates the app icon from source.
 # zstandard powers the BOF May 2026+ PCK extractor/packer (Zstd
@@ -17,10 +31,10 @@
 # check, AcoustID lookup): the frozen macOS builds link a Homebrew OpenSSL
 # whose default CA path doesn't exist on non-Homebrew Macs, so without a
 # bundled trust store every HTTPS request fails certificate verification.
-Pillow>=10.0
-certifi>=2024.2.2
-zstandard>=0.22
-pycryptodome>=3
-numpy>=1.24
-unicorn>=2.0
-capstone>=5.0
+Pillow==12.3.0
+certifi==2026.7.22
+zstandard==0.25.0
+pycryptodome==3.23.0
+numpy==2.5.3
+unicorn==2.1.4
+capstone==5.0.9

@@ -1,0 +1,33 @@
+# What the WINDOWS installer bundles on top of requirements.txt, pinned.
+#
+# Windows is not a PyInstaller build: installer/build.ps1 lays down an embedded
+# CPython and pip-installs into it, and the app runs ONLY that interpreter (its
+# ._pth sandboxes it from any system Python).  So anything missing from this
+# list is missing for the user with no fix — a `pip install` into their own
+# Python is invisible to the app.  That is not hypothetical: a fresh-install
+# user's system pip said "already satisfied" while the app still showed the
+# Stern dependencies missing.
+#
+# WHY THIS SET DIFFERS FROM requirements-build.txt: no pyinstaller (nothing is
+# frozen here), no faster-whisper (Auto-name call-outs stays an on-demand
+# "Install Missing" item on Windows, to keep the installer small — it works
+# there because the bundled Python and the elevated installer can add it
+# later, which the frozen Mac/Linux apps cannot), and one package the other
+# platforms must not have:
+#
+#   sounddevice   the Spike 2 emulator's SPEAKER, and Windows-only by nature:
+#                 a WSL run serves the guest's PCM to a Windows Python that
+#                 opens the sound device directly, because WSLg's own audio
+#                 hop is measurably damaged (+16 dB of error).  PAD-95's
+#                 reporter had no Python of his own at all, so shipping it is
+#                 what makes a fresh install sound right with nothing asked.
+#
+#   UnityPy/fsb5/pyogg   Spooky's Unity asset extraction.
+#   imageio-ffmpeg       a real ffmpeg.exe, so Replace Audio/Video conversion
+#                        and resampling work with no system install or PATH
+#                        hunting (find_ffmpeg() falls back to it).
+UnityPy==1.25.3
+fsb5==1.0
+pyogg==0.6.14a1
+imageio-ffmpeg==0.6.0
+sounddevice==0.5.6

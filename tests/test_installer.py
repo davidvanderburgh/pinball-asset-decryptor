@@ -60,6 +60,61 @@ PYINSTALLER_BUILD_SCRIPTS = [
 ]
 WINDOWS_BUILD = INSTALLER / "build.ps1"
 
+#: Every pinned requirement file in the repo, and which build each belongs to.
+REQ_FILES = {
+    "requirements.txt": "the app's own runtime dependencies",
+    "requirements-build.txt": "what the frozen Mac/Linux builds add",
+    "requirements-windows.txt": "what the Windows bundled Python adds",
+}
+_REQ_NAME_RE = re.compile(r"requirements(?:-[a-z]+)?\.txt")
+
+
+def _requirement_names(path):
+    """The package names a requirements file declares, lowercased."""
+    names = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#")[0].strip()
+        if line and not line.startswith("-"):
+            names.add(re.split(r"[=<>!~;\[ ]", line)[0].strip().lower())
+    return names
+
+
+def _declared_packages(script):
+    """What a build script installs, FOLLOWING the requirement files it names.
+
+    The package lists used to be typed into each build script (and into each
+    release job), so a test could look for a name in the script's own text.
+    They are files now - one list instead of five - and these tests have to
+    follow the same trail pip does, or they end up asserting on a name that
+    survives only in a comment.  That is not hypothetical: the sounddevice
+    guard below kept passing on a build.ps1 that no longer installed it,
+    because the word was still in the paragraph explaining why it matters.
+    """
+    src = script.read_text(encoding="utf-8", errors="replace")
+    names = set()
+    for fname in set(_REQ_NAME_RE.findall(src)):
+        f = REPO / fname
+        if f.is_file():
+            names |= _requirement_names(f)
+    # Anything still installed by name on a pip line, so a script that goes
+    # back to an inline package is measured the same way.
+    for line in src.splitlines():
+        # A comment that TALKS about `pip install` is not one: build.ps1's own
+        # paragraph explaining why the deps go into the bundled Python would
+        # otherwise register a package called "into".
+        if line.lstrip().startswith("#"):
+            continue
+        if "pip install" not in line and "pip3 install" not in line:
+            continue
+        body = re.sub(r"-r\s+\S+", " ", line.split("install", 1)[1])
+        body = re.sub(r"\$\w+|@\w+|\"[^\"]*\"|\|.*$", " ", body)
+        # The lookbehind is what keeps `--user` from reading as a package
+        # called "user": a match may not start inside a longer word or after
+        # a dash.
+        for tok in re.findall(r"(?<![-\w])[A-Za-z][A-Za-z0-9_.-]{2,}", body):
+            names.add(tok.lower())
+    return names
+
 
 def test_installer_layout():
     """The shared GDRE script and the PowerShell installer must exist."""
@@ -357,7 +412,7 @@ def test_pyinstaller_bundles_whisper_stack(script):
     if not script.exists():
         pytest.skip(f"{script.name} not present in this checkout")
     src = script.read_text(encoding="utf-8", errors="replace")
-    assert "faster-whisper" in src or "faster_whisper" in src, (
+    assert "faster-whisper" in _declared_packages(script), (
         f"{script.name} must install + collect faster-whisper so Auto-name "
         f"call-outs works in the frozen app (it can't be added post-install).")
     for pkg in ("faster_whisper", "ctranslate2", "onnxruntime", "av"):
@@ -384,7 +439,7 @@ def test_pyinstaller_bundles_ffmpeg(script):
     if not script.exists():
         pytest.skip(f"{script.name} not present in this checkout")
     src = script.read_text(encoding="utf-8", errors="replace")
-    assert "imageio-ffmpeg" in src, (
+    assert "imageio-ffmpeg" in _declared_packages(script), (
         f"{script.name} must install imageio-ffmpeg so the frozen app ships a "
         f"working ffmpeg (Replace Audio/Video need it, and a frozen app can't "
         f"have one added later).")
@@ -1185,8 +1240,7 @@ def test_windows_ships_and_repairs_the_emulator_speaker():
         "the Emulate tab sends the user here for it.")
     if not WINDOWS_BUILD.exists():
         pytest.skip("build.ps1 not present in this checkout")
-    src = WINDOWS_BUILD.read_text(encoding="utf-8", errors="replace")
-    assert "sounddevice" in src, (
+    assert "sounddevice" in _declared_packages(WINDOWS_BUILD), (
         "build.ps1 must install sounddevice into the bundled Python so a "
         "fresh Windows install has good emulator sound with nothing asked of "
         "the user.")
@@ -1601,3 +1655,46 @@ def test_gdre_prereq_probe_matches_install_location():
     assert "which " not in probe, (
         "BOF gdre_tools probe uses `which` again — a PATH lookup inside "
         "WSL is slow/flaky; test the install path directly.")
+
+
+# ------------------------------------------------ what a build is made of --
+
+@pytest.mark.parametrize("name", sorted(REQ_FILES), ids=lambda n: n)
+def test_every_dependency_is_pinned_to_one_version(name):
+    """`>=` is not a pin: it means two builds of the SAME app version can
+    bundle different libraries, so what a user runs is whatever pip resolved
+    the day CI ran — which is the same failure as compiling the emulator on
+    their machine, one layer up.  Upgrading is an edit here plus a test run,
+    not something that happens to us."""
+    path = REPO / name
+    assert path.is_file(), "%s (%s) is missing" % (name, REQ_FILES[name])
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#")[0].strip()
+        if not line:
+            continue
+        assert "==" in line, (
+            "%s pins nothing in %r — every dependency needs an exact version"
+            % (name, line))
+
+
+def test_no_build_script_installs_a_package_the_pinned_files_do_not_carry():
+    """One list, not five.  This set was typed into three release jobs and
+    three build scripts, which is how a dependency ends up on one platform
+    only; a name that reappears on a pip line here would be unpinned and
+    invisible to the guard above."""
+    pinned = set()
+    for name in REQ_FILES:
+        pinned |= _requirement_names(REPO / name)
+    # setuptools/wheel bootstrap pip itself into the embedded interpreter
+    # before any requirement file can be read, and pytest's own runner deps
+    # are the test workflow's, not a shipped app's.
+    allowed = pinned | {"setuptools", "wheel", "pip", "pytest", "pytest-xdist",
+                        "pycryptodome"}
+    for script in list(PYINSTALLER_BUILD_SCRIPTS) + [WINDOWS_BUILD]:
+        if not script.exists():
+            continue
+        extra = {n for n in _declared_packages(script) if n not in allowed
+                 and not n.endswith(".txt") and "/" not in n}
+        assert not extra, (
+            "%s installs %s outside the pinned requirement files"
+            % (script.name, sorted(extra)))

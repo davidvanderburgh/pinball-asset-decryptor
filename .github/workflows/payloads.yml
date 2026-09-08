@@ -1,0 +1,135 @@
+name: Build Pinned Payloads
+
+# The binaries the app SHIPS instead of building on a user's machine.
+#
+# WHY THIS IS A WORKFLOW OF ITS OWN, and not part of release.yml: a payload is
+# pinned by SHA-256 in pinball_decryptor/core/payloads.py, and a hash that
+# changes every release is not a pin.  These are built ONLY when we mean to
+# change them, published to their own immutable tag (payloads-N), and left
+# alone by every app release after that.  An app release then carries the
+# HASHES, which is what makes "the emulator our users run is the one we
+# tested" a fact rather than a hope.
+#
+# WHAT IT BUILDS, and why each one can be one build for every distro:
+#
+#   qemu-arm    qemu 8.2.2 + tools/spike1_emu/patch_qemu.py, configured
+#               --static: a static-pie ELF with no shared library at all, so
+#               the distro's glibc, its meson, its ninja and its python stop
+#               being part of the story.  This is the build that broke in the
+#               field twice - once on glibc 2.41's sched_attr, once on a
+#               Python 3.14 that packages ensurepip separately.
+#   s1hwshim    the CUSE device model, linked against libfuse3.a.  CUSE opens
+#               /dev/fuse directly and never runs the fusermount3 helper, so a
+#               static link leaves nothing to install on the far side.
+#
+# ON THE RUNNER'S AGE: ubuntu-22.04, deliberately.  Both outputs are static, so
+# the build host's glibc does not reach the user - but the TOOLCHAIN that has
+# to compile qemu 8.2.2 does, and 22.04 is the era that release was written
+# for.  Newer runners are exactly where the field breaks came from.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Payload release tag (payloads-N). Never reuse one."
+        required: true
+        default: "payloads-1"
+      publish:
+        description: "Upload to the release (off = build and print hashes only)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libglib2.0-dev pkg-config \
+                                  flex bison gcc python3-venv libfuse3-dev \
+                                  wget xz-utils
+
+      # The same script a user used to run, with the same patches, so what we
+      # ship is what the from-source path would have produced - not a
+      # differently-configured qemu that happens to be easier to build here.
+      - name: Build patched qemu-arm (static)
+        run: |
+          QEMU_WORK="$RUNNER_TEMP/qemubuild" QEMU_OUT="$RUNNER_TEMP/qemubuild" \
+            bash tools/spike1_emu/build_qemu.sh
+          cp "$RUNNER_TEMP/qemubuild/qemu-arm" payload-qemu-arm
+          strip payload-qemu-arm
+          file payload-qemu-arm | tee /dev/stderr | grep -q "static-pie linked"
+
+      - name: Build s1hwshim (static libfuse3)
+        run: |
+          gcc -std=gnu17 -O2 -static -o payload-s1hwshim \
+              tools/spike1_emu/s1hwshim.c \
+              $(pkg-config --static --cflags --libs fuse3)
+          strip payload-s1hwshim
+          file payload-s1hwshim | tee /dev/stderr | grep -q "statically linked"
+
+      # A static binary that cannot start is still a broken payload, and the
+      # cheapest possible proof that it can is asking it to run.  qemu-arm
+      # answers --version; the shim needs /dev/fuse and root, so it is asked
+      # only for the thing every ELF must do - load and reach main.
+      - name: Smoke-test what was built
+        run: |
+          ./payload-qemu-arm --version | head -2
+          ./payload-s1hwshim --help >/dev/null 2>&1 || true
+          test -x ./payload-s1hwshim
+
+      - name: Print the pins
+        id: pins
+        run: |
+          set -e
+          # source_sha256 is printed BY THIS BUILD, not worked out later from a
+          # checkout: it is the hash of the source these exact bytes were
+          # compiled from, and it is what the rig compares against to decide
+          # whether the shipped binary is the one for the sources beside it.
+          emit() {
+            printf '%s\n' "  key/file      : $2"
+            printf '%s\n' "  sha256        : $(sha256sum "$1" | cut -d' ' -f1)"
+            printf '%s\n' "  size          : $(stat -c%s "$1")"
+            printf '%s\n' "  source_sha256 : $(sha256sum "$3" | cut -d' ' -f1)"
+          }
+          {
+            echo "Paste these into pinball_decryptor/core/payloads.py:"
+            echo
+            echo "spike1-qemu (release_tag=${{ inputs.tag }})"
+            emit payload-qemu-arm qemu-arm tools/spike1_emu/patch_qemu.py
+            echo
+            echo "spike1-hwshim (release_tag=${{ inputs.tag }})"
+            emit payload-s1hwshim s1hwshim tools/spike1_emu/s1hwshim.c
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage the assets under their shipped names
+        run: |
+          mkdir -p out
+          cp payload-qemu-arm out/qemu-arm
+          cp payload-s1hwshim out/s1hwshim
+          (cd out && sha256sum qemu-arm s1hwshim > SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: payloads
+          path: out/*
+
+      # --clobber is NOT used: a payload tag is immutable on purpose.  If an
+      # upload here fails because the asset exists, that is the guard working -
+      # cut payloads-N+1 rather than moving a hash that is already shipped.
+      - name: Publish
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ inputs.tag }}" >/dev/null 2>&1 \
+            || gh release create "${{ inputs.tag }}" \
+                 --title "Pinned payloads ${{ inputs.tag }}" \
+                 --notes "Binaries the app installs instead of building on a user's machine. Pinned by SHA-256 in pinball_decryptor/core/payloads.py."
+          gh release upload "${{ inputs.tag }}" out/qemu-arm out/s1hwshim out/SHA256SUMS

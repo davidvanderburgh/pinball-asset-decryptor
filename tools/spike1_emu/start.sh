@@ -17,27 +17,46 @@
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-: "${S1_DESKTOP_USER:=$(getent passwd 1000 2>/dev/null | cut -d: -f1)}"
-UHOME="/home/${S1_DESKTOP_USER:-david}"
-: "${S1_WORK:=$UHOME/s1emu}"
-: "${QEMU_WORK:=$UHOME/qemubuild}"
-: "${S1_QEMU:=$QEMU_WORK/qemu-arm}"
+# The rig's paths and the "what still has to be built" rule both live in
+# prereqs.sh, so this script and the Fix-setup button's read-only half
+# (prereqcheck.sh) cannot come to different answers about the same machine.
+. "$HERE/prereqs.sh"
+s1_paths
+UHOME="$S1_HOME"
 CARD="${1:-}"
 
 log(){ echo "$*"; }
-fail(){ log "ERROR: $*"; exit "${2:-1}"; }
+# The message is $1 ALONE.  `log "$*"` printed the exit code too, so every one
+# of these read "…failed 5" and the qemu one ended in a stray "2" that a user
+# reasonably took for part of the package list (2026-09-08).
+fail(){ log "ERROR: $1"; exit "${2:-1}"; }
 
 mkdir -p "$S1_WORK"
 
+# 0. CAN THIS MACHINE BUILD WHAT IS ABOUT TO BE BUILT?  Asked before either
+#    build starts and only about the steps that will actually run, so a user
+#    missing three packages meets all three now rather than one per Start,
+#    minutes apart, each named by whichever tool happened to die first.
+#    Nothing is asked of a machine whose emulator the app already installed:
+#    the binaries we build and pin in CI (core/payloads.py) land exactly where
+#    a from-source build would have put them, so on those machines this is
+#    empty and no compiler is ever wanted.
+NEED=$(s1_build_groups "$HERE")
+case " $NEED " in *" qemu "*) BUILD_QEMU=1 ;; *) BUILD_QEMU=0 ;; esac
+case " $NEED " in *" shim "*) BUILD_SHIM=1 ;; *) BUILD_SHIM=0 ;; esac
+if [ -n "$NEED" ]; then
+    s1_prereq_report $NEED || exit 2
+fi
+
 # 1. patched qemu-user (one-time build, a few minutes on first run)
-if [ ! -x "$S1_QEMU" ]; then
+if [ "$BUILD_QEMU" = 1 ]; then
     log "Setup: building the patched ARM emulator (one time, a few minutes)…"
     QEMU_WORK="$QEMU_WORK" QEMU_OUT="$QEMU_WORK" bash "$HERE/build_qemu.sh" 2>&1 \
-        || fail "could not build qemu — install: meson ninja-build libglib2.0-dev pkg-config flex bison gcc" 2
+        || fail "could not build the ARM emulator — the build's own last lines above say why" 2
 fi
 
 # 2. CUSE device model (quick compile; rebuild when the source changed)
-if [ ! -x "$S1_WORK/s1hwshim" ] || [ "$HERE/s1hwshim.c" -nt "$S1_WORK/s1hwshim" ]; then
+if [ "$BUILD_SHIM" = 1 ]; then
     log "Setup: compiling the device model…"
     # -std=gnu17: pinned rather than inherited, so the next distro's gcc (15
     # defaults to gnu23) compiles this the way today's does.

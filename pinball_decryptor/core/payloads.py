@@ -354,6 +354,13 @@ def install(payload: Payload, installer=None, log=None,
 
 
 def default_installer(distro: Optional[str] = None):
+    # macOS IS NOT A PLACE FOR THESE.  Every payload is a Linux binary bound
+    # for a Linux path; on a Mac the "local" installer would write ELF into
+    # ~/qemubuild and report success for a rig that cannot run there at all.
+    if sys.platform == "darwin":
+        raise RuntimeError(
+            "the emulator binaries are Linux programs; this Mac has nowhere "
+            "to put them (the Spike 1 rig runs on Windows through WSL)")
     """Copy into the Linux side: through ``wsl.exe`` as root on Windows, and
     straight onto the filesystem on a Linux desktop.
 
@@ -405,8 +412,22 @@ def _install_through_wsl(payload: Payload, src: str,
     # output on purpose, and taking that over would be a much bigger act than
     # installing a file.
     script = (
-        'set -e; u="$(getent passwd 1000 | cut -d: -f1)"; '
+        'set -e; '
+        # A DISTRO WITH NO uid 1000 IS NOT ONE WE CAN INSTALL INTO.  Without
+        # this, `h` is empty, `~/qemubuild/qemu-arm` resolves to
+        # /qemubuild/qemu-arm, and the app installs the emulator at the ROOT of
+        # someone's distro as root - which then reads back as installed,
+        # because the probe expands the same empty `~` the same wrong way.
+        'u="$(getent passwd 1000 | cut -d: -f1)"; '
         'h="$(getent passwd 1000 | cut -d: -f6)"; '
+        'if [ -z "$h" ]; then echo "this WSL distro has no ordinary user '
+        '(uid 1000), and the emulator installs into that user home" >&2; '
+        'exit 3; fi; '
+        # AND THE BYTES MUST BE FOR THIS CPU.  Everything we pin is built
+        # x86-64; an ARM64 Windows PC runs an aarch64 distro, where these would
+        # install cleanly and then fail to exec.
+        'm="$(uname -m)"; if [ "$m" != x86_64 ]; then echo "this WSL distro is '
+        '$m; the emulator we ship is built for x86_64" >&2; exit 4; fi; '
         'd="%s"; case "$d" in "~"*) d="$h${d#\\~}";; esac; '
         'p="$(dirname "$d")"; made=0; [ -d "$p" ] || made=1; '
         'install -D -m %o /dev/stdin "$d"; '
@@ -417,9 +438,14 @@ def _install_through_wsl(payload: Payload, src: str,
                        stamp_text(payload).replace("\n", "\\n"),
                        STAMP_SUFFIX, STAMP_SUFFIX))
     head = ["wsl.exe"] + (["-d", distro] if distro else []) + ["-u", "root"]
+    # A TIMEOUT, because a wedged WSL is a state this rig documents and hits:
+    # zombie mounts pin a distro and wsl.exe never returns.  Without one the
+    # worker thread waits forever, "Fix setup" stays greyed and Start sits at
+    # "Starting…" with no way back but killing the app.  Ten minutes is far
+    # longer than piping 20 MB and far shorter than never.
     with open(src, "rb") as f:
         proc = subprocess.run(
-            head + ["-e", "bash", "-c", script],
+            head + ["-e", "bash", "-c", script], timeout=600,
             stdin=f, capture_output=True,
             creationflags=(subprocess.CREATE_NO_WINDOW
                            if sys.platform == "win32" else 0))
@@ -457,9 +483,17 @@ def _probe_locally(payload: Payload) -> bool:
 
 def _probe_through_wsl(payload: Payload,
                        distro: Optional[str] = None) -> bool:
+    # NOT "IS SOMETHING THERE" - "IS THIS ONE THERE".  The stamp beside the
+    # binary names the payload it came from, so a RE-CUT payload (a new hash
+    # under the same filename) actually reaches a machine that already has the
+    # old one.  Existence alone would mean the first payload a machine ever
+    # installed is the last one it would ever get, while the app went on
+    # believing its users were running the bytes it had pinned.
     script = ('h="$(getent passwd 1000 | cut -d: -f6)"; d="%s"; '
-              'case "$d" in "~"*) d="$h${d#\\~}";; esac; [ -x "$d" ]'
-              % payload.dest)
+              'case "$d" in "~"*) d="$h${d#\\~}";; esac; '
+              '[ -x "$d" ] || exit 1; '
+              'grep -qx "sha256=%s" "$d%s" 2>/dev/null'
+              % (payload.dest, payload.sha256, STAMP_SUFFIX))
     try:
         head = ["wsl.exe"] + (["-d", distro] if distro else [])
         proc = subprocess.run(

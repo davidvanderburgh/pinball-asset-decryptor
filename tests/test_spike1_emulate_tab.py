@@ -38,6 +38,26 @@ def _no_runtime_unless_asked(monkeypatch):
     """
     monkeypatch.setattr(spike1_emulate_tab.runtime, "distro_for", lambda rig: None)
     monkeypatch.setattr(spike1_emulate_tab.runtime, "known_state", lambda: None)
+    # AND NOTHING HERE MAY REACH THE NETWORK OR A REAL DISTRO.  `_fix_setup`
+    # calls `_install_runtime`, which on a machine whose runtime is a version
+    # behind falls straight through to `runtime.install()` - a 371 MB download
+    # into the real per-user cache, and a `wsl --import` into the real WSL.  A
+    # test that does that on a CI runner is a broken test, and on a developer's
+    # machine it is a broken machine, so both are refused here and any test
+    # that is ABOUT installing patches them itself.
+    def _refuse_install(*a, **kw):
+        raise AssertionError(
+            "a test reached the real runtime installer - patch it")
+
+    def _refuse_payloads(*a, **kw):
+        raise AssertionError(
+            "a test reached the real payload downloader - patch it")
+
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "install", _refuse_install)
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "status",
+                        lambda *a, **kw: ("unsupported", "not in tests"))
+    from pinball_decryptor.core import payloads as _core_payloads
+    monkeypatch.setattr(_core_payloads, "ensure", _refuse_payloads)
 
 
 def test_event_log_filters_keep_events_and_drop_chatter():

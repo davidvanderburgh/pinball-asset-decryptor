@@ -59,6 +59,26 @@ def _no_runtime_unless_asked(monkeypatch):
     """
     monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
     monkeypatch.setattr(emulate_tab.runtime, "known_state", lambda: None)
+    # AND NOTHING HERE MAY REACH THE NETWORK OR A REAL DISTRO.  `_fix_setup`
+    # calls `_install_runtime`, which on a machine whose runtime is a version
+    # behind falls straight through to `runtime.install()` - a 371 MB download
+    # into the real per-user cache, and a `wsl --import` into the real WSL.  A
+    # test that does that on a CI runner is a broken test, and on a developer's
+    # machine it is a broken machine, so both are refused here and any test
+    # that is ABOUT installing patches them itself.
+    def _refuse_install(*a, **kw):
+        raise AssertionError(
+            "a test reached the real runtime installer - patch it")
+
+    def _refuse_payloads(*a, **kw):
+        raise AssertionError(
+            "a test reached the real payload downloader - patch it")
+
+    monkeypatch.setattr(emulate_tab.runtime, "install", _refuse_install)
+    monkeypatch.setattr(emulate_tab.runtime, "status",
+                        lambda *a, **kw: ("unsupported", "not in tests"))
+    from pinball_decryptor.core import payloads as _core_payloads
+    monkeypatch.setattr(_core_payloads, "ensure", _refuse_payloads)
 
 
 def test_parse_status_reads_key_value_lines():
@@ -666,8 +686,13 @@ def test_env_survives_the_hop_on_every_platform(monkeypatch, tmp_path):
 # home rides along explicitly because root's own HOME is the wrong rootfs.
 
 def _home(monkeypatch, value):
-    """Pin wsl_home()'s answer - the probe itself needs a live WSL."""
-    monkeypatch.setattr(emulate_tab, "_WSL_HOME", [value, True])
+    """Pin wsl_home()'s answer - the probe itself needs a live WSL.
+
+    The second slot is the DISTRO the answer belongs to, not a boolean: the
+    app can install its own Linux mid-session, and a cache that outlived the
+    switch would hand one distro's home to a rig running in another.  "" is
+    the machine's default, which is where these tests run."""
+    monkeypatch.setattr(emulate_tab, "_WSL_HOME", [value, ""])
 
 
 def test_windows_start_is_the_checkpointable_launch(monkeypatch, tmp_path):
@@ -699,6 +724,7 @@ def _account_probe(monkeypatch, whoami, passwd=""):
     """Answer the two wsl.exe probes wsl_account() makes, and nothing else."""
     monkeypatch.setattr(emulate_tab, "_WSL_ACCOUNT", [("", ""), False])
     monkeypatch.setattr(emulate_tab, "_WSL_HOME", [None, False])
+    # False = never probed, so the probes below actually run.
 
     def fake_run(argv, **kw):
         if "whoami" in argv:
@@ -3598,3 +3624,35 @@ def test_the_first_run_in_the_apps_own_linux_says_what_it_will_rebuild(
     monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
     panel._note_the_runtime_is_a_different_machine()
     assert not logged
+
+
+def test_the_wsl_account_belongs_to_the_distro_it_was_probed_in(monkeypatch):
+    """★ The app can install its own Linux MID-SESSION.  Probe the Spike 2 tab
+    once (caching the default distro's user and home), press Fix setup on the
+    Spike 1 tab, and every later Spike 2 run is `wsl -d PAD-Runtime` carrying
+    the OTHER distro's account - a rig looking for its work in a home that
+    belongs to nobody there.  The cache is keyed by distro now."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    where = {"distro": None}
+    monkeypatch.setattr(emulate_tab.runtime, "distro_for",
+                        lambda rig: where["distro"])
+    probes = []
+
+    def fake_run(argv, **kw):
+        probes.append(argv)
+        if "whoami" in argv:
+            return SimpleNamespace(stdout=b"david\n", returncode=0)
+        return SimpleNamespace(stdout=b"david:x:1000:1000::/home/david:/bin/sh\n",
+                               returncode=0)
+
+    monkeypatch.setattr(emulate_tab, "_WSL_ACCOUNT", [("", ""), False])
+    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
+    assert emulate_tab.wsl_account() == ("david", "/home/david")
+    n = len(probes)
+    emulate_tab.wsl_account()
+    assert len(probes) == n, "the same distro must be answered from cache"
+
+    where["distro"] = "PAD-Runtime"          # Fix setup ran
+    emulate_tab.wsl_account()
+    assert len(probes) > n, "a different distro must be asked again"
+    assert probes[-1][:3] == ["wsl.exe", "-d", "PAD-Runtime"], probes[-1]

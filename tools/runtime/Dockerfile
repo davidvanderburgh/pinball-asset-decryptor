@@ -117,6 +117,7 @@ RUN mkdir -p /out \
         libnet1-dev libcap-dev libbsd-dev uuid-dev \
       && git clone --depth 1 --branch "$CRIU_VERSION" \
            https://github.com/checkpoint-restore/criu.git /src \
+      && echo "criu $CRIU_VERSION is commit $(git -C /src rev-parse HEAD)" \
       && make -C /src -j"$(nproc)" USERCFLAGS=-std=gnu17 criu \
       && install -D -m 0755 /src/criu/criu /out/usr/local/bin/criu; \
     fi
@@ -192,7 +193,10 @@ RUN apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
 #:                              away from the host tree and needs a NATIVE
 #:                              STATIC binary inside the guest root
 #: and the rest are what the rig's own scripts call: make and patch for its
-#: builds, zstd and xxd for card work, and the two runtime libraries the GL
+#: builds, zstd and xxd for card work, file(1) - which emu_root.sh uses to
+#: decide whether busybox is static, and therefore whether SAVE STATES are
+#: possible at all (without it the boot quietly falls back and blames the
+#: machine for a missing static busybox that is right there), and the two runtime libraries the GL
 #: renderer links by SONAME (it declares every entry point itself, so no -dev
 #: packages are needed for them).  criu's shared libraries are here too,
 #: because the binary copied in from the stage above is dynamically linked.
@@ -207,7 +211,7 @@ RUN if [ "$VARIANT" = full ]; then \
         fuse3 \
         ffmpeg \
         busybox-static \
-        make patch zstd xxd \
+        make patch zstd xxd file \
         libegl1 libx11-6 \
         libprotobuf-c1 libnl-3-200 libnet1 libcap2 libbsd0 libuuid1 \
       && rm -rf /var/lib/apt/lists/*; \

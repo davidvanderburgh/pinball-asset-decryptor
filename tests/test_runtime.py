@@ -176,16 +176,26 @@ def test_the_health_answer_is_cached_because_it_is_asked_on_a_timer(monkeypatch)
 
 def test_installing_replaces_a_registered_runtime_rather_than_failing_on_it(
         monkeypatch, tmp_path):
-    """`wsl --import` refuses a name that exists, and the states this heals -
-    a half-imported runtime, one from an older app version - are exactly the
-    ones where the user pressed a button that says Fix."""
+    """`wsl --import` refuses a name that exists, so replacing one means
+    `wsl --unregister` first - which DELETES that distro's filesystem, and the
+    rigs keep extracted games, card caches and save-state slots inside it.  A
+    slot is something a person made and cannot get back, so the destruction is
+    a flag the caller has to pass, and the only caller that may pass it is a
+    dialog that named what is inside."""
     tar = tmp_path / "img.tar.gz"
     tar.write_bytes(b"x")
     monkeypatch.setattr(runtime, "ensure_cached", lambda *a, **k: str(tar))
     monkeypatch.setattr(runtime, "verify", lambda *a: (True, ""))
     monkeypatch.setenv("PAD_RUNTIME_DIR", str(tmp_path / "dest"))
     calls = []
-    runtime.install(runner=_runner(listed=[runtime.DISTRO], calls=calls))
+    # WITHOUT CONSENT IT REFUSES.  Replacing a registered runtime destroys the
+    # distro's filesystem, and the rigs keep save-state slots in there.
+    with pytest.raises(runtime.RuntimeNeedsReplacing):
+        runtime.install(runner=_runner(listed=[runtime.DISTRO], calls=calls))
+    assert not [c for c in calls if "--unregister" in c], calls
+    calls.clear()
+    runtime.install(runner=_runner(listed=[runtime.DISTRO], calls=calls),
+                    replace=True)
     flat = [" ".join(c) for c in calls]
     assert any("--unregister" in c for c in flat), flat
     imp = [c for c in flat if "--import" in c]
@@ -438,3 +448,52 @@ def test_known_state_never_asks_anyone(monkeypatch):
     runtime.status(refresh=True)
     assert runtime.known_state() == "ready"
     assert len(calls) == 2, calls
+
+
+def test_no_check_in_the_workflow_can_pass_over_its_own_failure():
+    """★ The busybox assertion silently did nothing for a whole release cycle.
+
+    Written as `check && echo "it works"`, a FAILING check is exempt from
+    `set -e` - only the last command of an && list is checked - so the step
+    prints nothing, moves on and passes.  That is how an image shipped without
+    file(1) while the step that was supposed to catch it reported success.
+    Every assertion is its own statement ending in `|| fail` now, and this
+    keeps the old shape from coming back."""
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    body = wf[wf.index("Prove the Spike 2 toolchain works"):
+              wf.index("Build the rig's actual shim")]
+    for line in body.splitlines():
+        bare = line.strip()
+        if bare.startswith("#") or "&& echo" not in bare:
+            continue
+        raise AssertionError(
+            "a check that reports success through `&& echo` can pass over its "
+            "own failure: %s" % bare)
+    assert "|| fail" in body, "the checks must fail loudly"
+    assert 'fail() { echo "FAILED: $1"; exit 1; }' in body
+
+
+def test_the_image_carries_file_because_save_states_depend_on_it():
+    """★ emu_root.sh decides whether busybox is static with `file -L`, and that
+    decision is whether the checkpointable boot - SAVE STATES - is possible at
+    all.  Without file(1) the rig falls back quietly and blames the machine for
+    a missing static busybox that is sitting right there."""
+    df = DOCKERFILE.read_text(encoding="utf-8")
+    installed = set()
+    in_install = False
+    for line in df.splitlines():
+        bare = line.strip()
+        if bare.startswith("#"):
+            continue
+        if "apt-get" in bare and " install" in bare:
+            in_install = True
+            bare = bare.split(" install", 1)[1]
+        elif not in_install:
+            continue
+        installed.update(re.findall(r"(?<![-\w])[a-z][a-z0-9.+-]{2,}", bare))
+        if not bare.endswith("\\"):
+            in_install = False
+    assert "file" in installed, "the image must carry file(1)"
+    rig = (REPO / "tools" / "spike1_emu" / "emu_root.sh").read_text(
+        encoding="utf-8")
+    assert "file -L" in rig, "if the rig stopped using it, drop this test"

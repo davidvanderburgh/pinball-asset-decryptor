@@ -220,6 +220,9 @@ class Spike1EmulatePanel:
         self._polled_once = False
         self._stopped = False
         self._busy = False
+        #: How far the last runtime download got, so progress is logged in
+        #: steps rather than on every chunk.
+        self._dl_pct = 0
         self._extracting = False
         self._last_up = False
         self._info = {}
@@ -1130,6 +1133,11 @@ class Spike1EmulatePanel:
         pinned in this app version yet - because that is not a fault, it is
         this feature not applying here."""
         say = log or self._log
+        # THE RIG MUST NOT BE RUNNING.  Replacing the distro it runs in kills
+        # the run and takes its work with it.
+        if self._last_up:
+            say("Spike 1: the emulator is running — stop it first.")
+            return None
         state, detail = runtime.status(refresh=True)
         if state in ("unsupported", "unpublished"):
             return None
@@ -1141,8 +1149,48 @@ class Spike1EmulatePanel:
             return state
         say("Spike 1: installing the Linux the emulator runs on (%s)…"
             % runtime.IMAGE.version)
-        runtime.install(log=lambda m: say("Spike 1: %s" % m))
+        try:
+            runtime.install(log=lambda m: say("Spike 1: %s" % m),
+                            progress=self._download_progress)
+        except runtime.RuntimeNeedsReplacing:
+            # THE ONE PLACE ALLOWED TO SAY YES, and only after saying what it
+            # costs.  Replacing the runtime unregisters the distro, and the
+            # rigs keep extracted games, card caches and SAVE-STATE SLOTS
+            # inside it - a slot is something a person made and cannot get
+            # back.  The button that leads here says "Fix setup"; nobody
+            # pressing it has agreed to that.
+            if not self._ask_before_replacing():
+                say("Spike 1: left the installed runtime alone.")
+                return "stale"
+            runtime.install(log=lambda m: say("Spike 1: %s" % m),
+                            progress=self._download_progress, replace=True)
         return "ready"
+
+    def _download_progress(self, done, total):
+        """A 371 MB download with no progress looks like a hang, and the app
+        has a hang that looks exactly the same (a wedged WSL) - so silence
+        here makes two different problems indistinguishable."""
+        if not total:
+            return
+        pct = int(done * 100 / total)
+        if pct >= self._dl_pct + 10:
+            self._dl_pct = pct
+            self._log("Spike 1: downloading… %d%% of %d MB"
+                      % (pct, total // (1024 * 1024)))
+
+    def _ask_before_replacing(self):
+        """Name what is about to be destroyed, then let a human decide."""
+        return messagebox.askyesno(
+            "Replace the emulator's Linux?",
+            "This app installs its own Linux (%s), and one is already "
+            "installed here from an older version.\n\n"
+            "Replacing it DELETES everything inside it:\n"
+            "  - games extracted from your cards (about a minute each to redo)\n"
+            "  - cached cards\n"
+            "  - any SAVE STATES you made while running in it\n\n"
+            "Nothing outside it is touched: your cards, your extractions on "
+            "this PC and your own WSL distro all stay as they are.\n\n"
+            "Replace it now?" % runtime.DISTRO)
 
     def _default_distro_has_a_game(self):
         """Does the machine's OWN distro hold an extraction the runtime does

@@ -919,12 +919,15 @@ def rig_cmd_root(script, *args):
 #: wsl_account()'s cache: [(user, home), probed].  One probe per app run is
 #: plenty - the answer changes when the user reinstalls their distro, not
 #: between clicks.
+#: [(user, home), the distro it was probed in].  False means "never probed";
+#: any other value is the distro name (or "" for the machine's default).
 _WSL_ACCOUNT = [("", ""), False]
 
 #: wsl_home()'s cache: [value, probed].  Its own, and not just a slice of the
 #: one above, because it answers a NARROWER question (see wsl_home) - and
 #: because pinning it is how the tests hand this module a home without a live
 #: WSL.
+#: [home, the distro it was probed in] - see wsl_account above.
 _WSL_HOME = [None, False]
 
 
@@ -948,9 +951,17 @@ def wsl_account():
 
     NEVER ON THE UI THREAD - see :func:`wsl_home` for why.
     """
-    if _WSL_ACCOUNT[1]:
+    # THE ANSWER BELONGS TO A DISTRO, NOT TO THE PROCESS.  This used to be
+    # cached for the life of the app, which was true while there was only ever
+    # one Linux to ask.  Now the app can install its own mid-session: probe the
+    # Spike 2 tab once (caching the default distro's account), press Fix setup,
+    # and every later run would be `wsl -d PAD-Runtime` carrying the OTHER
+    # distro's user and home - a rig looking for its work in a directory that
+    # belongs to nobody there.
+    _here = runtime.distro_for("spike2") or ""
+    if _WSL_ACCOUNT[1] == _here:
         return _WSL_ACCOUNT[0]
-    _WSL_ACCOUNT[1] = True
+    _WSL_ACCOUNT[1] = _here
     user = home = ""
     try:
         u = subprocess.run(_wsl_head() + ["whoami"],
@@ -997,9 +1008,10 @@ def wsl_home():
     quit blocks by design, and it only runs while a run is up - so WSL is
     warm and the probe answers fast even when it is not already cached.
     """
-    if _WSL_HOME[1]:
+    _here = runtime.distro_for("spike2") or ""
+    if _WSL_HOME[1] == _here:
         return _WSL_HOME[0]
-    _WSL_HOME[1] = True
+    _WSL_HOME[1] = _here
     user, home = wsl_account()
     if user and user != "root" and home:
         _WSL_HOME[0] = home

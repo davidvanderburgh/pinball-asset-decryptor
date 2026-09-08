@@ -244,3 +244,103 @@ def test_the_app_and_the_rig_spell_the_stamp_the_same_way():
     assert m.group(1) == payloads.STAMP_SUFFIX
     assert "source_sha256=" in src, (
         "the rig reads a field the app no longer writes")
+
+
+# ------------------------------------- what the adversarial review found ----
+
+def test_the_probe_asks_whether_THIS_payload_is_installed(sample):
+    """★ A re-cut payload must reach a machine that already has the old one.
+    The probe used to ask only whether a file existed at the path, which would
+    make the first payload a machine ever installed the last one it ever got -
+    while the app went on believing its users ran the bytes it had pinned."""
+    import types
+    captured = []
+    real_run = payloads.subprocess.run
+
+    def fake(args, **kw):
+        captured.append(args)
+        return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    payloads.subprocess.run = fake
+    try:
+        payloads._probe_through_wsl(sample, "PAD-Runtime")
+    finally:
+        payloads.subprocess.run = real_run
+    argv = captured[0]
+    assert argv[:3] == ["wsl.exe", "-d", "PAD-Runtime"], argv
+    script = argv[-1]
+    assert "sha256=%s" % sample.sha256 in script, script
+    assert payloads.STAMP_SUFFIX in script
+
+
+def test_a_distro_with_no_ordinary_user_is_refused_not_written_to_at_the_root(
+        sample):
+    """★ `~` with no uid 1000 expands to nothing, so the emulator would install
+    at the ROOT of the distro - and the probe, expanding the same empty `~` the
+    same wrong way, would then report it correctly installed."""
+    import inspect
+    src = inspect.getsource(payloads._install_through_wsl)
+    assert 'if [ -z "$h" ]' in src, "no guard for a distro without uid 1000"
+    assert "exit 3" in src
+
+
+def test_the_bytes_have_to_be_for_this_cpu(sample):
+    """★ Everything pinned here is x86-64.  An ARM64 Windows PC runs an
+    aarch64 distro, where these install cleanly and then cannot exec."""
+    import inspect
+    src = inspect.getsource(payloads._install_through_wsl)
+    assert "uname -m" in src and "x86_64" in src
+
+
+def test_a_wedged_wsl_cannot_block_the_installer_forever(sample):
+    """★ A wedged WSL is a documented state of this rig - zombie mounts pin a
+    distro and wsl.exe never returns.  Without a timeout the worker waits for
+    ever, the button stays greyed, and the only way out is killing the app."""
+    import inspect
+    assert "timeout=600" in inspect.getsource(payloads._install_through_wsl)
+
+
+def test_a_mac_is_not_given_linux_binaries_to_keep(monkeypatch):
+    """★ Two of the four installers we ship are macOS.  The Spike 1 tab is
+    Windows-only there, and writing Linux ELF into a Mac home while reporting
+    success is worse than doing nothing."""
+    monkeypatch.setattr(payloads.sys, "platform", "darwin")
+    with pytest.raises(RuntimeError, match="Linux programs"):
+        payloads.default_installer()
+
+
+def test_the_pinned_source_hash_is_the_hash_of_the_source_we_ship():
+    """★ NOTHING checked this, and it is the promise the whole payload rests
+    on.  The rig decides whether to rebuild the device model by comparing the
+    stamp's source hash against the s1hwshim.c sitting beside it - so a shipped
+    edit to that file WITHOUT a re-cut payload silently puts every user back on
+    the compile path, needing gcc and libfuse3-dev to start the emulator.  That
+    is the exact failure this feature exists to end, arriving quietly."""
+    import hashlib
+    for key, rel in (("spike1-hwshim", "tools/spike1_emu/s1hwshim.c"),
+                     ("spike1-qemu", "tools/spike1_emu/patch_qemu.py")):
+        p = payloads.PAYLOADS[key]
+        if not p.source_sha256:
+            continue
+        raw = (REPO / rel).read_bytes()
+        # Line endings normalised, exactly as the rig's s1_source_hash and the
+        # payload workflow do it - a Windows checkout is CRLF and CI is LF.
+        norm = b"\n".join(line.rstrip(b"\r") for line in raw.split(b"\n"))
+        assert hashlib.sha256(norm).hexdigest() == p.source_sha256, (
+            "%s no longer matches the %s the payload was built from - re-cut "
+            "the payload release, or every user goes back to compiling it"
+            % (rel, key))
+
+
+def test_the_qemu_source_the_payload_is_built_from_is_pinned_too():
+    """★ "Everything is pinned" stopped one link short.  The payload the app
+    installs is verified by SHA-256 and so is the image that bakes it in - but
+    the tarball those are BUILT FROM was fetched over the wire and unpacked
+    unchecked, so one substituted file on download.qemu.org would have flowed
+    all the way to a user's machine wearing our hashes."""
+    src = (REPO / "tools" / "spike1_emu" / "build_qemu.sh").read_text(
+        encoding="utf-8")
+    assert re.search(r"QEMU_SHA512_8_2_2=[0-9a-f]{128}", src), (
+        "the qemu tarball must be pinned by digest")
+    assert "sha512sum" in src and "Nothing was unpacked" in src, (
+        "and a mismatch must stop the build before anything is unpacked")

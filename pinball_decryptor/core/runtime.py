@@ -50,6 +50,13 @@ from typing import Optional, Tuple
 from .payloads import (Payload, ensure_cached, is_published,  # noqa: F401
                        verify)
 
+class RuntimeNeedsReplacing(RuntimeError):
+    """Raised instead of destroying a runtime that is already installed.
+
+    Carries no data: the caller knows which distro it asked about, and what
+    matters is that the decision goes to a person."""
+
+
 #: The distro name the app registers.  Chosen to be obviously ours in
 #: `wsl -l -v`, and never to collide with a name a person would pick.
 DISTRO = "PAD-Runtime"
@@ -97,6 +104,22 @@ def _run(args, timeout=120, stdin=None):
     return subprocess.run(args, capture_output=True, timeout=timeout,
                           env=_wsl_env(), stdin=stdin,
                           creationflags=_CREATE_FLAGS)
+
+
+def _why(out) -> str:
+    """What wsl.exe actually said, wherever it said it.
+
+    IT WRITES ITS ERRORS TO STDOUT, in UTF-16, and returns 4294967295 - so a
+    message built from stderr and the return code alone says "exit 4294967295"
+    for a full disk, a WSL 1 machine, virtualization switched off in the BIOS
+    and a distro that will not start, which are four different problems with
+    four different answers."""
+    for stream in (getattr(out, "stderr", b""), getattr(out, "stdout", b"")):
+        said = " ".join(_text(stream or b"").split())
+        if said:
+            return said
+    rc = getattr(out, "returncode", "?")
+    return "exit %s (WSL said nothing)" % rc
 
 
 def _text(raw):
@@ -274,8 +297,17 @@ def usable(runner=None) -> bool:
 
 
 def install(log=None, progress=None, runner=None, opener=None,
-            source: Optional[str] = None) -> str:
+            source: Optional[str] = None, replace: bool = False) -> str:
     """Download (or take a supplied file), verify, and import as a distro.
+
+    ``replace`` IS A CONSENT FLAG, and it is False by default on purpose.
+    Importing over a registered runtime means `wsl --unregister` first, and
+    that DELETES THAT DISTRO'S ENTIRE FILESYSTEM - which is not empty: the rigs
+    keep their extracted games, their card caches and their SAVE-STATE SLOTS
+    inside it ($S1_WORK/saves, $PAD_HOME/cardcache).  A save state is something
+    a person made and cannot get back.  So a caller that has not asked a human
+    gets :class:`RuntimeNeedsReplacing` instead of a silent wipe, and the one
+    place that may pass ``replace=True`` is a dialog that named what is inside.
 
     Returns the state afterwards.  Raises with a sentence for the log if the
     import itself fails - which on a machine without the WSL feature is the
@@ -297,17 +329,21 @@ def install(log=None, progress=None, runner=None, opener=None,
                                 opener=opener)
 
     # A REGISTERED DISTRO IS REPLACED, NOT INSTALLED OVER.  `wsl --import`
-    # refuses a name that exists, and the states this heals - a half-imported
-    # runtime, one from an older app version - are exactly the ones where the
-    # user pressed a button that says Fix.
+    # refuses a name that exists - but replacing one is destroying one, so it
+    # happens only when a human has been told what is in it.
     run = runner or _run
+    if registered(runner=runner) and not replace:
+        raise RuntimeNeedsReplacing(
+            "A runtime called %s is already installed, and replacing it "
+            "deletes everything inside it - extracted games, card caches and "
+            "save-state slots." % DISTRO)
     if registered(runner=runner):
         say("Removing the previous runtime…")
         out = run(["wsl.exe", "--unregister", DISTRO], timeout=300)
         invalidate()
         if out.returncode != 0:
             raise RuntimeError("could not remove the previous runtime: %s"
-                               % _text(out.stderr).strip())
+                               % _why(out))
 
     target = install_dir()
     os.makedirs(target, exist_ok=True)
@@ -331,9 +367,13 @@ def install(log=None, progress=None, runner=None, opener=None,
 
 
 def uninstall(runner=None) -> bool:
-    """Unregister the distro.  Destroys its filesystem, which is why nothing
-    the user made lives in it: cards, extractions and captures are the app's,
-    on the Windows side."""
+    """Unregister the distro, DESTROYING ITS FILESYSTEM.
+
+    And that filesystem is not empty, whatever an earlier version of this
+    docstring claimed: the rigs keep extracted games, card caches and
+    save-state slots inside the distro they run in ($S1_WORK/saves,
+    $PAD_HOME/cardcache).  Cards and captures are the app's, on the Windows
+    side; slots are not.  Callers must have said so to a human first."""
     if not registered(runner=runner):
         return False
     run = runner or _run

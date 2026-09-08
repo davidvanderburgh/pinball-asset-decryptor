@@ -125,6 +125,15 @@ jobs:
           test "$GOT" = "$V" || { echo "the image says version $GOT, the app expects $V"; exit 1; }
           echo "the image stamps the version the app expects ($V)"
 
+      # EVERY CHECK IS ITS OWN STATEMENT, ending in `|| fail`, and that shape
+      # is not style.  Written as `check && echo "it works"`, a FAILING check
+      # is exempt from `set -e` - only the last command of an && list is
+      # checked - so the step prints nothing, skips to the next line and
+      # passes.  That is exactly what happened: this image shipped without
+      # file(1), the busybox assertion silently did nothing, "busybox is
+      # static" never printed, and the step reported success.  A verification
+      # harness that can pass over its own failures is worse than none.
+      #
       # THE SPIKE 2 SET, CHECKED BY NAME AND BY RUNNING IT.  `command -v` alone
       # would pass for a cross compiler that cannot compile and a criu that
       # cannot load its libraries - and a criu copied out of a build stage is
@@ -146,17 +155,22 @@ jobs:
         run: |
           docker run --rm pad-runtime:${{ inputs.tag }} bash -c '
             set -e
-            for t in qemu-arm-static arm-linux-gnueabihf-gcc gcc debugfs                      fusermount3 fuse2fs ffmpeg busybox criu make patch zstd xxd; do
-              command -v $t >/dev/null || { echo "missing: $t"; exit 1; }
+            fail() { echo "FAILED: $1"; exit 1; }
+            for t in qemu-arm-static arm-linux-gnueabihf-gcc gcc debugfs                      fusermount3 fuse2fs ffmpeg busybox criu make patch zstd                      xxd file; do
+              command -v $t >/dev/null || fail "missing: $t"
             done
-            criu --version
+            criu --version || fail "criu will not run (its libraries did not come across?)"
             arm-linux-gnueabihf-gcc --version | head -1
             echo "int main(void){return 0;}" > /tmp/t.c
-            gcc -o /tmp/t.native /tmp/t.c && /tmp/t.native
-            arm-linux-gnueabihf-gcc -static -o /tmp/t.arm /tmp/t.c
-            qemu-arm-static /tmp/t.arm && echo "an ARM program ran under the interpreter"
-            ffmpeg -hide_banner -f lavfi -i testsrc=size=64x64:rate=1 -frames:v 1                    -c:v libx264 -f null - 2>/dev/null               && echo "ffmpeg decodes and encodes H.264"
-            busybox --help >/dev/null && file $(command -v busybox) | grep -q "statically linked"               && echo "busybox is static, so the pivot boot has its umount"
+            gcc -o /tmp/t.native /tmp/t.c || fail "the native compiler cannot compile"
+            /tmp/t.native || fail "what the native compiler built will not run"
+            arm-linux-gnueabihf-gcc -static -o /tmp/t.arm /tmp/t.c || fail "the cross compiler cannot compile"
+            qemu-arm-static /tmp/t.arm || fail "an ARM program will not run under the interpreter"
+            echo "an ARM program ran under the interpreter"
+            ffmpeg -hide_banner -f lavfi -i testsrc=size=64x64:rate=1 -frames:v 1                    -c:v libx264 -f null - 2>/dev/null || fail "ffmpeg cannot encode H.264"
+            echo "ffmpeg decodes and encodes H.264"
+            file "$(command -v busybox)" | grep -q "statically linked"               || fail "busybox is not static, so the save-state boot has no umount"
+            echo "busybox is static, so the pivot boot has its umount"
             echo "spike 2 toolchain OK"
           '
 

@@ -45,7 +45,10 @@ docker rm "$CID"
 ## Installing, inspecting and removing one
 
 The app does all of this from **Fix setup** on the Emulate tab, with no
-terminal. By hand, from Windows:
+terminal. The image is about **370 MB** compressed and unpacks to roughly
+1.5 GB, and replacing an installed runtime **destroys everything inside it** —
+extracted games, card caches and save-state slots — which is why the app asks
+before it does that and never does it while a rig is running. By hand, from Windows:
 
 ```powershell
 wsl --import PAD-Runtime "$env:LOCALAPPDATA\pinball_decryptor\runtime" pad-runtime-base.tar.gz --version 2
@@ -62,12 +65,18 @@ where the runtime is installed but suspect.
 
 The `base` variant carries what the **Spike 1** rig uses: python3, procps,
 util-linux, socat, a uid-1000 account (the rig looks its user up by number),
-and the emulator binaries. No `fuse3` — the device model links libfuse
-statically and talks to `/dev/fuse` directly.
+and the emulator binaries.
 
-The **Spike 2** rig is deliberately *not* on it yet: it wants another ~400 MB
-of toolchain (`qemu-user-static`, an ARM cross compiler, `ffmpeg`, `criu`), and
-it is the rig in daily use, so moving it onto a new distro is its own pass with
-its own proof. Until then it keeps using the machine's default distro. Which
-rigs are routed here is decided in one place — `RIGS` in `core/runtime.py` —
-and adding one there is a promise that the image can actually run it.
+The `full` variant — what the app ships — adds everything the **Spike 2** rig
+needs: `qemu-user-static` and the ARM cross compiler (with
+`libc6-dev-armhf-cross`, because the shim's sources include libc headers even
+though they link against the *card's* libc), `gcc`/`libc6-dev`, `e2fsprogs`,
+`fuse2fs`, `fuse3`, `ffmpeg`, a static `busybox`, `file` (which is how the rig
+decides whether save states are possible at all), and a `criu` built from
+source in the image because no Ubuntu packages one.
+
+Which rigs are routed here is decided in one place — `RIGS` in
+`core/runtime.py` — and adding one there is a promise that the image can
+actually run it, checked in CI by running each tool rather than looking for it.
+The multi-boot card builder is deliberately **not** routed: different feature,
+different tool list, never audited against this image.

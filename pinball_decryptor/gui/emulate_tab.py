@@ -73,7 +73,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from ..core import config, pkgnames
+from ..core import config, pkgnames, prereqs
 from . import _rig
 from .widgets import _Tooltip
 
@@ -1222,7 +1222,10 @@ def setup_unavailable(facts):
 #: with evidence behind it rather than "try something newer" - which is what
 #: the old wording amounted to, in front of a tester already on the newest.
 #: setupfix.sh names the same one in the log; a test holds the two together.
-KNOWN_GOOD_DISTRO = "Ubuntu-24.04"
+#: Defined in core.prereqs, which hands out the same name when a distro has
+#: stopped starting altogether (PAD-113) - one constant, so the two pages of
+#: the app cannot send one user to two different Ubuntus.
+KNOWN_GOOD_DISTRO = prereqs.KNOWN_GOOD_DISTRO
 
 #: The same release, as a user reads it.  One constant, two spellings, so the
 #: sentence and the command can never name different Ubuntus.

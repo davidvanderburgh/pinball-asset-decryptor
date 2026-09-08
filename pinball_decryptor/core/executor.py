@@ -174,7 +174,16 @@ class WslExecutor(CommandExecutor):
             self.run("echo ok", timeout=15)
             return True, "WSL2 available"
         except Exception:
-            return False, "WSL2 not available. Install via: wsl --install -d Ubuntu"
+            # A REGISTERED DISTRO THAT NO LONGER STARTS fails this exactly
+            # like a machine with no WSL on it, and "install WSL" is the one
+            # instruction that cannot help there (PAD-113).  Say what failed
+            # and give the check that tells the two apart, before naming an
+            # install that is only right for one of them.
+            return False, ("WSL2 not available: a command in the default "
+                           "distro failed. If WSL is installed, check that "
+                           "the distro still starts — 'wsl -l -v', then "
+                           "'wsl -d <name> -- echo ok'. If it is not "
+                           "installed: wsl --install -d Ubuntu")
 
 
 class NativeExecutor(CommandExecutor):

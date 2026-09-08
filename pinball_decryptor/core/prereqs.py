@@ -264,7 +264,17 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
         return False, msg, hint
     lines = (result.stderr or result.stdout or "").strip().splitlines()
     err = lines[0] if lines else f"exit {result.returncode}"
-    # ...except the loop-device probe, whose failure is a property of the
+    # ...but "the distro answered" is an ASSUMPTION, and it is wrong for a
+    # whole class of machine: a distro that is registered and does not start.
+    # wsl.exe fails the same way for every command in that state, so every
+    # diagnosis below reads the symptom of the package/loop-device it asked
+    # about and describes a fault the machine does not have (PAD-113 was told
+    # its distro "answered, but could not hand out a loop device" while
+    # nothing at all ran in it).  Ask the one question that separates them.
+    if _wsl_distro_runs_commands() is False:
+        msg, hint = _diagnose_wsl_dead_distro(err)
+        return False, msg, hint
+    # ...and the loop-device probe, whose failure is a property of the
     # DISTRO (WSL 1 owns no loop devices), not of a package apt can fix.
     if "losetup" in cmd:
         msg, hint = _diagnose_wsl_loop_failure(err)
@@ -350,6 +360,74 @@ def _wsl_default_distro() -> Tuple[str, Optional[int]]:
     return "", None
 
 
+#: Where to send someone who needs a distro that works.  An LTS, and the one
+#: the emulator rig is developed against, so it is a recommendation with
+#: evidence behind it rather than "try something newer".  Lives here rather
+#: than in the Emulate tab (which re-exports it) because the WSL diagnoses on
+#: this page hand out the same name, and two spellings of "the distro we know
+#: about" is how the app ends up naming different Ubuntus in one session.
+KNOWN_GOOD_DISTRO = "Ubuntu-24.04"
+
+#: The cheapest thing a Linux can be asked to do.  Run through the same
+#: ``wsl -u root -- bash -c`` door as every probe and every pipeline command,
+#: because the question is not "is the VM up" but "can WHAT WE DO run here".
+WSL_CANARY = "exit 0"
+
+
+def _wsl_distro_runs_commands() -> Optional[bool]:
+    """Can the default distro run anything at all?  ``None`` = don't know.
+
+    A distro that is registered but does not start fails EVERY command with
+    the same wsl.exe error, so the failure of any one probe says nothing
+    about the package it asked for.  This asks the question that does
+    separate them, and it is only ever asked once a probe has already
+    failed — a healthy machine never pays for it.
+
+    A timeout or an OSError answers ``None``, never ``False``: a slow VM is
+    not a broken one, and "your distro does not start" is far too big an
+    accusation to make on a call that merely ran out of patience (the cold-VM
+    boot wait above is where slowness is handled).
+    """
+    try:
+        return _run_in_wsl(WSL_CANARY, PROBE_TIMEOUT).returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+
+
+def _diagnose_wsl_dead_distro(err: str) -> Tuple[str, str]:
+    """(message, hint) for a REGISTERED distro that runs nothing at all.
+
+    The state PAD-113 arrived in: Ubuntu-22.04 upgraded in place to the next
+    LTS, after which it stopped starting.  Everything the app knew still said
+    the distro was there — ``wsl -l -q`` lists it, ``wsl -l -v`` reports
+    VERSION 2 — so the probe failure was read as the fault of whatever that
+    probe had asked for, and the app told him a loop device could not be
+    handed out by a distro that "answered".  It had not answered; nothing had.
+
+    Neither an apt package, nor a WSL 1 conversion, nor another
+    ``wsl --install`` can touch this, so the hint carries the two things that
+    can: restart the WSL service, and (when the distro's own filesystem is
+    what broke) a second distro ALONGSIDE the broken one — never a repair of
+    it, and never a delete, because the user's files are still in there.
+    """
+    name, _version = _wsl_default_distro()
+    named = name or "the default distro"
+    return (f"WSL is installed and {named} is registered, but nothing can "
+            f"run inside it — even '{WSL_CANARY}' failed ({err}). This is "
+            f"not a missing package and not a missing install: the distro "
+            f"itself is not starting.",
+            f"Run 'wsl --shutdown' in PowerShell, wait ten seconds, then "
+            f"'wsl -d {name or '<name>'} -- echo ok'. If that still fails, "
+            f"'wsl --update' (a distro upgraded in place often needs a newer "
+            f"WSL). If it fails after that, the distro's own filesystem is "
+            f"the problem — install a second one alongside it and make that "
+            f"the default, which is the distro PAD uses:\n"
+            f"wsl --install -d {KNOWN_GOOD_DISTRO}\n"
+            f"wsl --set-default {KNOWN_GOOD_DISTRO}\n"
+            f"The broken one is left where it is; 'wsl --export "
+            f"{name or '<name>'} backup.tar' gets its files out.")
+
+
 def _diagnose_wsl_loop_failure(err: str) -> Tuple[str, str]:
     """(message, hint) for a LOOP-DEVICE probe that failed inside a
     registered, answering distro.
@@ -367,6 +445,12 @@ def _diagnose_wsl_loop_failure(err: str) -> Tuple[str, str]:
     (usually a VM that wants a restart), so say the error out loud and
     keep the user away from a reinstall either way.  When the version
     can't be read, fall back to the static hint — it carries both routes.
+
+    "Answering" is CHECKED before this is called (:func:`_probe_wsl` asks
+    :func:`_wsl_distro_runs_commands` first), so the WSL 2 branch's claim
+    that the distro answered is a fact rather than an assumption.  It used
+    to be an assumption, and on a distro that had stopped starting it was
+    the sentence that sent PAD-113 hunting a loop-device fault.
     """
     name, version = _wsl_default_distro()
     if version == 1:

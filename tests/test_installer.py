@@ -1296,6 +1296,29 @@ def test_installer_checks_the_default_distro_is_wsl2():
             f"prerequisite app-side.")
 
 
+def test_installer_names_a_registered_distro_that_does_not_answer():
+    """Regression guard — PAD-113 (the app and the installer disagreed again).
+
+    A distro that is registered and no longer starts fails ``Test-WslHasApt``
+    exactly like a machine with no distro at all, so the installer went
+    straight to "no usable distro yet" and installed a second Ubuntu without
+    a word about the one that broke.  The reporter's own distro had stopped
+    starting after an in-place release upgrade; nothing in either half of the
+    app said so, and he spent the round-trip converting a WSL 2 distro to
+    WSL 2.  The installer must read the registration list and name it."""
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    assert "Get-WslRegisteredDistros" in ps1 and "wsl -l -q" in ps1, (
+        "install_prerequisites.ps1 must ask whether a distro is REGISTERED "
+        "before deciding that nothing is installed -- `wsl --status` and an "
+        "apt probe cannot tell 'never installed' from 'stopped starting'.")
+    assert "REGISTERED, BUT NOT ANSWERING" in ps1, (
+        "the installer installs a second distro in that state and says "
+        "nothing about the first, which is the one the user's files are in.")
+    assert "wsl --export" in ps1, (
+        "a user whose distro stopped starting must be told his files are "
+        "still retrievable before anything else is installed.")
+
+
 def test_reboot_banner_names_the_start_menu_shortcut():
     """Regression guard — PAD-16 (user looped on the WSL2 reboot step).
 

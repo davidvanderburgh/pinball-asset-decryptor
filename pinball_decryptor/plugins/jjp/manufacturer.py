@@ -289,10 +289,13 @@ class JJPManufacturer(Manufacturer):
                      install_hint=(
                          "wsl --install -d Ubuntu  "
                          "(admin PowerShell, then reboot)\n"
-                         "Installed, but a loop-device error? That distro "
-                         "is WSL 1, which can't mount game images:\n"
-                         "wsl -l -v   (look at VERSION)\n"
-                         "wsl --set-version <name> 2")),
+                         "Installed, but a loop-device error? Look at the "
+                         "distro before changing anything:\n"
+                         "wsl -l -v\n"
+                         "VERSION 1 has no loop devices and cannot mount "
+                         "game images: wsl --set-version <name> 2\n"
+                         "VERSION 2 already: it is not a version problem "
+                         "— wsl --shutdown, then Re-check")),
         Prerequisite(name="partclone", where="wsl",
                      probe="which partclone.ext4",
                      reason="ISO partition extraction",

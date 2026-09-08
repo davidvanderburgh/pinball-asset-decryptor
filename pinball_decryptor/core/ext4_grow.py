@@ -72,10 +72,11 @@ LOOP_PROBE = ("modprobe loop >/dev/null 2>&1 || true; "
 
 def loop_unavailable_reason(ex, what="card image"):
     """``None`` when *ex*'s Linux can hand out a loop device, else a
-    user-facing reason naming the likely fix.  On Windows the classic culprit
-    is a WSL 1 distro (no loop devices, ever) — the message walks the user to
-    the version check and conversion instead of leaving them a bare losetup
-    error to search for.
+    user-facing reason naming what to look at.  On Windows the classic culprit
+    is a WSL 1 distro (no loop devices, ever), but a distro that has stopped
+    starting fails the same probe — the message walks the user through telling
+    them apart instead of leaving a bare losetup error to search for, and
+    instead of naming one of them as the answer (PAD-113).
 
     Public because the JJP ISO flows need the same verdict: they loop-mount
     the ext4 image they extract from the .iso, so a distro without loop
@@ -90,12 +91,23 @@ def loop_unavailable_reason(ex, what="card image"):
         detail = next((ln for ln in lines if "losetup" in ln),
                       lines[-1] if lines else "losetup -f failed")
         if sys.platform == "win32":
-            return ("WSL can't create a loop device to mount the %s "
-                    "(%s). This usually means the default WSL distro runs "
-                    "under WSL 1: check with 'wsl -l -v' in PowerShell and "
-                    "convert it with 'wsl --set-version <name> 2'. If it "
-                    "already says VERSION 2, run 'wsl --shutdown' and try "
-                    "again" % (what, detail))
+            # NEVER LEAD WITH A GUESS.  "This usually means WSL 1" read as a
+            # diagnosis: the reporter checked (VERSION 2), ran the conversion
+            # anyway, was told the distro was already version 2, and went on
+            # to upgrade the whole distro in place hunting the fault it named
+            # (PAD-113).  Three different machines fail this way and one
+            # command separates them, so ask for that instead of picking one.
+            # The prerequisite strip diagnoses the same states from the app,
+            # where it can run the checks itself (prereqs._probe_wsl); this
+            # runs mid-pipeline and stays pure.
+            return ("WSL can't create a loop device to mount the %s (%s). "
+                    "Look at the distro before changing anything: 'wsl -l -v' "
+                    "in PowerShell. VERSION 1 has no loop devices and has to "
+                    "be converted with 'wsl --set-version <name> 2'. VERSION "
+                    "2 is not a version problem: run 'wsl --shutdown' and try "
+                    "again. If even 'wsl -d <name> -- echo ok' fails, the "
+                    "distro itself has stopped starting and no package or "
+                    "conversion will help" % (what, detail))
         return ("this system can't create a loop device to mount the %s "
                 "(%s); load the loop module (modprobe loop) or reboot, "
                 "then try again" % (what, detail))

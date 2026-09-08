@@ -225,12 +225,18 @@ def test_wsl_restart_pending_says_restart_windows(monkeypatch):
 def test_wsl_fastfail_with_registered_distro_keeps_static_hint(monkeypatch):
     """A registered distro whose probe fails on a TOOL (an apt package that
     isn't installed) keeps the real error line and the static hint, which
-    names the apt install."""
+    names the apt install.
+
+    The distro answers everything EXCEPT the probe — which is what "an apt
+    package is missing" actually looks like, and what tells this machine
+    apart from one whose distro no longer starts (PAD-113)."""
     _wsl_env(monkeypatch)
 
     def _run(cmd, *a, **kw):
         if "-l" in cmd:
             return subprocess.CompletedProcess(cmd, 0)
+        if cmd[-1] == prereqs.WSL_CANARY:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(
             cmd, 1, stdout="",
             stderr="bash: partclone.ext4: command not found\n")
@@ -258,9 +264,14 @@ _WSL_LIST_HEADER = "  NAME      STATE           VERSION\n"
 
 
 def _loop_probe_run(monkeypatch, *, version_line, calls=None,
-                    version_rc=0):
+                    version_rc=0, canary_rc=0, dead_err=""):
     """wsl fake for a loop probe: registration OK, the in-VM probe fails
-    with a losetup error, and `wsl -l -v` answers *version_line*."""
+    with a losetup error, and `wsl -l -v` answers *version_line*.
+
+    The distro answers the canary by default: these are machines whose Linux
+    RUNS, and whose loop devices are the thing missing.  *canary_rc* /
+    *dead_err* model the other machine — a registered distro that no longer
+    starts, where every command fails with wsl.exe's own error (PAD-113)."""
     def _run(cmd, *a, **kw):
         assert cmd[0] == "wsl"
         if list(cmd[1:3]) == ["-l", "-v"]:
@@ -273,8 +284,18 @@ def _loop_probe_run(monkeypatch, *, version_line, calls=None,
             if calls is not None:
                 calls.append("list")
             return subprocess.CompletedProcess(cmd, 0)
+        if cmd[-1] == prereqs.WSL_CANARY:
+            if calls is not None:
+                calls.append("canary")
+            return subprocess.CompletedProcess(
+                cmd, canary_rc, stdout="", stderr=dead_err)
         if calls is not None:
             calls.append("probe")
+        if canary_rc:
+            # A distro that runs nothing fails the loop probe the same way
+            # it fails everything else — with wsl.exe's error, not losetup's.
+            return subprocess.CompletedProcess(cmd, 1, stdout="",
+                                               stderr=dead_err)
         return subprocess.CompletedProcess(
             cmd, 1, stdout="",
             stderr="losetup: cannot find an unused loop device\n")
@@ -331,6 +352,8 @@ def test_non_loop_probe_never_reads_the_wsl_version(monkeypatch):
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if "-l" in cmd:
             return subprocess.CompletedProcess(cmd, 0)
+        if cmd[-1] == prereqs.WSL_CANARY:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(cmd, 1, stdout="",
                                            stderr="which: no debugfs\n")
 
@@ -376,6 +399,111 @@ def prereqs_loop_probe():
     tests can't drift from what the strip actually runs."""
     from pinball_decryptor.core.ext4_grow import LOOP_PROBE
     return LOOP_PROBE
+
+
+# ---------------------------------------------------------------------------
+# A REGISTERED distro that no longer starts (PAD-113).
+#
+# Ubuntu-22.04 upgraded in place to the next LTS, and afterwards nothing ran
+# in it.  Every fact the app had still said the distro was there — `wsl -l -q`
+# lists it, `wsl -l -v` says VERSION 2 — so the loop probe's failure was read
+# as a loop-device fault and the user was told his distro "answered, but could
+# not hand out a loop device".  It had not answered; nothing had.  He went
+# looking for the named fault instead: `wsl -l -v` (2), `wsl --set-version
+# Ubuntu-22.04 2` ("already the requested version"), then a whole-distro
+# upgrade.  One canary command separates this machine from the others.
+# ---------------------------------------------------------------------------
+
+_WSL_TERMINATED = ("The Windows Subsystem for Linux instance has "
+                   "terminated.\n")
+
+
+def test_dead_distro_is_not_reported_as_a_loop_device_fault(monkeypatch):
+    """The reporter's machine.  Say the distro does not start, name it, and
+    do not claim it answered or that a loop device is what is missing."""
+    _wsl_env(monkeypatch)
+    _loop_probe_run(monkeypatch, version_line="* Ubuntu-22.04  Running  2\n",
+                    canary_rc=1, dead_err=_WSL_TERMINATED)
+    ok, msg, hint = prereqs._probe_wsl(prereqs_loop_probe())
+    assert ok is False
+    assert "Ubuntu-22.04" in msg
+    assert "nothing can run inside it" in msg
+    assert "not starting" in msg
+    assert "answered" not in msg
+    assert "loop device" not in msg
+    # Neither of the two routes that cannot work here.
+    assert "--set-version" not in hint
+    assert "apt-get" not in hint
+    # ...and the two that can: restart the service, or a SECOND distro made
+    # the default (never a repair or a delete of the one holding his files).
+    assert "wsl --shutdown" in hint
+    assert "wsl --set-default %s" % prereqs.KNOWN_GOOD_DISTRO in hint
+    assert "wsl --export Ubuntu-22.04" in hint
+
+
+def test_dead_distro_beats_the_package_hint(monkeypatch):
+    """A package probe on the same machine must not be answered with an apt
+    install: nothing in there can be installed, or run, until it starts."""
+    _wsl_env(monkeypatch)
+
+    def _run(cmd, *a, **kw):
+        if list(cmd[1:3]) == ["-l", "-v"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=_WSL_LIST_HEADER + "* Ubuntu  Running  2\n")
+        if "-l" in cmd:
+            return subprocess.CompletedProcess(cmd, 0)
+        return subprocess.CompletedProcess(cmd, 1, stdout="",
+                                           stderr=_WSL_TERMINATED)
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+    ok, msg, hint = prereqs._probe_wsl("which partclone.ext4")
+    assert ok is False
+    assert "nothing can run inside it" in msg
+    assert hint and "apt-get" not in hint
+
+    # The result's hint is what the GUI shows, so the override has to reach it
+    # past the prerequisite's static "apt-get install partclone".
+    p = Prerequisite(name="partclone", where="wsl",
+                     probe="which partclone.ext4", reason="x",
+                     install_hint="apt-get install partclone (in WSL)")
+    assert "apt-get" not in check_prerequisite(p).install_hint
+
+
+def test_a_slow_canary_accuses_nobody(monkeypatch):
+    """Unknown is not dead.  A canary that times out leaves the diagnosis
+    exactly where it was — "your distro does not start" is far too big a
+    thing to say because one call ran out of patience."""
+    _wsl_env(monkeypatch)
+
+    def _run(cmd, *a, **kw):
+        if list(cmd[1:3]) == ["-l", "-v"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=_WSL_LIST_HEADER + "* Ubuntu  Running  1\n")
+        if "-l" in cmd:
+            return subprocess.CompletedProcess(cmd, 0)
+        if cmd[-1] == prereqs.WSL_CANARY:
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+        return subprocess.CompletedProcess(
+            cmd, 1, stdout="",
+            stderr="losetup: cannot find an unused loop device\n")
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+    assert prereqs._wsl_distro_runs_commands() is None
+    ok, msg, hint = prereqs._probe_wsl(prereqs_loop_probe())
+    assert ok is False
+    assert "WSL 1" in msg                      # the PAD-73 diagnosis, intact
+    assert "wsl --set-version Ubuntu 2" in hint
+
+
+def test_a_healthy_machine_never_pays_for_the_canary(monkeypatch):
+    """It runs only after something has already failed."""
+    _wsl_env(monkeypatch)
+    calls = []
+    _scripted_run(monkeypatch, registered=True, probe_outcomes=[0],
+                  calls=calls)
+    ok, _msg, _hint = prereqs._probe_wsl("echo ok")
+    assert ok is True
+    assert calls == [("probe", prereqs.PROBE_TIMEOUT)]
 
 
 def test_check_prerequisite_wsl_hint_override_reaches_result(monkeypatch):

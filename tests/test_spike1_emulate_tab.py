@@ -63,9 +63,25 @@ def test_rig_cmd_root_refuses_off_windows(monkeypatch):
 
 
 def test_rig_cmd_root_targets_wsl_root(monkeypatch):
+    # WHICH LINUX IS PINNED HERE ON PURPOSE.  Since the app can install a
+    # runtime distro of its own, the command builders ask the real machine
+    # which one to name - so this assertion used to pass or fail depending on
+    # whether the person running it had the runtime installed.  The routing
+    # itself is tested against an injected runner in tests/test_runtime.py;
+    # what is tested here is the root part, so the distro is held still.
     monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: None)
     cmd = rig_cmd_root("start.sh")
     assert cmd[:4] == ["wsl.exe", "-u", "root", "-e"]
+
+
+def test_rig_cmd_root_names_the_runtime_distro(monkeypatch):
+    """And when there IS one, it is named before the root switch - a machine
+    with our runtime must not run the root half in someone else's Linux."""
+    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: "PAD-Runtime")
+    cmd = rig_cmd_root("start.sh")
+    assert cmd[:6] == ["wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e"]
 
 
 def test_status_is_ordinary_user_not_root(monkeypatch):

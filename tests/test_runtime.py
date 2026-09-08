@@ -340,7 +340,14 @@ def test_the_toolchain_is_proven_by_running_it_not_by_looking_for_it():
     wf = WORKFLOW.read_text(encoding="utf-8")
     assert "criu --version" in wf
     assert "qemu-arm-static /tmp/t.arm" in wf
-    assert "arm-linux-gnueabihf-gcc -static" in wf
+    # -nostdlib, because that is how the RIG builds: its shim and the GL
+    # bridge's guest halves link against the CARD's glibc 2.21, not this
+    # image's.  An ordinary `int main` needs crt1.o from an ARM libc the image
+    # deliberately does not carry, and failing on that says nothing about
+    # whether the rig can build - which is exactly how the first version of
+    # this check failed.
+    assert "arm-linux-gnueabihf-gcc -nostdlib -static" in wf
+    assert "-shared -fPIC -nostdlib" in wf
     assert "libx264" in wf, "ffmpeg must be asked to decode/encode, not just exist"
 
 

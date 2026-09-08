@@ -114,6 +114,17 @@ jobs:
       # cannot load its libraries - and a criu copied out of a build stage is
       # exactly the thing whose shared libraries can be missing.  So each one
       # is asked to do its job, in the image, before anyone downloads it.
+      #
+      # THE ARM PROGRAM IS FREESTANDING (-nostdlib), and that is not a way of
+      # dodging a missing package - it is HOW THE RIG BUILDS.  Its shim and the
+      # GL bridge's guest halves are compiled -nostdlib and linked against the
+      # CARD's own libc (`-L$R/lib -l:libc.so.6`), because they have to match
+      # the glibc 2.21 the game ships with, not the one this image has.  So the
+      # image deliberately does NOT carry libc6-dev-armhf-cross: nothing here
+      # needs it, and a check that installed it would be testing a toolchain
+      # the rig never uses.  The first version of this step compiled an
+      # ordinary `int main` and failed on a missing crt1.o - which said nothing
+      # about whether the rig could build.
       - name: Prove the Spike 2 toolchain works
         if: ${{ inputs.variant == 'full' }}
         run: |
@@ -126,8 +137,10 @@ jobs:
             arm-linux-gnueabihf-gcc --version | head -1
             echo "int main(void){return 0;}" > /tmp/t.c
             gcc -o /tmp/t.native /tmp/t.c && /tmp/t.native
-            arm-linux-gnueabihf-gcc -static -o /tmp/t.arm /tmp/t.c
+            echo "void _start(void){__asm__ volatile(\"mov r7,#1; mov r0,#0; svc 0\");}" > /tmp/a.c
+            arm-linux-gnueabihf-gcc -nostdlib -static -o /tmp/t.arm /tmp/a.c
             qemu-arm-static /tmp/t.arm && echo "an ARM program ran under the interpreter"
+            arm-linux-gnueabihf-gcc -shared -fPIC -nostdlib -o /tmp/t.so /tmp/a.c && echo "and the shared, freestanding shape the shim is built in"
             ffmpeg -hide_banner -f lavfi -i testsrc=size=64x64:rate=1 -frames:v 1                    -c:v libx264 -f null - 2>/dev/null               && echo "ffmpeg decodes and encodes H.264"
             busybox --help >/dev/null && file $(command -v busybox) | grep -q "statically linked"               && echo "busybox is static, so the pivot boot has its umount"
             echo "spike 2 toolchain OK"

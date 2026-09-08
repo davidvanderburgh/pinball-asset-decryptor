@@ -65,6 +65,13 @@ RUN apt-get update \
 # And the index is CHECKED, not assumed: apt answers a broken source with a
 # warning and a zero exit, so without this the failure surfaces later as a
 # missing package rather than here as a missing archive.
+#
+# The check is `apt-cache show`, deliberately NOT `apt-cache policy | grep -q`.
+# This file runs its RUN lines under `bash -o pipefail`, and `grep -q` exits
+# the moment it matches, which closes the pipe under apt-cache, which dies of
+# SIGPIPE - so the pipeline FAILS on the success case.  That cost this image
+# its second build, reporting a missing archive over a log that had just
+# downloaded 1.5 MB of package index.
 RUN printf '%s\n' \
       "deb [check-valid-until=no] https://snapshot.ubuntu.com/ubuntu/${SNAPSHOT} noble main universe" \
       "deb [check-valid-until=no] https://snapshot.ubuntu.com/ubuntu/${SNAPSHOT} noble-updates main universe" \
@@ -72,8 +79,8 @@ RUN printf '%s\n' \
     > /etc/apt/sources.list.d/ubuntu.sources.list \
  && rm -f /etc/apt/sources.list.d/ubuntu.sources \
  && apt-get -o Acquire::Retries=3 update \
- && { apt-cache policy python3 | grep -qE "Candidate: [0-9]" \
-      || { echo "the snapshot archive gave apt no usable index"; exit 1; }; }
+ && if ! apt-cache show python3 >/dev/null 2>&1; then \
+      echo "the snapshot archive gave apt no usable index"; exit 1; fi
 
 #: WHAT THE RIG ACTUALLY USES, read out of the rig rather than remembered:
 #: every command its scripts call and every module its python imports.

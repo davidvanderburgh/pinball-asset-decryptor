@@ -92,11 +92,17 @@ jobs:
           # checkout: it is the hash of the source these exact bytes were
           # compiled from, and it is what the rig compares against to decide
           # whether the shipped binary is the one for the sources beside it.
+          #
+          # WITH LINE ENDINGS NORMALISED, exactly as the rig's s1_source_hash
+          # does it.  This runner checks out LF; the Windows machine the app
+          # ships from checks out CRLF; a plain sha256sum makes those two the
+          # same source with different hashes, and the rig then rebuilds a
+          # binary it already has - the failure the stamp exists to prevent.
           emit() {
             printf '%s\n' "  key/file      : $2"
             printf '%s\n' "  sha256        : $(sha256sum "$1" | cut -d' ' -f1)"
             printf '%s\n' "  size          : $(stat -c%s "$1")"
-            printf '%s\n' "  source_sha256 : $(sha256sum "$3" | cut -d' ' -f1)"
+            printf '%s\n' "  source_sha256 : $(sed 's/\r$//' "$3" | sha256sum | cut -d' ' -f1)"
           }
           {
             echo "Paste these into pinball_decryptor/core/payloads.py:"

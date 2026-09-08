@@ -129,6 +129,21 @@ _s1_venv_pkg_alt() {
 #: because the app writes it and this reads it.
 S1_PAYLOAD_STAMP_SUFFIX=".pad-payload"
 
+# s1_source_hash FILE - the hash of a source file with its LINE ENDINGS
+# NORMALISED, which is the only kind of source hash that means anything here.
+#
+# THIS IS NOT A DETAIL.  The rig runs out of the app's own directory, and on
+# Windows that directory came from a checkout with CRLF line endings, while the
+# CI machine that built the payload had LF.  The same file, byte-for-byte
+# different, two different sha256s - so the first end-to-end install compared
+# `dc269e3a` here against `3fd77ece` in the stamp, decided the shipped binary
+# was for other sources, and asked for a compiler.  Which is the exact failure
+# the stamp exists to prevent.  Both sides strip the CR, so the comparison is
+# about the SOURCE and not about which operating system checked it out.
+s1_source_hash() {
+    sed 's/\r$//' "$1" 2>/dev/null | sha256sum | cut -d' ' -f1
+}
+
 # s1_paths - the rig's path defaults, set only where the caller has not.
 # WHERE THE RIG LIVES IS ONE FACT.  start.sh worked them out at the top of
 # itself, which was fine while it was the only script that needed them and
@@ -166,7 +181,7 @@ s1_build_groups() {
         need="$need shim"
     elif [ -f "$stamp" ]; then
         want=$(sed -n 's/^source_sha256=//p' "$stamp")
-        have=$(sha256sum "$here/s1hwshim.c" 2>/dev/null | cut -d' ' -f1)
+        have=$(s1_source_hash "$here/s1hwshim.c")
         [ -n "$want" ] && [ "$want" = "$have" ] || need="$need shim"
     elif [ "$here/s1hwshim.c" -nt "$S1_WORK/s1hwshim" ]; then
         need="$need shim"

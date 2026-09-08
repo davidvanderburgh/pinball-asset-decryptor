@@ -136,33 +136,36 @@ def register(payload: Payload) -> Payload:
     return payload
 
 
-# Placeholders until the first payload release is cut: the workflow prints the
-# real tag/sha/size, and `payloads.yml --emit` writes them here.  A payload
-# whose sha256 is empty is treated as NOT YET PUBLISHED - the app falls back to
-# the from-source build and says so, rather than trying to download a file that
-# does not exist.  See tests/test_payloads.py.
+# Built and published by .github/workflows/payloads.yml on 2026-09-08 (run
+# 34262051787, tag payloads-1), which printed every field below.  A payload
+# whose sha256 is empty is treated as NOT YET PUBLISHED - the app then falls
+# back to the from-source build rather than trying to download a file that does
+# not exist - which is what these two were between the mechanism landing and
+# the release being cut.  See tests/test_payloads.py.
 register(Payload(
     key="spike1-qemu",
     filename="qemu-arm",
     release_tag="payloads-1",
-    sha256="",
-    size=0,
+    sha256="af669cbaf5536e431315685a8c37bdd511b9496536aed553552cd450afc572bf",
+    size=4981904,
     version="qemu 8.2.2, patched (static)",
     what="the ARM emulator the Spike 1 game runs under",
     dest="~/qemubuild/qemu-arm",
     source_of=("tools/spike1_emu/patch_qemu.py",),
+    source_sha256="968c137774290af7481db53cb75de1e0dfe89a066f9b70e41ed200fb5589c779",
 ))
 
 register(Payload(
     key="spike1-hwshim",
     filename="s1hwshim",
     release_tag="payloads-1",
-    sha256="",
-    size=0,
+    sha256="27dbf3864d4ec2d7afe107c8fa834788be5fc7439b432277eebdee3529c0c4ba",
+    size=1276008,
     version="s1hwshim (static libfuse3)",
     what="the CUSE device model the game's board set talks to",
     dest="~/s1emu/s1hwshim",
     source_of=("tools/spike1_emu/s1hwshim.c",),
+    source_sha256="3fd77ece34cfde552330b838650a00678e2b0ed9202d12af734b50dd4a8eea28",
 ))
 
 

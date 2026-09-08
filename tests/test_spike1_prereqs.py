@@ -256,3 +256,43 @@ def test_the_venv_probe_asks_what_qemus_own_mkvenv_asks():
     assert "rc=1" in r.stdout
     r = _run('_s1_python_can_venv ""; echo "rc=$?"')
     assert "rc=1" in r.stdout
+
+
+# ------------------------------------------------- the shipped binary's stamp --
+
+@pytest.mark.skipif(not HAS_BASH4, reason="no bash 4+ to run the preflight with")
+def test_a_sources_hash_does_not_depend_on_who_checked_it_out():
+    """★ The first end-to-end install of a real payload failed on this.
+
+    The rig runs out of the app's own directory, which on Windows came from a
+    checkout with CRLF line endings, while the CI machine that built and hashed
+    the binary had LF.  Same source, different bytes, different sha256 - so the
+    stamp said "this binary was built from other sources", and a machine that
+    had just downloaded a working device model was asked for a compiler.  Both
+    sides strip the CR, so the hash is about the source and not about the
+    operating system that checked it out."""
+    r = _run(
+        'lf=$(mktemp); crlf=$(mktemp)\n'
+        'printf "int main(void)\n{\n\treturn 0;\n}\n" > "$lf"\n'
+        'sed "s/$/\r/" "$lf" > "$crlf"\n'
+        'a=$(s1_source_hash "$lf"); b=$(s1_source_hash "$crlf")\n'
+        'raw_a=$(sha256sum "$lf" | cut -d" " -f1)\n'
+        'raw_b=$(sha256sum "$crlf" | cut -d" " -f1)\n'
+        '[ "$a" = "$b" ] && echo SAME || echo DIFFERENT\n'
+        '[ "$raw_a" = "$raw_b" ] && echo RAW-SAME || echo RAW-DIFFERENT\n'
+        'rm -f "$lf" "$crlf"')
+    assert "SAME" in r.stdout and "DIFFERENT" not in r.stdout.split("SAME")[0], r.stdout
+    # And the guard is meaningful: the raw hashes really do differ, so this
+    # test would pass for the wrong reason if the fixture stopped making CRLF.
+    assert "RAW-DIFFERENT" in r.stdout, r.stdout
+
+
+def test_the_workflow_hashes_the_source_the_same_way_the_rig_does():
+    """The two halves of one comparison, written in different files weeks
+    apart: CI computes the stamp, the rig checks it."""
+    wf = (REPO / ".github" / "workflows" / "payloads.yml").read_text(encoding="utf-8")
+    line = [l for l in wf.splitlines() if "source_sha256 :" in l]
+    assert line, "the workflow no longer prints a source hash"
+    assert r"sed 's/\r$//'" in line[0], (
+        "payloads.yml must normalise line endings before hashing the source, "
+        "the same way prereqs.sh's s1_source_hash does: %s" % line[0])

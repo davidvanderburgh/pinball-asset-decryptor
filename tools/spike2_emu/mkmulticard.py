@@ -378,11 +378,24 @@ MEDIA_ROW = ("",) * len(MEDIA_FIELDS)
 MULTI_LABEL = "multi"
 MULTI_SUBDIR_RE = re.compile(r"^img(\d+)$")
 #: The stock games partition's feature set (dumpe2fs of turtles_pro 1.59's p3), so the card's
-#: 3.14 kernel mounts p7 exactly as it mounts p3; the four ^ entries are e2fsprogs 1.47 defaults
-#: that kernel does not know (metadata_csum_seed, orphan_file) or that p3 does not use.
-MULTI_FEATURES = ("has_journal,ext_attr,resize_inode,dir_index,filetype,extent,flex_bg,sparse_super,"
-                  "large_file,huge_file,uninit_bg,dir_nlink,extra_isize,"
-                  "^metadata_csum,^metadata_csum_seed,^64bit,^orphan_file")
+#: 3.14 kernel mounts p7 exactly as it mounts p3.
+#:
+#: `none,` FIRST, AND THEN ONLY POSITIVES.  This was written as the positives plus
+#: `^metadata_csum,^metadata_csum_seed,^64bit,^orphan_file` - the e2fsprogs 1.47 defaults that
+#: kernel does not know - and naming a feature to switch OFF is a promise that every mke2fs
+#: this ever runs on has heard of it.  `orphan_file` arrived in e2fsprogs 1.47; on Ubuntu
+#: 22.04 (1.46.5) the name means nothing, and mke2fs does not skip what it cannot parse - it
+#: rejects the WHOLE option set:
+#:
+#:     Invalid filesystem option set: ...,^orphan_file
+#:
+#: so the card could not be built on 22.04 at all, while 24.04 built it perfectly.  `none`
+#: clears every feature first (supported since long before either release), which makes the
+#: negations unnecessary: what is not on this list is off, including whatever a future
+#: e2fsprogs decides to switch on by default.  The list is then only names that have existed
+#: for a decade, which is what makes it portable in both directions.
+MULTI_FEATURES = ("none,has_journal,ext_attr,resize_inode,dir_index,filetype,extent,flex_bg,"
+                  "sparse_super,large_file,huge_file,uninit_bg,dir_nlink,extra_isize")
 MULTI_SLACK = 0.10                            # size = used * (1 + slack) + headroom, MiB-rounded
 MULTI_HEADROOM = 256 << 20
 LAYOUTS = ("auto", "parts", "multi", "store")

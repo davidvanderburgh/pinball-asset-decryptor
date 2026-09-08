@@ -1423,10 +1423,15 @@ def test_ubuntu_install_failure_names_a_manual_route():
         "the dead-end 'try: wsl --list --verbose' failure hint is back — "
         "it only re-confirms the distro is missing. Name the manual "
         "install routes instead (PAD-19).")
-    assert "wsl --install -d Ubuntu" in ps1, (
+    # The distro is the script's own $PadKnownGoodDistro since PAD-114 - the
+    # release the app is TESTED on rather than the tracking name, which gives
+    # whichever LTS is current that month - so the route is checked as the
+    # format string it now is.  Which release that is stays the app's
+    # constant, held there by tests/test_emulate_tab.py.
+    assert "wsl --install -d {0}" in ps1 and "$PadKnownGoodDistro" in ps1, (
         "the Ubuntu failure path must spell out the manual command "
-        "(`wsl --install -d Ubuntu`) so a stranded user can finish the "
-        "install without this script.")
+        "(`wsl --install -d <the release this installs>`) so a stranded user "
+        "can finish the install without this script.")
     assert "Microsoft Store" in ps1, (
         "the Ubuntu failure path must offer the Microsoft Store app as "
         "the no-command-line fallback route.")

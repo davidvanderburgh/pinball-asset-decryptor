@@ -171,6 +171,24 @@ pad_criu() {
     return 1
 }
 
+#: ...AND ONE THAT RUNS, which is a different question and the one every
+#: caller above was really asking. `-x` is a FILE test: criu here is built from
+#: source (no Ubuntu publishes it) against libprotobuf-c, libnl and libcap, and
+#: a distro upgraded in place to the next LTS keeps the file while the SONAMEs
+#: it was linked against go. The file test says yes, setupcheck says criu=1,
+#: the tab offers save states, and the first press gets the dynamic linker's
+#: complaint about a shared object instead - a fault reported nowhere near the
+#: upgrade that caused it. `--version` is the cheapest command that makes the
+#: linker do its work.
+#:
+#: pad_criu STAYS a path resolver: a caller that is about to run criu needs the
+#: path whatever it then does, and getcriu.sh needs to name the broken one.
+pad_criu_runs() {
+    local c
+    c=$(pad_criu) || return 1
+    "$c" --version >/dev/null 2>&1
+}
+
 # THE OTHER HALF OF A PIVOT, AND THE HALF NOBODY CHECKED: the program that
 # performs it. Reported 2026-08-11 by the same user as the busybox fault above,
 # one release later and on the very next run - he installed the package the tab
@@ -271,7 +289,7 @@ pad_pivot_programs() {
 }
 
 pad_can_pivot() {
-    pad_pivot_programs && pad_criu >/dev/null 2>&1
+    pad_pivot_programs && pad_criu_runs
 }
 
 # ---- WHAT THE HARDWARE SHIM IS BUILT FROM, IN ONE PLACE ------------------
@@ -303,21 +321,47 @@ export PAD_SHIM_STAMP
 #     file times that say nothing about what the bytes are.
 #
 # A digest is the same answer in every direction: different bytes, rebuild.
-# Empty when nothing is there, so a caller can tell "no sources" from "these
-# sources", and eol=lf is pinned for this directory (see .gitattributes), so
-# the repo copy and the installed copy hash identically.
+# eol=lf is pinned for this directory (see .gitattributes), so the repo copy
+# and the installed copy hash identically. Nothing there hashes the build
+# environment line alone, which is a value like any other - "no sources" and
+# "these sources" still differ, they are simply both digests.
 #
 # THE DIGEST ITSELF TAKES A LIST, because there are now three of them - the
 # shim and the bridge's two halves - and the reasoning above is the same for
 # every one. Three copies of these six lines is how the rule this rig keeps
 # writing down ("never let two scripts define the same fact") gets broken
 # inside a single file.
+#
+# ...AND THE RELEASE IS PART OF THE INPUT, because "different bytes, rebuild"
+# was only half of when a rebuild is due. These binaries are linked against
+# THIS distro's libraries, and a WSL distro upgraded in place to the next LTS
+# is a different set of them under the same sources: every digest still
+# matches, nothing rebuilds, and what runs is a binary built for a release
+# that is gone. Folding /etc/os-release in costs one rebuild of some very
+# small C programs on the first run after an upgrade, and that is the whole
+# repair.
+#
+# ID and VERSION_ID only, deliberately NOT the compiler's patch level: what
+# moves the shared libraries out from under a binary is the release, and
+# hashing `gcc --version` would rebuild everything on an ordinary apt upgrade
+# for no fault at all. Unknown when /etc/os-release cannot be read, which is
+# one stable value rather than a digest that changes every call.
+pad_build_env() {
+    local id ver
+    id=$(sed -n 's/^ID=//p'         /etc/os-release 2>/dev/null | tr -d '"' | head -1)
+    ver=$(sed -n 's/^VERSION_ID=//p' /etc/os-release 2>/dev/null | tr -d '"' | head -1)
+    printf 'pad-build-env %s %s\n' "${id:-unknown}" "${ver:-unknown}"
+}
+
 pad_src_hash() {
     local d=$1 f
     shift
-    for f in "$@"; do
-        [ -f "$d/$f" ] && cat "$d/$f"
-    done | sha256sum | cut -d' ' -f1
+    {
+        pad_build_env
+        for f in "$@"; do
+            [ -f "$d/$f" ] && cat "$d/$f"
+        done
+    } | sha256sum | cut -d' ' -f1
 }
 pad_shim_hash() { pad_src_hash "${1:-$RIG}" $PAD_SHIM_SRCS; }
 

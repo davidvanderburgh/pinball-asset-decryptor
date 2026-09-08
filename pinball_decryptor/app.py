@@ -836,6 +836,23 @@ class App:
                     self._current_mfr.key != target_key):
                 return
 
+            # WHICH LINUX WAS THAT.  Only when this manufacturer actually
+            # probed inside WSL - the VM is then already up, so the line
+            # costs one command rather than a cold boot - and after the
+            # probes for the same reason.  Every WSL ticket this project has
+            # triaged arrived without it (PAD-73 asked for `wsl -l -v` and
+            # never got an answer across four more tickets), so it goes in
+            # the log the user pastes rather than staying a question in the
+            # first reply.
+            if any(p.where == "wsl" for p in prereqs):
+                try:
+                    from .core.prereqs import wsl_release_lines
+                    for i, line in enumerate(wsl_release_lines()):
+                        self.msg_queue.put(
+                            LogMsg(line, "info" if i == 0 else "warning"))
+                except Exception:       # noqa: BLE001 - a diagnostic only
+                    pass
+
             missing = [r for r in results if not r.ok]
             if not missing:
                 self.msg_queue.put(LogMsg(

@@ -680,6 +680,53 @@ def test_a_failed_home_probe_degrades_to_the_ordinary_launch(monkeypatch,
     assert "-u" not in cmd and "PAD_PIVOT=1" not in cmd
 
 
+def _account_probe(monkeypatch, whoami, passwd=""):
+    """Answer the two wsl.exe probes wsl_account() makes, and nothing else."""
+    monkeypatch.setattr(emulate_tab, "_WSL_ACCOUNT", [("", ""), False])
+    monkeypatch.setattr(emulate_tab, "_WSL_HOME", [None, False])
+
+    def fake_run(argv, **kw):
+        if "whoami" in argv:
+            return SimpleNamespace(returncode=0, stdout=whoami.encode())
+        if "getent" in argv:
+            return SimpleNamespace(returncode=0, stdout=passwd.encode())
+        raise AssertionError("unexpected probe: %r" % (argv,))
+
+    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
+
+
+def test_the_account_probe_names_a_root_default_distro(monkeypatch):
+    """A distro that never got a user of its own logs everyone in as root,
+    and that is a machine to build for, not a broken probe: wsl_account says
+    so with root's own home, while wsl_home - which exists to answer "is
+    there a DESKTOP user to hand the root launch" - still says None.
+
+    wsl.exe is entitled to prepend its own warnings to stdout, so both
+    answers are read off the LAST line.
+    """
+    _account_probe(monkeypatch,
+                   "wsl: your 131072x1 screen size is bogus\nroot\n",
+                   "root:x:0:0:root:/root:/bin/bash\n")
+    assert emulate_tab.wsl_account() == ("root", "/root")
+    assert emulate_tab.wsl_home() is None
+    _account_probe(monkeypatch, "david\n",
+                   "david:x:1000:1000::/home/david:/bin/bash\n")
+    assert emulate_tab.wsl_account() == ("david", "/home/david")
+    assert emulate_tab.wsl_home() == "/home/david"
+
+
+def test_the_account_probe_is_empty_when_wsl_says_nothing(monkeypatch):
+    """'' is "could not ask", which is NOT the same fact as 'root' - the
+    Multi-boot tab's build tells the two apart (PAD-114).  An account whose
+    passwd row cannot be read keeps its name and loses only the home."""
+    _account_probe(monkeypatch, "")
+    assert emulate_tab.wsl_account() == ("", "")
+    assert emulate_tab.wsl_home() is None
+    _account_probe(monkeypatch, "david\n", "")
+    assert emulate_tab.wsl_account() == ("david", "")
+    assert emulate_tab.wsl_home() is None
+
+
 def test_savestates_off_is_the_ordinary_launch(monkeypatch, tmp_path):
     """The tab's opt-out - and the DEFAULT: with the toggle off, even a
     machine whose home probe would succeed boots the plain user launch, not
@@ -2050,6 +2097,34 @@ def test_the_two_halves_agree_on_the_fallback_release():
     assert "PAD_KNOWN_GOOD_DISTRO=%s" % emulate_tab.KNOWN_GOOD_DISTRO in fix
     assert emulate_tab.FALLBACK_RELEASE == "24.04"
     assert "PAD_FALLBACK_SUITE=noble" in fix
+
+
+def test_the_installer_puts_a_machine_on_the_release_the_app_names():
+    """PAD-114, and the third half of the same fact.  The prerequisite
+    installer asked wsl.exe for `-d Ubuntu`, which is the TRACKING name: it
+    installs whichever LTS is current that month.  So the installer could put
+    a new machine on one release while every hint the app gives names another
+    - including the suite the rig's cross-release package fetch downloads
+    from, which is pinned to exactly one.
+
+    The plain name survives as the FALLBACK, and it has two jobs: a Store with
+    no entry for this exact release, and a machine where this exact name is
+    already registered (the dead distro this installer reports just above),
+    where the pinned install can only answer "already exists"."""
+    ps1 = (pathlib.Path(DEFAULT_RIG_DIR).parent.parent / "installer"
+           / "install_prerequisites.ps1").read_text(encoding="utf-8")
+    assert '$PadKnownGoodDistro = "%s"' % emulate_tab.KNOWN_GOOD_DISTRO in ps1
+    assert '@("--install", "-d", $PadKnownGoodDistro)' in ps1
+    assert '@("--install", "-d", "Ubuntu")' in ps1, "the fallback is still there"
+    # ...and it is reached only after a non-zero exit, so an install that
+    # merely wants its first-run setup finished never becomes a second distro.
+    tail = ps1[ps1.index("$plan.FallbackArgs"):]
+    guard = ps1[:ps1.index("& wsl $plan.FallbackArgs")]
+    assert "-not (Test-WslHasApt) -and $installExit -ne 0" in guard, guard[-400:]
+    assert tail, "the fallback is actually run"
+    # No hint anywhere still sends a person to the tracking name by hand.
+    assert "wsl --install -d Ubuntu\"" not in ps1
+    assert "wsl --set-default Ubuntu\"" not in ps1
 
 
 def test_only_a_package_that_depends_on_nothing_is_cross_installed():

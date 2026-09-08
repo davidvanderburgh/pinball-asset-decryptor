@@ -1968,3 +1968,33 @@ def test_bypass_state_tells_a_half_bypass_from_a_whole_one(mk, monkeypatch):
     monkeypatch.setattr(vp, "find_grade_restore", lambda e: None)
     assert mk.bypass_state(bytes(elf)) == "bypassed"
     assert "HALF" in mk.bypass_words("half")
+
+
+# ---- PAD-114: the card has to build on every Ubuntu, not just this one -------------------
+def test_the_p7_feature_list_names_nothing_a_release_might_not_know(mk):
+    """mke2fs does not skip a feature name it cannot parse - it rejects the WHOLE
+    option set:
+
+        Invalid filesystem option set: ...,^orphan_file
+
+    and `orphan_file` arrived in e2fsprogs 1.47.  Ubuntu 22.04 ships 1.46.5, where that
+    name means nothing, so the list that switched it OFF made mke2fs refuse and no
+    multi-boot card could be built there at all - while 24.04 built one perfectly.
+
+    `none` clears every feature first and is understood by both (it is in 22.04's own
+    mke2fs man page), so the list is positives only: names that have existed for a
+    decade, and no promise about what a future e2fsprogs will have heard of.  What is
+    not listed is off, which is also what keeps the next default feature - whatever it
+    turns out to be - off a card whose kernel is 3.14."""
+    feats = mk.MULTI_FEATURES.split(",")
+    assert feats[0] == "none", "the list has to start by clearing the defaults"
+    assert not [f for f in feats if f.startswith("^")], (
+        "a ^feature is a promise that every mke2fs this runs on knows the name")
+    # The set the stock games partition (turtles_pro 1.59 p3) actually has.
+    assert set(feats[1:]) == {
+        "has_journal", "ext_attr", "resize_inode", "dir_index", "filetype",
+        "extent", "flex_bg", "sparse_super", "large_file", "huge_file",
+        "uninit_bg", "dir_nlink", "extra_isize"}
+    # ...and none of the three the 3.14 kernel does not know can be on it.
+    for never in ("metadata_csum", "metadata_csum_seed", "64bit", "orphan_file"):
+        assert never not in feats, never

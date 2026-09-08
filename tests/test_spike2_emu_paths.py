@@ -541,6 +541,44 @@ def test_the_rebuild_decision_is_a_digest_not_a_file_time():
     assert "pad_shim_hash" in ensure and "$PAD_SHIM_STAMP" in ensure
 
 
+def test_the_digest_covers_the_release_the_binaries_were_linked_against():
+    """PAD-114.  "Different bytes, rebuild" was only half of when a rebuild is
+    due: the shim, the renderer and the selector are linked against THIS
+    distro's libraries, and a WSL upgraded in place to the next LTS is a
+    different set of them under sources that have not moved.  Every digest
+    matched, nothing rebuilt, and what ran was built for a release that is
+    gone.  One line of /etc/os-release in the hashed stream is the repair, and
+    it has to be inside pad_src_hash so that every list gets it - the shim,
+    the selector and both halves of the bridge - and so the stamp written by a
+    build and the digest read by ensurebuild are the same function's answer."""
+    pp = _rig_text("padpath.sh")
+    assert "pad_build_env()" in pp
+    env = pp[pp.index("pad_build_env()"):]
+    env = env[:env.index("\n}")]
+    assert "/etc/os-release" in env and "VERSION_ID" in env
+    body = pp[pp.index("pad_src_hash()"):]
+    body = body[:body.index("\n}")]
+    assert "pad_build_env" in body, (
+        "the release has to be hashed with the sources, not beside them")
+    assert body.index("pad_build_env") < body.index("sha256sum")
+    # The compiler's patch level is deliberately NOT in it: an ordinary apt
+    # upgrade must not rebuild everything for a fault that has not happened.
+    assert "gcc --version" not in env and "-dumpversion" not in env
+
+
+def test_a_rebuild_message_does_not_blame_a_source_that_did_not_move():
+    """...and because the release is now one of the reasons, the lines that
+    announce a rebuild cannot say "older than its source": after an upgrade
+    the source is innocent and the person reading the log has just been told
+    something false about their own machine."""
+    ensure = _rig_text("ensurebuild.sh")
+    code = "\n".join(ln for ln in ensure.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "older than its source" not in code
+    assert code.count("is out of date") >= 3, (
+        "the shim, the selector and the renderer each announce their own")
+
+
 def test_nothing_is_rebuilt_under_a_running_guest():
     """The linker truncates and rewrites its output in place: a live guest has
     hwshim.so MAPPED (SIGBUS) and a live padglhost is its own text file

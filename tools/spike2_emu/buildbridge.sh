@@ -48,7 +48,10 @@ done
 # it a build breaks on newer distros than this rig is developed on and cannot
 # be made to break here. Both halves of the bridge, because both are compiled
 # on the user's machine.
-CFLAGS="-fno-stack-protector -shared -fPIC -O2 -nostdlib -Wall \
+# ...and -std=gnu17 beside it, for the reason build.sh records: gcc 15 defaults
+# to gnu23, and a build that silently changes language when the distro does is
+# the same class of surprise this flag exists to stop.
+CFLAGS="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -nostdlib -Wall \
 -Werror=implicit-function-declaration -I$HOME/emusrc"
 
 if [ "$WHICH" != host ]; then
@@ -73,7 +76,7 @@ if [ "$WHICH" != guest ]; then
     # -lEGL / -lX11 fail to link. libxcb comes in via libX11's DT_NEEDED.
     # padglhost.c declares every EGL/GLES/X11 entry point it uses itself, so
     # this needs the runtime libraries and no -dev packages at all.
-    gcc -O2 -Wall -Werror=implicit-function-declaration -I$HOME/emusrc \
+    gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -I$HOME/emusrc \
       -o "$PAD_GLHOST_BIN" \
       "$HOME/emusrc/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 

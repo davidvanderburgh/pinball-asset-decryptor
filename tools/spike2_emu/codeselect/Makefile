@@ -33,7 +33,12 @@ TABLES   ?= $(ROOT)/dump/tables/turtles_pro/switch_list.txt
 GCCINC   := $(shell $(CC) -print-file-name=include)
 CRTBEGIN := $(shell $(CC) -print-file-name=crtbegin.o)
 CRTEND   := $(shell $(CC) -print-file-name=crtend.o)
-CFLAGS    = -O2 -Wall -Werror=implicit-function-declaration \
+# -std=gnu17: the dialect is a decision, not whatever the distro's gcc defaults
+# to this year.  gcc 11 (22.04) and 13 (24.04) already default to it; gcc 15
+# defaults to gnu23, where bool/true/false are keywords - the change that broke
+# criu here already, and which would otherwise arrive in these sources with the
+# next LTS and no warning.
+CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
             -U_TIME_BITS -U_FILE_OFFSET_BITS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
             -fno-stack-protector -fno-pie -no-pie \
             -nostdinc -isystem $(GCCINC) -isystem $(ROOT)/usr/include -I$(BUILD)

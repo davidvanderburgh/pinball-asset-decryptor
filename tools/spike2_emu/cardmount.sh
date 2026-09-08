@@ -331,6 +331,50 @@ cache_pick() {
 # fuse2fs and libfuse2, unpacked into a private prefix. Downloaded once; after
 # that this is offline. Ubuntu splits them into two packages and fuse2fs links
 # libfuse.so.2 (not the libfuse3 the distro ships), hence both.
+#
+# ONE OF THE TWO IS SPELLED DIFFERENTLY ON EVERY RELEASE BUT THIS ONE, and
+# this used to name 24.04's spelling alone. The t64 transition renamed
+# `libfuse2` to `libfuse2t64` in noble, so on 22.04 - a supported LTS, and the
+# release a user is on until the day they upgrade - that name resolves to
+# nothing. Both names went to apt in ONE `apt-get download`, which is
+# all-or-nothing, so the name this release does not have downloaded NEITHER
+# package; and apt's own "Unable to locate package" went to /dev/null, leaving
+# the person with "no network?" about a machine whose network is fine.
+#
+# So: one package at a time, each spelling tried until one resolves, and
+# whatever apt said is what is printed when none of them do. `fuse2fs` itself
+# is spelled the same on both releases (checked against Ubuntu's own file
+# index, not assumed), so it is a one-name list and stays a list anyway - the
+# next rename is not going to announce itself either.
+PAD_FUSE2FS_PKGS=${PAD_FUSE2FS_PKGS:-"fuse2fs"}
+PAD_LIBFUSE2_PKGS=${PAD_LIBFUSE2_PKGS:-"libfuse2t64 libfuse2"}
+
+#: Does <binary> still have the libraries it was linked against? The private
+#: prefix below outlives a distro upgrade and the .so files it was filled from
+#: may not, which is the same trap pad_criu_runs describes: an executable file
+#: that cannot start. `ldd` honours the LD_LIBRARY_PATH exported above, so it
+#: asks the question the way the run will ask it, and a machine with no `ldd`
+#: at all answers "fine" rather than losing its card mount to a missing
+#: diagnostic.
+_resolves() {
+    [ -x "$1" ] || return 1
+    ! ldd "$1" 2>/dev/null | grep -q "not found"
+}
+
+#: Download the first of <names> this release publishes, into $PWD. Prints
+#: what apt said about EVERY name when none of them resolve - which is the
+#: sentence a person can act on, and the one this used to throw away.
+_apt_download_first() {
+    local name out all=
+    for name in "$@"; do
+        out=$(apt-get download "$name" 2>&1) && return 0
+        all="$all$name: $out
+"
+    done
+    printf '%s' "$all" | sed 's/^/[card]   /' >&2
+    return 1
+}
+
 ensure_fuse2fs() {
     # A PROPERLY INSTALLED fuse2fs WINS, and asking first is the whole fix.
     # The private-prefix download below exists for one situation - a machine
@@ -344,13 +388,26 @@ ensure_fuse2fs() {
         FUSE2FS=$(command -v fuse2fs)
         return 0
     fi
-    [ -x "$FUSE2FS" ] && [ -e "$PREFIX/lib/x86_64-linux-gnu/libfuse.so.2" ] && return 0
+    # ...and the private copy, IF IT STILL RUNS. `-x` alone kept a prefix
+    # filled on the release this machine used to be on: the file is there, the
+    # library it wants is not, and the mount died in the dynamic linker rather
+    # than here where it can be re-fetched.
+    [ -e "$PREFIX/lib/x86_64-linux-gnu/libfuse.so.2" ] && _resolves "$FUSE2FS" \
+        && return 0
     echo "[card] fetching fuse2fs into $PREFIX (once)"
     mkdir -p "$PREFIX" /tmp/cardpkg || return 1
-    ( cd /tmp/cardpkg && apt-get download fuse2fs libfuse2t64 >/dev/null 2>&1 ) || {
-        echo "[card] apt-get download failed - no network?" >&2; return 1; }
+    ( cd /tmp/cardpkg && _apt_download_first $PAD_FUSE2FS_PKGS ) || {
+        echo "[card] could not download fuse2fs (tried: $PAD_FUSE2FS_PKGS)" >&2
+        return 1; }
+    ( cd /tmp/cardpkg && _apt_download_first $PAD_LIBFUSE2_PKGS ) || {
+        echo "[card] could not download libfuse.so.2 (tried:" \
+             "$PAD_LIBFUSE2_PKGS)" >&2
+        return 1; }
     for d in /tmp/cardpkg/*.deb; do dpkg-deb -x "$d" "$PREFIX" || return 1; done
-    [ -x "$FUSE2FS" ] || return 1
+    [ -x "$FUSE2FS" ] || {
+        echo "[card] those packages unpacked, and none of them holds" \
+             "$FUSE2FS" >&2
+        return 1; }
     return 0
 }
 

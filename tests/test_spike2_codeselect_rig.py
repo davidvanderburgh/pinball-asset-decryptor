@@ -678,6 +678,33 @@ def test_cardmount_title_dir_accepts_a_multi_partition_one_level_down():
     assert 'basename "$d"/' not in body and 'basename "$s"' not in body
 
 
+def test_the_fuse2fs_fetch_survives_the_release_that_renamed_libfuse2():
+    """PAD-114.  cardmount fetches fuse2fs and libfuse.so.2 into a private
+    prefix when the machine has neither, and it named ONE release's spelling:
+    `libfuse2t64` is the t64 transition's name, which exists on 24.04 and not
+    on 22.04, where the library is `libfuse2`.  Both names went to apt in one
+    `apt-get download`, which is all-or-nothing, so on the other release
+    NEITHER package was fetched - and apt's "Unable to locate package" went to
+    /dev/null behind "no network?", which is a sentence about a machine whose
+    network is fine.  One package at a time, every spelling tried, and apt's
+    own words when none of them resolve."""
+    text = _read("cardmount.sh")
+    code = _code(text)
+    assert "libfuse2t64 libfuse2" in code, "both spellings, newest first"
+    assert "apt-get download fuse2fs libfuse2t64" not in code, (
+        "one all-or-nothing call is what made a rename fetch nothing")
+    body = code[code.index("_apt_download_first() {"):]
+    body = body[:body.index("\n}")]
+    assert 'for name in "$@"' in body and "return 0" in body, (
+        "each spelling is tried until one resolves")
+    assert "2>&1" in body and "sed" in body, "apt's own error is what is shown"
+    ensure = code[code.index("ensure_fuse2fs() {"):]
+    ensure = ensure[:ensure.index("\n}")]
+    assert ensure.count("_apt_download_first") == 2, (
+        "the binary and the library are separate downloads now")
+    assert "no network?" not in ensure
+
+
 def test_everything_new_in_run_game_is_gated_on_pad_select():
     """A plain run must be byte-for-byte the launch it always was."""
     code = _code(_read("run_game.sh"))

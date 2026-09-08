@@ -59,7 +59,7 @@ _pad_run_live() {
     [ "$(bash "$RIG/alive.sh" --total 2>/dev/null)" != 0 ]
 }
 
-#: Is <binary> older than the sources it was built from?  0 = stale.
+#: Is <binary> the build this machine needs?  0 = no, rebuild it.
 #:
 #: THE DIGEST WINS WHENEVER THERE IS ONE, for the reason pad_src_hash records:
 #: it is the only test that answers the same way in both directions, and the
@@ -67,6 +67,13 @@ _pad_run_live() {
 #: the stamps existed - timestamps are what is left, and they are right in the
 #: common case of an edit followed by a run.  The first rebuild lays a stamp
 #: down and that branch is never taken again on that machine.
+#:
+#: "STALE" IS NOT ONLY "THE SOURCE MOVED".  pad_src_hash folds the distro
+#: release into the digest, so a WSL upgraded in place to the next LTS is
+#: stale here too - which it is: these are binaries linked against the
+#: libraries of a release that is gone.  Nothing else changes; the rebuild is
+#: the same rebuild.  The messages therefore say "out of date" rather than
+#: naming the source, because after an upgrade the source is innocent.
 _pad_stale() {           # <binary> <stamp> <want-digest> <src>...
     local bin=$1 stamp=$2 want=$3 src
     shift 3
@@ -168,17 +175,17 @@ pad_ensure_shim() {
     _pad_stale "$so" "$PAD_SHIM_STAMP" "$(pad_shim_hash "$RIG")" $PAD_SHIM_SRCS \
         || return 0
     if _pad_run_live; then
-        echo "[build] the hardware shim is older than its source, but a run is" >&2
+        echo "[build] the hardware shim is out of date, but a run is" >&2
         echo "[build] still up and the shim cannot be rewritten underneath it." >&2
         echo "[build] Stop it (killgame.sh) and start again to pick up the fix." >&2
         return 0
     fi
     if ! command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
-        echo "[build] the hardware shim is older than its source, but there is no" >&2
+        echo "[build] the hardware shim is out of date, but there is no" >&2
         echo "[build] arm-linux-gnueabihf-gcc here to rebuild it. Running as built." >&2
         return 0
     fi
-    echo "[build] the hardware shim is older than its source; rebuilding"
+    echo "[build] the hardware shim is out of date; rebuilding"
     _pad_build build.sh \
         || echo "[build]   rebuild FAILED; running the shim already built" >&2
     return 0
@@ -230,17 +237,17 @@ pad_ensure_select() {
     _pad_stale "$bin" "$PAD_SELECT_STAMP" "$(pad_select_hash "$RIG")" $PAD_SELECT_SRCS \
         || return 0
     if _pad_run_live; then
-        echo "[build] the boot selector is older than its source, but a run is" >&2
+        echo "[build] the boot selector is out of date, but a run is" >&2
         echo "[build] still up and it cannot be rewritten underneath it." >&2
         echo "[build] Stop it (killgame.sh) and start again to pick up the fix." >&2
         return 0
     fi
     if ! command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
-        echo "[build] the boot selector is older than its source, but there is no" >&2
+        echo "[build] the boot selector is out of date, but there is no" >&2
         echo "[build] arm-linux-gnueabihf-gcc here to rebuild it. Running as built." >&2
         return 0
     fi
-    echo "[build] the boot selector is older than its source; rebuilding"
+    echo "[build] the boot selector is out of date; rebuilding"
     _pad_build buildselect.sh \
         || echo "[build]   rebuild FAILED; running the selector already built" >&2
     return 0
@@ -309,15 +316,15 @@ pad_ensure_bridge() {
     elif _pad_stale "$PAD_GLHOST_BIN" "$PAD_GLHOST_STAMP" \
                     "$(pad_glhost_hash "$RIG")" $PAD_GLHOST_SRCS; then
         if _pad_run_live; then
-            echo "[build] the GL renderer is older than its source, but a run is" >&2
+            echo "[build] the GL renderer is out of date, but a run is" >&2
             echo "[build] still up and its binary cannot be rewritten underneath" >&2
             echo "[build] it. Stop it (killgame.sh) to pick up the fix." >&2
         elif ! _pad_cc_works; then
-            echo "[build] the GL renderer is older than its source, but this" >&2
+            echo "[build] the GL renderer is out of date, but this" >&2
             echo "[build] machine cannot compile it (gcc + libc6-dev). Running" >&2
             echo "[build] as built." >&2
         else
-            echo "[build] the GL renderer is older than its source; rebuilding"
+            echo "[build] the GL renderer is out of date; rebuilding"
             _pad_build buildbridge.sh --host \
                 || echo "[build]   rebuild FAILED; running the renderer already built" >&2
         fi
@@ -346,7 +353,7 @@ pad_ensure_bridge() {
                     $PAD_GLGUEST_SRCS; then
         # padgl.h is on both source lists, so a protocol change lands here as
         # well as on the host - the two are never allowed to move apart.
-        why="is older than its source"
+        why="is out of date"
     elif ! grep -aq glTexDirectVIV "$guest" 2>/dev/null; then
         # THE STAMP CAN BE FRESH AND THE FILE STILL BE THE WRONG BACKEND.
         # buildgl.sh - the pre-bridge raster builder, still useful for

@@ -97,10 +97,26 @@ _run() {
 # install a second copy beside a working one - or, worse, report success about
 # a criu the scripts do not use.
 if have=$(pad_criu); then
-    echo "criu is already here: $have"
+    # PRESENT IS NOT THE SAME AS WORKING, and this used to report the first
+    # while printing the evidence for the second: `--version` was run through
+    # a pipe, whose status is sed's, and nothing looked at it either way. A
+    # criu built here before an in-place upgrade to the next LTS is still an
+    # executable file with its libraries gone, so it answered "already here",
+    # exited 0, and the fault surfaced at the first save state instead.
+    if "$have" --version >/dev/null 2>&1; then
+        echo "criu is already here: $have"
+        "$have" --version 2>&1 | sed 's/^/  /'
+        echo "result=present"
+        exit 0
+    fi
+    echo "There is a criu at $have and it does not run:"
     "$have" --version 2>&1 | sed 's/^/  /'
-    echo "result=present"
-    exit 0
+    echo "That is what an in-place upgrade to a new Ubuntu release does to a"
+    echo "criu built on the old one - the file stays, the libraries it was"
+    echo "linked against do not. Building a fresh one against this release."
+    # The build installs to /usr/local/bin/criu, which pad_criu prefers over
+    # everything else on its list, so the one that will not start is shadowed
+    # rather than left to be picked up again.
 fi
 
 echo "This machine has no criu, and no Ubuntu release publishes one, so it has"

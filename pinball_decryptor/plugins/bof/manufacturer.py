@@ -120,11 +120,11 @@ class BOFManufacturer(Manufacturer):
     # before kicking off a flow that's going to fail mid-pipeline.
     prerequisites = (
         Prerequisite(name="gpg", where="wsl",
-                     probe="which gpg",
+                     probe="command -v gpg",
                      reason=".fun GPG decryption + re-encryption",
                      install_hint="apt-get install gnupg (in WSL)"),
         Prerequisite(name="tar", where="wsl",
-                     probe="which tar",
+                     probe="command -v tar",
                      reason="Archive packing/unpacking",
                      install_hint="apt-get install tar (in WSL)"),
         Prerequisite(
@@ -142,7 +142,7 @@ class BOFManufacturer(Manufacturer):
                 "GDRE Tools to /opt/gdre_tools.")),
         Prerequisite(
             name="xvfb-run", where="wsl",
-            probe="which xvfb-run",
+            probe="command -v xvfb-run",
             reason="Headless X server — GDRE Tools needs it on Linux/WSL.",
             install_hint="apt-get install xvfb (in WSL)"),
     )

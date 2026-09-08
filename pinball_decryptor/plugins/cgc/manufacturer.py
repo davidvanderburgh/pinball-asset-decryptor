@@ -95,11 +95,11 @@ class CGCManufacturer(Manufacturer):
     # Docker on macOS) -- same model as JJP.
     prerequisites = (
         Prerequisite(name="debugfs", where="wsl",
-                     probe="which debugfs",
+                     probe="command -v debugfs",
                      reason="ext4 read/write on installer P3 + emmc.img P2",
                      install_hint="apt-get install e2fsprogs (in WSL)"),
         Prerequisite(name="xxd", where="wsl",
-                     probe="which xxd",
+                     probe="command -v xxd",
                      reason="Reading the inner emmc.img MBR partition table",
                      install_hint="apt-get install xxd (in WSL)"),
         # faster-whisper drives the Auto-transcribe checkbox.  Probed

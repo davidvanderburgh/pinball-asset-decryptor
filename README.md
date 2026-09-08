@@ -553,6 +553,40 @@ wsl --set-default Ubuntu-24.04
 The old distro is left exactly where it is, and `wsl --export <name>
 backup.tar` still gets its files out.
 
+**Which Ubuntu release is up to you.** PAD works on any current one —
+22.04, 24.04, and whatever comes next — and it is never refused on a
+version number: what decides whether a machine can do the work is the
+prerequisite checks, which ask what it can actually do. Every check that
+runs inside WSL now writes one line naming the distro and release it
+probed (`WSL: Ubuntu (Ubuntu 24.04.4 LTS, WSL 2)`), so a log pasted into
+a bug report carries it; a release older than 22.04 adds a second line
+saying it is older than anything this is tested against and is worth
+ruling out first. An app update never installs or switches a distro —
+a machine that works keeps working. PAD asks the machine rather than
+assuming a release: the ARM handler is registered the way *this* distro
+registers one, packages whose names changed between releases are tried
+under every spelling they have had, and criu is used from apt where a
+release publishes it and built from source where none does. The one
+release named out loud, in the installer and in the hints above, is
+24.04, and that is only "the one this is tested on": it is what a fresh
+install gets, not something an existing distro has to become. Two things
+follow an in-place upgrade to a new release automatically, because both
+are built against the release they run on — the emulator's own small
+binaries (rebuilt once on the next run) and criu (a criu that no longer
+starts is now reported as one that does not start, and rebuilt, instead
+of counting as present).
+
+If your WSL **logs in as root** — a distro installed without its
+first-run account setup does — building a multi-boot card used to stop
+with *"cannot find your WSL home … check that WSL starts"*, on a WSL that
+had just built the menu program, drawn the preview and planned the card.
+The card is written as root, and the app was looking for an ordinary
+user's home to hand that step; there isn't one on such a machine, and
+there doesn't need to be — root's own home is where `~/spike2root` has
+been all along. The build now runs there. (The emulator is the one thing
+that still wants an ordinary account: a root run can't attach to the
+WSLg X server, so the game window opens black.)
+
 If pressing ▶ on the Replace Audio tab says **Audio preview needs
 ffplay**, the ffmpeg it found is an "essentials" build or the copy
 bundled inside the app — neither carries `ffplay.exe`. Answer **Yes** to

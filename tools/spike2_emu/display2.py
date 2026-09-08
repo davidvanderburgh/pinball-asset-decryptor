@@ -161,11 +161,10 @@ def fb_geometry(elf_path):
 #: angle is not in there either; the game renders the same landscape frame
 #: whichever way round the glass is screwed on.
 #:
-#: WHAT MAKES THEM SAFE TO KEEP. Each only ever moves a WINDOW on the host: it
-#: cannot reach the guest, cannot change what the game is told, and a wrong
-#: entry is visible the instant anyone looks - the opposite of the
-#: silent-missing-devices failure the no-tables rule exists to prevent. And
-#: each is a measurement from a machine someone owns, not a guess:
+#: WHAT MAKES THEM SAFE TO KEEP. A wrong entry is visible the instant anyone
+#: looks - the opposite of the silent-missing-devices failure the no-tables
+#: rule exists to prevent. And each is a measurement from a machine someone
+#: owns, not a guess:
 #:
 #:   * the 800x480 single screen - three separate cabinets, three separate
 #:     reports, the same number (James Bond 60th, Star Wars Home Edition,
@@ -173,6 +172,22 @@ def fb_geometry(elf_path):
 #:   * venom_le's quarter turn - the report said "90 degrees clockwise", and a
 #:     photograph of that machine shows its topper carrying the same service
 #:     screen as the backbox, a quarter turn from it.
+#:
+#: ★ ONE OF THEM REACHES THE GUEST, AND THAT IS THE POINT OF IT (2026-09-08).
+#: `rot2` and the second display's size are host-only, and must stay that way -
+#: item 67 proved that telling the GAME display 2's panel size crops the
+#: topper, because the game presents display 2 through display 0's viewport.
+#: `screen` is not that. A one-screen cabinet has no second display and no
+#: viewport indirection, and these games do not scale their scene to the size
+#: they are handed: told 1360x768, star_wars_elg draws its 800x480 service
+#: screen in the top-left corner and leaves the rest black, and
+#: jurassic_park_the_pin puts its bottom-right Insider badge at 0.57 across
+#: (800/1360). Sizing only the WINDOW therefore shrank the same wrong picture
+#: and the report came back unchanged. So `screen` sizes the guest's render
+#: target, which is what the machine's own panel does; watch.sh sets
+#: PAD_GL_W/H from it, and a caller that names those by hand still wins.
+#: The check on that is the same as every other line here: it is wrong in a
+#: way anybody can see.
 #:
 #: A title that grows a real timing record later needs no entry: the derived
 #: reading is what sizes the second display, and this only fills the gap.
@@ -190,8 +205,47 @@ def reported(title):
     return dict(REPORTED_PANELS.get(title or "", {}))
 
 
+def reported_exports(title):
+    """["NAME=value", ...] - `title`'s reported facts as watch.sh wants them.
+
+    The translation from a fact to the knobs that carry it lives HERE and not
+    in the shell, because it is the part with a decision in it: a reported
+    screen sets the guest's render size AND the window, a reported rotation
+    sets neither. That was got wrong once in the other direction - the panel
+    was made a window size alone, which shrank the wrong picture instead of
+    fixing it - so it is somewhere a test can reach.
+
+    watch.sh still decides who WINS: a caller that named any of these by hand
+    keeps its own value. This only says what the machine was reported to be.
+    """
+    r = reported(title)
+    out = []
+    if r.get("screen"):
+        w, h = r["screen"]
+        # Both, and in this order. PAD_GL_W/H is what the game is told, which
+        # is the half that makes the picture right; PAD_GL_WIN_W/H is the
+        # window, which is normally the same number and is also padglhost's
+        # signal that this run's size is a reported panel rather than the
+        # rig's default (it will not replay a window size remembered from
+        # before that was known).
+        out += ["PAD_GL_W=%d" % w, "PAD_GL_H=%d" % h,
+                "PAD_GL_WIN_W=%d" % w, "PAD_GL_WIN_H=%d" % h]
+    if r.get("rot2"):
+        # Host side only, and it must stay that way - a rotation the guest
+        # knew about would be a rotation applied twice.
+        out.append("PAD_GL2_ROT=%d" % r["rot2"])
+    return out
+
+
 def main(argv):
     shell = "--shell" in argv
+    if "--reported" in argv:
+        args = [a for a in argv[1:] if a != "--reported"]
+        if not args:
+            raise SystemExit(__doc__)
+        for line in reported_exports(args[0]):
+            print(line)
+        return 0
     args = [a for a in argv[1:] if a != "--shell"]
     if not args:
         raise SystemExit(__doc__)

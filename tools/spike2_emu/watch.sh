@@ -184,6 +184,14 @@ VID_HOST=$ROOT/dump/padvid
 VID_GUEST=/dump/padvid
 S=$RIG
 
+# WAS THE RENDER SIZE ASKED FOR BY THE CALLER? Recorded before the default is
+# applied, because `${PAD_GL_W:-1360}` cannot be asked again afterwards - the
+# variable is set either way from here on. The one-screen cabinets' block far
+# below needs to know the difference: a sweep that names a size by hand must
+# get exactly what it asked for, and a title's reported panel must not silently
+# overwrite it.
+GL_WH_FROM_CALLER=0
+if [ -n "${PAD_GL_W:-}${PAD_GL_H:-}" ]; then GL_WH_FROM_CALLER=1; fi
 export PAD_GL_W=${PAD_GL_W:-1360}
 export PAD_GL_H=${PAD_GL_H:-768}
 export GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12}   # without this Mesa picks llvmpipe
@@ -444,27 +452,61 @@ if [ -f "$GAME_ELF" ]; then
     # kept in display2.py beside the derived reading with the evidence for each;
     # see REPORTED_PANELS there for why these four lines are not the per-title
     # table this rig otherwise refuses to keep.
-    _rep=$(python3 - "$GAME" <<'PYREP' 2>/dev/null
-import sys, os
-sys.path.insert(0, os.environ.get("RIG", "."))
-import display2
-r = display2.reported(sys.argv[1])
-if r.get("screen"):
-    print("PAD_GL_WIN_W=%d" % r["screen"][0])
-    print("PAD_GL_WIN_H=%d" % r["screen"][1])
-if r.get("rot2"):
-    print("PAD_GL2_ROT=%d" % r["rot2"])
-PYREP
-)
+    # ★★ THE PANEL IS THE RENDER SIZE ON THESE THREE, NOT JUST THE WINDOW -
+    # and getting that wrong is why the fix of 2026-09-07 did not fix them
+    # (peanuts, 2026-09-08: "the screen resolution for Star Wars Home Edition,
+    # Jurassic Park The Pin and James Bond 60th are still wrong").
+    #
+    # Display 2's lesson was the exact opposite one - there, the record is the
+    # panel, the panel is the WINDOW, and the game must keep being told the
+    # backbox's size because its own present() assumes it (item 67 measured
+    # that by cropping mando_le's topper). Reading that lesson across to
+    # display 0 was the mistake: a one-screen cabinet has no second display
+    # and no viewport indirection, so nothing stands between what the game is
+    # told and what it draws.
+    #
+    # WHAT THESE GAMES ACTUALLY DO, off the reporter's own screenshots
+    # (star_wars_elg, jurassic_park_the_pin, 2026-08-30): they do NOT scale
+    # their scene to the size they are handed. The Cycling Coil Test comes up
+    # at its authored 800x480 in the TOP-LEFT of the 1360x768 framebuffer with
+    # the rest black, and The Pin's Insider Connected badge - which belongs in
+    # the bottom-right corner - sits at (0.57, 0.59) of the window, i.e. at
+    # the corner of an 800x480 screen inside a 1360x768 one (800/1360 = 0.588,
+    # 480/768 = 0.625). So a window at the panel size scales that whole mostly
+    # black frame down and the picture ends up SMALLER in the same corner: the
+    # complaint survives the fix, which is exactly what was reported.
+    #
+    # Told 800x480, the game fills it, because 800x480 is what the machine's
+    # own panel tells it. This does reach the guest, which the rest of
+    # REPORTED_PANELS deliberately does not - see display2.py, where the
+    # argument for the exception is kept beside the evidence.
+    #
+    # WHICH FACT SETS WHICH KNOB is display2.reported_exports()'s answer, not
+    # this loop's: it is the part with a decision in it, and it was got wrong
+    # once already. What stays here is who WINS - a caller that named any of
+    # these by hand keeps its own value, on every line, and PAD_GL_W/H needs
+    # GL_WH_FROM_CALLER to say so because it is already set by now.
+    _rep=$(python3 "$RIG/display2.py" --reported "$GAME" 2>/dev/null)
     for _kv in $_rep; do
         case "$_kv" in
+            PAD_GL_W=*)      if [ "$GL_WH_FROM_CALLER" = 0 ]; then
+                                 export PAD_GL_W=${_kv#*=}
+                             fi ;;
+            PAD_GL_H=*)      if [ "$GL_WH_FROM_CALLER" = 0 ]; then
+                                 export PAD_GL_H=${_kv#*=}
+                             fi ;;
             PAD_GL_WIN_W=*)  export PAD_GL_WIN_W=${PAD_GL_WIN_W:-${_kv#*=}} ;;
             PAD_GL_WIN_H=*)  export PAD_GL_WIN_H=${PAD_GL_WIN_H:-${_kv#*=}} ;;
             PAD_GL2_ROT=*)   export PAD_GL2_ROT=${PAD_GL2_ROT:-${_kv#*=}} ;;
+            # A NEW KEY MUST NOT BE SILENTLY DROPPED. reported_exports() is
+            # where a fact turns into a knob; if it grows one this loop does
+            # not know, the run says so instead of quietly ignoring it.
+            *) echo "[watch] screen: display2 reported '$_kv', which this" \
+                    "script does not know how to set - ignored" ;;
         esac
     done
     if [ -n "${PAD_GL_WIN_W:-}" ]; then
-        echo "[watch] screen: this cabinet has ONE screen and it is"              "${PAD_GL_WIN_W}x${PAD_GL_WIN_H} - reported from the machine, not"              "in the binary; the game still renders at ${PAD_GL_W}x${PAD_GL_H}"
+        echo "[watch] screen: this cabinet has ONE screen and it is"              "${PAD_GL_WIN_W}x${PAD_GL_WIN_H} - reported from the machine, not"              "in the binary; the game renders at ${PAD_GL_W}x${PAD_GL_H}"
     fi
     if [ -n "${PAD_GL2_ROT:-}" ] && [ "${PAD_GL2_ROT}" != 0 ]; then
         echo "[watch] display 2: its panel is mounted a quarter turn"              "(${PAD_GL2_ROT} degrees clockwise), so its window is the panel"              "transposed and the picture is turned into it"

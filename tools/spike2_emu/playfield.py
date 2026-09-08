@@ -1098,9 +1098,42 @@ class SwitchWatch:
             return False
         self._n = self.every
         self.mrg = read_merged()
-        self.door = bool(self.mrg) and not self.mrg[self.door_id]
+        # ★ THE DOOR ID IS NOT ALWAYS AN ADDRESS THIS ARRAY HAS (2026-09-08).
+        # is_made() below has bounded every other read of `mrg` since it was
+        # written; this one indexed it bare, and on foo_fighters_le 1.04.0 the
+        # coin door resolves to id 583 against a 256-entry array - an
+        # IndexError out of a paced callback, so the window stops updating
+        # entirely. See addressable() for where those ids come from and why
+        # the answer here is "unknown", not a guess: an unreadable door read
+        # as OPEN would put a 48 V warning on a closed one.
+        self.door = self.is_made(self.door_id) is False
         self.balls.update(self.closed())
         return True
+
+    def addressable(self, sw_id):
+        """Can this rig read and poke `sw_id` at all?
+
+        ★ NOT EVERY ID IN A SWITCH LIST IS ONE (2026-09-08, peanuts: "for Foo
+        Fighters and The Munsters, the list of Switches is still incomplete").
+        The shim's arrays are padsw.MAX_ID long - 256 since item 73 widened
+        them from 128 - and every id in them is the game's own switch id. The
+        DERIVED reader (item 102) has no entry table to read one from on the
+        48-byte generation, so it numbers its rows by position in the device
+        ARRAY, and those run far past 256: foo_fighters_le 1.04.0 to 847,
+        elvira3 1.13.0 to 629, munsters_le 1.28.0 to 268.
+
+        foo_fighters_le is the proof that the two are different numbers and
+        not merely a bigger version of the same one: 1.03.0 and 1.04.0 are the
+        same machine with the same 105 switches, 1.03.0 has a stored address
+        so it is read the old way and puts the coin door at id 34, and 1.04.0
+        falls through to the derived reader and puts it at 583.
+
+        So a row past the end is not addressable, and this is what says so
+        instead of the window quietly showing a dead one. Renumbering is the
+        thing NOT to do - an id is an address, and a poke at an invented one
+        closes a switch the user did not ask for.
+        """
+        return 0 <= sw_id < padsw.MAX_ID
 
     def closed(self):
         """[bool] per trough position, in trough order."""
@@ -4455,9 +4488,23 @@ class Schematic(StateOps):
 
         bar = tk.Frame(root, bg="#111")
         bar.pack(fill="x")
-        tk.Label(bar, text="  %s: %d switches, no playfield artwork in this title"
-                           "  - click a row to close that switch"
-                      % (GAME, len(switches)),
+        # ★ SAY HOW MANY OF THEM THIS BUILD CAN ACTUALLY WORK (2026-09-08).
+        # On a title read by the derived reader the id column is a position in
+        # the device array rather than a switch id, and anything past
+        # padsw.MAX_ID is an address the shim's arrays do not have - 89 of
+        # foo_fighters_le 1.04.0's 105 rows, 13 of munsters_le 1.28.0's 103.
+        # Those rows show no state and cannot be clicked, and until this line
+        # existed the window gave no hint of it: the list simply looked
+        # incomplete, which is exactly how it was reported. See
+        # SwitchWatch.addressable() for why they are not renumbered.
+        dead = sum(1 for sw in switches
+                   if not (0 <= sw["id"] < padsw.MAX_ID))
+        note = ("  - click a row to close that switch" if not dead else
+                "  - %d of them cannot be read or clicked on this build "
+                "(their ids are past the %d this rig addresses)"
+                % (dead, padsw.MAX_ID))
+        tk.Label(bar, text="  %s: %d switches, no playfield artwork in this "
+                           "title%s" % (GAME, len(switches), note),
                  bg="#111", fg="#bbb", font=("Consolas", 9)).pack(side="left",
                                                                   padx=4, pady=4)
         # Save/Load state on the bar's right (item 13, same cluster as the
@@ -4603,9 +4650,18 @@ class Schematic(StateOps):
                                         font=("Consolas", 9, "bold"),
                                         text="node %d" % d)
                     continue
+                # A row this build cannot address is drawn dim and is NOT
+                # registered in `info`, so a click can never land on it - the
+                # same rule the live-state dots follow below, and for the same
+                # reason: an id past padsw.MAX_ID is not an address, so poking
+                # it would write outside the array the game reads.
+                live = 0 <= d["id"] < padsw.MAX_ID
                 i = self.cv.create_text(
-                    x, y, anchor="w", fill="#d8d8d8", font=("Consolas", 9),
+                    x, y, anchor="w", fill="#d8d8d8" if live else "#5a5a5a",
+                    font=("Consolas", 9),
                     text="%3d  %s" % (d["id"], d["name"][:self.NAME_W]))
+                if not live:
+                    continue
                 self.info[i] = dict(kind="switch", d=d)
                 # The live-state dot beside the row, drawn OUTSIDE the text and
                 # not registered in `info` - the same rule as the artwork

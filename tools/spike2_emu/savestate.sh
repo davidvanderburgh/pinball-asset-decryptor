@@ -273,6 +273,34 @@ while read -r p; do
         && echo "ring $p $stash" >> "$DDIR/restore.env"
 done < <(awk '$2 ~ /s/ && $4 !~ /^00:00/ {print $6}' "/proc/$PID/maps" 2>/dev/null | sort -u)
 
+# --- the render size this checkpoint was taken at ------------------------
+# PAD_GL_W/H sizes the guest's whole pipeline before it starts - its EGL
+# surface, the GL ring's own header, every texture the scene is composed into
+# - and all of that is IN the checkpoint. Restoring one into a session running
+# a different render size is therefore not a resize, it is a mismatch, and
+# criu finds out about it after the live guest has already been killed.
+#
+# Nothing could change that size per title until 2026-09-08, when the
+# one-screen cabinets (james_bond_60th_le, star_wars_elg,
+# jurassic_park_the_pin) started rendering at their own 800x480 panel instead
+# of the backbox's 1360x768 - so every slot those three have from before that
+# is a 1360x768 checkpoint. Record it, and let restorestate.sh refuse such a
+# slot in its pre-flight, where a refusal still costs nothing.
+#
+# Read from the GL ring's header rather than the environment: this script runs
+# as root through `wsl -u root`, which does not carry the session's exports,
+# and the header is padglhost's own answer. fb_w/fb_h are the fifth and sixth
+# 32-bit words of padgl_hdr (padgl.h) - 4 unsigned ints then 4 unsigned long
+# longs, so byte 48.
+RENDER=$(od -An -tu4 -j48 -N8 "/proc/$PID/root/dump/padgl" 2>/dev/null \
+         | tr -s ' \n' ' ' | sed 's/^ *//; s/ *$//')
+case "$RENDER" in
+    [1-9][0-9]*" "[1-9][0-9]*)
+        echo "render $RENDER" >> "$DDIR/restore.env"
+        echo "[save] render size in the slot: ${RENDER% *}x${RENDER#* }" ;;
+    *)  echo "[save] no render size in the slot (no GL ring to read it from)" ;;
+esac
+
 # --- the GL world journal (guest frozen: freeze-exact) --------------------
 # The checkpoint restores the GUEST; the renderer's GL world - every texture,
 # buffer, shader and VAO the guest has uploaded - lives in padglhost and dies

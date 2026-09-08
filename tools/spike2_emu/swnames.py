@@ -65,6 +65,7 @@ import argparse
 import collections
 import os
 import re
+import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -268,12 +269,68 @@ def _offset(dev, bits):
     return best if best_n == len(want) else None
 
 
-def fill(rows, game=None, elf_path=None):
+def static_switch_names(game=None, elf_path=None):
+    """{(node, bit): name} from the title's own STATIC switch table, or {}.
+
+    ★ THE THIRD NAME SOURCE, and it closes the gap the other two leave
+    (2026-09-08, peanuts: "for Foo Fighters and The Munsters, the list of
+    Switches is still incomplete with some question marks").
+
+    The device table above is the better join where it reaches, because it
+    carries the connector that names the board. It does not always reach:
+    foo_fighters_le 1.04.0 yields devicexy FIFTEEN switch records for a machine
+    with 105 switches, so nine playfield rows in ten stay `?` and the list is
+    unreadable - which is the report. swelf's derived reader (item 102) walks
+    the same binary a different way and produces all 105 WITH the game's own
+    names, and nothing was asking it, because mktables only ever consulted it
+    as a substitute for a missing run rather than as a source of names.
+
+    JOINED ON (node, bit) AND NOTHING ELSE. That is the key item 73 established
+    as universal - "names vary, ids drift, the wires do not" - and it is also
+    the only key that is safe here: the derived reader numbers its rows by
+    position in the device ARRAY, which is a different numbering from the live
+    dump's switch ids, so joining on the id would put right names on wrong
+    switches. A wire that appears twice in the derived table is dropped rather
+    than guessed at, for the same reason.
+
+    VALIDATED AGAINST THE GAME'S OWN WORDS, which is possible because elvira3
+    has both: its cached list holds 45 names the game itself reported and 64
+    `?`. Every one of the 64 has an unambiguous wire in the derived table, and
+    of the 45 the game named, 42 come back character for character. The three
+    that differ are all rows the PLATFORM table below had labelled generically
+    ("Action Button" for the title's own "LOCKDOWN BUTTON") - so the
+    disagreements are with the fallback, not with the game.
+    """
+    try:
+        import swelf
+    except ImportError:                                    # pragma: no cover
+        return {}
+    path = elf_path or gameinfo.elf(game)
+    title = game or gameinfo.active()
+    try:
+        rows = swelf.rows(path, title)
+    except (OSError, SystemExit, ValueError, struct.error):
+        return {}
+    by_wire = {}
+    for _sid, _num, node, bit, name in rows:
+        if not name or name == "?":
+            continue
+        by_wire.setdefault((node, bit), []).append(name)
+    return {w: n[0] for w, n in by_wire.items() if len(n) == 1}
+
+
+def fill(rows, game=None, elf_path=None, use_static=True):
     """Fill `?` names in swtable rows. Returns (rows, [report lines]).
 
     Never overwrites a name the game itself supplied: a title that can read its
     own message table is the better authority, and this must not quietly replace
     "LOCKDOWN BUTTON" with "Action Button".
+
+    `use_static` turns off the static-table source. It is not free - the
+    derived reader indexes the whole image, which is ten seconds on a 117 MB
+    binary - and mktables only pays it once per build, remembering in the file
+    that it has asked. Nothing else has a place to remember, so the default
+    is to ask.
     """
     unknown = [r for r in rows if r[4] == "?"]
     if not unknown:
@@ -306,12 +363,30 @@ def fill(rows, game=None, elf_path=None):
         report.append("node %d: %d names from the title's device table "
                       "(index -> bit %+d)" % (node, len(drecs), off))
 
-    out, from_dev, from_plat = [], 0, 0
+    # THE STATIC TABLE IS ASKED ONLY FOR WHAT THE DEVICE TABLE DID NOT REACH,
+    # and only if that is anything - the walk is the expensive one here, and a
+    # title whose device table named every `?` has nothing to ask about.
+    static = {}
+    if use_static and any(r[4] == "?" and (r[2], r[3]) not in named
+                          for r in rows):
+        static = static_switch_names(game, elf_path)
+        if static:
+            report.append("%d names from this title's static switch table "
+                          "(joined on node/bit)" % len(static))
+
+    out, from_dev, from_static, from_plat = [], 0, 0, 0
     for sid, num, node, bit, name in rows:
         if name == "?":
+            # The title's own words first, in the order of how well the source
+            # is pinned to this row: the device table carries the connector
+            # that names the board, the static table is joined on the wire,
+            # and PLATFORM is a generic label for a board every machine has.
             if (node, bit) in named:
                 name = named[(node, bit)]
                 from_dev += 1
+            elif (node, bit) in static:
+                name = static[(node, bit)]
+                from_static += 1
             elif (node, bit) in PLATFORM:
                 name = PLATFORM[(node, bit)]
                 from_plat += 1
@@ -319,9 +394,10 @@ def fill(rows, game=None, elf_path=None):
 
     still = sum(1 for r in out if r[4] == "?")
     report.append("filled %d of %d unnamed: %d from this title's device table, "
-                  "%d generic platform labels, %d still ?"
-                  % (from_dev + from_plat, len(unknown), from_dev, from_plat,
-                     still))
+                  "%d from its static switch table, %d generic platform "
+                  "labels, %d still ?"
+                  % (from_dev + from_static + from_plat, len(unknown),
+                     from_dev, from_static, from_plat, still))
     return out, report
 
 

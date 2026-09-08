@@ -84,6 +84,61 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **103. The derived switch reader publishes a POSITION where every
+      consumer expects an ADDRESS, so most of a title's switches cannot be
+      read or poked at all.** `S2 D3`
+      *(Found 2026-09-08 on PAD-115, chasing peanuts' "for Foo Fighters and
+      The Munsters, the list of Switches is still incomplete with some
+      question marks". The names half is fixed on that branch; this is the
+      other half and it wants its own pass.)*
+      **THE MEASUREMENT, and it is unambiguous because ONE MACHINE ANSWERS
+      TWICE.** `foo_fighters_le` 1.03.0 and 1.04.0 are the same 105 switches.
+      1.03.0 has a stored address, so `_rows_roots` reads the ENTRY table and
+      numbers them **3..106, coin door at 34**. 1.04.0's addresses have moved
+      and it falls through to item 102's derived reader, which has no entry
+      table on the 48-byte generation and numbers each row by its position in
+      the DEVICE array: **3..847, coin door at 583**. Those are not the same
+      number in different clothes; one of them is the game's switch id and the
+      other is not.
+      **WHAT IT COSTS.** `padsw.MAX_ID` is 256 - the length of every switch
+      array the shim and padglhost share, widened from 128 by item 73 for
+      exactly this generation - and an id past it is an address that does not
+      exist. Measured over the library:
+          foo_fighters_le 1.04.0   105 rows, **89** past 256, door 583
+          elvira3 1.13.0           109 rows, **93** past 256, door 553
+          munsters_le 1.28.0       103 rows, **13** past 256, door 198
+          sword_of_rage_le 1.18.0   98 rows, **11** past 256, door 201
+          (every ROOTS title: 0 past 256, door 33-36)
+      Those rows show no live state, cannot be clicked, and cannot be bound to
+      a key - which is what "the list is incomplete" looks like from the front.
+      **Already done on PAD-115, and it is first aid, not the fix:**
+      `SwitchWatch.poll()` no longer indexes the merged array with an
+      unchecked door id (on foo_fighters_le 1.04.0 that was an IndexError out
+      of a paced callback, so the whole playfield window died on its first
+      tick); the switch-list view dims an unaddressable row, leaves it out of
+      the click map, and its bar says how many there are.
+      **DO NOT RENUMBER THEM.** An id is an address: a dense 0..n-1 renumber
+      makes every row addressable and makes half of them press a switch the
+      user did not ask for. This file's standing rule applies unchanged.
+      **The real fix is the entry table**, which `_rows_roots` reads through
+      `*(ENT) + 44*id` and `_ent_by_walkback()` already derives without a root
+      on the ROOTS generation. The 48-byte generation must have an equivalent
+      - the game indexes its own switches somehow - and nothing has looked for
+      it yet; `_rows_gen2` never asks. foo_fighters_le is the oracle the search
+      needs and there has never been one before: 1.03.0 gives the right answer
+      for 105 switches by name, so a candidate table on 1.04.0 can be scored
+      against it row for row instead of by plausibility.
+      **Acceptance:** on foo_fighters_le 1.04.0 the switch list's ids all fall
+      under `padsw.MAX_ID` and its coin door resolves to the same wire (0,23)
+      row that 1.03.0 calls 34; the bar reports 0 unaddressable; munsters_le
+      1.28.0, elvira3 1.13.0 and sword_of_rage_le the same; every ROOTS title
+      byte-identical as the control.
+      — S2: these titles open, list and play, and the keyboard still works
+      because item 73 resolves the cabinet by WIRE - what is lost is the mouse
+      and the live state on most of the playfield. D3: the search has a real
+      oracle for once, but it is a struct hunt across a generation and could
+      turn out not to be one table.
+
 - [x] **100. A "Compact build" tick beside the size strip, and the strip shows
       what compact saves.** `S2 D2` **SHIPPED on `item/100` 2026-09-05:** the tick
       moved out of Menu settings into the size row (its own trace re-plans; the
@@ -5358,6 +5413,29 @@ These have each been violated at least once and each cost a run or a window:
       display2.py's reader expects, so there is nothing to derive from yet.
       Note PAD_GL_W/H is not the same shape of change as PAD_GL2_WIN_W/H: it
       is the guest's render target as well as the window.
+      **2026-09-08, PAD-115 - (b) IS DONE, AND THE LAST SENTENCE ABOVE IS THE
+      WHOLE REASON IT TOOK TWICE.** Item 102 gave the three one-screen
+      cabinets an 800x480 WINDOW over an unchanged 1360x768 render, reasoning
+      from display 2, where item 67 had proved the game must keep being told
+      the backbox's size. peanuts tested it and reported all three still
+      wrong. His own screenshots say why, and they had been on the disk since
+      2026-08-30: **these games do not scale their scene to the size they are
+      handed.** star_wars_elg draws the Cycling Coil Test at its authored
+      800x480 in the TOP-LEFT of a 1360x768 window with the rest black, and
+      jurassic_park_the_pin's Insider Connected badge - a bottom-right corner
+      element - sits at (0.57, 0.59) of the client area, which is the corner
+      of an 800x480 screen inside a 1360x768 one. Scaling that frame into a
+      smaller window shrinks the same wrong picture. Display 2 is the
+      opposite case only because the game presents it through display 0's
+      viewport; a one-screen cabinet has no such indirection, so here the
+      panel IS the render target. watch.sh now takes PAD_GL_W/H from
+      `display2.reported_exports()`, a caller that names them by hand still
+      wins, and two consequences of a per-title render size are handled with
+      it: a window size remembered in `~/.pad_windows` records the render it
+      framed (a size saved around 1360x768 is not replayed over an 800x480
+      one), and a save slot records its render size so `restorestate.sh`
+      refuses a pre-change checkpoint in the pre-flight instead of letting
+      criu discover it after the live guest has been killed.
       titles come up stretched or ringed in black — and Venom's is on its
       side.** `S3 D2`
       *(Filed 2026-08-23 from PAD-81, the tester who asked for the Compare

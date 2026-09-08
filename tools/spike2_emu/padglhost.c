@@ -799,6 +799,11 @@ static int win_on;                       /* PAD_GL_WINDOW=1                  */
 static XDisplay *xdpy;
 static unsigned long xwin, wm_delete;
 static int win_w, win_h;                 /* current drawable size            */
+/* Set when PAD_GL_WIN_W/H named this run's size, i.e. when the size came
+ * from display2.REPORTED_PANELS rather than from the rig's default. The
+ * remembered-geometry restore in win_open() is the only thing that asks:
+ * a size remembered before that fact was known predates it. */
+static int win_reported_panel;
 static int win_flip;                     /* 0 = correct here; see win_present() */
 static int win_every = 1;                /* present every Nth frame          */
 static unsigned blit_prog, blit_vao;
@@ -1522,18 +1527,31 @@ static const char *winpos_file(void)
 }
 
 /* w/h may be NULL for a caller that only wants the position; they are left
- * untouched when the line has no size fields. */
-static int winpos_get(const char *key, int *x, int *y, int *w, int *h)
+ * untouched when the line has no size fields.
+ *
+ * fw/fh are the RENDER SIZE the remembered size was taken against, and they
+ * come back 0 for a line written before that field existed. A remembered
+ * window size only means anything beside the picture it was framing: see
+ * win_open(), where a size taken at a render size this run is not using is
+ * dropped rather than replayed. */
+static int winpos_get(const char *key, int *x, int *y, int *w, int *h,
+                      int *fw, int *fh)
 {
     char line[160], k[64];
     FILE *f = fopen(winpos_file(), "r");
-    int gx, gy, gw, gh, n, hit = 0;
+    int gx, gy, gw, gh, gfw, gfh, n, hit = 0;
     if (!f) return 0;
     while (fgets(line, sizeof line, f)) {
-        n = sscanf(line, "%63s %d %d %d %d", k, &gx, &gy, &gw, &gh);
+        gfw = gfh = 0;
+        n = sscanf(line, "%63s %d %d %d %d %d %d", k, &gx, &gy, &gw, &gh,
+                   &gfw, &gfh);
         if (n >= 3 && !strcmp(k, key)) {
             *x = gx; *y = gy;
             if (n >= 5 && w && h) { *w = gw; *h = gh; }
+            if (fw && fh) {
+                *fw = n >= 7 ? gfw : 0;
+                *fh = n >= 7 ? gfh : 0;
+            }
             hit = 1;
         }
     }
@@ -1562,7 +1580,13 @@ static void winpos_put(const char *key, int x, int y, int w, int h)
         fputs(keep[i], f);
         if (!strchr(keep[i], '\n')) fputc('\n', f);
     }
-    if (w > 0 && h > 0) fprintf(f, "%s %d %d %d %d\n", key, x, y, w, h);
+    /* The render size goes on the line WITH the window size, because it is
+     * what makes that size readable later - a 1360x768 window is a sensible
+     * frame for a 1360x768 render and much too big for an 800x480 one. Two
+     * extra fields, so a line written here still parses everywhere that reads
+     * five, and a five-field line from before this still parses here. */
+    if (w > 0 && h > 0) fprintf(f, "%s %d %d %d %d %d %d\n", key, x, y, w, h,
+                                fb_w, fb_h);
     else                fprintf(f, "%s %d %d\n", key, x, y);
     fclose(f);
 }
@@ -1835,7 +1859,7 @@ static void legend_open(int scr)
      * delayed XMoveWindow in win_pump(); the capture here just records where
      * it should go. */
     int lx = win_w + 16, ly = 0;
-    legend_want_pos = winpos_get("legend", &lx, &ly, 0, 0);
+    legend_want_pos = winpos_get("legend", &lx, &ly, 0, 0, 0, 0);
     legend_want_x = lx; legend_want_y = ly;
     legend_win = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr),
                                      lx, ly, 430,
@@ -1926,14 +1950,23 @@ static int win_open(void)
     }
     scr  = XDefaultScreen(xdpy);
     win_w = fb_w; win_h = fb_h;
-    {   /* ★ THE SMALL CABINETS' SCREEN, host side only (2026-09-07). A Home
-         * Edition, a 60th and a The Pin have ONE screen and it is 800x480, not
-         * the 1360x768 backbox every other title has - reported from three
-         * separate machines. Same split as display 2's: the GAME still renders
-         * at PAD_GL_W/H (that is the guest's render target and its ring header,
-         * and moving it would relocate every save slot), and only the window it
-         * is shown in changes. win_present() letterboxes fb into the window
-         * already, so the guest cannot see this.
+    {   /* ★ THE SMALL CABINETS' SCREEN (2026-09-07, corrected 2026-09-08). A
+         * Home Edition, a 60th and a The Pin have ONE screen and it is
+         * 800x480, not the 1360x768 backbox every other title has - reported
+         * from three separate machines.
+         *
+         * This was first done here ALONE, as a window size over an unchanged
+         * 1360x768 render, on the reasoning that had settled display 2. It did
+         * not fix the reports, and the reason is in display2.py: these games
+         * draw their scene at its authored size in the corner of whatever
+         * framebuffer they are given, so shrinking the window shrank the same
+         * wrong picture. watch.sh now sets PAD_GL_W/H from the same reported
+         * fact, so fb_w/fb_h ARE the panel by the time this runs and the two
+         * lines below normally change nothing.
+         *
+         * What they still do is mark this run as one whose size is a reported
+         * panel rather than the rig's default, which the remembered-geometry
+         * block below needs - see there.
          *
          * Bounded, and out of range falls back to the render size - a typo here
          * is otherwise a window nobody can find. */
@@ -1942,9 +1975,9 @@ static int win_open(void)
         int w0 = ew ? atoi(ew) : 0, h0 = eh ? atoi(eh) : 0;
         if (w0 >= 160 && h0 >= 120 && w0 <= 7680 && h0 <= 4320) {
             win_w = w0; win_h = h0;
-            fprintf(stderr, "[padglhost] this cabinet's screen is %dx%d, so the "
-                    "window opens at that and the %dx%d render is scaled into "
-                    "it\n", w0, h0, fb_w, fb_h);
+            win_reported_panel = 1;
+            fprintf(stderr, "[padglhost] this cabinet's screen is %dx%d and "
+                    "the game renders at %dx%d\n", w0, h0, fb_w, fb_h);
         }
     }
     {   /* Reopen where - and at the size - the window was last left. The SIZE
@@ -1953,11 +1986,36 @@ static int win_open(void)
          * captured here and replayed by the delayed XMoveWindow in win_pump().
          * The bounds keep a corrupt line from creating a 3x2 or a 30000-wide
          * window; out of bounds falls back to the framebuffer size. */
-        int gx = 0, gy = 0, gw = 0, gh = 0;
-        game_want_pos = winpos_get("game", &gx, &gy, &gw, &gh);
+        int gx = 0, gy = 0, gw = 0, gh = 0, gfw = 0, gfh = 0;
+        game_want_pos = winpos_get("game", &gx, &gy, &gw, &gh, &gfw, &gfh);
         game_want_x = gx; game_want_y = gy;
+        /* ★ A SIZE REMEMBERED AROUND A DIFFERENT PICTURE IS NOT A PREFERENCE
+         * (2026-09-08). This file is written on every run and read back on the
+         * next one, so it outlives a change to what the window frames - and
+         * the one-screen cabinets are exactly that change: every existing line
+         * for them was saved around a 1360x768 render, and replaying it would
+         * hand the panel fix a window nearly twice the size of the screen the
+         * machine has. The reporter would see the same "window too large" he
+         * has now, from a fix that had already landed.
+         *
+         * So the size is kept only when the line says which render it framed
+         * and that is this run's. A line from before the field carries no
+         * answer: it is trusted as before, EXCEPT on a title whose size is a
+         * reported panel, where it is known to predate the panel. Everything
+         * else keeps the size it was left at, and one run rewrites the line
+         * with its render size so the question stops being open. */
         if (gw >= 160 && gh >= 120 && gw <= 7680 && gh <= 4320) {
-            win_w = gw; win_h = gh;
+            int matched = gfw ? (gfw == fb_w && gfh == fb_h)
+                              : !win_reported_panel;
+            if (matched) {
+                win_w = gw; win_h = gh;
+            } else {
+                fprintf(stderr, "[padglhost] window: the remembered %dx%d was "
+                        "sized around a %dx%d picture, not this run's %dx%d - "
+                        "opening at the screen instead. Drag it where you want "
+                        "it and that is what comes back.\n",
+                        gw, gh, gfw, gfh, fb_w, fb_h);
+            }
         }
         /* A REMEMBERED POSITION NOTHING COULD REACH IS NOT RESTORED. On a
          * compositor that honors it, obeying that line opens the game window

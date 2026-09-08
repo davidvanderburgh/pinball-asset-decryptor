@@ -224,3 +224,173 @@ def test_king_kong_fill_names_every_ramp_opto(monkeypatch):
     assert sum(1 for r in out if r[4] == "?") == 1
     assert any(l.startswith("group 4: connector 9c names node 9") for l in report)
     assert any(l.startswith("node 9: 27 names") for l in report)
+
+
+# ---------------------------------------------------------------------------
+# THE THIRD NAME SOURCE: the title's own STATIC switch table
+#
+# 2026-09-08, peanuts: "for Foo Fighters and The Munsters, the list of
+# Switches is still incomplete with some question marks". The device table is
+# the join above and it does not always reach - devicexy yields
+# foo_fighters_le 1.04.0 FIFTEEN switch records for a machine with 105
+# switches, so nine playfield rows in ten stayed `?`. swelf's derived reader
+# (item 102) reads all 105 out of the same binary WITH the game's own names,
+# and nothing was asking it for names: mktables only ever used it as a
+# substitute for a missing run.
+#
+# Measured on the builds he tested, modelling item 29's failure (the dump
+# finds the table and names nothing): foo_fighters_le 1.04.0 60 `?` -> 0,
+# munsters_le 1.28.0 3 -> 0, and the rows carrying the title's own word
+# rather than a generic label 0 -> 97 and 64 -> 95.
+# ---------------------------------------------------------------------------
+
+def _static(monkeypatch, rows):
+    """swelf's derived table, without a card or an ELF."""
+    import swelf
+    monkeypatch.setattr(swelf, "rows", lambda path, title: rows)
+    monkeypatch.setattr(swnames.gameinfo, "elf", lambda game=None: "/no/elf")
+    monkeypatch.setattr(swnames.gameinfo, "active", lambda *a, **k: "t")
+
+
+def test_the_static_table_names_what_the_device_table_cannot_reach(monkeypatch):
+    """foo_fighters_le's shape: a full roster on the wire, a device table that
+    covers almost none of it."""
+    _table(monkeypatch, [])                       # no device records at all
+    _static(monkeypatch, [(0, 0, 8, 3, "LEFT RAMP OPTO"),
+                          (1, 0, 8, 4, "RIGHT RAMP OPTO"),
+                          (2, 0, 9, 7, "SPINNER")])
+    rows = [(1, 0, 8, 3, "?"), (2, 0, 8, 4, "?"), (3, 0, 9, 7, "?")]
+    out, report = swnames.fill(rows, "foo_fighters_le", "/no/elf")
+    assert [r[4] for r in out] == ["LEFT RAMP OPTO", "RIGHT RAMP OPTO",
+                                   "SPINNER"]
+    assert any("static switch table" in l for l in report)
+
+
+def test_the_static_table_never_replaces_a_name_the_game_gave(monkeypatch):
+    """swnames' standing rule, and the static table is not an exception: a
+    title that can read its own message table is the better authority."""
+    _table(monkeypatch, [])
+    _static(monkeypatch, [(0, 0, 8, 3, "LEFT RAMP OPTO")])
+    rows = [(1, 0, 8, 3, "Left Ramp Made Opto")]
+    out, _report = swnames.fill(rows, "t", "/no/elf")
+    assert out == rows
+
+
+def test_the_device_table_still_wins_where_it_answers(monkeypatch):
+    """Nothing that resolved before this existed resolves differently now.
+    The device table carries the connector that names the board, which is a
+    tighter pin on the row than a wire join."""
+    _table(monkeypatch, [dict(cls=1, group=7, index=3, name="FROM DEVICE",
+                              conn="8a")])
+    _static(monkeypatch, [(0, 0, 8, 3, "FROM STATIC")])
+    rows = [(1, 0, 8, 3, "?")]
+    out, _report = swnames.fill(rows, "t", "/no/elf")
+    assert out[0][4] == "FROM DEVICE"
+
+
+def test_the_titles_own_word_beats_a_generic_platform_label(monkeypatch):
+    """PLATFORM is documented as a fallback LABEL - node 1 bit 2 is "Action
+    Button" on Godzilla and "LOCKDOWN BUTTON" on Star Wars, one physical
+    button that games rename. The static table is the title's own word for
+    the same switch, so it goes first."""
+    _table(monkeypatch, [])
+    _static(monkeypatch, [(0, 0, 1, 2, "LOCKDOWN BUTTON")])
+    rows = [(1, 0, 1, 2, "?")]
+    out, _report = swnames.fill(rows, "t", "/no/elf")
+    assert out[0][4] == "LOCKDOWN BUTTON"
+    assert swnames.PLATFORM[(1, 2)] == "Action Button"    # the label it beat
+
+
+def test_a_wire_the_static_table_names_twice_is_refused(monkeypatch):
+    """The derived reader numbers its rows by position in the device ARRAY,
+    which is not the live dump's id space - so the wire is the only safe key,
+    and a wire it answers twice is no answer. A wrong name here is a marker
+    that presses the wrong switch (item 29's warning)."""
+    _table(monkeypatch, [])
+    _static(monkeypatch, [(0, 0, 8, 3, "ONE"), (1, 0, 8, 3, "OTHER"),
+                          (2, 0, 8, 4, "ONLY")])
+    rows = [(1, 0, 8, 3, "?"), (2, 0, 8, 4, "?")]
+    out, _report = swnames.fill(rows, "t", "/no/elf")
+    assert out[0][4] == "?"
+    assert out[1][4] == "ONLY"
+
+
+def test_a_row_the_static_table_leaves_unnamed_is_not_invented(monkeypatch):
+    _table(monkeypatch, [])
+    _static(monkeypatch, [(0, 0, 8, 3, "?"), (1, 0, 8, 4, "")])
+    rows = [(1, 0, 8, 3, "?"), (2, 0, 8, 4, "?")]
+    out, _report = swnames.fill(rows, "t", "/no/elf")
+    assert [r[4] for r in out] == ["?", "?"]
+
+
+def test_the_expensive_source_is_not_asked_when_nothing_needs_it(monkeypatch):
+    """The derived reader indexes the whole image - ten seconds on a 117 MB
+    binary - and this runs on every start of a title whose list keeps a `?`.
+    It must not run when the device table already covered every one."""
+    _table(monkeypatch, [dict(cls=1, group=7, index=3, name="FROM DEVICE",
+                              conn="8a")])
+    asked = []
+    import swelf
+    monkeypatch.setattr(swelf, "rows",
+                        lambda p, t: asked.append(1) or [])
+    swnames.fill([(1, 0, 8, 3, "?")], "t", "/no/elf")
+    assert asked == []
+
+
+def test_use_static_off_is_the_old_behaviour(monkeypatch):
+    _table(monkeypatch, [])
+    asked = []
+    import swelf
+    monkeypatch.setattr(swelf, "rows", lambda p, t: asked.append(1) or [])
+    out, _r = swnames.fill([(1, 0, 8, 3, "?")], "t", "/no/elf",
+                           use_static=False)
+    assert asked == []
+    assert out[0][4] == "?"
+
+
+# ------------------------------------------- asked once per build ----------
+
+def test_the_list_remembers_that_the_static_table_was_asked(tmp_path,
+                                                            monkeypatch):
+    """Without the memo, a title whose `?` no source can fill pays the walk on
+    every single start, for ever - the shape of the cost item 101 spent a
+    whole pass removing from rush_le's boot."""
+    import mktables
+    import swtable
+    elf = tmp_path / "game"
+    elf.write_bytes(b"x" * 32)
+    monkeypatch.setattr(mktables.devicexy, "binary_id",
+                        lambda p: "game 32 bytes")
+    monkeypatch.setattr(swtable.devicexy, "binary_id",
+                        lambda p: "game 32 bytes")
+    rows = [(1, 0, 8, 3, "?")]
+
+    plain = tmp_path / "plain.txt"
+    plain.write_text(swtable.text("t", rows, str(elf)), encoding="utf-8")
+    assert not mktables._static_names_asked(str(plain), str(elf))
+
+    stamped = tmp_path / "stamped.txt"
+    stamped.write_text(swtable.text("t", rows, str(elf), static_asked=True),
+                       encoding="utf-8")
+    assert mktables._static_names_asked(str(stamped), str(elf))
+    # ... and the memo is tied to the BINARY, so a new build clears it
+    monkeypatch.setattr(mktables.devicexy, "binary_id",
+                        lambda p: "game 999 bytes")
+    assert not mktables._static_names_asked(str(stamped), str(elf))
+
+
+def test_the_memo_line_does_not_disturb_the_readers(tmp_path, monkeypatch):
+    """It goes in the header, which every reader of this file skips, and the
+    `# binary:` line the build check reads is still found."""
+    import mktables
+    import swtable
+    elf = tmp_path / "game"
+    elf.write_bytes(b"x" * 32)
+    monkeypatch.setattr(swtable.devicexy, "binary_id", lambda p: "game 32 bytes")
+    monkeypatch.setattr(mktables.devicexy, "binary_id", lambda p: "game 32 bytes")
+    p = tmp_path / "switch_list.txt"
+    p.write_text(swtable.text("t", [(1, 2, 8, 3, "LEFT RAMP")], str(elf),
+                              static_asked=True), encoding="utf-8")
+    assert mktables._read_list(str(p)) == [(1, 2, 8, 3, "LEFT RAMP")]
+    assert mktables._recorded_binary(str(p)) == "game 32 bytes"
+    assert mktables._built_from(str(p), str(elf))

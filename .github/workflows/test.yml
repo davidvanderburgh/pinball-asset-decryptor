@@ -17,6 +17,10 @@ jobs:
   test:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # A wedged or looping test should fail the job, not hang for the
+    # 6-hour default and hold up a release.  Healthy runs finish in
+    # ~3m (Linux/macOS) and ~9m (the slower, tk-serial Windows run).
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +28,38 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # The hosted Windows runner starts with only a few GB free on C:,
+      # and shipped an intermittent "There is not enough space on the disk"
+      # (the runner's own _diag block store) partway through the suite.
+      # Delete the big SDK caches our Python tests never touch — Android,
+      # CodeQL, and the .NET/Swift toolchains — to buy back ~10-15 GB.
+      # Best-effort: a missing path is fine, and we deliberately leave
+      # hostedtoolcache\windows\Python alone -- setup-python (next step)
+      # needs it.
+      - name: Free up disk space (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $before = (Get-PSDrive C).Free / 1GB
+          $targets = @(
+            "$env:ANDROID_SDK_ROOT",
+            "$env:ANDROID_HOME",
+            "C:\Android",
+            "C:\hostedtoolcache\windows\CodeQL",
+            "$env:AGENT_TOOLSDIRECTORY\CodeQL",
+            "C:\Program Files\dotnet",
+            "C:\Program Files\Microsoft SDKs\Azure",
+            "C:\Swift"
+          )
+          foreach ($t in $targets) {
+            if ($t -and (Test-Path $t)) {
+              Write-Host "Removing $t"
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $t
+            }
+          }
+          $after = (Get-PSDrive C).Free / 1GB
+          Write-Host ("C: free before={0:N1} GB, after={1:N1} GB" -f $before, $after)
 
       - name: Set up Python
         uses: actions/setup-python@v5

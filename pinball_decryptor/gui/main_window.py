@@ -406,8 +406,7 @@ class _AudioPreviewPane:
                                                 gain_db=self.gain_db)
             if self._render_id != rid:
                 return
-            self._win._tk_root().after(
-                0, self._show_spectrogram, png, rid, w, h)
+            self._win._post_ui(self._show_spectrogram, png, rid, w, h)
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -901,8 +900,8 @@ class _VideoPreviewPane:
                 path, pos, self._disp_w, self._disp_h)
             if self._render_id != rid:
                 return
-            self._win._tk_root().after(0, self._show_poster, png, rid,
-                                       fallbacks, sampling)
+            self._win._post_ui(self._show_poster, png, rid,
+                               fallbacks, sampling)
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -4307,9 +4306,8 @@ class MainWindow:
                 cats = {}
             if self._audio_scan_id != scan_id:
                 return
-            self._tk_root().after(
-                0, self._populate_audio_after_scan,
-                slots, scan_id, assets_path, cats)
+            self._post_ui(self._populate_audio_after_scan,
+                          slots, scan_id, assets_path, cats)
 
         self._set_tab_scanning("audio", True)
         threading.Thread(target=_work, daemon=True).start()
@@ -7424,9 +7422,8 @@ class MainWindow:
                 slots = []
             if self._video_scan_id != scan_id:
                 return
-            self._tk_root().after(
-                0, self._populate_video_after_scan,
-                slots, scan_id, assets_path)
+            self._post_ui(self._populate_video_after_scan,
+                          slots, scan_id, assets_path)
 
         self._set_tab_scanning("video", True)
         threading.Thread(target=_work, daemon=True).start()
@@ -8689,9 +8686,9 @@ class MainWindow:
                 groups, group_occ, group_all = {}, {}, {}
             if self._image_scan_id != scan_id:
                 return
-            self._tk_root().after(
-                0, self._populate_image_after_scan,
-                slots, scan_id, assets_path, groups, group_occ, group_all)
+            self._post_ui(self._populate_image_after_scan,
+                          slots, scan_id, assets_path, groups, group_occ,
+                          group_all)
 
         self._set_tab_scanning("image", True)
         threading.Thread(target=_work, daemon=True).start()
@@ -18179,8 +18176,7 @@ class MainWindow:
             except Exception:
                 drives, pick = [], (None, None, None)
             # Hop back to the main thread before touching Tk widgets.
-            self._tk_root().after(
-                0, self._apply_drives, mode, drives, pick)
+            self._post_ui(self._apply_drives, mode, drives, pick)
 
         import threading
         threading.Thread(target=_worker, daemon=True).start()
@@ -18194,6 +18190,24 @@ class MainWindow:
         # ``self.master`` or the title label both work; pick a known-
         # existing widget that's created before any threaded work.
         return self._title_lbl.winfo_toplevel()
+
+    def _post_ui(self, fn, *args, delay=0):
+        """Schedule ``fn(*args)`` on the Tk main thread from a worker thread.
+
+        A background render/scan can outlive the window that launched it: the
+        user closes it mid-run, or — on CI — a test tears its App down while
+        the daemon thread is still finishing.  Reaching into Tk after the root
+        is gone raises ``RuntimeError: main thread is not in main loop`` (or
+        ``tk.TclError``) *inside the worker thread* — a stray traceback in
+        production, and under pytest-xdist a crashed worker that fails the
+        whole Windows run.  There is no window left to update by then, so
+        swallow both and drop the update.  This is the one guarded hop every
+        worker thread must use instead of ``_tk_root().after(...)``.
+        """
+        try:
+            self._tk_root().after(delay, fn, *args)
+        except (tk.TclError, RuntimeError):
+            pass
 
     def _theme_toplevel(self, win):
         """Paint a Toplevel's own background with the active theme.

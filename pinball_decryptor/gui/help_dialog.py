@@ -987,7 +987,12 @@ HELP_CONTENT = {
          "as part of this app, downloaded once and verified against the exact "
          "version this app expects, so nothing is compiled on your machine and "
          "no packages are needed. Later starts are quick, and switching to a "
-         "different card you've already picked before reuses its extraction."),
+         "different card you've already picked before reuses its extraction. "
+         "It also brings its own Linux: the first Start installs a small "
+         "private WSL distro called PAD-Runtime with the emulator already in "
+         "it, so your own distro is not touched and a PC with WSL enabled but "
+         "no distro installed at all can still run a game. Set PAD_RUNTIME=0 "
+         "if you would rather it used the machine's default distro."),
         ("Fix setup, if anything is missing",
          "Fix setup installs whatever the emulator is missing and then says "
          "what, if anything, is left — no terminal, either way. If your "

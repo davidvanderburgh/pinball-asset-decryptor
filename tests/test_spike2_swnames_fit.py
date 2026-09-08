@@ -337,6 +337,27 @@ def test_the_expensive_source_is_not_asked_when_nothing_needs_it(monkeypatch):
     assert asked == []
 
 
+def test_no_rootfs_means_no_static_table_rather_than_a_crash(monkeypatch):
+    """A machine with no Spike 2 rootfs has no ELF to walk, and asking for one
+    must read as "this source has nothing" - not as an exception.
+
+    `gameinfo.elf()` answers None there, and `open(None)` raises TypeError,
+    which the OSError/ValueError guard around the walk does not hold. That is
+    what took the whole switch list down on the one CI runner without a
+    rootfs, and it is why the path is checked before the walk, not after."""
+    _table(monkeypatch, [])
+    asked = []
+    import swelf
+    monkeypatch.setattr(swelf, "rows", lambda p, t: asked.append(p) or [])
+    monkeypatch.setattr(swnames.gameinfo, "elf", lambda game=None: None)
+    monkeypatch.setattr(swnames.gameinfo, "active", lambda *a, **k: None)
+
+    assert swnames.static_switch_names("king_kong_le") == {}
+    out, _report = swnames.fill([(1, 0, 8, 3, "?")], "king_kong_le")
+    assert out[0][4] == "?"
+    assert asked == []                       # never walked a None path
+
+
 def test_use_static_off_is_the_old_behaviour(monkeypatch):
     _table(monkeypatch, [])
     asked = []

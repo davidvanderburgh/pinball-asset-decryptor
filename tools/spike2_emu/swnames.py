@@ -306,6 +306,14 @@ def static_switch_names(game=None, elf_path=None):
     except ImportError:                                    # pragma: no cover
         return {}
     path = elf_path or gameinfo.elf(game)
+    if not path:
+        # NO ROOTFS ON THIS MACHINE, so gameinfo.elf() is None and there is no
+        # static table to read - the same answer as an unreadable one. It has
+        # to be caught here rather than below: open(None) raises TypeError,
+        # which is not an OSError, so the except would not hold it. A release
+        # was pulled for exactly this, on the one CI runner with no rootfs -
+        # the two that have one fail as a caught OSError and say nothing.
+        return {}
     title = game or gameinfo.active()
     try:
         rows = swelf.rows(path, title)

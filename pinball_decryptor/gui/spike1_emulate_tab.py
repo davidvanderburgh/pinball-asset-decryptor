@@ -1238,6 +1238,18 @@ class Spike1EmulatePanel:
                       "game extracted: %s · running: %s"
                       % (yn("qemu_built"), yn("hwshim_built"), yn("game_ready"),
                          "yes" if int(info.get("game_procs") or 0) else "no"))
+            # WHICH LINUX, named rather than assumed.  Two machines that
+            # disagree about a bug are often two different distros, and until
+            # the app could install one of its own there was no way for a log
+            # to say so.
+            state, detail = runtime.status()
+            if state in ("unsupported", "unpublished"):
+                self._log("Spike 1 setup — Linux: %s (%s)"
+                          % (info.get("distro") or "the machine's default",
+                             "the app has no runtime of its own here"))
+            else:
+                self._log("Spike 1 setup — Linux: %s · %s"
+                          % (info.get("distro") or "?", detail))
 
         threading.Thread(target=work, daemon=True).start()
 

@@ -113,7 +113,15 @@ RUN apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
 # desktop user and its home, so the image must have one - an image whose only
 # account is root would have the rig writing its work dir into /root and the
 # viewer windows running as the wrong user.
-RUN useradd -m -u 1000 -s /bin/bash pad
+#
+# The stock account goes first.  Ubuntu's 24.04 image ships a user called
+# `ubuntu` AT UID 1000 (22.04 did not), so creating ours is "UID 1000 is not
+# unique" until that one is gone - which cost this image its fourth build.
+# Removing it rather than reusing it keeps the name predictable: every path
+# baked in below, and every log line the rig writes, says /home/pad.
+RUN userdel -r ubuntu 2>/dev/null || true \
+ && useradd -m -u 1000 -s /bin/bash pad \
+ && [ "$(id -u pad)" = 1000 ]
 
 # WSL reads this on every start of the distro.
 #   default=pad          the rig's ordinary-user half runs as uid 1000

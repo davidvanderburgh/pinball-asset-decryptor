@@ -533,6 +533,26 @@ another install. To do it by hand, run `wsl --set-version <name> 2` in an
 admin PowerShell (it runs for a few minutes; close anything using WSL
 first), then click **Re-check** in the app.
 
+If the distro itself has stopped starting — most often after upgrading it
+in place from inside WSL — nothing runs in it, and `wsl -l -v` still
+lists it as VERSION 2 because that answer comes from the registry rather
+than from the distro. The app now checks whether the distro can run
+anything at all before it explains a failed prerequisite, so it says
+"nothing can run inside it … the distro itself is not starting" instead
+of blaming a package or a loop device, and **Install Prerequisites** says
+which registered distro did not answer before it installs anything. Try
+`wsl --shutdown` (wait ten seconds) and then `wsl --update`; if it still
+won't start, install a second distro **alongside** it and make that the
+default, which is the one the app uses:
+
+```powershell
+wsl --install -d Ubuntu-24.04
+wsl --set-default Ubuntu-24.04
+```
+
+The old distro is left exactly where it is, and `wsl --export <name>
+backup.tar` still gets its files out.
+
 If pressing ▶ on the Replace Audio tab says **Audio preview needs
 ffplay**, the ffmpeg it found is an "essentials" build or the copy
 bundled inside the app — neither carries `ffplay.exe`. Answer **Yes** to

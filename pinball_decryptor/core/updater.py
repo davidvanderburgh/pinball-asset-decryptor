@@ -31,6 +31,24 @@ from . import net
 from .config import GITHUB_REPO
 
 REQUEST_TIMEOUT = 5
+# How many releases the update check reads.
+#
+# GitHub's /releases/latest is "the most recently PUBLISHED release", which
+# is not the same thing as "the newest version of the app" — and this repo
+# publishes releases that carry no app at all: runtime-N holds the Linux
+# image the emulator rigs run on, payloads-N the pinned qemu/hwshim
+# binaries.  Both are deliberately separate from the app's own releases
+# (they are pinned by SHA-256, so they must not move every time we ship),
+# and both become "latest" the moment they are published.  runtime-1 doing
+# so is why a user on v0.191.0 was told he was up to date with v0.192.0
+# already released: the answer's tag was "runtime-1", which parses to no
+# version at all, so the comparison below could never fire.
+#
+# So we read a page of releases and pick the newest one whose tag IS a
+# version.  The page only has to be deep enough to clear a run of
+# asset-holder releases; each row carries its notes and asset list, so
+# there is no reason to pull a hundred of them.
+RELEASES_PAGE_SIZE = 20
 # Generous cap for the installer download itself — the Windows setup exe
 # is a few hundred MB (bundled Python + whisper stack) and GitHub's CDN
 # can be slow; this is a per-read timeout, not a whole-download one.
@@ -85,6 +103,34 @@ def _parse_version(version_str):
         return tuple(int(x) for x in v.split("."))
     except ValueError:
         return ()
+
+
+def _latest_version_release(releases):
+    """The newest app release in a ``/releases`` page as
+    ``(version_tuple, release_dict)``, or None if the page holds no app
+    release at all.
+
+    Newest is decided by the PARSED VERSION rather than by the API's own
+    ordering (created-at descending, where created-at is the tag's commit
+    date), so nothing here depends on when a release row happened to be
+    made.
+
+    A tag that doesn't parse as a version is not an app release: that is
+    what keeps the runtime-N / payloads-N asset holders out of the update
+    check.  Drafts and prereleases are skipped explicitly because
+    ``/releases`` lists both and ``/releases/latest`` did not — dropping
+    them silently was part of what we're replacing.
+    """
+    best = None
+    for data in releases:
+        if not isinstance(data, dict):
+            continue
+        if data.get("draft") or data.get("prerelease"):
+            continue
+        version = _parse_version(data.get("tag_name") or "")
+        if version and (best is None or version > best[0]):
+            best = (version, data)
+    return best
 
 
 def _pick_installer_asset(assets, platform=None, machine=None):
@@ -175,6 +221,12 @@ def check_for_update(current_version, repo=None, not_ready_cb=None):
     can fetch this platform's release asset itself, else ``None`` (the
     GUI then falls back to the plain open-in-browser Download button).
 
+    Reads the release LIST and picks the newest version-tagged release
+    from it (:func:`_latest_version_release`).  It used to ask GitHub for
+    ``/releases/latest``, which answers with the most recently published
+    release whatever it is — so the runtime-1 image release shadowed
+    v0.192.0 and every installed copy went quiet.
+
     A newer release whose installers haven't finished uploading (see
     :func:`_release_ready`) is treated as "no update yet" — the banner
     must never point at a download that isn't there.  ``not_ready_cb``,
@@ -186,7 +238,8 @@ def check_for_update(current_version, repo=None, not_ready_cb=None):
     version" — the app logs the two outcomes differently.
     """
     target_repo = repo or GITHUB_REPO
-    url = f"https://api.github.com/repos/{target_repo}/releases/latest"
+    url = (f"https://api.github.com/repos/{target_repo}/releases"
+           f"?per_page={RELEASES_PAGE_SIZE}")
     req = urllib.request.Request(
         url,
         headers={
@@ -198,22 +251,35 @@ def check_for_update(current_version, repo=None, not_ready_cb=None):
     # OpenSSL default CA path, so the default context can't verify
     # api.github.com and every check fails (see core/net.py).
     with net.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode())
+        payload = json.loads(resp.read().decode())
 
-    tag = data.get("tag_name", "")
-    html_url = data.get("html_url", "")
+    if not isinstance(payload, list):
+        # Anything but a list means we didn't get the release feed (an API
+        # message body, say).  Raise rather than return None: the caller
+        # then reports "couldn't check", which is true, where "no update"
+        # would be exactly the false reassurance this function is here to
+        # stop giving.
+        raise ValueError("unexpected release feed from GitHub: %s"
+                         % str(payload)[:200])
+
+    newest = _latest_version_release(payload)
+    if newest is None:
+        return None
+    latest, release = newest
+
+    tag = release.get("tag_name", "")
+    html_url = release.get("html_url", "")
     if not tag or not html_url:
         return None
 
-    latest = _parse_version(tag)
     current = _parse_version(current_version)
-    if latest and current and latest > current:
-        if not _release_ready(data):
+    if current and latest > current:
+        if not _release_ready(release):
             if not_ready_cb:
                 not_ready_cb(tag.lstrip("v"))
             return None
-        return (tag.lstrip("v"), html_url, data.get("body", "") or "",
-                _pick_installer_asset(data.get("assets")))
+        return (tag.lstrip("v"), html_url, release.get("body", "") or "",
+                _pick_installer_asset(release.get("assets")))
     return None
 
 

@@ -135,7 +135,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "${{ inputs.tag }}" >/dev/null 2>&1 \
-            || gh release create "${{ inputs.tag }}" \
+            || gh release create "${{ inputs.tag }}" --latest=false \
                  --title "Pinned payloads ${{ inputs.tag }}" \
                  --notes "Binaries the app installs instead of building on a user's machine. Pinned by SHA-256 in pinball_decryptor/core/payloads.py."
+          # NEVER "Latest": this release carries no app.  Every copy of the
+          # app already installed asks GitHub for the latest release and
+          # compares THAT tag to its own version, so an asset-holder release
+          # sitting in the top slot tells every user they are up to date -
+          # a tester on v0.191.0 was never offered v0.192.0 because runtime-1
+          # had just been published (PAD-116).  Newer builds read the release
+          # list instead, but the ones already out there cannot be fixed from
+          # here.  Applied unconditionally so a tag created before we knew
+          # this is corrected on the next run.
+          gh release edit "${{ inputs.tag }}" --latest=false
           gh release upload "${{ inputs.tag }}" out/qemu-arm out/s1hwshim out/SHA256SUMS

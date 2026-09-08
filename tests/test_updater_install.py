@@ -147,12 +147,15 @@ def test_check_for_update_carries_installer(monkeypatch, platform,
         def __exit__(self, *exc):
             return False
 
-    body = json.dumps({
+    # A LIST: the check reads the release feed, not /releases/latest (see
+    # test_updater_release_feed.py — an image release published on top of
+    # an app release was answering that question).
+    body = json.dumps([{
         "tag_name": "v99.0.0",
         "html_url": "https://example.com/rel",
         "body": "notes",
         "assets": ASSETS,
-    }).encode()
+    }]).encode()
     monkeypatch.setattr(net, "urlopen",
                         lambda req, timeout: FakeResp(body))
     monkeypatch.setattr(updater.sys, "platform", platform)
@@ -209,12 +212,12 @@ def test_release_ready_requires_notes():
 
 def test_check_for_update_withheld_until_assets_ready(monkeypatch):
     withheld = []
-    body = json.dumps({
+    body = json.dumps([{
         "tag_name": "v99.0.0",
         "html_url": "https://example.com/rel",
         "body": "notes",
         "assets": [],           # release published, uploads still running
-    }).encode()
+    }]).encode()
     monkeypatch.setattr(net, "urlopen", lambda req, timeout: _FakeResp(body))
     assert updater.check_for_update(
         "0.1.0", not_ready_cb=withheld.append) is None

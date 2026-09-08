@@ -11,6 +11,12 @@ If you find yourself reaching for this module to add an update
 prompt, prefer the core updater — pointing at the deprecated
 ``jjp-decryptor`` GitHub repo would now show users a release older
 than the unified app they're already running.
+
+It also still asks for ``releases/latest``, which is the bug PAD-116
+was: that endpoint answers with the most recently PUBLISHED release,
+and this repo publishes releases that carry no app (runtime-N,
+payloads-N).  The core updater reads the release list and picks the
+newest version-tagged release instead.  Don't copy the call below.
 """
 
 import json

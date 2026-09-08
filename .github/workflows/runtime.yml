@@ -132,7 +132,16 @@ jobs:
         run: |
           (cd out && sha256sum *.tar.gz > SHA256SUMS)
           gh release view "${{ inputs.tag }}" >/dev/null 2>&1 \
-            || gh release create "${{ inputs.tag }}" \
+            || gh release create "${{ inputs.tag }}" --latest=false \
                  --title "PAD Runtime ${{ inputs.tag }}" \
                  --notes "The Linux the emulator rigs run on, imported as a private WSL distro. Pinned by SHA-256 in pinball_decryptor/core/runtime.py."
+          # NEVER "Latest": this release carries no app.  Every copy of the
+          # app already installed asks GitHub for the latest release and
+          # compares THAT tag to its own version, so publishing runtime-1
+          # into the top slot told a tester on v0.191.0 he was up to date
+          # with v0.192.0 released the same day (PAD-116).  Newer builds read
+          # the release list instead, but the ones already out there cannot
+          # be fixed from here.  Applied unconditionally so a tag created
+          # before we knew this is corrected on the next run.
+          gh release edit "${{ inputs.tag }}" --latest=false
           gh release upload "${{ inputs.tag }}" out/*.tar.gz out/SHA256SUMS

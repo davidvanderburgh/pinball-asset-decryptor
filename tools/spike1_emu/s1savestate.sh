@@ -47,7 +47,7 @@ esac
 # the plugin, compiled on demand (cc is present wherever the rig builds qemu)
 if [ ! -e "$PLUGDIR/s1criu.so" ] || [ "$HERE/s1criu.c" -nt "$PLUGDIR/s1criu.so" ]; then
     mkdir -p "$PLUGDIR"
-    gcc -shared -fPIC -O2 -o "$PLUGDIR/s1criu.so" "$HERE/s1criu.c" -I"$HERE" \
+    gcc -std=gnu17 -shared -fPIC -O2 -o "$PLUGDIR/s1criu.so" "$HERE/s1criu.c" -I"$HERE" \
         || { echo "[s1save] could not compile the criu plugin"; exit 2; }
 fi
 

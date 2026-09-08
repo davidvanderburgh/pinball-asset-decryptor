@@ -35,7 +35,7 @@ class PBManufacturer(Manufacturer):
     # path needs WSL + e2fsprogs/debugfs for Alien/Queen Clonezilla.
     prerequisites = (
         Prerequisite(name="debugfs", where="wsl",
-                     probe="which debugfs",
+                     probe="command -v debugfs",
                      reason="Alien/Queen Clonezilla .iso extraction",
                      install_hint="apt-get install e2fsprogs (in WSL)"),
     )

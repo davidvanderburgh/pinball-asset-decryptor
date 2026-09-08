@@ -230,7 +230,12 @@ def check_prerequisites(executor=None):
         ("debugfs", "debugfs", "apk add e2fsprogs-extra / apt install e2fsprogs"),
     ]:
         try:
-            executor.run(f"which {tool}", timeout=10)
+            # `command -v`, not `which`: which is a package (debianutils has
+            # been shedding it), command -v is a shell builtin that is on
+            # every release there will ever be.  A probe that needs its own
+            # package installed is a prerequisite check that can report a
+            # tool missing on a machine that has it.
+            executor.run(f"command -v {tool}", timeout=10)
             results.append((display_name, True, "Available"))
         except CommandError:
             results.append((display_name, False,
@@ -245,11 +250,19 @@ def check_prerequisites(executor=None):
     except CommandError:
         # Try zstd CLI as fallback
         try:
-            executor.run("which zstd", timeout=10)
+            executor.run("command -v zstd", timeout=10)
             results.append(("zstandard", True, "Available (CLI)"))
         except CommandError:
+            # NOT `pip3 install zstandard`.  Since Ubuntu 23.04 the system
+            # Python is marked externally managed (PEP 668) and pip refuses
+            # outright - so on 24.04 that advice cannot work, while on 22.04
+            # it happened to.  Both releases carry the same two packages, and
+            # the Linux prerequisite installer already installs the first of
+            # them for Spooky.
             results.append(("zstandard", False,
-                            "Not found. Install: pip3 install zstandard"))
+                            "Not found. Install: apt install "
+                            "python3-zstandard (or zstd) / "
+                            "apk add py3-zstandard"))
     except Exception:
         results.append(("zstandard", False, "Could not check for zstandard"))
 

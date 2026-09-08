@@ -39,7 +39,9 @@ fi
 # 2. CUSE device model (quick compile; rebuild when the source changed)
 if [ ! -x "$S1_WORK/s1hwshim" ] || [ "$HERE/s1hwshim.c" -nt "$S1_WORK/s1hwshim" ]; then
     log "Setup: compiling the device model…"
-    gcc -O2 -o "$S1_WORK/s1hwshim" "$HERE/s1hwshim.c" \
+    # -std=gnu17: pinned rather than inherited, so the next distro's gcc (15
+    # defaults to gnu23) compiles this the way today's does.
+    gcc -std=gnu17 -O2 -o "$S1_WORK/s1hwshim" "$HERE/s1hwshim.c" \
         $(pkg-config --cflags --libs fuse3) 2>&1 \
         || fail "could not compile the device model (need libfuse3-dev)" 3
 fi

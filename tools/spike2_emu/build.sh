@@ -27,7 +27,15 @@ done
 # developed on - while the same sources compiled here without complaint. That is
 # the worst shape a build fault can have: it cannot happen on the machine that
 # could fix it. Asking GCC 13 for GCC 14's answer means the next one fails HERE.
-arm-linux-gnueabihf-gcc -fno-stack-protector -shared -fPIC -O2 -nostdlib \
+# -std=gnu17 for the OTHER half of that thought: the flag above makes a newer
+# compiler's stricter verdict happen here too, and this makes sure there is no
+# newer LANGUAGE to be strict about.  gcc 11 (22.04) and 13 (24.04) both default
+# to gnu17, so this changes nothing on either; gcc 15 defaults to gnu23, where
+# `bool`, `true` and `false` are keywords and a redefinition is an error - the
+# change that already broke criu here (getcriu.sh) and would otherwise reach
+# these sources on the next LTS with no warning at all.  The dialect a build
+# uses should be a decision, not whatever the distro shipped this year.
+arm-linux-gnueabihf-gcc -std=gnu17 -fno-stack-protector -shared -fPIC -O2 -nostdlib \
   -Werror=implicit-function-declaration \
   -Wl,-soname,hwshim.so -o "$R/lib/hwshim.so" \
   "${CC_SRCS[@]}" \

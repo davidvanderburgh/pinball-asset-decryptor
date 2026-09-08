@@ -9,7 +9,7 @@ R=$ROOT
 OUT="${1:-$HOME/padtrace.so}"
 mkdir -p "$HOME/emusrc"
 cp "$RIG/padtrace.c" "$HOME/emusrc/padtrace.c"
-arm-linux-gnueabihf-gcc -fno-stack-protector -shared -fPIC -O2 -nostdlib \
+arm-linux-gnueabihf-gcc -std=gnu17 -fno-stack-protector -shared -fPIC -O2 -nostdlib \
   -Werror=implicit-function-declaration \
   -Wl,-soname,padtrace.so -o "$R/lib/padtrace.so" \
   "$HOME/emusrc/padtrace.c" \

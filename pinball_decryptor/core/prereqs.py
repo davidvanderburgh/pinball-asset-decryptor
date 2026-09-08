@@ -149,12 +149,21 @@ _SHELL_METACHARS = set("|&;<>()$`\n*?[]{}")
 
 
 def _probe_presence_exe(cmd: str) -> Optional[str]:
-    """The leading executable of *cmd* when it is a simple presence probe
-    (``ffmpeg -version``, ``gpg --version``), else None for compound shell
-    commands where we can't substitute a PATH lookup for running it."""
+    """The executable *cmd* is a presence probe FOR (``ffmpeg -version``,
+    ``gpg --version``, ``command -v ffmpeg``), else None for compound shell
+    commands where we can't substitute a PATH lookup for running it.
+
+    ``command -v X`` is named here because it is what an in-guest probe is
+    spelled as now (PAD-114: ``which`` is a package, and one Debian has been
+    shedding).  Without this, the leading word would be "command" - a shell
+    builtin, never on PATH - so the fast path would miss and the probe would
+    be run through a shell that on Windows is cmd.exe, where it means nothing.
+    """
     if not cmd or any(c in _SHELL_METACHARS for c in cmd):
         return None
     parts = cmd.split()
+    if len(parts) == 3 and parts[0] == "command" and parts[1] in ("-v", "-V"):
+        return parts[2]
     return parts[0] if parts else None
 
 

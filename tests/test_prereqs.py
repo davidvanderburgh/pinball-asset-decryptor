@@ -624,3 +624,41 @@ def test_run_in_wsl_asks_for_utf8_errors(monkeypatch):
     monkeypatch.setattr(prereqs.subprocess, "run", _run)
     prereqs._run_in_wsl("echo ok", 5)
     assert seen["env"]["WSL_UTF8"] == "1"
+
+
+def test_no_plugin_probes_a_tool_with_which():
+    """PAD-114.  Every one of these runs INSIDE the distro, and `which` is a
+    program from a package - debianutils has been shedding it, and Debian's
+    own trixie no longer installs it as a matter of course - while
+    `command -v` is a shell builtin that is on every release there will ever
+    be.  A prerequisite probe that needs its own package installed is one
+    that can report a tool missing on a machine that has it, which is the
+    loop PAD-73 and PAD-113 were both stuck in.
+    """
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent / "pinball_decryptor"
+    offenders = []
+    for py in root.rglob("*.py"):
+        text = py.read_text(encoding="utf-8", errors="replace")
+        for i, line in enumerate(text.splitlines(), 1):
+            if 'probe="which ' in line or "probe='which " in line:
+                offenders.append("%s:%d" % (py.name, i))
+            # ...and the runtime checks that ask the same question.
+            if 'run(f"which ' in line or 'run("which ' in line:
+                offenders.append("%s:%d" % (py.name, i))
+    assert not offenders, (
+        "use `command -v`, not `which`, for an in-guest probe: %s"
+        % ", ".join(offenders))
+
+
+def test_the_probe_machinery_takes_command_v():
+    """...and the load-proof fast path has to know the new spelling, or it
+    would look for an executable called `command` (a shell builtin, never on
+    PATH), miss every time, and run the probe through a shell - which on
+    Windows is cmd.exe, where `command -v ffmpeg` means nothing at all."""
+    assert prereqs._probe_presence_exe("ffmpeg -version") == "ffmpeg"
+    assert prereqs._probe_presence_exe("command -v ffmpeg") == "ffmpeg"
+    assert prereqs._probe_presence_exe("command -v partclone.ext4") == \
+        "partclone.ext4"
+    # Still nothing to shortcut for a compound probe.
+    assert prereqs._probe_presence_exe("command -v a && command -v b") is None

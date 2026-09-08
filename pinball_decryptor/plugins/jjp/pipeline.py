@@ -2340,7 +2340,7 @@ class DecryptionPipeline:
 
         has_partclone = False
         try:
-            self.executor.run("which partclone.restore", timeout=5)
+            self.executor.run("command -v partclone.restore", timeout=5)
             has_partclone = True
         except CommandError:
             pass
@@ -4821,7 +4821,7 @@ class ModPipeline(DecryptionPipeline):
         # Use --fast -b 1024 --rsyncable to match the original Clonezilla
         # compression flags, ensuring maximum compatibility.
         try:
-            self.executor.run("which pigz", timeout=5)
+            self.executor.run("command -v pigz", timeout=5)
             compressor = "pigz -c --fast -b 1024 --rsyncable"
         except CommandError:
             compressor = "gzip -c --fast --rsyncable"
@@ -4934,7 +4934,7 @@ class ModPipeline(DecryptionPipeline):
         """Ensure partclone and xorriso are available, installing if needed."""
         for tool, pkg in [("partclone.ext4", "partclone"), ("xorriso", "xorriso")]:
             try:
-                self.executor.run(f"which {tool}", timeout=10)
+                self.executor.run(f"command -v {tool}", timeout=10)
                 self.log(f"  {tool}: found", "info")
             except CommandError:
                 self.log(f"  {tool} not found. Installing {pkg}...", "info")
@@ -6184,7 +6184,7 @@ class StandaloneModPipeline(ModPipeline):
             return self._ffmpeg_available
         self._ffmpeg_checked = True
         try:
-            self.executor.run("which ffmpeg", timeout=10)
+            self.executor.run("command -v ffmpeg", timeout=10)
             self._ffmpeg_available = True
             return True
         except CommandError:
@@ -7353,7 +7353,7 @@ class StandaloneModPipeline(ModPipeline):
             pass
 
         try:
-            self.executor.run("which pigz", timeout=5)
+            self.executor.run("command -v pigz", timeout=5)
             compressor = "pigz -c --fast -b 1024 --rsyncable"
         except CommandError:
             compressor = "gzip -c --fast --rsyncable"
@@ -10655,7 +10655,7 @@ class RestoreToSSDPipeline:
         # Check if the specific partclone variant exists, fall back to
         # partclone.restore (generic)
         try:
-            self.executor.run(f"which {partclone_type}", timeout=5)
+            self.executor.run(f"command -v {partclone_type}", timeout=5)
         except CommandError:
             partclone_type = "partclone.restore"
 
@@ -10751,7 +10751,7 @@ class RestoreToSSDPipeline:
         partclone_type = f"partclone.{fs_type}" if fs_type != "vfat" \
             else "partclone.vfat"
         try:
-            self.executor.run(f"which {partclone_type}", timeout=5)
+            self.executor.run(f"command -v {partclone_type}", timeout=5)
         except CommandError:
             partclone_type = "partclone.restore"
 
@@ -11016,35 +11016,35 @@ def check_prerequisites(executor, standalone=False):
                 results.append(("WSL2", True, "Available"))
 
         try:
-            executor.run("which partclone.ext4", timeout=10)
+            executor.run("command -v partclone.ext4", timeout=10)
             results.append(("partclone", True, "Available"))
         except Exception:
             results.append(("partclone", False,
                 "Not installed. Run: wsl -u root -- apt install partclone"))
 
         try:
-            executor.run("which xorriso", timeout=10)
+            executor.run("command -v xorriso", timeout=10)
             results.append(("xorriso", True, "Available"))
         except Exception:
             results.append(("xorriso", False,
                 "Not installed. Run: wsl -u root -- apt install xorriso"))
 
         try:
-            executor.run("which debugfs", timeout=10)
+            executor.run("command -v debugfs", timeout=10)
             results.append(("debugfs", True, "Available"))
         except Exception:
             results.append(("debugfs", False,
                 "Not installed. Run: wsl -u root -- apt install e2fsprogs"))
 
         try:
-            executor.run("which pigz", timeout=10)
+            executor.run("command -v pigz", timeout=10)
             results.append(("pigz", True, "Available"))
         except Exception:
             results.append(("pigz", False,
                 "Not installed. Run: wsl -u root -- apt install pigz"))
 
         try:
-            executor.run("which ffmpeg", timeout=10)
+            executor.run("command -v ffmpeg", timeout=10)
             results.append(("ffmpeg", True, "Available"))
         except Exception:
             results.append(("ffmpeg", False,
@@ -11087,35 +11087,35 @@ def check_prerequisites(executor, standalone=False):
         results.append(("System", ok, msg))
 
         try:
-            executor.run("which partclone.ext4", timeout=10)
+            executor.run("command -v partclone.ext4", timeout=10)
             results.append(("partclone", True, "Available"))
         except Exception:
             results.append(("partclone", False,
                 "Not installed. Run: sudo apt install partclone"))
 
         try:
-            executor.run("which xorriso", timeout=10)
+            executor.run("command -v xorriso", timeout=10)
             results.append(("xorriso", True, "Available"))
         except Exception:
             results.append(("xorriso", False,
                 "Not installed. Run: sudo apt install xorriso"))
 
         try:
-            executor.run("which debugfs", timeout=10)
+            executor.run("command -v debugfs", timeout=10)
             results.append(("debugfs", True, "Available"))
         except Exception:
             results.append(("debugfs", False,
                 "Not installed. Run: sudo apt install e2fsprogs"))
 
         try:
-            executor.run("which pigz", timeout=10)
+            executor.run("command -v pigz", timeout=10)
             results.append(("pigz", True, "Available"))
         except Exception:
             results.append(("pigz", False,
                 "Not installed. Run: sudo apt install pigz"))
 
         try:
-            executor.run("which ffmpeg", timeout=10)
+            executor.run("command -v ffmpeg", timeout=10)
             results.append(("ffmpeg", True, "Available"))
         except Exception:
             results.append(("ffmpeg", False,

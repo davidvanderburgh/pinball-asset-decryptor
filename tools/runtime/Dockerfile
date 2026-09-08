@@ -46,6 +46,14 @@ ARG VARIANT=base
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# THE SNAPSHOT SERVICE IS THE PRICE OF PINNING, and it is a BUILD-time price
+# only - no user ever fetches from it, because what they get is the finished
+# rootfs.  It answers a 503 often enough to lose a build (this image's third
+# attempt died on one .deb out of forty), so every apt call here gets a large
+# retry budget.  A build that still fails this way is retried, not worked
+# around: the alternative is the ordinary archive, which cannot be pinned.
+# (Hence the `Acquire::Retries=10` on every apt call below.)
+
 # CERTIFICATES BEFORE THE SNAPSHOT, and the order is the whole of it.  The
 # snapshot service is HTTPS only (plain http 301s onto it) and this base image
 # ships NO CA certificates at all - so apt cannot verify the connection, each
@@ -78,7 +86,7 @@ RUN printf '%s\n' \
       "deb [check-valid-until=no] https://snapshot.ubuntu.com/ubuntu/${SNAPSHOT} noble-security main universe" \
     > /etc/apt/sources.list.d/ubuntu.sources.list \
  && rm -f /etc/apt/sources.list.d/ubuntu.sources \
- && apt-get -o Acquire::Retries=3 update \
+ && apt-get -o Acquire::Retries=10 update \
  && if ! apt-cache show python3 >/dev/null 2>&1; then \
       echo "the snapshot archive gave apt no usable index"; exit 1; fi
 
@@ -92,12 +100,12 @@ RUN printf '%s\n' \
 #:   ca-certificates  so anything fetched from in here can verify a certificate
 #: fuse3 is NOT here on purpose: the device model links libfuse statically and
 #: talks to /dev/fuse directly, so there is nothing left to install for it.
-RUN apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
       python3 \
       procps \
       util-linux \
       socat \
- && apt-get -o Acquire::Retries=3 install -y --reinstall \
+ && apt-get -o Acquire::Retries=10 install -y --reinstall \
       --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 

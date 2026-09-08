@@ -131,6 +131,24 @@ function Get-WslDefaultDistro {
 # no-op on those machines (PAD-19: summary showed "wsl --install exit -1"
 # while WSL2 itself reported OK).  Build the argument list from the flags
 # THIS machine's wsl.exe actually advertises in its own help text.
+# --- Which Ubuntu this installs ------------------------------------------
+# THE RELEASE THE APP IS TESTED AGAINST, spelled the way wsl.exe wants it.
+#
+# This used to be plain "Ubuntu", which is the TRACKING name: it installs
+# whichever LTS is current that month.  So this installer put new machines on
+# one release while every piece of advice the app gives names another - the
+# app's own hints (core/prereqs.py KNOWN_GOOD_DISTRO), and the rig's
+# cross-release package fetch, which downloads from exactly one suite
+# (setupfix.sh PAD_KNOWN_GOOD_DISTRO / PAD_FALLBACK_SUITE).  One release, one
+# spelling, everywhere; tests/test_emulate_tab.py keeps the copies together.
+#
+# The plain name stays as the FALLBACK, and it earns its place twice: a
+# machine whose Store has no entry for this exact release still gets a distro,
+# and a machine where this exact name is already registered - the dead-distro
+# case this script reports just above - is not handed "already exists" and
+# left with nothing.
+$PadKnownGoodDistro = "Ubuntu-24.04"
+
 function Get-WslInstallPlan {
     $help = ""
     try {
@@ -140,14 +158,23 @@ function Get-WslInstallPlan {
     } catch {}
     # --no-launch skips the interactive 'create UNIX user' first boot; we
     # only ever exec via 'wsl -u root' so a default user isn't needed.
-    $installArgs = @("--install", "-d", "Ubuntu")
-    if ($help -match '--no-launch') { $installArgs += "--no-launch" }
+    $installArgs  = @("--install", "-d", $PadKnownGoodDistro)
+    $fallbackArgs = @("--install", "-d", "Ubuntu")
+    if ($help -match '--no-launch') {
+        $installArgs  += "--no-launch"
+        $fallbackArgs += "--no-launch"
+    }
     @{
-        InstallArgs = $installArgs
-        NoLaunch    = [bool]($help -match '--no-launch')
+        InstallArgs  = $installArgs
+        # Whatever Ubuntu is current, for when the pinned release cannot be
+        # installed on this machine.  Tried only after a NON-ZERO exit, so an
+        # install that merely needs its first-run setup finished never turns
+        # into a second distro.
+        FallbackArgs = $fallbackArgs
+        NoLaunch     = [bool]($help -match '--no-launch')
         # --web-download fetches the distro from Microsoft's CDN — the
         # fallback when the Store is broken, blocked, or signed out.
-        WebDownload = [bool]($help -match '--web-download')
+        WebDownload  = [bool]($help -match '--web-download')
     }
 }
 
@@ -709,7 +736,7 @@ if ($needsWsl) {
             Write-Host "  left exactly as it is, and its files can still be got out"    -ForegroundColor Gray
             Write-Host ("  with:   wsl --export {0} backup.tar" -f $registered[0])      -ForegroundColor Gray
             Write-Host "  The app uses whichever distro WSL calls the default, so if"   -ForegroundColor Gray
-            Write-Host "  it is still red afterwards:   wsl --set-default Ubuntu"       -ForegroundColor Gray
+            Write-Host ("  it is still red afterwards:   wsl --set-default {0}" -f $PadKnownGoodDistro) -ForegroundColor Gray
             Write-Host ""
         }
         # Install Ubuntu directly.
@@ -717,7 +744,7 @@ if ($needsWsl) {
         # because PowerShell 5.1's pipeline mangles its UTF-16LE output -
         # and if this fails, the user needs to see wsl's own error text.
         $plan = Get-WslInstallPlan
-        Write-Host "  Installing Ubuntu into WSL (this may take a few minutes)..." -ForegroundColor Cyan
+        Write-Host ("  Installing {0} into WSL (this may take a few minutes)..." -f $PadKnownGoodDistro) -ForegroundColor Cyan
         if (-not $plan.NoLaunch) {
             # This wsl.exe launches Ubuntu's first-run setup itself (its
             # --install has no --no-launch).  Warn before the window opens.
@@ -740,6 +767,19 @@ if ($needsWsl) {
             Write-Host ("  wsl --install exited with code {0} - retrying with --web-download (skips the Microsoft Store)..." -f $installExit) -ForegroundColor Cyan
             $wslRetryArgs = $plan.InstallArgs + "--web-download"
             & wsl $wslRetryArgs
+            $installExit = $LASTEXITCODE
+            Start-Sleep -Seconds 2
+        }
+
+        if (-not (Test-WslHasApt) -and $installExit -ne 0) {
+            # The pinned release could not be installed here: no Store entry
+            # for that exact name, or a distro already registered under it
+            # (the dead one, in the case reported above).  Take whatever
+            # Ubuntu is current rather than leave the machine with none - the
+            # app works on any apt distro; the pin is which one it is TESTED
+            # on, not a requirement.
+            Write-Host ("  {0} could not be installed (exit {1}) - trying the current Ubuntu instead..." -f $PadKnownGoodDistro, $installExit) -ForegroundColor Cyan
+            & wsl $plan.FallbackArgs
             $installExit = $LASTEXITCODE
             Start-Sleep -Seconds 2
         }
@@ -770,12 +810,12 @@ if ($needsWsl) {
             # point at it, and leave routes that don't need this script.
             Write-Host ("  Ubuntu could not be installed automatically (wsl --install exit {0})." -f $installExit) -ForegroundColor Red
             Write-Host "  The error text above, from wsl.exe itself, says why.  Manual routes:" -ForegroundColor Yellow
-            Write-Host "    1. In an admin PowerShell window run:   wsl --install -d Ubuntu"    -ForegroundColor Yellow
+            Write-Host ("    1. In an admin PowerShell window run:   wsl --install -d {0}" -f $PadKnownGoodDistro) -ForegroundColor Yellow
             Write-Host "       Create the username/password it asks for, type exit at the"      -ForegroundColor Yellow
             Write-Host "       Ubuntu prompt, then re-run this installer."                      -ForegroundColor Yellow
             Write-Host "    2. Or install 'Ubuntu' from the Microsoft Store app, launch it"     -ForegroundColor Yellow
             Write-Host "       once to finish its setup, then re-run this installer."           -ForegroundColor Yellow
-            Write-FAIL ("Ubuntu (wsl --install exit {0}; manual: wsl --install -d Ubuntu)" -f $installExit)
+            Write-FAIL ("Ubuntu (wsl --install exit {0}; manual: wsl --install -d {1})" -f $installExit, $PadKnownGoodDistro)
         }
     } elseif ($needsReboot -and -not $ubuntuFound) {
         Write-SKIP "Ubuntu (will install after the Windows restart)"

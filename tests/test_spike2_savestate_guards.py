@@ -237,6 +237,44 @@ def test_the_criu_search_covers_the_three_machines_that_exist():
     assert "/var/tmp/criubuild" in body, "the developer build still resolves"
 
 
+def test_the_criu_that_is_reported_present_is_one_that_runs():
+    """PAD-114.  criu is the one thing on the setup list that was BUILT here
+    rather than installed by apt - against this release's libprotobuf-c, libnl
+    and libcap - so a distro upgraded in place to the next LTS keeps an
+    executable file whose libraries have gone.  `-x` is a FILE test and said
+    yes to that machine: the tab drew criu green, the boot asked for a
+    checkpoint, and the fault arrived at the first save state, nowhere near
+    the upgrade that caused it.  pad_criu stays the path resolver (a caller
+    about to run criu needs the path whatever it then does); the question
+    "does it run" is its own function, and both gates ask that one."""
+    body = src("padpath.sh")
+    assert "pad_criu_runs()" in body
+    runs = body[body.index("pad_criu_runs()"):]
+    runs = runs[:runs.index("\n}")]
+    assert "--version" in runs, (
+        "only running it makes the dynamic linker resolve what it needs")
+    gate = body[body.index("pad_can_pivot()"):]
+    gate = gate[:gate.index("\n}")]
+    assert "pad_criu_runs" in gate, "the RUN's gate asks the real question"
+    assert "criu:@pad_criu_runs:-:0" in src("setupcheck.sh"), (
+        "and so does the row the tab draws from")
+
+
+def test_a_criu_that_will_not_start_is_rebuilt_not_called_present():
+    """getcriu.sh ran `criu --version` THROUGH A PIPE and then said
+    result=present: a pipeline's status is sed's, and nothing read it either
+    way, so the evidence it printed and the verdict it reached were about
+    different things.  A criu that cannot start now gets the rebuild, and the
+    person is told which of the two states their machine was in."""
+    text = src("getcriu.sh")
+    head = text[text.index("# ---- 0."):text.index("# ---- 1.")]
+    assert '"$have" --version >/dev/null 2>&1' in head, (
+        "the verdict has to come from running it, not from -x")
+    assert head.index('--version >/dev/null') < head.index("result=present"), \
+        "present is only reachable once it has answered"
+    assert "does not run" in head, "the other outcome needs a sentence too"
+
+
 def test_a_failed_save_names_the_command_that_fixes_it():
     """It used to print `no criu at /var/tmp/criubuild/...` - a directory the
     user has never had and cannot create.  With no criu there is no path to
@@ -252,7 +290,7 @@ def test_criu_is_probed_but_never_handed_to_apt():
     keeps it out of `need`, which setupfix.sh feeds to apt-get verbatim - and
     `apt-get install a criu` installs NEITHER."""
     text = src("setupcheck.sh")
-    assert "criu:@pad_criu:-:0" in text
+    assert "criu:@pad_criu_runs:-:0" in text
     assert '[ "$_pkg" = "-" ] && continue' in text, (
         "a package apt has never heard of would reach the install list")
     fix = src("setupfix.sh")

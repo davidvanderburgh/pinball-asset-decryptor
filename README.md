@@ -553,6 +553,21 @@ wsl --set-default Ubuntu-24.04
 The old distro is left exactly where it is, and `wsl --export <name>
 backup.tar` still gets its files out.
 
+**Which Ubuntu release is up to you.** PAD works on any current one —
+22.04, 24.04, and whatever comes next — and asks the machine rather than
+assuming a release: the ARM handler is registered the way *this* distro
+registers one, packages whose names changed between releases are tried
+under every spelling they have had, and criu is used from apt where a
+release publishes it and built from source where none does. The one
+release named out loud, in the installer and in the hints above, is
+24.04, and that is only "the one this is tested on": it is what a fresh
+install gets, not something an existing distro has to become. Two things
+follow an in-place upgrade to a new release automatically, because both
+are built against the release they run on — the emulator's own small
+binaries (rebuilt once on the next run) and criu (a criu that no longer
+starts is now reported as one that does not start, and rebuilt, instead
+of counting as present).
+
 If your WSL **logs in as root** — a distro installed without its
 first-run account setup does — building a multi-boot card used to stop
 with *"cannot find your WSL home … check that WSL starts"*, on a WSL that

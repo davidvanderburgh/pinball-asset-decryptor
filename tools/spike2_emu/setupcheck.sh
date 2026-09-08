@@ -142,6 +142,12 @@ _have() {
 #: turn one missing extra into "could not install", i.e. a machine told its
 #: emulator setup failed when the emulator is fine. getcriu.sh builds it from
 #: source instead, and setupfix.sh calls that when this fact is 0.
+#: AND IT IS THE ONE FACT HERE THAT A FILE TEST CANNOT ANSWER. Every other
+#: tool on this list came from apt and is upgraded with the distro; criu was
+#: BUILT here, against this release's libprotobuf-c and libnl, so an in-place
+#: upgrade to the next LTS leaves the file executable and the libraries it
+#: needs gone. `@pad_criu` said 1 about that machine right up to the first
+#: save state; `@pad_criu_runs` asks criu itself.
 PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static:1
 armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf:0
 nativecc:@_pad_cc_works:gcc,libc6-dev:0
@@ -149,7 +155,7 @@ debugfs:debugfs:e2fsprogs:0
 fuse:fusermount3:fuse3:0
 ffmpeg:ffmpeg:ffmpeg:0
 busybox:@pad_pivot_programs:busybox-static:0
-criu:@pad_criu:-:0"
+criu:@pad_criu_runs:-:0"
 
 need= _xrel_ok=
 for _t in $PAD_SETUP_TOOLS; do

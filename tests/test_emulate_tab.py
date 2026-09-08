@@ -2099,6 +2099,34 @@ def test_the_two_halves_agree_on_the_fallback_release():
     assert "PAD_FALLBACK_SUITE=noble" in fix
 
 
+def test_the_installer_puts_a_machine_on_the_release_the_app_names():
+    """PAD-114, and the third half of the same fact.  The prerequisite
+    installer asked wsl.exe for `-d Ubuntu`, which is the TRACKING name: it
+    installs whichever LTS is current that month.  So the installer could put
+    a new machine on one release while every hint the app gives names another
+    - including the suite the rig's cross-release package fetch downloads
+    from, which is pinned to exactly one.
+
+    The plain name survives as the FALLBACK, and it has two jobs: a Store with
+    no entry for this exact release, and a machine where this exact name is
+    already registered (the dead distro this installer reports just above),
+    where the pinned install can only answer "already exists"."""
+    ps1 = (pathlib.Path(DEFAULT_RIG_DIR).parent.parent / "installer"
+           / "install_prerequisites.ps1").read_text(encoding="utf-8")
+    assert '$PadKnownGoodDistro = "%s"' % emulate_tab.KNOWN_GOOD_DISTRO in ps1
+    assert '@("--install", "-d", $PadKnownGoodDistro)' in ps1
+    assert '@("--install", "-d", "Ubuntu")' in ps1, "the fallback is still there"
+    # ...and it is reached only after a non-zero exit, so an install that
+    # merely wants its first-run setup finished never becomes a second distro.
+    tail = ps1[ps1.index("$plan.FallbackArgs"):]
+    guard = ps1[:ps1.index("& wsl $plan.FallbackArgs")]
+    assert "-not (Test-WslHasApt) -and $installExit -ne 0" in guard, guard[-400:]
+    assert tail, "the fallback is actually run"
+    # No hint anywhere still sends a person to the tracking name by hand.
+    assert "wsl --install -d Ubuntu\"" not in ps1
+    assert "wsl --set-default Ubuntu\"" not in ps1
+
+
 def test_only_a_package_that_depends_on_nothing_is_cross_installed():
     """THE SAFETY PROPERTY.  A .deb from another release drags its dependency
     chain in with it, which is how "the emulator will not start" becomes "apt

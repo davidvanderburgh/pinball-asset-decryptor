@@ -1830,7 +1830,8 @@ def setup_notice(facts, can_fix):
                 "“Set up emulator…” cannot get past this — there is nothing "
                 "left for it to install. PAD uses whichever distro WSL calls "
                 "the default, so a distro that does carry %s, made the "
-                "default, is the way through. In a Windows terminal:\n"
+                "default, is the way through. Any current Ubuntu will do; "
+                "this is the one PAD is tested on. In a Windows terminal:\n"
                 "     wsl --install -d %s\n"
                 "     wsl --set-default %s"
                 % (", ".join(unavailable) or "the packages",

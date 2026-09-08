@@ -2066,6 +2066,8 @@ class EmulatePanel:
         # returned immediately without doing anything.  _starting is only true
         # across the launch itself.
         self._starting = False
+        #: Said once per app run, not once per Start.
+        self._runtime_noted = False
         self._stopping = False
         self._resetting = False
         #: A "Reset windows" run is in flight.  Its own flag rather than
@@ -4509,6 +4511,29 @@ class EmulatePanel:
         except tk.TclError:
             pass
 
+    def _note_the_runtime_is_a_different_machine(self):
+        """Say it BEFORE the first run in the app's own Linux, not after.
+
+        The rig keeps real work in whichever distro it runs in: the card cache
+        (gigabytes per card), the save-state slots, and the binaries it builds
+        for itself.  Moving to the runtime means the first start there rebuilds
+        those and re-copies the card - minutes, and a lot of disk - while the
+        originals sit untouched in the machine's own distro.  Nothing is lost
+        and nothing is deleted, but a silent re-copy looks exactly like losing
+        them, and a user watching a progress bar deserves to know which of the
+        two they are looking at."""
+        if not runtime.distro_for("spike2"):
+            return
+        if self._runtime_noted:
+            return
+        self._runtime_noted = True
+        self._log("[emulate] The emulator now runs in the Linux this app "
+                  "installs (%s), which carries its whole toolchain. The "
+                  "first run there builds the rig's binaries and copies the "
+                  "card again; anything cached in this PC's own distro is "
+                  "untouched, and PAD_RUNTIME=0 goes back to using it."
+                  % runtime.DISTRO)
+
     def _launch_env(self, src):
         """The Start environment beyond the card: the audio control file, and
         (item 90) the boot selector's THREE-WAY answer.  Its own method so the
@@ -4608,6 +4633,7 @@ class EmulatePanel:
         states = True
 
         def run():
+            self._note_the_runtime_is_a_different_machine()
             # DOCKER IS CHECKED HERE, in the worker, so a slow probe cannot
             # freeze the tab - and it is checked on every Start rather than
             # trusted from build time, because the user may have installed or

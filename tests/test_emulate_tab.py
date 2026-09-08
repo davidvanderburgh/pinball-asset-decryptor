@@ -3554,3 +3554,31 @@ def test_no_call_site_spells_out_its_own_wsl_head():
     # `wsl.exe --shutdown` is deliberately global - it restarts WSL itself,
     # which is not a per-distro act - and the docstring quoting the old shape.
     assert not [s for s in stray if "--shutdown" not in s and "copies of" not in s], stray
+
+
+def test_the_first_run_in_the_apps_own_linux_says_what_it_will_rebuild(
+        monkeypatch):
+    """The rig keeps real work in whichever distro it runs in: a card cache of
+    gigabytes, save-state slots, and the binaries it builds for itself.  A
+    silent re-copy of all that looks exactly like losing it."""
+    panel = emulate_tab.EmulatePanel.__new__(emulate_tab.EmulatePanel)
+    panel._runtime_noted = False
+    logged = []
+    panel._log = lambda m: logged.append(m)
+    monkeypatch.setattr(emulate_tab.runtime, "distro_for",
+                        lambda rig: "PAD-Runtime")
+
+    panel._note_the_runtime_is_a_different_machine()
+    assert any("PAD_RUNTIME=0" in m and "untouched" in m for m in logged), logged
+
+    # Once per app run, not once per Start: a line repeated on every press is
+    # noise, and this one is only news the first time.
+    logged.clear()
+    panel._note_the_runtime_is_a_different_machine()
+    assert not logged
+
+    # And silence entirely when the rig is where it has always been.
+    panel._runtime_noted = False
+    monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
+    panel._note_the_runtime_is_a_different_machine()
+    assert not logged

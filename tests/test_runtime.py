@@ -286,7 +286,7 @@ def test_the_image_carries_the_spike2_toolchain_it_promises():
     have to appear here."""
     df = DOCKERFILE.read_text(encoding="utf-8")
     for pkg in ("qemu-user-static", "gcc-arm-linux-gnueabihf", "libc6-dev",
-                "e2fsprogs", "fuse3", "ffmpeg", "busybox-static"):
+                "e2fsprogs", "fuse2fs", "fuse3", "ffmpeg", "busybox-static"):
         assert pkg in df, "the full variant must carry %s" % pkg
     assert "spike2" in runtime.RIGS
 

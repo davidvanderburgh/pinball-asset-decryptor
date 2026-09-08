@@ -195,7 +195,7 @@ from tkinter import colorchooser, filedialog, font as tkfont, messagebox, ttk
 
 from ..core import config
 from . import _rig
-from .emulate_tab import rig_dir, wsl_home
+from .emulate_tab import rig_dir, wsl_account, wsl_home
 from .preview_audio import PreviewAudio
 from .theme import THEMES, dark_titlebar
 from .widgets import _Tooltip, center_over
@@ -1610,19 +1610,34 @@ def root_command(args, cwd=None, exe="python3"):
     """The argv of a tool step that must run as root (build, update: they
     loop-mount the card's partitions - item 93) - as a CALLABLE the worker
     resolves just before the step, because the desktop user's WSL home is
-    two ``wsl.exe`` probes (:func:`emulate_tab.wsl_home`) and must never run
-    on the Tk thread.  No home -> the step fails with a sentence, not a
-    hang."""
+    two ``wsl.exe`` probes (:func:`emulate_tab.wsl_account`) and must never
+    run on the Tk thread.  No answer at all -> the step fails with a
+    sentence, not a hang.
+
+    A DISTRO WHOSE DEFAULT ACCOUNT IS ROOT has no desktop home to carry, and
+    needs none: ``~`` has meant root's home in every other step of the same
+    run (the selector goes to /root/spike2root, and that is where this step
+    must look for it), so root's own home is the right one and the run goes
+    ahead.  Until PAD-114 that machine got the sentence below instead -
+    "check that WSL starts" on a WSL that had just built the menu program,
+    rendered the preview and planned the card - and could never build one.
+    """
     if sys.platform != "win32":
         return wsl_command_root(args, cwd, exe)
 
     def later(_texts):
         home = wsl_home()
         if not home:
-            raise RuntimeError(
-                "cannot find your WSL home (wsl.exe -e whoami / getent both "
-                "failed) - the card is written as root and needs it to find "
-                "~/spike2root; check that WSL starts, then try again")
+            user, root_home = wsl_account()
+            if user != "root":
+                raise RuntimeError(
+                    "cannot find your WSL home (wsl.exe -e whoami / getent "
+                    "both failed) - the card is written as root and needs it "
+                    "to find ~/spike2root; check that WSL starts, then try "
+                    "again")
+            # No override when the probe could not read root's passwd row:
+            # `wsl -u root` sets HOME itself, and that is the same account.
+            home = root_home or None
         return wsl_command_root(args, cwd, exe, home=home)
     return later
 

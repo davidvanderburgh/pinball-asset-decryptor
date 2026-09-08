@@ -24,6 +24,7 @@ from tests.test_multiboot_tab import (  # noqa: E402
 @pytest.fixture(autouse=True)
 def _no_wsl_home_probe(monkeypatch):
     monkeypatch.setattr(multiboot_tab, "wsl_home", lambda: "/home/x")
+    monkeypatch.setattr(multiboot_tab, "wsl_account", lambda: ("x", "/home/x"))
 
 
 # ------------------------------------------------------------------ argv
@@ -66,12 +67,35 @@ def test_build_and_update_run_as_root_with_the_desktop_home(monkeypatch, tmp_pat
 
 
 def test_a_root_step_without_a_home_fails_with_a_sentence(monkeypatch, tmp_path):
+    """Only when WSL would not say WHO it logs in as - see the test below for
+    the machine that has no desktop home and does not need one."""
     _win(monkeypatch)
     monkeypatch.setattr(multiboot_tab, "wsl_home", lambda: None)
+    monkeypatch.setattr(multiboot_tab, "wsl_account", lambda: ("", ""))
     step = root_command(["x.py", "build"], cwd="/mnt/c/repo")
     with pytest.raises(RuntimeError) as e:
         step({})
     assert "WSL home" in str(e.value)
+
+
+def test_a_root_default_distro_builds_with_roots_own_home(monkeypatch, tmp_path):
+    """PAD-114.  A distro whose default account IS root has no desktop home
+    to carry, and needs none: every other step of the run has already been
+    root, so ~/spike2root means /root/spike2root here too and the build goes
+    ahead.  It used to be refused with "check that WSL starts" - on a WSL
+    that had just built the menu program and planned the card."""
+    _win(monkeypatch)
+    monkeypatch.setattr(multiboot_tab, "wsl_home", lambda: None)
+    monkeypatch.setattr(multiboot_tab, "wsl_account", lambda: ("root", "/root"))
+    argv = root_command(["x.py", "build"], cwd="/mnt/c/repo")({})
+    assert argv[:8] == ["wsl.exe", "-u", "root", "-e", "env", "HOME=/root",
+                        "bash", "-lc"]
+    assert _line(argv) == "cd /mnt/c/repo && python3 x.py build"
+    # ...and with no readable passwd row for root, no override at all:
+    # `wsl -u root` sets HOME itself, to the same account's home.
+    monkeypatch.setattr(multiboot_tab, "wsl_account", lambda: ("root", ""))
+    argv = root_command(["x.py", "build"], cwd="/mnt/c/repo")({})
+    assert argv[:6] == ["wsl.exe", "-u", "root", "-e", "bash", "-lc"]
 
 
 def test_measure_commands_add_the_dry_run_only_for_a_loaded_card(monkeypatch, tmp_path):

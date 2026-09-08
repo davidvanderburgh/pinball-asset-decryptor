@@ -57,8 +57,10 @@ from pinball_decryptor.gui.multiboot_tab import (
 @pytest.fixture(autouse=True)
 def _no_wsl_home_probe(monkeypatch):
     """A root step resolves the desktop user's WSL home on the worker (two
-    wsl.exe probes); no test may reach wsl.exe for it."""
+    wsl.exe probes); no test may reach wsl.exe for it - including the
+    account probe a missing home falls back to."""
     monkeypatch.setattr(multiboot_tab, "wsl_home", lambda: "/home/x")
+    monkeypatch.setattr(multiboot_tab, "wsl_account", lambda: ("x", "/home/x"))
 
 
 @pytest.fixture(autouse=True)

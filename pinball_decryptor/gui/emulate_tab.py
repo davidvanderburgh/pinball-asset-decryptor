@@ -898,22 +898,79 @@ def rig_cmd_root(script, *args):
             "%s/%s" % (_wsl_path(rig_dir()), script)] + [str(a) for a in args]
 
 
-#: wsl_home()'s cache: [value, probed].  One probe per app run is plenty - the
-#: answer changes when the user reinstalls their distro, not between clicks.
+#: wsl_account()'s cache: [(user, home), probed].  One probe per app run is
+#: plenty - the answer changes when the user reinstalls their distro, not
+#: between clicks.
+_WSL_ACCOUNT = [("", ""), False]
+
+#: wsl_home()'s cache: [value, probed].  Its own, and not just a slice of the
+#: one above, because it answers a NARROWER question (see wsl_home) - and
+#: because pinning it is how the tests hand this module a home without a live
+#: WSL.
 _WSL_HOME = [None, False]
 
 
+def wsl_account():
+    """``(user, home)`` for the account ``wsl.exe`` logs into with no ``-u``:
+    ``('david', '/home/david')`` on an ordinary distro, ``('root', '/root')``
+    on one that never got a user of its own.
+
+    THAT SECOND SHAPE IS A REAL MACHINE, not a broken one: a distro installed
+    without its first-run setup logs everybody in as root, several of PAD's
+    users have run on one for months, and the only sign of it in a log is
+    that every ``~`` came out under /root.
+
+    NO shell variables anywhere in the probe: ``wsl.exe`` re-parses its
+    argument line and ``$HOME`` expands to empty on that second pass (the JJP
+    executor learned that the hard way), so it is ``whoami`` + ``getent``,
+    which carry no ``$`` at all.  ``('', '')`` when WSL does not answer at
+    all; an account whose passwd row cannot be read keeps its name and loses
+    only the home, because the name alone already tells the callers which
+    machine they are on.
+
+    NEVER ON THE UI THREAD - see :func:`wsl_home` for why.
+    """
+    if _WSL_ACCOUNT[1]:
+        return _WSL_ACCOUNT[0]
+    _WSL_ACCOUNT[1] = True
+    user = home = ""
+    try:
+        u = subprocess.run(["wsl.exe", "-e", "whoami"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=30, creationflags=_CREATE_FLAGS)
+        user = u.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
+    except Exception:                                   # noqa: BLE001
+        user = ""
+    if user:
+        try:
+            p = subprocess.run(["wsl.exe", "-e", "getent", "passwd", user],
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL,
+                               timeout=30, creationflags=_CREATE_FLAGS)
+            row = p.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
+            parts = row.split(":")
+            if len(parts) >= 6 and parts[5].startswith("/"):
+                home = parts[5]
+        except Exception:                               # noqa: BLE001
+            home = ""
+    _WSL_ACCOUNT[0] = (user, home)
+    return _WSL_ACCOUNT[0]
+
+
 def wsl_home():
-    """The default WSL user's home ('/home/david'), asked of WSL itself.
+    """The DESKTOP user's home ('/home/david'), or None when there is no such
+    user - a distro whose default account is root has none.
 
     The checkpointable launch below runs ``wsl -u root``, whose own HOME is
     /root - the wrong rootfs, the wrong logs, the wrong everything - so the
     desktop user's home is passed in explicitly, and this is where it comes
-    from.  NO shell variables anywhere in the probe: ``wsl.exe`` re-parses its
-    argument line and ``$HOME`` expands to empty on that second pass (the JJP
-    executor learned that the hard way), so it is ``whoami`` + ``getent``,
-    which carry no ``$`` at all.  None when anything fails, and the callers
-    fall back to the ordinary user launch.
+    from.  None therefore means "nothing to hand that launch", and every
+    caller here reads it that way: the ordinary user launch instead.
+
+    A step that MUST be root asks :func:`wsl_account` rather than this one -
+    on a root-default distro root's own home is not a fallback, it is the
+    right answer, and reading None as "WSL would not answer" is what stopped
+    the Multi-boot tab's build dead on those machines (PAD-114).
 
     NEVER ON THE UI THREAD.  The first wsl.exe after a Windows reboot boots
     the whole WSL VM, so this probe's real worst case is not its 30 s
@@ -925,22 +982,9 @@ def wsl_home():
     if _WSL_HOME[1]:
         return _WSL_HOME[0]
     _WSL_HOME[1] = True
-    try:
-        u = subprocess.run(["wsl.exe", "-e", "whoami"],
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                           timeout=30, creationflags=_CREATE_FLAGS)
-        user = u.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
-        if user and user != "root":
-            p = subprocess.run(["wsl.exe", "-e", "getent", "passwd", user],
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL,
-                               timeout=30, creationflags=_CREATE_FLAGS)
-            row = p.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
-            parts = row.split(":")
-            if len(parts) >= 6 and parts[5].startswith("/"):
-                _WSL_HOME[0] = parts[5]
-    except Exception:                                   # noqa: BLE001
-        _WSL_HOME[0] = None
+    user, home = wsl_account()
+    if user and user != "root" and home:
+        _WSL_HOME[0] = home
     return _WSL_HOME[0]
 
 

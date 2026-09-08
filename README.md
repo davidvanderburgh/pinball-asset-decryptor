@@ -553,6 +553,17 @@ wsl --set-default Ubuntu-24.04
 The old distro is left exactly where it is, and `wsl --export <name>
 backup.tar` still gets its files out.
 
+If your WSL **logs in as root** — a distro installed without its
+first-run account setup does — building a multi-boot card used to stop
+with *"cannot find your WSL home … check that WSL starts"*, on a WSL that
+had just built the menu program, drawn the preview and planned the card.
+The card is written as root, and the app was looking for an ordinary
+user's home to hand that step; there isn't one on such a machine, and
+there doesn't need to be — root's own home is where `~/spike2root` has
+been all along. The build now runs there. (The emulator is the one thing
+that still wants an ordinary account: a root run can't attach to the
+WSLg X server, so the game window opens black.)
+
 If pressing ▶ on the Replace Audio tab says **Audio preview needs
 ffplay**, the ffmpeg it found is an "essentials" build or the copy
 bundled inside the app — neither carries `ffplay.exe`. Answer **Yes** to

@@ -2831,21 +2831,26 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
     # standalone name grows its host line too, and is itself longer).
     over = [o for o, n in edits.items() if len(n) > len(o)]
     reloc = None
+    # Why longer text has nowhere to go, carried into plan_writes so each
+    # skipped line names the WRITE's limit instead of blaming itself.
+    no_grow_why = ""
     if over and grow is not None:
         if grow.get("ok"):
             reloc, why = _text_reloc_plan(raw)
             if reloc is None:
+                no_grow_why = why
                 log("Program text: %d edit(s) are longer than the original and "
                     "can't be placed in new space in %s (%s); they are skipped "
                     "— same-length edits still land in place."
                     % (len(over), card_path, why), "warning")
         else:
+            no_grow_why = grow.get("why") or "growth unavailable"
             log("Program text: %d edit(s) are longer than the original and "
                 "can't be placed in new space for this write (%s); they are "
                 "skipped — same-length edits still land in place."
-                % (len(over), grow.get("why") or "growth unavailable"),
-                "warning")
-    file_writes, n, blob = progtext.plan_writes(raw, edits, log, reloc=reloc)
+                % (len(over), no_grow_why), "warning")
+    file_writes, n, blob = progtext.plan_writes(raw, edits, log, reloc=reloc,
+                                                no_grow_why=no_grow_why)
     if blob:
         try:
             grown = _grow_program_text(raw, file_writes, blob, reloc,
@@ -2855,7 +2860,9 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
             log("Program text: couldn't place the longer text in new space "
                 "(%s); those edits are skipped and the rest patched in place."
                 % e, "warning")
-            file_writes, n, blob = progtext.plan_writes(raw, edits, log)
+            file_writes, n, blob = progtext.plan_writes(
+                raw, edits, log,
+                no_grow_why="placing longer text in new space failed (%s)" % e)
     if not file_writes:
         return [], n, {}, None
     if patched_fw is not None:

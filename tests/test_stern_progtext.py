@@ -183,7 +183,9 @@ def test_tail_only_edit_too_long_is_skipped(fixture_elf):
     msgs, log = _logs()
     writes, n, _blob = progtext.plan_writes(raw, {"EBIRAH": "BIOLLANTE"}, log)
     assert writes == [] and n == 0
-    assert any("Edit the full line too" in m for _l, m in msgs)
+    # The host IS referenced, so this is a write with nowhere to put a longer
+    # copy (PAD-111) — the advice for shortening it here comes with that.
+    assert any("edit the full line too" in m for _l, m in msgs)
 
 
 def test_full_edit_that_breaks_the_tail_is_skipped(fixture_elf):
@@ -444,6 +446,69 @@ def test_no_reference_span_keeps_the_in_place_rule(reloc_elf):
         raw, {DEAD: "NO REFS HERE BUT LONGER"}, log, RELOC)
     assert writes == [] and n == 0 and blob == b""
     assert any("only %d" % len(DEAD) in m for m in _warnings(msgs))
+
+
+# ---------------------------------------------------------------------------
+# No extension segment at all (the WRITE couldn't grow, not the line): the
+# tester's Godzilla rename came back "the game reads this line in a way the
+# tool can't follow ... use a shorter replacement" for eight strings that
+# every one of them relocates cleanly (PAD-111).
+# ---------------------------------------------------------------------------
+
+WHY = "a direct-SD write can't grow the game program; build an image file"
+
+
+def test_write_that_cannot_grow_blames_itself_not_the_line(reloc_elf):
+    raw, _offs = reloc_elf
+    msgs, log = _logs()
+    writes, n, blob = progtext.plan_writes(
+        raw, {PLAIN: "SUPER DUPER JACKPOT AWARD!"}, log, no_grow_why=WHY)
+    assert writes == [] and n == 0 and blob == b""
+    warn = _warnings(msgs)
+    assert len(warn) == 1
+    assert WHY in warn[0] and "can be made longer" in warn[0]
+    # the two things the old wording got wrong
+    assert "can't follow" not in warn[0]
+    assert "wasn't found" not in warn[0]
+
+
+def test_a_line_with_no_references_still_reads_as_immovable(reloc_elf):
+    """The other half of "not growable" keeps its own (permanent) advice."""
+    raw, _offs = reloc_elf
+    msgs, log = _logs()
+    writes, n, _blob = progtext.plan_writes(
+        raw, {DEAD: "NO REFS HERE BUT LONGER"}, log, no_grow_why=WHY)
+    assert writes == [] and n == 0
+    warn = _warnings(msgs)
+    assert len(warn) == 1 and "can't follow" in warn[0]
+    assert "Use a shorter replacement" in warn[0] and WHY not in warn[0]
+
+
+def test_a_tail_rename_that_cannot_grow_says_the_same(reloc_elf):
+    raw, _offs = reloc_elf
+    msgs, log = _logs()
+    writes, n, _blob = progtext.plan_writes(
+        raw, {"MEGALON": "SPACEGODZILLA"}, log, no_grow_why=WHY)
+    assert writes == [] and n == 0
+    warn = _warnings(msgs)
+    assert len(warn) == 1 and WHY in warn[0]
+    assert "GODZILLA VS SPACEGODZILLA" in warn[0]
+
+
+def test_a_skipped_edit_is_never_also_reported_missing(reloc_elf):
+    """Found-and-skipped is not missing: every skip above already said why."""
+    raw, _offs = reloc_elf
+    for edits, reloc in (({PLAIN: "SUPER DUPER JACKPOT AWARD!",
+                           MEGA: "GODZILLA VS SPACEGODZILLA"}, None),
+                         ({MEGA: "GODZILLA VS SPACEGODZILLA"}, RELOC),
+                         ({DEAD: "NO REFS HERE BUT LONGER"}, RELOC)):
+        msgs, log = _logs()
+        progtext.plan_writes(raw, dict(edits), log, reloc)
+        assert not any("wasn't found" in m for m in _warnings(msgs)), edits
+    # a genuine typo still says so
+    msgs, log = _logs()
+    progtext.plan_writes(raw, {"NO SUCH LINE": "X Y"}, log, RELOC)
+    assert any("wasn't found" in m for m in _warnings(msgs))
 
 
 def test_capacity_exhausted_refuses_with_a_named_reason(reloc_elf):

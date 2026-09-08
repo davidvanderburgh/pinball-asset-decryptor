@@ -42,6 +42,14 @@ INTO the string (a tail) is retargeted to ``copy + new_delta`` and needs the
 new text to END with the (possibly edited) tail, the same rule the in-place
 tail move already enforces.
 
+A write that offers NO extension segment (``reloc = None``: a direct-SD
+destination, a host that can't grow files inside an ext4 image, an ELF with
+no room) is a different refusal entirely, and the log has to keep the two
+apart — the line is growable, this write just has nowhere to put it, so the
+skip names the write's reason (``no_grow_why``) and never asks for shorter
+text.  Godzilla's kaiju rename (PAD-111) is the case: every one of the
+strings a tester was told the tool "can't follow" relocates cleanly.
+
 Reuse of an extension segment: the caller stores ``b"PADTXT01" + u32 used``
 at the segment's start (:func:`progreloc.extension_segment` reads it back)
 and passes ``reloc = {"base_va", "capacity", "used"}``; the blob is placed
@@ -429,12 +437,18 @@ class _Blob(object):
         return self.base_va + self.used + off
 
 
-def plan_writes(raw, edits, log=None, reloc=None):
+def plan_writes(raw, edits, log=None, reloc=None, no_grow_why=""):
     """Resolve *edits* (``{original: replacement}``) against the ELF *raw*
     and return ``(writes, n_applied, blob)`` where *writes* is a flat
     ``[(file_offset, bytes)]`` patch list and *blob* the bytes to place in
     the extension segment (``b""`` unless *reloc* is given and an edit
     needed it).
+
+    *no_grow_why* is why the caller could not offer *reloc* (the write's own
+    reason: a direct-SD destination, no ext4 growth on this host, an ELF that
+    can't take a segment...).  A string that the census CAN repoint is then
+    skipped for that reason and says so — the line itself is fine, and telling
+    its author to shorten it would be wrong.
 
     *reloc* = ``None`` (every edit must fit its slot) or ``{"base_va": int,
     "capacity": int, "used": int}`` describing the extension segment the
@@ -498,9 +512,14 @@ def plan_writes(raw, edits, log=None, reloc=None):
     blob = _Blob(reloc) if reloc is not None else None
 
     applied = set()
+    found = set()          # edit keys some span matched, applied or skipped
     writes = []
 
     enc = encode_text                        # newline-safe form for the log
+    # Why a growable line still can't grow on THIS write.  Never the line's
+    # own fault, so it is worded as the write's limit and carries the reason
+    # (with the fix in it) the caller passed down.
+    why_write = (" (%s)" % no_grow_why) if no_grow_why else ""
 
     def _fmt_ok(old, new, where):
         if _fmt_tokens(old) == _fmt_tokens(new):
@@ -527,6 +546,14 @@ def plan_writes(raw, edits, log=None, reloc=None):
         budget = len(text)
         refs = census.get(off, [])
         growable = blob is not None and bool(refs)
+        # The string is fine and the WRITE is what can't take it: the two
+        # halves of "not growable" get opposite advice, so never merge them.
+        write_blocked = blob is None and bool(refs)
+        if full_new is not None:
+            found.add(text)
+        for _d, _tt, _p, _tn in tail_edits:
+            if _tn is not None:
+                found.add(_tt)
 
         new_full = full_new
         if new_full is None:
@@ -539,6 +566,15 @@ def plan_writes(raw, edits, log=None, reloc=None):
                 continue
             d, tt, _ptrs, tn = edited[0]
             new_full = text[:d] + tn
+            if len(new_full) > budget and write_blocked:
+                log('Program text: renaming "%s" to "%s" makes "%s" %d bytes '
+                    "but only %d fit, and this write can't place longer "
+                    "text%s; skipped. The line itself can be made longer, so "
+                    "fix that and Write again — or edit the full line too "
+                    '(any text ending in "%s" that fits).'
+                    % (enc(tt), enc(tn), enc(new_full), len(new_full),
+                       budget, why_write, enc(tn)), "warning")
+                continue
             if len(new_full) > budget and not growable:
                 log('Program text: renaming "%s" to "%s" makes "%s" %d bytes '
                     "but only %d fit. Edit the full line too (any text ending "
@@ -546,6 +582,17 @@ def plan_writes(raw, edits, log=None, reloc=None):
                     % (enc(tt), enc(tn), enc(new_full), len(new_full),
                        budget, enc(tn)), "warning")
                 continue
+        if len(new_full) > budget and write_blocked:
+            # The line CAN move — this write just has nowhere to put it.
+            # Telling its author to shorten it would be wrong twice over:
+            # the text is fine, and the thing to fix is one write setting.
+            log('Program text: "%s" -> "%s" is %d bytes but only %d fit, and '
+                "this write can't place longer text%s; skipped. The line "
+                "itself can be made longer, so fix that and Write again — or "
+                "use a replacement of %d bytes or fewer."
+                % (enc(text), enc(new_full), len(new_full), budget,
+                   why_write, budget), "warning")
+            continue
         if len(new_full) > budget and not growable:
             # The Text tab offers longer text on any program row it has not
             # been told is immovable (a project extracted before the tool
@@ -637,10 +684,14 @@ def plan_writes(raw, edits, log=None, reloc=None):
                 "info")
 
     applied.discard(None)
+    # "wasn't found" means exactly that.  A string the loop DID find and then
+    # skipped has already been logged with its own reason; repeating it here
+    # as missing sent a tester looking for a typo in text that was right in
+    # front of him.
     for original in edits:
-        if original not in applied:
+        if original not in applied and original not in found:
             log('Program text: "%s" wasn\'t found in the game program; '
-                "skipped." % original, "warning")
+                "skipped." % enc(original), "warning")
 
     blob_bytes = bytes(blob.data) if blob is not None else b""
 

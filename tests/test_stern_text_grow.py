@@ -435,8 +435,14 @@ def test_direct_sd_degrades_and_same_length_edits_still_land(tmp_path,
     assert grow_plan is None
     assert counts == (0, 0, 0, 1)
     assert any(l == "warning" and "direct-SD" in m for l, m in msgs)
-    assert any(l == "warning" and "BIOLLANTE" in m and "skipped" in m
-               for l, m in msgs)
+    # The line itself relocates fine; the destination is what can't take it,
+    # so the per-line skip carries the destination's reason and its fix, and
+    # never asks for shorter text (PAD-111).
+    line = next(m for l, m in msgs
+                if l == "warning" and "BIOLLANTE" in m and "skipped" in m)
+    assert "direct-SD" in line and "build an image file" in line
+    assert "can't follow" not in line
+    assert not any("wasn't found" in m for _l, m in msgs)
     fw_writes = _writes_in(writes, reader.FW_DISK, len(raw))
     assert (reader.FW_DISK + offs[PRESS],
             same.encode().ljust(len(PRESS), b"\x00")) in fw_writes

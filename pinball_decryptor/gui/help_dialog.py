@@ -982,9 +982,21 @@ HELP_CONTENT = {
         ("It needs WSL and runs as root there",
          "The board model needs a privileged host setup, so this tab is "
          "Windows-only and runs the emulator inside WSL with root (which on "
-         "Windows needs no password). The first Start builds the emulator once, "
-         "which takes a few minutes; later starts are quick, and switching to a "
+         "Windows needs no password). The first Start installs the emulator: "
+         "the ARM emulator and the board model are binaries built and checked "
+         "as part of this app, downloaded once and verified against the exact "
+         "version this app expects, so nothing is compiled on your machine and "
+         "no packages are needed. Later starts are quick, and switching to a "
          "different card you've already picked before reuses its extraction."),
+        ("Fix setup, if anything is missing",
+         "Fix setup installs whatever the emulator is missing and then says "
+         "what, if anything, is left — no terminal, either way. If your "
+         "network blocks the download (a firewall, or a proxy that allows "
+         "github.com but not its download host), it offers a file picker "
+         "instead: fetch the file on any other machine and it is checked "
+         "against the same checksum before it is installed. Start does the "
+         "same install by itself, so pressing this first is only needed when "
+         "something has gone wrong."),
         ("Play a game",
          "A display window shows what the machine is showing — the dot matrix, "
          "or, on a 2012 home model, its two 16-segment displays side by side "

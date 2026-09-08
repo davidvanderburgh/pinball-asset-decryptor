@@ -834,3 +834,27 @@ def test_the_panel_only_asks_for_payloads_the_app_actually_pins():
     from pinball_decryptor.core import payloads as core_payloads
     for key in Spike1EmulatePanel.PAYLOAD_KEYS:
         assert key in core_payloads.PAYLOADS
+
+
+def test_a_first_run_in_the_apps_own_linux_says_where_the_old_work_is(
+        panel, monkeypatch):
+    """Installing the runtime moves the rig to a distro where the machine's
+    earlier extractions are not.  Nothing is deleted, but a silent re-extract
+    looks exactly like losing gigabytes of work, so it is said first."""
+    logged = []
+    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
+    monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: "PAD-Runtime")
+    monkeypatch.setattr(panel, "_default_distro_has_a_game", lambda: True)
+    panel._info = {"game_ready": "0"}
+    panel._note_where_the_old_extraction_went()
+    assert any("PAD_RUNTIME=0" in m and "untouched" in m for m in logged), logged
+
+    # ...and it stays quiet when there is nothing to explain: no runtime in
+    # use, or the runtime already holds the game.
+    logged.clear()
+    monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: None)
+    panel._note_where_the_old_extraction_went()
+    monkeypatch.setattr(spike1_emulate_tab, "rig_distro", lambda: "PAD-Runtime")
+    panel._info = {"game_ready": "1"}
+    panel._note_where_the_old_extraction_went()
+    assert not logged, logged

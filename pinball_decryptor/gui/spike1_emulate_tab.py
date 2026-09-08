@@ -832,6 +832,7 @@ class Spike1EmulatePanel:
                     self._log("Spike 1: could not install the shipped "
                               "emulator (%s). Falling back to building it on "
                               "this machine." % exc)
+                self._note_where_the_old_extraction_went()
                 if self._info.get("qemu_built") != "1":
                     self._log("Spike 1: first run — building the emulator, this "
                               "takes a few minutes. Each step is shown below.")
@@ -1142,6 +1143,40 @@ class Spike1EmulatePanel:
             % runtime.IMAGE.version)
         runtime.install(log=lambda m: say("Spike 1: %s" % m))
         return "ready"
+
+    def _default_distro_has_a_game(self):
+        """Does the machine's OWN distro hold an extraction the runtime does
+        not?  Asked with no distro argument on purpose - that is the default,
+        which is where a rig's work lived before the app had a Linux of its
+        own."""
+        try:
+            out = subprocess.run(
+                _rig.rig_cmd(rig_dir(), "status.sh"), stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, timeout=25,
+                creationflags=_rig.CREATE_FLAGS)
+        except Exception:                                   # noqa: BLE001
+            return False
+        return _rig.parse_status(
+            out.stdout.decode("utf-8", "replace")).get("game_ready") == "1"
+
+    def _note_where_the_old_extraction_went(self):
+        """Say it BEFORE re-extracting, not after.
+
+        A machine that has been running the emulator in its own distro has
+        gigabytes of extracted games there, and installing the app's Linux
+        moves the rig somewhere those are not.  Nothing is lost and nothing is
+        deleted - but a re-extract that happens silently looks exactly like
+        losing them, so the log says where they are and how to go back."""
+        if self._info.get("game_ready") == "1" or not rig_distro():
+            return
+        if not self._default_distro_has_a_game():
+            return
+        self._log(
+            "Spike 1: the emulator now runs in the Linux this app installs "
+            "(%s), so this card is extracted into it once. Your earlier "
+            "extractions are still in this PC's own WSL distro — untouched, "
+            "not deleted — and setting PAD_RUNTIME=0 goes back to using them."
+            % runtime.DISTRO)
 
     def _offer_file_install(self, exc):
         """The blocked-download path, on the UI thread.

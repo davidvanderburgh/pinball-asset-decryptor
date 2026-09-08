@@ -157,7 +157,15 @@ RUN apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
 #:                              guest halves - which link against the CARD's
 #:                              own libc, so they can never be prebuilt for it
 #:   gcc + libc6-dev            the native half of the bridge
-#:   e2fsprogs                  debugfs, and fuse2fs to run a card unpacked
+#:   e2fsprogs                  debugfs
+#:   fuse2fs                    running a card WITHOUT unpacking it, and its
+#:                              OWN package since 24.04 - it used to ship
+#:                              inside e2fsprogs, so the rig's list (which
+#:                              names capabilities, spelled for the distro of
+#:                              the day) did not carry it, and the first full
+#:                              image was built without it.  Caught by the CI
+#:                              step that asks each tool to do its job, which
+#:                              is the entire reason that step exists
 #:   fuse3                      fusermount3, for those mounts
 #:   ffmpeg                     the game decodes NEITHER its video nor its
 #:                              sound itself, so both go through this; without
@@ -179,6 +187,7 @@ RUN if [ "$VARIANT" = full ]; then \
         gcc-arm-linux-gnueabihf \
         gcc libc6-dev \
         e2fsprogs \
+        fuse2fs \
         fuse3 \
         ffmpeg \
         busybox-static \

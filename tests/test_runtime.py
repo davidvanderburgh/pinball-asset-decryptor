@@ -285,9 +285,29 @@ def test_the_image_carries_the_spike2_toolchain_it_promises():
     setupcheck.sh is the rig's one list of what it needs, so the same names
     have to appear here."""
     df = DOCKERFILE.read_text(encoding="utf-8")
+    # The INSTALL LINES, not the whole file: this test passed once on a
+    # Dockerfile that only MENTIONED fuse2fs in a comment while the apt line
+    # beside it never installed it, and the image shipped without the tool the
+    # rig calls 57 times.  A test that a comment can satisfy is not a test.
+    installed = set()
+    in_install = False
+    for line in df.splitlines():
+        bare = line.strip()
+        if bare.startswith("#"):          # prose, however convincing
+            continue
+        if "apt-get" in bare and " install" in bare:
+            in_install = True
+            bare = bare.split(" install", 1)[1]
+        elif not in_install:
+            continue
+        for tok in re.findall(r"(?<![-\w])[a-z][a-z0-9.+-]{2,}", bare):
+            installed.add(tok)
+        if not bare.endswith("\\"):       # the continuation ends the list
+            in_install = False
     for pkg in ("qemu-user-static", "gcc-arm-linux-gnueabihf", "libc6-dev",
                 "e2fsprogs", "fuse2fs", "fuse3", "ffmpeg", "busybox-static"):
-        assert pkg in df, "the full variant must carry %s" % pkg
+        assert pkg in installed, (
+            "the full variant must INSTALL %s, not merely mention it" % pkg)
     assert "spike2" in runtime.RIGS
 
 

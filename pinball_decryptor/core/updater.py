@@ -39,10 +39,14 @@ REQUEST_TIMEOUT = 5
 # image the emulator rigs run on, payloads-N the pinned qemu/hwshim
 # binaries.  Both are deliberately separate from the app's own releases
 # (they are pinned by SHA-256, so they must not move every time we ship),
-# and both become "latest" the moment they are published.  runtime-1 doing
-# so is why a user on v0.191.0 was told he was up to date with v0.192.0
-# already released: the answer's tag was "runtime-1", which parses to no
-# version at all, so the comparison below could never fire.
+# and both took the "latest" slot the moment they were published.
+# runtime-1 doing so is why a user on v0.191.0 was told he was up to date
+# with v0.192.0 already released: the answer's tag was "runtime-1", which
+# parses to no version at all, so the comparison below could never fire.
+# Their workflows publish them as PRERELEASES now, which is the only flag
+# that keeps a release out of /releases/latest — but that only protects
+# copies of the app that are already installed, and nothing stops a future
+# non-app release from being published some other way.
 #
 # So we read a page of releases and pick the newest one whose tag IS a
 # version.  The page only has to be deep enough to clear a run of

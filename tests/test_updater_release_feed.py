@@ -11,9 +11,10 @@ Two halves, both pinned here:
 
   * the app reads the release LIST and picks the newest release whose tag
     is a version, so an asset holder in the top slot is simply skipped;
-  * the workflows that publish those asset holders mark them not-latest,
-    because the copies of the app already in the field will never have
-    the fix above and are still asking the old question.
+  * the workflows that publish those asset holders mark them prerelease,
+    which is what keeps them out of ``/releases/latest`` — the copies of
+    the app already in the field will never have the fix above and are
+    still asking the old question.
 """
 
 import io
@@ -153,18 +154,34 @@ def test_the_running_version_is_still_the_floor(monkeypatch):
 # ---------------------------------------------------------- the workflows --
 
 @pytest.mark.parametrize("workflow", ["runtime.yml", "payloads.yml"])
-def test_asset_holder_releases_never_claim_to_be_latest(workflow):
+def test_asset_holder_releases_are_marked_prerelease(workflow):
     """The half of the fix that reaches copies of the app that will never
     get the other half: every v0.192.0-and-older install in the field is
     still asking GitHub for "the latest release", and these two workflows
-    are the only things that put a non-app release in that slot."""
+    are the only things that put a non-app release in that slot.
+
+    It has to be ``--prerelease``.  ``--latest=false`` reads like the right
+    flag and is not: it only un-pins the release, and GitHub then recomputes
+    its latest one by creation date and lands straight back on the release
+    you just un-pinned — checked against the live API on runtime-1, which
+    stayed "Latest" through both `gh release edit --latest=false` and a raw
+    `PATCH make_latest=false`.  ``/releases/latest`` is documented as the
+    most recent NON-PRERELEASE, non-draft release, so that is the flag that
+    actually excludes one.
+    """
     wf = (REPO / ".github" / "workflows" / workflow).read_text(
         encoding="utf-8")
     publish = wf.split("- name: Publish", 1)[1]
     assert "gh release create" in publish
     for line in publish.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
         if "gh release create" in line:
-            assert "--latest=false" in line, (
-                "%s creates its release without --latest=false" % workflow)
+            assert "--prerelease" in line, (
+                "%s creates its release without --prerelease" % workflow)
+        assert "--latest=false" not in line, (
+            "%s uses --latest=false, which does not demote anything"
+            % workflow)
     # ...and a tag created before we knew this gets corrected on a re-run.
-    assert "gh release edit" in publish and "--latest=false" in publish
+    assert "gh release edit" in publish and "--prerelease" in publish

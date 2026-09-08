@@ -163,7 +163,24 @@ jobs:
         run: |
           (cd out && sha256sum *.tar.gz > SHA256SUMS)
           gh release view "${{ inputs.tag }}" >/dev/null 2>&1 \
-            || gh release create "${{ inputs.tag }}" \
+            || gh release create "${{ inputs.tag }}" --prerelease \
                  --title "PAD Runtime ${{ inputs.tag }}" \
                  --notes "The Linux the emulator rigs run on, imported as a private WSL distro. Pinned by SHA-256 in pinball_decryptor/core/runtime.py."
+          # MARKED PRERELEASE BECAUSE IT MUST NEVER BE "Latest", and that flag
+          # is the only one that does it.  This release carries no app, but
+          # every copy of the app already installed asks GitHub for the latest
+          # release and compares THAT tag to its own version - publishing
+          # runtime-1 into the top slot told a tester on v0.191.0 he was up to
+          # date with v0.192.0 released the same day (PAD-116).  Newer builds
+          # read the release list instead; the ones already out there cannot be
+          # fixed from here, which is what this line is for.
+          #
+          # --latest=false does NOT do this, however much it reads like it
+          # does: it only un-pins the release, and GitHub then recomputes the
+          # latest one by creation date and lands right back on this one
+          # (verified against the live API on runtime-1).  /releases/latest is
+          # documented as the newest NON-PRERELEASE, non-draft release, so
+          # prerelease is the flag with teeth.  Applied unconditionally below
+          # so a tag created before we knew this is corrected on a re-run.
+          gh release edit "${{ inputs.tag }}" --prerelease
           gh release upload "${{ inputs.tag }}" out/*.tar.gz out/SHA256SUMS

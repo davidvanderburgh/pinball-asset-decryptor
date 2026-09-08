@@ -37,7 +37,8 @@ def test_check_for_update_routes_through_net_urlopen(monkeypatch):
 
     def fake_urlopen(req, timeout):
         calls.append(req.full_url)
-        body = json.dumps({
+        # The release FEED (a list) — see test_updater_release_feed.py.
+        body = json.dumps([{
             "tag_name": "v99.0.0",
             "html_url": "https://example.com/rel",
             "body": "notes",
@@ -53,7 +54,7 @@ def test_check_for_update_routes_through_net_urlopen(monkeypatch):
                 {"name": "X_Linux_x86_64.AppImage",
                  "browser_download_url": "https://example.com/l.AppImage"},
             ],
-        }).encode()
+        }]).encode()
         return FakeResp(body)
 
     monkeypatch.setattr(net, "urlopen", fake_urlopen)

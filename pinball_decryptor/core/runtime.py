@@ -26,13 +26,17 @@ needs the WSL feature present (that install wants an administrator and usually
 a reboot, which the app cannot do for anyone).  What it removes is everything
 AFTER that.
 
-SCOPE, AND IT IS DELIBERATE.  The `base` variant runs the Spike 1 rig, whose
-runtime needs are small and whose binaries we already ship.  The Spike 2 rig
-wants another ~400 MB of toolchain (qemu-user-static, an ARM cross compiler,
-ffmpeg, criu) and is the rig in daily use, so moving it onto a new distro is
-its own pass with its own proof - not a side effect of introducing one.  Until
-then Spike 2 keeps using the default distro, which is why the routing below is
-asked PER RIG rather than set globally.
+ONE IMAGE, BOTH RIGS.  The first cut (`base`, runtime 1) carried what Spike 1
+needs; `full` adds Spike 2's - the ARM cross compiler and qemu-user-static its
+guest runs under, ffmpeg for a picture and a sound the game does not decode
+itself, e2fsprogs and fuse3 for the card, a static busybox for the
+checkpointable boot, and criu, which no Ubuntu has ever packaged and which the
+rig therefore COMPILES on the user's machine today.  The image builds it, so
+that stops too.
+
+The routing below is still asked PER RIG, and stays that way: `RIGS` is a
+promise that the image can actually run a thing, and a rig added there without
+its tools would trade a working default distro for one that is missing them.
 """
 
 import json
@@ -52,7 +56,7 @@ DISTRO = "PAD-Runtime"
 #: What the app expects to find inside an installed runtime
 #: (/etc/pad-runtime.json).  A runtime older than this is upgradeable, not
 #: broken: the app says so and offers to replace it.
-RUNTIME_VERSION = 1
+RUNTIME_VERSION = 2
 
 #: The image itself, pinned exactly like a payload binary - same download,
 #: same .part-then-verify, same offline "install from file" path.  Filled in
@@ -62,12 +66,12 @@ RUNTIME_VERSION = 1
 #: that does not exist - which is how the mechanism shipped before the image
 #: existed.  45 MB compressed: the whole Linux is smaller than the app.
 IMAGE = Payload(
-    key="runtime-base",
-    filename="pad-runtime-base.tar.gz",
-    release_tag="runtime-1",
-    sha256="e34f7d1f252127244a6de56628389f923c4330d02dd9281d09e3253c8426a71e",
-    size=45637240,
-    version="PAD Runtime 1 (base)",
+    key="runtime-full",
+    filename="pad-runtime-full.tar.gz",
+    release_tag="runtime-2",
+    sha256="",
+    size=0,
+    version="PAD Runtime 2 (full)",
     what="the Linux the emulator runs on, built and pinned by us",
     dest="",              # not a path inside Linux: this one becomes a distro
 )
@@ -286,12 +290,13 @@ def uninstall(runner=None) -> bool:
     return out.returncode == 0
 
 
-#: WHICH RIGS RUN IN IT.  Per rig, not global: the `base` image runs the
-#: Spike 1 rig, and Spike 2 still wants a toolchain the image does not carry,
-#: so pretending otherwise would swap a working default distro for one that is
-#: missing qemu-user-static.  Adding a rig here is a promise the image can
-#: actually run it.
-RIGS = {"spike1"}
+#: WHICH RIGS RUN IN IT.  Per rig, not global, and adding a name here is a
+#: promise that the image carries what that rig needs - checked in CI by
+#: running each tool rather than looking for it (runtime.yml).  The multi-boot
+#: card builder is deliberately NOT here: it is a different feature with its
+#: own tool list, it has not been audited against this image, and it works
+#: today in the machine's default distro.
+RIGS = {"spike1", "spike2"}
 
 
 def distro_for(rig: str, runner=None) -> Optional[str]:

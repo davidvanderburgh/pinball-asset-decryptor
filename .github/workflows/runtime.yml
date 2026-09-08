@@ -26,8 +26,8 @@ on:
       variant:
         description: "Which package set to build"
         type: choice
-        options: [base]
-        default: base
+        options: [full, base]
+        default: full
       publish:
         description: "Upload to the release (off = build and print the pin only)"
         type: boolean
@@ -108,6 +108,37 @@ jobs:
             for t in pgrep unshare setsid socat mount; do command -v $t >/dev/null || { echo "missing: $t"; exit 1; }; done
             echo "image selftest OK"
           '
+
+      # THE SPIKE 2 SET, CHECKED BY NAME AND BY RUNNING IT.  `command -v` alone
+      # would pass for a cross compiler that cannot compile and a criu that
+      # cannot load its libraries - and a criu copied out of a build stage is
+      # exactly the thing whose shared libraries can be missing.  So each one
+      # is asked to do its job, in the image, before anyone downloads it.
+      - name: Prove the Spike 2 toolchain works
+        if: ${{ inputs.variant == 'full' }}
+        run: |
+          docker run --rm pad-runtime:${{ inputs.tag }} bash -c '
+            set -e
+            for t in qemu-arm-static arm-linux-gnueabihf-gcc gcc debugfs                      fusermount3 fuse2fs ffmpeg busybox criu make patch zstd xxd; do
+              command -v $t >/dev/null || { echo "missing: $t"; exit 1; }
+            done
+            criu --version
+            arm-linux-gnueabihf-gcc --version | head -1
+            echo "int main(void){return 0;}" > /tmp/t.c
+            gcc -o /tmp/t.native /tmp/t.c && /tmp/t.native
+            arm-linux-gnueabihf-gcc -static -o /tmp/t.arm /tmp/t.c
+            qemu-arm-static /tmp/t.arm && echo "an ARM program ran under the interpreter"
+            ffmpeg -hide_banner -f lavfi -i testsrc=size=64x64:rate=1 -frames:v 1                    -c:v libx264 -f null - 2>/dev/null               && echo "ffmpeg decodes and encodes H.264"
+            busybox --help >/dev/null && file $(command -v busybox) | grep -q "statically linked"               && echo "busybox is static, so the pivot boot has its umount"
+            echo "spike 2 toolchain OK"
+          '
+
+      # For the record, and not as a gate: the RIG'S OWN read-only verdict on
+      # the image, from the same script the app runs on a user's machine.
+      - name: What the rig itself says about this image
+        if: ${{ inputs.variant == 'full' }}
+        run: |
+          docker run --rm -v "$PWD:/repo" pad-runtime:${{ inputs.tag }}             bash /repo/tools/spike2_emu/setupcheck.sh 2>&1 | head -40 || true
 
       - name: Print the pin
         run: |

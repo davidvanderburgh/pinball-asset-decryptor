@@ -120,12 +120,15 @@ def test_off_windows_it_is_not_a_failure_it_is_not_applicable(monkeypatch):
 # ------------------------------------------------------------- the routing --
 
 def test_only_rigs_the_image_can_actually_run_are_routed_into_it():
-    """The `base` image carries the Spike 1 emulator and none of Spike 2's
-    toolchain, so routing Spike 2 into it would swap a working default distro
-    for one with no qemu-user-static.  Per rig, not global."""
+    """Naming a rig in RIGS is a PROMISE that the image carries its tools -
+    checked in CI by running each one, not by looking for it.  The full image
+    carries both emulator rigs; the multi-boot card builder is a different
+    feature with its own tool list that has never been audited against this
+    image, so it keeps using the machine's default distro."""
     r = _runner(listed=[runtime.DISTRO])
     assert runtime.distro_for("spike1", runner=r) == runtime.DISTRO
-    assert runtime.distro_for("spike2", runner=r) is None
+    assert runtime.distro_for("spike2", runner=r) == runtime.DISTRO
+    assert runtime.distro_for("multiboot", runner=r) is None
 
 
 def test_a_rig_is_not_routed_into_a_runtime_that_is_not_ready():
@@ -231,7 +234,7 @@ def test_the_pinned_image_is_the_one_the_workflow_publishes():
     install."""
     wf = WORKFLOW.read_text(encoding="utf-8")
     assert "pad-runtime-${{ inputs.variant }}.tar.gz" in wf
-    assert runtime.IMAGE.filename == "pad-runtime-base.tar.gz"
+    assert runtime.IMAGE.filename == "pad-runtime-full.tar.gz"
     assert "--version 2" not in wf, "the workflow does not import; the app does"
 
 
@@ -250,7 +253,8 @@ def test_the_base_image_is_pinned_by_digest_not_by_tag():
     """`ubuntu:24.04` is rebuilt every few weeks, so the same Dockerfile would
     otherwise mean a different Linux each time it was built."""
     df = DOCKERFILE.read_text(encoding="utf-8")
-    m = re.search(r"^FROM\s+ubuntu:[\d.]+@(sha256:[0-9a-f]{64})\s*$", df, re.M)
+    m = re.search(r"^FROM\s+ubuntu:[\d.]+@(sha256:[0-9a-f]{64})(\s+AS\s+\w+)?\s*$",
+                  df, re.M)
     assert m, "the base image must be pinned by digest"
 
 
@@ -272,3 +276,59 @@ def test_the_workflow_verifies_the_binaries_it_bakes_in():
     assert "payloads.stamp_text" in wf, (
         "the rig's rebuild rule reads a stamp beside the binary; an image "
         "without one rebuilds the shim on every start")
+
+
+# ------------------------------------------------- what the full image adds --
+
+def test_the_image_carries_the_spike2_toolchain_it_promises():
+    """RIGS names spike2, and that is a promise about the IMAGE.  Its own
+    setupcheck.sh is the rig's one list of what it needs, so the same names
+    have to appear here."""
+    df = DOCKERFILE.read_text(encoding="utf-8")
+    for pkg in ("qemu-user-static", "gcc-arm-linux-gnueabihf", "libc6-dev",
+                "e2fsprogs", "fuse3", "ffmpeg", "busybox-static"):
+        assert pkg in df, "the full variant must carry %s" % pkg
+    assert "spike2" in runtime.RIGS
+
+
+def test_criu_is_built_in_the_image_because_no_ubuntu_packages_it():
+    """The last from-source build on a user's machine.  getcriu.sh compiles
+    criu on their PC today - a dozen -dev packages and whatever their
+    compiler is strict about this year - because the only criu-named package
+    in the archive is a Go binding.  The image builds it instead, at the
+    version the rig expects, in a stage whose -dev packages never reach the
+    finished rootfs."""
+    df = DOCKERFILE.read_text(encoding="utf-8")
+    assert "FROM apt AS criu" in df
+    assert "checkpoint-restore/criu.git" in df
+    getcriu = (REPO / "tools" / "spike2_emu" / "getcriu.sh").read_text(
+        encoding="utf-8")
+    want = re.search(r"CRIU_VERSION=\$\{PAD_CRIU_VERSION:-(v[\d.]+)\}", getcriu)
+    assert want, "getcriu.sh no longer pins a version"
+    assert "CRIU_VERSION=%s" % want.group(1) in df, (
+        "the image must build the criu version the rig expects (%s)"
+        % want.group(1))
+    # And copied WITHOUT its build tree: an image carrying a full toolchain
+    # twice over is a download the user pays for and never uses.
+    assert "COPY --from=criu /out/ /" in df
+
+
+def test_the_toolchain_is_proven_by_running_it_not_by_looking_for_it():
+    """`command -v` passes for a cross compiler that cannot compile and for a
+    criu whose shared libraries did not come across from the build stage -
+    which is exactly the failure mode of copying a binary between stages."""
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    assert "criu --version" in wf
+    assert "qemu-arm-static /tmp/t.arm" in wf
+    assert "arm-linux-gnueabihf-gcc -static" in wf
+    assert "libx264" in wf, "ffmpeg must be asked to decode/encode, not just exist"
+
+
+def test_systemd_is_on_in_the_full_image_so_the_arm_handler_survives():
+    """qemu-user-static registers the interpreter through /usr/lib/binfmt.d,
+    which is systemd's to apply.  Without it the handler has to be poked into
+    /proc after every restart of the distro - the state the rig's own
+    setupcheck calls "registered but will not survive a restart"."""
+    df = DOCKERFILE.read_text(encoding="utf-8")
+    assert "systemd=true" in df
+    assert "binfmt.d" in df, "say why it is on, beside it"

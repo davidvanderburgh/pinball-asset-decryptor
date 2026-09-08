@@ -3516,3 +3516,41 @@ def test_the_probe_never_blocks_the_tab(tmp_path, monkeypatch):
     finally:
         gate.set()
         root.destroy()
+
+
+# ------------------------------------------- the Linux this rig talks to ----
+
+def test_every_wsl_call_in_this_module_goes_to_the_same_distro(monkeypatch):
+    """The app can install a Linux of its own, and this rig's calls answer
+    questions ABOUT EACH OTHER - which user it runs as, where that user's home
+    is, whether its binaries are built there.  One head asking a different
+    machine than the rest gives answers that are each true and together
+    nonsense, so they all go through _wsl_head."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_tab.runtime, "distro_for",
+                        lambda rig: "PAD-Runtime")
+    assert emulate_tab._wsl_head() == ["wsl.exe", "-d", "PAD-Runtime", "-e"]
+    assert emulate_tab._wsl_head(root=True) == [
+        "wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e"]
+    assert emulate_tab.rig_cmd("watch.sh")[:4] == [
+        "wsl.exe", "-d", "PAD-Runtime", "-e"]
+    assert emulate_tab.rig_cmd_root("run_game.sh")[:6] == [
+        "wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e"]
+
+    # ...and with no runtime installed, nothing changes from how it has always
+    # worked: the machine's default distro, no -d at all.
+    monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
+    assert emulate_tab._wsl_head() == ["wsl.exe", "-e"]
+    assert emulate_tab.rig_cmd("watch.sh")[:2] == ["wsl.exe", "-e"]
+
+
+def test_no_call_site_spells_out_its_own_wsl_head():
+    """A new `["wsl.exe", "-e", ...]` typed into this module would silently
+    talk to the default distro while the rest of the rig ran in ours."""
+    src = pathlib.Path(emulate_tab.__file__).read_text(encoding="utf-8")
+    stray = [ln.strip() for ln in src.splitlines()
+             if '"wsl.exe", "-' in ln and "_wsl_head" not in ln
+             and not ln.strip().startswith("#")]
+    # `wsl.exe --shutdown` is deliberately global - it restarts WSL itself,
+    # which is not a per-distro act - and the docstring quoting the old shape.
+    assert not [s for s in stray if "--shutdown" not in s and "copies of" not in s], stray

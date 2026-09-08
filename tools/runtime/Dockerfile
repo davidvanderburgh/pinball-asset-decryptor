@@ -23,26 +23,30 @@
 #   * the packages by SNAPSHOT - snapshot.ubuntu.com serves the archive exactly
 #     as it stood at one instant, so `apt-get install python3` resolves to the
 #     same version next month as it did today.  The ordinary archive cannot do
-#     that: it carries only the newest version of anything, so a rebuild silently
-#     picks up whatever security update landed since;
-#   * and the two binaries we build ourselves come from the payloads release,
+#     that: it carries only the newest version of anything, so a rebuild
+#     silently picks up whatever security update landed since;
+#   * and the binaries we build ourselves come from the payloads release,
 #     verified by the same SHA-256 the app carries (the workflow does that
 #     check before this file ever sees them).
 #
-# WHAT IS DELIBERATELY NOT HERE.  The Spike 2 rig's toolchain - qemu-user-static,
-# the ARM cross compiler, ffmpeg, criu - is another ~400 MB and its own
-# verification pass, and Spike 2 is the rig that is in daily use, so moving it
-# to a new distro is not something to do in the same breath as introducing one.
-# The package list below is the variant `base`; the workflow is written to build
-# more than one.
+# TWO VARIANTS, and `full` is what the app ships:
+#
+#   base   what the SPIKE 1 rig needs: python3 and a few shell tools, plus the
+#          emulator and device model we build.  45 MB.
+#   full   base plus everything the SPIKE 2 rig needs - the ARM cross compiler
+#          and qemu-user-static it runs a guest with, ffmpeg for the picture
+#          and the sound, e2fsprogs and fuse3 for the card, a static busybox
+#          for the checkpointable boot, and criu, which no Ubuntu has ever
+#          packaged and which this image therefore BUILDS.  That last one is
+#          the point of the whole exercise: `getcriu.sh` compiles criu from
+#          source on the user's machine today, and a compile on a machine we
+#          have never seen is exactly what this is here to end.
 
-FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
+FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS apt
 
 # The instant of the archive this image installs from.  Bump it deliberately,
 # never automatically: a new stamp is a new image and a new pin.
 ARG SNAPSHOT=20260801T000000Z
-ARG RUNTIME_VERSION=1
-ARG VARIANT=base
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -90,7 +94,41 @@ RUN printf '%s\n' \
  && if ! apt-cache show python3 >/dev/null 2>&1; then \
       echo "the snapshot archive gave apt no usable index"; exit 1; fi
 
-#: WHAT THE RIG ACTUALLY USES, read out of the rig rather than remembered:
+
+# ---------------------------------------------------------------- criu ------
+# BUILT HERE SO IT IS NEVER BUILT THERE.  criu is the one dependency no Ubuntu
+# has ever packaged (the only criu-named package in the archive is a Go
+# binding), so the rig's getcriu.sh compiles it from source on the user's
+# machine - installing a dozen -dev packages to do it, and failing on whatever
+# the distro's compiler has decided to be strict about this year.  Version and
+# dialect are taken from that script, so the binary is the one the rig expects.
+#
+# Its own stage, so the -dev packages and the source tree stay OUT of the
+# finished rootfs; only the binary is copied across.  The `base` variant builds
+# nothing here and copies an empty tree, because a COPY cannot be conditional.
+FROM apt AS criu
+ARG VARIANT=full
+ARG CRIU_VERSION=v4.1
+RUN mkdir -p /out \
+ && if [ "$VARIANT" = full ]; then \
+      apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
+        build-essential git pkg-config libprotobuf-dev libprotobuf-c-dev \
+        protobuf-c-compiler protobuf-compiler python3-protobuf libnl-3-dev \
+        libnet1-dev libcap-dev libbsd-dev uuid-dev \
+      && git clone --depth 1 --branch "$CRIU_VERSION" \
+           https://github.com/checkpoint-restore/criu.git /src \
+      && make -C /src -j"$(nproc)" USERCFLAGS=-std=gnu17 criu \
+      && install -D -m 0755 /src/criu/criu /out/usr/local/bin/criu; \
+    fi
+
+
+# ------------------------------------------------------------- the runtime --
+FROM apt AS runtime
+ARG SNAPSHOT=20260801T000000Z
+ARG RUNTIME_VERSION=2
+ARG VARIANT=full
+
+#: WHAT THE SPIKE 1 RIG USES, read out of the rig rather than remembered:
 #: every command its scripts call and every module its python imports.
 #:   python3        every rig script that is not shell (build_rootfs.py reads
 #:                  ext4 in pure python, so no e2fsprogs is needed for it)
@@ -98,8 +136,9 @@ RUN printf '%s\n' \
 #:   util-linux     unshare/setsid/mount - the namespace the guest boots in
 #:   socat          the one socket relay in the boot path
 #:   ca-certificates  so anything fetched from in here can verify a certificate
-#: fuse3 is NOT here on purpose: the device model links libfuse statically and
-#: talks to /dev/fuse directly, so there is nothing left to install for it.
+#: fuse3 is NOT here on purpose for Spike 1: its device model links libfuse
+#: statically and talks to /dev/fuse directly.  Spike 2 needs the real thing,
+#: and gets it below.
 RUN apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
       python3 \
       procps \
@@ -108,6 +147,48 @@ RUN apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
  && apt-get -o Acquire::Retries=10 install -y --reinstall \
       --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
+
+#: WHAT THE SPIKE 2 RIG USES.  The first eight are its own setupcheck.sh's
+#: table, verbatim and in its order - that script is the rig's one list of what
+#: it needs, and copying it here rather than re-deciding is what stops the
+#: image and the rig disagreeing about a machine:
+#:   qemu-user-static           the ARM interpreter the guest runs under
+#:   gcc-arm-linux-gnueabihf    builds the hardware shim and the GL bridge's
+#:                              guest halves - which link against the CARD's
+#:                              own libc, so they can never be prebuilt for it
+#:   gcc + libc6-dev            the native half of the bridge
+#:   e2fsprogs                  debugfs, and fuse2fs to run a card unpacked
+#:   fuse3                      fusermount3, for those mounts
+#:   ffmpeg                     the game decodes NEITHER its video nor its
+#:                              sound itself, so both go through this; without
+#:                              it a run comes up black and silent, which is
+#:                              the one missing package that does not look like
+#:                              a missing package
+#:   busybox-static             the checkpointable (save-state) boot pivots
+#:                              away from the host tree and needs a NATIVE
+#:                              STATIC binary inside the guest root
+#: and the rest are what the rig's own scripts call: make and patch for its
+#: builds, zstd and xxd for card work, and the two runtime libraries the GL
+#: renderer links by SONAME (it declares every entry point itself, so no -dev
+#: packages are needed for them).  criu's shared libraries are here too,
+#: because the binary copied in from the stage above is dynamically linked.
+RUN if [ "$VARIANT" = full ]; then \
+      apt-get -o Acquire::Retries=10 update \
+      && apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
+        qemu-user-static \
+        gcc-arm-linux-gnueabihf \
+        gcc libc6-dev \
+        e2fsprogs \
+        fuse3 \
+        ffmpeg \
+        busybox-static \
+        make patch zstd xxd \
+        libegl1 libx11-6 \
+        libprotobuf-c1 libnl-3-200 libnet1 libcap2 libbsd0 libuuid1 \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+COPY --from=criu /out/ /
 
 # THE RIG LOOKS UP uid 1000 BY NUMBER (`getent passwd 1000`) to find the
 # desktop user and its home, so the image must have one - an image whose only
@@ -130,11 +211,19 @@ RUN userdel -r ubuntu 2>/dev/null || true \
 #   interop + appendWindowsPath   the emulator's sound is played by a WINDOWS
 #                        process the rig launches through interop; without this
 #                        the run is silent and nothing says why
-RUN printf '%s\n' \
-      '[user]' 'default=pad' '' \
-      '[automount]' 'enabled=true' 'options="metadata"' '' \
-      '[interop]' 'enabled=true' 'appendWindowsPath=true' \
-    > /etc/wsl.conf
+#   boot systemd         `full` only, and it is not decoration: qemu-user-static
+#                        registers the ARM interpreter through /usr/lib/binfmt.d,
+#                        which is systemd's to apply.  Without it the handler
+#                        has to be poked into /proc by hand after every restart
+#                        of the distro - which is exactly the state the Spike 2
+#                        rig's setupcheck.sh calls out as "registered but will
+#                        not survive a restart".
+RUN { printf '%s\n' \
+        '[user]' 'default=pad' '' \
+        '[automount]' 'enabled=true' 'options="metadata"' '' \
+        '[interop]' 'enabled=true' 'appendWindowsPath=true'; \
+      if [ "$VARIANT" = full ]; then printf '\n%s\n' '[boot]' 'systemd=true'; fi; \
+    } > /etc/wsl.conf
 
 # The binaries we build ourselves, already verified against the app's pins by
 # the workflow that put them here.  Baked in so a fresh import needs no second

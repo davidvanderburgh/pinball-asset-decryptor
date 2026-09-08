@@ -73,7 +73,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from ..core import config, pkgnames, prereqs
+from ..core import config, pkgnames, prereqs, runtime
 from . import _rig
 from .widgets import _Tooltip
 
@@ -775,6 +775,24 @@ def _wsl_path(win_path):
     return _rig.wsl_path(win_path)
 
 
+#: WHICH LINUX THIS RIG TALKS TO.  The app can install a Linux of its own
+#: (core/runtime.py) - pinned, built by us, and carrying this rig's whole
+#: toolchain: the ARM cross compiler, qemu-user-static, ffmpeg, e2fsprogs,
+#: fuse3, a static busybox and a criu that no Ubuntu packages.  When it is
+#: installed every call below runs in THAT distro; when it is not, everything
+#: behaves exactly as it did before, in the machine's default.
+#:
+#: EVERY wsl.exe HEAD IN THIS MODULE GOES THROUGH HERE.  There are six of them
+#: and they answer questions about each other - which user the rig runs as,
+#: where its home is, whether its binaries are built - so one of them asking a
+#: different machine than the rest would produce answers that are individually
+#: true and collectively nonsense.
+def _wsl_head(root=False):
+    d = runtime.distro_for("spike2")
+    head = ["wsl.exe"] + (["-d", d] if d else [])
+    return head + (["-u", "root"] if root else []) + ["-e"]
+
+
 def rig_cmd(script, *args, env=()):
     """The command that runs one of the rig's scripts, on THIS platform.
 
@@ -805,7 +823,7 @@ def rig_cmd(script, *args, env=()):
         return ["/usr/bin/env"] + list(env) + ["bash", box, script] + \
                [str(a) for a in args]
     if sys.platform == "win32":
-        head = ["wsl.exe", "-e"]
+        head = _wsl_head()
         path = "%s/%s" % (_wsl_path(rig_dir()), script)
         # PAD'S OWN PYTHON RIDES ALONG ON EVERY CALL, because two different
         # scripts need it and neither can find it: setupcheck.sh reports
@@ -848,7 +866,7 @@ def multiboot_cmd(path):
     if sys.platform == "darwin":
         return None
     if sys.platform == "win32":
-        return ["wsl.exe", "-e", "python3",
+        return _wsl_head() + ["python3",
                 "%s/parts.py" % _wsl_path(rig_dir()), "--multiboot",
                 _wsl_path(path)]
     return ["python3", os.path.join(rig_dir(), "parts.py"), "--multiboot",
@@ -894,7 +912,7 @@ def rig_cmd_root(script, *args):
     """
     if sys.platform != "win32":
         raise RuntimeError("rig_cmd_root is WSL-only")
-    return ["wsl.exe", "-u", "root", "-e", "bash",
+    return _wsl_head(root=True) + ["bash",
             "%s/%s" % (_wsl_path(rig_dir()), script)] + [str(a) for a in args]
 
 
@@ -935,7 +953,7 @@ def wsl_account():
     _WSL_ACCOUNT[1] = True
     user = home = ""
     try:
-        u = subprocess.run(["wsl.exe", "-e", "whoami"],
+        u = subprocess.run(_wsl_head() + ["whoami"],
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                            timeout=30, creationflags=_CREATE_FLAGS)
         user = u.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
@@ -943,7 +961,7 @@ def wsl_account():
         user = ""
     if user:
         try:
-            p = subprocess.run(["wsl.exe", "-e", "getent", "passwd", user],
+            p = subprocess.run(_wsl_head() + ["getent", "passwd", user],
                                stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL,
                                timeout=30, creationflags=_CREATE_FLAGS)
@@ -1021,7 +1039,7 @@ def watch_cmd(minutes, env, savestates=True):
             # checkpointable launch is built here rather than by rig_cmd, and
             # a run started without it is a run whose sound quietly takes the
             # WSLg path (PAD-95).
-            return (["wsl.exe", "-u", "root", "-e", "env",
+            return (_wsl_head(root=True) + ["env",
                      "HOME=" + home, "PAD_PIVOT=1"]
                     + list(rig_win_python_env()) + list(env)
                     + ["bash", "%s/watch.sh" % _wsl_path(rig_dir()),
@@ -1042,7 +1060,7 @@ def kill_cmd():
     if sys.platform == "win32":
         home = wsl_home()
         if home:
-            return ["wsl.exe", "-u", "root", "-e", "env", "HOME=" + home,
+            return _wsl_head(root=True) + ["env", "HOME=" + home,
                     "bash", "%s/killgame.sh" % _wsl_path(rig_dir())]
     return rig_cmd("killgame.sh")
 
@@ -1056,7 +1074,7 @@ def load_cmd(slot):
     if sys.platform == "win32":
         home = wsl_home()
         if home:
-            return ["wsl.exe", "-u", "root", "-e", "env", "HOME=" + home,
+            return _wsl_head(root=True) + ["env", "HOME=" + home,
                     "PAD_RESTORE_KILL=1", "bash",
                     "%s/loadgame.sh" % _wsl_path(rig_dir()), str(slot)]
     return rig_cmd("loadgame.sh", slot, env=("PAD_RESTORE_KILL=1",))

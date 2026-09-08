@@ -25,6 +25,21 @@ def _event_keep(name):
     return next(k for f, _t, k in spike1_emulate_tab._EVENT_LOGS if f == name)
 
 
+@pytest.fixture(autouse=True)
+def _no_runtime_unless_asked(monkeypatch):
+    """THE TESTS MUST NOT DEPEND ON WHETHER THIS MACHINE HAS THE RUNTIME.
+
+    `runtime.distro_for` asks WSL which distro to route a rig into, and on a
+    developer's box - where the runtime IS installed - that answer costs two
+    wsl.exe launches and starts a distro, inside the Start path these tests
+    time.  Three of them failed that way, on the dev box only, while every CI
+    runner passed: the worst shape a test can have.  So the default here is
+    "no runtime", and the tests that are ABOUT routing patch it themselves.
+    """
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "distro_for", lambda rig: None)
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "known_state", lambda: None)
+
+
 def test_event_log_filters_keep_events_and_drop_chatter():
     """The rig-event tail forwards event-shaped lines and drops the periodic
     chatter — a flooded log pane is a known UI-thread freeze class."""

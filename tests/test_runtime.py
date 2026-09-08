@@ -154,15 +154,22 @@ def test_the_health_answer_is_cached_because_it_is_asked_on_a_timer(monkeypatch)
     calls = []
     monkeypatch.setattr(runtime, "_run", _runner(listed=[runtime.DISTRO],
                                                  calls=calls))
-    assert runtime.status()[0] == "ready"
+    # refresh=True because this test runs ON THE MAIN THREAD, where a cold
+    # cache deliberately answers "unknown" rather than blocking the interface
+    # for two wsl.exe launches.  The warming happens on the tabs' worker
+    # threads; here it is asked for explicitly.
+    assert runtime.status(refresh=True)[0] == "ready"
     n = len(calls)
     assert n >= 2                      # the list, then the manifest
     for _ in range(5):
         runtime.status()
     assert len(calls) == n, "a cached answer must cost nothing"
     runtime.invalidate()
-    runtime.status()
+    runtime.status(refresh=True)
     assert len(calls) > n
+    # ...and a refresh is TWO launches, not three: the manifest read does not
+    # re-ask whether the distro is registered, which the line above just did.
+    assert len(calls) == 2 * n, calls
 
 
 # ------------------------------------------------------------- the install --
@@ -388,3 +395,46 @@ def test_the_app_decides_the_runtime_version_and_the_image_is_checked_against_it
     df = DOCKERFILE.read_text(encoding="utf-8")
     assert "ARG RUNTIME_VERSION=0" in df, (
         "an unstamped build must be obviously wrong, not plausibly right")
+
+
+def test_a_cold_cache_never_blocks_the_interface(monkeypatch):
+    """★ Every rig command asks which distro to run in, so an honest answer on
+    the Tk thread would freeze the window for as long as WSL takes - seconds,
+    on a machine with no distro at all.  On that thread a cold cache answers
+    "unknown" and the routing falls back to the machine's default, which is
+    what every rig did before this existed.  Nothing is spawned to fix it
+    either: both tabs build their commands on worker threads, so the ordinary
+    poll fills the cache within a tick, and a background thread started from
+    here would race with anything that patches subprocess (it did, and it broke
+    three unrelated tests)."""
+    calls = []
+    monkeypatch.setattr(runtime, "_run", _runner(listed=[runtime.DISTRO],
+                                                 calls=calls))
+    state, detail = runtime.status()          # main thread, cold cache
+    assert state == "unknown", state
+    assert not calls, "the UI thread must not launch wsl.exe"
+    assert runtime.distro_for("spike2") is None, "unknown must route nowhere"
+
+    # A worker thread is allowed to wait, and that is what warms it.
+    import threading
+    out = {}
+    t = threading.Thread(target=lambda: out.update(s=runtime.status()))
+    t.start(); t.join(30)
+    assert out["s"][0] == "ready", out
+    assert calls, "the worker thread is where the asking happens"
+    # ...and now the UI thread gets the real answer for free.
+    assert runtime.status()[0] == "ready"
+    assert runtime.distro_for("spike2") == runtime.DISTRO
+
+
+def test_known_state_never_asks_anyone(monkeypatch):
+    """For log lines and labels: the last answer, or None.  A sentence in a
+    log is not worth starting a distro for."""
+    calls = []
+    monkeypatch.setattr(runtime, "_run", _runner(listed=[runtime.DISTRO],
+                                                 calls=calls))
+    assert runtime.known_state() is None
+    assert not calls
+    runtime.status(refresh=True)
+    assert runtime.known_state() == "ready"
+    assert len(calls) == 2, calls

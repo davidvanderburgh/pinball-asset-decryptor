@@ -4522,7 +4522,11 @@ class EmulatePanel:
         and nothing is deleted, but a silent re-copy looks exactly like losing
         them, and a user watching a progress bar deserves to know which of the
         two they are looking at."""
-        if not runtime.distro_for("spike2"):
+        # THE CACHED ANSWER ONLY.  This is a sentence in a log; it must not
+        # cost the two wsl.exe launches an honest answer takes, and it must not
+        # delay the Start it is printed in front of.  When nobody has asked
+        # yet, saying nothing is right - the next Start will have the answer.
+        if runtime.known_state() != "ready" or not runtime.distro_for("spike2"):
             return
         if self._runtime_noted:
             return

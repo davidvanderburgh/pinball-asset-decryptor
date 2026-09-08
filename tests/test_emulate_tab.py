@@ -46,6 +46,21 @@ def _no_real_setup_probe(monkeypatch):
     monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_runtime_unless_asked(monkeypatch):
+    """THE TESTS MUST NOT DEPEND ON WHETHER THIS MACHINE HAS THE RUNTIME.
+
+    `runtime.distro_for` asks WSL which distro to route a rig into, and on a
+    developer's box - where the runtime IS installed - that answer costs two
+    wsl.exe launches and starts a distro, inside the Start path these tests
+    time.  Three of them failed that way, on the dev box only, while every CI
+    runner passed: the worst shape a test can have.  So the default here is
+    "no runtime", and the tests that are ABOUT routing patch it themselves.
+    """
+    monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
+    monkeypatch.setattr(emulate_tab.runtime, "known_state", lambda: None)
+
+
 def test_parse_status_reads_key_value_lines():
     info = parse_status("procs=5\nrunning=1\ncpu=14.9\nrss=995\nstate=running\n")
     assert info["procs"] == "5"
@@ -3567,6 +3582,7 @@ def test_the_first_run_in_the_apps_own_linux_says_what_it_will_rebuild(
     panel._log = lambda m: logged.append(m)
     monkeypatch.setattr(emulate_tab.runtime, "distro_for",
                         lambda rig: "PAD-Runtime")
+    monkeypatch.setattr(emulate_tab.runtime, "known_state", lambda: "ready")
 
     panel._note_the_runtime_is_a_different_machine()
     assert any("PAD_RUNTIME=0" in m and "untouched" in m for m in logged), logged

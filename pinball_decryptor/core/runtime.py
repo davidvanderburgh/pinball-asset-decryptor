@@ -43,6 +43,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from typing import Optional, Tuple
 
@@ -135,7 +136,7 @@ def registered(runner=None) -> bool:
         return False
     run = runner or _run
     try:
-        out = run(["wsl.exe", "-l", "-q"], timeout=60)
+        out = run(["wsl.exe", "-l", "-q"], timeout=20)
     except (OSError, subprocess.TimeoutExpired):
         return False
     names = [n.strip() for n in _text(out.stdout).splitlines()]
@@ -150,10 +151,19 @@ def manifest(runner=None) -> Optional[dict]:
     app must not treat that as its own."""
     if not registered(runner=runner):
         return None
+    return _read_manifest(runner)
+
+
+def _read_manifest(runner=None) -> Optional[dict]:
+    """The read itself, WITHOUT re-asking whether the distro is registered.
+
+    Split out because the caller that matters has just asked: `_status` was
+    paying for THREE wsl.exe launches per refresh - list, list again, then the
+    read - and the second list told it nothing the first had not."""
     run = runner or _run
     try:
         out = run(["wsl.exe", "-d", DISTRO, "-e", "cat", "/etc/pad-runtime.json"],
-                  timeout=120)
+                  timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if out.returncode != 0:
@@ -178,17 +188,57 @@ def invalidate() -> None:
     _STATUS_CACHE.update(when=0.0, value=None)
 
 
+def known_state() -> Optional[str]:
+    """The last answer, WITHOUT asking anyone.  None when nobody has asked yet.
+
+    For the things that must never cost a subprocess: a cosmetic log line, a
+    label, anything on a hot path.  Routing uses :func:`status`, which is
+    allowed to go and look; a sentence in the log is not worth starting a
+    distro for."""
+    value = _STATUS_CACHE["value"]
+    return value[0] if value else None
+
+
+
+
 def status(runner=None, refresh: bool = False) -> Tuple[str, str]:
     """``(state, one sentence)`` - the whole health answer in one call.
 
     States: ``unsupported`` (not Windows), ``unpublished`` (no image pinned in
     this app version yet), ``absent``, ``foreign`` (a distro of that name that
-    is not ours), ``stale`` (ours, older than this app expects) and ``ready``.
+    is not ours), ``stale`` (ours, older than this app expects), ``ready``, and
+    ``unknown`` - which means only "nobody has asked yet on a thread allowed to
+    wait", never "something is wrong".
     """
-    if runner is None and not refresh:
-        cached = _STATUS_CACHE["value"]
-        if cached and (time.monotonic() - _STATUS_CACHE["when"]) < STATUS_TTL:
-            return cached
+    if runner is None:
+        # The two answers that cost NOTHING are always exact, cache or no
+        # cache: a Mac is not going to grow a WSL distro, and an app version
+        # with no pinned image has nothing to look for.
+        if sys.platform != "win32":
+            return ("unsupported",
+                    "The runtime is a WSL distro, so it is Windows-only.")
+        if not available():
+            return ("unpublished",
+                    "This app version has no pinned runtime image yet.")
+        if not refresh:
+            cached = _STATUS_CACHE["value"]
+            if cached and (time.monotonic() - _STATUS_CACHE["when"]) < STATUS_TTL:
+                return cached
+            # A COLD CACHE MUST NEVER BLOCK THE INTERFACE.  Answering honestly
+            # costs two wsl.exe launches, and every rig command asks this to
+            # decide which distro to run in - so a command built on the Tk
+            # thread would freeze the window for as long as WSL takes, which on
+            # a machine with no distro at all is seconds.  On that thread the
+            # answer is "not known yet" and the routing falls back to the
+            # machine's default, which is what every rig did before this
+            # existed.  Nothing is spawned to fix that: both tabs already build
+            # their commands on worker threads, so the ordinary status poll
+            # fills this cache within a tick - and a background thread started
+            # from here would race with anything that patches subprocess.
+            if threading.current_thread() is threading.main_thread():
+                return cached or (
+                    "unknown",
+                    "The runtime has not been looked at on this machine yet.")
     answer = _status(runner)
     if runner is None:
         _STATUS_CACHE.update(when=time.monotonic(), value=answer)
@@ -203,7 +253,7 @@ def _status(runner=None) -> Tuple[str, str]:
                 "This app version has no pinned runtime image yet.")
     if not registered(runner=runner):
         return "absent", "The runtime is not installed on this machine yet."
-    info = manifest(runner=runner)
+    info = _read_manifest(runner)
     if info is None:
         return ("foreign",
                 "A WSL distro called %s exists but is not ours - the app will "

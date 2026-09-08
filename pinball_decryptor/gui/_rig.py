@@ -38,16 +38,22 @@ def wsl_path(win_path):
     return p
 
 
-def rig_cmd(rig_dir, script, *args, env=()):
+def rig_cmd(rig_dir, script, *args, env=(), distro=None):
     """Run one of ``rig_dir``'s scripts as the ordinary user.
 
     ``env`` is a list of ``NAME=value`` strings applied with ``env(1)`` rather
     than by a shell, because ``wsl.exe`` RE-PARSES its argument line: a ``$var``
     or ``$(subst)`` written into the command reaches the far side already
     expanded to nothing.  Every rig script that needs a value gets it this way.
+
+    ``distro`` names the WSL distro to run in.  None means the machine's
+    default, which is what every rig used before the app had a Linux of its own
+    (core/runtime.py) - and is still what a rig whose tools the runtime image
+    does not carry must use, which is why this is a per-call argument rather
+    than a global switch.
     """
     if sys.platform == "win32":
-        head = ["wsl.exe", "-e"]
+        head = ["wsl.exe"] + (["-d", str(distro)] if distro else []) + ["-e"]
         path = "%s/%s" % (wsl_path(rig_dir), script)
     else:
         head = []
@@ -57,7 +63,7 @@ def rig_cmd(rig_dir, script, *args, env=()):
     return head + ["bash", path] + [str(a) for a in args]
 
 
-def rig_cmd_root(rig_dir, script, *args, env=()):
+def rig_cmd_root(rig_dir, script, *args, env=(), distro=None):
     """The same script as root.  Windows only, and that is honest rather than
     a limitation settled for.
 
@@ -72,7 +78,7 @@ def rig_cmd_root(rig_dir, script, *args, env=()):
     """
     if sys.platform != "win32":
         raise RuntimeError("rig_cmd_root is WSL-only")
-    head = ["wsl.exe", "-u", "root", "-e"]
+    head = ["wsl.exe"] + (["-d", str(distro)] if distro else [])         + ["-u", "root", "-e"]
     if env:
         head = head + ["env"] + [str(e) for e in env]
     return head + ["bash", "%s/%s" % (wsl_path(rig_dir), script)] + \

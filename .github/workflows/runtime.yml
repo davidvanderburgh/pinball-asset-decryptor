@@ -1,0 +1,138 @@
+name: Build the PAD Runtime image
+
+# The Linux the emulator rigs run on, built by us and imported as a private WSL
+# distro (see tools/runtime/Dockerfile for what is in it and why).
+#
+# SEPARATE FROM THE APP RELEASE, exactly like payloads.yml and for the same
+# reason: the image is pinned by SHA-256 in pinball_decryptor/core/runtime.py,
+# and a hash that changes every app release is not a pin.  Built only when we
+# mean to change the runtime, published to an immutable runtime-N tag, and left
+# alone by every release after that.
+#
+# THE PAYLOAD BINARIES COME OUT OF THE APP'S OWN PINS.  This workflow does not
+# rebuild qemu-arm and s1hwshim - it downloads the ones payloads.yml published
+# and checks them against the SHA-256 core/payloads.py carries, then bakes them
+# in.  So there is one build of those binaries in the world, not two, and a
+# user on the runtime and a user on their own distro are running identical
+# bytes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Runtime release tag (runtime-N). Never reuse one."
+        required: true
+        default: "runtime-1"
+      variant:
+        description: "Which package set to build"
+        type: choice
+        options: [base]
+        default: base
+      publish:
+        description: "Upload to the release (off = build and print the pin only)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The app is the authority on which binaries belong in the image and what
+      # they must hash to.  Asking it here, rather than repeating the values,
+      # is what keeps the image and the app from disagreeing about the emulator
+      # they each think is installed.
+      - name: Fetch the pinned payloads the app expects
+        run: |
+          python - <<'PY'
+          import pathlib, urllib.request
+          from pinball_decryptor.core import payloads
+          out = pathlib.Path("tools/runtime/payload")
+          out.mkdir(parents=True, exist_ok=True)
+          for key in ("spike1-qemu", "spike1-hwshim"):
+              p = payloads.PAYLOADS[key]
+              if not payloads.is_published(p):
+                  raise SystemExit("%s has no pinned hash yet - cut payloads first" % key)
+              dest = out / p.filename
+              urllib.request.urlretrieve(payloads.asset_url(p), dest)
+              ok, why = payloads.verify(str(dest), p)
+              if not ok:
+                  raise SystemExit("%s: %s" % (p.filename, why))
+              # The stamp the app would have written, so the rig's
+              # "is this binary for these sources" rule works inside the image.
+              (out / (p.filename + payloads.STAMP_SUFFIX)).write_text(
+                  payloads.stamp_text(p), encoding="utf-8")
+              print("verified %s (%d bytes)" % (p.filename, p.size))
+          PY
+
+      - name: Build the image
+        run: |
+          docker build tools/runtime \
+            --build-arg VARIANT=${{ inputs.variant }} \
+            --build-arg BUILD_STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t pad-runtime:${{ inputs.tag }}
+
+      # `docker export` is the container's filesystem with no image metadata -
+      # which is exactly what `wsl --import` wants, and is NOT the same as
+      # `docker save` (that produces layers WSL cannot read).
+      - name: Export the rootfs
+        run: |
+          CID=$(docker create pad-runtime:${{ inputs.tag }})
+          mkdir -p out
+          docker export "$CID" | gzip -9 > out/pad-runtime-${{ inputs.variant }}.tar.gz
+          docker rm "$CID"
+          ls -l out/
+
+      # A rootfs that cannot start is not a runtime.  This runs the image's own
+      # python and the emulator we baked into it, and checks the account the rig
+      # looks up by number - the three things whose absence would only show up
+      # on a user's machine, minutes into a first run.
+      - name: Prove the image can actually run the rig's pieces
+        run: |
+          docker run --rm pad-runtime:${{ inputs.tag }} bash -c '
+            set -e
+            python3 -c "import json,struct,zlib,termios; print(\"python\", __import__(\"sys\").version.split()[0])"
+            getent passwd 1000
+            /home/pad/qemubuild/qemu-arm --version | head -1
+            /home/pad/s1hwshim 2>&1 | head -1 || true
+            test -x /home/pad/s1emu/s1hwshim
+            cat /etc/pad-runtime.json
+            for t in pgrep unshare setsid socat mount; do command -v $t >/dev/null || { echo "missing: $t"; exit 1; }; done
+            echo "image selftest OK"
+          '
+
+      - name: Print the pin
+        run: |
+          F=out/pad-runtime-${{ inputs.variant }}.tar.gz
+          {
+            echo "Paste into pinball_decryptor/core/runtime.py:"
+            echo "  release_tag : ${{ inputs.tag }}"
+            echo "  filename    : $(basename "$F")"
+            echo "  sha256      : $(sha256sum "$F" | cut -d' ' -f1)"
+            echo "  size        : $(stat -c%s "$F")"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pad-runtime-${{ inputs.variant }}
+          path: out/*
+
+      - name: Publish
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd out && sha256sum *.tar.gz > SHA256SUMS)
+          gh release view "${{ inputs.tag }}" >/dev/null 2>&1 \
+            || gh release create "${{ inputs.tag }}" \
+                 --title "PAD Runtime ${{ inputs.tag }}" \
+                 --notes "The Linux the emulator rigs run on, imported as a private WSL distro. Pinned by SHA-256 in pinball_decryptor/core/runtime.py."
+          gh release upload "${{ inputs.tag }}" out/*.tar.gz out/SHA256SUMS

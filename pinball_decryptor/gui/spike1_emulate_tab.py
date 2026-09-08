@@ -44,7 +44,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import _rig
-from ..core import payloads
+from ..core import payloads, runtime
 # The volume/mute control FILE and its load/store belong to the Spike 2 tab
 # (item 56) and are deliberately shared, not copied: one knob value, one file,
 # read by the one padplay.py speaker implementation both rigs launch.
@@ -72,11 +72,23 @@ def rig_available():
                for s in ("start.sh", "stop.sh", "status.sh"))
 
 
+#: WHICH LINUX THIS TAB TALKS TO.  The app can install a Linux of its own
+#: (core/runtime.py) - pinned, built by us, and holding the emulator already.
+#: When it is installed every command here runs in THAT distro; when it is not,
+#: everything behaves exactly as it did before, in the machine's default.  The
+#: choice is made in one place so no call site can disagree with another about
+#: which machine it is looking at.
+def rig_distro():
+    return runtime.distro_for("spike1")
+
+
 def rig_cmd(*args, **kw):
+    kw.setdefault("distro", rig_distro())
     return _rig.rig_cmd(rig_dir(), *args, **kw)
 
 
 def rig_cmd_root(*args, **kw):
+    kw.setdefault("distro", rig_distro())
     return _rig.rig_cmd_root(rig_dir(), *args, **kw)
 
 
@@ -1107,7 +1119,29 @@ class Spike1EmulatePanel:
         has to know to ask for is not a repair: the ordinary path is that
         pressing Start on a fresh machine installs what is missing and gets on
         with it."""
-        return payloads.ensure(list(self.PAYLOAD_KEYS), log=log or self._log)
+        return payloads.ensure(list(self.PAYLOAD_KEYS), log=log or self._log,
+                               distro=rig_distro())
+
+    def _install_runtime(self, log=None):
+        """Install or repair the app's own Linux, when there is one to install.
+
+        Silent about a machine that cannot have it - not Windows, or no image
+        pinned in this app version yet - because that is not a fault, it is
+        this feature not applying here."""
+        say = log or self._log
+        state, detail = runtime.status(refresh=True)
+        if state in ("unsupported", "unpublished"):
+            return None
+        if state == "ready":
+            say("Spike 1: %s" % detail)
+            return state
+        if state == "foreign":
+            say("Spike 1: %s" % detail)
+            return state
+        say("Spike 1: installing the Linux the emulator runs on (%s)…"
+            % runtime.IMAGE.version)
+        runtime.install(log=lambda m: say("Spike 1: %s" % m))
+        return "ready"
 
     def _offer_file_install(self, exc):
         """The blocked-download path, on the UI thread.
@@ -1147,6 +1181,14 @@ class Spike1EmulatePanel:
         def work():
             try:
                 self._log("Spike 1: checking the emulator install…")
+                # THE LINUX FIRST, THEN WHAT RUNS ON IT.  A machine with our
+                # runtime installed needs no binaries fetched at all - the
+                # image carries them - so installing it first turns the step
+                # below into a no-op rather than a second download.
+                try:
+                    self._install_runtime()
+                except Exception as exc:                    # noqa: BLE001
+                    self._log("Spike 1: %s" % exc)
                 try:
                     got = self._install_payloads()
                     if got:

@@ -334,7 +334,8 @@ def install_from_file(payload: Payload, path: str, installer=None, log=None) -> 
     return install(payload, installer=installer, log=log)
 
 
-def install(payload: Payload, installer=None, log=None) -> str:
+def install(payload: Payload, installer=None, log=None,
+            distro: Optional[str] = None) -> str:
     """Put the cached payload where the rig looks for it.
 
     ``installer`` is the one thing that differs between a Windows host talking
@@ -345,14 +346,14 @@ def install(payload: Payload, installer=None, log=None) -> str:
     ok, why = verify(src, payload)
     if not ok:
         raise RuntimeError("refusing to install %s: %s" % (payload.filename, why))
-    place = installer or default_installer()
+    place = installer or default_installer(distro)
     place(payload, src)
     if log:
         log("Installed %s -> %s" % (payload.filename, payload.dest))
     return payload.dest
 
 
-def default_installer():
+def default_installer(distro: Optional[str] = None):
     """Copy into the Linux side: through ``wsl.exe`` as root on Windows, and
     straight onto the filesystem on a Linux desktop.
 
@@ -361,7 +362,7 @@ def default_installer():
     Windows filesystem, which is the one place a Windows antivirus can hold it
     open or quarantine it between our write and the rig's read."""
     if sys.platform == "win32":
-        return _install_through_wsl
+        return lambda p, src: _install_through_wsl(p, src, distro)
     return _install_locally
 
 
@@ -387,7 +388,8 @@ def _install_locally(payload: Payload, src: str) -> None:
         f.write(stamp_text(payload))
 
 
-def _install_through_wsl(payload: Payload, src: str) -> None:
+def _install_through_wsl(payload: Payload, src: str,
+                         distro: Optional[str] = None) -> None:
     # install -D makes the directory, sets the mode and writes the file in one
     # step; /dev/stdin is the payload arriving on the pipe.  As root, because
     # the rig's own work dirs are made by a root start.sh - and then chown'd to
@@ -414,9 +416,10 @@ def _install_through_wsl(payload: Payload, src: str) -> None:
         'echo "$d"' % (payload.dest, payload.mode,
                        stamp_text(payload).replace("\n", "\\n"),
                        STAMP_SUFFIX, STAMP_SUFFIX))
+    head = ["wsl.exe"] + (["-d", distro] if distro else []) + ["-u", "root"]
     with open(src, "rb") as f:
         proc = subprocess.run(
-            ["wsl.exe", "-u", "root", "-e", "bash", "-c", script],
+            head + ["-e", "bash", "-c", script],
             stdin=f, capture_output=True,
             creationflags=(subprocess.CREATE_NO_WINDOW
                            if sys.platform == "win32" else 0))
@@ -427,12 +430,13 @@ def _install_through_wsl(payload: Payload, src: str) -> None:
                               or "exit %d" % proc.returncode))
 
 
-def missing(keys: Optional[List[str]] = None, prober=None) -> List[Payload]:
+def missing(keys: Optional[List[str]] = None, prober=None,
+            distro: Optional[str] = None) -> List[Payload]:
     """Those of ``keys`` that are published but not installed on this machine.
 
     ``prober`` answers "is this path an executable file on the Linux side?" and
     is injected for the same reason the installer is."""
-    ask = prober or default_prober()
+    ask = prober or default_prober(distro)
     out = []
     for key in (keys if keys is not None else list(PAYLOADS)):
         p = PAYLOADS[key]
@@ -441,9 +445,9 @@ def missing(keys: Optional[List[str]] = None, prober=None) -> List[Payload]:
     return out
 
 
-def default_prober():
+def default_prober(distro: Optional[str] = None):
     if sys.platform == "win32":
-        return _probe_through_wsl
+        return lambda p: _probe_through_wsl(p, distro)
     return _probe_locally
 
 
@@ -451,13 +455,15 @@ def _probe_locally(payload: Payload) -> bool:
     return os.access(os.path.expanduser(payload.dest), os.X_OK)
 
 
-def _probe_through_wsl(payload: Payload) -> bool:
+def _probe_through_wsl(payload: Payload,
+                       distro: Optional[str] = None) -> bool:
     script = ('h="$(getent passwd 1000 | cut -d: -f6)"; d="%s"; '
               'case "$d" in "~"*) d="$h${d#\\~}";; esac; [ -x "$d" ]'
               % payload.dest)
     try:
+        head = ["wsl.exe"] + (["-d", distro] if distro else [])
         proc = subprocess.run(
-            ["wsl.exe", "-e", "bash", "-c", script], capture_output=True,
+            head + ["-e", "bash", "-c", script], capture_output=True,
             timeout=30, creationflags=(subprocess.CREATE_NO_WINDOW
                                        if sys.platform == "win32" else 0))
     except (OSError, subprocess.TimeoutExpired):
@@ -467,16 +473,16 @@ def _probe_through_wsl(payload: Payload) -> bool:
 
 def ensure(keys: Optional[List[str]] = None, log=None, progress=None,
            installer=None, prober=None, opener=None,
-           repo: str = GITHUB_REPO) -> List[str]:
+           repo: str = GITHUB_REPO, distro: Optional[str] = None) -> List[str]:
     """Make sure every published payload in ``keys`` is installed.
 
     Returns the keys it actually had to install, so a caller can say "nothing
     to do" honestly.  Never raises for a payload that has no pinned hash yet -
     that one is simply not ours to supply until the release is cut."""
     installed = []
-    for p in missing(keys, prober=prober):
+    for p in missing(keys, prober=prober, distro=distro):
         ensure_cached(p, log=log, progress=progress, opener=opener, repo=repo)
-        install(p, installer=installer, log=log)
+        install(p, installer=installer, log=log, distro=distro)
         installed.append(p.key)
     return installed
 

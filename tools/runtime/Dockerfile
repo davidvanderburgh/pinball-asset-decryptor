@@ -125,7 +125,14 @@ RUN mkdir -p /out \
 # ------------------------------------------------------------- the runtime --
 FROM apt AS runtime
 ARG SNAPSHOT=20260801T000000Z
-ARG RUNTIME_VERSION=2
+#: WHAT VERSION THIS IMAGE CLAIMS TO BE, and it is NOT decided here.  The app
+#: declares what it expects (RUNTIME_VERSION in core/runtime.py) and the
+#: workflow passes that number in - because the one time this file carried its
+#: own copy, a bump landed in the app and not here, the image stamped itself
+#: version 2 against an app expecting 3, and the install failed at the last
+#: step with "the runtime imported but does not answer as ours".  The default
+#: is 0 so an unstamped build is obviously wrong rather than plausibly right.
+ARG RUNTIME_VERSION=0
 ARG VARIANT=full
 
 #: WHAT THE SPIKE 1 RIG USES, read out of the rig rather than remembered:

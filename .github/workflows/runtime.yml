@@ -73,10 +73,16 @@ jobs:
               print("verified %s (%d bytes)" % (p.filename, p.size))
           PY
 
+      # THE APP DECIDES WHAT VERSION THIS IMAGE IS.  Read out of core/runtime.py
+      # rather than written down twice - see the check after the selftest for
+      # what the second copy cost.
       - name: Build the image
         run: |
+          V=$(python -c "from pinball_decryptor.core import runtime; print(runtime.RUNTIME_VERSION)")
+          echo "the app expects runtime version $V"
           docker build tools/runtime \
             --build-arg VARIANT=${{ inputs.variant }} \
+            --build-arg RUNTIME_VERSION="$V" \
             --build-arg BUILD_STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -t pad-runtime:${{ inputs.tag }}
 
@@ -108,6 +114,16 @@ jobs:
             for t in pgrep unshare setsid socat mount; do command -v $t >/dev/null || { echo "missing: $t"; exit 1; }; done
             echo "image selftest OK"
           '
+          # THE STAMP MUST BE THE ONE THE APP WILL ACCEPT.  An image whose
+          # manifest disagrees with the app imports perfectly and is then
+          # rejected as "not ours" - after the user has downloaded all of it,
+          # which is exactly what happened when the Dockerfile carried its own
+          # copy of the version and a bump landed only in the app.
+          V=$(python -c "from pinball_decryptor.core import runtime; print(runtime.RUNTIME_VERSION)")
+          GOT=$(docker run --rm pad-runtime:${{ inputs.tag }} \
+                  python3 -c "import json;print(json.load(open('/etc/pad-runtime.json'))['runtime_version'])")
+          test "$GOT" = "$V" || { echo "the image says version $GOT, the app expects $V"; exit 1; }
+          echo "the image stamps the version the app expects ($V)"
 
       # THE SPIKE 2 SET, CHECKED BY NAME AND BY RUNNING IT.  `command -v` alone
       # would pass for a cross compiler that cannot compile and a criu that

@@ -367,3 +367,24 @@ def test_the_image_does_not_claim_a_systemd_it_does_not_have():
     assert "'[boot]'" not in conf and "systemd=true'" not in conf, (
         "wsl.conf must not promise a systemd this image does not install")
     assert "binfmt_misc is" in df, "say why it is absent, beside it"
+
+
+def test_the_app_decides_the_runtime_version_and_the_image_is_checked_against_it():
+    """★ The Dockerfile carried its own copy of the version for one build. A
+    bump landed in the app and not in it, so the image stamped itself 2 for an
+    app expecting 3 - and the failure surfaced at the LAST step of an install,
+    after the user had downloaded 371 MB, as "the runtime imported but does not
+    answer as ours".
+
+    The workflow now reads the number out of this module and passes it in, and
+    checks the built image back against it."""
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    assert "--build-arg RUNTIME_VERSION=" in wf, (
+        "the image must be stamped with the version the app expects")
+    assert "print(runtime.RUNTIME_VERSION)" in wf, (
+        "and that number must come from the app, not be typed twice")
+    assert "the app expects $V" in wf, (
+        "the built image must be checked back against it before publishing")
+    df = DOCKERFILE.read_text(encoding="utf-8")
+    assert "ARG RUNTIME_VERSION=0" in df, (
+        "an unstamped build must be obviously wrong, not plausibly right")

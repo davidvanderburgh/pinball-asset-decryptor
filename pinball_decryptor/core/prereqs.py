@@ -377,6 +377,100 @@ def _wsl_default_distro() -> Tuple[str, Optional[int]]:
 #: about" is how the app ends up naming different Ubuntus in one session.
 KNOWN_GOOD_DISTRO = "Ubuntu-24.04"
 
+#: The oldest Ubuntu this is known to work on, as (major, minor).
+#:
+#: A FLOOR, NOT A REQUIREMENT, and the difference is the whole design.  PAD
+#: runs on whatever apt distro WSL calls the default: 22.04 and 24.04 both
+#: work (PAD-114 fixed the four places that had one of them baked in), and
+#: whatever comes next has to work on the day it ships rather than on the day
+#: this app is next updated.  So nothing here fails a check on a version
+#: number - a machine that can do the work is a machine that passes, which is
+#: what the probes already ask.  What this floor buys is a NAMED suspicion:
+#: below it the release is older than anything the app has been run against,
+#: and saying so beats a user chasing a fault that is really their distro's
+#: age.  Ubuntu only: Debian, Arch and the rest number their releases their
+#: own way, and judging them by this would be a guess dressed as a fact.
+OLDEST_TESTED_RELEASE = (22, 4)
+
+#: wsl_release()'s cache: [(id, version, pretty), read].
+_WSL_RELEASE: list = [("", "", ""), False]
+
+
+def wsl_release() -> Tuple[str, str, str]:
+    """``(id, version, pretty)`` of the default distro, from its own
+    /etc/os-release: ``("ubuntu", "24.04", "Ubuntu 24.04.4 LTS")``.
+
+    ``("", "", "")`` when it cannot be read, which is deliberately the same
+    answer for "no WSL", "distro will not start" and "not an os-release
+    distro" - every caller here treats it as "say nothing", never as "old".
+
+    NEVER FIRST.  This is a diagnostic, and the first wsl.exe after a Windows
+    reboot boots the whole VM; it is asked once, after a prerequisite run has
+    already been through that door, so it never adds a cold boot of its own.
+    """
+    if _WSL_RELEASE[1]:
+        return _WSL_RELEASE[0]
+    _WSL_RELEASE[1] = True
+    if sys.platform != "win32" or shutil.which("wsl") is None:
+        return _WSL_RELEASE[0]
+    try:
+        result = _run_in_wsl("cat /etc/os-release", PROBE_TIMEOUT)
+    except (subprocess.TimeoutExpired, OSError):
+        return _WSL_RELEASE[0]
+    if result.returncode != 0:
+        return _WSL_RELEASE[0]
+    fields = {}
+    for line in (result.stdout or "").replace("\x00", "").splitlines():
+        key, sep, val = line.strip().partition("=")
+        if sep:
+            fields[key] = val.strip().strip('"')
+    _WSL_RELEASE[0] = (fields.get("ID", ""), fields.get("VERSION_ID", ""),
+                       fields.get("PRETTY_NAME", ""))
+    return _WSL_RELEASE[0]
+
+
+def _release_tuple(version: str) -> Optional[Tuple[int, int]]:
+    """``"24.04"`` -> ``(24, 4)``; None for anything that is not two numbers,
+    because a rolling release ("", "n/a", a date) is not a version to compare
+    and must not be read as a small one."""
+    parts = version.split(".")
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        return None
+    return int(parts[0]), int(parts[1])
+
+
+def wsl_release_lines() -> List[str]:
+    """What a prerequisite run says about the distro it just probed: one line
+    naming it, and a second only when it is below :data:`OLDEST_TESTED_RELEASE`.
+
+    THE FIRST LINE IS THE POINT.  Every WSL fault this project has triaged -
+    PAD-73, PAD-112, PAD-113, PAD-114 - was reported with a log that said
+    which STEP failed and never which Linux it failed on, so the first reply
+    was always a request for `wsl -l -v`.  It is one line, it costs a command
+    on a VM that is already up, and it turns that round trip into a fact the
+    log already carries.
+    """
+    name, wsl_ver = _wsl_default_distro()
+    distro_id, version, pretty = wsl_release()
+    if not name and not pretty:
+        return []
+    said = pretty or version or "release unknown"
+    where = "%s (%s%s)" % (name or "the default distro", said,
+                           ", WSL %d" % wsl_ver if wsl_ver else "")
+    lines = ["WSL: " + where]
+    rel = _release_tuple(version)
+    if distro_id == "ubuntu" and rel and rel < OLDEST_TESTED_RELEASE:
+        lines.append(
+            "That release is older than the %d.%02d PAD is tested against. "
+            "It is not refused and it may well be fine - but if something "
+            "fails here in a way that makes no sense, this is the first "
+            "thing to rule out. A newer distro can sit alongside it: "
+            "'wsl --install -d %s' then 'wsl --set-default %s'."
+            % (OLDEST_TESTED_RELEASE[0], OLDEST_TESTED_RELEASE[1],
+               KNOWN_GOOD_DISTRO, KNOWN_GOOD_DISTRO))
+    return lines
+
+
 #: The cheapest thing a Linux can be asked to do.  Run through the same
 #: ``wsl -u root -- bash -c`` door as every probe and every pipeline command,
 #: because the question is not "is the VM up" but "can WHAT WE DO run here".

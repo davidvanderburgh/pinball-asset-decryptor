@@ -662,3 +662,77 @@ def test_the_probe_machinery_takes_command_v():
         "partclone.ext4"
     # Still nothing to shortcut for a compound probe.
     assert prereqs._probe_presence_exe("command -v a && command -v b") is None
+
+
+# ---- PAD-114: which Linux was that? ----------------------------------------
+def _release(monkeypatch, osrelease, distro=("Ubuntu", 2)):
+    monkeypatch.setattr(prereqs, "_WSL_RELEASE", [("", "", ""), False])
+    monkeypatch.setattr(prereqs.sys, "platform", "win32")
+    monkeypatch.setattr(prereqs.shutil, "which", lambda n: "/wsl.exe")
+    monkeypatch.setattr(prereqs, "_wsl_default_distro", lambda: distro)
+    monkeypatch.setattr(
+        prereqs, "_run_in_wsl",
+        lambda cmd, t: subprocess.CompletedProcess(cmd, 0, stdout=osrelease,
+                                                   stderr=""))
+
+
+NOBLE = ('NAME="Ubuntu"\nVERSION_ID="24.04"\n'
+         'PRETTY_NAME="Ubuntu 24.04.4 LTS"\nID=ubuntu\n')
+JAMMY = ('NAME="Ubuntu"\nVERSION_ID="22.04"\n'
+         'PRETTY_NAME="Ubuntu 22.04.5 LTS"\nID=ubuntu\n')
+FOCAL = ('NAME="Ubuntu"\nVERSION_ID="20.04"\n'
+         'PRETTY_NAME="Ubuntu 20.04.6 LTS"\nID=ubuntu\n')
+ARCH = 'NAME="Arch Linux"\nID=arch\nBUILD_ID=rolling\n'
+
+
+def test_a_prerequisite_run_says_which_linux_it_probed(monkeypatch):
+    """One line, in the log the user pastes.  Every WSL ticket here has
+    arrived without it and the first reply has been a request for
+    `wsl -l -v` (PAD-73, still unanswered four tickets later)."""
+    _release(monkeypatch, NOBLE)
+    lines = prereqs.wsl_release_lines()
+    assert lines == ["WSL: Ubuntu (Ubuntu 24.04.4 LTS, WSL 2)"]
+    _release(monkeypatch, JAMMY)
+    assert prereqs.wsl_release_lines() == \
+        ["WSL: Ubuntu (Ubuntu 22.04.5 LTS, WSL 2)"], "22.04 is supported"
+
+
+def test_a_release_below_the_floor_is_named_but_never_refused(monkeypatch):
+    """A FLOOR, NOT A GATE.  The app runs on whatever apt distro is the
+    default, and a version number is not what decides whether the work can
+    be done - the probes are.  What the floor buys is a named suspicion."""
+    _release(monkeypatch, FOCAL)
+    lines = prereqs.wsl_release_lines()
+    assert len(lines) == 2 and "20.04" in lines[0]
+    assert "older than the 22.04" in lines[1]
+    assert prereqs.KNOWN_GOOD_DISTRO in lines[1]
+    assert "alongside" in lines[1], "the old distro is never replaced"
+    # ...and it says in as many words that nothing is being refused.  The
+    # prerequisites are decided by the probes, which ask what the machine can
+    # DO; this line is a suspicion to rule out, and the wording is the only
+    # thing standing between the two.
+    assert "not refused" in lines[1]
+    for verdict in ("unsupported", "must be", "required", "not supported"):
+        assert verdict not in lines[1].lower(), verdict
+
+
+def test_a_distro_that_numbers_itself_differently_is_not_judged(monkeypatch):
+    """Arch has no x.y release and Debian's is not Ubuntu's.  Comparing them
+    to an Ubuntu floor is a guess dressed as a fact, so it is not made."""
+    _release(monkeypatch, ARCH, distro=("Arch", 2))
+    assert len(prereqs.wsl_release_lines()) == 1
+    assert prereqs._release_tuple("rolling") is None
+    assert prereqs._release_tuple("") is None
+    assert prereqs._release_tuple("24.04") == (24, 4)
+
+
+def test_no_release_read_says_nothing_at_all(monkeypatch):
+    """"Could not read it" must never come out as "old"."""
+    monkeypatch.setattr(prereqs, "_WSL_RELEASE", [("", "", ""), False])
+    monkeypatch.setattr(prereqs.sys, "platform", "win32")
+    monkeypatch.setattr(prereqs.shutil, "which", lambda n: "/wsl.exe")
+    monkeypatch.setattr(prereqs, "_wsl_default_distro", lambda: ("", None))
+    monkeypatch.setattr(
+        prereqs, "_run_in_wsl",
+        lambda cmd, t: subprocess.CompletedProcess(cmd, 1, stdout="", stderr=""))
+    assert prereqs.wsl_release_lines() == []

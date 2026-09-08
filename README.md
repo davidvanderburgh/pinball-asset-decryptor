@@ -554,7 +554,15 @@ The old distro is left exactly where it is, and `wsl --export <name>
 backup.tar` still gets its files out.
 
 **Which Ubuntu release is up to you.** PAD works on any current one —
-22.04, 24.04, and whatever comes next — and asks the machine rather than
+22.04, 24.04, and whatever comes next — and it is never refused on a
+version number: what decides whether a machine can do the work is the
+prerequisite checks, which ask what it can actually do. Every check that
+runs inside WSL now writes one line naming the distro and release it
+probed (`WSL: Ubuntu (Ubuntu 24.04.4 LTS, WSL 2)`), so a log pasted into
+a bug report carries it; a release older than 22.04 adds a second line
+saying it is older than anything this is tested against and is worth
+ruling out first. An app update never installs or switches a distro —
+a machine that works keeps working. PAD asks the machine rather than
 assuming a release: the ARM handler is registered the way *this* distro
 registers one, packages whose names changed between releases are tried
 under every spelling they have had, and criu is used from apt where a

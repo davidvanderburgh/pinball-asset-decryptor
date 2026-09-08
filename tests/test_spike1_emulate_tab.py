@@ -980,3 +980,35 @@ def test_a_blocked_runtime_download_offers_the_file_picker(panel, monkeypatch):
                         lambda: SimpleNamespace(after=lambda ms, fn: offered.append(fn)))
     panel._install_runtime()
     assert offered, "a blocked runtime download must offer the file picker"
+
+
+def test_a_runtime_that_is_already_installed_reaches_the_consent_dialog(
+        panel, monkeypatch):
+    """★ The dialog was UNREACHABLE when it was first written.
+    RuntimeNeedsReplacing is a RuntimeError, so a broad `except RuntimeError`
+    above it caught the refusal, and the `raise` inside that handler left the
+    whole try statement rather than falling through to its sibling - so the
+    user saw the refusal in the log and was never asked.  This walks the path
+    the button actually takes."""
+    asked, installed, logged = [], [], []
+    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "status",
+                        lambda *a, **k: ("stale", "version 2; expects 3"))
+
+    def install(log=None, progress=None, replace=False, **kw):
+        if not replace:
+            raise spike1_emulate_tab.runtime.RuntimeNeedsReplacing("already there")
+        installed.append("replaced")
+
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "install", install)
+    monkeypatch.setattr(panel, "_ask_before_replacing",
+                        lambda: asked.append(1) or True)
+    assert panel._install_runtime() == "ready"
+    assert asked, "the user must be asked before the distro is destroyed"
+    assert installed == ["replaced"]
+
+    # ...and a NO leaves it exactly as it was.
+    asked.clear(); installed.clear()
+    monkeypatch.setattr(panel, "_ask_before_replacing", lambda: False)
+    assert panel._install_runtime() == "stale"
+    assert not installed, "a refusal must not destroy anything"

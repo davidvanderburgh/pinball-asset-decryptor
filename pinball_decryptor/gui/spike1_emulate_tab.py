@@ -1170,15 +1170,12 @@ class Spike1EmulatePanel:
         try:
             runtime.install(log=lambda m: say("Spike 1: %s" % m),
                             progress=self._download_progress)
-        except RuntimeError as exc:
-            if not isinstance(exc, runtime.RuntimeNeedsReplacing):
-                # A blocked download, a proxy, an antivirus: the runtime has
-                # an offline route too, and this is where it is offered.
-                self._log("Spike 1: %s" % exc)
-                self._timer().after(
-                    0, lambda e=exc: self._offer_runtime_from_file(e))
-                return "absent"
-            raise
+        # THE SPECIFIC ONE FIRST.  RuntimeNeedsReplacing IS a RuntimeError, so
+        # with the broad handler above it the narrow one below never ran - and
+        # a `raise` inside an except block leaves the whole try statement
+        # rather than falling through to its siblings.  Written the wrong way
+        # round, the consent dialog this whole change exists for was
+        # unreachable, and the user just saw the refusal in the log.
         except runtime.RuntimeNeedsReplacing:
             # THE ONE PLACE ALLOWED TO SAY YES, and only after saying what it
             # costs.  Replacing the runtime unregisters the distro, and the
@@ -1191,6 +1188,13 @@ class Spike1EmulatePanel:
                 return "stale"
             runtime.install(log=lambda m: say("Spike 1: %s" % m),
                             progress=self._download_progress, replace=True)
+        except RuntimeError as exc:
+            # A blocked download, a proxy, an antivirus: the runtime has an
+            # offline route too, and this is where it is offered.
+            self._log("Spike 1: %s" % exc)
+            self._timer().after(
+                0, lambda e=exc: self._offer_runtime_from_file(e))
+            return "absent"
         return "ready"
 
     def _download_progress(self, done, total):

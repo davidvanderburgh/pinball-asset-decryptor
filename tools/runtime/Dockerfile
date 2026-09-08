@@ -46,14 +46,34 @@ ARG VARIANT=base
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# CERTIFICATES BEFORE THE SNAPSHOT, and the order is the whole of it.  The
+# snapshot service is HTTPS only (plain http 301s onto it) and this base image
+# ships NO CA certificates at all - so apt cannot verify the connection, each
+# index fetch fails as a WARNING rather than an error, `apt-get update` exits 0
+# having downloaded nothing, and the install two steps down reports "Unable to
+# locate package python3".  That is a confusing way to say "no trust store",
+# and it is exactly what the first build of this image died of.  So the
+# certificates come first, from the base image's own archive over http, and
+# the snapshot is switched to afterwards.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
 # One source list, one instant.  `check-valid-until=no` because a snapshot's
 # Release file ages by definition and apt would otherwise refuse it as stale.
+#
+# And the index is CHECKED, not assumed: apt answers a broken source with a
+# warning and a zero exit, so without this the failure surfaces later as a
+# missing package rather than here as a missing archive.
 RUN printf '%s\n' \
       "deb [check-valid-until=no] https://snapshot.ubuntu.com/ubuntu/${SNAPSHOT} noble main universe" \
       "deb [check-valid-until=no] https://snapshot.ubuntu.com/ubuntu/${SNAPSHOT} noble-updates main universe" \
       "deb [check-valid-until=no] https://snapshot.ubuntu.com/ubuntu/${SNAPSHOT} noble-security main universe" \
     > /etc/apt/sources.list.d/ubuntu.sources.list \
- && rm -f /etc/apt/sources.list.d/ubuntu.sources
+ && rm -f /etc/apt/sources.list.d/ubuntu.sources \
+ && apt-get -o Acquire::Retries=3 update \
+ && { apt-cache policy python3 | grep -qE "Candidate: [0-9]" \
+      || { echo "the snapshot archive gave apt no usable index"; exit 1; }; }
 
 #: WHAT THE RIG ACTUALLY USES, read out of the rig rather than remembered:
 #: every command its scripts call and every module its python imports.
@@ -65,13 +85,13 @@ RUN printf '%s\n' \
 #:   ca-certificates  so anything fetched from in here can verify a certificate
 #: fuse3 is NOT here on purpose: the device model links libfuse statically and
 #: talks to /dev/fuse directly, so there is nothing left to install for it.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
       python3 \
       procps \
       util-linux \
       socat \
-      ca-certificates \
+ && apt-get -o Acquire::Retries=3 install -y --reinstall \
+      --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # THE RIG LOOKS UP uid 1000 BY NUMBER (`getent passwd 1000`) to find the

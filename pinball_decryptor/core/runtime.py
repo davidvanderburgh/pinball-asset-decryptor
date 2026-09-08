@@ -56,22 +56,24 @@ DISTRO = "PAD-Runtime"
 #: What the app expects to find inside an installed runtime
 #: (/etc/pad-runtime.json).  A runtime older than this is upgradeable, not
 #: broken: the app says so and offers to replace it.
-RUNTIME_VERSION = 2
+RUNTIME_VERSION = 3
 
 #: The image itself, pinned exactly like a payload binary - same download,
 #: same .part-then-verify, same offline "install from file" path.  Filled in
 #: by .github/workflows/runtime.yml, which prints these four fields (run
-#: 34268980223, 2026-09-08).  An empty sha256 means NOT YET PUBLISHED and every
+#: 34274758043, 2026-09-08).  An empty sha256 means NOT YET PUBLISHED and every
 #: entry point below reports "not available" rather than trying to fetch a file
 #: that does not exist - which is how the mechanism shipped before the image
-#: existed.  45 MB compressed: the whole Linux is smaller than the app.
+#: existed.  368 MB compressed, most of it the ARM cross compiler, ffmpeg and
+#: qemu-user-static: one download, once, against a toolchain a user would
+#: otherwise be told to assemble themselves.
 IMAGE = Payload(
     key="runtime-full",
     filename="pad-runtime-full.tar.gz",
-    release_tag="runtime-2",
+    release_tag="runtime-3",
     sha256="",
     size=0,
-    version="PAD Runtime 2 (full)",
+    version="PAD Runtime 3 (full)",
     what="the Linux the emulator runs on, built and pinned by us",
     dest="",              # not a path inside Linux: this one becomes a distro
 )

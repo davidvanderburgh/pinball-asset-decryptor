@@ -154,8 +154,17 @@ RUN apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
 #: image and the rig disagreeing about a machine:
 #:   qemu-user-static           the ARM interpreter the guest runs under
 #:   gcc-arm-linux-gnueabihf    builds the hardware shim and the GL bridge's
-#:                              guest halves - which link against the CARD's
+#:                              guest halves - which LINK against the CARD's
 #:                              own libc, so they can never be prebuilt for it
+#:   libc6-dev-armhf-cross      ...but they still COMPILE against ordinary libc
+#:                              HEADERS - hwshim.c includes setjmp.h.
+#:                              `-nostdlib` governs the LINK, not the includes,
+#:                              and an image without these headers compiles a
+#:                              toy freestanding file perfectly and then dies
+#:                              on the rig's real source with "bits/wordsize.h:
+#:                              No such file or directory".  Found by compiling
+#:                              the ACTUAL shim instead of a stand-in, which is
+#:                              now what CI does
 #:   gcc + libc6-dev            the native half of the bridge
 #:   e2fsprogs                  debugfs
 #:   fuse2fs                    running a card WITHOUT unpacking it, and its
@@ -184,7 +193,7 @@ RUN if [ "$VARIANT" = full ]; then \
       apt-get -o Acquire::Retries=10 update \
       && apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
         qemu-user-static \
-        gcc-arm-linux-gnueabihf \
+        gcc-arm-linux-gnueabihf libc6-dev-armhf-cross \
         gcc libc6-dev \
         e2fsprogs \
         fuse2fs \
@@ -220,19 +229,29 @@ RUN userdel -r ubuntu 2>/dev/null || true \
 #   interop + appendWindowsPath   the emulator's sound is played by a WINDOWS
 #                        process the rig launches through interop; without this
 #                        the run is silent and nothing says why
-#   boot systemd         `full` only, and it is not decoration: qemu-user-static
-#                        registers the ARM interpreter through /usr/lib/binfmt.d,
-#                        which is systemd's to apply.  Without it the handler
-#                        has to be poked into /proc by hand after every restart
-#                        of the distro - which is exactly the state the Spike 2
-#                        rig's setupcheck.sh calls out as "registered but will
-#                        not survive a restart".
-RUN { printf '%s\n' \
-        '[user]' 'default=pad' '' \
-        '[automount]' 'enabled=true' 'options="metadata"' '' \
-        '[interop]' 'enabled=true' 'appendWindowsPath=true'; \
-      if [ "$VARIANT" = full ]; then printf '\n%s\n' '[boot]' 'systemd=true'; fi; \
-    } > /etc/wsl.conf
+#
+# AND NO `[boot] systemd=true`, which this file did claim for exactly one
+# build.  Two reasons, and the second is the one that matters:
+#
+#   * it was a lie.  This base image has no systemd package, so WSL falls back
+#     to its own init and the setting does nothing - the rig's own check
+#     reported `wslconf=0` on an image whose wsl.conf said systemd=true.
+#   * and installing systemd to make it true would be worse.  binfmt_misc is
+#     VM-GLOBAL in WSL: every distro shares one kernel and one handler table.
+#     qemu-user-static's /usr/lib/binfmt.d entry, applied by our systemd at
+#     every start of this distro, would re-register the ARM interpreter for the
+#     user's OTHER distros too - and the Spike 1 rig deliberately swaps that
+#     handler and restores the stock one when it stops.  A distro of ours
+#     quietly reaching into that is the kind of surprise this runtime exists to
+#     remove, not to introduce.
+#
+# So the RIG owns the ARM handler, as it always has: setupcheck.sh reports it,
+# setupfix.sh registers it, and the rig puts back what it found.
+RUN printf '%s\n' \
+      '[user]' 'default=pad' '' \
+      '[automount]' 'enabled=true' 'options="metadata"' '' \
+      '[interop]' 'enabled=true' 'appendWindowsPath=true' \
+    > /etc/wsl.conf
 
 # The binaries we build ourselves, already verified against the app's pins by
 # the workflow that put them here.  Baked in so a fresh import needs no second

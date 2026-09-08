@@ -115,16 +115,16 @@ jobs:
       # exactly the thing whose shared libraries can be missing.  So each one
       # is asked to do its job, in the image, before anyone downloads it.
       #
-      # THE ARM PROGRAM IS FREESTANDING (-nostdlib), and that is not a way of
-      # dodging a missing package - it is HOW THE RIG BUILDS.  Its shim and the
-      # GL bridge's guest halves are compiled -nostdlib and linked against the
-      # CARD's own libc (`-L$R/lib -l:libc.so.6`), because they have to match
-      # the glibc 2.21 the game ships with, not the one this image has.  So the
-      # image deliberately does NOT carry libc6-dev-armhf-cross: nothing here
-      # needs it, and a check that installed it would be testing a toolchain
-      # the rig never uses.  The first version of this step compiled an
-      # ordinary `int main` and failed on a missing crt1.o - which said nothing
-      # about whether the rig could build.
+      # THE ARM SIDE TOOK TWO WRONG TURNS BEFORE THIS SHAPE, and both are worth
+      # remembering.  The rig LINKS its guest code against the CARD's own libc
+      # (`-L$R/lib -l:libc.so.6`), because it has to match the glibc 2.21 the
+      # game ships with - so the first check compiled an ordinary `int main`
+      # and died on a missing crt1.o, and the conclusion drawn was "the image
+      # needs no ARM libc".  The second check therefore compiled a freestanding
+      # `_start` and passed happily... while the rig's REAL hwshim.c would not
+      # build at all, because it includes setjmp.h and `-nostdlib` governs the
+      # LINK, not the includes.  The image carries libc6-dev-armhf-cross for
+      # the headers, and the step below compiles the actual sources.
       - name: Prove the Spike 2 toolchain works
         if: ${{ inputs.variant == 'full' }}
         run: |
@@ -137,13 +137,30 @@ jobs:
             arm-linux-gnueabihf-gcc --version | head -1
             echo "int main(void){return 0;}" > /tmp/t.c
             gcc -o /tmp/t.native /tmp/t.c && /tmp/t.native
-            echo "void _start(void){__asm__ volatile(\"mov r7,#1; mov r0,#0; svc 0\");}" > /tmp/a.c
-            arm-linux-gnueabihf-gcc -nostdlib -static -o /tmp/t.arm /tmp/a.c
+            arm-linux-gnueabihf-gcc -static -o /tmp/t.arm /tmp/t.c
             qemu-arm-static /tmp/t.arm && echo "an ARM program ran under the interpreter"
-            arm-linux-gnueabihf-gcc -shared -fPIC -nostdlib -o /tmp/t.so /tmp/a.c && echo "and the shared, freestanding shape the shim is built in"
             ffmpeg -hide_banner -f lavfi -i testsrc=size=64x64:rate=1 -frames:v 1                    -c:v libx264 -f null - 2>/dev/null               && echo "ffmpeg decodes and encodes H.264"
             busybox --help >/dev/null && file $(command -v busybox) | grep -q "statically linked"               && echo "busybox is static, so the pivot boot has its umount"
             echo "spike 2 toolchain OK"
+          '
+
+      # THE RIG'S OWN SOURCES, COMPILED WITH THE IMAGE'S OWN TOOLCHAIN, and
+      # this is the check that matters.  A stand-in file proves nothing: the
+      # first version of this step compiled a freestanding `_start` and passed,
+      # while the real hwshim.c - which includes setjmp.h - died on a missing
+      # bits/wordsize.h, because -nostdlib governs the LINK and not the
+      # includes.  A user would have met that as their first Spike 2 start.
+      - name: Build the rig's actual shim and renderer in the image
+        if: ${{ inputs.variant == 'full' }}
+        run: |
+          docker run --rm -v "$PWD:/repo" pad-runtime:${{ inputs.tag }} bash -c '
+            set -e
+            W=$(mktemp -d); cd "$W"
+            cp /repo/tools/spike2_emu/{hwshim.c,alsastub.c,gststub.c,gstvid.c,padvid.h,padsw.h} .
+            arm-linux-gnueabihf-gcc -std=gnu17 -fno-stack-protector -shared -fPIC               -O2 -nostdlib -Werror=implicit-function-declaration               -Wl,-soname,hwshim.so -o hwshim.so               hwshim.c alsastub.c gststub.c gstvid.c
+            echo "the guest shim built: $(stat -c%s hwshim.so) bytes"
+            gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration               -o padglhost /repo/tools/spike2_emu/padglhost.c               -l:libEGL.so.1 -l:libX11.so.6
+            echo "the host renderer built: $(stat -c%s padglhost) bytes"
           '
 
       # For the record, and not as a gate: the RIG'S OWN read-only verdict on

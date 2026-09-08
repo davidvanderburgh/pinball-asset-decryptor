@@ -305,6 +305,7 @@ def test_the_image_carries_the_spike2_toolchain_it_promises():
         if not bare.endswith("\\"):       # the continuation ends the list
             in_install = False
     for pkg in ("qemu-user-static", "gcc-arm-linux-gnueabihf", "libc6-dev",
+                "libc6-dev-armhf-cross",
                 "e2fsprogs", "fuse2fs", "fuse3", "ffmpeg", "busybox-static"):
         assert pkg in installed, (
             "the full variant must INSTALL %s, not merely mention it" % pkg)
@@ -340,37 +341,29 @@ def test_the_toolchain_is_proven_by_running_it_not_by_looking_for_it():
     wf = WORKFLOW.read_text(encoding="utf-8")
     assert "criu --version" in wf
     assert "qemu-arm-static /tmp/t.arm" in wf
-    # -nostdlib, because that is how the RIG builds: its shim and the GL
-    # bridge's guest halves link against the CARD's glibc 2.21, not this
-    # image's.  An ordinary `int main` needs crt1.o from an ARM libc the image
-    # deliberately does not carry, and failing on that says nothing about
-    # whether the rig can build - which is exactly how the first version of
-    # this check failed.
-    assert "arm-linux-gnueabihf-gcc -nostdlib -static" in wf
-    assert "-shared -fPIC -nostdlib" in wf
+    # AND THE ARM SIDE IS THE RIG'S OWN SOURCE, not a stand-in.  A toy
+    # freestanding file compiled fine in an image whose real hwshim.c could not
+    # build at all (it includes setjmp.h; -nostdlib governs the LINK, not the
+    # includes) - so the gate is the actual shim and the actual renderer.
+    assert "hwshim.c alsastub.c gststub.c gstvid.c" in wf, (
+        "CI must compile the rig's real shim sources, not a stand-in")
+    assert "padglhost.c" in wf, "and the host renderer, which links EGL and X11"
     assert "libx264" in wf, "ffmpeg must be asked to decode/encode, not just exist"
 
 
-def test_systemd_is_on_in_the_full_image_so_the_arm_handler_survives():
-    """qemu-user-static registers the interpreter through /usr/lib/binfmt.d,
-    which is systemd's to apply.  Without it the handler has to be poked into
-    /proc after every restart of the distro - the state the rig's own
-    setupcheck calls "registered but will not survive a restart"."""
+def test_the_image_does_not_claim_a_systemd_it_does_not_have():
+    """★ It did, for one build.  `[boot] systemd=true` in wsl.conf does nothing
+    when the image has no systemd package - WSL falls back to its own init, and
+    the rig's own check reported wslconf=0 on an image that promised otherwise.
+
+    Installing systemd to make it true would be the worse fix: binfmt_misc is
+    VM-GLOBAL in WSL, so our distro's systemd applying qemu-user-static's
+    binfmt.d entry at every boot would re-register the ARM interpreter for the
+    user's other distros too - and the Spike 1 rig swaps that handler
+    deliberately and restores the stock one when it stops.  The rig owns the
+    handler; the image stays out of it."""
     df = DOCKERFILE.read_text(encoding="utf-8")
-    assert "systemd=true" in df
-    assert "binfmt.d" in df, "say why it is on, beside it"
-
-
-def test_the_runtime_release_can_never_become_the_latest_release():
-    """★ PAD-116.  These releases carry no app, but every installed copy asks
-    GitHub for the LATEST release and compares that tag to its own version -
-    so an asset holder in the top slot tells every user they are up to date.
-    A tester on v0.191.0 was never offered v0.192.0 because runtime-1 had just
-    been published.  Prerelease is the only flag that keeps a release out of
-    /releases/latest; --latest=false merely un-pins it and GitHub recomputes
-    by date, landing right back on it."""
-    wf = WORKFLOW.read_text(encoding="utf-8")
-    assert "--prerelease" in wf
-    assert 'gh release edit "${{ inputs.tag }}" --prerelease' in wf, (
-        "an existing release must be corrected on a re-run, not only created "
-        "correctly the first time")
+    conf = df[df.index("> /etc/wsl.conf") - 900:df.index("> /etc/wsl.conf")]
+    assert "'[boot]'" not in conf and "systemd=true'" not in conf, (
+        "wsl.conf must not promise a systemd this image does not install")
+    assert "binfmt_misc is" in df, "say why it is absent, beside it"

@@ -909,3 +909,74 @@ def test_a_first_run_in_the_apps_own_linux_says_where_the_old_work_is(
     panel._info = {"game_ready": "1"}
     panel._note_where_the_old_extraction_went()
     assert not logged, logged
+
+
+# ------------------------------- what the adversarial review found here ----
+
+def test_the_fix_button_is_dead_where_it_could_only_do_harm(root, monkeypatch):
+    """★ Off Windows the button was left enabled, and pressing it would
+    download 6 MB of x86-64 Linux ELF, write it into the user's home and report
+    "installed" - for a rig that cannot run on that machine at all.  Two of the
+    four installers we ship are macOS."""
+    import tkinter as tk
+    monkeypatch.setattr(spike1_emulate_tab, "rig_available", lambda: True)
+    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "darwin")
+    monkeypatch.setattr(Spike1EmulatePanel, "_schedule_poll",
+                        lambda self, ms=None: None)
+    frame = tk.Frame(root)
+    p = Spike1EmulatePanel(frame, card_var=tk.StringVar())
+    p.build(frame)
+    try:
+        assert str(p._fix_btn.cget("state")) == "disabled"
+        assert str(p._go_btn.cget("state")) == "disabled"
+    finally:
+        p._stopped = True
+        frame.destroy()
+
+
+def test_removing_the_runtime_names_what_it_deletes_and_refuses_mid_run(
+        panel, monkeypatch):
+    """★ Nothing in the app or the Windows uninstaller ever removed the
+    runtime: a user who tried the emulator once kept a registered WSL distro
+    and ~1.5 GB for ever, with only a terminal command as a way out.  And the
+    removal must name the save states it destroys, and never run under a live
+    game."""
+    logged, asked, removed = [], {}, []
+    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "status",
+                        lambda *a, **k: ("ready", "Runtime 3 (full)"))
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "uninstall",
+                        lambda: removed.append(1) or True)
+    monkeypatch.setattr(spike1_emulate_tab.messagebox, "askyesno",
+                        lambda title, body: asked.update(body=body) or True)
+    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread",
+                        lambda target, daemon=None: SimpleNamespace(start=target))
+
+    panel._last_up = True                      # a game is running
+    panel._remove_runtime()
+    assert not removed, "it must refuse while the emulator is running"
+    assert any("stop it first" in m for m in logged), logged
+
+    panel._last_up = False
+    panel._remove_runtime()
+    assert removed, "it must actually remove it"
+    assert "SAVE STATES" in asked["body"], asked
+    assert "untouched" in asked["body"]
+
+
+def test_a_blocked_runtime_download_offers_the_file_picker(panel, monkeypatch):
+    """★ The image is the download most likely to be refused - 370 MB from a
+    host some proxies do not allow - and it was the one with no way round."""
+    offered = []
+    monkeypatch.setattr(panel, "_log", lambda m: None)
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "status",
+                        lambda *a, **k: ("absent", "not installed"))
+
+    def boom(*a, **kw):
+        raise RuntimeError("could not download pad-runtime-full.tar.gz: blocked")
+
+    monkeypatch.setattr(spike1_emulate_tab.runtime, "install", boom)
+    monkeypatch.setattr(panel, "_timer",
+                        lambda: SimpleNamespace(after=lambda ms, fn: offered.append(fn)))
+    panel._install_runtime()
+    assert offered, "a blocked runtime download must offer the file picker"

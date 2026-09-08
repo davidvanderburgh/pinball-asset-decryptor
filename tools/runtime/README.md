@@ -61,6 +61,21 @@ wsl --unregister PAD-Runtime                         # remove it completely
 default distro without uninstalling anything — the escape hatch for a machine
 where the runtime is installed but suspect.
 
+## Known limitation: the ARM handler and WSL restarts
+
+`binfmt_misc` — the kernel table that says "run this ARM binary through
+qemu" — is **shared by every distro in the WSL VM**, and it is emptied when
+that VM stops. A stock Ubuntu re-registers it at boot through systemd; this
+image carries no systemd, on purpose, because a systemd of ours re-registering
+the interpreter at every boot would reach into the user's *other* distros, and
+the Spike 1 rig deliberately swaps that handler and restores it.
+
+So after a full `wsl --shutdown`, a Windows reboot, or a WSL idle timeout, the
+Spike 2 tab will report the handler missing and **Set up emulator…** registers
+it again in a moment. The tab says exactly that rather than promising
+persistence it cannot deliver. Giving the image its own systemd is the obvious
+next step and needs its own verification on hardware first.
+
 ## What is in it, and what is not
 
 The `base` variant carries what the **Spike 1** rig uses: python3, procps,

@@ -328,12 +328,24 @@ class Spike1EmulatePanel:
         self._fix_btn = ttk.Button(btns, text="Fix setup",
                                    command=self._fix_setup, width=11)
         self._fix_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # RIGHT-CLICK GIVES THE DISK BACK.  A visible button for removing a
+        # Linux would be a loaded gun beside "Fix setup"; a menu on the button
+        # that installs it is where someone would look for it, and the action
+        # names everything it deletes before it does anything.
+        self._fix_menu = tk.Menu(self._fix_btn, tearoff=0)
+        self._fix_menu.add_command(label="Remove the app's Linux…",
+                                   command=self._remove_runtime)
+        self._fix_btn.bind(
+            "<Button-3>",
+            lambda e: self._fix_menu.tk_popup(e.x_root, e.y_root))
         _Tooltip(self._fix_btn,
                  "Install whatever the emulator is missing: the ARM emulator "
                  "and device model we build and verify ourselves, downloaded "
                  "and checked against the exact version this app expects. "
                  "Nothing is compiled on your machine, and no terminal is "
-                 "needed. Offers a file picker if the download is blocked.",
+                 "needed. Offers a file picker if the download is blocked. "
+                 "Right-click for \"Remove the app’s Linux\", which gives "
+                 "the disk back.",
                  self._theme_fn)
 
         # The volume trio, mirroring the Spike 2 tab's row (and sharing its
@@ -398,6 +410,12 @@ class Spike1EmulatePanel:
                 text="The Spike 1 emulator runs through WSL, so this tab is "
                      "Windows-only.")
             self._go_btn.configure(state=tk.DISABLED)
+            # AND THE FIX BUTTON WITH IT.  It was left enabled, and on a Mac
+            # it would download 6 MB of x86-64 Linux ELF, write it into the
+            # user's home and report "installed" - for a rig that cannot run
+            # on that machine at all.  Two of the four installers we ship are
+            # macOS.
+            self._fix_btn.configure(state=tk.DISABLED)
 
         frame.bind("<Destroy>", self._on_destroy)
         self._schedule_poll(self.POLL_FIRST_MS)
@@ -1152,6 +1170,15 @@ class Spike1EmulatePanel:
         try:
             runtime.install(log=lambda m: say("Spike 1: %s" % m),
                             progress=self._download_progress)
+        except RuntimeError as exc:
+            if not isinstance(exc, runtime.RuntimeNeedsReplacing):
+                # A blocked download, a proxy, an antivirus: the runtime has
+                # an offline route too, and this is where it is offered.
+                self._log("Spike 1: %s" % exc)
+                self._timer().after(
+                    0, lambda e=exc: self._offer_runtime_from_file(e))
+                return "absent"
+            raise
         except runtime.RuntimeNeedsReplacing:
             # THE ONE PLACE ALLOWED TO SAY YES, and only after saying what it
             # costs.  Replacing the runtime unregisters the distro, and the
@@ -1225,6 +1252,72 @@ class Spike1EmulatePanel:
             "extractions are still in this PC's own WSL distro — untouched, "
             "not deleted — and setting PAD_RUNTIME=0 goes back to using them."
             % runtime.DISTRO)
+
+    def _remove_runtime(self):
+        """Give back the disk.  Nothing else in the app or the Windows
+        uninstaller does: a user who tried the emulator once was left with a
+        registered WSL distro and about 1.5 GB on their system drive for ever,
+        and the only way out was a terminal command nobody had told them."""
+        state, detail = runtime.status(refresh=True)
+        if state in ("absent", "unsupported", "unpublished"):
+            self._log("Spike 1: there is no runtime installed to remove.")
+            return
+        if self._last_up:
+            self._log("Spike 1: the emulator is running - stop it first.")
+            return
+        if state == "foreign":
+            self._log("Spike 1: %s" % detail)
+            return
+        if not messagebox.askyesno(
+                "Remove the emulator's Linux?",
+                "This removes %s and everything inside it:\n\n"
+                "  - games extracted from your cards\n"
+                "  - cached cards\n"
+                "  - any SAVE STATES made while running in it\n\n"
+                "Your cards, your extractions on this PC and your own WSL "
+                "distro are untouched, and the emulator goes back to using "
+                "the machine's own distro.\n\nRemove it?"
+                % runtime.DISTRO):
+            return
+
+        def work():
+            try:
+                if runtime.uninstall():
+                    self._log("Spike 1: removed %s. The emulator will use "
+                              "this PC's own WSL distro again."
+                              % runtime.DISTRO)
+                else:
+                    self._log("Spike 1: could not remove %s." % runtime.DISTRO)
+            except Exception as exc:                        # noqa: BLE001
+                self._log("Spike 1: %s" % exc)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _offer_runtime_from_file(self, exc):
+        """The blocked-download path for the RUNTIME, not just the binaries.
+
+        The image is the download most likely to be refused - 370 MB from a
+        host some proxies do not allow - and it was the one with no way round.
+        Same checksum, different delivery."""
+        if not messagebox.askyesno(
+                "Install the runtime from a file",
+                "%s\n\nIf you can copy %s onto this machine another way, "
+                "choose it now - it is checked against the same checksum "
+                "before anything is installed.\n\nChoose a file?"
+                % (exc, runtime.IMAGE.filename)):
+            return
+        path = filedialog.askopenfilename(
+            title="Choose the downloaded %s" % runtime.IMAGE.filename,
+            initialfile=runtime.IMAGE.filename)
+        if not path:
+            return
+        try:
+            runtime.install(log=lambda m: self._log("Spike 1: %s" % m),
+                            source=path,
+                            replace=self._ask_before_replacing()
+                            if runtime.status()[0] not in ("absent",) else False)
+        except Exception as e:                              # noqa: BLE001
+            self._log("Spike 1: %s" % e)
 
     def _offer_file_install(self, exc):
         """The blocked-download path, on the UI thread.

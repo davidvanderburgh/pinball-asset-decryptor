@@ -3148,7 +3148,20 @@ class EmulatePanel:
                 self._log("[emulate] setup failed: %s" % exc)
             if result == "ok":
                 self._log("[emulate] this PC can run the emulator now.")
-                if restart:
+                if restart and runtime.distro_for("spike2"):
+                    # IN THE APP'S OWN LINUX THAT SENTENCE WOULD BE FALSE.
+                    # The runtime image carries no systemd package - deliberately,
+                    # because binfmt_misc is VM-global in WSL and a systemd of
+                    # ours re-registering the ARM interpreter at every boot would
+                    # reach into the user's other distros - so switching the
+                    # setting on there changes nothing.  Say what actually
+                    # happens instead of promising what does not.
+                    self._log("[emulate] the ARM handler is registered for as "
+                              "long as WSL stays up. The app's own Linux does "
+                              "not run systemd, so after a full WSL restart "
+                              "(or a reboot) press this button again — it "
+                              "takes a moment and nothing else is affected.")
+                elif restart:
                     self._log("[emulate] systemd was turned on for WSL so the "
                               "ARM handler survives a restart; it takes effect "
                               "the next time WSL starts, and nothing needs "

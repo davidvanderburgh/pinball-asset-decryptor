@@ -1132,6 +1132,14 @@ class SwitchWatch:
         instead of the window quietly showing a dead one. Renumbering is the
         thing NOT to do - an id is an address, and a poke at an invented one
         closes a switch the user did not ask for.
+
+        ★ THE REAL ID WAS FOUND the same day (swelf._gen2_entry_ids): the
+        48-byte generation carries an entry table after all, and no card on
+        this disk reaches this test any more. It stays as the backstop, because
+        that table is FOUND rather than known - a build whose one cannot be
+        identified still falls back to device positions, deliberately, and the
+        next record shape will arrive the way this one did, on somebody's
+        machine and without notice.
         """
         return 0 <= sw_id < padsw.MAX_ID
 

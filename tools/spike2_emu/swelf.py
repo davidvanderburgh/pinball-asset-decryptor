@@ -398,8 +398,15 @@ GEN2_KIND_SWITCH = 1
 #: three - the old readers spell those as two u16s at +16/+18 and +4/+6, which
 #: is the same two halves of the same word.
 DERIVED_LAYOUTS = (
-    # the 48-byte generation: carries its own number
-    dict(stride=48, cell=8, slotbit=20, kind=24, switch=1, num=0),
+    # ★ THE 48-BYTE GENERATION DOES NOT CARRY ITS OWN NUMBER, and this said it
+    # did until 2026-09-08. The u32 at the record's start reads 0 on
+    # foo_fighters_le 1.04.0 and elvira3 1.13.0, and on munsters_le 1.28.0 it
+    # reads values that are not Stern's - 145 on TILT PENDULUM, which every
+    # Stern manual numbers 81. The real number rides in the ENTRY table beside
+    # the id, where `_rows_roots` has always read it; `_gen2_entry_ids` fetches
+    # both. None here, so a build whose entry table cannot be found publishes
+    # an honestly absent number instead of a wrong one.
+    dict(stride=48, cell=8, slotbit=20, kind=24, switch=1, num=None),
     # ROOTS' shape: number lives in the separate entry table, not the record
     dict(stride=24, cell=12, slotbit=16, kind=20, switch=7, num=None),
     # ROOTS_NONUM's shape: no number anywhere - see that table's docstring
@@ -495,7 +502,7 @@ def _gen2_find_board(e, idx, slots, nodes):
     return hit
 
 
-def _rows_gen2(e):
+def _rows_gen2(e, require_ids=False):
     """The switch list, derived entirely - no stored address for this build.
 
     Every known record layout is tried and the FIRST that yields a coherent
@@ -504,6 +511,11 @@ def _rows_gen2(e):
     the node set the title's own directory declares, and enough rows have to
     come out named. A layout that half-fits produces nothing rather than a
     partial table, which is this file's standing rule.
+
+    `require_ids` refuses a reading whose ids are device-array positions rather
+    than the game's own switch ids - see `_gen2_entry_ids`. It is how `rows()`
+    asks whether this reader can beat a stored-address one that has no ids of
+    its own, without having to guess.
     """
     try:
         import nbdir
@@ -515,13 +527,162 @@ def _rows_gen2(e):
         return []
     idx = _gen2_words(e)
     for lay in DERIVED_LAYOUTS:
-        out = _rows_for_layout(e, idx, nodes, lay)
+        out = _rows_for_layout(e, idx, nodes, lay, require_ids=require_ids)
         if out:
             return out
     return []
 
 
-def _rows_for_layout(e, idx, nodes, lay):
+#: The ENTRY table's record. Its INDEX is the switch id - the number the game
+#: uses in its own switch array, which is what a poke writes to and what a key
+#: bind resolves to - and these two fields sit at the same offsets on both
+#: strides seen so far. `_rows_roots` has read this shape at stride 44 since
+#: item 57; the 48-byte device generation carries the same record at 40.
+ENTRY_STRIDES = (44, 40)
+ENTRY_NUM_OFF = 24
+ENTRY_DEV_OFF = 26
+#: A walk over zeroed memory passes the plausibility test for ever (num 0,
+#: device 0), so the backward walk is capped rather than left to run to the end
+#: of the segment.
+ENTRY_WALK_CAP = 4096
+
+
+def _entry_plausible(e, va, stride, dev_count):
+    """Does a `stride`-byte record at `va` look like an entry?
+
+    ★ THE DEVICE-0 RULE, and it is what stops the walk in the right place
+    (2026-09-08). A dummy entry - device 0, no number - is real and appears
+    INSIDE the table: every title measured has exactly one, immediately before
+    its first switch. But "device 0, number 0" is also what UNRELATED memory in
+    front of the table reads as, and elvira3 1.13.0 has a descending u32 array
+    right there whose 15 records all pass that test. Walking through them put
+    every id 15 too low - Service Select at 40, where item 73's sweep of the
+    real switch lists measured 25.
+
+    A dummy is EMPTY, and that is what separates them: it carries at most one
+    non-zero word, the name pointer that says "INVALID" (munsters_le 1.27.0 and
+    sword_of_rage_le have that pointer, foo_fighters_le 1.04.0, munsters_le
+    1.28.0 and elvira3 are blank all through), while the arrays that abut the
+    table read as five to ten non-zero words.
+
+    WHAT THE RULE IS WORTH, measured rather than argued: with it, all eight
+    titles whose Service Select id item 73 established from their own real
+    lists come back with that id - aerosmith 26, batman 28, elvira3 25,
+    foo_fighters 26, guardians 26, iron maiden 26, mando 26, rush 26 - and
+    munsters_le's two builds agree with each other where they did not before.
+    """
+    num = e.u16(va + ENTRY_NUM_OFF)
+    dev = e.u16(va + ENTRY_DEV_OFF)
+    if num is None or dev is None or dev >= dev_count or num >= 1024:
+        return False
+    if dev == 0:
+        off = e.off(va)
+        if off is None:
+            return False
+        raw = e.d[off:off + stride]
+        if len(raw) < stride:
+            return False
+        filled = sum(1 for i in range(0, stride - 3, 4)
+                     if struct.unpack_from("<I", raw, i)[0])
+        if filled > 1:
+            return False
+    return True
+
+
+def _gen2_entry_ids(e, dev_start, dev_count, switch_devs):
+    """{device index: (switch id, stern num)} from the title's own entry
+    table, or {} when it cannot be found and checked.
+
+    ★ WHY THIS EXISTS (2026-09-08, PAD-115). The derived reader used to report
+    each row's position in the DEVICE array as its id, because it had no entry
+    table to take one from. Those are different numbers: `padsw.MAX_ID` is 256
+    and a device position runs to 847 on foo_fighters_le 1.04.0, so 89 of its
+    105 switches had an "id" the rig cannot address - no live state, no click,
+    no key bind - and reading the coin door's crashed the playfield window.
+
+    foo_fighters_le PROVES they are different rather than merely bigger,
+    because one machine answers twice: 1.03.0 has a stored address, is read
+    through its 44-byte entry table, and puts the coin door at id 34; 1.04.0's
+    addresses have moved, it falls through to here, and its device position is
+    583. This walk gives 1.04.0 ids 2..106 against 1.03.0's 2..106 - the same
+    numbering for the same 105 switches, matched wire for wire.
+
+    HOW IT IS FOUND, and it is the method `_ent_by_walkback` already uses for
+    the 44-byte generation: the table sits immediately before the device array,
+    so walk backward from there while the records stay plausible. What is new
+    is that the 48-byte generation does NOT sit flush against the array - it
+    stops 12 bytes short - so a single assumed alignment misses it, and every
+    even gap is tried instead.
+
+    WHAT PICKS THE ANSWER is not the longest run, which lands on a misaligned
+    one: the entry table's switch rows must reproduce the device array's own
+    switch records IN ORDER, at consecutive entry indices, covering nearly all
+    of them. Nothing but the real table does that, and a candidate that half
+    fits produces nothing rather than an id space that is wrong by one - which
+    would be worse than what it replaces, because every id would then address
+    a real switch that is not the one on the row.
+
+    Validated beyond foo_fighters_le on the `num` field, which rides in the
+    same record: elvira3 1.13.0, munsters_le 1.28.0 and foo_fighters_le 1.04.0
+    all come back with DIP 1..8 at num 1..8 and SERVICE SELECT / PLUS / MINUS /
+    BACK at 9..12, the numbering real Stern manuals use.
+    """
+    if not switch_devs:
+        return {}
+    want = list(switch_devs)
+    wanted = set(want)
+    found = []
+    for stride in ENTRY_STRIDES:
+        # A gap of `stride` or more is the same alignment one record earlier,
+        # so every distinct alignment is covered by gaps below the stride.
+        for gap in range(0, stride, 2):
+            va, n, dummies = dev_start - gap - stride, 0, 0
+            while n < ENTRY_WALK_CAP:
+                if not _entry_plausible(e, va, stride, dev_count):
+                    break
+                # ★ ONE DUMMY, NEVER TWO IN A ROW. Every title measured has
+                # exactly one - device 0, empty - immediately before its first
+                # switch, so the walk must pass through it; a SECOND is not a
+                # table, it is the zeroed run in front of one, and an all-zero
+                # record satisfies every other test here for as far back as the
+                # zeros go.
+                dummies = dummies + 1 if not e.u16(va + ENTRY_DEV_OFF) else 0
+                if dummies > 1:
+                    break
+                n += 1
+                va -= stride
+            if n < 16:
+                continue
+            base = va + stride
+            seen, out = [], {}
+            for i in range(n):
+                dev = e.u16(base + stride * i + ENTRY_DEV_OFF)
+                if dev in wanted and dev not in out:
+                    seen.append(dev)
+                    out[dev] = (i, e.u16(base + stride * i + ENTRY_NUM_OFF) or 0)
+            # The switch rows must be the device array's own order, at
+            # consecutive entry indices, and cover nearly all of it.
+            if seen != [d for d in want if d in out]:
+                continue
+            if len(out) < len(want) - max(2, len(want) // 20):
+                continue
+            ids = [out[d][0] for d in seen]
+            if ids != list(range(ids[0], ids[0] + len(ids))):
+                continue
+            found.append(out)
+    if not found:
+        return {}
+    best = max(found, key=len)
+    # A second table is only a contradiction if it puts a DIFFERENT id on a
+    # switch they both name. One that merely stops earlier is the same table
+    # walked from a different starting point, and the fuller read stands.
+    for other in found:
+        if any(other[d] != best[d] for d in other if d in best):
+            return {}
+    return best
+
+
+def _rows_for_layout(e, idx, nodes, lay, require_ids=False):
     dev = _gen2_find_dev(e, idx, lay)
     if not dev:
         return []
@@ -538,6 +699,18 @@ def _rows_for_layout(e, idx, nodes, lay):
         num = e.u32(r + lay["num"]) if lay["num"] is not None else 0
         sw.append((i, num or 0, slot, bit, _gen2_name(e, r, lay) or "?"))
     if len(sw) < 16:
+        return []
+    # THE ID AND THE NUMBER COME FROM THE ENTRY TABLE WHERE THERE IS ONE.
+    # A device record the entry table does not list is a device the GAME does
+    # not carry in its switch array (munsters_le 1.28.0's RIGHT SPINNER is the
+    # only one in the library), so it has no id and is dropped rather than
+    # given the position it used to be given: a row nothing can address is
+    # what made these lists look incomplete in the first place.
+    ents = _gen2_entry_ids(e, start, count, [s[0] for s in sw])
+    if ents:
+        sw = [(ents[i][0], ents[i][1], slot, bit, name)
+              for i, _num, slot, bit, name in sw if i in ents]
+    elif require_ids:
         return []
     brd = _gen2_find_board(e, idx, sorted({s[2] for s in sw}), nodes)
     if brd is None:
@@ -574,8 +747,18 @@ def rows(elf_path, title):
     # second-guesses them. It is a NEW BUILD, whose addresses have all moved,
     # and a title that was never in the tables at all, that reach this.
     if nonum_roots:
-        out = _rows_nonum(e, *nonum_roots)
-        return out or _rows_gen2(e)
+        # ★ A REAL ID OUTRANKS THE PLACEHOLDER (2026-09-08). ROOTS_NONUM's
+        # whole reason for reporting each row's position in the device array as
+        # its id is stated in its own docstring: "no ENT-equivalent table
+        # exists for either title". One does, and `_gen2_entry_ids` finds it -
+        # so on sword_of_rage_le the ids become 2..99 instead of running to
+        # 266, past the 256 the rig can address. The two readings were checked
+        # against each other first and agree on all 98 rows, wire for wire and
+        # name for name; only the id column moves. A build where the entry
+        # table cannot be found falls straight back to what it does today.
+        return (_rows_gen2(e, require_ids=True)
+                or _rows_nonum(e, *nonum_roots)
+                or _rows_gen2(e))
     if not roots:
         return _rows_gen2(e)
     return _rows_roots(e, roots) or _rows_gen2(e)

@@ -29,7 +29,20 @@ clicked - which is what "incomplete" looks like from the front.
 
 NOT FIXED BY RENUMBERING, ever: an id is an address, so a dense 0..n-1 renumber
 would make every row addressable and half of them press a switch nobody asked
-for. Finding the real id is queue item 103.
+for.
+
+★ THE REAL ID WAS FOUND THE SAME DAY (item 103, `swelf._gen2_entry_ids`): the
+48-byte generation does carry an entry table, at a stride of 40 and stopping 12
+bytes short of the device array instead of flush against it, which is why every
+earlier walk missed it. Every title in the library now reports ids under
+`padsw.MAX_ID`, so nothing here fires on any card on this disk.
+
+THESE TESTS STAY, and they are not dead weight. The entry table is found by a
+walk that can fail - a build whose table cannot be identified falls back to
+device positions on purpose, because an id space that is wrong by one is worse
+than one that is honestly unaddressable - and the next generation of the record
+will arrive the way this one did, unannounced, on somebody's machine. What is
+pinned here is that the window survives it and says so.
 """
 import os
 import sys

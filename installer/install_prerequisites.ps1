@@ -94,6 +94,22 @@ function Test-WslHasApt {
 # from the right so a distro name with spaces survives.  NULs are stripped
 # for the same reason Get-WslInstallPlan strips them - wsl.exe builds older
 # than 0.64 ignore WSL_UTF8 and answer in UTF-16LE.
+# --- Is ANY distro registered? -------------------------------------------
+# Answered from the registry by wslservice, so it says nothing about whether
+# that distro can still START - which is exactly the pair of facts that
+# matters here: registered but dead is a state where installing packages is
+# impossible and "no distro yet" is the wrong story to tell (PAD-113).
+function Get-WslRegisteredDistros {
+    if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) { return @() }
+    $out = ""
+    try {
+        $out = ((& wsl -l -q 2>&1 | Out-String) -replace "`0", "")
+    } catch { return @() }
+    return @($out -split "`r?`n" |
+             ForEach-Object { $_.Trim() } |
+             Where-Object { $_ -and ($_ -notmatch '^Windows Subsystem') })
+}
+
 function Get-WslDefaultDistro {
     if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) { return $null }
     $out = ""
@@ -669,7 +685,34 @@ if ($needsWsl) {
         Write-VirtualizationBanner
         Write-FAIL "Ubuntu (virtualization disabled in BIOS/UEFI)"
     } elseif (-not $ubuntuFound -and $wslAvailable -and -not $needsReboot) {
-        # No usable distro yet - install Ubuntu directly.
+        # ...but "no usable distro" has two very different shapes, and only
+        # one of them is "you have not installed one".  A distro that is
+        # REGISTERED and no longer starts fails Test-WslHasApt exactly like a
+        # machine with nothing installed, and silently installing a second
+        # Ubuntu next to it explains none of that to the user whose own distro
+        # just stopped working (PAD-113: an in-place release upgrade, after
+        # which nothing ran in it).  Say what was found before changing
+        # anything, and say the old distro is not being touched.
+        $registered = Get-WslRegisteredDistros
+        if ($registered.Count -gt 0) {
+            $rn = $registered -join ", "
+            Write-Host ""
+            Write-Host "  ============================================================" -ForegroundColor Yellow
+            Write-Host ("  REGISTERED, BUT NOT ANSWERING: {0}" -f $rn)                   -ForegroundColor Yellow
+            Write-Host "  ============================================================" -ForegroundColor Yellow
+            Write-Host "  wsl.exe lists that distro, but a command run in it as root"   -ForegroundColor Yellow
+            Write-Host "  failed, so no package can be installed there and the app's"   -ForegroundColor Yellow
+            Write-Host "  checks fail the same way.  A distro that has stopped"         -ForegroundColor Yellow
+            Write-Host "  starting (an upgrade done inside it is the usual cause)"      -ForegroundColor Yellow
+            Write-Host "  cannot be repaired from here."                                -ForegroundColor Yellow
+            Write-Host "  Installing a SECOND distro alongside it.  The old one is"     -ForegroundColor Gray
+            Write-Host "  left exactly as it is, and its files can still be got out"    -ForegroundColor Gray
+            Write-Host ("  with:   wsl --export {0} backup.tar" -f $registered[0])      -ForegroundColor Gray
+            Write-Host "  The app uses whichever distro WSL calls the default, so if"   -ForegroundColor Gray
+            Write-Host "  it is still red afterwards:   wsl --set-default Ubuntu"       -ForegroundColor Gray
+            Write-Host ""
+        }
+        # Install Ubuntu directly.
         # We let wsl write its output to the console directly (no capture)
         # because PowerShell 5.1's pipeline mangles its UTF-16LE output -
         # and if this fails, the user needs to see wsl's own error text.

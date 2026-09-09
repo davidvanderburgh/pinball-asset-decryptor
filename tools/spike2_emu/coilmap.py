@@ -61,9 +61,14 @@ NEWLINE = chr(10)
 #: now, not the answer; see group_node() below.
 GROUP_NODE = {4: 0, 5: 1, 6: 8, 7: 9}
 
-#: Groups 4 and 5 are the CPU and the cabinet on every title measured, so only
-#: the playfield groups (>= 6) move. Kept beside GROUP_NODE so the two halves
-#: of the same fact sit together.
+#: Groups 4 and 5 are the CPU and the cabinet on MOST titles, so only the
+#: playfield groups (>= 6) move. Kept beside GROUP_NODE so the two halves of
+#: the same fact sit together.
+#:
+#: ★ IT IS A PIN, NOT A LAW, AND THE HOME EDITIONS LIFT IT - see
+#: fixed_group_node(). "every title measured" was every full-size cabinet on
+#: this disk; a machine with ONE playfield board puts that board in group 5
+#: and has no node 1 at all.
 FIXED_GROUPS = {4: 0, 5: 1}
 
 
@@ -167,7 +172,8 @@ def connector_group_node(dev_rows):
     metallica_spike all put a connector "2" on a group-5 row, against a switch
     join that says node 1 on every title it can answer for. Reading connectors
     for those groups would import that error for the two titles where nothing
-    contradicts it.
+    contradicts it. fixed_group_node() below reads them under a rule those
+    three rows cannot pass, which is what lets the Home Editions out.
     """
     seen = collections.defaultdict(set)
     for r in dev_rows or []:
@@ -177,6 +183,85 @@ def connector_group_node(dev_rows):
         if m:
             seen[r["group"]].add(int(m.group(1)))
     return {g: next(iter(n)) for g, n in seen.items() if len(n) == 1}
+
+
+def fixed_group_node(dev_rows):
+    """{group: node} for a FIXED_GROUPS group whose own rows say it is a board.
+
+    THE THIRD DERIVATION, AND IT EXISTS BECAUSE THE PIN IS A CENSUS AND NOT A
+    LAW. FIXED_GROUPS reads groups 4 and 5 as the CPU and the cabinet, which is
+    true of every full-size cabinet on this disk and false of both HOME
+    EDITIONS. star_wars_elg 1.10 and jurassic_park_the_pin 1.05 declare their
+    whole machine in group 5 - the flippers, the trough, the pops and EVERY
+    insert their service drawing carries (64 of 64 positioned lamps on one, 50
+    of 50 on the other) - and 73 of star_wars_elg's 120 group-5 rows spell the
+    board out in the connector column as `8a`/`8b`/`8c`, 59 of 101 on The Pin.
+
+    Their own node directories settle it: nbdir.py reads BOTH binaries as
+    nodes {0, 2, 4, 8, 12, 14} - a CPU, two ws2812 boards, a node4, one
+    playfield pinnode and a toy board - so NEITHER MACHINE HAS A NODE 1 for
+    the pin to be pointing at. So the pin was not merely reading
+    the wrong board, it was addressing a board the title does not have, and
+    every insert on the artwork view drew dark through a whole light show
+    while the shim decoded the same lamps on node 8. That is item 53's own
+    "a wrong address is worse than a missing one", one layer down: the pin is
+    another title's answer exactly as GROUP_NODE is.
+
+    ★ THE RULE IS A MAJORITY OF THE GROUP'S OWN ROWS, and it is a majority
+    because the claim being tested is "this GROUP is that board" - the rows
+    are the group's members, so more than half of them naming one board is the
+    group answering rather than a row answering. That is what separates the
+    Home Editions from the three titles connector_group_node() refuses to read
+    down here, and the gap is not close:
+
+        star_wars_elg        group 5   73 of 120 rows name node 8     61%
+        jurassic_park_the_pin group 5  59 of 101 rows name node 8     58%
+        john_wick_le         group 5    1 of 12 rows names node 2      8%
+        king_kong_le         group 5    1 of 12 rows names node 2      8%
+        king_kong_le         group 4    1 of 13 rows names node 9      8%
+        metallica_spike      group 5    1 of 15 rows names node 2      7%
+
+    Those lone rows are the case nodecensus.py already documents - Stern
+    filling in one channel of three, "a single LOCKDOWN BUTTON-B carrying 2a
+    where its own -R and -G siblings carry nothing" - and one row can never be
+    a majority of a group of twelve. No title on this disk sits near the line.
+
+    A MINORITY DISSENTER IS OUTVOTED RATHER THAN FATAL, which is the one place
+    this parts company with connector_group_node()'s all-or-nothing rule: The
+    Pin has a single lamp row carrying `12a` against 59 carrying `8a`, and
+    dropping the whole group over it would leave 50 inserts dark to protect
+    them from one. The unanimity rule up there is guarding groups whose
+    connectors split ~50/50 (dungeons_and_dragons_le); this one is guarding
+    against a lone row, and a majority answers both.
+
+    ONLY A DISAGREEMENT IS RETURNED. A connector column that names the node
+    the pin already gives changes nothing, so it is not reported - which keeps
+    `measured` empty on every title that was already right, and with it the
+    fallback branch in group_node().
+
+    NOT EXTENDED TO THE GROUPS BELOW 4, deliberately. john_wick_le, king_kong_le
+    and metallica_spike each put 288 topper lamps in group 1 with `2a` on 287
+    of them - the same shape of evidence, a bigger majority - but nothing is
+    pinning group 1 and nothing has reported those lamps, so lighting them is
+    its own change with its own proof, not a rider on this one.
+    """
+    rows_by_group = collections.defaultdict(list)
+    for r in dev_rows or []:
+        if r["group"] in FIXED_GROUPS:
+            rows_by_group[r["group"]].append(r)
+    out = {}
+    for group, rows in rows_by_group.items():
+        votes = collections.Counter()
+        for r in rows:
+            m = CONN_NODE.match(r.get("conn") or "")
+            if m:
+                votes[int(m.group(1))] += 1
+        if not votes:
+            continue
+        node, n = votes.most_common(1)[0]
+        if node != FIXED_GROUPS[group] and n * 2 > len(rows):
+            out[group] = node
+    return out
 
 
 def group_node(rows, nodedir_path=None, dev_rows=None,
@@ -217,12 +302,15 @@ def group_node(rows, nodedir_path=None, dev_rows=None,
     address, drawn dark on a complete piece of artwork, while the shim decoded
     36351 lamp writes on exactly the nodes those devices are on.
 
-    So two sources that MEASURE the mapping are consulted first:
+    So three sources that MEASURE the mapping are consulted first:
 
       1. switch_group_node() - the running game's own switch table, joined on
          the name. The game is the authority and this wins on disagreement.
       2. connector_group_node() - the device table's connector column. Needs
          no run, so it answers where (1) cannot.
+      3. fixed_group_node() - the same column read for the two groups (2)
+         refuses, under a majority rule. It is what unpins a HOME EDITION,
+         whose whole machine is group 5 and which has no node 1 at all.
 
     THEY AGREE, and that is the argument for trusting either. On every title on
     this disk where both can answer - beatles, deadpool_pro, godzilla_pro,
@@ -237,6 +325,8 @@ def group_node(rows, nodedir_path=None, dev_rows=None,
         james_bond_60th_le         : 8 -> 8, 9 -> 9, 10 -> 12
         jaws_le / deadpool_pro     : 7 -> 8, 8 -> 9
         dungeons_and_dragons_le    : 7 -> 8, 8 -> 9, 9 -> 10
+        star_wars_elg (Home Ed.)   : 5 -> 8            (PAD-120, 2026-09-09)
+        jurassic_park_the_pin      : 5 -> 8            (PAD-120, 2026-09-09)
 
     ★ WHEN A TITLE MEASURES ITS OWN MAP, GODZILLA'S IS DROPPED RATHER THAN
     USED TO FILL THE GAPS, and Bond is why. Its group 7 is 24 BACKBOX lamps;
@@ -244,10 +334,20 @@ def group_node(rows, nodedir_path=None, dev_rows=None,
     every backbox swatch was rendering playfield values under backbox labels.
     A wrong address is worse than a known-missing one: this item exists because
     one title's answer stood in for every title's, and filling holes from that
-    same constant is the same mistake one layer down. Only FIXED_GROUPS
-    survives, because groups 4 and 5 are the CPU and the cabinet on every title
-    measured and the switch join confirms 4 -> 0 and 5 -> 1 wherever it can
-    answer.
+    same constant is the same mistake one layer down. FIXED_GROUPS survived
+    that pass, because groups 4 and 5 are the CPU and the cabinet on every
+    title measured then and the switch join confirms 4 -> 0 and 5 -> 1 wherever
+    it can answer.
+
+    ★ AND FIXED_GROUPS TURNED OUT TO BE THE SAME MISTAKE A LAYER FURTHER DOWN
+    (PAD-120, 2026-09-09). It was applied LAST, over the measured sources, so
+    on a machine whose one playfield board IS group 5 - Star Wars Home Edition,
+    Jurassic Park Home Edition - every insert and every coil was addressed to
+    node 1, a board those titles do not have, and a tester watched an attract
+    light show with a completely dark virtual playfield. The pin now sits under
+    anything the title measures about itself: fixed_group_node() reads the
+    connector column for exactly these two groups under a majority rule, and
+    the switch join is no longer overruled here either.
 
     A title neither source can speak for is untouched: elvira3 names none of
     its 109 switches and writes no numeric connector, and it resolves exactly
@@ -261,16 +361,20 @@ def group_node(rows, nodedir_path=None, dev_rows=None,
 
     dev_rows = dev_rows if dev_rows is not None else rows
     measured = dict(connector_group_node(dev_rows))
+    measured.update(fixed_group_node(dev_rows))
     measured.update(switch_group_node(dev_rows, switch_lines))
 
-    # The ladder, weakest first. GROUP_NODE is the only rung that is ANOTHER
-    # title's answer, so it is the only one dropped the moment this title says
-    # anything about itself; the ascending rule is this title's own inference
-    # and stays underneath, covering groups the measured sources are silent on.
+    # The ladder, weakest first. BOTH CONSTANTS ARE ANOTHER TITLE'S ANSWER and
+    # both now sit under everything this title measures about itself: GROUP_NODE
+    # is dropped outright the moment there is any measurement, and FIXED_GROUPS
+    # - which used to be applied LAST, over the measured sources - is a pin that
+    # a group's own rows can lift (fixed_group_node, and the switch join with
+    # it). The ascending rule stays underneath the pin, covering groups nothing
+    # measured; it can only ever name coil groups (>= 6) anyway.
     mapping = dict(FIXED_GROUPS if (inferred or measured) else GROUP_NODE)
     mapping.update(inferred)
-    mapping.update(measured)
     mapping.update(FIXED_GROUPS)
+    mapping.update(measured)
     return mapping
 
 

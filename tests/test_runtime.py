@@ -527,3 +527,33 @@ def test_the_image_carries_file_because_save_states_depend_on_it():
     rig = (REPO / "tools" / "spike1_emu" / "emu_root.sh").read_text(
         encoding="utf-8")
     assert "file -L" in rig, "if the rig stopped using it, drop this test"
+
+
+def test_no_apostrophe_inside_the_workflows_single_quoted_shell_blocks():
+    """The image's checks run as ``docker run ... bash -c '<block>'``, one
+    single-quoted argument - so an apostrophe anywhere inside it closes the
+    quote and the step dies with "unexpected EOF while looking for matching
+    quote", pointing at the END of the block rather than at the word.
+
+    Only a CI run can report that, and it costs a fifteen-minute image build
+    to find out; it happened on the modprobe check, over the word "can not"
+    spelled the ordinary way.  Scanned here instead.
+    """
+    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    offenders, inside, opened_at = [], False, 0
+    for n, line in enumerate(lines, 1):
+        if not inside:
+            if line.rstrip().endswith("bash -c '"):
+                inside, opened_at = True, n
+            continue
+        if line.strip() == "'":          # the block's closing quote
+            inside = False
+            continue
+        if "'" in line:
+            offenders.append("line %d: %s" % (n, line.strip()[:60]))
+    assert not offenders, (
+        "these lines sit inside a single-quoted `bash -c` block in "
+        "runtime.yml and contain an apostrophe, which ends the block there: "
+        "%s" % "; ".join(offenders))
+    assert not inside, (
+        "a `bash -c '` block opened at line %d is never closed" % opened_at)

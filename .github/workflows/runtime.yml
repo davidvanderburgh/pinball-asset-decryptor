@@ -228,15 +228,23 @@ jobs:
             # runs it INSIDE this distro to load vhci_hcd, which is how the
             # JJP dongle reaches WSL at all.  There is no kernel under docker
             # to load a module into, so the proof here is that it runs and
-            # reports a missing module rather than a missing program - the
-            # error the image actually shipped with was "The 'modprobe'
-            # command is unavailable".
+            # reports a missing MODULE rather than a missing PROGRAM - the
+            # error the shipped image answered with was that the modprobe
+            # command is unavailable.
+            #
+            # NO APOSTROPHE ANYWHERE IN THIS BLOCK, comments included.  It is
+            # all one single-quoted argument to bash -c, so one apostrophe
+            # closes the quote and the step dies with "unexpected EOF while
+            # looking for matching quote" - pointing at the END of the block
+            # rather than at the word.  That is what happened here twice, and
+            # tests/test_runtime.py now scans for it.
             said=$(modprobe --dry-run vhci_hcd 2>&1 || true)
             case "$said" in
-              *"not found"*|*"can't open"*|*"Module"*|"") echo "modprobe runs: ${said:-clean}" ;;
-              *unavailable*) fail "modprobe is not installed: $said" ;;
-              *) echo "modprobe runs: $said" ;;
+              *unavailable*|*"not found: modprobe"*)
+                fail "modprobe is not installed: $said" ;;
+              *) echo "modprobe runs: ${said:-clean}" ;;
             esac
+            command -v modprobe >/dev/null || fail "modprobe is not installed"
             echo "pipeline tools OK"
           '
 

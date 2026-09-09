@@ -98,6 +98,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_adjustments" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_emulate" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx" \
+    --hidden-import "pinball_decryptor.plugins.stern.multiimage" \
     --hidden-import "pinball_decryptor.plugins.stern.valpatch" \
     --hidden-import "pinball_decryptor.plugins.stern.ext4" \
     --hidden-import "pinball_decryptor.plugins.stern.explorer" \

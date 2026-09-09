@@ -49,49 +49,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The hosted Windows runner ships an intermittent "There is not enough
-      # space on the disk" (the runner's own _diag block store) partway
-      # through the suite, so we delete the big SDK caches our Python tests
-      # never touch -- Android, CodeQL, the .NET/Swift toolchains.
+      # There used to be a "Free up disk space (Windows)" step here, deleting
+      # the Android/CodeQL/.NET/Swift trees because the suite intermittently
+      # filled C:.  It cost 1m17s, 5m40s and 5m06s on the three runs that
+      # were timed, on the runner this account queues longest for.
       #
-      # DO NOT make this conditional on free space.  Tried 2026-09-09, skip
-      # above 20 GB: the runner came up with 29.4 GB free, the step skipped,
-      # and the suite died on a full disk four minutes in.  The ~6 GB this
-      # buys is not slack, it is the margin -- runners start somewhere around
-      # 29-32 GB and the suite needs more than the low end of that.  A run
-      # that starts high enough to skip safely is indistinguishable from one
-      # that does not.
+      # It is gone because its reason is gone.  The suite filled C: because
+      # two mkmulticard tests built 7.32 GB card images with truncate, which
+      # is a hole on Linux and 7.32 GB of written zeros on Windows; four of
+      # those live at once cost 29 GB.  conftest.sparse_image() fixed that at
+      # the source.  Measured on the first run afterwards:
       #
-      # What WAS worth fixing is the cost.  Remove-Item -Recurse walks every
-      # file and took 1m17s on one run and 5m40s on the next, all of it on
-      # the runner this account queues longest for.  cmd's rd hands the whole
-      # tree to the filesystem, and the trees go in parallel.
-      # hostedtoolcache\windows\Python is deliberately spared -- setup-python
-      # needs it.
-      - name: Free up disk space (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $before = (Get-PSDrive C).Free / 1GB
-          $targets = @(
-            "$env:ANDROID_SDK_ROOT",
-            "$env:ANDROID_HOME",
-            "C:\Android",
-            "C:\hostedtoolcache\windows\CodeQL",
-            "$env:AGENT_TOOLSDIRECTORY\CodeQL",
-            "C:\Program Files\dotnet",
-            "C:\Program Files\Microsoft SDKs\Azure",
-            "C:\Swift"
-          ) | Where-Object { $_ -and (Test-Path $_) }
-          $jobs = foreach ($t in $targets) {
-            Write-Host "Removing $t"
-            Start-Job -ArgumentList $t -ScriptBlock {
-              param($p); & cmd.exe /c "rd /s /q `"$p`"" 2>&1 | Out-Null
-            }
-          }
-          if ($jobs) { $jobs | Wait-Job -Timeout 300 | Out-Null; $jobs | Remove-Job -Force }
-          $after = (Get-PSDrive C).Free / 1GB
-          Write-Host ("C: free before={0:N1} GB, after={1:N1} GB" -f $before, $after)
+      #   free before the (still-present) cleanup   31.9 GB
+      #   free after it                             34.5 GB
+      #   free after the whole suite                32.7 GB
+      #
+      # 1.8 GB consumed against 31.9 GB a runner comes up with -- a 17x
+      # margin, not a squeaker.  The step below keeps printing the number so
+      # a regression shows up as a shrinking margin rather than as a red job
+      # months from now.
 
       - name: Set up Python
         uses: actions/setup-python@v5

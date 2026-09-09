@@ -781,9 +781,42 @@ unset _v _val
 # root ignores file permissions. Not root (an ordinary run) - nothing changes.
 PAD_USER=${PAD_USER:-${SUDO_USER:-}}
 if [ -z "$PAD_USER" ] && [ "$(id -u)" = 0 ]; then
-    # whoever owns the rootfs is the desktop user whose session this is
-    PAD_USER=$(stat -c %U "$ROOT" 2>/dev/null)
+    # ★ WHOEVER OWNS THE RIG'S HOME. NOT THE ROOTFS - THE ROOTFS ANSWERS ROOT
+    # ON ANY MACHINE WHOSE FIRST RUN CAME FROM THE APP (PAD-119, C FB
+    # 2026-09-08).
+    #
+    # This asked `stat -c %U "$ROOT"`, and $ROOT is the one directory in the
+    # rig that a root run BUILDS ITSELF. ensurebuild.sh makes it and rootfs.sh
+    # fills it with `debugfs rdump`, which as root restores the card's own
+    # ownership - i.e. root. So on a machine where the app's Start was the
+    # first thing ever to build the guest filesystem, this answered "root",
+    # PAD_USER came out empty, DROP stayed 0, and the renderer ran as root
+    # FOREVER AFTER: black window, "MESA: error: Failed to attach to x11 shm"
+    # on repeat, every other counter healthy.
+    #
+    # AND THE BANNER BELOW THEN BLAMED THE WRONG THING. It says the cure is an
+    # ordinary account plus `default=` in /etc/wsl.conf - which is right for a
+    # root-default distro and useless here, because this distro already logs in
+    # as an ordinary user. The reporter did all three commands, restarted WSL,
+    # and got the same black window; his own log had `logs in as: home` from
+    # the setup check and the root banner from here, in the same file.
+    #
+    # $PAD_HOME IS THE RIGHT QUESTION and the rest of the rig already asks it:
+    # cardmount.sh, overrides.sh and buildselect.sh all hand their output back
+    # to `stat -c %U "$HOME"`. padpath.sh's header states the rule this follows
+    # - "ROOT IS ELEVATION, NOT OWNERSHIP: the rig belongs to a human's home" -
+    # and PAD_HOME is that home, resolved there rather than guessed here. A
+    # genuinely root-default distro still lands on /root, which root owns, so
+    # PAD_USER stays empty and the banner below is still the right answer for
+    # the machine it was written for.
+    PAD_USER=$(stat -c %U "$PAD_HOME" 2>/dev/null)
     [ "$PAD_USER" = root ] && PAD_USER=""
+    # The rootfs stays as the fallback: a rig whose home this shell cannot stat
+    # but whose tree is plainly someone's is still theirs to run.
+    if [ -z "$PAD_USER" ]; then
+        PAD_USER=$(stat -c %U "$ROOT" 2>/dev/null)
+        [ "$PAD_USER" = root ] && PAD_USER=""
+    fi
 fi
 DROP=0
 [ "$(id -u)" = 0 ] && [ -n "$PAD_USER" ] && DROP=1

@@ -1004,7 +1004,15 @@ HELP_CONTENT = {
          "instead: fetch the file on any other machine and it is checked "
          "against the same checksum before it is installed. Start does the "
          "same install by itself, so pressing this first is only needed when "
-         "something has gone wrong."),
+         "something has gone wrong. Right-click it to give space back "
+         "instead: \"Delete the emulator's data\" (the extracted games, "
+         "card caches and save states), \"Delete downloaded files\" (the "
+         "emulator binaries and the runtime image, all re-downloadable), and "
+         "\"Remove the app's Linux\" (the PAD-Runtime distro itself). Each "
+         "says what it will destroy before it does it, refuses while a game "
+         "is running, and reports how much it freed. The emulator's work "
+         "lives on a disk of its own, so removing the runtime does not take "
+         "your save states with it."),
         ("Play a game",
          "A display window shows what the machine is showing — the dot matrix, "
          "or, on a 2012 home model, its two 16-segment displays side by side "
@@ -1400,7 +1408,13 @@ HELP_CONTENT = {
          "“Set up emulator…” beside it, instead of leaving it to the next "
          "Start to fail. The log says it is checking before it checks, "
          "since that check is what boots WSL back up. A machine that came "
-         "back intact is told nothing."),
+         "back intact is told nothing. There is a third fault it cures: "
+         "WSL takes its graphics libraries from the Windows side, and a "
+         "session left running across a driver or WSL update can end up "
+         "with a stale set that Linux refuses to load. The run no longer "
+         "stops for that — it carries on with software rendering, which "
+         "costs a few percent here — but it says so in the log, and this "
+         "is the button that puts the graphics card back."),
     ],
     "Compare": [
         ("What it does",

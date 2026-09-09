@@ -140,6 +140,7 @@ COMMAND_PACKAGE = {
     "gcc": "gcc",
     "gpg": "gnupg",
     "killall": "psmisc", "fuser": "psmisc",
+    "modprobe": "kmod",
     "partprobe": "parted",
     "python3": "python3",
     "rsync": "rsync",
@@ -170,13 +171,34 @@ NOT_COMMANDS = {"apk", "dest", "emmc_exec", "image_exec", "img_exec",
                 "inner_exec", "out_exec", "p3_exec"}
 
 
-def _commands_the_pipelines_run():
-    """Every word sitting where a COMMAND would in the shell strings handed to
-    the executor: the start of the string, or after ``|``, ``&&``, ``;``.
+def _leading_words(shell):
+    """Every word sitting where a COMMAND would in one shell string: the start
+    of it, or after ``|``, ``&&``, ``;``."""
+    out = set()
+    for tok in re.split(r'\|\||&&|[|;&\n(]', shell):
+        tok = re.sub(r'^(?:sudo\s+|env\s+|[A-Z_][A-Z0-9_]*=\S*\s+)+', '',
+                     tok.strip())
+        word = re.match(r'^([a-z][a-z0-9_.+-]{1,24})\b', tok)
+        if word:
+            out.add(word.group(1))
+    return out
 
-    Read out of the source rather than listed, for the same reason the
-    installer's table is: a list of what the code runs, maintained by hand
-    beside the code that runs it, is a list that goes stale silently."""
+
+def _commands_the_pipelines_run():
+    """Everything the app asks a Linux to run, from BOTH places it asks from.
+
+    The shell strings handed to the executor are read out of the source, for
+    the same reason the installer's table is: a list maintained by hand beside
+    the code it describes is a list that goes stale silently.
+
+    THE PREREQUISITE PROBES ARE ASKED OF THE OBJECTS, not of the source, and
+    that is the half this scan first missed.  A probe may be a constant rather
+    than a literal - ext4_grow's LOOP_PROBE is `modprobe loop ... ; losetup
+    -f` - so a regex over the plugin files sees `probe=LOOP_PROBE` and learns
+    nothing.  Loading the plugins and reading `Prerequisite.probe` sees the
+    command.  modprobe is exactly what slipped through: it is not in any
+    prerequisite table either, and the image shipped without it.
+    """
     found = set()
     roots = [REPO / "pinball_decryptor" / "plugins",
              REPO / "pinball_decryptor" / "core"]
@@ -186,13 +208,14 @@ def _commands_the_pipelines_run():
         re.S)
     for f in files:
         for m in call.finditer(f.read_text(encoding="utf-8", errors="replace")):
-            for tok in re.split(r'\|\||&&|[|;&\n(]', m.group(1)):
-                tok = re.sub(
-                    r'^(?:sudo\s+|env\s+|[A-Z_][A-Z0-9_]*=\S*\s+)+', '',
-                    tok.strip())
-                word = re.match(r'^([a-z][a-z0-9_.+-]{1,24})\b', tok)
-                if word:
-                    found.add(word.group(1))
+            found |= _leading_words(m.group(1))
+
+    from pinball_decryptor.core.registry import all_manufacturers, load_plugins
+    load_plugins()
+    for mfr in all_manufacturers():
+        for p in (mfr.prerequisites or ()):
+            if p.where == "wsl" and not p.probe.startswith("python:"):
+                found |= _leading_words(p.probe)
     return found - NOT_COMMANDS
 
 

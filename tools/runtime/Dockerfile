@@ -264,6 +264,19 @@ RUN if [ "$VARIANT" = full ]; then \
 #:                      reports success and leaves the output folder empty
 #:   parted             partprobe(1), asking the kernel to re-read a partition
 #:                      table the direct-to-SSD write just changed
+#:   kmod               modprobe(1).  WSL 2 shares ONE kernel between every
+#:                      distro, so a module loaded from any of them is loaded
+#:                      for all - but something has to load it, and usbipd
+#:                      does that by running modprobe INSIDE the distro it is
+#:                      told to attach through.  Once the app started naming
+#:                      ours, "usbipd attach" died on `The 'modprobe' command
+#:                      is unavailable` and the JJP dongle never appeared.
+#:                      ext4_grow's loop-device probe does the same for
+#:                      `modprobe loop`, quietly - it is written `|| true`, so
+#:                      its absence is not an error, just a loop device that
+#:                      never arrives on a machine where nothing else loaded
+#:                      the module first.  Found by plugging the Sentinel key
+#:                      in, which is the only way it could have been found
 #: These three are not in any prerequisite table either.  They were found by
 #: reading every command the plugin pipelines hand to the executor and asking
 #: this image for each one - which is now a test (tests/test_runtime_packages
@@ -287,6 +300,7 @@ RUN if [ "$VARIANT" = full ]; then \
         psmisc \
         rsync \
         parted \
+        kmod \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 

@@ -199,7 +199,7 @@ jobs:
           docker run --rm pad-runtime:${{ inputs.tag }} bash -c '
             set -e
             fail() { echo "FAILED: $1"; exit 1; }
-            for t in gpg partclone.ext4 xorriso pigz curl unzip cwebp xvfb-run tar fuser killall rsync partprobe; do
+            for t in gpg partclone.ext4 xorriso pigz curl unzip cwebp xvfb-run tar fuser killall rsync partprobe modprobe; do
               command -v $t >/dev/null || fail "missing: $t"
             done
             gpg --version | head -1
@@ -223,6 +223,19 @@ jobs:
             case "$said" in
               *"Godot RE Tools"*) echo "GDRE Tools runs headless: $said" ;;
               *) fail "GDRE Tools did not start under xvfb (the way the BOF pipeline runs it): $said" ;;
+            esac
+            # modprobe is asked to do its job, not merely to exist: usbipd
+            # runs it INSIDE this distro to load vhci_hcd, which is how the
+            # JJP dongle reaches WSL at all.  There is no kernel under docker
+            # to load a module into, so the proof here is that it runs and
+            # reports a missing module rather than a missing program - the
+            # error the image actually shipped with was "The 'modprobe'
+            # command is unavailable".
+            said=$(modprobe --dry-run vhci_hcd 2>&1 || true)
+            case "$said" in
+              *"not found"*|*"can't open"*|*"Module"*|"") echo "modprobe runs: ${said:-clean}" ;;
+              *unavailable*) fail "modprobe is not installed: $said" ;;
+              *) echo "modprobe runs: $said" ;;
             esac
             echo "pipeline tools OK"
           '

@@ -664,6 +664,19 @@ def test_transfer_panel_autofills_base_image_and_versions(
     # Version hints parsed from the recorded source filenames.
     assert "1.58.1 (1987)" in w.transfer_src_ver_var.get()
     assert "1.59.0 (Release)" in w.transfer_dst_ver_var.get()
+    # Field 3 reports its version too (PAD-124: it was the one picker with no
+    # chip, so choosing a folder there looked like nothing happened — and it
+    # is the field where a wrong version does the most damage, since the whole
+    # compare is against it).
+    oldstock = tmp_path / "oldstock158"
+    oldstock.mkdir()
+    extract_source.write_extract_source(str(oldstock), old_img)
+    w.transfer_oldstock_var.set(str(oldstock))
+    app.root.update()
+    assert "1.58.1 (1987)" in w.transfer_oldstock_ver_var.get()
+    w.transfer_oldstock_var.set("")
+    app.root.update()
+    assert w.transfer_oldstock_ver_var.get() == ""
     # Base image auto-filled from the NEW extract's recorded source...
     assert os.path.normcase(w.transfer_newimg_var.get()) == os.path.normcase(
         str(base_img))

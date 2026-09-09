@@ -35,6 +35,23 @@ def _require_engine():
             "(pip install unicorn capstone numpy) and try again.")
 
 
+def _log_multi_image(path, log):
+    """Say which image of a multi-boot card this run covers (PAD-122).
+
+    In the RUN LOG as well as the confirm the App shows first, because the log
+    is what a user pastes into a bug report — and "only the first image
+    changed" is exactly the report a multi-boot card produces otherwise.
+    Silent for an ordinary single-game card, and never fatal: this is a
+    courtesy probe in front of the real work.
+    """
+    try:
+        from .multiimage import images_for_path, log_lines
+        for line in log_lines(images_for_path(path)):
+            log(line, "warning")
+    except Exception:
+        pass
+
+
 def _category_flags(cats):
     """Map the GUI's ``{category: bool}`` selection to ``extract_all``'s
     ``do_audio`` / ``do_video`` / ``do_images`` / ``do_text`` kwargs.  Missing or
@@ -175,6 +192,9 @@ class SternExtractPipeline(BasePipeline):
                 "Locate partitions",
                 "No Linux (ext) partition found on the card image.")
         self._log("Found %d ext partition(s)." % len(parts), "info")
+        # ...and, on a multi-boot card, which of its games those belong to:
+        # this extract is the first image only (PAD-122).
+        _log_multi_image(self.input_path, self._log)
         self._check_cancel()
 
         _require_engine()
@@ -222,6 +242,10 @@ class SternWritePipeline(BasePipeline):
         key = detect_game(self.original_path)
         if key is None:
             raise PipelineError("Detect", "Original is not a Spike card image.")
+        # A multi-boot original builds a multi-boot card with its FIRST image
+        # changed and the rest copied through (PAD-122) — say so in the log
+        # the user keeps, not only in the confirm they clicked past.
+        _log_multi_image(self.original_path, self._log)
         self._check_cancel()
         self._set_phase(1)  # Stage
         _require_engine()

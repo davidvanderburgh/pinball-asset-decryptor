@@ -972,7 +972,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    how many — that pattern means one of the two folders was extracted by
    an older release rather than that the sound was re-recorded, so
    re-extracting both with this version and running the transfer again
-   is the fix. Image
+   is the fix. From v0.196.0 the strings a transfer could NOT line up
+   are named, not just counted: the log quotes each one under the asset
+   it came from and says which of the two old-version extracts it was
+   in, so you can tell at a glance whether the skipped text was one of
+   your own lines or something the factory reworded on its own. Sound
+   slots that exist on only one side, and text assets the modded
+   extract does not have at all, are listed the same way, and the
+   confirm dialog points at the log for the list. Image
    edits (including single-character font-glyph edits) and your renamed
    image-group names ride along too, matched by their on-card identity so
    they land on the right slot even when the new firmware re-baked the art
@@ -1035,6 +1042,20 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    compare against, an edit whose bytes can't be traced back to a file
    on the card, or a booted card that doesn't carry the files it was
    given, and the run stops and says which.
+   And a replacement you *picked* counts as one of those edits from
+   v0.196.3, even if you have never built a card with it: Start applies
+   the assignments waiting on the Replace tabs to the project folder
+   first, exactly as a build does before it repacks, and says in the log
+   that it did - it changed your folder and you did not press Build.
+   Before that the box could only see edits a previous build had already
+   written there, so a freshly picked sound, clip or image ran as the
+   stock card and the log said there was nothing to apply. If everything
+   you assigned fails to convert, the run refuses instead of playing the
+   stock card. On a multi-boot card the edits are prepared from ONE image
+   on it - the largest game partition, which is where every write on that
+   card goes - and applied over whichever image you pick at the boot
+   menu, and the run says so; to edit a different image, build that image
+   on its own and rebuild the multi-boot card from it.
    A **virtual playfield** window opens beside the game: the title's own
    artwork with every switch, coil and insert drawn on it, inserts lit
    live off the node bus, and switches you can click or press and hold
@@ -1070,6 +1091,21 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    which lets loading a checkpoint taken before this change be refused
    in the pre-flight — before the running game is killed for it,
    rather than after.
+   **A Home Edition's inserts light.** Star Wars Home Edition and
+   Jurassic Park The Pin drew every insert dark through the whole
+   attract light show, on a playfield window whose own status bar was
+   counting tens of thousands of decoded lamp writes at the same time.
+   A Home Edition is ONE playfield board, and both titles describe
+   their whole machine — flippers, trough, pops and every positioned
+   insert — in a single group of the game binary's device table: a
+   group the rig had pinned to the board number a full cabinet uses for
+   its cabinet wiring. Neither machine has that board at all, so every
+   lamp on it was addressed to nothing. That pin is now read from the
+   table's own wiring column, when a majority of the group's rows name
+   one board, and it gives way to whatever the running game says about
+   itself instead of overriding it. Measured across every title in the
+   library that carries a device table, exactly two maps change, and
+   they are these two.
    **The switch list carries the game's own names.** A title whose
    device table describes only a handful of its switches used to leave
    the rest of the list as question marks — one 105-switch machine
@@ -1140,7 +1176,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    without either starts the ordinary way instead — every title runs,
    one log line says save states are off and how to turn them on.)
    A run that cannot be saved says why on the button instead of failing
-   quietly.
+   quietly. From v0.196.1 the save-state controls take a row of their
+   own when the window is too narrow to hold them beside the game
+   buttons. The two clusters grow from opposite edges of the playfield,
+   and the window is sized from your screen, so on a shorter screen they
+   used to meet in the middle and draw on top of each other — the slot
+   picker over Start, Load state over Plunge, four buttons visible and
+   two of them unclickable. The fit is measured rather than assumed, so
+   a window with room to spare looks exactly as it did.
    A **Volume slider and Mute** sit next to the Sound checkbox — the
    level of the emulator's own sound coming out of your PC speakers,
    not the in-game volume adjustment on the machine's own coin door.
@@ -1272,6 +1315,26 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    Nothing is changed for you: which user a run starts as is a WSL
    setting, and a guessed one is easy to get wrong in a way that trades
    a black window for a renderer that can't start at all.
+   That notice was right about the machine it describes and, until
+   v0.196.1, fired on a second machine it could not help. Every Start is
+   elevated, and the run hands its helpers back to your desktop account
+   before the game window opens, or the renderer cannot reach the
+   display. It worked out which account that is by asking who owns the
+   extracted guest filesystem — the one folder an elevated run creates
+   for itself, which therefore answers *root* on any PC where this app's
+   own Start was the first thing ever to build it. The hand-back was
+   skipped, the window was black on that run and on every run after it,
+   and the notice then blamed a login setting that was already correct:
+   the setup check in the same log said the distro logs in as an
+   ordinary user. The question is now asked of the emulator's home
+   folder, which is where the rest of the emulator already asks it, so
+   an elevated run on an ordinary distro drops back to you as it always
+   meant to. A distro that really does log in as root still owns a root
+   home, still gets the notice above, and the cure named there is still
+   the right one. A stray *"integer expression expected"* line during
+   the same first build is gone too — it came from the count of the
+   ownership notices an elevated extraction never produces, and it was
+   only ever noise in the middle of an extraction that was going fine.
    The run also stopped claiming you closed the window when you didn't.
    *"renderer exited (window closed)"* was printed on nothing more than
    the process being gone, so a renderer that **died** read exactly

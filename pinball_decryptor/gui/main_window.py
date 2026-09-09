@@ -1525,7 +1525,8 @@ class MainWindow:
                  initial_show_log_history=True,
                  on_show_log_history_change=None,
                  initial_compare_row_limit=None,
-                 on_compare_row_limit_change=None):
+                 on_compare_row_limit_change=None,
+                 on_stage_pending=None):
         self.root = root
         self._install_callback_error_logger(root)
         # Default Settings presets: {"presets": {name: {AD_name: value}},
@@ -1794,6 +1795,12 @@ class MainWindow:
         self.compare_limit_var = tk.StringVar(
             value=normalize_compare_row_limit(initial_compare_row_limit))
         self._on_compare_row_limit_change = on_compare_row_limit_change
+        #: PAD-121: ``App.stage_pending_replacements`` — write the Replace
+        #: tabs' assigned replacements into the project folder.  Injected
+        #: because it is the app's job (it owns the worker queue the staging
+        #: logs through) and the Emulate tab needs it before it can build an
+        #: override set out of that folder.
+        self._on_stage_pending = on_stage_pending
         self._compare_expanded = set()  # (section index, group index)
         self._compare_more = {}         # tree iid -> that key, for the click
         self._compare_row_count = 0     # rows painted, for scroll restore
@@ -14160,6 +14167,11 @@ class MainWindow:
             # has one extract folder and that field already owns it.
             assets_var=self.write_assets_var,
             overrides_var=self.emulate_overrides_var,
+            # PAD-121: and the app's own staging, so a replacement assigned
+            # on a Replace tab is IN that folder by the time the override set
+            # is computed from it.  Without it the box only ever saw the edits
+            # a previous build had already written there.
+            stage_fn=self._on_stage_pending,
             theme_fn=lambda: self._current_theme,
             badge_fn=self._make_round_icon,
             # The panel's setup notice can appear while the user is already

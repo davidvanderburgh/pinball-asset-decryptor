@@ -837,6 +837,23 @@ class Manufacturer(ABC):
                 "dimensions. Pick your extracted folder, assign an image to a "
                 "slot, then build the update on the Write tab.")
 
+    #: Title of the confirm :meth:`source_note` is shown in.  Override with
+    #: the name of the thing being warned about (Stern: "Multi-boot card").
+    source_note_title: str = "About this image"
+
+    def source_note(self, path) -> str:
+        """Something about the source image itself the user must be told
+        BEFORE an Extract or a Build runs against it, or ``""``.
+
+        Not an error and not a refusal: the run is valid, but it covers less
+        of *path* than the file's name suggests, and finding that out an hour
+        later costs the user the hour.  The App shows it as a confirm before
+        it starts either job; the plugin's pipeline logs the same facts.  Runs
+        on the Tk thread on a button press, so it must stay a cheap
+        metadata-level probe (Stern's is the multi-boot image count).
+        """
+        return ""
+
     def audio_export_supported(self, path) -> bool:
         """Whether extracting *path* yields audio assets the
         transcribe pipeline can act on.

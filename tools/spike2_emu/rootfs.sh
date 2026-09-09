@@ -166,11 +166,16 @@ echo "[rootfs] extracting the OS partition (offset $OFF) - several minutes"
 # script is that it needs no root, so the noise is summarised rather than shown.
 XLOG=$(mktemp "${TMPDIR:-/var/tmp}/rootfs.XXXXXX")
 debugfs -R "rdump / $STAGE" "$IMG?offset=$OFF" > "$XLOG" 2>&1
-# `grep -c` PRINTS 0 AND EXITS 1 when it matches nothing, so `|| echo 0`
-# appended a SECOND zero and the test below read "0\n0" - "integer expression
-# expected", printed in the middle of a first run that was otherwise going
-# fine.  The exit code is what needs the fallback, not the output.
-CHOWN_WARN=$(grep -c 'changing ownership' "$XLOG" 2>/dev/null) || CHOWN_WARN=0
+# `|| true`, NOT `|| echo 0`. `grep -c` PRINTS "0" and EXITS 1 when it matches
+# nothing, so the fallback appended a SECOND zero and this variable came out as
+# two lines - which is what the app's log pane showed a first-time user
+# (PAD-119, C FB 2026-09-08), mid-build, in the middle of an extraction that
+# was going fine:
+#     rootfs.sh: line 141: [: 0
+#     0: integer expression expected
+# That is a run under a root launch, where rdump keeps the card's ownership and
+# so warns about nothing at all. The count is already defaulted at its reader.
+CHOWN_WARN=$(grep -c 'changing ownership' "$XLOG" 2>/dev/null || true)
 grep -v 'changing ownership' "$XLOG" | grep -v '^debugfs' | grep -v '^$' | head -8
 [ "${CHOWN_WARN:-0}" -gt 0 ] && \
     echo "[rootfs] ($CHOWN_WARN ownership notices - expected without root, files still extracted)"

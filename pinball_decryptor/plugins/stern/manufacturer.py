@@ -409,6 +409,11 @@ class SternManufacturer(Manufacturer):
     # be mistaken for the stock image in the same folder (a tester 5).  Safe
     # here: the flashed card doesn't care what the image file was called.
     write_output_suffix = "-modified"
+    # The only thing Stern's source_note ever reports (PAD-122): a card with a
+    # boot menu on it.  Titling the confirm with what it is about beats the
+    # base class's "About this image" — the user has to recognise the case
+    # from the title bar before reading a word.
+    source_note_title = "Multi-boot card"
 
     # ------------------------------------------------------------------
     # Era-aware surface (Spike 2 SD-card vs Whitestar MAME capture)
@@ -573,6 +578,26 @@ class SternManufacturer(Manufacturer):
         elif game.era == "whitestar" and game.notes:
             disp += " (%s)" % game.notes
         return disp
+
+    def source_note(self, path):
+        # PAD-122: a multi-boot card carries several games and the app edits
+        # exactly one of them (see .multiimage).  Said before the Extract or
+        # the Build starts, because the alternative is what the tester who
+        # asked for it did — mod a multi-boot card for a while and work out
+        # from the result that only one image had changed.  Spike 2 cards
+        # only; a Whitestar zip or a Spike 1 card has nothing to count.  A raw
+        # device skips that gate — detect_game routes on the FILENAME, which
+        # \\.\PHYSICALDRIVE2 does not have, and reading the card in a reader
+        # is the likeliest way to meet a multi-boot card in the first place.
+        from ...core.rawdevice import is_device_path
+        if not is_device_path(path) and (
+                path.lower().endswith(".zip") or detect_game(path) is None):
+            return ""
+        from .multiimage import note_for_path
+        try:
+            return note_for_path(path)
+        except Exception:
+            return ""                     # never block a run on the probe
 
     def image_info(self, path, assets_dir=None):
         # Only the Spike 2 card probe — a Whitestar MAME zip or Spike 1 card

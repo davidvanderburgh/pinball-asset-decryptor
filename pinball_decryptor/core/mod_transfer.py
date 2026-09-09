@@ -589,7 +589,11 @@ def _longest_monotone(anchors):
 
 def _pair_text_lists(stock, modded):
     """Pair one asset's stock strings with the modded extract's, returning
-    ``([(stock_s, modded_s), ...], n_unpaired)``.
+    ``([(stock_s, modded_s), ...], [(side, string), ...])`` where *side* is
+    ``"stock"`` / ``"modded"``: which extract each unpaired string came from,
+    so the caller can NAME them rather than only count them (a tester asked
+    for exactly that: "showing part of the text not matched would be helpful
+    in understanding if it was something important").
 
     A baked text mod is an IN-PLACE, same-length patch, so a modded string
     sits where in the asset's row list the stock string it replaced sat — but
@@ -613,7 +617,9 @@ def _pair_text_lists(stock, modded):
     between consecutive anchors by position.  Only an equal-length run is
     paired: same-length in place is what a text patch looks like, and a
     lopsided run is a genuine add/remove where guessing which new string
-    replaced which old one would invent an edit the user never made.  Those
+    replaced which old one would invent an edit the user never made.  BOTH
+    sides of such a run are returned as unpaired — the old string nothing
+    replaced, and the new string that replaced nothing.  Those
     are counted, not paired.  With no anchors at all (every string repeats)
     two equal-length lists still pair straight through, as they always did.
     """
@@ -626,14 +632,15 @@ def _pair_text_lists(stock, modded):
     anchors = [(i, at_m[s]) for i, s in enumerate(stock)
                if counts_s[s] == 1 and counts_m.get(s) == 1]
 
-    pairs, unpaired = [], 0
+    pairs, unpaired = [], []
     i = j = 0
     for a_i, a_j in _longest_monotone(anchors) + [(len(stock), len(modded))]:
         n_s, n_m = a_i - i, a_j - j
         if n_s == n_m:
             pairs.extend(zip(stock[i:a_i], modded[j:a_j]))
         else:
-            unpaired += max(n_s, n_m)
+            unpaired.extend(("stock", s) for s in stock[i:a_i])
+            unpaired.extend(("modded", s) for s in modded[j:a_j])
         i, j = a_i + 1, a_j + 1
     return pairs, unpaired
 
@@ -648,7 +655,14 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
          "text_rows": [{path, original, replacement}, ...],
          "notes": {"paired_audio": int, "unpaired_audio": int,
                    "skipped_text_assets": int, "unpaired_text": int,
-                   "image_rebake_skipped": int}}
+                   "image_rebake_skipped": int,
+                   "unpaired_audio_slots": [(side, rel), ...],
+                   "skipped_text_paths": [asset_path, ...],
+                   "unpaired_text_rows": [{path, side, text}, ...]}}
+
+    The three lists say WHICH items the counts above them are about (*side* is
+    ``"stock"`` / ``"modded"``); :func:`unmatched_text_lines` turns the text
+    ones into log lines, and this function already streams them at *log_cb*.
 
     ``image_rebake_skipped`` counts image pairs whose bytes differ but whose
     pixels are identical (a re-encode, not a mod — see
@@ -666,7 +680,9 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
     log = log_cb or (lambda *_a, **_k: None)
     saved = {"audio": {}, "video": {}, "image": {}}
     notes = {"paired_audio": 0, "unpaired_audio": 0, "skipped_text_assets": 0,
-             "unpaired_text": 0, "image_rebake_skipped": 0}
+             "unpaired_text": 0, "image_rebake_skipped": 0,
+             "unpaired_audio_slots": [], "skipped_text_paths": [],
+             "unpaired_text_rows": []}
 
     mod_keys = _audio_by_slot_key(modded_dir)
     stk_keys = _audio_by_slot_key(stock_dir)
@@ -677,13 +693,18 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
         mod_rel = mod_keys.get(key)
         if mod_rel is None:
             notes["unpaired_audio"] += 1
+            notes["unpaired_audio_slots"].append(("stock", stk_rel))
             continue
         notes["paired_audio"] += 1
         if _files_differ(_abs(stock_dir, stk_rel), _abs(modded_dir, mod_rel)):
             saved["audio"][stk_rel] = os.path.abspath(_abs(modded_dir, mod_rel))
-    notes["unpaired_audio"] += sum(1 for k in mod_keys if k not in stk_keys)
+    for k, mod_rel in mod_keys.items():
+        if k not in stk_keys:
+            notes["unpaired_audio"] += 1
+            notes["unpaired_audio_slots"].append(("modded", mod_rel))
     log("Sounds: %d differ (%d unpaired)."
         % (len(saved["audio"]), notes["unpaired_audio"]))
+    _log_lines(log, _unpaired_audio_lines(notes["unpaired_audio_slots"]))
 
     # Videos pair by on-card path when both extracts carry a manifest (same
     # version, so filenames USUALLY agree — but the manifest is authoritative
@@ -738,9 +759,12 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
         mod_originals = mod_by_path.get(path)
         if mod_originals is None:
             notes["skipped_text_assets"] += 1
+            notes["skipped_text_paths"].append(path)
             continue
         pairs, unpaired = _pair_text_lists(stk_originals, mod_originals)
-        notes["unpaired_text"] += unpaired
+        notes["unpaired_text"] += len(unpaired)
+        notes["unpaired_text_rows"].extend(
+            {"path": path, "side": side, "text": s} for side, s in unpaired)
         for stock_s, modded_s in pairs:
             if modded_s != stock_s:
                 text_rows.append({"path": path, "original": stock_s,
@@ -756,6 +780,7 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
         log("Text: %d string(s) differ.%s"
             % (len(text_rows),
                ("  Skipped " + " and ".join(extra) + ".") if extra else ""))
+        _log_lines(log, unmatched_text_lines(notes))
 
     return {"saved": saved, "text_rows": text_rows, "notes": notes}
 
@@ -1314,6 +1339,79 @@ def _detail_block(out, level, header, entries, label, cap):
         out.append((level, "    " + label(e)))
     if len(entries) > cap:
         out.append((level, "    ...and %d more" % (len(entries) - cap)))
+
+
+def _log_lines(log, lines):
+    """Push ``[(level, text), ...]`` at a ``log_cb``."""
+    for level, text in lines:
+        log(text, level)
+
+
+#: How much of an unmatched string a log line shows.  Long enough to recognise
+#: a call-out or a mode title, short enough to keep one string on one line.
+_SNIPPET_CAP = 70
+
+
+def _text_snippet(s):
+    """One quoted, single-line, length-capped rendering of a manifest string.
+
+    Quoted because whitespace matters here (padding is what a lot of these
+    strings are), and flattened because a game-program string can carry a real
+    line break — which would otherwise break the one-line-per-item log."""
+    s = (s or "").replace("\r", " ").replace("\n", "\\n").replace("\t", " ")
+    if len(s) > _SNIPPET_CAP:
+        s = s[:_SNIPPET_CAP] + "…"
+    return '"%s"' % s
+
+
+_TEXT_SIDE = {"stock": "only in the stock old-version extract",
+              "modded": "only in your modded extract"}
+
+
+def unmatched_text_lines(notes, cap=_DETAIL_CAP):
+    """Name the text a :func:`diff_baked_mods` compare could NOT line up
+    between the two old-version extracts.  Returns ``[(log_level, text), ...]``
+    from that call's *notes*, empty when everything paired.
+
+    The compare used to report those as a bare count, which tells the user
+    nothing about whether the thing it skipped was one of his own mods or a
+    line the vendor changed on its own.  A tester asked for the strings
+    themselves: "showing part of the text not matched would be helpful in
+    understanding if it was something important or just something Stern did
+    that has no relevance to the update.\""""
+    out = []
+    _detail_block(
+        out, "warning",
+        "Text: %d string(s) couldn't be lined up between the two old-version "
+        "extracts, so no edit to them can be carried.  Here they are — if "
+        "none of them are yours, nothing of yours was skipped:",
+        notes.get("unpaired_text_rows"),
+        lambda e: "%s  —  %s: %s" % (e["path"],
+                                     _TEXT_SIDE.get(e["side"], e["side"]),
+                                     _text_snippet(e["text"])),
+        cap)
+    _detail_block(
+        out, "warning",
+        "Text: %d asset(s) hold text in the stock extract but aren't in the "
+        "modded one, so their text couldn't be compared:",
+        notes.get("skipped_text_paths"), lambda p: p, cap)
+    return out
+
+
+def _unpaired_audio_lines(slots, cap=_DETAIL_CAP):
+    """Name the sound slots a :func:`diff_baked_mods` compare found on only
+    one side, for the same reason :func:`unmatched_text_lines` names strings —
+    the count alone doesn't say whether a mod was skipped."""
+    out = []
+    for side, header in (
+            ("modded", "Audio: %d slot(s) are only in your modded extract, so "
+                       "there's no stock sound to compare them against:"),
+            ("stock", "Audio: %d slot(s) are only in the stock extract, so "
+                      "any mod you made to them can't be seen:")):
+        _detail_block(out, "warning", header,
+                      [r for s, r in slots or () if s == side],
+                      _slot_name, cap)
+    return out
 
 
 def _audio_fail_line(e):

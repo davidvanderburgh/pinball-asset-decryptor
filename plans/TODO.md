@@ -4248,6 +4248,40 @@ These have each been violated at least once and each cost a run or a window:
       lamps) still resolves to nothing — see the open sub-question above. It is
       the swatch view, not the artwork this item was about, and guessing it
       would collide two groups on one board index.
+      **★ 2026-09-09, TICKET PAD-120 — THE SAME FAULT WAS STILL IN HERE, ONE
+      LAYER DOWN, AND `FIXED_GROUPS` WAS IT.** peanuts: "For Star Wars Home
+      Edition and Jurassic Park Home Edition, leds don't light up in attract
+      mode." Both are HOME EDITIONS, and a Home Edition is one playfield board:
+      `star_wars_elg` 1.10 and `jurassic_park_the_pin` 1.05 put their **whole
+      machine in GROUP 5** — flippers, trough, pops and **every positioned
+      insert** (64 of 64 on one, 50 of 50 on the other). `FIXED_GROUPS = {4:0,
+      5:1}` was applied **last, over the measured sources**, so all of it was
+      addressed to node 1 — and `nbdir.py` on their own binaries says the
+      machines are nodes **{0,2,4,8,12,14}**: *there is no node 1 on either
+      one*. 73 of star_wars_elg's 120 group-5 rows spell the real board out as
+      `8a`/`8b`/`8c` (59 of 101 on The Pin), and node 8 is where the shim was
+      publishing the lamps the whole time. Not "a group with no address" — a
+      CONFIDENT WRONG ONE, which is this item's own headline sentence.
+      **Fixed on `ticket/PAD-120`:** `coilmap.fixed_group_node()` reads the
+      connector column for groups 4 and 5 under a **majority of the group's own
+      rows** (61% / 58% on the Home Editions against **1 row of 12** on
+      john_wick_le, king_kong_le and metallica_spike — the lone `2a` this
+      module already refuses, and no title on this disk sits near the line);
+      the pin now sits UNDER everything the title measures, so the switch join
+      can lift it too. A minority dissenter is outvoted rather than fatal (The
+      Pin has one `12a` against 59 `8a`, and the unanimity rule up in
+      `connector_group_node` would have dropped all 50 inserts to protect them
+      from one). **Measured across all 25 library binaries that yield a device
+      table: exactly TWO maps change, and they are the two reported titles.**
+      godzilla_pro/le, Bond, jaws, john_wick, king_kong, metallica, DnD, JP LE
+      and X-Men are byte-identical. `mktables.py`'s "group map" log line no
+      longer filters on `g >= 6`, which printed "no playfield group resolves"
+      over a map that had just resolved every insert on these titles.
+      **Not extended to the groups below 4**, deliberately: john_wick_le,
+      king_kong_le and metallica_spike each put 288 topper lamps in group 1
+      with `2a` on 287 of them — same shape of evidence, bigger majority — but
+      nothing pins group 1 and nobody has reported those lamps, so it is its
+      own change with its own proof.
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the

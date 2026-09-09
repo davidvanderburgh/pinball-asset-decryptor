@@ -331,6 +331,7 @@ class App:
             on_show_log_history_change=self._on_show_log_history_change,
             initial_compare_row_limit=self._settings.get("compare_row_limit"),
             on_compare_row_limit_change=self._on_compare_row_limit_change,
+            on_stage_pending=self.stage_pending_replacements,
             on_recheck_prereqs=self._recheck_prereqs,
             on_install_prereqs=self._launch_install_prereqs,
             on_back=self._on_back_to_picker,
@@ -1163,6 +1164,11 @@ class App:
                 "Please select an output folder.")
             return
 
+        # What this card really is, before any of the work (PAD-122): a
+        # multi-boot card extracts as its FIRST image only.
+        if not self._source_note_accepted(in_path):
+            return
+
         # Batch 19: extracting into an ARCHIVED project is the hydrate —
         # edited files step aside into .hydrate/ so the re-extract can't
         # touch them, and the done-handler moves them back over the fresh
@@ -1577,6 +1583,10 @@ class App:
                 "Missing Output",
                 "Please select an output folder.")
             return
+        # What the card in the reader really is, before any of the work
+        # (PAD-122) — the file branch asks the same question of its image.
+        if not self._source_note_accepted(device_path):
+            return
         if self._extract_overwrite_risk(output_path):
             if not messagebox.askyesno(
                 "Output Folder Not Empty",
@@ -1662,6 +1672,28 @@ class App:
             "full_dump": bool(
                 self.window.extract_filesystem_var.get()),
         }
+
+    def _source_note_accepted(self, path):
+        """Show the plugin's ``source_note`` for *path*; False = user backed
+        out (PAD-122).
+
+        The note is about the SOURCE IMAGE, so both jobs that read one — the
+        Extract and the Build — ask before they start rather than after: a
+        Stern multi-boot card holds several games and both jobs cover exactly
+        the first one, which is an hour of replacing assets before the result
+        says so.  A plugin that has nothing to say returns "" and no dialog is
+        shown; a probe that throws is not allowed to block the run.
+        """
+        try:
+            note = self._current_mfr.source_note(path)
+        except Exception:
+            return True
+        if not note:
+            return True
+        return bool(messagebox.askyesno(
+            getattr(self._current_mfr, "source_note_title",
+                    "About this image"),
+            note + "\n\nContinue?", icon="warning"))
 
     def _extract_overwrite_risk(self, output_path):
         """True if this extract would actually overwrite something in
@@ -1824,6 +1856,12 @@ class App:
             messagebox.showerror("Build Location", dest_err)
             return
 
+        # What the original really is (PAD-122): a multi-boot card builds as a
+        # multi-boot card with its FIRST image changed, and the user has to
+        # know that before the edits go in, not after.
+        if not self._source_note_accepted(original):
+            return
+
         # Collision check: warn before clobbering an existing build with the
         # same name (a re-build, or a name the user picked that's already
         # taken).  Overwriting the original is caught above; everything else is
@@ -1950,6 +1988,11 @@ class App:
                     f"(got: {override_raw!r}).\n\n"
                     f"Leave blank to auto-discover.")
                 return
+
+        # What the card in the reader really is (PAD-122): a multi-boot card
+        # takes the edits into its FIRST image and keeps the rest.
+        if not self._source_note_accepted(device_path):
+            return
 
         # Last-chance confirmation — Direct-SSD writes go straight to
         # the connected drive with no undo.  The red warning above
@@ -2757,15 +2800,19 @@ class App:
                     len(saved["image"]), len(diff["text_rows"])))
         # Say when part of the text couldn't be lined up between the two
         # extracts, so a low (or zero) text count isn't read as "no text mods"
-        # (PAD-108 — the log line from diff_baked_mods says the same thing).
+        # (PAD-108 — the log line from diff_baked_mods says the same thing),
+        # and point at the log, which now quotes each skipped string (PAD-118:
+        # "showing part of the text not matched would be helpful in
+        # understanding if it was something important").
         unpaired = (diff["notes"].get("unpaired_text", 0)
                     + diff["notes"].get("skipped_text_assets", 0))
         if unpaired:
             intro += ("\n\n%d string(s) couldn't be lined up between the two "
                       "old-version extracts and were skipped — the count "
-                      "above is only what could be compared.  Extracting "
-                      "both old-version folders with this same app version "
-                      "lines them up." % unpaired)
+                      "above is only what could be compared.  The log quotes "
+                      "every one of them, so you can see whether any are "
+                      "yours.  Extracting both old-version folders with this "
+                      "same app version lines them up." % unpaired)
         self._confirm_apply_transfer(stock_dir, target_dir, plan,
                                      src_saved=saved, intro=intro,
                                      source_label=modded_dir)
@@ -3501,6 +3548,35 @@ class App:
             self.msg_queue.put(LogMsg(
                 f"Image replacement failed: {e}", "error"))
             return (len(assignments), 0, [("image replacements", str(e))])
+
+    def stage_pending_replacements(self, assets_dir, cancel_cb=None):
+        """Apply every assigned Replace-tab replacement into *assets_dir* now.
+
+        The three ``_stage_pending_*`` calls a Write makes, in the same order,
+        summed into one ``(pending, staged, failures)`` — for a caller that is
+        NOT a build but still reads the project folder as the state of the
+        user's edits.
+
+        WHY IT IS ITS OWN ENTRY POINT (PAD-121, DragonRR: "If I choose a
+        replacement image do I HAVE to write that? ... only writing a new image
+        replaces the assets").  A Replace tab holds an assignment in memory,
+        mirrored to the folder's ``.staged_changes.json``, and writes it over
+        the folder's own file only when a build runs.  The Emulate tab's
+        "apply my replaced assets" (PAD-103) computes its override set by
+        diffing that folder against the extract baseline, so until a card had
+        been built there was nothing there to find: the box was ticked, the
+        log said there was nothing to apply, and the run played the stock
+        card.  Which is the one outcome the whole feature exists to avoid.
+
+        Runs on the caller's worker thread and logs through the message queue,
+        exactly as the write flow's staging does.
+        """
+        pend_a = self._stage_pending_audio(assets_dir)
+        pend_v = self._stage_pending_video(assets_dir, cancel_cb=cancel_cb)
+        pend_i = self._stage_pending_image(assets_dir)
+        return (pend_a[0] + pend_v[0] + pend_i[0],
+                pend_a[1] + pend_v[1] + pend_i[1],
+                pend_a[2] + pend_v[2] + pend_i[2])
 
     # ------------------------------------------------------------------
     # Revert all changes

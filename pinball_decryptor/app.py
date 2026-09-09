@@ -2757,15 +2757,19 @@ class App:
                     len(saved["image"]), len(diff["text_rows"])))
         # Say when part of the text couldn't be lined up between the two
         # extracts, so a low (or zero) text count isn't read as "no text mods"
-        # (PAD-108 — the log line from diff_baked_mods says the same thing).
+        # (PAD-108 — the log line from diff_baked_mods says the same thing),
+        # and point at the log, which now quotes each skipped string (PAD-118:
+        # "showing part of the text not matched would be helpful in
+        # understanding if it was something important").
         unpaired = (diff["notes"].get("unpaired_text", 0)
                     + diff["notes"].get("skipped_text_assets", 0))
         if unpaired:
             intro += ("\n\n%d string(s) couldn't be lined up between the two "
                       "old-version extracts and were skipped — the count "
-                      "above is only what could be compared.  Extracting "
-                      "both old-version folders with this same app version "
-                      "lines them up." % unpaired)
+                      "above is only what could be compared.  The log quotes "
+                      "every one of them, so you can see whether any are "
+                      "yours.  Extracting both old-version folders with this "
+                      "same app version lines them up." % unpaired)
         self._confirm_apply_transfer(stock_dir, target_dir, plan,
                                      src_saved=saved, intro=intro,
                                      source_label=modded_dir)

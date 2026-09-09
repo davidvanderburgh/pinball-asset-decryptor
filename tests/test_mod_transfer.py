@@ -1437,7 +1437,14 @@ def test_text_pairing_never_invents_a_lopsided_edit(tmp_path):
                                   ("a.radium", "TAIL", "")])
     diff = mod_transfer.diff_baked_mods(mod, stk)
     assert diff["text_rows"] == []
-    assert diff["notes"]["unpaired_text"] == 2
+    # All THREE strings of the lopsided run are unpaired: the old one nothing
+    # replaced, and the two new ones that replaced nothing (PAD-118 — the
+    # count has to match the list the log now prints).
+    assert diff["notes"]["unpaired_text"] == 3
+    assert diff["notes"]["unpaired_text_rows"] == [
+        {"path": "a.radium", "side": "stock", "text": "OLD ONE"},
+        {"path": "a.radium", "side": "modded", "text": "NEW ONE"},
+        {"path": "a.radium", "side": "modded", "text": "NEW TWO"}]
 
 
 def test_text_asset_missing_from_the_modded_extract_is_counted(tmp_path):
@@ -1447,6 +1454,67 @@ def test_text_asset_missing_from_the_modded_extract_is_counted(tmp_path):
                                   ("gone.radium", "ANYTHING", "")])
     diff = mod_transfer.diff_baked_mods(mod, stk)
     assert diff["notes"]["skipped_text_assets"] == 1
+    assert diff["notes"]["skipped_text_paths"] == ["gone.radium"]
+
+
+# ---- PAD-118: name the text a compare could not line up --------------------
+
+def test_unmatched_text_is_quoted_in_the_log(tmp_path):
+    # The tester's ask: a bare "1 string(s) couldn't be paired" doesn't say
+    # whether the skipped line was one of his mods or a vendor change.
+    mod, stk = str(tmp_path / "modded"), str(tmp_path / "stock")
+    _mk_extract(mod, {}, strings=[("game_real", "ATTRACT", ""),
+                                  ("game_real", "RUBBER SOUL BONUS", ""),
+                                  ("game_real", "GAME OVER", "")])
+    _mk_extract(stk, {}, strings=[("game_real", "ATTRACT", ""),
+                                  ("game_real", "PRESS START TO PLAY", ""),
+                                  ("game_real", "TILT", ""),
+                                  ("game_real", "GAME OVER", ""),
+                                  ("gone.radium", "YELLOW SUBMARINE", "")])
+    lines = []
+    diff = mod_transfer.diff_baked_mods(
+        mod, stk, log_cb=lambda t, lvl="info": lines.append((lvl, t)))
+
+    text = "\n".join(t for _lvl, t in lines)
+    assert '"PRESS START TO PLAY"' in text and '"TILT"' in text
+    assert '"RUBBER SOUL BONUS"' in text
+    assert "only in the stock old-version extract" in text
+    assert "only in your modded extract" in text
+    assert "gone.radium" in text
+    # The summary count and the quoted list have to agree.
+    assert diff["notes"]["unpaired_text"] == 3
+    assert len(diff["notes"]["unpaired_text_rows"]) == 3
+    assert all(lvl == "warning"
+               for lvl, t in lines if "couldn't be lined up" in t)
+
+
+def test_unmatched_text_lines_flatten_and_cap_a_long_string(tmp_path):
+    long_s = "I READ THE NEWS TODAY OH BOY " * 4
+    notes = {"unpaired_text_rows": [
+        {"path": "game_real", "side": "modded", "text": long_s},
+        {"path": "game_real", "side": "stock", "text": "TWO\nLINES"}],
+        "skipped_text_paths": []}
+    text = "\n".join(t for _lvl, t in mod_transfer.unmatched_text_lines(notes))
+    assert len(text.splitlines()) == 3          # header + one line each
+    assert "…" in text and long_s not in text
+    assert '"TWO\\nLINES"' in text
+
+
+def test_one_sided_sound_slots_are_named(tmp_path):
+    mod, stk = str(tmp_path / "modded"), str(tmp_path / "stock")
+    _mk_extract(mod, {"audio/idx0001.wav": b"SAME" * 100,
+                      "audio/idx0900.wav": b"HAND-ADDED" * 100})
+    _mk_extract(stk, {"audio/idx0001.wav": b"SAME" * 100,
+                      "audio/idx0554.wav": b"ONLY-STOCK" * 100})
+    lines = []
+    diff = mod_transfer.diff_baked_mods(
+        mod, stk, log_cb=lambda t, lvl="info": lines.append((lvl, t)))
+
+    text = "\n".join(t for _lvl, t in lines)
+    assert diff["notes"]["unpaired_audio"] == 2
+    assert "idx0900.wav" in text and "idx0554.wav" in text
+    assert "only in your modded extract" in text
+    assert "only in the stock extract" in text
 
 
 # ---- PAD-108: a second transfer of the same mods replaces the first ---------

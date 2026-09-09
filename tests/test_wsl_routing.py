@@ -140,6 +140,13 @@ def test_the_iso_share_names_the_distro_the_mount_happened_in(ours, monkeypatch)
 
 
 def test_the_iso_share_still_scans_the_list_without_our_runtime(theirs, monkeypatch):
+    # CREATE_NO_WINDOW does not exist off Windows, and the scan below swallows
+    # every exception - so without this the fallback silently does nothing and
+    # the test passes for the wrong reason on a Linux or macOS runner, which
+    # is exactly what it did.  Stubbed rather than skipped: the thing under
+    # test is a string the app builds, and that is the same everywhere.
+    monkeypatch.setattr(clonezilla.subprocess, "CREATE_NO_WINDOW", 0,
+                        raising=False)
     monkeypatch.setattr(
         clonezilla.subprocess, "run",
         lambda *a, **kw: subprocess.CompletedProcess([], 0,
@@ -168,6 +175,16 @@ def test_the_disk_tools_report_on_the_linux_the_app_uses(ours, monkeypatch):
     assert seen[0][:5] == ["wsl.exe", "-d", DISTRO, "-u", "root"]
 
 
+#: The Windows registry is where WSL keeps which distro is which, so the two
+#: tests below can only run where there is one.  Everything else in this file
+#: checks an argument list or a string, which is the same on every platform -
+#: and has to be, because those are what the Linux and macOS runners see.
+windows_only = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason=r"reads HKCU\...\Lxss, which exists only on Windows")
+
+
+@windows_only
 def test_the_disk_dialog_measures_and_resizes_the_same_distro(ours, monkeypatch):
     """usage() df's the filesystem the pipelines stage into; resize_disk()
     grows the disk named by _default_distro_vhdx().  Those were two different
@@ -205,6 +222,7 @@ def test_the_disk_dialog_measures_and_resizes_the_same_distro(ours, monkeypatch)
     assert vhdx.endswith("ext4.vhdx")
 
 
+@windows_only
 def test_without_our_runtime_the_disk_dialog_follows_the_default(theirs, monkeypatch):
     asked = []
     monkeypatch.setattr(wsl_disk, "_guid_named",

@@ -1702,7 +1702,8 @@ def test_no_build_script_installs_a_package_the_pinned_files_do_not_carry():
 
 # ------------------------------------------- what uninstalling leaves behind --
 
-def test_the_uninstaller_offers_to_remove_everything_the_app_put_outside_itself():
+def test_the_uninstaller_offers_to_remove_everything_the_app_put_outside_itself(
+        monkeypatch):
     """Since the app brings its own Linux, the biggest thing it installs is
     not in its own folder: a registered WSL distro, a work disk measured in
     gigabytes, and the downloads that built them.  Inno removes none of that
@@ -1712,34 +1713,39 @@ def test_the_uninstaller_offers_to_remove_everything_the_app_put_outside_itself(
     The paths are asserted against the code that CREATES them, not written
     out here a second time: three constants in three modules, and an
     uninstaller naming a fourth spelling of any of them would delete nothing
-    and say nothing."""
-    import os
+    and say nothing.
+
+    ASKED AS WINDOWS, whatever machine this runs on.  The installer is a
+    Windows artifact and its paths have to match on the Linux and macOS
+    runners too - the first version of this read the real LOCALAPPDATA, which
+    made it a test of the runner rather than of the code, green on Windows
+    and red on the other two."""
     from pinball_decryptor.core import payloads, rigdata, runtime
+
+    local = "C:" + chr(92) + "Users" + chr(92) + "t" + chr(92) + "AppData" \
+        + chr(92) + "Local"
+    monkeypatch.setenv("LOCALAPPDATA", local)
+    for var in ("PAD_RUNTIME_DIR", "PAD_DATA_DISK", "PAD_PAYLOAD_DIR"):
+        monkeypatch.delenv(var, raising=False)
+    # cache_root() is the one of the three that branches on the platform.
+    monkeypatch.setattr(payloads.sys, "platform", "win32")
 
     text = ISS.read_text(encoding="utf-8", errors="replace")
 
-    # {localappdata}\pinball_decryptor\... is how Inno spells what these
-    # return under LOCALAPPDATA.
     def as_inno(path):
-        local = os.environ.get("LOCALAPPDATA") or ""
-        assert local and path.startswith(local), (
+        assert path.startswith(local), (
             "%s is no longer under LOCALAPPDATA, so the uninstaller's "
-            "{localappdata} spelling cannot reach it" % path)
-        return "{localappdata}" + path[len(local):]
+            "localappdata spelling cannot reach it" % path)
+        # os.path.join joins with "/" off Windows; the .iss is spelled with
+        # backslashes, so the tail is normalised before it is compared.
+        return "{localappdata}" + path[len(local):].replace("/", chr(92))
 
-    saved = dict(os.environ)
-    for var in ("PAD_RUNTIME_DIR", "PAD_DATA_DISK", "PAD_PAYLOAD_DIR"):
-        os.environ.pop(var, None)
-    try:
-        for what, path in (("the runtime", runtime.install_dir()),
-                           ("the work disk", rigdata.disk_path()),
-                           ("the download cache", payloads.cache_root())):
-            assert as_inno(path) in text, (
-                "the uninstaller does not name %s (%s), so uninstalling "
-                "leaves it on the disk" % (what, as_inno(path)))
-    finally:
-        os.environ.clear()
-        os.environ.update(saved)
+    for what, path in (("the runtime", runtime.install_dir()),
+                       ("the work disk", rigdata.disk_path()),
+                       ("the download cache", payloads.cache_root())):
+        assert as_inno(path) in text, (
+            "the uninstaller does not name %s (%s), so uninstalling "
+            "leaves it on the disk" % (what, as_inno(path)))
 
     # The distro is UNREGISTERED, not just deleted: removing the folder alone
     # leaves WSL holding a registry entry for a distro whose disk is gone,

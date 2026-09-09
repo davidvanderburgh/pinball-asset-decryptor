@@ -17,6 +17,7 @@ import sys
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
+from . import runtime
 from .pkgnames import localize_hint
 
 # Prevent console flashes when launched via pythonw.exe on Windows.
@@ -104,6 +105,22 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
     except Exception as e:
         ok, msg = False, f"{type(e).__name__}: {e}"
 
+    hint = hint_override or prereq.install_hint
+
+    # AND NOT APT'S ADVICE AT ALL WHEN THE LINUX IS OURS.  These probes run in
+    # the app's own runtime when it is installed, and that image is built with
+    # every one of these tools in it - so a red row here is not a machine
+    # missing a package, it is OUR image missing one, and "apt-get install
+    # partclone" would have the user modifying a distro he did not build to
+    # work around a bug he cannot see.  Say what it actually is.
+    if not ok and prereq.where == "wsl" and runtime.wsl_distro():
+        hint = (
+            "This is one of the tools the app's own Linux (%s) is built with, "
+            "so this is a fault in the app rather than something missing from "
+            "your machine. 'Fix setup' on the Emulate tab reinstalls that "
+            "Linux; if it stays red after that, please report it with this "
+            "log." % runtime.DISTRO)
+
     # SPELLED FOR THIS LINUX.  Every plugin's hint says "apt-get install X
     # (in WSL)", written when Windows was the only desktop: on a Linux desktop
     # the "(in WSL)" is wrong on every distro, and on Arch the name is too -
@@ -113,7 +130,7 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
     return PrerequisiteResult(
         name=prereq.name, ok=ok, message=msg,
         reason=prereq.reason,
-        install_hint=localize_hint(hint_override or prereq.install_hint),
+        install_hint=localize_hint(hint),
     )
 
 
@@ -292,11 +309,19 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
 
 
 def _run_in_wsl(cmd: str, timeout: float) -> subprocess.CompletedProcess:
+    # IN THE DISTRO THE APP ACTUALLY USES, which is the whole point of this
+    # line.  Every probe here used to go to the machine's DEFAULT distro while
+    # the pipelines and the rigs ran in ours - so a user with the runtime
+    # installed and a thin default distro (or none at all) was shown a column
+    # of red beside an app that worked perfectly, and told to apt-get install
+    # tools he already had.  A strip that reports on a Linux nothing runs in
+    # is worse than no strip: it sends people to fix a machine that is fine.
+    #
     # WSL_UTF8=1: wsl.exe's own diagnostics ("no installed distributions",
     # the 0x80370102 virtualization error, ...) default to UTF-16LE, which
     # text=True renders as NUL-riddled mojibake in the tooltip and log.
     return subprocess.run(
-        ["wsl", "-u", "root", "--", "bash", "-c", cmd],
+        runtime.wsl_head(root=True) + ["--", "bash", "-c", cmd],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -324,9 +349,14 @@ def _wsl_distro_registered() -> bool:
         return False
 
 
-def _wsl_default_distro() -> Tuple[str, Optional[int]]:
-    """``(name, version)`` of the DEFAULT distro — the one every probe runs
-    in — or ``("", None)`` when it can't be read.
+def _wsl_default_distro(want: Optional[str] = None) -> Tuple[str, Optional[int]]:
+    """``(name, version)`` of the distro every probe runs in, or ``("", None)``
+    when it can't be read.
+
+    *want* names a distro to look up instead of the default — which is what
+    the app passes once its own runtime is installed, because the probes go
+    there and a log line naming the DEFAULT would be describing a Linux
+    nothing ran in.
 
     ``wsl -l -v`` marks the default with ``*`` and puts the version last::
 
@@ -360,12 +390,17 @@ def _wsl_default_distro() -> Tuple[str, Optional[int]]:
         out = out.decode("utf-8", "replace")
     for line in out.replace("\x00", "").splitlines():
         line = line.strip()
-        if not line.startswith("*"):
+        # The default is the starred row; a named one is any row, starred or
+        # not, so the marker is stripped before the name is compared.
+        if want is None and not line.startswith("*"):
             continue
-        parts = line[1:].strip().rsplit(None, 2)
-        if len(parts) == 3 and parts[2].isdigit():
-            return parts[0].strip(), int(parts[2])
-        break
+        parts = line.lstrip("*").strip().rsplit(None, 2)
+        if len(parts) != 3 or not parts[2].isdigit():
+            continue
+        name = parts[0].strip()
+        if want is not None and name != want:
+            continue
+        return name, int(parts[2])
     return "", None
 
 
@@ -450,16 +485,21 @@ def wsl_release_lines() -> List[str]:
     on a VM that is already up, and it turns that round trip into a fact the
     log already carries.
     """
-    name, wsl_ver = _wsl_default_distro()
+    ours = runtime.wsl_distro()
+    name, wsl_ver = _wsl_default_distro(want=ours)
     distro_id, version, pretty = wsl_release()
     if not name and not pretty:
         return []
     said = pretty or version or "release unknown"
-    where = "%s (%s%s)" % (name or "the default distro", said,
+    where = "%s (%s%s)" % (name or ours or "the default distro", said,
                            ", WSL %d" % wsl_ver if wsl_ver else "")
     lines = ["WSL: " + where]
     rel = _release_tuple(version)
-    if distro_id == "ubuntu" and rel and rel < OLDEST_TESTED_RELEASE:
+    # THE AGE WARNING IS ABOUT THE USER'S DISTRO, never about ours.  Our own
+    # runtime is pinned to a release we build and test against, so telling
+    # someone to install a newer Ubuntu alongside it would be advice about a
+    # machine detail he does not control and we already decided.
+    if not ours and distro_id == "ubuntu" and rel and rel < OLDEST_TESTED_RELEASE:
         lines.append(
             "That release is older than the %d.%02d PAD is tested against. "
             "It is not refused and it may well be fine - but if something "

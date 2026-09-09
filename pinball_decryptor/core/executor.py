@@ -1,7 +1,9 @@
 """Platform-aware command execution for native-tool pipelines (Clonezilla,
 GPG verification, etc.).
 
-- Windows → WSL2 (Ubuntu) via ``wsl -u root -- bash -c``
+- Windows → WSL2 via ``wsl -u root -- bash -c``, in the app's own runtime
+            distro when one is installed and in the machine's default when it
+            is not (see :func:`pinball_decryptor.core.runtime.wsl_distro`)
 - macOS   → native bash, with Homebrew paths prepended
 - Linux   → native bash (sudo if not running as root)
 """
@@ -13,6 +15,8 @@ import subprocess
 import sys
 import threading
 from collections import deque
+
+from . import runtime
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
@@ -62,8 +66,22 @@ class CommandExecutor:
 
 
 class WslExecutor(CommandExecutor):
+    #: EVERY COMMAND THIS CLASS SENDS INTO LINUX STARTS HERE.  There are three
+    #: launchers below (run, stream, popen_binary) and they used to spell the
+    #: same head out three times, which is three chances for one of them to go
+    #: to a different Linux than its neighbours - and "the extract worked and
+    #: the write did not" is exactly what that looks like from outside.
+    #:
+    #: The head names the app's own runtime when one is installed, and is the
+    #: bare `wsl -u root` when it is not.  Asked per command rather than once
+    #: per process on purpose: a user can install the runtime from the Emulate
+    #: tab while a pipeline object is alive, and the answer is cached in
+    #: core/runtime.py anyway, so this costs a dictionary lookup.
+    def _head(self):
+        return runtime.wsl_head(root=True) + ["--", "bash", "-c"]
+
     def run(self, bash_cmd, timeout=120):
-        full_cmd = ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd]
+        full_cmd = self._head() + [bash_cmd]
         try:
             result = subprocess.run(
                 full_cmd, capture_output=True, text=True,
@@ -78,7 +96,7 @@ class WslExecutor(CommandExecutor):
         return result.stdout
 
     def stream(self, bash_cmd, timeout=600):
-        full_cmd = ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd]
+        full_cmd = self._head() + [bash_cmd]
         proc = subprocess.Popen(
             full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
@@ -107,7 +125,7 @@ class WslExecutor(CommandExecutor):
                 self._current_proc = None
 
     def popen_binary(self, bash_cmd):
-        full_cmd = ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd]
+        full_cmd = self._head() + [bash_cmd]
         return subprocess.Popen(
             full_cmd, stdout=subprocess.PIPE, creationflags=_CREATE_FLAGS)
 
@@ -138,7 +156,13 @@ class WslExecutor(CommandExecutor):
         if "'" in unc_src:
             raise CommandError("mount -t drvfs", -1,
                                f"Unsupported network share name: {unc_label}")
-        key = (server.lower(), share.lower())
+        # KEYED BY DISTRO TOO.  These mounts live inside one Linux, and the
+        # app can change which Linux it uses without restarting - installing
+        # the runtime from the Emulate tab does exactly that.  Without the
+        # distro in the key, a share mounted in the old one is remembered as
+        # a path that simply does not exist in the new one, and the pipeline
+        # fails on a file it can see in Explorer.
+        key = (runtime.wsl_distro() or "", server.lower(), share.lower())
         with self._unc_lock:
             mount_point = self._unc_mounts.get(key)
             if mount_point is None:
@@ -170,15 +194,27 @@ class WslExecutor(CommandExecutor):
         return path
 
     def check_available(self):
+        ours = runtime.wsl_distro()
         try:
             self.run("echo ok", timeout=15)
-            return True, "WSL2 available"
+            return True, "WSL2 available" + (" (%s)" % ours if ours else "")
         except Exception:
             # A REGISTERED DISTRO THAT NO LONGER STARTS fails this exactly
             # like a machine with no WSL on it, and "install WSL" is the one
             # instruction that cannot help there (PAD-113).  Say what failed
             # and give the check that tells the two apart, before naming an
             # install that is only right for one of them.
+            #
+            # AND NAME THE DISTRO IT ACTUALLY TRIED, because since the app
+            # brought its own there are two candidates and "the default
+            # distro" is the wrong one to go and inspect on most machines
+            # that have ours.
+            if ours:
+                return False, (
+                    "WSL2 not available: a command in %s - the Linux this app "
+                    "installed - failed. Check that it still starts with "
+                    "'wsl -d %s -- echo ok'. The Emulate tab's Fix setup "
+                    "button reinstalls it." % (ours, ours))
             return False, ("WSL2 not available: a command in the default "
                            "distro failed. If WSL is installed, check that "
                            "the distro still starts — 'wsl -l -v', then "

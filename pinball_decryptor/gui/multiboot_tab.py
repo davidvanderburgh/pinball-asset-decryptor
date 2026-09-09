@@ -193,7 +193,7 @@ from dataclasses import (asdict, dataclass, field, fields as dc_fields,
                          replace)
 from tkinter import colorchooser, filedialog, font as tkfont, messagebox, ttk
 
-from ..core import config
+from ..core import config, runtime
 from . import _rig
 from .emulate_tab import rig_dir, wsl_account, wsl_home
 from .preview_audio import PreviewAudio
@@ -1570,9 +1570,17 @@ def shell_line(args, cwd, exe="python3"):
 
 def wsl_shell(line):
     """The argv that runs one shell line on THIS platform: through ``wsl.exe``
-    on Windows, ``bash`` on Linux."""
+    on Windows, ``bash`` on Linux.
+
+    IN THE APP'S OWN DISTRO when one is installed.  This tab used to be the
+    one WSL path deliberately left on the machine's default Linux, because
+    the runtime image had not been audited against the card builder's tool
+    list.  It has been now - fuser(1) was the one thing missing, and the image
+    carries psmisc for it - so this goes where everything else goes.  A card
+    built in one Linux and a rig run in another was never a difference anyone
+    wanted to reason about."""
     if sys.platform == "win32":
-        return ["wsl.exe", "-e", "bash", "-lc", line]
+        return runtime.wsl_head() + ["-e", "bash", "-lc", line]
     return ["bash", "-lc", line]
 
 
@@ -1593,7 +1601,7 @@ def wsl_shell_root(line, home=None):
     not be able to turn an ordinary run into a root one (_rig.rig_cmd_root's
     rule)."""
     if sys.platform == "win32":
-        head = ["wsl.exe", "-u", "root", "-e"]
+        head = runtime.wsl_head(root=True) + ["-e"]
         if home:
             head += ["env", "HOME=" + home]
         return head + ["bash", "-lc", line]

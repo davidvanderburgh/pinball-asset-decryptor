@@ -37,6 +37,8 @@ import subprocess
 import sys
 import tempfile
 
+from . import runtime
+
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
@@ -102,13 +104,15 @@ def is_supported():
 
 
 def _wsl_bash(bash_cmd, timeout=120):
-    """Run *bash_cmd* in the default WSL distro as root; return stdout.
+    """Run *bash_cmd* in the WSL distro the app uses, as root; return stdout.
 
-    Mirrors :class:`core.executor.WslExecutor` (same ``wsl -u root -- bash -c``
-    target) so we see exactly the distro the pipelines stage into.
+    Mirrors :class:`core.executor.WslExecutor` - the same head, from the same
+    function - so this module reports on exactly the Linux the pipelines stage
+    into, which since the app brought its own is not necessarily the machine's
+    default one.
     """
     proc = subprocess.run(
-        ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd],
+        runtime.wsl_head(root=True) + ["--", "bash", "-c", bash_cmd],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=timeout, creationflags=_CREATE_FLAGS,
     )

@@ -50,14 +50,15 @@ def _no_real_setup_probe(monkeypatch):
 def _no_runtime_unless_asked(monkeypatch):
     """THE TESTS MUST NOT DEPEND ON WHETHER THIS MACHINE HAS THE RUNTIME.
 
-    `runtime.distro_for` asks WSL which distro to route a rig into, and on a
+    `runtime.wsl_distro` asks WSL which distro to route into, and on a
     developer's box - where the runtime IS installed - that answer costs two
     wsl.exe launches and starts a distro, inside the Start path these tests
     time.  Three of them failed that way, on the dev box only, while every CI
     runner passed: the worst shape a test can have.  So the default here is
     "no runtime", and the tests that are ABOUT routing patch it themselves.
     """
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: None)
     monkeypatch.setattr(emulate_tab.runtime, "known_state", lambda: None)
     # AND NOTHING HERE MAY REACH THE NETWORK OR A REAL DISTRO.  `_fix_setup`
     # calls `_install_runtime`, which on a machine whose runtime is a version
@@ -3568,8 +3569,8 @@ def test_every_wsl_call_in_this_module_goes_to_the_same_distro(monkeypatch):
     machine than the rest gives answers that are each true and together
     nonsense, so they all go through _wsl_head."""
     monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for",
-                        lambda rig: "PAD-Runtime")
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: "PAD-Runtime")
     assert emulate_tab._wsl_head() == ["wsl.exe", "-d", "PAD-Runtime", "-e"]
     assert emulate_tab._wsl_head(root=True) == [
         "wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e"]
@@ -3580,7 +3581,8 @@ def test_every_wsl_call_in_this_module_goes_to_the_same_distro(monkeypatch):
 
     # ...and with no runtime installed, nothing changes from how it has always
     # worked: the machine's default distro, no -d at all.
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: None)
     assert emulate_tab._wsl_head() == ["wsl.exe", "-e"]
     assert emulate_tab.rig_cmd("watch.sh")[:2] == ["wsl.exe", "-e"]
 
@@ -3606,8 +3608,8 @@ def test_the_first_run_in_the_apps_own_linux_says_what_it_will_rebuild(
     panel._runtime_noted = False
     logged = []
     panel._log = lambda m: logged.append(m)
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for",
-                        lambda rig: "PAD-Runtime")
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: "PAD-Runtime")
     monkeypatch.setattr(emulate_tab.runtime, "known_state", lambda: "ready")
 
     panel._note_the_runtime_is_a_different_machine()
@@ -3621,7 +3623,8 @@ def test_the_first_run_in_the_apps_own_linux_says_what_it_will_rebuild(
 
     # And silence entirely when the rig is where it has always been.
     panel._runtime_noted = False
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: None)
     panel._note_the_runtime_is_a_different_machine()
     assert not logged
 
@@ -3634,8 +3637,8 @@ def test_the_wsl_account_belongs_to_the_distro_it_was_probed_in(monkeypatch):
     belongs to nobody there.  The cache is keyed by distro now."""
     monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
     where = {"distro": None}
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for",
-                        lambda rig: where["distro"])
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: where["distro"])
     probes = []
 
     def fake_run(argv, **kw):

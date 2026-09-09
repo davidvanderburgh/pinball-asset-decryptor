@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 
+from . import runtime
 from .executor import CommandError
 
 
@@ -32,24 +33,40 @@ def mount_iso(image_path, executor=None, log_cb=None):
 
 
 def _mount_via_wsl(image_path, executor, log_cb):
+    """Mount the ISO inside WSL and hand back a Windows path into it.
+
+    THE NAME IN THAT PATH MUST BE THE DISTRO THE MOUNT HAPPENED IN.  The
+    executor does the mounting and the ``\\\\wsl.localhost\\<name>`` share is
+    how Windows then reads the files - so if the two disagree, the mount
+    succeeds, the share resolves to a different Linux, and the caller sees an
+    empty directory rather than an error.  Asking core.runtime first is what
+    keeps them the same: it is the same function the executor routes on.
+
+    The scan below is the fallback for a machine without our runtime, and it
+    takes the FIRST distro rather than the default - which is a guess, and was
+    already a guess before this.  It is left alone deliberately: on those
+    machines the executor uses the default too, and changing the guess here
+    without changing it there would be a new way to disagree.
+    """
     iso_exec = executor.to_exec_path(image_path)
     exec_mount = "/tmp/pad_iso"
-    distro = "Ubuntu"
-    try:
-        out = subprocess.run(
-            ["wsl.exe", "-l", "-q"],
-            capture_output=True, text=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        ).stdout
-        if "\x00" in out:
-            out = out.encode("latin-1").decode("utf-16-le", errors="replace")
-        for line in out.splitlines():
-            ln = line.strip()
-            if ln and not ln.startswith("Windows"):
-                distro = ln
-                break
-    except Exception:
-        pass
+    distro = runtime.wsl_distro() or "Ubuntu"
+    if not runtime.wsl_distro():
+        try:
+            out = subprocess.run(
+                ["wsl.exe", "-l", "-q"],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            ).stdout
+            if "\x00" in out:
+                out = out.encode("latin-1").decode("utf-16-le", errors="replace")
+            for line in out.splitlines():
+                ln = line.strip()
+                if ln and not ln.startswith("Windows"):
+                    distro = ln
+                    break
+        except Exception:
+            pass
 
     host_mount = f"\\\\wsl.localhost\\{distro}\\tmp\\pad_iso"
 

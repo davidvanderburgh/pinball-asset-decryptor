@@ -34,9 +34,12 @@ checkpointable boot, and criu, which no Ubuntu has ever packaged and which the
 rig therefore COMPILES on the user's machine today.  The image builds it, so
 that stops too.
 
-The routing below is still asked PER RIG, and stays that way: `RIGS` is a
-promise that the image can actually run a thing, and a rig added there without
-its tools would trade a working default distro for one that is missing them.
+AND EVERYTHING GOES THROUGH IT, not only the rigs.  The first cut routed the
+two emulators and left the extract and write pipelines in the user's own
+distro, which gave the app two Linuxes and a prerequisite strip reporting on
+the wrong one.  The image carries the pipelines' tools now, so `wsl_distro`
+answers once for the whole app - and a machine without our runtime still uses
+its own default, exactly as before.
 """
 
 import json
@@ -69,19 +72,19 @@ RUNTIME_VERSION = 4
 #: The image itself, pinned exactly like a payload binary - same download,
 #: same .part-then-verify, same offline "install from file" path.  Filled in
 #: by .github/workflows/runtime.yml, which prints these four fields (run
-#: 34284387632, 2026-09-08).  An empty sha256 means NOT YET PUBLISHED and every
+#: 34302950268, 2026-09-09).  An empty sha256 means NOT YET PUBLISHED and every
 #: entry point below reports "not available" rather than trying to fetch a file
 #: that does not exist - which is how the mechanism shipped before the image
-#: existed.  368 MB compressed, most of it the ARM cross compiler, ffmpeg and
-#: qemu-user-static: one download, once, against a toolchain a user would
-#: otherwise be told to assemble themselves.
+#: existed.  413 MB compressed, most of it the ARM cross compiler, ffmpeg,
+#: qemu-user-static and GDRE Tools: one download, once, against a toolchain a
+#: user would otherwise be told to assemble themselves.
 IMAGE = Payload(
     key="runtime-full",
     filename="pad-runtime-full.tar.gz",
-    release_tag="runtime-4",
-    sha256="0f02672384feb28d7882beebba42e0ddc209f1edccafb9b0baa6f6e65cd53b36",
-    size=389647973,
-    version="PAD Runtime 3 (full)",
+    release_tag="runtime-5",
+    sha256="7ec524367af36d3b20f21e827b0f9ea6cdd3fa9da2376a31a3e1b26d15f6f71f",
+    size=433341598,
+    version="PAD Runtime 4 (full)",
     what="the Linux the emulator runs on, built and pinned by us",
     dest="",              # not a path inside Linux: this one becomes a distro
 )
@@ -382,24 +385,54 @@ def uninstall(runner=None) -> bool:
     return out.returncode == 0
 
 
-#: WHICH RIGS RUN IN IT.  Per rig, not global, and adding a name here is a
-#: promise that the image carries what that rig needs - checked in CI by
-#: running each tool rather than looking for it (runtime.yml).  The multi-boot
-#: card builder is deliberately NOT here: it is a different feature with its
-#: own tool list, it has not been audited against this image, and it works
-#: today in the machine's default distro.
-RIGS = {"spike1", "spike2"}
+def wsl_distro(runner=None) -> Optional[str]:
+    """The distro EVERY Linux command from this app runs in, or None meaning
+    "the machine's default" - which is what everything did before this existed
+    and what a machine without our runtime still does.
+
+    IT USED TO BE PER RIG, and the reason it no longer is worth writing down.
+    The first cut routed only the Spike 1 and Spike 2 emulators here, because
+    the image carried only what they need; the extract and write pipelines
+    stayed in the user's own distro, installing packages onto his machine.
+    That left the app with two Linuxes and a prerequisite strip that reported
+    on the wrong one - a user whose emulator ran perfectly could be shown a
+    column of red, because the strip was asking a thin default distro about
+    tools that live in ours.  The image carries the pipelines' tools now
+    (tools/runtime/Dockerfile, and tests/test_runtime_packages.py holds it to
+    the installer's own lists), so there is one answer to "which Linux?" and
+    this is it.
+
+    Everything still degrades to the old behaviour rather than failing: on a
+    machine with no runtime installed this is None and every caller uses the
+    default distro exactly as it always has.
+
+    PAD_RUNTIME=0 forces that old behaviour on a machine where the runtime is
+    installed but suspect.  PAD_RUNTIME=1 does not force it ON, because a
+    runtime that is not installed cannot be used by insisting.
+    """
+    if os.environ.get("PAD_RUNTIME") == "0":
+        return None
+    return DISTRO if usable(runner=runner) else None
+
+
+def wsl_head(root: bool = False, runner=None) -> list:
+    """``wsl.exe`` plus the distro selector, and ``-u root`` when asked.
+
+    Every command this app sends into Linux starts with these words.  Handing
+    out the list rather than the name is deliberate: the ``-d`` has to come
+    before ``-u``, which has to come before ``--``, and six modules spelling
+    that out separately is six chances to put our distro on one code path and
+    not its neighbour."""
+    head = ["wsl.exe"]
+    distro = wsl_distro(runner=runner)
+    if distro:
+        head += ["-d", distro]
+    if root:
+        head += ["-u", "root"]
+    return head
 
 
 def distro_for(rig: str, runner=None) -> Optional[str]:
-    """The distro name a rig's commands should run in, or None for "the
-    machine's default", which is what every rig used before this existed.
-
-    PAD_RUNTIME=0 forces the old behaviour for a machine where the runtime is
-    installed but suspect; PAD_RUNTIME=1 does not force it ON, because a
-    runtime that is not installed cannot be used by insisting."""
-    if os.environ.get("PAD_RUNTIME") == "0":
-        return None
-    if rig not in RIGS:
-        return None
-    return DISTRO if usable(runner=runner) else None
+    """Kept for the rig callers, which name the rig they are.  The answer no
+    longer depends on which one - see :func:`wsl_distro`."""
+    return wsl_distro(runner=runner)

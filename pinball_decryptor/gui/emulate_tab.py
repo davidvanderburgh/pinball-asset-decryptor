@@ -788,9 +788,7 @@ def _wsl_path(win_path):
 #: different machine than the rest would produce answers that are individually
 #: true and collectively nonsense.
 def _wsl_head(root=False):
-    d = runtime.distro_for("spike2")
-    head = ["wsl.exe"] + (["-d", d] if d else [])
-    return head + (["-u", "root"] if root else []) + ["-e"]
+    return runtime.wsl_head(root=root) + ["-e"]
 
 
 #: WHERE THIS RIG'S WORK GOES.  padpath.sh says "explicit PAD_HOME always

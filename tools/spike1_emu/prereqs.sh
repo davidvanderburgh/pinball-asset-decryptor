@@ -156,9 +156,17 @@ s1_paths() {
     : "${S1_HOME:=$(getent passwd 1000 2>/dev/null | cut -d: -f6)}"
     : "${S1_HOME:=/home/${S1_DESKTOP_USER:-david}}"
     : "${S1_WORK:=$S1_HOME/s1emu}"
+    # WHERE THE DEVICE MODEL LIVES, and it is NOT "wherever the work is".
+    # s1hwshim is OUR binary - the app installs it as a pinned payload, or a
+    # developer builds it here - while $S1_WORK holds the USER's work:
+    # extractions, cached cards, save states.  Those were the same directory
+    # for as long as both sat in the home, and the day the work moved onto its
+    # own disk (core/rigdata.py) the rig looked for the shim there, did not
+    # find it, and asked a machine that already had it for a compiler.
+    : "${S1_SHIM_DIR:=$S1_HOME/s1emu}"
     : "${QEMU_WORK:=$S1_HOME/qemubuild}"
     : "${S1_QEMU:=$QEMU_WORK/qemu-arm}"
-    export S1_DESKTOP_USER S1_HOME S1_WORK QEMU_WORK S1_QEMU
+    export S1_DESKTOP_USER S1_HOME S1_WORK S1_SHIM_DIR QEMU_WORK S1_QEMU
 }
 
 # s1_build_groups RIGDIR - which build steps this machine still has to run:
@@ -176,14 +184,14 @@ s1_paths() {
 s1_build_groups() {
     local here="$1" need="" stamp want have
     [ -x "$S1_QEMU" ] || need="$need qemu"
-    stamp="$S1_WORK/s1hwshim$S1_PAYLOAD_STAMP_SUFFIX"
-    if [ ! -x "$S1_WORK/s1hwshim" ]; then
+    stamp="$S1_SHIM_DIR/s1hwshim$S1_PAYLOAD_STAMP_SUFFIX"
+    if [ ! -x "$S1_SHIM_DIR/s1hwshim" ]; then
         need="$need shim"
     elif [ -f "$stamp" ]; then
         want=$(sed -n 's/^source_sha256=//p' "$stamp")
         have=$(s1_source_hash "$here/s1hwshim.c")
         [ -n "$want" ] && [ "$want" = "$have" ] || need="$need shim"
-    elif [ "$here/s1hwshim.c" -nt "$S1_WORK/s1hwshim" ]; then
+    elif [ "$here/s1hwshim.c" -nt "$S1_SHIM_DIR/s1hwshim" ]; then
         need="$need shim"
     fi
     echo $need

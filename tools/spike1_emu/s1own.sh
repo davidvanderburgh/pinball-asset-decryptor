@@ -44,11 +44,27 @@ set -u
 # extraction cache, so compare against the canonical work dir.
 W=$(readlink -f "$S1_WORK" 2>/dev/null); : "${W:=$S1_WORK}"
 
+# ...AND THE PATH mountinfo REPORTS IS RELATIVE TO ITS OWN FILESYSTEM.  Field 4
+# is the mount's root WITHIN the device, so while the work dir sat on the same
+# filesystem as / it read as the full path and a plain match worked.  The day
+# the work moved onto its own disk (core/rigdata.py, /mnt/wsl/paddata) the same
+# mount started reading `/spike1/cache/<title>/game` - the path INSIDE that
+# disk - and the rig stopped recognising its own running game: status.sh said
+# `game_procs=0` over a game whose DMD was visibly advancing, which is the
+# shape that makes a tab claim a healthy run is not there.
+#
+# So the match is on the work dir MINUS its mount point, which is the same
+# string in both worlds: the full path when / is the mount point, and the
+# in-disk path when the data disk is.
+MP=$(stat -c %m "$W" 2>/dev/null); : "${MP:=/}"
+if [ "$MP" = "/" ]; then WREL=$W; else WREL=${W#"$MP"}; fi
+: "${WREL:=/}"
+
 case "${1:-game}" in
 game)
     for pid in $(pgrep -x game 2>/dev/null); do
         if mi=$(cat "/proc/$pid/mountinfo" 2>/dev/null); then
-            case "$mi" in *"$W/"*) echo "$pid" ;; esac
+            case "$mi" in *"$WREL/"*) echo "$pid" ;; esac
         elif [ -d "/proc/$pid" ]; then
             # The pid is alive but its mountinfo could not be read at all (a
             # kernel that restricts it — not seen on WSL, where this was

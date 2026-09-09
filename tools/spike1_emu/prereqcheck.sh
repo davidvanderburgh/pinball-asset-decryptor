@@ -23,7 +23,7 @@ NEED=$(s1_build_groups "$HERE")
 
 # What the app HAS supplied, named by its own stamp, so the log says which
 # emulator is installed rather than only that one is.
-for f in "$S1_QEMU" "$S1_WORK/s1hwshim"; do
+for f in "$S1_QEMU" "$S1_SHIM_DIR/s1hwshim"; do
     stamp="$f$S1_PAYLOAD_STAMP_SUFFIX"
     if [ -f "$stamp" ]; then
         echo "Installed: $(sed -n 's/^version=//p' "$stamp") — $(basename "$f")"

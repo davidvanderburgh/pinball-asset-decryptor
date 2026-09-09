@@ -73,7 +73,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from ..core import config, pkgnames, prereqs, runtime
+from ..core import config, pkgnames, prereqs, rigdata, runtime
 from . import _rig
 from .widgets import _Tooltip
 
@@ -793,6 +793,19 @@ def _wsl_head(root=False):
     return head + (["-u", "root"] if root else []) + ["-e"]
 
 
+#: WHERE THIS RIG'S WORK GOES.  padpath.sh says "explicit PAD_HOME always
+#: wins", so one entry moves the guest rootfs, the card cache and the
+#: save-state slots onto the app's own data disk - which survives the runtime
+#: being replaced, and which the user can delete in one action.
+#:
+#: EMPTY unless the rig is actually running in our runtime.  A machine using
+#: its own distro keeps the paths it has always used: moving those would
+#: strand work the user already has, for no benefit they asked for.
+def _rig_env():
+    d = runtime.distro_for("spike2")
+    return rigdata.rig_env("spike2", bool(d) and rigdata.exists())
+
+
 def rig_cmd(script, *args, env=()):
     """The command that runs one of the rig's scripts, on THIS platform.
 
@@ -830,7 +843,7 @@ def rig_cmd(script, *args, env=()):
         # whether this PC has a Windows sound player, playaudio.sh uses one.
         # Cheap (two path lookups) and additive - the caller's own entries
         # follow it and win any argument.
-        env = list(rig_win_python_env()) + list(env)
+        env = list(rig_win_python_env()) + _rig_env() + list(env)
     else:
         head = []
         path = os.path.join(rig_dir(), script)
@@ -912,8 +925,8 @@ def rig_cmd_root(script, *args):
     """
     if sys.platform != "win32":
         raise RuntimeError("rig_cmd_root is WSL-only")
-    return _wsl_head(root=True) + ["bash",
-            "%s/%s" % (_wsl_path(rig_dir()), script)] + [str(a) for a in args]
+    root_env = _rig_env()
+    return _wsl_head(root=True) + (["env"] + root_env if root_env else []) +         ["bash", "%s/%s" % (_wsl_path(rig_dir()), script)] +         [str(a) for a in args]
 
 
 #: wsl_account()'s cache: [(user, home), probed].  One probe per app run is
@@ -1052,7 +1065,7 @@ def watch_cmd(minutes, env, savestates=True):
             # a run started without it is a run whose sound quietly takes the
             # WSLg path (PAD-95).
             return (_wsl_head(root=True) + ["env",
-                     "HOME=" + home, "PAD_PIVOT=1"]
+                     "HOME=" + home, "PAD_PIVOT=1"] + _rig_env()
                     + list(rig_win_python_env()) + list(env)
                     + ["bash", "%s/watch.sh" % _wsl_path(rig_dir()),
                        str(minutes)])
@@ -1072,7 +1085,7 @@ def kill_cmd():
     if sys.platform == "win32":
         home = wsl_home()
         if home:
-            return _wsl_head(root=True) + ["env", "HOME=" + home,
+            return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
                     "bash", "%s/killgame.sh" % _wsl_path(rig_dir())]
     return rig_cmd("killgame.sh")
 
@@ -1086,7 +1099,7 @@ def load_cmd(slot):
     if sys.platform == "win32":
         home = wsl_home()
         if home:
-            return _wsl_head(root=True) + ["env", "HOME=" + home,
+            return _wsl_head(root=True) + ["env", "HOME=" + home] + _rig_env() + [
                     "PAD_RESTORE_KILL=1", "bash",
                     "%s/loadgame.sh" % _wsl_path(rig_dir()), str(slot)]
     return rig_cmd("loadgame.sh", slot, env=("PAD_RESTORE_KILL=1",))

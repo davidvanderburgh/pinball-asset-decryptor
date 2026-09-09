@@ -60,7 +60,8 @@ if [ "$BUILD_SHIM" = 1 ]; then
     log "Setup: compiling the device model…"
     # -std=gnu17: pinned rather than inherited, so the next distro's gcc (15
     # defaults to gnu23) compiles this the way today's does.
-    gcc -std=gnu17 -O2 -o "$S1_WORK/s1hwshim" "$HERE/s1hwshim.c" \
+    mkdir -p "$S1_SHIM_DIR"
+    gcc -std=gnu17 -O2 -o "$S1_SHIM_DIR/s1hwshim" "$HERE/s1hwshim.c" \
         $(pkg-config --cflags --libs fuse3) 2>&1 \
         || fail "could not compile the device model (need libfuse3-dev)" 3
 fi
@@ -240,7 +241,7 @@ log "Node-bus responder up."
 # 6. run the game (MUTED; drops the fatal SIGFPE; binds the responder pty; captures
 #    the DMD).  emu_root.sh owns the namespace/chroot/CUSE/binfmt loop.
 export S1_ROOT="$S1_WORK/rootfs" S1_GAME="$S1_WORK/game" S1_QEMU="$S1_QEMU" \
-       S1_HWSHIM="$S1_WORK/s1hwshim" S1_CPUINFO="$HERE/cpuinfo" \
+       S1_HWSHIM="$S1_SHIM_DIR/s1hwshim" S1_CPUINFO="$HERE/cpuinfo" \
        S1_STRACE="${S1_STRACE:-0}" S1_I2C_LOG=0 S1_RUNS=1000 S1_DROP_SIGFPE=1 \
        S1_EE_FILE=/data/board_eeprom.bin S1_TTYS4_CAP="$SLAVE" \
        S1_SPI0_CAP="$S1_WORK/spi0.cap" S1_DMD_FPS="${S1_DMD_FPS:-60}" \

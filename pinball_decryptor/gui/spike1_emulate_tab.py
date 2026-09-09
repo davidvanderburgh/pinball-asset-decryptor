@@ -44,7 +44,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import _rig
-from ..core import payloads, runtime
+from ..core import payloads, rigdata, runtime
 # The volume/mute control FILE and its load/store belong to the Spike 2 tab
 # (item 56) and are deliberately shared, not copied: one knob value, one file,
 # read by the one padplay.py speaker implementation both rigs launch.
@@ -82,13 +82,25 @@ def rig_distro():
     return runtime.distro_for("spike1")
 
 
+#: WHERE THE RIG'S WORK GOES, carried on every command rather than set once.
+#: The rig reads S1_WORK per invocation - start.sh, status.sh, stop.sh and
+#: prereqcheck.sh each work it out for themselves - so one of them left without
+#: it would look at a different machine's worth of state than the others.
+def _work_env(kw):
+    d = rig_distro()
+    ready = bool(d) and rigdata.exists()
+    return list(kw.pop("env", ())) + rigdata.rig_env("spike1", ready)
+
+
 def rig_cmd(*args, **kw):
     kw.setdefault("distro", rig_distro())
+    kw["env"] = _work_env(kw)
     return _rig.rig_cmd(rig_dir(), *args, **kw)
 
 
 def rig_cmd_root(*args, **kw):
     kw.setdefault("distro", rig_distro())
+    kw["env"] = _work_env(kw)
     return _rig.rig_cmd_root(rig_dir(), *args, **kw)
 
 
@@ -333,6 +345,11 @@ class Spike1EmulatePanel:
         # that installs it is where someone would look for it, and the action
         # names everything it deletes before it does anything.
         self._fix_menu = tk.Menu(self._fix_btn, tearoff=0)
+        self._fix_menu.add_command(label="Delete the emulator's data…",
+                                   command=self._delete_rig_data)
+        self._fix_menu.add_command(label="Delete downloaded files…",
+                                   command=self._delete_downloads)
+        self._fix_menu.add_separator()
         self._fix_menu.add_command(label="Remove the app's Linux…",
                                    command=self._remove_runtime)
         self._fix_btn.bind(
@@ -854,6 +871,7 @@ class Spike1EmulatePanel:
                               "emulator (%s). Falling back to building it on "
                               "this machine." % exc)
                 self._note_where_the_old_extraction_went()
+                self._ensure_data_disk()
                 if self._info.get("qemu_built") != "1":
                     self._log("Spike 1: first run — building the emulator, this "
                               "takes a few minutes. Each step is shown below.")
@@ -1222,6 +1240,93 @@ class Spike1EmulatePanel:
             "Nothing outside it is touched: your cards, your extractions on "
             "this PC and your own WSL distro all stay as they are.\n\n"
             "Replace it now?" % runtime.DISTRO)
+
+    def _ensure_data_disk(self):
+        """Make the work disk before the rig writes to it.
+
+        Its whole point is that the user's extractions, cards and SAVE STATES
+        do not live inside a Linux we replace - so it is made on the first run
+        that needs it rather than at install, when the user is already about
+        to write gigabytes.  A failure here is not fatal: the rig falls back to
+        its own default inside the distro, which is what it always did."""
+        d = rig_distro()
+        if not d:
+            return
+        try:
+            if rigdata.ensure(d, log=lambda m: self._log("Spike 1: %s" % m)):
+                free = rigdata.free_bytes(d)
+                if free and free < rigdata.LOW_SPACE_BYTES:
+                    self._log(
+                        "Spike 1: the emulator's data disk is nearly full "
+                        "(%.1f GB left). Right-click Fix setup to delete what "
+                        "is on it." % (free / 1073741824.0))
+        except Exception as exc:                            # noqa: BLE001
+            self._log("Spike 1: could not set up the data disk (%s) — the "
+                      "emulator will keep its work inside the runtime "
+                      "instead." % exc)
+
+    def _delete_rig_data(self):
+        """Give the disk back.  Deleting files INSIDE a WSL distro frees
+        nothing - WSL 2.6.1 refuses to shrink one - so the unit of reclaim has
+        to be this file."""
+        if self._last_up:
+            self._log("Spike 1: the emulator is running — stop it first.")
+            return
+        if not rigdata.exists():
+            self._log("Spike 1: there is no emulator data to delete.")
+            return
+        size = rigdata.size_on_disk() / 1073741824.0
+        if not messagebox.askyesno(
+                "Delete the emulator's data?",
+                "This deletes everything both emulators have written: games "
+                "extracted from your cards, cached cards, and any SAVE STATES."
+                "\n\nIt frees %.1f GB. Your cards and anything you have "
+                "exported are untouched, and the emulator itself stays "
+                "installed - the next run just extracts again."
+                "\n\nDelete it?"
+                % size):
+            return
+
+        def work():
+            if rigdata.delete():
+                self._log("Spike 1: deleted the emulator's data (%.1f GB "
+                          "freed)." % size)
+            else:
+                self._log("Spike 1: could not delete the data disk — is a run "
+                          "still using it?")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _delete_downloads(self):
+        """The third thing that takes disk: what we downloaded to install."""
+        from ..core import payloads as _p
+        root = _p.cache_root()
+        total = 0
+        for base, _dirs, files in os.walk(root):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(base, f))
+                except OSError:
+                    pass
+        if not total:
+            self._log("Spike 1: nothing downloaded to delete.")
+            return
+        if not messagebox.askyesno(
+                "Delete downloaded files?",
+                "This deletes the installer files the app has downloaded (the "
+                "emulator binaries and the runtime image), freeing %.1f GB."
+                "\n\nNothing that is installed is removed - they are only "
+                "downloaded again if something needs reinstalling."
+                "\n\nDelete them?"
+                % (total / 1073741824.0)):
+            return
+        import shutil
+        try:
+            shutil.rmtree(root)
+            self._log("Spike 1: deleted the downloaded files (%.1f GB freed)."
+                      % (total / 1073741824.0))
+        except OSError as exc:
+            self._log("Spike 1: could not delete them: %s" % exc)
 
     def _default_distro_has_a_game(self):
         """Does the machine's OWN distro hold an extraction the runtime does

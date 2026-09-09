@@ -157,7 +157,8 @@ def _isolate_audio_ctl(tmp_path_factory):
 # create/map/destroy serializes at the desktop layer whatever the process
 # count.  So Tk work never spreads freely; it rides named groups, and the
 # other workers parallelize the rest of the suite.  How many groups is the
-# question the hook below answers, and the trade is written out there.
+# question the hook below answers -- one on CI, two on a dev box, both
+# numbers measured rather than reasoned.
 #
 # MEMBERSHIP IS THE PART THAT WAS WRONG (2026-09-01).  The original sniff
 # looked only for the literal string "tkinter", which missed every file that
@@ -192,24 +193,29 @@ def _touches_tk(path):
 # or the marker arrives after the train has left.
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
-    # a76064c split the lane two ways LOCALLY (232s -> 177s) and left CI on
-    # the single group, reasoning that "CI wall time is not the constraint".
-    # It is now.  Measured on the 2026-09-09 Windows CI job: the tk lane ran
-    # 424s on gw0 while gw1/gw2/gw3 finished everything else in 281s and then
-    # sat idle for 3m26s -- the lane WAS the job.  The same lane costs 119s on
-    # the macOS runner, so Windows is both the slow lane and the runner this
-    # account queues longest for.
+    # HOW MANY GROUPS.  a76064c split the lane two ways LOCALLY (232s -> 177s)
+    # and left CI on one group, reasoning "CI wall time is not the constraint".
+    # When CI wall time BECAME the constraint (2026-09-09: a release's windows
+    # job spent 8m33s in the test step and the lane was its whole critical
+    # path, 424s on gw0 while the other three workers idled 3m26s), the
+    # obvious move was to split CI too.  It was measured on the real runner
+    # and it does not work:
     #
-    # Splitting test_gui_* (309s) from the emulator-window files (115s) puts
-    # the biggest group at 309s and the remaining 958s over three workers at
-    # 319s -- within ten seconds of a perfectly balanced 317s, so a 2-way
-    # split gets essentially all of the available win and a wider spread
-    # would only re-buy the desktop-layer anti-scaling a76064c measured.
+    #     one group    lane 487s on one worker      -- test step 8m33s
+    #     two groups   tk-app 467s + tk-emu 395s    -- test step 8m15s
     #
-    # macOS CI keeps the single group: that is where the mid-Toplevel worker
-    # crash was seen, splitting it is unretested, and its lane is under two
-    # minutes so there is nothing there to win.
-    single_group = bool(os.environ.get("CI")) and sys.platform == "darwin"
+    # Splitting grew the TOTAL Tk work from 487s to 862s -- 77% -- and bought
+    # 20 seconds of critical path, because window create/map/destroy
+    # serializes at the desktop layer no matter how many processes ask.  That
+    # is the same anti-scaling a76064c measured at 8 workers, and it is far
+    # steeper on a 4-core hosted runner than on the 16-core dev box, where a
+    # 2-way split still pays (177s) and stays the default.
+    #
+    # So CI keeps ONE group.  It is not leaving time on the table: there is no
+    # time there to take.  The lane is 4x slower on Windows than on macOS
+    # because of what Windows charges per window, and the only lever left is
+    # opening fewer of them -- a fixture-scope change, not a scheduling one.
+    single_group = bool(os.environ.get("CI"))
     for item in items:
         if _touches_tk(item.path):
             if single_group:

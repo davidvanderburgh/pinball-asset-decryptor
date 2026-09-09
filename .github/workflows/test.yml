@@ -38,7 +38,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     # A wedged or looping test should fail the job, not hang for the
     # 6-hour default and hold up a release.  Healthy runs finish in
-    # ~3m (Linux/macOS) and ~6m (Windows, whose Tk lane is 4x macOS's).
+    # ~3m (Linux/macOS) and ~9m (Windows, whose Tk lane is 4x macOS's and
+    # is the whole job -- see tests/conftest.py on why it cannot be split).
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -142,13 +143,13 @@ jobs:
       # remaining 250+ tests still exercise the picker / mfr-switch /
       # log persistence behaviour through their non-GUI entry points,
       # and the GUI smoke suite is run manually before tagging.
-      # --dist loadgroup honours the xdist_group markers conftest.py stamps
-      # on every tkinter-touching module.  Real-Tk tests never spread freely
-      # across workers -- concurrent Tk crashed a macOS worker and Windows
-      # App() fixtures on the first -n auto runs, and window create/map/
-      # destroy serializes at the desktop layer anyway.  They ride two
-      # groups (app-fixture files vs emulator windows), except on macOS CI
-      # which keeps the single group; the other workers take the rest.
+      # --dist loadgroup honours the xdist_group marker conftest.py stamps on
+      # every tkinter-touching module: on CI all real-Tk tests ride ONE
+      # worker, while the others parallelize the rest.  That is measured, not
+      # cautious -- splitting the lane two ways on the Windows runner grew
+      # total Tk work 487s -> 862s and moved the wall clock 20 seconds,
+      # because window create/map/destroy serializes at the desktop layer.
+      # tests/conftest.py carries the numbers.
       - name: Run tests (Linux, under xvfb)
         if: runner.os == 'Linux'
         run: xvfb-run -a python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py

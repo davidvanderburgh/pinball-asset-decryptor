@@ -3,9 +3,9 @@ r"""The Tk lane's xdist grouping is the shape of the Windows CI job.
 ``conftest.pytest_collection_modifyitems`` stamps an ``xdist_group`` marker on
 every tkinter-touching test.  ``--dist loadgroup`` then keeps a group on one
 worker, so the marker decides how long the slowest worker runs -- and on the
-Windows runner that worker IS the job: measured 2026-09-09, the single "tk"
-group ran 424s on gw0 while the other three workers finished everything else
-in 281s and idled for the remaining 3m26s.
+Windows runner that worker IS the job: measured 2026-09-09, the lane ran 424s
+on gw0 while the other three workers finished everything else in 281s and
+idled for the remaining 3m26s.
 
 Two properties are load-bearing and neither is visible from reading a test
 run, so they are pinned here:
@@ -16,13 +16,16 @@ run, so they are pinned here:
   ungrouped across workers for a month (fixed 2026-09-01).  A new GUI test
   file must be grouped the day it appears, with nobody remembering to mark it.
 
-* **Group count.**  Windows and Linux CI split the lane two ways so it stops
-  being the critical path; macOS CI keeps ONE group, because that is where
-  the concurrent-Tk mid-Toplevel worker crash was seen and its lane is under
-  two minutes anyway.  Getting this backwards costs either three minutes of
-  the scarcest runner in the account or a flaky macOS job.
+* **Group count: ONE on CI, two on a dev box.**  Splitting CI's lane looks
+  like free parallelism and is not.  Measured on the real Windows runner:
+  one group ran the lane in 487s on a single worker; two groups ran 467s and
+  395s side by side -- 862s of total Tk work for 20 seconds of critical path,
+  because window create/map/destroy serializes at the desktop layer however
+  many processes ask for it.  The 16-core dev box is shallow enough on that
+  curve that a 2-way split still pays (232s -> 177s, a76064c) and stays the
+  default there.  Anyone reading "CI only uses one worker for a third of the
+  suite" as an oversight should read those numbers first.
 """
-
 import os
 import sys
 
@@ -79,33 +82,25 @@ def test_a_file_that_never_touches_tk_is_left_alone(tmp_path, monkeypatch):
     assert _group(f, ci=True, platform="win32", monkeypatch=monkeypatch) is None
 
 
-@pytest.mark.parametrize("platform", ["win32", "linux"])
-def test_windows_and_linux_ci_split_the_lane_two_ways(platform, monkeypatch):
+@pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
+def test_ci_keeps_the_whole_lane_on_one_worker(platform, monkeypatch):
+    """Two groups cost 862s of Tk work to save 20s of wall clock. Measured."""
     d = _tests_dir()
     app = _group(os.path.join(d, "test_gui_batch18.py"), ci=True,
                  platform=platform, monkeypatch=monkeypatch)
     emu = _group(os.path.join(d, "test_multiboot_tab.py"), ci=True,
                  platform=platform, monkeypatch=monkeypatch)
-    assert app and emu and app != emu
-
-
-def test_macos_ci_keeps_the_lane_on_one_worker(monkeypatch):
-    """Splitting it there is the unretested mid-Toplevel crash regime."""
-    d = _tests_dir()
-    app = _group(os.path.join(d, "test_gui_batch18.py"), ci=True,
-                 platform="darwin", monkeypatch=monkeypatch)
-    emu = _group(os.path.join(d, "test_multiboot_tab.py"), ci=True,
-                 platform="darwin", monkeypatch=monkeypatch)
     assert app == emu == "tk"
 
 
-def test_a_developer_box_splits_the_lane_on_every_platform(monkeypatch):
+@pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
+def test_a_developer_box_splits_the_lane(platform, monkeypatch):
     """Off CI the split is unconditional -- it is what took 232s to 177s."""
     d = _tests_dir()
     app = _group(os.path.join(d, "test_gui_batch18.py"), ci=False,
-                 platform="darwin", monkeypatch=monkeypatch)
+                 platform=platform, monkeypatch=monkeypatch)
     emu = _group(os.path.join(d, "test_multiboot_tab.py"), ci=False,
-                 platform="darwin", monkeypatch=monkeypatch)
+                 platform=platform, monkeypatch=monkeypatch)
     assert app and emu and app != emu
 
 

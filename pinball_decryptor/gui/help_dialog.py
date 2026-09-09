@@ -45,6 +45,18 @@ HELP_CONTENT = {
          "still in progress; try again once the copy finishes. If the file "
          "belongs to a different manufacturer, that line offers a one-click "
          "switch."),
+        ("Multi-boot cards hold several games — you get the first",
+         "A card with a boot menu carries a complete game per menu entry, and "
+         "everything here works on the FIRST one: the extract, the "
+         "replacements you make from it, and the card a Build writes. Press "
+         "Extract (or Build) on such a card and a notice says so, lists the "
+         "games on it, and names the one in play. Nothing is lost — a Build "
+         "copies the other games and the menu through untouched, so you get a "
+         "working multi-boot card with the first game changed. To change one "
+         "of the others, extract THAT game's own image, replace what you want "
+         "and build it, then load the card on the Multi-boot tab, point that "
+         "game's row at your new build and update the card in place. The "
+         "Info button beside the path lists a card's games at any time."),
         ("What gets extracted",
          "The Audio / Video / Images / Text checkboxes choose which asset "
          "types to pull. Everything lands in the Project Folder — the one "
@@ -644,6 +656,15 @@ HELP_CONTENT = {
          "go in before you click — it's only a preview: the build does its "
          "own full comparison, so there's no need to wait for the scan to "
          "finish before building."),
+        ("Building from a multi-boot card",
+         "The build is the whole card again, so a multi-boot original gives "
+         "you a multi-boot build: the first game on it carries your changes "
+         "and every other game, plus the menu, is copied through exactly as "
+         "it was. A notice before the build says which game that is. To "
+         "change one of the others, build that game's own image and then put "
+         "it onto the card from the Multi-boot tab (load the card, point that "
+         "game's row at your build, update in place) — only the parts that "
+         "changed are written."),
         ("Output name",
          "The Build Image line shows the exact file the build will "
          "produce. Builds land in the project's own build\\ folder — one "
@@ -1165,9 +1186,10 @@ HELP_CONTENT = {
          "the box is the Write tab's Assets "
          "Folder, shown here read only — the project has one extract folder "
          "and one place to set it. On a card with a boot menu the edits are "
-         "prepared from ONE image on it — the largest game partition, the one "
-         "every write on this card goes to — and applied over whichever image "
-         "you pick at the menu; to edit another image, build that image on "
+         "prepared from ONE image on it — the first game image on the card, "
+         "the one every extract and write on this card uses — and applied "
+         "over whichever image you pick at the menu; to edit another image, "
+         "build that image on "
          "its own and rebuild the multi-boot card from it. And if the edits "
          "cannot be delivered (no "
          "assets folder, no baseline to compare them against, or an edit that "

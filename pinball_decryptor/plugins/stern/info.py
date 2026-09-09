@@ -442,6 +442,34 @@ def _data_partition_probe(card):
             game_folder)
 
 
+def _multi_image_section(path):
+    """``[("Games on this Card", rows)]`` for a multi-boot card, else ``[]``.
+
+    A card with one game says nothing here — the Firmware section above
+    already names it.  A card with several is the case the report exists for
+    (PAD-122): the version, the asset counts and every other row above
+    describe the FIRST image only, because that is the one the app reads.
+    """
+    from .multiimage import images_for_path, pretty
+    try:
+        images = images_for_path(path)
+    except Exception:
+        return []
+    if len(images) < 2:
+        return []
+    rows = [("Boot menu", "%d games — this card boots into a menu that picks "
+                          "one" % len(images))]
+    for i, img in enumerate(images):
+        rows.append(
+            ("Game %d" % (i + 1),
+             "%s  (p%d%s)%s"
+             % (pretty(img), img.part,
+                "/" + img.subdir if img.subdir else "",
+                "  — the one this app extracts and writes; everything above "
+                "describes it" if i == 0 else "")))
+    return [("Games on this Card", rows)]
+
+
 def card_info(path):
     """Image-Info sections for a Spike 2 card image."""
     firmware = [("System", "Stern Spike 2")]
@@ -479,6 +507,7 @@ def card_info(path):
         firmware.append(("Version ID", vid))
     firmware.extend(fw_rows)
     sections = [("Firmware", firmware)]
+    sections.extend(_multi_image_section(path))
     if asset_rows:
         sections.append(("Assets on Card", asset_rows))
     if partitions:

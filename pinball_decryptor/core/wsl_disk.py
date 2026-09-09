@@ -364,12 +364,41 @@ def delete_all():
 # Reclaim to Windows (compact the .vhdx -- disruptive, needs admin)
 # ---------------------------------------------------------------------------
 
+def _guid_named(lxss_key, want):
+    """The Lxss subkey GUID whose ``DistributionName`` is *want*, or None.
+
+    WSL keys its distros by GUID and keeps the name inside, so finding one by
+    name means walking the subkeys.  None rather than an exception when it is
+    not there: the caller then falls back to the default distro, which is what
+    a machine without our runtime uses anyway."""
+    import winreg
+    i = 0
+    while True:
+        try:
+            sub = winreg.EnumKey(lxss_key, i)
+        except OSError:
+            return None
+        i += 1
+        try:
+            with winreg.OpenKey(lxss_key, sub) as k:
+                if winreg.QueryValueEx(k, "DistributionName")[0] == want:
+                    return sub
+        except OSError:
+            continue
+
+
 def _default_distro_vhdx():
-    """Return ``(distro_name, vhdx_path)`` for the default WSL distro.
+    """Return ``(distro_name, vhdx_path)`` for the distro THE APP USES.
 
     Read from ``HKCU\\...\\Lxss``: the ``DefaultDistribution`` GUID points at
     the per-distro subkey holding ``BasePath`` (and ``DistributionName``); the
     disk is ``ext4.vhdx`` under it.  Returns ``(None, None)`` if not found.
+
+    NOT NECESSARILY THE DEFAULT ONE, despite the name this has always carried.
+    Everything else in this module measures the Linux the app actually runs in
+    - :func:`usage` df's the filesystem the pipelines stage into - and this is
+    what the RESIZE acts on.  Left pointing at the default, the dialog would
+    report one distro filling up and its Resize button would grow another.
     """
     if not is_supported():
         return None, None
@@ -378,9 +407,12 @@ def _default_distro_vhdx():
     except ImportError:
         return None, None
     base = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
+    want = runtime.wsl_distro()
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as k:
             guid = winreg.QueryValueEx(k, "DefaultDistribution")[0]
+            if want:
+                guid = _guid_named(k, want) or guid
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                             base + "\\" + guid) as k:
             base_path = winreg.QueryValueEx(k, "BasePath")[0]

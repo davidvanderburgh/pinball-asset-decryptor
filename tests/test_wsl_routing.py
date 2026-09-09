@@ -168,6 +168,67 @@ def test_the_disk_tools_report_on_the_linux_the_app_uses(ours, monkeypatch):
     assert seen[0][:5] == ["wsl.exe", "-d", DISTRO, "-u", "root"]
 
 
+def test_the_disk_dialog_measures_and_resizes_the_same_distro(ours, monkeypatch):
+    """usage() df's the filesystem the pipelines stage into; resize_disk()
+    grows the disk named by _default_distro_vhdx().  Those were two different
+    Linuxes the moment the pipelines moved into ours - so the dialog would
+    report OUR distro filling up and its Resize button would grow the user's
+    Ubuntu, which is a wrong answer that looks like a working feature."""
+    seen = {}
+
+    def _enum(lxss_key, want):
+        seen["asked_for"] = want
+        return "{guid-of-ours}"
+
+    monkeypatch.setattr(wsl_disk, "_guid_named", _enum)
+    monkeypatch.setattr(wsl_disk, "is_supported", lambda: True)
+
+    class _Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    import winreg
+    monkeypatch.setattr(winreg, "OpenKey", lambda *a, **k: _Key())
+    vals = {"DefaultDistribution": ("{guid-of-theirs}", 1),
+            "BasePath": (r"C:\wsl\ours", 1),
+            "DistributionName": (DISTRO, 1)}
+    monkeypatch.setattr(winreg, "QueryValueEx", lambda k, n: vals[n])
+
+    name, vhdx = wsl_disk._default_distro_vhdx()
+    assert seen["asked_for"] == DISTRO, (
+        "the resize still follows WSL's DefaultDistribution while every "
+        "measurement in this module follows the app's own distro")
+    assert name == DISTRO
+    assert vhdx.endswith("ext4.vhdx")
+
+
+def test_without_our_runtime_the_disk_dialog_follows_the_default(theirs, monkeypatch):
+    asked = []
+    monkeypatch.setattr(wsl_disk, "_guid_named",
+                        lambda k, w: asked.append(w) or None)
+    monkeypatch.setattr(wsl_disk, "is_supported", lambda: True)
+
+    class _Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    import winreg
+    monkeypatch.setattr(winreg, "OpenKey", lambda *a, **k: _Key())
+    vals = {"DefaultDistribution": ("{guid-of-theirs}", 1),
+            "BasePath": (r"C:\wsl	heirs", 1),
+            "DistributionName": ("Ubuntu", 1)}
+    monkeypatch.setattr(winreg, "QueryValueEx", lambda k, n: vals[n])
+    name, _ = wsl_disk._default_distro_vhdx()
+    assert asked == [], "it went looking for a runtime that is not installed"
+    assert name == "Ubuntu"
+
+
 # ---------------------------------------------------- and the one rule above --
 
 def test_the_escape_hatch_puts_everything_back(monkeypatch):

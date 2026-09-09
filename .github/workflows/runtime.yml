@@ -167,7 +167,7 @@ jobs:
           docker run --rm pad-runtime:${{ inputs.tag }} bash -c '
             set -e
             fail() { echo "FAILED: $1"; exit 1; }
-            for t in qemu-arm-static arm-linux-gnueabihf-gcc gcc debugfs                      fusermount3 fuse2fs ffmpeg busybox criu make patch zstd                      xxd file; do
+            for t in qemu-arm-static arm-linux-gnueabihf-gcc gcc debugfs mke2fs e2fsck sfdisk fdisk                      fusermount3 fuse2fs ffmpeg busybox criu make patch zstd                      xxd file; do
               command -v $t >/dev/null || fail "missing: $t"
             done
             criu --version || fail "criu will not run (its libraries did not come across?)"

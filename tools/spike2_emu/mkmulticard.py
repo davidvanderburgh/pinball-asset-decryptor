@@ -92,9 +92,10 @@ each image, never guessed from a file name, from up to three places that are cro
         every one of the 49 cards checked (it is written on the machine, not by the factory),
         so nothing here depends on it.
 
-Run under WSL/Linux (needs debugfs, e2fsck, mke2fs, sfdisk, fdisk from e2fsprogs/util-linux);
-the pure-python parts (layout, MBR/EBR bytes, hook, images.conf, media checks, the version
-record decoder) are tested on Windows.
+Run under WSL/Linux (needs debugfs, e2fsck, mke2fs from e2fsprogs; sfdisk and fdisk - Ubuntu's
+`fdisk` package - are verify's optional cross-checks, said when absent, and the selftest's
+requirement); the pure-python parts (layout, MBR/EBR bytes, hook, images.conf, media checks,
+the version record decoder) are tested on Windows.
 
   mkmulticard.py plan        --primary P --extra E [--extra E2 ...] [--layout L] [--allow-unreachable]
         print the layout, byte totals and whether it fits Stern's 16G / 32G sizes; writes nothing
@@ -5394,6 +5395,38 @@ def sfdisk_table(image):
     return rows, out
 
 
+#: What verify prints for a cross-check it cannot run.  A NOTE, never a FAIL.
+CROSS_CHECK_NOTE = ("NOTE  %s is not installed here (Ubuntu's `fdisk` package); the parser "
+                    "above holds the table byte for byte")
+
+
+def table_cross_checks(card, plan, check, which=shutil.which, run=subprocess.run):
+    """The partition table read a second and a third way - `sfdisk -d` compared with the
+    plan, `fdisk -l` printed for a person - WHEN THOSE TOOLS ARE HERE.  They are
+    cross-checks: the tool's own parser has already held the table against the plan, and
+    check-stock proves that parser regenerates Stern's tables byte for byte.  Ubuntu 24.04
+    keeps sfdisk and fdisk in the `fdisk` package, which the PAD runtime image did not carry
+    (2026-09-09: every build in the app ended in this verify refusing "missing tool(s):
+    sfdisk, fdisk"), so a missing one is SAID, in the same column, and is not a failure.
+    -> the names that were missing."""
+    missing = []
+    if which("sfdisk"):
+        rows, sf = sfdisk_table(card)
+        want_sf = [(n, st, cnt, t) for (n, t, st, cnt) in plan.table()]
+        check("table parse-back (sfdisk -d)", rows == want_sf, "" if rows == want_sf else "got %r" % (rows,))
+        print(sf.rstrip())
+    else:
+        missing.append("sfdisk")
+        print("%-58s %s" % ("table parse-back (sfdisk -d)", CROSS_CHECK_NOTE % "sfdisk"))
+    if which("fdisk"):
+        r = run(["fdisk", "-l", card], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        print(r.stdout.decode("utf-8", "replace").rstrip())
+    else:
+        missing.append("fdisk")
+        print("%-58s %s" % ("table listing (fdisk -l)", CROSS_CHECK_NOTE % "fdisk"))
+    return missing
+
+
 def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touched=None):
     """`mode` (item 93) says how much of a RECORDED games tree's content is re-hashed against
     trees.json: 'full' every file (the default of the verify command), 'touched' the files
@@ -5407,7 +5440,7 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
         ok &= bool(good)
         print("%-58s %s%s" % (label, "OK" if good else "FAIL", ("  " + detail) if detail else ""))
 
-    need_tools("debugfs", "e2fsck", "sfdisk", "fdisk")
+    need_tools("debugfs", "e2fsck")
     try:
         trees_rec = read_trees(card)
     except Refused as e:
@@ -5417,12 +5450,7 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
     O = Geometry.from_file(card)
     got = [(n, t, st, cnt) for (n, t, st, cnt) in O.prim] + [(5 + i, t, st, cnt) for i, (_e, t, st, cnt) in enumerate(O.logical)]
     check("table parse-back (own parser)", plan.table() == got, "" if plan.table() == got else "got %r" % (got,))
-    rows, sf = sfdisk_table(card)
-    want_sf = [(n, st, cnt, t) for (n, t, st, cnt) in plan.table()]
-    check("table parse-back (sfdisk -d)", rows == want_sf, "" if rows == want_sf else "got %r" % (rows,))
-    print(sf.rstrip())
-    r = subprocess.run(["fdisk", "-l", card], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    print(r.stdout.decode("utf-8", "replace").rstrip())
+    table_cross_checks(card, plan, check)
     check("image size %d" % plan.total_bytes, os.path.getsize(card) == plan.total_bytes, "actual %d" % os.path.getsize(card))
     # the MBR: bootstrap + disk id verbatim, entries regenerated
     with open(card, "rb") as f:

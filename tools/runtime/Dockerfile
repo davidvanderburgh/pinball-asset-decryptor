@@ -189,6 +189,16 @@ RUN apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
 #:                              step that asks each tool to do its job, which
 #:                              is the entire reason that step exists
 #:   fuse3                      fusermount3, for those mounts
+#:   fdisk                      sfdisk + fdisk, the multi-boot card verify's
+#:                              two cross-readings of a partition table.
+#:                              util-linux is here (mount, unshare), but
+#:                              Ubuntu keeps these two in a package of their
+#:                              own, and runtime 6 shipped without them - so
+#:                              every multi-boot build in the app ended with
+#:                              verify refusing "missing tool(s): sfdisk,
+#:                              fdisk" (2026-09-09).  verify now says so and
+#:                              carries on when they are absent; this puts
+#:                              them back for the next image
 #:   ffmpeg                     the game decodes NEITHER its video nor its
 #:                              sound itself, so both go through this; without
 #:                              it a run comes up black and silent, which is
@@ -214,6 +224,7 @@ RUN if [ "$VARIANT" = full ]; then \
         e2fsprogs \
         fuse2fs \
         fuse3 \
+        fdisk \
         ffmpeg \
         busybox-static \
         make patch zstd xxd file \

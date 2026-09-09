@@ -2095,6 +2095,50 @@ def test_recovered_names_come_from_build_json_and_never_collide(mk):
     assert mk.recovered_names("/x/card.raw", 1, {"images": [{"source": "/a/notes.txt"}]}) == ["card.image0.raw"]
 
 
+def test_verifys_table_cross_checks_are_notes_not_failures_without_sfdisk_and_fdisk(mk, tmp_path, capsys):
+    """The PAD runtime image carries util-linux but not Ubuntu's `fdisk` package, so every
+    build in the app ended in verify refusing "missing tool(s): sfdisk, fdisk".  The tool's
+    own parser holds the table; the other two readings are cross-checks, said when absent."""
+    A, B, out = _parts_card(mk, tmp_path)
+    plan = mk.plan_from_card(out)
+    seen = []
+
+    def check(label, good, detail=""):
+        seen.append((label, bool(good), detail))
+    # neither tool: two NOTE lines, no check at all, both named
+    missing = mk.table_cross_checks(out, plan, check, which=lambda name: None,
+                                    run=lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran")))
+    assert missing == ["sfdisk", "fdisk"] and seen == []
+    text = capsys.readouterr().out
+    assert text.count("NOTE") == 2 and "sfdisk is not installed here" in text \
+        and "fdisk is not installed here" in text and "FAIL" not in text
+    # both tools: sfdisk's rows are compared, fdisk's listing is printed
+    want = [(n, st, cnt, t) for (n, t, st, cnt) in plan.table()]
+    mk_sf = lambda image: (want, "label: dos\n")
+    orig = mk.sfdisk_table
+    mk.sfdisk_table = mk_sf
+    try:
+        ran = []
+        missing = mk.table_cross_checks(
+            out, plan, check, which=lambda name: "/usr/sbin/" + name,
+            run=lambda argv, **k: ran.append(argv) or type("R", (), {"stdout": b"Disk x: 10 MiB\n"})())
+    finally:
+        mk.sfdisk_table = orig
+    assert missing == [] and seen == [("table parse-back (sfdisk -d)", True, "")]
+    assert ran == [["fdisk", "-l", out]]
+    text = capsys.readouterr().out
+    assert "label: dos" in text and "Disk x: 10 MiB" in text and "NOTE" not in text
+    # ...and a table sfdisk reads differently is still a FAIL
+    seen.clear()
+    mk.sfdisk_table = lambda image: (want[:-1], "")
+    try:
+        mk.table_cross_checks(out, plan, check, which=lambda name: name == "sfdisk" and "/usr/sbin/sfdisk" or None,
+                              run=None)
+    finally:
+        mk.sfdisk_table = orig
+    assert seen[0][:2] == ("table parse-back (sfdisk -d)", False) and "got" in seen[0][2]
+
+
 def test_the_recorded_tree_as_the_card_holds_it_carries_the_bypass_digests(mk):
     """trees.json keeps the SOURCE's digests and the validator bypass's own beside them
     (item 98); a tree read off the card - or out of an image recovered from it - has the

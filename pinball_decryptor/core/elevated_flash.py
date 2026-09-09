@@ -123,17 +123,20 @@ def flash_image_with_privileges(image_path, device_path, *, log=None,
 
 
 def read_device_with_privileges(device_path, image_path, *, log=None,
-                                progress=None, cancel=None):
+                                progress=None, cancel=None, extent=None):
     """Read *device_path* into *image_path*, elevating only the read.
 
     Drop-in for :func:`core.rawdevice.read_device_to_image` with the same
-    return value (bytes read) and exceptions.  Reading raw sectors is gated on
-    Administrator/root exactly like writing them, so this reuses the flash
-    helper's elevation + IPC wholesale — only the job's ``mode`` differs.
+    return value (bytes read), exceptions and ``extent`` (``"card"`` = up to
+    the end of the card's partition table, the image rather than the card).
+    Reading raw sectors is gated on Administrator/root exactly like writing
+    them, so this reuses the flash helper's elevation + IPC wholesale — only
+    the job's ``mode`` differs.
     """
     if is_admin() or not is_device_path(device_path):
         return read_device_to_image(device_path, image_path, log=log,
-                                    progress=progress, cancel=cancel)
+                                    progress=progress, cancel=cancel,
+                                    extent=extent)
 
     if log is not None:
         log("Reading the card needs administrator access — approve the "
@@ -144,7 +147,7 @@ def read_device_with_privileges(device_path, image_path, *, log=None,
     try:
         with open(os.path.join(ipc, _JOB), "w", encoding="utf-8") as f:
             json.dump({"mode": "read", "image": image_path,
-                       "device": device_path}, f)
+                       "device": device_path, "extent": extent}, f)
 
         run = _spawn_elevated_helper(ipc)
         if run is None:
@@ -582,7 +585,8 @@ def run_helper_main(argv):
                 device, image, log=_log, progress=_progress, cancel=_cancel)
         elif reading:
             written = read_device_to_image(
-                device, image, log=_log, progress=_progress, cancel=_cancel)
+                device, image, log=_log, progress=_progress, cancel=_cancel,
+                extent=job.get("extent") or None)
         else:
             write = flash_menu_to_device if menu_only else flash_image_to_device
             written = write(

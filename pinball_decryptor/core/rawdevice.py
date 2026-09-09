@@ -1141,8 +1141,30 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
 _VERIFY_CHUNK = 16 * 1024 * 1024
 
 
+def card_image_extent(read_at, dev_size, tail=2):
+    """How many bytes of a card a Stern card IMAGE covers: the end of its last partition plus
+    the two spare sectors every stock image carries after its extended container - what
+    ``mkmulticard`` calls the image's total.  A 14.7 GB multi-boot card flashed onto a 32 GB
+    SD card is 14.7 GB of image and 17 GB of nothing, and reading the nothing doubles a
+    seven-minute read for a file that is then the wrong size to be that image.
+
+    *read_at* reads one sector at an LBA.  The whole device when the card holds no readable
+    table (there is then nothing to say where the image ends), never more than the device."""
+    mbr = read_at(0)
+    prim = _mbr_primaries(mbr)
+    if not prim:
+        return dev_size
+    end = 0
+    for _idx, ptype, lba, count in prim:
+        end = max(end, lba + count)
+        if ptype == 0x0F:
+            for _ebr, _lt, lstart, lcount in _ebr_chain(read_at, lba):
+                end = max(end, lstart + lcount)
+    return min(dev_size, (end + tail) * 512)
+
+
 def read_device_to_image(device_path, image_path, *, log=None, progress=None,
-                         cancel=None):
+                         cancel=None, extent=None):
     """dd-style raw copy of the whole card *device_path* into *image_path*.
 
     The exact inverse of :func:`flash_image_to_device`: every sector of the
@@ -1157,6 +1179,12 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
     and honours ``cancel`` (a True return raises :class:`FlashCancelled`).
     Returns the number of bytes read.
 
+    ``extent="card"`` reads the card IMAGE rather than the card: up to the end
+    of the partition table's last partition (:func:`card_image_extent`), which
+    is the file the Multi-boot tab can load, update and recover images from -
+    the bytes past it are what a bigger SD card has over the image.  The
+    default reads every sector, as a backup should.
+
     The image is built at ``<image_path>.part`` and renamed only once the whole
     card has landed, so an interrupted read can never leave a short file
     sitting there looking like a good backup.
@@ -1167,6 +1195,23 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
             "Could not read the size of %s, so there is no way to know how "
             "much to copy. Re-seat the card (or its reader) and try again."
             % device_path)
+    want = dev_size
+    if extent == "card":
+        try:
+            with RawDeviceFile(device_path, writable=False) as dev:
+                want = card_image_extent(
+                    lambda lba: dev._aligned_read(lba * 512, 512), dev_size)
+        except PermissionError as e:
+            raise FlashError(str(e)) from e
+        except OSError as e:
+            raise FlashError("Reading the card's partition table failed:\n%s"
+                             % e) from e
+        if log is not None and want < dev_size:
+            log("The card image ends %s into the %s card; only that much is read."
+                % (format_size(want), format_size(dev_size)), "info")
+    elif extent is not None:
+        raise ValueError("extent must be None or 'card', not %r" % (extent,))
+    dev_size = want
 
     dest_dir = os.path.dirname(os.path.abspath(image_path)) or "."
     try:

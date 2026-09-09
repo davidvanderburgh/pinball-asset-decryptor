@@ -3711,6 +3711,26 @@ def restore_changes(old_im, tree, changes, live=None):
     return out
 
 
+def tree_as_on_card(im):
+    """The recorded tree of one image AS THE CARD HOLDS IT: the record keeps the SOURCE's
+    digests and carries the validator bypass's own (the patched game and .sidx) beside them
+    (item 98), so a tree read back off the card - or out of an image recovered from it - has
+    those two files at the bypass's digests, not the source's.  A tree with no bypass
+    record is returned as it is."""
+    ts = _treesync()
+    by = im.bypass or {}
+    files = dict(im.tree.files)
+    changed = False
+    for path_key, digest_key in (("game_path", "game"), ("sidx_path", "sidx")):
+        rel, sha = by.get(path_key), by.get(digest_key)
+        if rel and sha and rel in files and files[rel].sha256 != sha:
+            files[rel] = files[rel]._replace(sha256=sha)
+            changed = True
+    if not changed:
+        return im.tree
+    return ts.TreeManifest(files, im.tree.symlinks, im.tree.dirs)
+
+
 def _update_locked(a, ts, card, dry):
     workdir = a.workdir or os.path.dirname(os.path.abspath(card))
     plan = plan_from_card(card)
@@ -3815,6 +3835,47 @@ def _update_locked(a, ts, card, dry):
         man, how = source_tree(path, a.cache_dir)
         new_trees[i] = (man.tree, st, man.uuid, old_im)
         u["sources"].append((i, act.device, how, os.path.basename(path)))
+    # A SOURCE AT ANOTHER PATH WITH THE SAME TREE IS THE SAME IMAGE.  match_trees knows a
+    # recorded tree by its source's path and stamp; an image recovered off the card itself
+    # (extract - the card came from someone else's machine), or a library reorganised, has
+    # neither, and read as "new" it was removed and written again in full - 6 GB, which a
+    # parts card has no room for, so a card with NOTHING changed could not be updated at
+    # all.  Once hashed, the tree says what it is: matched to the recorded tree it holds
+    # no difference from (the diff that would be written is empty), and kept.
+    removed = [a_ for a_ in actions if a_.action == "remove"]
+    rematched = {}                      # index -> the recorded tree AS THE CARD HOLDS IT
+    # the primary is always image 0: a re-hashed one that is the card's own content (an
+    # image recovered off the card - patched game and .sidx included) is compared with what
+    # the card holds, so it writes nothing rather than the same two files again
+    im0 = rec.image(0)
+    if im0 is not None and by_index[0].action == "keep" and new_trees[0][3] is not None and im0.bypass \
+            and new_trees[0][0] is not im0.tree:
+        on_card0 = tree_as_on_card(im0)
+        if not ts.diff_tree(on_card0, new_trees[0][0]):
+            rematched[0] = on_card0
+    if removed:
+        swap = {}
+        for act in [a_ for a_ in actions if a_.action == "new"]:
+            tree = new_trees[act.index][0]
+            for rem in removed:
+                im = rec.image(rem.old_index)
+                on_card = tree_as_on_card(im) if im is not None else None
+                if on_card is not None and not ts.diff_tree(on_card, tree):
+                    removed.remove(rem)
+                    kept = ts.TreeAction(act.index, act.device, im.sub, act.new_sub,
+                                         "keep" if im.sub == act.new_sub else "rename", im.index)
+                    swap[id(act)] = kept
+                    t_, st_, uuid_, _old = new_trees[act.index]
+                    new_trees[act.index] = (t_, st_, uuid_, im)
+                    rematched[act.index] = on_card
+                    say("image %d: %s is not the file image %d was built from, but it holds the same tree - kept"
+                        % (act.index, os.path.basename(sources[act.index]), im.index))
+                    break
+        if swap:
+            still_removed = {rem.old_index for rem in removed}
+            actions = [swap.get(id(a_), a_) for a_ in actions
+                       if a_.action != "remove" or a_.old_index in still_removed]
+            by_index = {a_.index: a_ for a_ in actions if a_.action != "remove"}
     for act in actions:
         if act.action == "remove":
             im = rec.image(act.old_index)
@@ -3848,6 +3909,10 @@ def _update_locked(a, ts, card, dry):
         act = by_index[i]
         tree, st, uuid, old_im = new_trees[i]
         old_tree = old_im.tree if (old_im is not None and act.action in ("keep", "rename")) else None
+        if i in rematched:
+            # matched by what the card HOLDS (the bypass's own digests in the tree): a source
+            # that is the card's own content writes nothing, one edited since writes the edit
+            old_tree = rematched[i]
         ch = ts.diff_tree(old_tree, tree)
         if a.bypass_validation and i < len(plan.trees):
             try:
@@ -4210,6 +4275,103 @@ def plan_from_card(card):
 
 
 # ============================================================================= the multi layout
+def dump_games_tree(ref, root, dest, owners, prefix="", skip=("lost+found",), what=None):
+    """ONE games tree out of the read-only filesystem at `ref` into the directory `dest`:
+    every root entry of `root` ('/' for a whole games partition, '/imgN' for a tree inside
+    one) rdump'd (symlinks survive - measured), the three links the machine boots through
+    re-made as links when they did not, `owners` filled with {prefix + relative path: (uid,
+    gid)} for the ownership pass that follows the mke2fs (rdump as a user cannot chown).
+    `skip` names root entries left behind (lost+found; at a store card's root the store and
+    the extras' trees).  -> (title directories, bytes of regular files copied).
+
+    Shared by the multi layout's p7 build and `extract`, which puts a tree back into a
+    partition of its own: the recipe is the one the multi layout has booted on hardware."""
+    top = root.strip("/")
+    rel0 = len(top) + 1 if top else 0
+    ents = [e for e in debugfs_ls(ref, root) if e[4] not in (".", "..") and e[4] not in skip]
+    what = what or root
+    say("%s <- %s: %d root entries (%s)" % (os.path.basename(dest), what, len(ents),
+                                             ", ".join(e[4] for e in ents)))
+    # THE WALK COMES BEFORE THE EXTRACTION, not after it.  It is the same walk the
+    # ownership pass has always needed; taken first it also says how big each root entry
+    # is, which is what gives the meter a budget per rdump - and one root entry of a games
+    # tree is most of the card, so "how far into THIS entry" is the whole question.
+    walk = []
+    for rel, ino, mode, uid, gid, size in debugfs_walk(ref, root):
+        rel = rel[rel0:]
+        if rel.split("/")[0] in skip:
+            continue
+        walk.append((rel, ino, mode, uid, gid, size))
+    for rel, ino, mode, uid, gid, size in walk:
+        owners[prefix + rel] = (uid, gid)
+    weigh = {}
+    nbytes = 0
+    for rel, ino, mode, uid, gid, size in walk:
+        if not statmod.S_ISDIR(mode) and not statmod.S_ISLNK(mode):
+            head = rel.split("/")[0]
+            weigh[head] = weigh.get(head, 0) + (size or 0)
+            nbytes += size or 0
+    for ino, mode, uid, gid, name, size in ents:
+        if PROGRESS.on:
+            PROGRESS.step("reading %s out of %s" % (name, what), weigh.get(name, 0))
+        debugfs_rdump(ref, root.rstrip("/") + "/" + name, dest, PROGRESS if PROGRESS.on else None)
+    # the three links the machine boots through must have survived as links
+    for name in ("game", "conagent", "data"):
+        src_st = debugfs_stat(ref, root.rstrip("/") + "/" + name) if any(e[4] == name for e in ents) else None
+        if src_st and src_st.get("link") is not None:
+            p = os.path.join(dest, name)
+            if not os.path.islink(p):
+                if os.path.lexists(p):
+                    shutil.rmtree(p) if os.path.isdir(p) else os.unlink(p)
+                os.symlink(src_st["link"], p)
+                say("  %s/%s recreated as a symlink -> %s" % (os.path.basename(dest), name, src_st["link"]))
+    title = [e[4] for e in ents if statmod.S_ISDIR(e[1]) and e[4] != "spk" and os.path.isfile(os.path.join(dest, e[4], "game"))]
+    if not title:
+        raise Refused("%s: no title directory with a game file came out of %s" % (os.path.basename(dest), what))
+    return title, nbytes
+
+
+def mke2fs_games_tree(tree, img, sectors, owners, what, label=None, budget=0):
+    """`tree` written into the fresh ext4 image `img` (`sectors` long) with the stock p3's
+    feature set, ownership put back from `owners` ({relative path: (uid, gid)} - mke2fs -d
+    records the running uid), e2fsck -fn before and after.  The scratch tree is removed."""
+    with open(img, "wb") as f:
+        f.truncate(sectors * SECTOR)
+    say("mke2fs -d %s -> %s (%d MiB%s)" % (tree, img, sectors * SECTOR >> 20,
+                                           (", label %s" % label) if label else ""))
+    if PROGRESS.on:
+        PROGRESS.step(what, budget or 0)
+    argv = ["mke2fs", "-q", "-F", "-t", "ext4", "-m", "0"]
+    if label:
+        argv += ["-L", label]
+    argv += ["-O", MULTI_FEATURES, "-E", "lazy_itable_init=0,lazy_journal_init=0", "-d", tree, img,
+             str(sectors * SECTOR // 1024) + "k"]
+    _rc, _so, _se = run_metered(argv, PROGRESS if PROGRESS.on else None)
+    r = argparse.Namespace(returncode=_rc, stdout=_so + _se)
+    if r.returncode != 0:
+        raise Refused("mke2fs failed (rc=%d):\n%s" % (r.returncode, r.stdout.decode("utf-8", "replace")))
+    shutil.rmtree(tree, ignore_errors=True)
+    rc, txt = e2fsck(img)
+    if rc != 0:
+        raise Refused("%s is not clean after mke2fs (rc=%d):\n%s" % (os.path.basename(img), rc, txt))
+    # ownership: every inode of the new filesystem back to what its source said (by inode
+    # number, so symlinks are set and not followed); the root directory is root's
+    cmds = ["set_inode_field <2> uid 0", "set_inode_field <2> gid 0"]
+    for rel, ino, mode, uid, gid, size in debugfs_walk(img, "/"):
+        if rel == "lost+found":
+            continue
+        want = owners.get(rel, (0, 0))
+        if (uid, gid) != want:
+            cmds.append("set_inode_field <%d> uid %d" % (ino, want[0]))
+            cmds.append("set_inode_field <%d> gid %d" % (ino, want[1]))
+    if cmds:
+        debugfs_write_script(img, cmds)
+        rc, txt = e2fsck(img)
+        if rc != 0:
+            raise Refused("%s is not clean after the ownership fix (rc=%d):\n%s" % (os.path.basename(img), rc, txt))
+    return len(cmds) // 2
+
+
 def build_multi_partition(plan, workdir=None):
     """Build the multi layout's p7 image: every extra's games partition rdump'd into
     <tmp>/tree/imgK (symlinks survive - measured), mke2fs -d of that tree with the stock p3's
@@ -4227,76 +4389,315 @@ def build_multi_partition(plan, workdir=None):
         ref = fs_ref(x, st * SECTOR)
         dest = os.path.join(tree, sub)
         os.mkdir(dest)
-        ents = [e for e in debugfs_ls(ref, "/") if e[4] not in (".", "..", "lost+found")]
-        say("%s <- %s p3: %d root entries (%s)" % (sub, os.path.basename(x), len(ents),
-                                                     ", ".join(e[4] for e in ents)))
-        # THE WALK COMES BEFORE THE EXTRACTION, not after it.  It is the same walk the
-        # ownership pass has always needed; taken first it also says how big each root entry
-        # is, which is what gives the meter a budget per rdump - and one root entry of a games
-        # tree is most of the card, so "how far into THIS entry" is the whole question.
-        walk = [e for e in debugfs_walk(ref, "/")
-                if not (e[0] == "lost+found" or e[0].startswith("lost+found/"))]
-        for rel, ino, mode, uid, gid, size in walk:
-            owners[sub + "/" + rel] = (uid, gid)
-        weigh = {}
-        for rel, ino, mode, uid, gid, size in walk:
-            if not statmod.S_ISDIR(mode) and not statmod.S_ISLNK(mode):
-                top = rel.split("/")[0]
-                weigh[top] = weigh.get(top, 0) + (size or 0)
-        for ino, mode, uid, gid, name, size in ents:
-            if PROGRESS.on:
-                PROGRESS.step("reading %s out of %s" % (name, default_title(x)),
-                              weigh.get(name, 0))
-            debugfs_rdump(ref, "/" + name, dest, PROGRESS if PROGRESS.on else None)
-        # the three links the machine boots through must have survived as links
-        for name in ("game", "conagent", "data"):
-            src_st = debugfs_stat(ref, "/" + name) if any(e[4] == name for e in ents) else None
-            if src_st and src_st.get("link") is not None:
-                p = os.path.join(dest, name)
-                if not os.path.islink(p):
-                    if os.path.lexists(p):
-                        shutil.rmtree(p) if os.path.isdir(p) else os.unlink(p)
-                    os.symlink(src_st["link"], p)
-                    say("  %s/%s recreated as a symlink -> %s" % (sub, name, src_st["link"]))
-        title = [e[4] for e in ents if statmod.S_ISDIR(e[1]) and e[4] != "spk" and os.path.isfile(os.path.join(dest, e[4], "game"))]
-        if not title:
-            raise Refused("%s: no title directory with a game file came out of %s's p3" % (sub, x))
+        title, _n = dump_games_tree(ref, "/", dest, owners, prefix=sub + "/", what=default_title(x))
         say("  %s: title %s, %d entries copied in %.0f s" % (sub, "/".join(title), len(owners), time.monotonic() - t0))
     img = os.path.join(tmp, "p7.img")
-    with open(img, "wb") as f:
-        f.truncate(mp.count * SECTOR)
-    say("mke2fs -d %s -> %s (%d MiB, label %s)" % (tree, img, mp.count * SECTOR >> 20, MULTI_LABEL))
-    if PROGRESS.on:
-        PROGRESS.step("writing the games into p%d" % mp.num, plan.multi_used or 0)
-    _rc, _so, _se = run_metered(
-        ["mke2fs", "-q", "-F", "-t", "ext4", "-m", "0", "-L", MULTI_LABEL, "-O", MULTI_FEATURES,
-         "-E", "lazy_itable_init=0,lazy_journal_init=0", "-d", tree, img,
-         str(mp.count * SECTOR // 1024) + "k"],
-        PROGRESS if PROGRESS.on else None)
-    r = argparse.Namespace(returncode=_rc, stdout=_so + _se)
-    if r.returncode != 0:
-        raise Refused("mke2fs failed (rc=%d):\n%s" % (r.returncode, r.stdout.decode("utf-8", "replace")))
-    shutil.rmtree(tree, ignore_errors=True)
-    rc, txt = e2fsck(img)
-    if rc != 0:
-        raise Refused("the multi p7 image is not clean after mke2fs (rc=%d):\n%s" % (rc, txt))
-    # ownership: every inode of the new filesystem back to what its source said (by inode
-    # number, so symlinks are set and not followed); the root directory is root's
-    cmds = ["set_inode_field <2> uid 0", "set_inode_field <2> gid 0"]
-    for rel, ino, mode, uid, gid, size in debugfs_walk(img, "/"):
-        if rel == "lost+found":
-            continue
-        want = owners.get(rel, (0, 0))
-        if (uid, gid) != want:
-            cmds.append("set_inode_field <%d> uid %d" % (ino, want[0]))
-            cmds.append("set_inode_field <%d> gid %d" % (ino, want[1]))
-    if cmds:
-        debugfs_write_script(img, cmds)
-        rc, txt = e2fsck(img)
-        if rc != 0:
-            raise Refused("the multi p7 image is not clean after the ownership fix (rc=%d):\n%s" % (rc, txt))
-    say("p7 image built: %d ownership fixes, e2fsck clean, %.0f s" % (len(cmds) // 2, time.monotonic() - t0))
+    fixes = mke2fs_games_tree(tree, img, mp.count, owners, "writing the games into p%d" % mp.num,
+                              label=MULTI_LABEL, budget=plan.multi_used or 0)
+    say("p7 image built: %d ownership fixes, e2fsck clean, %.0f s" % (fixes, time.monotonic() - t0))
     return img, tmp
+
+
+# ============================================================================= recovering an image (extract)
+# A multi-boot card downloaded from someone else names, in its build.json, the .raw files it
+# was built from - on THEIR machine.  Every rebuild, update and 'add an image' needs those
+# sources, so such a card could be admired and have its titles changed, and nothing else
+# (David, 2026-09-09: "the references to the files live on their machine, so I cannot do it").
+# The card itself holds every byte of every image; `extract` writes one image back out as a
+# card of its own - the games tree as p3 (verbatim when it is a whole partition, else written
+# into a fresh games filesystem), the card's own p1/p2/p5/p6 around it, the menu taken back
+# out of p2 - which is exactly the stock-shaped source every other subcommand takes.
+
+def recovered_plan(card, part, sub, p3_src=None, p3_count=None):
+    """A stock-shaped Plan for ONE image of a multi card: the card's own p1, p2, p5 and p6
+    (the primary's), and as p3 the games tree asked for - the range of the partition that
+    holds it when the tree is a whole partition (p3 itself, or a parts-layout p7/p8), else
+    the ext4 image `p3_src` (`p3_count` sectors) the tree was written into.  p5/p6 keep
+    their LBAs when p3 keeps its size - the common case, byte for byte the layout the card
+    was built from - and are re-laid after a p3 of another size, as the store layout does."""
+    G = Geometry.from_file(card)
+    base = Geometry(G.size, G.mbr, G.prim, G.ext, G.logical[:2], G.ebr_raw, card)
+    plan = Plan(base, [], card, [], "parts")
+    t3, s3, c3 = G.part(3)
+    if p3_src is not None:
+        src, src_start, cnt = p3_src, 0, int(p3_count)
+    elif not sub and part.num != 3:
+        src, src_start, cnt = card, part.start, part.count
+    else:
+        src, src_start, cnt = card, s3, c3
+    plan.prims[2] = Part(3, t3 or 0x83, s3, cnt, src, src_start, None)
+    plan.images = [plan.prims[2]]
+    plan.trees = [(plan.prims[2], None)]
+    if cnt != c3:
+        ext_base = align_up(s3 + cnt)
+        logs, prev_end = [], ext_base - 1
+        for old in plan.logs:
+            ebr = prev_end + 1
+            st = align_up(ebr + 1)
+            logs.append(Part(old.num, old.ptype, st, old.count, old.src, old.src_start, ebr))
+            prev_end = st + old.count - 1
+        plan.logs = logs
+        plan.ext_base = ext_base
+        plan.ext_count = prev_end + 1 - ext_base
+        plan.total = prev_end + 1 + TAIL
+    return plan
+
+
+def clean_p2(p2_image):
+    """The inverse of :func:`inject_into_p2` on an extracted rootfs image: the hook taken
+    back out of the game script (its mode, owner and times kept) and SELECT_DIR removed with
+    everything in it, so the image is the stock rootfs again - what the emulator, the version
+    gate and a later build all expect of a source.  e2fsck -fn before and after, the script
+    read back.  -> (hook removed, files removed)."""
+    need_tools("debugfs", "e2fsck")
+    rc, txt = e2fsck(p2_image)
+    if rc != 0:
+        raise Refused("p2 is not clean before the menu is taken out (e2fsck rc=%d):\n%s" % (rc, txt))
+    orig = debugfs_cat(p2_image, GAME_SCRIPT)
+    if not orig:
+        raise Refused("%s is empty or missing in p2" % GAME_SCRIPT)
+    st = debugfs_stat(p2_image, GAME_SCRIPT)
+    text = orig.decode("utf-8", "replace")
+    stripped = strip_hook(text)
+    cmds, nfiles = [], 0
+    if debugfs_exists(p2_image, SELECT_DIR):
+        walk = debugfs_walk(p2_image, SELECT_DIR)
+        for rel, _ino, mode, _u, _g, _s in walk:
+            if not statmod.S_ISDIR(mode):
+                cmds.append("rm " + dq("/" + rel))
+                nfiles += 1
+        # deepest directories first: debugfs's rmdir takes an empty one only
+        for rel, _ino, mode, _u, _g, _s in sorted(walk, key=lambda e: -e[0].count("/")):
+            if statmod.S_ISDIR(mode):
+                cmds.append("rmdir " + dq("/" + rel))
+        cmds.append("rmdir " + dq(SELECT_DIR))
+    staged = None
+    if stripped != text:
+        staged = tempfile.NamedTemporaryFile("wb", suffix=".game", delete=False)
+        staged.write(stripped.encode("utf-8"))
+        staged.close()
+        mode = (st.get("mode") or 0o755) & 0o7777
+        cmds.append("rm " + dq(GAME_SCRIPT))
+        cmds.append("write %s %s" % (dq(staged.name), dq(GAME_SCRIPT)))
+        cmds.append("set_inode_field %s mode 0%o" % (dq(GAME_SCRIPT), statmod.S_IFREG | mode))
+        cmds.append("set_inode_field %s uid %d" % (dq(GAME_SCRIPT), st.get("uid", 0)))
+        cmds.append("set_inode_field %s gid %d" % (dq(GAME_SCRIPT), st.get("gid", 0)))
+        for k in ("atime", "ctime", "mtime"):
+            if k in st:
+                cmds.append("set_inode_field %s %s @%d" % (dq(GAME_SCRIPT), k, st[k]))
+    try:
+        if cmds:
+            debugfs_write_script(p2_image, cmds)
+    finally:
+        if staged is not None:
+            os.unlink(staged.name)
+    rc, txt = e2fsck(p2_image)
+    if rc != 0:
+        raise Refused("p2 is not clean after the menu was taken out (e2fsck rc=%d):\n%s" % (rc, txt))
+    back = debugfs_cat(p2_image, GAME_SCRIPT).decode("utf-8", "replace")
+    if back != stripped or has_hook(back):
+        raise Refused("%s read back with the hook still in it" % GAME_SCRIPT)
+    if debugfs_exists(p2_image, SELECT_DIR):
+        raise Refused("%s is still in p2 after its removal" % SELECT_DIR)
+    return stripped != text, nfiles
+
+
+def clean_card_p2(card, workdir=None):
+    """`clean_p2` on the p2 of a whole card image, in place: extracted, cleaned, written back,
+    md5-checked (the shape of :func:`inject_card`).  -> (hook removed, files removed)."""
+    geom = Geometry.from_file(card)
+    t, st, cnt = geom.part(2)
+    if t != 0x83:
+        raise Refused("%s: p2 is type 0x%02x, not Linux" % (card, t))
+    tmp = tempfile.mkdtemp(prefix="mkmulticard.clean.", dir=workdir)
+    try:
+        p2 = os.path.join(tmp, "p2.img")
+        with open(p2, "wb") as f:
+            f.truncate(cnt * SECTOR)
+        copy_range(card, st * SECTOR, p2, 0, cnt * SECTOR, "p2 extract", sparse=False, progress=None)
+        done = clean_p2(p2)
+        copy_range(p2, 0, card, st * SECTOR, cnt * SECTOR, "p2 write-back", sparse=False, progress=None)
+        a, b = md5_file(p2), md5_range(card, st * SECTOR, cnt * SECTOR)
+        if a != b:
+            raise Refused("p2 write-back mismatch (%s vs %s)" % (a, b))
+        return done
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def recovered_names(card, n, build=None):
+    """The file name each of a card's `n` images is written out under: the basename of the
+    .raw it was built from when build.json records one (the name the person who built the card
+    knew it by), else `<card stem>.imageN.raw`; a name two images would share gets its index."""
+    stem = re.sub(r"\.(raw|img)$", "", os.path.basename(card), flags=re.I)
+    recs = (build or {}).get("images") or []
+    names = []
+    for i in range(n):
+        src = recs[i].get("source") if i < len(recs) and isinstance(recs[i], dict) else None
+        base = os.path.basename((src or "").replace("\\", "/").rstrip("/"))
+        if not base or not re.search(r"\.(raw|img)$", base, re.I):
+            base = "%s.image%d.raw" % (stem, i)
+        names.append(base)
+    seen = {}
+    for name in names:
+        seen[name.lower()] = seen.get(name.lower(), 0) + 1
+    out = []
+    for i, name in enumerate(names):
+        if seen[name.lower()] > 1:
+            name = re.sub(r"(\.(raw|img))$", r".image%d\1" % i, name, flags=re.I)
+        out.append(name)
+    return out
+
+
+def extract_image(card, index, out, workdir=None, force=False, clean=True, plan=None):
+    """Image `index` of a multi card written out as a stock-shaped card of its own (sparse):
+    the card's p1, p2, p5 and p6 around the games tree as p3 - copied verbatim when the tree is
+    a whole partition (image 0's p3, a parts layout's p7), else rdump'd out of the partition
+    it lives in (a multi layout's p7/imgN, a store's p3/imgN or the store's own root minus the
+    store) and written into a fresh games filesystem the size of the card's p3 or of its
+    content, whichever is bigger.  Then, with `clean`, the boot menu taken out of p2 (the hook
+    and SELECT_DIR), so what comes out is the stock rootfs.  Proved before it returns: the
+    table stock-shaped and byte-regenerated, p3 md5-equal to its range or e2fsck clean, the
+    tree readable with its title and version.  -> read_tree's record of the new image."""
+    plan = plan or plan_from_card(card)
+    if not 0 <= index < len(plan.trees):
+        raise Refused("%s holds %d image(s); there is no image %d" % (os.path.basename(card), len(plan.trees), index))
+    part, sub = plan.trees[index]
+    check_output_path(out, [card], force=force)
+    workdir = workdir or os.path.dirname(os.path.abspath(out))
+    os.makedirs(workdir, exist_ok=True)
+    G = Geometry.from_file(card)
+    _t3, s3, c3 = G.part(3)
+    dev = device_name(part.num, sub)
+    subtree = bool(sub) or plan.layout == "store"
+    tmp = None
+    t0 = time.monotonic()
+    try:
+        if subtree:
+            need_tools("debugfs", "e2fsck", "mke2fs")
+            tmp = tempfile.mkdtemp(prefix="mkmulticard.extract.", dir=workdir)
+            tree = os.path.join(tmp, "tree")
+            os.mkdir(tree)
+            ref = fs_ref(card, part.start * SECTOR)
+            root = "/" + sub if sub else "/"
+            skip = tree_skip(plan, sub)
+            # the meter's budget: the tree out (rdump) and back in (mke2fs), then the image
+            # copy - p3 counted at the card's own size, which is what it is unless the tree
+            # outgrows it, and finish() squares the last few percent either way
+            used = ext_used_bytes(card, part.start * SECTOR)[0]
+            copy = PRE_P1 * SECTOR + sum(G.part(n)[2] * SECTOR for n in (1, 2, 3, 5, 6))
+            PROGRESS.start(2 * used + copy, "preparing")
+            owners = {}
+            say("image %d (%s): reading its tree out of p%d%s" % (index, dev, part.num, ("/" + sub) if sub else ""))
+            title, nbytes = dump_games_tree(ref, root, tree, owners, skip=skip, what="image %d" % index)
+            need = multi_size_sectors(nbytes)
+            cnt = need if plan.layout == "store" else max(c3, need)
+            p3img = os.path.join(tmp, "p3.img")
+            fixes = mke2fs_games_tree(tree, p3img, cnt, owners, "writing image %d's games into p3" % index,
+                                      budget=nbytes)
+            say("image %d: title %s, %s in %d files' worth of tree, p3 %s, %d ownership fixes"
+                % (index, "/".join(title), _gb(nbytes), len(owners), _gb(cnt * SECTOR), fixes))
+            rplan = recovered_plan(card, part, sub, p3img, cnt)
+        else:
+            rplan = recovered_plan(card, part, sub)
+            PROGRESS.start(PRE_P1 * SECTOR + sum(p.count * SECTOR for p in rplan.prims + rplan.logs), "preparing")
+        say("image %d (%s) -> %s: %s apparent" % (index, dev, out, _gb(rplan.total_bytes)))
+        build_image(rplan, out)
+        drop_stale_sidecars(out, keep=())
+        if clean:
+            PROGRESS.step("taking the boot menu out of the rootfs")
+            hook, nfiles = clean_card_p2(out, workdir)
+            say("p2: the hook %s, %d menu file(s) removed" % ("removed" if hook else "was not there", nfiles))
+        PROGRESS.finish()
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+    # the proof: the shape of a source (p1..p4 with p4 the container, p5 and p6 and nothing
+    # after them, p1/p2 the card's own), the table as planned, the tree as it was
+    Gout = Geometry.from_file(out)
+    issues = []
+    if [n for (n, _t, _s, _c) in Gout.prim] != [1, 2, 3, 4] or Gout.ext is None:
+        issues.append("primaries are %r" % ([n for (n, _t, _s, _c) in Gout.prim],))
+    if len(Gout.logical) != 2:
+        issues.append("%d logical partition(s), a source has p5 and p6" % len(Gout.logical))
+    for n in (1, 2):
+        if Gout.part(n) != G.part(n):
+            issues.append("p%d is %r, the card's is %r" % (n, Gout.part(n), G.part(n)))
+    if issues:
+        raise Refused("%s is not the shape of a source image: %s" % (out, "; ".join(issues)))
+    if Gout.sectors != rplan.total or Gout.part(3) != (rplan.prims[2].ptype, rplan.prims[2].start, rplan.prims[2].count):
+        raise Refused("%s: the table read back differs from the plan" % out)
+    p3 = rplan.prims[2]
+    if not subtree:
+        a = md5_range(card, p3.src_start * SECTOR, p3.count * SECTOR)
+        b = md5_range(out, p3.start * SECTOR, p3.count * SECTOR)
+        if a != b:
+            raise Refused("%s: p3 (%s) differs from %s's %s (%s)" % (out, b, os.path.basename(card), dev, a))
+    if shutil.which("e2fsck"):
+        rc, txt = e2fsck(fs_ref(out, p3.start * SECTOR))
+        if rc != 0:
+            raise Refused("%s: p3 is not clean (e2fsck rc=%d):\n%s" % (out, rc, txt))
+    rec = read_tree(out, source_part(out), None)
+    alloc = allocated_bytes(out)
+    say("image %d recovered: %s - title %s, game code %s, %s apparent%s, %.0f s"
+        % (index, out, rec.get("title"), rec.get("version") or "unknown", _gb(rplan.total_bytes),
+           (", %s allocated" % _gb(alloc)) if alloc is not None else "", time.monotonic() - t0))
+    return rec
+
+
+def extract_card(card, indexes=None, out=None, out_dir=None, media_out=None, workdir=None, force=False):
+    """`extract`: the images `indexes` (every one when None) of `card` written out - to `out`
+    for a single image, else into `out_dir` under :func:`recovered_names` - and, with
+    `media_out`, the card's menu media (pictures, clips, sounds and media.json) copied there
+    flat, the way a load extracts it.  Every line a reader needs is printed as
+    `[extract] image N: <path>` / `[extract] media: <dir>`.  -> [(index, path, record)]."""
+    if not os.path.isfile(card):
+        raise Refused("%s does not exist" % card)
+    plan = plan_from_card(card)
+    n = len(plan.trees)
+    want = list(indexes) if indexes else list(range(n))
+    for i in want:
+        if not 0 <= i < n:
+            raise Refused("%s holds %d image(s); there is no image %d" % (os.path.basename(card), n, i))
+    if out and len(want) != 1:
+        raise Refused("--out names ONE file; with several images give --out-dir")
+    if not out and not out_dir:
+        raise Refused("extract needs --out (one image) or --out-dir")
+    # every refusal that needs no tool comes before the first debugfs call
+    if out:
+        check_output_path(out, [card], force=force)
+    if out_dir:
+        check_library_path(out_dir)
+    need_tools("debugfs", "e2fsck")
+    ref = select_ref(card)
+    warns = []
+    build = parse_manifest(read_select_file(ref, BUILD_MANIFEST), BUILD_MANIFEST, warns) if debugfs_exists(ref, SELECT_DIR) else None
+    for w in warns:
+        say("WARNING: " + w)
+    names = recovered_names(card, n, build)
+    targets = []
+    for i in want:
+        path = out if out else os.path.join(out_dir, names[i])
+        check_output_path(path, [card], force=force)
+        targets.append((i, path))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    done = []
+    for i, path in targets:
+        rec = extract_image(card, i, path, workdir=workdir, force=force, plan=plan)
+        print("[extract] image %d: %s" % (i, path), flush=True)
+        done.append((i, path, rec))
+    if media_out:
+        names_on_card = []
+        if debugfs_exists(ref, MEDIA_DIR):
+            names_on_card = [e[4] for e in debugfs_ls(ref, MEDIA_DIR) if e[4] not in (".", "..")]
+        media_json = read_select_file(ref, MEDIA_MANIFEST)
+        written, skipped = extract_card_media(ref, media_out, sorted(names_on_card), media_json)
+        say("media: %d file(s) into %s%s" % (len(written), media_out,
+                                            (" (%d skipped: %s)" % (len(skipped), ", ".join(skipped))) if skipped else ""))
+        print("[extract] media: %s" % os.path.abspath(media_out), flush=True)
+    print("[extract] done: %d image(s)" % len(done), flush=True)
+    return done
 
 
 # ============================================================================= the validator bypass
@@ -6340,6 +6741,117 @@ def selftest(d, selector_file=None):
     print("== a raw bypass of a store card is refused")
     ok &= main(["bypass", "--card", out6, "--dry-run"]) == 2
     print("SELFTEST part 6 (store)", "PASS" if ok else "FAIL")
+
+    # ---- PART 7: extract - every image back out of a card as a stock-shaped card of its own
+    print("== extract (parts): every image of the A+B+C card, named after its source, p3 byte-equal, p2 stock again")
+    xd = os.path.join(d, "extracted")
+    recs = extract_card(out, out_dir=xd, media_out=os.path.join(xd, "menu media"))
+    ok &= [i for (i, _p, _r) in recs] == [0, 1, 2]
+    ok &= [os.path.basename(p) for (_i, p, _r) in recs] == ["A.img", "B.img", "C.img"]
+    # (against the CARD, not against A/B/C on disk: parts 4 and 5 wrote into those sources
+    #  since this card was built from them; and p1/p2/p5/p6 of every recovered image are the
+    #  primary's - A's - which is what the parts layout carried)
+    pc = plan_from_card(out)
+    gA = Geometry.from_file(A)
+    for i, (src, (_i, x, rec)) in enumerate(zip((A, B, C), recs)):
+        gx = Geometry.from_file(x)
+        part, _sub = pc.trees[i]
+        _t, xs3, xc3 = gx.part(3)
+        ok &= (xs3, xc3) == (gA.part(3)[1], part.count) and gx.sectors == gA.sectors
+        ok &= md5_range(out, part.start * SECTOR, part.count * SECTOR) == md5_range(x, xs3 * SECTOR, xc3 * SECTOR)
+        ok &= md5_range(A, 0, PRE_P1 * SECTOR) == md5_range(x, 0, PRE_P1 * SECTOR)
+        for n in (1, 5, 6):
+            cp = [p for p in pc.prims + pc.logs if p.num == n][0]
+            ok &= md5_range(out, cp.start * SECTOR, cp.count * SECTOR) == \
+                md5_range(x, gx.part(n)[1] * SECTOR, gx.part(n)[2] * SECTOR)
+        ok &= check_stock(x)
+        ref2 = fs_ref(x, gx.part(2)[1] * SECTOR)
+        ok &= not debugfs_exists(ref2, SELECT_DIR)
+        ok &= debugfs_cat(ref2, GAME_SCRIPT).decode("utf-8") == SYNTH_GAME
+        ok &= rec["title"] == os.path.basename(src)[0] + "_title"
+        ok &= plan_from_card(x).layout == "parts" and len(plan_from_card(x).trees) == 1
+        # ...and a recovered image is the source a rebuild takes: the primary's identity (p1
+        # and p2 minus the menu), so the update gate would take it as the primary
+        ok &= primary_identity(x) == primary_identity(A)
+    ok &= os.path.isfile(os.path.join(xd, "menu media", "art0.png"))
+    ok &= os.path.isfile(os.path.join(xd, "menu media", MEDIA_MANIFEST))
+    print("== extract refuses an output that exists, an index the card lacks, and --out with two images")
+    ok &= main(["extract", "--card", out, "--image", "1", "--out", recs[1][1]]) == 2
+    ok &= main(["extract", "--card", out, "--image", "9", "--out-dir", xd]) == 2
+    ok &= main(["extract", "--card", out, "--image", "0", "--image", "1", "--out", os.path.join(xd, "x.img")]) == 2
+    print("== extract (multi): a tree inside p7 comes back as a games partition of its own, the same tree")
+    ts = _treesync()
+    pm = plan_from_card(out2)
+    for i, (part, sub) in enumerate(pm.trees):
+        x = os.path.join(xd, "multi-image%d.img" % i)
+        rec = extract_image(out2, i, x, plan=pm)
+        gx = Geometry.from_file(x)
+        ok &= check_stock(x) and gx.part(3)[2] >= Geometry.from_file(out2).part(3)[2]
+        want, _how = card_tree(out2, part, sub)
+        got, _how2 = source_tree(x)
+        same = want.tree == got.tree
+        if not same:
+            # mtime is the one field a copy may legitimately move; everything else must hold
+            strip = lambda t: ({k: (r.sha256, r.size, r.mode, r.uid, r.gid) for k, r in t.files.items()},
+                               dict(t.symlinks), dict(t.dirs))
+            same = strip(want.tree) == strip(got.tree)
+            print("  image %d: trees equal apart from mtimes: %s" % (i, same))
+        ok &= same
+        ok &= bool(rec["title"])
+        ref2 = fs_ref(x, gx.part(2)[1] * SECTOR)
+        ok &= not debugfs_exists(ref2, SELECT_DIR) and not has_hook(debugfs_cat(ref2, GAME_SCRIPT))
+    print("== update: the recovered images ARE the card's images - matched by content, nothing to write")
+    xs = [os.path.join(xd, "multi-image%d.img" % i) for i in range(len(pm.trees))]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["update", "--card", out2, "--primary", xs[0]] + sum([["--extra", x] for x in xs[1:]], [])
+                  + ["--selector-dir", sel, "--allow-version-mismatch", "--dry-run"])
+    text = buf.getvalue()
+    print("\n".join(l for l in text.splitlines() if l.startswith("update-") or "same tree" in l))
+    if rc != 0:
+        print(text[-3000:])
+    ok &= rc == 0
+    ok &= not re.search(r"^update-source \d+ \S+ (removed|missing) ", text, re.M)
+    rows = re.findall(r"^update-files (\d+) (\S+) (\d+) (\d+) (\S+)", text, re.M)
+    ok &= len(rows) == len(xs) and all(n == "0" and nbytes == "0" and action == "keep"
+                                        for (_i, _d, n, nbytes, action) in rows)
+    ok &= re.search(r"^update-size 0$", text, re.M) is not None
+    ok &= text.count("holds the same tree - kept") == len(xs) - 1
+    print("== update: ...and on a parts card whose extra was patched by the bypass, the recovered extra is "
+          "still the card's image - nothing to write (the digest substitution itself is a pytest: "
+          "test_the_recorded_tree_as_the_card_holds_it_carries_the_bypass_digests)")
+    xb = os.path.join(xd, "versions-image1.img")
+    extract_image(out3, 1, xb)
+    recb = read_trees(out3)
+    ok &= not _treesync().diff_tree(tree_as_on_card(recb.image(1)), source_tree(xb)[0].tree)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["update", "--card", out3, "--primary", v0, "--extra", xb, "--selector-dir", sel, "--dry-run"])
+    text = buf.getvalue()
+    print("\n".join(l for l in text.splitlines() if l.startswith("update-") or "same tree" in l))
+    if rc != 0:
+        print(text[-3000:])
+    ok &= rc == 0
+    rows = re.findall(r"^update-files (\d+) (\S+) (\d+) (\d+) (\S+)", text, re.M)
+    ok &= len(rows) == 2 and all(n == "0" and nbytes == "0" and action == "keep"
+                                  for (_i, _d, n, nbytes, action) in rows)
+    ok &= re.search(r"^update-size 0$", text, re.M) is not None
+    ok &= "holds the same tree - kept" in text
+    print("== extract (store): the primary's own tree without the store, and an extra out of img1")
+    ps = plan_from_card(out6)
+    for i, (part, sub) in enumerate(ps.trees[:2]):
+        x = os.path.join(xd, "store-image%d.img" % i)
+        extract_image(out6, i, x, plan=ps)
+        gx = Geometry.from_file(x)
+        ok &= check_stock(x)
+        want, _how = card_tree(out6, part, sub, skip=tree_skip(ps, sub))
+        got, _how2 = source_tree(x)
+        strip = lambda t: ({k: (r.sha256, r.size, r.mode, r.uid, r.gid) for k, r in t.files.items()},
+                           dict(t.symlinks), dict(t.dirs))
+        ok &= strip(want.tree) == strip(got.tree)
+        ok &= not any(n in (".blobs", "img1", "img2") for n in
+                      (e[4] for e in debugfs_ls(fs_ref(x, gx.part(3)[1] * SECTOR), "/")))
+    print("SELFTEST part 7 (extract)", "PASS" if ok else "FAIL")
     print("SELFTEST", "PASS" if ok else "FAIL")
     return bool(ok)
 
@@ -6456,6 +6968,20 @@ def main(argv=None):
                    help="print ONE JSON object on stdout instead of the table (the GUI's 'Load card' reads it)")
     s.add_argument("--media-out", help="also extract the card's media directory + media.json into this directory "
                                        "(give it a per-card scratch directory: nothing there is deleted)")
+    s = sub.add_parser("extract", help="write an image of a multi-boot card back out as a card of its own (a "
+                                       "stock-shaped .raw: its games tree as p3, the boot menu taken out of p2) - "
+                                       "the source a rebuild, an update or an added image needs when the .raw the "
+                                       "card was built from is not on this machine")
+    s.add_argument("--card", required=True, help="the multi-boot card to read (nothing is written to it)")
+    s.add_argument("--image", type=int, action="append", default=[], metavar="N",
+                   help="the image to write out (0 = the primary); repeatable; default: every image")
+    s.add_argument("--out", help="the .raw to write ONE --image to")
+    s.add_argument("--out-dir", help="the directory the images are written into, each named after the .raw the "
+                                     "card records it was built from (else <card>.imageN.raw)")
+    s.add_argument("--media-out", help="also copy the card's menu media (pictures, clips, sounds, media.json) "
+                                       "into this directory, flat")
+    s.add_argument("--force", action="store_true", help="overwrite an output that exists")
+    s.add_argument("--workdir", help="scratch directory (default: beside the output)")
     s = sub.add_parser("bypass", help="apply the validator bypass to every games tree on an existing card (in place)")
     s.add_argument("--card", required=True, help="the card to modify IN PLACE")
     s.add_argument("--dry-run", action="store_true", help="report every tree's state; write nothing")
@@ -6667,6 +7193,9 @@ def main(argv=None):
                 sys.stdout.write("\n")
             else:
                 print_inspect(rep)
+        elif a.cmd == "extract":
+            extract_card(a.card, indexes=a.image or None, out=a.out, out_dir=a.out_dir, media_out=a.media_out,
+                         workdir=a.workdir, force=a.force)
         elif a.cmd == "bypass":
             check_output_path(a.card, [], must_exist=True)
             plan = plan_from_card(a.card)

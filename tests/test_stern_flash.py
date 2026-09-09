@@ -1088,3 +1088,68 @@ def test_the_ipc_dir_is_granted_to_the_user_on_windows(tmp_path, monkeypatch):
     calls.clear()
     ef._ipc_dir("pad_test_")
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Reading the card IMAGE off a bigger card (the Multi-boot tab's whole-card read).
+# ---------------------------------------------------------------------------
+
+#: The fake card's image extent: its extended container (LBA 384 x 384) reaches past its
+#: last logical (p7 at 642 x 100), and a stock image ends two sectors after the container.
+_FAKE_EXTENT = (384 + 384 + 2) * _SEC
+
+
+def test_the_card_image_extent_ends_two_sectors_after_the_last_partition(tmp_path):
+    """A 14.7 GB multi-boot image flashed onto a 32 GB card is 14.7 GB of card: the
+    extent is the end of the last partition (the extended container included) plus the
+    two spare sectors every stock image carries - what mkmulticard calls the image's
+    total, and on David's Godzilla card exactly the file's 14723055616 bytes."""
+    card = _spike_image(tmp_path / "card.raw", 0x11223344)
+    with open(card, "rb") as f:
+        def read_at(lba):
+            f.seek(lba * _SEC)
+            return f.read(_SEC)
+        assert rd.card_image_extent(read_at, 10 ** 9) == _FAKE_EXTENT
+        # never past the device itself
+        assert rd.card_image_extent(read_at, 700 * _SEC) == 700 * _SEC
+    # no table at all: the whole device (there is nothing to say where an image ends)
+    assert rd.card_image_extent(lambda lba: bytes(_SEC), 4096) == 4096
+
+
+def test_reading_the_card_image_stops_at_the_extent_and_a_plain_read_does_not(tmp_path):
+    card = _spike_image(tmp_path / "card.raw", 0x11223344)
+    # a card bigger than its image: the fake card padded with 'empty' sectors
+    with open(card, "ab") as f:
+        f.write(b"\xee" * (256 * _SEC))
+    whole = os.path.getsize(card)
+    n = rd.read_device_to_image(card, str(tmp_path / "image.raw"), extent="card")
+    assert n == _FAKE_EXTENT == os.path.getsize(str(tmp_path / "image.raw"))
+    with open(card, "rb") as src, open(str(tmp_path / "image.raw"), "rb") as out:
+        assert src.read(n) == out.read()
+    seen = []
+    m = rd.read_device_to_image(card, str(tmp_path / "all.raw"),
+                                progress=lambda d, t, msg="": seen.append((d, t)))
+    assert m == whole == os.path.getsize(str(tmp_path / "all.raw"))
+    assert seen[-1] == (whole, whole)
+    with pytest.raises(ValueError):
+        rd.read_device_to_image(card, str(tmp_path / "bad.raw"), extent="half")
+
+
+def test_the_elevated_helper_reads_the_card_image_when_the_job_says_so(tmp_path):
+    from pinball_decryptor.core import elevated_flash as ef
+    card = _spike_image(tmp_path / "card.raw", 0x11223344)
+    with open(card, "ab") as f:
+        f.write(b"\xee" * (256 * _SEC))
+    img = str(tmp_path / "image.raw")
+    ipc = tmp_path / "ipc"
+    ipc.mkdir()
+    (ipc / "job.json").write_text(json.dumps({"mode": "read", "image": img, "device": card,
+                                              "extent": "card"}))
+    assert ef.run_helper_main(["--flash-helper", str(ipc)]) == 0
+    result = json.loads((ipc / "result.json").read_text())
+    assert result["ok"] is True and result["written"] == _FAKE_EXTENT
+    assert os.path.getsize(img) == result["written"]
+    # the unelevated entry point on a plain file runs in-process, extent and all
+    n = ef.read_device_with_privileges(card, str(tmp_path / "image2.raw"), extent="card")
+    assert n == result["written"]
+    assert ef.read_device_with_privileges(card, str(tmp_path / "all.raw")) == os.path.getsize(card)

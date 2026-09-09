@@ -2055,6 +2055,159 @@ def inspect_commands(card, media_out=None, cwd=None):
                 inspect_args(card, media_out, as_json=True), cwd))]
 
 
+def extract_args(card, out_dir, media_out=None, indexes=()):
+    """``mkmulticard.py extract --card``: the card's images written back out
+    as stock-shaped .raw files of their own (the games tree as p3, the menu
+    taken out of p2), each named after the .raw the card records it was
+    built from, plus the card's menu media copied flat into *media_out*.
+    Reads the card; writes only into *out_dir*."""
+    args = [MKMULTICARD, "extract", "--card", wsl(card.strip().strip('"')),
+            "--out-dir", wsl(out_dir)]
+    for i in indexes:
+        args += ["--image", str(int(i))]
+    if media_out:
+        args += ["--media-out", wsl(media_out)]
+    return args
+
+
+def extract_commands(card, out_dir, media_out=None, indexes=(), cwd=None):
+    """The 'Recover images…' run: one tool step, as the user (debugfs and
+    mke2fs need no root to read a card and write files)."""
+    return [("extract", wsl_command(extract_args(card, out_dir, media_out,
+                                                 indexes), cwd))]
+
+
+#: What the tool prints for each image it wrote out, and for the media.
+_EXTRACT_IMAGE_RE = re.compile(r"^\[extract\] image (\d+): (.+)$")
+_EXTRACT_MEDIA_RE = re.compile(r"^\[extract\] media: (.+)$")
+
+
+def parse_extract(text):
+    """``({index: host path}, media dir or '')`` from what ``extract``
+    printed - the files the rows are pointed at afterwards."""
+    mapping, media = {}, ""
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        m = _EXTRACT_IMAGE_RE.match(line)
+        if m:
+            mapping[int(m.group(1))] = host_path(m.group(2).strip())
+            continue
+        m = _EXTRACT_MEDIA_RE.match(line)
+        if m:
+            media = host_path(m.group(1).strip())
+    return mapping, media
+
+
+def recovered_media_dirname(card):
+    """Where a recovery puts the card's own menu media, inside the folder
+    chosen for the images: ``<card stem>.menu-media``.  Never plain
+    ``media`` - that is where a build at that folder would RENDER, and a
+    prepare must never read its inputs out of the directory it writes."""
+    base = os.path.basename((card or "").strip().strip('"'))
+    stem = re.sub(r"\.(raw|img)$", "", base, flags=re.I) or "card"
+    return stem + ".menu-media"
+
+
+def recoverable_indexes(rows, info):
+    """The rows a 'Recover images…' can act on: the .raw is not on this
+    machine (or was never recorded) and the loaded card carries the games
+    tree - which the reader's menu-only image does not, so a card read that
+    way has nothing to recover from until it is read whole."""
+    out = []
+    images = (info or {}).get("images") or []
+    for i, row in enumerate(rows or ()):
+        p = (getattr(row, "path", "") or "").strip().strip('"')
+        if p and os.path.isfile(p):
+            continue
+        im = images[i] if i < len(images) and isinstance(images[i], dict) \
+            else {}
+        if im.get("title_dir"):
+            out.append(i)
+    return out
+
+
+def recover_rows(rows, mapping, media_dir="", info=None):
+    """Point the rows at what a recovery wrote: image *i*'s path at
+    ``mapping[i]``, and every media field that was '(on the card)' - or was
+    made from a file that is not on this machine - at the copy of the
+    card's own file in *media_dir* (the name the inspect report *info* gives
+    that field), a plain file choice from then on.  So a fresh card can be
+    built with the pictures and sounds this one has, and a media change
+    re-renders from files that are not in the directory the prepare writes
+    into.  Applied to the live rows AND the loaded baseline, so a recovery
+    is not itself a change.  -> the lines saying what moved."""
+    notes = []
+    images = (info or {}).get("images") or []
+    for i, row in enumerate(rows or ()):
+        if i in mapping:
+            row.path = mapping[i]
+            notes.append("image %d: %s" % (i, mapping[i]))
+        if not media_dir:
+            continue
+        im = images[i] if i < len(images) and isinstance(images[i], dict) \
+            else {}
+        for what, key in (("art", "art"), ("animation", "anim"),
+                          ("music", "music"), ("confirm sound", "confirm")):
+            val = (getattr(row, key) or "").strip().strip('"')
+            if getattr(row, key + "_on_card"):
+                name = val
+            else:
+                spec = row.art_video if (key == "art" and val.lower()
+                                         == "video frame") else val
+                if not is_file_choice(spec) or os.path.isfile(spec):
+                    continue                # a word, or a file that is here
+                name = (im.get(key) or "").strip()
+            path = os.path.join(media_dir, name) if name else ""
+            if name and os.path.isfile(path):
+                setattr(row, key, path)
+                setattr(row, key + "_on_card", False)
+                if key == "art":
+                    row.art_video, row.art_time = "", ""
+                elif key == "anim":
+                    row.anim_start = ""
+                notes.append("image %d: the %s is %s" % (i, what, path))
+    return notes
+
+
+def recover_sound(value, media_dir, name):
+    """The menu-wide move / confirm sound after a recovery: when *value* is
+    a file that is not on this machine and the card's own WAV (*name*, in
+    the recovered media dir) is, that WAV - else None, the field untouched.
+    A word ('auto', 'synth', 'none') is never a file and stays."""
+    v = (value or "").strip().strip('"')
+    if not is_file_choice(v) or os.path.isfile(v) or not media_dir:
+        return None
+    path = os.path.join(media_dir, name)
+    return path if os.path.isfile(path) else None
+
+
+#: The two menu-wide sounds' file names on the card, by form field.
+MENU_SOUND_FILES = (("sound_move", "move.wav"), ("sound_confirm", "confirm.wav"))
+
+
+#: validate_form's sentences about a media FILE that is not on this machine.
+_IMAGE_FILE_ERR_RE = re.compile(r"^Image \d+: (art|animation|music) file not found: ")
+_SOUND_FILE_ERR_RE = re.compile(r"^The (move|confirm) sound file was not found: ")
+
+
+def sound_file_errors(errs):
+    """Of :func:`validate_form`'s sentences, the ones about a menu-wide
+    sound file that is not on this machine - what a PICTURE never needs:
+    the render is --visual-only, and a loaded card's sounds are already in
+    its media dir."""
+    return [e for e in errs if _SOUND_FILE_ERR_RE.match(e)]
+
+
+def media_file_errors(errs):
+    """...and the ones about ANY media file that is not on this machine -
+    what a picture does not need either while nothing has to be rendered
+    again: a loaded card whose media fields are still the card's own is
+    drawn from the files the load extracted, whatever the videos and WAVs
+    they were made from (David's downloaded card: every one on the other
+    person's G:, and 'art file not found' stopped the menu being drawn)."""
+    return [e for e in errs if _IMAGE_FILE_ERR_RE.match(e) or _SOUND_FILE_ERR_RE.match(e)]
+
+
 def inject_commands(form, card, cwd=None):
     return [("inject", wsl_command(inject_args(form, card), cwd))]
 
@@ -2198,6 +2351,10 @@ def split_sound_source(spec, what, source=None):
     if src:
         if src.lower() in _WORDS or _AUTO_IDX_RE.match(src):
             return src.lower(), ""
+        # The path comes back AS RECORDED even when it is not on this
+        # machine (a drive not plugged in, or a card built on someone
+        # else's): the preview draws without the sounds' sources, and a
+        # recovery points the field at the card's own WAV (recover_sound).
         return host_path(src), ""
     s = (spec or "").strip()
     if not s:
@@ -2292,6 +2449,27 @@ def rows_from_inspect(info):
             row.confirm, row.confirm_on_card = im["confirm"], True
         else:
             row.confirm = ""
+        # A SOURCE THAT IS ON SOMEBODY ELSE'S MACHINE (a card downloaded
+        # from another user records the videos and WAVs its pictures were
+        # made from on THEIR disk) comes back AS RECORDED, like a drive that
+        # is not plugged in - a load followed by an apply must write what
+        # was read.  It is SAID, once per field: the preview draws the
+        # card's own rendered file regardless (see media_file_errors), and
+        # a recovery points the field at that file (recover_rows).
+        for what, key in (("art", "art"), ("animation", "anim"),
+                          ("music", "music"), ("confirm sound", "confirm")):
+            val = getattr(row, key)
+            if what == "art" and (val or "").strip().lower() == "video frame":
+                val = row.art_video
+            if (getattr(row, key + "_on_card") or not is_file_choice(val)
+                    or os.path.isfile((val or "").strip().strip('"'))):
+                continue
+            warnings.append(
+                "Image %d: its %s was made from %s, which is not on this "
+                "machine - the card's own %s is drawn and kept until a media "
+                "change asks for it again."
+                % (i, what, (val or "").strip(),
+                   im.get(key) or ("%s file" % what)))
         if not row.path:
             warnings.append("Image %d: this card does not record which .raw "
                             "it was built from (%s)."
@@ -4002,7 +4180,7 @@ class CardPickDialog:
         th = THEMES.get(theme_fn()) or THEMES["dark"]
         dlg = tk.Toplevel(parent)
         self._dlg = dlg
-        dlg.title("Read the boot menu off an SD card")
+        dlg.title("Read an SD card")
         dlg.transient(parent.winfo_toplevel())
         dlg.configure(bg=th["bg"])
         body = ttk.Frame(dlg, padding=12)
@@ -4014,8 +4192,20 @@ class CardPickDialog:
         self._note = ttk.Label(body, text="", foreground=th["gray"], wraplength=440,
                                justify=tk.LEFT)
         self._note.grid(row=1, column=0, columnspan=2, sticky=tk.W)
+        # WHAT TO READ.  The menu alone is item 99's fast read, and enough to
+        # change titles, pictures and sounds; the whole card is what a card
+        # someone else built needs before its images can be recovered or
+        # another added (the menu-only image holds no games).
+        ttk.Label(body, text="Read:").grid(row=2, column=0, sticky=tk.NW, pady=(10, 0))
+        modes = ttk.Frame(body)
+        modes.grid(row=2, column=1, sticky=tk.W, padx=(6, 0), pady=(10, 0))
+        self._mode = tk.StringVar(value="menu")
+        ttk.Radiobutton(modes, variable=self._mode, value="menu",
+                        text=self.MENU_ONLY_TEXT).pack(anchor=tk.W)
+        ttk.Radiobutton(modes, variable=self._mode, value="whole",
+                        text=self.WHOLE_CARD_TEXT).pack(anchor=tk.W, pady=(4, 0))
         btns = ttk.Frame(body)
-        btns.grid(row=2, column=0, columnspan=2, sticky=tk.E, pady=(10, 0))
+        btns.grid(row=3, column=0, columnspan=2, sticky=tk.E, pady=(10, 0))
         ttk.Button(btns, text="Refresh", command=self.refresh).pack(side=tk.LEFT)
         self._read_btn = ttk.Button(btns, text="Read", command=self._read, state=tk.DISABLED)
         self._read_btn.pack(side=tk.LEFT, padx=(6, 0))
@@ -4065,12 +4255,23 @@ class CardPickDialog:
                 return d
         return None
 
+    #: The two reads, as the dialog words them.
+    MENU_ONLY_TEXT = ("The boot menu only - titles, pictures, sounds and settings "
+                      "(a few hundred MB, about a minute)")
+    WHOLE_CARD_TEXT = ("The whole card, into a .raw you name - its images too, so they "
+                       "can be recovered, replaced or added to (several minutes)")
+
+    def whole(self):
+        """Whether the whole card is to be read rather than its menu."""
+        return self._mode.get() == "whole"
+
     def _read(self):
         d = self.picked()
         if d is None:
             return
+        whole = self.whole()
         self._dlg.destroy()
-        self._on_read(d.device_path, d)
+        self._on_read(d.device_path, d, whole)
 
     def cancel(self):
         try:
@@ -5263,12 +5464,13 @@ class MultibootPanel:
         self._maybe_plan()
 
     FROM_CARD_TIP = (
-        "Read the boot menu off the SD card in the reader - titles, pictures, "
-        "sounds, settings and the images' sources - without its image file. "
-        "Only the menu's part of the card is read (a few hundred MB), so the "
-        "games' versions are not shown. Apply then writes the menu back onto "
-        "that card. Windows asks for administrator access for the read and "
-        "the write.")
+        "Read the SD card in the reader. The boot menu only (a few hundred "
+        "MB, about a minute): titles, pictures, sounds, settings and the "
+        "images' sources, without an image file - Apply then writes the menu "
+        "back onto that card. Or the whole card into a .raw you name: its "
+        "images too, so they can be recovered, replaced or added to, like "
+        "any card image on disk. Windows asks for administrator access for "
+        "the read and the write.")
 
     def _from_card_clicked(self):
         if self._busy:
@@ -5276,22 +5478,139 @@ class MultibootPanel:
             return
         CardPickDialog(self._parent, self._theme_fn, self.load_from_card)
 
-    def load_from_card(self, device_path, drive):
-        """Read the menu off the card at *device_path* (elevated, off-thread)
-        into :func:`menu_card_image_path` and load that image; the card is
-        remembered so Apply writes the menu back onto it.  False when the
-        tab refused."""
+    def _recover_clicked(self):
+        """'Recover images\u2026': the loaded card's images this machine lacks,
+        written out of the card into a folder the person picks, and the
+        rows pointed at them (see :func:`recover_rows`)."""
         if self._busy:
             self._error("A run is already in progress.")
             return False
-        path = menu_card_image_path(drive)
+        want = self.recoverable()
+        if not want:
+            self._error("Nothing to recover: every image of the loaded card "
+                        "is already on this machine, or the card was read "
+                        "from the reader as its menu only.")
+            return False
+        card = self._loaded_card
+        try:
+            initial = os.path.dirname(os.path.abspath(card))
+        except (OSError, ValueError):                   # pragma: no cover
+            initial = ""
+        out_dir = filedialog.askdirectory(
+            title="Folder for the recovered images", initialdir=initial,
+            mustexist=False)
+        if not out_dir:
+            return False
+        return self.recover_images(out_dir, want)
+
+    def recover_images(self, out_dir, indexes=None):
+        """The run behind Recover images\u2026: ``extract`` into *out_dir* (with
+        the card's menu media beside the images), then every recovered row
+        pointed at its file.  The public seam the tests drive.  False when
+        the tab refused."""
+        card = self._loaded_card
+        want = list(indexes if indexes is not None else self.recoverable())
+        out_dir = os.path.normpath((out_dir or "").strip().strip('"'))
+        if not card or not want:
+            self._error("Read a card whose images are not on this machine "
+                        "first.")
+            return False
+        if under_library(out_dir):
+            self._error("That folder is in the card library (%s); pick one "
+                        "outside it." % LIBRARY_PREFIXES[0])
+            return False
+        if self._busy:
+            self._error("A run is already in progress.")
+            return False
+        media_out = os.path.join(out_dir, recovered_media_dirname(card))
+        self._run_kind = "recover"
+        self._ok("Recovering image%s %s off %s into %s\u2026"
+                 % ("" if len(want) == 1 else "s",
+                    ", ".join(str(i) for i in want),
+                    os.path.basename(card), out_dir))
+
+        def done(rc, failed, texts):
+            if rc != 0:
+                if self.run_cancelled():
+                    self._ok("Recovering the images was cancelled; whatever "
+                             "was written into %s is half a file." % out_dir)
+                    return
+                why = parse_refusal(texts.get(failed, ""), card) or \
+                    "%s failed (exit %d) - see the Log." % (failed, rc)
+                self._error("Cannot recover the images: %s" % why)
+                return
+            mapping, media = parse_extract(texts.get("extract", ""))
+            if not mapping:
+                self._error("The recovery printed no image paths - see the "
+                            "Log.")
+                return
+            notes = recover_rows(self._rows, mapping, media, self._loaded_info)
+            if self._loaded_form is not None:
+                # the baseline moves with the rows: a recovery is not a
+                # change to the card, and must not read as one
+                recover_rows(self._loaded_form.images, mapping, media,
+                             self._loaded_info)
+            # ...and the two menu-wide sounds, made from WAVs that are not
+            # here: the card's own copies, in the field and the baseline
+            for attr, var, name in (("sound_move", self._move_var, "move.wav"),
+                                    ("sound_confirm", self._confirm_var,
+                                     "confirm.wav")):
+                got = recover_sound(var.get(), media, name)
+                if got:
+                    self._loading = True
+                    try:
+                        var.set(got)
+                    finally:
+                        self._loading = False
+                    if self._loaded_form is not None:
+                        setattr(self._loaded_form, attr, got)
+                    notes.append("the %s is %s" % (attr.replace("_", " "), got))
+            # every frame was keyed on the old specs; the picture is the
+            # same, the key is not
+            self._pv_cache.clear()
+            self._pv_totals.clear()
+            self._pv_shown = None
+            self._refresh_tree(select=self._selected())
+            self._update_edit_status()
+            self._schedule_probe(refresh=True)
+            self._ok("Recovered %d image%s into %s. %s can update this "
+                     "card, rebuild it, or build a fresh one with another "
+                     "image added."
+                     % (len(mapping), "" if len(mapping) == 1 else "s",
+                        out_dir, WRITE_BUTTON))
+            for line in notes:
+                self._write("[recover] " + line)
+        return self._run_commands(
+            extract_commands(card, out_dir, media_out, want), on_done=done)
+
+    def load_from_card(self, device_path, drive, whole=False):
+        """Read the card at *device_path* (elevated, off-thread) and load
+        what was read.  The menu only (the default): into
+        :func:`menu_card_image_path`, and the card is remembered so Apply
+        writes the menu back onto it.  *whole*: the card image - up to the
+        end of its partition table, the games too - into a .raw the person
+        names, loaded like any card on disk (so its images can be recovered,
+        replaced or added to; flashing it back is the Build / flash dialog's
+        flash section).  False when the tab refused."""
+        if self._busy:
+            self._error("A run is already in progress.")
+            return False
         name = getattr(drive, "display", None) or device_path
-        self._pending_device = (path, device_path, name)
+        if whole:
+            path = self._ask_card_image_path(drive)
+            if not path:
+                return False
+            self._pending_device = None
+            what = "the card"
+        else:
+            path = menu_card_image_path(drive)
+            self._pending_device = (path, device_path, name)
+            what = "the boot menu"
         self._card_device = None
         self._set_busy(True)
         self._run_kind = "load"
-        self._ok("Reading the boot menu off %s\u2026" % name)
-        self._phase_fn(3, status="Reading the boot menu off the card\u2026")
+        self._ok("Reading %s off %s\u2026" % (what, name))
+        self._phase_fn(3, status="Reading %s off the card\u2026" % what)
         last = [0]
 
         def log(text, level="info"):
@@ -5305,10 +5624,14 @@ class MultibootPanel:
         def run():
             from ..core import elevated_flash as _ef
             try:
-                _ef.read_device_menu_with_privileges(device_path, path, log=log, progress=progress)
+                if whole:
+                    _ef.read_device_with_privileges(device_path, path, log=log, progress=progress,
+                                                    extent="card")
+                else:
+                    _ef.read_device_menu_with_privileges(device_path, path, log=log, progress=progress)
             except Exception as exc:                       # noqa: BLE001 - reported, never lost
                 err = exc                                   # the name dies with the except block
-                self._ui(lambda: self._from_card_failed(name, err))
+                self._ui(lambda: self._from_card_failed(name, err, what))
                 return
             self._ui(lambda: self._from_card_read(path))
 
@@ -5316,10 +5639,39 @@ class MultibootPanel:
         self._drain()
         return True
 
-    def _from_card_failed(self, name, exc):
+    def _ask_card_image_path(self, drive):
+        """Where a whole-card read lands: a .raw the person names, offered
+        next to the card in the path box (or in their home) as
+        ``<model>-<size>G.sdcard.raw``.  '' when the dialog was cancelled or
+        the choice is one the tools would refuse."""
+        model = re.sub(r"[^A-Za-z0-9._-]+", "_",
+                       (getattr(drive, "model", "") or "card").strip()) or "card"
+        size = int(getattr(drive, "size_bytes", 0) or 0)
+        initialfile = ("%s-%dG.sdcard.raw" % (model, round(size / 1e9))
+                       if size else "%s.sdcard.raw" % model)
+        cur = self._out_var.get().strip().strip('"')
+        initialdir = os.path.dirname(os.path.abspath(cur)) if cur else \
+            os.path.expanduser("~")
+        if under_library(initialdir):
+            initialdir = os.path.expanduser("~")
+        path = filedialog.asksaveasfilename(
+            title="Save the card image as", initialdir=initialdir,
+            initialfile=initialfile, defaultextension=".raw",
+            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+        path = (path or "").strip()
+        if not path:
+            return ""
+        if under_library(path):
+            self._error("That path is in the card library (%s), which "
+                        "nothing here may write into - pick another folder."
+                        % LIBRARY_PREFIXES[0])
+            return ""
+        return os.path.normpath(path)
+
+    def _from_card_failed(self, name, exc, what="the boot menu"):
         self._set_busy(False)
         self._pending_device = None
-        self._error("Cannot read the boot menu off %s: %s" % (name, exc))
+        self._error("Cannot read %s off %s: %s" % (what, name, exc))
 
     def _from_card_read(self, path):
         self._set_busy(False)
@@ -5684,6 +6036,17 @@ class MultibootPanel:
         self._menu_btn = ttk.Button(row, text="Menu settings…", width=16,
                                     command=self.open_menu_settings)
         self._menu_btn.pack(side=tk.LEFT)
+        # A card from SOMEBODY ELSE names its images on their disk.  This
+        # writes them back out of the card as .raw files here, and from then
+        # on the card is one this machine built: updatable, rebuildable, and
+        # open to a third image (David, 2026-09-09: "I want to add a third
+        # title that is not on this one that was shared with me").
+        self._recover_btn = ttk.Button(row, text="Recover images…", width=17,
+                                       command=self._recover_clicked,
+                                       state=tk.DISABLED)
+        self._recover_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._recover_tip = _Tooltip(self._recover_btn, self.RECOVER_TIP,
+                                     self._theme_fn)
         self._emu_btn = ttk.Button(row, text="Run in emulator", width=16,
                                    command=self._run_emulator)
         self._emu_btn.pack(side=tk.RIGHT, padx=(0, 6))
@@ -5713,7 +6076,19 @@ class MultibootPanel:
         self._menu_tip = _Tooltip(self._menu_lbl, "", self._theme_fn)
         self._action_btns = [
             self._buildflash_btn, self._emu_btn,
-            self._menu_btn, self._browse_btn, self._new_btn]
+            self._menu_btn, self._recover_btn, self._browse_btn, self._new_btn]
+
+    RECOVER_TIP = (
+        "Write the loaded card's images back out as .raw files of their own "
+        "- for a card someone else built, whose images live on their "
+        "machine. Each comes out as a normal card image (the game as p3, the "
+        "boot menu taken out), named as the card records it, and the card's "
+        "pictures and sounds are copied out beside them; the rows are then "
+        "pointed at those files, so the card can be updated, rebuilt or "
+        "given another image. Reads the card, writes only into the folder "
+        "you pick. Greyed while every image is already on this machine, "
+        "and for a card read from the reader as its menu only (read the "
+        "whole card for this).")
 
     #: The green button's two lives.  While a run is up it IS the run's
     #: Cancel - the shape the Write and Extract tabs have had since a tester
@@ -8190,6 +8565,25 @@ class MultibootPanel:
         #: What the probe last said about the path, so <Return> can tell
         #: "there is nothing there" from "the answer has not come back".
         self._row_kind = kind
+        self._sync_recover_button()
+
+    def recoverable(self):
+        """The image indexes 'Recover images…' would write out now."""
+        if not self._loaded_card or self._card_device:
+            return []
+        return recoverable_indexes(self._rows, self._loaded_info)
+
+    def _sync_recover_button(self):
+        """Recover images… is live exactly when a loaded card has an image
+        this machine lacks and the card carries its tree."""
+        btn = getattr(self, "_recover_btn", None)
+        if btn is None:
+            return
+        live = bool(self.recoverable()) and not self._busy
+        try:
+            btn.configure(state=tk.NORMAL if live else tk.DISABLED)
+        except tk.TclError:                             # pragma: no cover
+            pass
 
     def _loaded_diff(self, form=None):
         """``(menu, rebuild)`` between the loaded card and *form* (the live
@@ -9504,7 +9898,16 @@ class MultibootPanel:
         # waited for the typing to STOP, and a preview that quietly stops
         # following the form from then on is the worst of both.  So the
         # picture's own caption says it is out of date, and why.
-        errs = validate_form(form, sources=self.needs_prepare(form))
+        prepare = self.needs_prepare(form)
+        errs = validate_form(form, sources=prepare)
+        # THE PICTURE DOES NOT NEED THE MEDIA'S SOURCES.  A card someone
+        # else built records the videos and WAVs its media was made from on
+        # their disk, and 'art file not found' was stopping the whole menu
+        # from being drawn - while nothing has to be rendered again, the
+        # card's own files are what is drawn; and the two sounds' sources
+        # are never needed for a --visual-only render.
+        skip = sound_file_errors(errs) if prepare else media_file_errors(errs)
+        errs = [e for e in errs if e not in skip]
         if errs:
             self._pv_stale(errs[0], len(errs) - 1)
             return False
@@ -10172,7 +10575,7 @@ class MultibootPanel:
     #: read honestly on it: Build & verify walks all four, Apply to card
     #: only the last two (plus Media when a media field moved).
     PHASE_OF = {"selector": 0, "prepare": 0, "plan": 0, DRY_RUN: 0,
-                "build": 1, "update": 1,
+                "build": 1, "update": 1, "extract": 1,
                 "inject": 2, "bypass": 2, "verify": 3, "inspect": 3,
                 INSPECT_JSON: 3}
 
@@ -10183,6 +10586,7 @@ class MultibootPanel:
         "plan": "Planning the card's layout…",
         "build": "Copying the images into the card…",
         "update": "Writing what changed into the card…",
+        "extract": "Copying the card's images out…",
         "inject": "Writing the menu into the card…",
         "bypass": "Patching the game validator…",
         "verify": "Verifying the card…",

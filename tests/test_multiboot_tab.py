@@ -4636,15 +4636,16 @@ def test_the_more_menu_is_gone_and_so_is_every_entry_in_it(tmp_path):
         for gone in ("_more_entry", "_back_to_card", "_bypass_existing",
                      "bypass_card", "_check_size", "_prepare_media"):
             assert not hasattr(panel, gone), gone
-        # THE ROW: Menu settings on the left, one green writing button and
-        # Run in emulator on the right, and the label that expands between
-        # them.  The three writing buttons (Apply / Build / Flash) are one
-        # 'Build / flash card\u2026' now.  Nothing else, and no Menubutton.
+        # THE ROW: Menu settings and Recover images on the left, one green
+        # writing button and Run in emulator on the right, and the label
+        # that expands between them.  The three writing buttons (Apply /
+        # Build / Flash) are one 'Build / flash card\u2026' now.  Nothing
+        # else, and no Menubutton.
         kids = [w.cget("text") for w in panel._action_row.winfo_children()
                 if w.winfo_class() == "TButton"]
         assert sorted(kids) == sorted([
-            "Menu settings\u2026", "Build / flash card\u2026",
-            "Run in emulator"])
+            "Menu settings\u2026", "Recover images\u2026",
+            "Build / flash card\u2026", "Run in emulator"])
         assert all(w.winfo_class() != "TMenubutton"
                    for w in panel._action_row.winfo_children())
         # 1+2. Check size and Prepare media: the tab decides, not the user.
@@ -8003,5 +8004,200 @@ def test_an_armed_tree_on_a_loaded_card_is_a_pending_bypass(tmp_path):
         panel._card_device = None
         panel._armed = False
         assert panel._loaded_diff() == ([], [])
+    finally:
+        root.destroy()
+
+
+# --------------------------------------------------------------------------
+# Recover images… - a card someone else built, made this machine's
+# --------------------------------------------------------------------------
+
+def _foreign_report(tmp_path):
+    """The downloaded Godzilla card: both .raw sources on the other person's
+    G:, art made from a video there, everything rendered onto the card."""
+    from tests.test_multiboot_recover import _foreign_report as _fr
+    rep = _fr(tmp_path)
+    rep["card"] = str(tmp_path / "multi" / "card.multi.raw")
+    return rep
+
+
+def test_a_foreign_card_loads_with_its_own_media_and_offers_to_recover_its_images(tmp_path):
+    """The load David reported: the sources on G: are not here, so the rows
+    keep the card's own pictures, the preview is not refused over a video
+    nobody has, and Recover images… is the one live way on."""
+    root, panel, card, media = _loaded(tmp_path, report=_foreign_report(tmp_path))
+    try:
+        for name in ("art0.png", "anim0.gif", "music0.wav", "confirm0.wav", "art1.png"):
+            open(os.path.join(media, name), "wb").write(bytes(2))
+        r0 = panel._rows[0]
+        assert r0.art.endswith("Powering Up.mp4") and not r0.art_on_card
+        # the preview's own gate: every sentence validate_form has is about
+        # a media file on the other machine, and none of them stops the
+        # picture while nothing has to be rendered again
+        errs = multiboot_tab.validate_form(panel.form(), sources=False)
+        assert errs and multiboot_tab.media_file_errors(errs) == errs
+        assert panel.needs_prepare() is False
+        assert panel.recoverable() == [0, 1]
+        assert str(panel._recover_btn.cget("state")) == "normal"
+        assert "not on this machine" in _pane(panel)
+        # the reader's menu-only image carries no trees: nothing to recover from
+        panel._card_device = r"\\.\PHYSICALDRIVE9"
+        assert panel.recoverable() == []
+        panel._sync_recover_button()
+        assert str(panel._recover_btn.cget("state")) == "disabled"
+        panel._card_device = None
+        # a fresh form has nothing to recover either
+        panel.new_card()
+        assert panel.recoverable() == []
+        assert str(panel._recover_btn.cget("state")) == "disabled"
+    finally:
+        root.destroy()
+
+
+def test_recover_images_runs_extract_and_points_the_rows_at_what_it_wrote(monkeypatch, tmp_path):
+    """The run: ONE extract step as the user, into the folder picked, with
+    the card's media beside the images; on its lines the rows - and the
+    loaded baseline with them - name the recovered files, so nothing reads
+    as a change and the card is updatable / rebuildable from here."""
+    _win(monkeypatch)
+    root, panel, card, media = _loaded(tmp_path, report=_foreign_report(tmp_path))
+    try:
+        out_dir = tmp_path / "recovered"
+        out_dir.mkdir()
+        rec0, rec1 = out_dir / "Orchestral.raw", out_dir / "godzilla_le-1_16_0.raw"
+        rec0.write_bytes(bytes(8))
+        rec1.write_bytes(bytes(8))
+        mdir = out_dir / multiboot_tab.recovered_media_dirname(card)
+        mdir.mkdir()
+        for name in ("art0.png", "anim0.gif", "music0.wav", "confirm0.wav", "art1.png",
+                     "move.wav", "confirm.wav"):
+            (mdir / name).write_bytes(bytes(2))
+        assert multiboot_tab.is_file_choice(panel._move_var.get())      # the WAV on G:
+        seen = {}
+
+        def fake_run(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
+            seen["cmds"] = cmds
+            text = ("[extract] image 0: %s\n[extract] image 1: %s\n[extract] media: %s\n"
+                    "[extract] done: 2 image(s)\n"
+                    % (multiboot_tab.wsl(str(rec0)), multiboot_tab.wsl(str(rec1)),
+                       multiboot_tab.wsl(str(mdir))))
+            on_done(0, None, {"extract": text})
+            return True
+        monkeypatch.setattr(panel, "_run_commands", fake_run)
+        assert panel.recover_images(str(out_dir)) is True
+        label, argv = seen["cmds"][0]
+        assert label == "extract"
+        words = argv[-1]
+        assert "extract" in words and "--out-dir" in words and "--media-out" in words
+        assert "--image 0 --image 1" in words and multiboot_tab.wsl(str(mdir)) in words
+        assert "-u root" not in " ".join(argv)
+        r0, r1 = panel._rows
+        same = lambda a, b: os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+        assert same(r0.path, str(rec0)) and same(r1.path, str(rec1))
+        assert same(r0.art, str(mdir / "art0.png")) and not r0.art_on_card
+        assert same(r0.anim, str(mdir / "anim0.gif")) and same(r0.music, str(mdir / "music0.wav"))
+        assert same(r0.confirm, str(mdir / "confirm0.wav")) and not r0.confirm_on_card
+        assert r1.art == "auto"
+        # the menu-wide sounds too: the move sound was a WAV on G:, the
+        # confirm sound 'synth' - the first is the card's own now, the
+        # second untouched, and the baseline agrees with both
+        assert same(panel._move_var.get(), str(mdir / "move.wav"))
+        assert same(panel._loaded_form.sound_move, str(mdir / "move.wav"))
+        assert panel._confirm_var.get() == "synth" == panel._loaded_form.sound_confirm
+        # the baseline moved with the rows: a recovery is not a change
+        assert panel._loaded_diff() == ([], [])
+        assert panel.recoverable() == []
+        assert str(panel._recover_btn.cget("state")) == "disabled"
+        pane = _pane(panel)
+        assert "[recover] image 0: " in pane and "[recover] the sound move is " in pane
+        # every media field is a file on this machine now: a fresh card can
+        # be built from this form, sources and all
+        assert not [e for e in multiboot_tab.validate_form(panel.form())
+                    if "no such file" in e or "not found" in e]
+        assert multiboot_tab.rebuild_blockers(panel.form()) == []
+        # a refusal from the tool is the status line, not a traceback
+        def refused(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
+            on_done(2, "extract", {"extract": "[card] error: output x exists; pass --force"})
+            return True
+        panel._rows[1].path = ""
+        monkeypatch.setattr(panel, "_run_commands", refused)
+        assert panel.recover_images(str(out_dir)) is True
+        assert "Cannot recover the images" in _pane(panel)
+        # ...and the library is never a place to write
+        assert panel.recover_images(multiboot_tab.LIBRARY_PREFIXES[0] + "/x") is False
+    finally:
+        root.destroy()
+
+
+def test_load_from_card_can_read_the_whole_card_into_a_raw_the_person_names(monkeypatch, tmp_path):
+    """The reader's other read: the card image (to its partition table's
+    end) into a .raw at a path asked for, then loaded like any card on disk
+    - no device bound to it, so Apply writes the file and the flash section
+    puts it back."""
+    from pinball_decryptor.gui import multiboot_tab as mt
+    from pinball_decryptor.core import elevated_flash as ef
+    from pinball_decryptor.core.drives import PhysicalDrive
+    d = PhysicalDrive(device_path="\\\\.\\PHYSICALDRIVE9", model="NORELSYS 1081CS1",
+                      size_bytes=31914983424, bus_type="USB")
+    target = str(tmp_path / "multi" / "gz.sdcard.raw")
+    calls = []
+
+    def fake_read(device, image, log=None, progress=None, cancel=None, extent=None):
+        calls.append((device, image, extent))
+        os.makedirs(os.path.dirname(image), exist_ok=True)
+        with open(image, "wb") as f:
+            f.write(b"card")
+        if progress:
+            progress(4, 4, "Reading")
+        return 4
+    monkeypatch.setattr(ef, "read_device_with_privileges", fake_read)
+    monkeypatch.setattr(mt.filedialog, "asksaveasfilename", lambda **kw: target)
+    root, panel = _panel()
+    try:
+        loaded = []
+        panel.load_card = lambda path, asked=True: loaded.append(path) or True
+        assert panel.load_from_card(d.device_path, d, whole=True) is True
+        for _ in range(40):
+            root.update()
+            if loaded:
+                break
+            time.sleep(0.05)
+        assert loaded == [os.path.normpath(target)]
+        assert calls == [(d.device_path, os.path.normpath(target), "card")]
+        assert panel._out_var.get() == loaded[0] and not panel._busy
+        assert panel._pending_device is None
+        # the whole-card image is not bound to the reader
+        panel.load_inspect(_rich_report(tmp_path), loaded[0], "")
+        assert panel._card_device is None
+        # the dialog cancelled: nothing read, nothing busy
+        monkeypatch.setattr(mt.filedialog, "asksaveasfilename", lambda **kw: "")
+        assert panel.load_from_card(d.device_path, d, whole=True) is False
+        assert not panel._busy
+        # ...and the library is refused before the read starts
+        monkeypatch.setattr(mt.filedialog, "asksaveasfilename",
+                            lambda **kw: mt.LIBRARY_PREFIXES[0] + "/x.raw")
+        assert panel.load_from_card(d.device_path, d, whole=True) is False
+        assert "card library" in _pane(panel)
+    finally:
+        root.destroy()
+
+
+def test_the_card_pick_dialog_offers_the_menu_or_the_whole_card(monkeypatch):
+    """Item 99's dialog grew a second read: the whole card.  The default is
+    still the fast menu-only read, and Read passes the choice on."""
+    from pinball_decryptor.gui import multiboot_tab as mt
+    from pinball_decryptor.core.drives import PhysicalDrive
+    root = _root()
+    try:
+        got = []
+        d = PhysicalDrive(device_path="\\\\.\\PHYSICALDRIVE9", model="Reader",
+                          size_bytes=15931539456, bus_type="USB")
+        dlg = mt.CardPickDialog(root, lambda: "dark", lambda dev, drive, whole: got.append((dev, whole)))
+        dlg.apply([d], d, "")
+        assert dlg.whole() is False and dlg.picked() is d
+        dlg._mode.set("whole")
+        assert dlg.whole() is True
+        dlg._read()
+        assert got == [(d.device_path, True)]
     finally:
         root.destroy()

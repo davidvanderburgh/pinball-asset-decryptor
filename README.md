@@ -1536,11 +1536,18 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    or picture, or one changed file inside one image, is written into the
    card in place in about a minute — no rebuild — and **From SD card…**
    reads the menu straight off the card in the reader and writes your
-   changes back onto it. Every image on the card boots with its game
-   validator bypassed and its saved validation grades ignored, so a GAME
-   VALIDATION ERROR an earlier card left in the machine cannot latch on
-   it. Never update a card built this way with a Stern USB update; rebuild
-   it here.
+   changes back onto it, or reads the whole card into a .raw you name.
+   A card someone else built loads the same way and draws its own menu,
+   but it names its images on their machine; **Recover images…** writes
+   each image back out of the card as a normal card image of its own
+   (the game as its games partition, the boot menu taken out), copies
+   the card's pictures and sounds out beside them, and points the rows
+   at those files — from then on the card is one this machine built:
+   updatable in place, rebuildable, and open to another image. Every
+   image on the card boots with its game validator bypassed and its
+   saved validation grades ignored, so a GAME VALIDATION ERROR an earlier
+   card left in the machine cannot latch on it. Never update a card built
+   this way with a Stern USB update; rebuild it here.
 11. **Emulate tab** *(Jersey Jack Pinball — Windows via WSL2)* — the same
    idea for a JJP machine, and a different problem. A JJP game is a
    native x86-64 Linux program, so there is no CPU emulation at all: it

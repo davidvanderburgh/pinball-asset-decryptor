@@ -1996,3 +1996,143 @@ def test_the_p7_feature_list_names_nothing_a_release_might_not_know(mk):
     # ...and none of the three the 3.14 kernel does not know can be on it.
     for never in ("metadata_csum", "metadata_csum_seed", "64bit", "orphan_file"):
         assert never not in feats, never
+
+
+# ============================================================================ extract
+# (the recovery of an image off a card someone else built; the debugfs half - the tree out
+#  of a multi-layout p7 and the menu out of p2 - runs in the tool's selftest, part 7)
+
+def _parts_card(mk, tmp_path):
+    """A + B -> a two-image parts card of random bytes (10 MiB sources, no filesystems)."""
+    A = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    B = mk.make_synthetic_card(str(tmp_path / "B.img"), "B", 0x0B0B0B0B)
+    out = str(tmp_path / "multi.img")
+    mk.build_image(mk.make_plan(A, [B], "parts"), out)
+    return A, B, out
+
+
+def test_recovered_plan_puts_a_whole_partition_tree_back_as_p3_around_the_cards_own_p1_p2_p5_p6(mk, tmp_path):
+    A, B, out = _parts_card(mk, tmp_path)
+    card = mk.plan_from_card(out)
+    assert [p.num for p in card.images] == [3, 7]
+    # image 0: the card's own p3, and the stock layout byte for byte
+    p0 = mk.recovered_plan(out, *card.trees[0])
+    assert p0.layout == "parts" and [p.num for p in p0.prims] == [1, 2, 3]
+    assert [p.num for p in p0.logs] == [5, 6] and p0.total == mk.Geometry.from_file(A).sectors
+    assert p0.table() == mk.make_plan(A, []).table()
+    assert (p0.prims[2].src, p0.prims[2].src_start, p0.prims[2].count) == (out, 12288, 2046)
+    # image 1: p3 sourced from the card's p7, the same table otherwise
+    p1 = mk.recovered_plan(out, *card.trees[1])
+    assert p1.table() == p0.table()
+    assert (p1.prims[2].src, p1.prims[2].src_start, p1.prims[2].count) == (out, 20480, 2046)
+    # a p3 written into an image file of its own: sourced from offset 0 of that file
+    p3img = str(tmp_path / "p3.img")
+    px = mk.recovered_plan(out, card.trees[1][0], "img1", p3img, 2046)
+    assert (px.prims[2].src, px.prims[2].src_start, px.prims[2].count) == (p3img, 0, 2046)
+    assert px.table() == p0.table()
+
+
+def test_recovered_plan_relays_p5_and_p6_after_a_bigger_p3(mk, tmp_path):
+    A, B, out = _parts_card(mk, tmp_path)
+    card = mk.plan_from_card(out)
+    p3img = str(tmp_path / "p3.img")
+    big = mk.recovered_plan(out, card.trees[1][0], "img1", p3img, 2046 + 4096)
+    assert big.prims[2].count == 2046 + 4096
+    assert big.ext_base == mk.align_up(12288 + 2046 + 4096)
+    assert [p.num for p in big.logs] == [5, 6]
+    assert big.logs[0].start == mk.align_up(big.ext_base + 2) and big.logs[0].ebr == big.ext_base
+    assert big.logs[1].ebr == big.logs[0].start + big.logs[0].count
+    assert big.logs[1].start == mk.align_up(big.logs[1].ebr + 1)
+    assert big.total == big.logs[1].start + big.logs[1].count + mk.TAIL
+    assert big.ext_count == big.total - mk.TAIL - big.ext_base
+    # the stock shape holds: the writer's own parser reads it back as p1..p6
+    out2 = str(tmp_path / "big.img")
+    with open(p3img, "wb") as f:
+        f.truncate(big.prims[2].count * 512)
+    mk.build_image(big, out2)
+    g = mk.Geometry.from_file(out2)
+    assert [n for (n, _t, _s, _c) in g.prim] == [1, 2, 3, 4] and g.ext is not None
+    assert g.part(3)[2] == 2046 + 4096 and len(g.logical) == 2
+    assert g.sectors == big.total
+
+
+def test_a_recovered_parts_image_is_the_source_again_byte_for_byte(mk, tmp_path):
+    """recovered_plan + build_image, the copy `extract` does for a whole-partition tree:
+    every partition of the recovered image md5-equal to the source it came from."""
+    A, B, out = _parts_card(mk, tmp_path)
+    card = mk.plan_from_card(out)
+    for src, tree in ((A, card.trees[0]), (B, card.trees[1])):
+        x = str(tmp_path / ("x%d.img" % tree[0].num))
+        mk.build_image(mk.recovered_plan(out, *tree), x)
+        gs, gx = mk.Geometry.from_file(src), mk.Geometry.from_file(x)
+        assert gx.sectors == gs.sectors and len(gx.logical) == 2
+        assert [n for (n, _t, _s, _c) in gx.prim] == [1, 2, 3, 4] and gx.ext == gs.ext
+        assert gx.part(3) == gs.part(3)
+        assert mk.md5_range(src, gs.part(3)[1] * 512, gs.part(3)[2] * 512) == \
+            mk.md5_range(x, gx.part(3)[1] * 512, gx.part(3)[2] * 512)
+        # p1, p2, p5, p6 and the bootstrap are the CARD's (= A's, the primary's)
+        for n in (1, 2, 5, 6):
+            assert mk.md5_range(A, gs.part(n)[1] * 512, gs.part(n)[2] * 512) == \
+                mk.md5_range(x, gx.part(n)[1] * 512, gx.part(n)[2] * 512), n
+        assert mk.md5_range(A, 0, 512 * 8192) == mk.md5_range(x, 0, 512 * 8192)
+        assert mk.check_stock(x)
+        assert len(mk.plan_from_card(x).trees) == 1
+
+
+def test_recovered_names_come_from_build_json_and_never_collide(mk):
+    build = {"images": [
+        {"device": "/dev/mmcblk0p3", "source": "/mnt/g/Custom/Orchestral Version.raw"},
+        {"device": "/dev/mmcblk0p7", "source": "G:\\Original\\godzilla_le-1_16_0.raw"},
+        {"device": "/dev/mmcblk0p7:img2", "source": None}]}
+    names = mk.recovered_names("/mnt/d/x/Godzilla V1.6.multi.raw", 3, build)
+    assert names == ["Orchestral Version.raw", "godzilla_le-1_16_0.raw", "Godzilla V1.6.multi.image2.raw"]
+    # no build.json at all
+    assert mk.recovered_names("/mnt/d/x/card.img", 2, None) == ["card.image0.raw", "card.image1.raw"]
+    # two images from the same source file name are told apart by their index
+    twice = {"images": [{"source": "/a/same.raw"}, {"source": "/b/same.raw"}, {"source": "/c/other.raw"}]}
+    assert mk.recovered_names("/x/card.raw", 3, twice) == ["same.image0.raw", "same.image1.raw", "other.raw"]
+    # a source that is not a card image name is not used as one
+    assert mk.recovered_names("/x/card.raw", 1, {"images": [{"source": "/a/notes.txt"}]}) == ["card.image0.raw"]
+
+
+def test_the_recorded_tree_as_the_card_holds_it_carries_the_bypass_digests(mk):
+    """trees.json keeps the SOURCE's digests and the validator bypass's own beside them
+    (item 98); a tree read off the card - or out of an image recovered from it - has the
+    patched game and .sidx.  So a recovered image is matched to the record THROUGH the bypass
+    digests, which is what made David's downloaded Godzilla card 'nothing to write' instead
+    of 'p7 needs 6.30 GB' (image 1's game and .sidx read as two changed files)."""
+    ts = mk._treesync()
+    rec = ts.FileRec("aa" * 32, 100, 0o775, 0, 0, 1)
+    tree = ts.TreeManifest({"gz/game": rec, "spk/index/gz-1_16_0.sidx": rec._replace(sha256="bb" * 32),
+                            "gz/other": rec._replace(sha256="cc" * 32)}, {"game": ts.LinkRec("gz/game", 0, 0)}, {})
+    im = ts.ImageTrees(1, "/dev/mmcblk0p7", "", tree, None, None,
+                       {"game": "dd" * 32, "game_path": "gz/game", "sidx": "ee" * 32,
+                        "sidx_path": "spk/index/gz-1_16_0.sidx"})
+    on_card = mk.tree_as_on_card(im)
+    assert on_card is not tree
+    assert on_card.files["gz/game"].sha256 == "dd" * 32
+    assert on_card.files["spk/index/gz-1_16_0.sidx"].sha256 == "ee" * 32
+    assert on_card.files["gz/other"] == tree.files["gz/other"]
+    assert on_card.symlinks == tree.symlinks and on_card.dirs == tree.dirs
+    # the record itself is untouched
+    assert tree.files["gz/game"].sha256 == "aa" * 32
+    # what the card holds, compared with a tree read off it, is no change at all
+    read_back = ts.TreeManifest(dict(on_card.files), dict(tree.symlinks), {})
+    assert ts.diff_tree(on_card, read_back) == []
+    assert ts.diff_tree(tree, read_back) != []
+    # no bypass record, or digests the tree already holds: the same object comes back
+    assert mk.tree_as_on_card(ts.ImageTrees(0, "/dev/mmcblk0p3", "", tree)) is tree
+    same = ts.ImageTrees(1, "/dev/mmcblk0p7", "", tree, None, None,
+                         {"game": "aa" * 32, "game_path": "gz/game"})
+    assert mk.tree_as_on_card(same) is tree
+
+
+def test_extract_refuses_before_reading_anything(mk, tmp_path, capsys):
+    A, B, out = _parts_card(mk, tmp_path)
+    assert mk.main(["extract", "--card", out]) == 2                      # neither --out nor --out-dir
+    assert mk.main(["extract", "--card", out, "--out", str(tmp_path / "x.img")]) == 2   # two images, one --out
+    assert mk.main(["extract", "--card", out, "--image", "5", "--out-dir", str(tmp_path)]) == 2
+    assert mk.main(["extract", "--card", out, "--image", "0", "--out", out]) == 2       # the card itself
+    assert mk.main(["extract", "--card", str(tmp_path / "nope.img"), "--out-dir", str(tmp_path)]) == 2
+    err = capsys.readouterr()
+    assert "no image 5" in err.out + err.err and "also an input" in err.out + err.err

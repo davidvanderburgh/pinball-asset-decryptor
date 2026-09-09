@@ -30,8 +30,14 @@ import re
 import sys
 from collections import OrderedDict
 
+# The `(acked ...)` clause was added to the serving line after this tool was
+# written, and the path pattern matched IT instead of the path - so every clip
+# read as `(acked`, every channel reported ONE distinct clip, and the fault this
+# tool exists to name could not appear in its own output. Optional, because logs
+# written before that clause existed are still worth reading.
 LINE = re.compile(
-    r"\[padvid\s+([\d.]+)\]\s+ch(\d+) serving (\d+)x(\d+) (\d+) frames (\S+)")
+    r"\[padvid\s+([\d.]+)\]\s+ch(\d+) serving (\d+)x(\d+) (\d+) frames "
+    r"(?:\(acked [^)]*\) )?(\S+)")
 
 
 def short(p):

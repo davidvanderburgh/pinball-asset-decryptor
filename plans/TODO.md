@@ -7880,6 +7880,141 @@ These have each been violated at least once and each cost a run or a window:
       exist before anything can be judged; budget more than one pass, one
       phase per pass.
 
+- [ ] **105. A multi-boot card with 5 to 16 images: the carousel is unproven on
+      hardware, the menu media budget starves it silently, and the tab never
+      says the real cap.** `S3 D2` *(A tester with five custom Beatles builds
+      plus Stern's asked on 2026-09-09 "how much effort to go past the 4 game
+      limit".)* There is no such limit: `CONF_MAX_IMAGES 16`
+      (`codeselect/conf.h:40`), `MAX_IMAGES = 16` (`mkmulticard.py:276`,
+      `multiboot_tab.py:263`); from 5 up `layout_compute` (`codeselect.c:350`)
+      draws a 3-card carousel with a `< n / N >` counter, proven only by
+      `headless.sh` cases 5 and 9 - never in the rig, never on a machine (the
+      biggest real card is 4 Godzilla images). What starves it: `selectmedia`'s
+      `MEDIA_BUDGET` is a flat 96 MB for the whole set (one busy 5 s GIF is
+      7.65 MB) and the refusal never says the per-image share. What breaks past
+      16: `media_tick`'s `1u << i` mask (`codeselect.c:624`) is silent past 32,
+      and every media array is `[CONF_MAX_IMAGES]`. DO: say 16 where the user
+      looks (the README's Multi-boot sentence, the table tooltip: "from 5 the
+      menu scrolls three at a time"); make the media refusal name the per-image
+      share and the heaviest images, and `plan` print `media-size` rows beside
+      `image-size`; replace the mask with a flag array plus a static assert
+      (item 106 raises the cap and must not inherit it); then the run: a
+      5-image TMNT card (the same source twice is fine;
+      `--allow-version-mismatch` if mixed) through `PAD_CARD=<raw> PAD_SELECT=1
+      PAD_AUDIO=0 watch.sh` under the rig lock, LEFT/RIGHT across the wrap,
+      choose image 4, attract - proof row 8 in `codeselect/DESIGN.md`. Hardware
+      proof is David's (the same card on the TMNT); the item waits at 90% for
+      it. Acceptance: the tab builds a 5-image card that boots each image
+      through the carousel in the emulator; the media refusal names the share;
+      a 40-image conf passes the mask headless; README and tooltip say 16.
+      Facts and design: `plans/spike2_pc_emulation_handoff.md` REMAINING item 105.
+      — S3: friction with a workaround (four images build today). D2: desk work
+      plus one confirming rig run.
+
+- [ ] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
+      and choosing it (by hand or by the countdown) boots one member at random,
+      a different one every power-up.** `S3 D4` *(A tester's "random jukebox",
+      2026-09-09: 20-40 song-set variants of one title, "everything looks
+      standard except for the songs". David's first answer to him was a
+      hold-START gesture; REJECTED below, his call.)* **GATE FIRST:** everything
+      here needs `--layout store`, which has never been on a machine (item 95's
+      open flash, the card is built and verified: `D:/Pinball/TMNT
+      1987/multi/turtles-1_59_0.store-stock+1987pro+1987le.16G.sdcard.raw`);
+      David flashes it and boots all three images before this item starts.
+      DESIGN (decided): members stay ordinary `image=` lines; ONE new key
+      `group=<members>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]`
+      (`3-5`, `3,5,7-9`) names them and carries a card's display fields, written
+      right before its first member. **`select.sh` is UNTOUCHED** (its awk
+      counts `image=` lines; the choice file still carries an image index).
+      Limits: `CONF_MAX_IMAGES` 64, `CONF_MAX_CARDS` 16 (visible),
+      `CONF_MAX_GROUPS` 8, mirrored in mkmulticard and the tab. Never fatal: a
+      bad member is dropped and logged, an empty group dropped, a one-member
+      group is a plain card. The selector draws CARDS (media arrays, layout,
+      counter, snapshot) and keeps `default=`/`--highlight`/
+      `/data/codeselect.last` as IMAGE indexes: a member highlights its group,
+      so a remembered roll re-rolls on the next countdown, no new state file.
+      The roll: the members minus the last-choice member, seeded from
+      /dev/urandom ^ CLOCK_MONOTONIC ^ time ^ pid at the confirm moment;
+      `--pick <image>` and `--seed N` for tests only; the LOADING frame names
+      the member; the log keeps `chose %d` and adds `(rolled from X: N
+      candidates)`. Selector 3.0; `inject` refuses a `group=` conf on a selector
+      below 3.0. mkmulticard: `--group 'TITLE|SUBTITLE'` then `--member <raw>`
+      ... or `--members-list FILE`; render/parse/inspect/plan (`image-group`
+      rows) carry groups; `auto` -> `store` when a group exists and
+      `parts`/`multi` with a group is refused naming the cost (David,
+      2026-09-09: the Compact tick is forced ON and disabled while a group row
+      exists, with the experimental wording). Tab: `ImageRow.members`, an "Add
+      group..." row whose editor has Add files / Add folder (every `*.raw`) /
+      Remove; one card per row in the preview; a merged size band.
+      `run_game.sh` carries `group=` lines when the tree count matches, plus
+      `PAD_SELECT_PICK`. Sizing, measured on beatles-1_29_0: a variant costs
+      ~450 MB in the store (`image.bin` 380 MB + clips + ELF), so 40 variants
+      are a 32 GB card. REJECTED: hold START/ACTION (START confirms on the press
+      edge, the debouncer sees rising edges only, and an unattended power-up
+      presses nothing); a `member=` line kind (changes select.sh's awk for no
+      gain); a full non-repeat cycle (needs a state file). Oracle: headless
+      group.conf cases (`--default 4` writes a member, `--pick`, `--seed` twice
+      equal, ten seeds never the last member, 46 lines load / 65 refused / 17
+      cards refused); `select_sh_test.sh` `--lookup 4` -> `img4` with `group=`
+      lines present; the rig: a TMNT store card with `--group '1987 RANDOM'
+      --member <pro> --member <LE>` alternates on two boots. Hardware proof is
+      David's. Acceptance: that card boots a different member on two power-ups
+      of his TMNT, and the tab builds a Beatles group card from a folder of
+      variants. Full design, files, ordered commits, traps: handoff REMAINING
+      item 106 (also the loose end "members from override sets", because 40 x
+      8 GB source images on the tester's PC is the real pain).
+      — S3: a workaround exists (choose by hand). D4: a conf grammar and
+      selector model change, a tool grammar, a tab editor, several rig runs and
+      a hardware proof at the end.
+
+- [ ] **107. A variant that changes a few songs costs a whole `image.bin` per
+      copy on a compact card; store only the changed byte ranges and rebuild the
+      file at boot.** `S3 D4` **PARKED** - not to be taken until the numbers
+      demand it: whole-file dedup already puts 40 Beatles variants on a 32 GB
+      card (~450 MB each). It pays only for 40+ variants on a 16 GB card, 80+
+      variants, or a title whose `image.bin` is 1.4-1.6 GB (TMNT, Godzilla).
+      WHY IT IS POSSIBLE: the app replaces a sound IN PLACE, size-neutral
+      (`manufacturer.py:485`, `engine.write_image`), so a one-song variant's
+      `image.bin` differs from the base only in that body's byte range; the
+      store's identity is the whole-file sha256 (`treesync.hash_tree`), and the
+      only range-delta code is the emulator's override set
+      (`engine._writes_by_file`, `overrides.delta`, `overrides.sh`). DESIGN
+      (recorded, not built): a `.delta` blob = base blob key + ranges + bytes;
+      the tree's `image.bin` links the BASE blob so the game always has a file;
+      at boot a `materialize.py` run by the card's OWN python2.7 rebuilds the
+      variant into a p7 work partition (the store leaves p7 free), stamps it,
+      and `mount --bind`s the file over the tree's; any failure = boot with the
+      base songs. RUNTIME FACTS (read off the zImage's embedded config): kernel
+      3.14.28, loop built in, NO device-mapper, NO overlayfs; busybox 1.23.1
+      `dd` has NO `conv=notrunc` (`seek=` truncates) - python2.7, `rsync
+      --inplace` and `debugfs` are the in-place writers; p5 72 MiB, p6 532 MiB
+      (496 free), `/var/volatile` = 512 MiB of RAM: none holds a general
+      title's `image.bin`, so it is p7 or nothing. The rig never runs
+      `select.sh`, so `run_game.sh` must call the same script. Acceptance: two
+      boots of a delta card on the TMNT play two song sets; `verify` hashes
+      base+delta to the tree's sha256. Details: handoff REMAINING item 107.
+      — S3: a bigger card is the workaround. D4: a new on-card file format plus
+      a machine-side writer only hardware proves.
+
+- [ ] **108. A multi-boot card can boot its remembered choice without showing
+      the menu, unless a flipper is held at power-up.** `S3 D3` *(Follow-up to
+      item 106: this is what makes a jukebox card look completely standard.)*
+      Conf key `quiet=1`, a Menu-settings tick in the tab, off by default: at
+      start the selector samples the DEBOUNCED input for a bounded window (~700
+      ms, or until node 8 and node 1 have each answered once), then confirms the
+      highlight at once unless LEFT, RIGHT or START reads held. Needs
+      `input_held(in, ev)` returning the level (the debouncer at
+      `input.c:31-50` produces no event for a key already down), fed by
+      `input_hw.c`'s scan thread and `input_padsw.c`. TRAP: on hardware the
+      first valid 0x11 reply comes only after the preamble, so the wait is
+      bounded and a timeout means "show the menu", never "boot blind". Oracle:
+      a headless `--input none` case with a held-key seam; a padsw case with
+      the key held before start; hardware is David's. Acceptance: a quiet card
+      powers up straight into the last choice (a group re-rolls), and a held
+      flipper brings the menu up. After 106, not before.
+      — S3: friction. D3: one mechanism on two input paths, needs a run to see.
+
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

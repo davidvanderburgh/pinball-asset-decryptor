@@ -1164,6 +1164,11 @@ class App:
                 "Please select an output folder.")
             return
 
+        # What this card really is, before any of the work (PAD-122): a
+        # multi-boot card extracts as its FIRST image only.
+        if not self._source_note_accepted(in_path):
+            return
+
         # Batch 19: extracting into an ARCHIVED project is the hydrate —
         # edited files step aside into .hydrate/ so the re-extract can't
         # touch them, and the done-handler moves them back over the fresh
@@ -1578,6 +1583,10 @@ class App:
                 "Missing Output",
                 "Please select an output folder.")
             return
+        # What the card in the reader really is, before any of the work
+        # (PAD-122) — the file branch asks the same question of its image.
+        if not self._source_note_accepted(device_path):
+            return
         if self._extract_overwrite_risk(output_path):
             if not messagebox.askyesno(
                 "Output Folder Not Empty",
@@ -1663,6 +1672,28 @@ class App:
             "full_dump": bool(
                 self.window.extract_filesystem_var.get()),
         }
+
+    def _source_note_accepted(self, path):
+        """Show the plugin's ``source_note`` for *path*; False = user backed
+        out (PAD-122).
+
+        The note is about the SOURCE IMAGE, so both jobs that read one — the
+        Extract and the Build — ask before they start rather than after: a
+        Stern multi-boot card holds several games and both jobs cover exactly
+        the first one, which is an hour of replacing assets before the result
+        says so.  A plugin that has nothing to say returns "" and no dialog is
+        shown; a probe that throws is not allowed to block the run.
+        """
+        try:
+            note = self._current_mfr.source_note(path)
+        except Exception:
+            return True
+        if not note:
+            return True
+        return bool(messagebox.askyesno(
+            getattr(self._current_mfr, "source_note_title",
+                    "About this image"),
+            note + "\n\nContinue?", icon="warning"))
 
     def _extract_overwrite_risk(self, output_path):
         """True if this extract would actually overwrite something in
@@ -1825,6 +1856,12 @@ class App:
             messagebox.showerror("Build Location", dest_err)
             return
 
+        # What the original really is (PAD-122): a multi-boot card builds as a
+        # multi-boot card with its FIRST image changed, and the user has to
+        # know that before the edits go in, not after.
+        if not self._source_note_accepted(original):
+            return
+
         # Collision check: warn before clobbering an existing build with the
         # same name (a re-build, or a name the user picked that's already
         # taken).  Overwriting the original is caught above; everything else is
@@ -1951,6 +1988,11 @@ class App:
                     f"(got: {override_raw!r}).\n\n"
                     f"Leave blank to auto-discover.")
                 return
+
+        # What the card in the reader really is (PAD-122): a multi-boot card
+        # takes the edits into its FIRST image and keeps the rest.
+        if not self._source_note_accepted(device_path):
+            return
 
         # Last-chance confirmation — Direct-SSD writes go straight to
         # the connected drive with no undo.  The red warning above

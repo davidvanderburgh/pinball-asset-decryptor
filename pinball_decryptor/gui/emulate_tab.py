@@ -243,20 +243,23 @@ _OVERRIDE_EXPLAIN = (
 #: the replacement assets replace? How do you decide or is it both?"
 #:
 #: THE ANSWER IS ONE IMAGE, AND NOT A CHOSEN ONE.  Everything that writes a
-#: Spike 2 card goes through ``engine._locate``, which walks the card's ext
-#: partitions largest first and takes the first one holding an ``image.bin``
-#: with a game beside it.  On a multi-image card that is one of several game
-#: partitions - the biggest - and the set built from it is then bound over
-#: whichever image the boot menu starts.  So it is said, on the run where it
-#: can be wrong, rather than left for the user to work out from a callout
-#: that did not change.
+#: Spike 2 card goes through ``engine._locate``, which walks the card's
+#: PRIMARY ext partitions largest first and takes the first one holding an
+#: ``image.bin`` with a game beside it.  On every layout ``mkmulticard.py``
+#: writes that is p3 - the FIRST image, the one the card was built around;
+#: the extras are logical partitions it never enumerates, or ``imgN``
+#: directories its search reaches later (see ``plugins.stern.multiimage``,
+#: PAD-122, which counts them).  The set built from that image is then bound
+#: over whichever image the boot menu starts.  So it is said, on the run
+#: where it can be wrong, rather than left for the user to work out from a
+#: callout that did not change.
 MULTI_IMAGE_NOTE = (
     "[emulate] this card carries a boot menu, and your edits were prepared "
-    "from ONE image on it — the largest game partition, which is the one "
-    "every write on this card goes to. They are applied over whichever image "
-    "you pick at the menu, so pick that one. To edit a different image, build "
-    "it on its own first and rebuild the multi-boot card from the built "
-    "image.")
+    "from ONE image on it — the first game image on the card, which is the "
+    "one every extract and write on this card uses. They are applied over "
+    "whichever image you pick at the menu, so pick that one. To edit a "
+    "different image, build it on its own first and rebuild the multi-boot "
+    "card from the built image.")
 
 #: Item 74: cardmount.sh narrates a first-boot copy one line every 2 s —
 #: ``[card] copying <name>: 3121 / 7497 MB (41%)``.  Parsed off the drain so

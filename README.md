@@ -1042,6 +1042,20 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    compare against, an edit whose bytes can't be traced back to a file
    on the card, or a booted card that doesn't carry the files it was
    given, and the run stops and says which.
+   And a replacement you *picked* counts as one of those edits from
+   v0.196.3, even if you have never built a card with it: Start applies
+   the assignments waiting on the Replace tabs to the project folder
+   first, exactly as a build does before it repacks, and says in the log
+   that it did - it changed your folder and you did not press Build.
+   Before that the box could only see edits a previous build had already
+   written there, so a freshly picked sound, clip or image ran as the
+   stock card and the log said there was nothing to apply. If everything
+   you assigned fails to convert, the run refuses instead of playing the
+   stock card. On a multi-boot card the edits are prepared from ONE image
+   on it - the largest game partition, which is where every write on that
+   card goes - and applied over whichever image you pick at the boot
+   menu, and the run says so; to edit a different image, build that image
+   on its own and rebuild the multi-boot card from it.
    A **virtual playfield** window opens beside the game: the title's own
    artwork with every switch, coil and insert drawn on it, inserts lit
    live off the node bus, and switches you can click or press and hold

@@ -693,6 +693,92 @@ pad_window_line() {
     printf '%s\n' "$head"
 }
 
+# ★ WHY THE RENDERER DIED, out of the renderer's own log (PAD-117).
+#
+# THE FAULT, reported 2026-09-08 against v0.194.0: a Beatles run on a WSL
+# session that had been up 1190 hours ended four lines after the window opened,
+# and watch.sh exited - so there was no run at all, no guest, no sound, no
+# playfield:
+#
+#     [padglhost] window opened 1360x768 on DISPLAY=:0
+#     libEGL warning: DRI3 error: Could not get DRI3 device
+#     Inconsistency detected by ld.so: dl-setup_hash.c: 36: _dl_setup_hash:
+#         Assertion (bitmask_nwords & (bitmask_nwords - 1)) == 0 failed!
+#     [watch] the renderer died on startup:
+#
+# WHERE IN THE RENDERER THAT IS: main() opens the window BEFORE it asks for an
+# EGL display (padglhost.c, "Open the window FIRST"), so every line after
+# "window opened" is Mesa loading a driver. With GALLIUM_DRIVER=d3d12 - which
+# watch.sh sets on every run - that means dri/d3d12_dri.so, and then
+# libd3d12core.so out of /usr/lib/wsl/lib.
+#
+# THAT DIRECTORY IS NOT PART OF UBUNTU. Measured here on a live WSL 2: it is an
+# overlay mount whose lower layers are /gpu_lib_packaged and /gpu_lib_inbox -
+# the GPU libraries WSL injects from the Windows side - and WSL writes
+# /etc/ld.so.conf.d/ld.wsl.conf itself so the loader searches it. Windows
+# replaces those files on a graphics-driver or WSL update; a VM that is already
+# running keeps the layer it started with. "Inconsistency detected by ld.so" is
+# the loader refusing a shared object whose .gnu.hash header does not read as a
+# hash table, which is the shape a stale layer gives you, and it is an abort
+# rather than an error return - so no amount of care inside the renderer can
+# catch it.
+#
+# NOTHING INSIDE LINUX CAN REPAIR IT: only a VM restart re-lays that overlay.
+# So the verdict is a WORD, computed here where a test can drive it, and
+# watch.sh both says what it means and carries on in software.
+pad_renderer_verdict() {
+    local log=${1:-}
+    [ -n "$log" ] && [ -r "$log" ] || { echo unknown; return 0; }
+    # The loader aborts before main() of anything it was asked to load, so its
+    # own name is the only reliable marker; the assertion text has changed
+    # spelling between glibc releases and the file:line is a glibc source path.
+    if grep -aq 'Inconsistency detected by ld\.so' "$log" 2>/dev/null; then
+        echo loader; return 0
+    fi
+    if grep -aqE 'error while loading shared libraries|cannot open shared object file' \
+            "$log" 2>/dev/null; then
+        echo nolib; return 0
+    fi
+    # ensurebuild.sh's case: no guest filesystem, so there is no directory to
+    # create the ring in. It has its own repair and names the rootfs itself.
+    if grep -aq 'open ring:' "$log" 2>/dev/null; then
+        echo ring; return 0
+    fi
+    echo unknown
+}
+
+# WHAT TO DO ABOUT IT, in the user's words rather than the loader's. Kept
+# beside the verdict so the two cannot drift, and printed by the caller - which
+# sends it to stderr, like every other diagnosis in watch.sh. One sentence per
+# line, because the app's log pane is what reads this.
+pad_renderer_advice() {
+    case ${1:-unknown} in
+        loader)
+            echo "[watch]   WHAT THAT LOADER LINE MEANS: one of the graphics"
+            echo "[watch]   libraries would not load - the loader judged the"
+            echo "[watch]   file itself corrupt. On WSL the GPU libraries are"
+            echo "[watch]   not part of Ubuntu: Windows lays them into"
+            echo "[watch]   /usr/lib/wsl/lib when the VM starts, and a Windows"
+            echo "[watch]   or graphics-driver update swaps them underneath a"
+            echo "[watch]   VM that is already running. A session that has"
+            echo "[watch]   been up for days is the one that gets caught (its"
+            echo "[watch]   age is printed further up this log)."
+            echo "[watch]   THE CURE IS A VM RESTART, and nothing in here can"
+            echo "[watch]   do it: Stop, then 'Restart WSL...' on the Emulate"
+            echo "[watch]   tab - or 'wsl --shutdown' in a Windows terminal -"
+            echo "[watch]   and start again." ;;
+        nolib)
+            echo "[watch]   A LIBRARY THE RENDERER NEEDS IS NOT INSTALLED; the"
+            echo "[watch]   line above names it. 'Set up emulator...' on the"
+            echo "[watch]   Emulate tab installs the set this rig expects." ;;
+        ring)
+            echo "[watch]   THE RING COULD NOT BE CREATED, which means the"
+            echo "[watch]   guest filesystem is not there rather than anything"
+            echo "[watch]   about graphics. Pick a card image and start again"
+            echo "[watch]   and it is built for you." ;;
+    esac
+}
+
 # Do it. Root only, and only when there is genuinely something to bind: this
 # mount ADDS the socket WSL itself put there, so it cannot take anything away,
 # but a bind over a directory that already works would still be a change made

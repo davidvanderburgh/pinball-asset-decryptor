@@ -1287,27 +1287,104 @@ fi
 
 echo "[watch] starting renderer (it opens the game window; the picture arrives"
 echo "[watch] with the guest's first frame, ~15 s later)"
-# PAD_GL_LEGEND passes through UNSET (item 39): the Controls window is
-# retired - the playfield's key panel carries its content - and padglhost
-# only opens it on an explicit =1, so a caller who wants the old window
-# back exports that and nothing here overrides them.
-setsid_as_user env PAD_GL_WINDOW=1 PAD_GL_DUMP="${PAD_GL_DUMP:-}" \
-           PAD_SW_SHM="$SW_HOST" PAD_GL_LEGEND="${PAD_GL_LEGEND:-}" \
-           PAD_VID_SHM="${VID_FOR_GL:-}" \
-           "$PAD_GLHOST_BIN" "$RING_HOST" > "$HOSTLOG" 2>&1 &
-# PADGL_DEBUG / PADGL_SEQ_* are NOT listed here on purpose: `env A=B cmd` keeps
-# the rest of the environment, so exporting them before watch.sh already reaches
-# padglhost, and naming them here would pass "" when they are unset - which
-# padglhost's atoi() reads as a real 0 and which would silently switch the
-# op-sequence window off.
-HOSTPG=$!
 
-for i in $(seq 1 100); do [ -s "$RING_HOST" ] && break; sleep 0.1; done
-sleep 0.3
-if ! pgrep -x padglhost >/dev/null; then
+# ★ THE RENDERER GETS A SECOND CHANCE, IN SOFTWARE (PAD-117).
+#
+# GALLIUM_DRIVER=d3d12 is set unconditionally at the top of this script, and
+# until this ticket a renderer that could not start on it ENDED THE RUN - a
+# bare `exit 1` with the guest never launched. That is the wrong trade twice
+# over.
+#
+# THE GPU IS BARELY AN OPTIMISATION HERE, and this rig has the measurement:
+# README's "Software rendering is not the bottleneck and never was" - a
+# headless Xvfb with GALLIUM_DRIVER=llvmpipe gave guest 57.1 fps, renderer
+# 59.9 fps, which is the frame rate. runbridge.sh has had a software mode
+# since it was written for exactly that reason. So the thing being protected
+# by that `exit 1` was worth a few percent, and what it cost was the whole
+# run.
+#
+# And the thing that kills the GPU path is usually not the emulator at all -
+# pad_renderer_verdict's comment in padpath.sh has the measured case, a
+# graphics library that Windows swapped underneath a running VM, which no
+# amount of care in here could have survived and no user could have guessed
+# from an ld.so assertion.
+#
+# So: try the GPU, and if the renderer is not alive a third of a second later,
+# SAY WHY IN WORDS and then try again on Mesa's software rasteriser.
+PAD_GL_MODE=gpu
+pad_gl_software() {
+    PAD_GL_MODE=sw
+    # BOTH VARIABLES, on purpose: LIBGL_ALWAYS_SOFTWARE is what the DRI loader
+    # reads and GALLIUM_DRIVER is what the gallium loader reads. Naming only
+    # one leaves the other free to find the driver that just died - and this
+    # script's own d3d12 export is still in the environment.
+    export GALLIUM_DRIVER=llvmpipe LIBGL_ALWAYS_SOFTWARE=1
+    # Meaningless without d3d12, and it would otherwise stay in the log as a
+    # claim about which adapter rendered the run.
+    unset MESA_D3D12_DEFAULT_ADAPTER_NAME
+    # The cfg block far above already printed GALLIUM_DRIVER=d3d12. A log that
+    # says d3d12 for a run that rendered in software cannot be compared with
+    # any other run, which is the whole point of that block.
+    echo "[watch] cfg GALLIUM_DRIVER=llvmpipe (software renderer)"
+}
+
+# ONE ATTEMPT. The ring is removed first so the wait below times THIS launch
+# rather than finding the dead attempt's file and returning immediately.
+pad_gl_try() {
+    rm -f "$RING_HOST" "$SW_HOST"
+    # PAD_GL_LEGEND passes through UNSET (item 39): the Controls window is
+    # retired - the playfield's key panel carries its content - and padglhost
+    # only opens it on an explicit =1, so a caller who wants the old window
+    # back exports that and nothing here overrides them.
+    setsid_as_user env PAD_GL_WINDOW=1 PAD_GL_DUMP="${PAD_GL_DUMP:-}" \
+               PAD_SW_SHM="$SW_HOST" PAD_GL_LEGEND="${PAD_GL_LEGEND:-}" \
+               PAD_VID_SHM="${VID_FOR_GL:-}" \
+               "$PAD_GLHOST_BIN" "$RING_HOST" > "$HOSTLOG" 2>&1 &
+    # PADGL_DEBUG / PADGL_SEQ_* are NOT listed here on purpose: `env A=B cmd`
+    # keeps the rest of the environment, so exporting them before watch.sh
+    # already reaches padglhost, and naming them here would pass "" when they
+    # are unset - which padglhost's atoi() reads as a real 0 and which would
+    # silently switch the op-sequence window off.
+    HOSTPG=$!
+
+    for i in $(seq 1 100); do [ -s "$RING_HOST" ] && break; sleep 0.1; done
+    sleep 0.3
+    pgrep -x padglhost >/dev/null
+}
+
+# PAD_GL_SOFTWARE=1 skips the GPU attempt altogether: for a machine known to
+# fail it, and so the software path can be exercised deliberately rather than
+# only by breaking a GPU.
+if [ "${PAD_GL_SOFTWARE:-0}" = 1 ]; then
+    echo "[watch] renderer: software by request (PAD_GL_SOFTWARE=1)"
+    pad_gl_software
+fi
+
+if ! pad_gl_try; then
     echo "[watch] the renderer died on startup:" >&2
     tail -20 "$HOSTLOG" >&2
-    exit 1
+    pad_renderer_advice "$(pad_renderer_verdict "$HOSTLOG")" >&2
+    if [ "$PAD_GL_MODE" = gpu ]; then
+        # KEEP THE GPU ATTEMPT'S LOG: the retry truncates $HOSTLOG, and those
+        # lines are the only record of what the GPU path did.
+        cp -f "$HOSTLOG" "$HOSTLOG.gpu" 2>/dev/null
+        echo "[watch] TRYING THE RENDERER AGAIN IN SOFTWARE. That costs less" >&2
+        echo "[watch]   than it sounds - this game measures 59.9 fps on the" >&2
+        echo "[watch]   software rasteriser - and nothing else about the run" >&2
+        echo "[watch]   changes. The failed GPU attempt's log is kept at" >&2
+        echo "[watch]   $HOSTLOG.gpu." >&2
+        pad_gl_software
+        if pad_gl_try; then
+            echo "[watch] the renderer is up in SOFTWARE (llvmpipe)."
+        else
+            echo "[watch] the software renderer died too, so this is not the" >&2
+            echo "[watch]   GPU: see $HOSTLOG and $HOSTLOG.gpu." >&2
+            tail -20 "$HOSTLOG" >&2
+            exit 1
+        fi
+    else
+        exit 1
+    fi
 fi
 grep -aE 'window opened|GL |ring |ready' "$HOSTLOG" | head -4
 

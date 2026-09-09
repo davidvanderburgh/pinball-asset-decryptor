@@ -254,17 +254,17 @@ begin
                '{localappdata}\pinball_decryptor\data\pad-data.vhdx'));
 
   if HasRuntime then
-    if MsgBox('Also remove the Linux this app installed (PAD-Runtime) and the '
+    if MsgBox('Also remove the Linux this app installed (PAD-Runtime) and the ' +
               'files it downloaded?' + #13#10 + #13#10 +
-              'This is about a gigabyte. It is not your data, and a '
+              'This is about a gigabyte. It is not your data, and a ' +
               'reinstalled app can fetch it again.',
               mbConfirmation, MB_YESNO) = IDYES then
       RemoveTheRuntimeDistro();
 
   if HasDisk then
     if MsgBox('Also delete the emulator''s work disk?' + #13#10 + #13#10 +
-              'This holds extracted games, cached cards and save states, and '
-              'it can be many gigabytes. It is YOUR work, and deleting it '
+              'This holds extracted games, cached cards and save states, and ' +
+              'it can be many gigabytes. It is YOUR work, and deleting it ' +
               'cannot be undone.' + #13#10 + #13#10 +
               'Choose No to keep it for a future install.',
               mbConfirmation, MB_YESNO) = IDYES then

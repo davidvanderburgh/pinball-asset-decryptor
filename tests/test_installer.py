@@ -1811,3 +1811,34 @@ def test_no_pascal_comment_in_the_iss_contains_a_brace():
     assert not in_comment, (
         "a Pascal comment opened at line %d of the [Code] section and is "
         "never closed" % comment_started_at)
+
+
+def test_no_two_string_literals_in_the_iss_are_joined_by_nothing():
+    """Pascal does not concatenate adjacent string literals the way C does.
+
+    A message split over several lines therefore needs a ``+`` on every one
+    of them, and a missing one is reported as a bare ``Syntax error.`` on the
+    following line - by a compiler that only exists on the build runner.
+    That cost a release-build round trip once already, on the uninstall
+    prompts, immediately after the brace-in-a-comment above.
+
+    The rule this checks is narrow and exact: a line whose last character
+    closes a string, followed by a line that opens one.  Anything ending in
+    an operator, a comma or a bracket is a continuation and is fine.
+    """
+    text = ISS.read_text(encoding="utf-8", errors="replace")
+    code = text[text.index("[Code]"):].splitlines()
+    offenders = []
+    for i in range(len(code) - 1):
+        here, nxt = code[i].rstrip(), code[i + 1].strip()
+        if not here.endswith("'") or here.endswith("''"):
+            continue
+        # A line that is only a comment, or that opens one, is not code.
+        if here.lstrip().startswith(("{", "//")):
+            continue
+        if nxt.startswith("'"):
+            offenders.append(here.strip()[:50])
+    assert not offenders, (
+        "these string literals in pinball_decryptor.iss are followed by "
+        "another with no '+' between them, which Inno rejects as a syntax "
+        "error on the NEXT line: %s" % "; ".join(offenders))

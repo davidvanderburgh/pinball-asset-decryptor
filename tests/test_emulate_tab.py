@@ -3681,6 +3681,19 @@ def test_the_wsl_account_belongs_to_the_distro_it_was_probed_in(monkeypatch):
 # cure on a tab they had no reason to open.
 
 
+def _packed(w):
+    """Is this widget packed?  Asked of the GEOMETRY MANAGER, not the window.
+
+    NOT winfo_ismapped(), which was the first spelling and failed on macOS CI:
+    these tests build an alpha-0 root parked off-screen, and macOS never maps
+    it, so every widget on it reports ismapped()==0 no matter what the panel
+    did.  That failed the three positive assertions outright and, worse, made
+    every NEGATIVE one pass without testing anything.  winfo_manager() returns
+    "pack" while packed and "" after pack_forget(), on every platform, with no
+    window manager and no timing in the way.
+    """
+    return bool(w.winfo_manager())
+
 def _rt(monkeypatch, state, detail="because"):
     monkeypatch.setattr(_runtime_ui.runtime, "status",
                         lambda *a, **k: (state, detail))
@@ -3693,8 +3706,8 @@ def test_a_stale_runtime_puts_a_notice_and_a_button_on_the_tab(tmp_path,
         monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
         panel._runtime_apply(("stale", "version 3; expects 6"))
         root.update()
-        assert panel._rt_msg.winfo_ismapped(), "the tab says nothing"
-        assert panel._rt_btn.winfo_ismapped(), "there is nothing to press"
+        assert _packed(panel._rt_msg), "the tab says nothing"
+        assert _packed(panel._rt_btn), "there is nothing to press"
         said = panel._rt_msg.cget("text")
         # The three things the user is actually holding.
         assert "own WSL distro" in said, said
@@ -3713,8 +3726,8 @@ def test_a_current_runtime_carries_no_notice_and_no_button(tmp_path,
         root.update()
         panel._runtime_apply(("ready", "Runtime 6 (full)"))
         root.update()
-        assert not panel._rt_msg.winfo_ismapped()
-        assert not panel._rt_btn.winfo_ismapped()
+        assert not _packed(panel._rt_msg)
+        assert not _packed(panel._rt_btn)
     finally:
         root.destroy()
 
@@ -3738,9 +3751,9 @@ def test_a_machine_that_never_had_a_runtime_is_not_nagged(tmp_path,
         monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
         panel._runtime_apply(("absent", "not installed"))
         root.update()
-        assert not panel._rt_msg.winfo_ismapped(), \
+        assert not _packed(panel._rt_msg), \
             "a working machine is being nagged to download 414 MB"
-        assert not panel._rt_btn.winfo_ismapped()
+        assert not _packed(panel._rt_btn)
     finally:
         root.destroy()
 
@@ -3755,8 +3768,8 @@ def test_a_foreign_distro_is_explained_but_never_offered(tmp_path, monkeypatch):
         monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
         panel._runtime_apply(("foreign", "not ours"))
         root.update()
-        assert panel._rt_msg.winfo_ismapped()
-        assert not panel._rt_btn.winfo_ismapped(), \
+        assert _packed(panel._rt_msg)
+        assert not _packed(panel._rt_btn), \
             "the app must not offer to delete a distro it did not build"
         assert "will not touch it" in panel._rt_msg.cget("text")
     finally:
@@ -3774,7 +3787,7 @@ def test_not_being_able_to_ask_is_not_an_answer(tmp_path, monkeypatch):
         root.update()
         panel._runtime_apply(None)
         root.update()
-        assert panel._rt_msg.winfo_ismapped(), \
+        assert _packed(panel._rt_msg), \
             "a failed probe wiped a warning that is still true"
     finally:
         root.destroy()

@@ -537,7 +537,8 @@ def _panel(**kw):
     frame.pack()
     panel = emulate_tab.EmulatePanel(
         frame, assets_var=tk.StringVar(value=kw.get("assets", "")),
-        overrides_var=tk.BooleanVar(value=kw.get("on", False)))
+        overrides_var=tk.BooleanVar(value=kw.get("on", False)),
+        log=kw.get("log"), stage_fn=kw.get("stage"))
     panel.build(frame)
     root.update()
     return root, panel
@@ -619,6 +620,172 @@ def test_a_prepared_set_reaches_watch_sh(tmp_path, monkeypatch):
                                     savestates=False)
         assert any(a.startswith("PAD_OVERRIDE_DIR=") for a in cmd)
         assert cmd.index(extra[0]) < cmd.index("120")
+    finally:
+        root.destroy()
+
+
+# --------------------------------------------------------------------------
+# PAD-121: a replacement you picked is an edit, without a build first
+# --------------------------------------------------------------------------
+
+def _ready_panel(tmp_path, monkeypatch, stage=None, log=None):
+    """A panel whose folder and card are ready for ``_prepare_overrides``.
+
+    The set is pinned CURRENT (``overrides_reason`` -> ""), so the only thing
+    left for a test to watch is what happens before that decision — which is
+    where the Replace tabs' assignments now land.
+    """
+    out = tmp_path / "ovr"
+    out.mkdir()
+    monkeypatch.setattr(emulate_tab, "overrides_dir", lambda: str(out))
+    monkeypatch.setattr(engine, "read_override_manifest",
+                        lambda d: {"reuse": True})
+    monkeypatch.setattr(emulate_tab, "overrides_reason", lambda *a, **k: "")
+    assets = tmp_path / "gz"
+    assets.mkdir()
+    (assets / ".checksums.md5").write_text(
+        "images/1.png\td41d8cd98f00b204e9800998ecf8427e\n")
+    img = tmp_path / "card.raw"
+    img.write_bytes(bytes(16))
+    root, panel = _panel(on=True, assets=str(assets), stage=stage, log=log)
+    # Picking a card normally kicks the rig's background pre-copy off the
+    # entry's write-trace (item 74).  Nothing here is testing that, and on a
+    # machine that HAS the rig it would start a wsl.exe per test.
+    panel._precache_kick = lambda *a, **kw: None
+    # Same for item 90's boot-menu probe, which asks the CARD (through WSL) on
+    # every card change and lands its answer through ``after`` — a thread that
+    # outlives the test's root and reports into whichever interpreter is
+    # running the event loop by then.
+    panel._select_probe_kick = lambda *a, **kw: None
+    panel._src_path.set(str(img))
+    return root, panel, str(img), str(assets)
+
+
+def test_an_assigned_replacement_is_applied_before_the_set_is_built(
+        tmp_path, monkeypatch):
+    """The ticket: a picked image did nothing until a card had been built.
+
+    The assignment lives in the Replace tab (and the folder's sidecar) until
+    something writes it over the folder's own file, and the set is computed
+    from that folder — so Start has to do it, exactly as a build does.
+    """
+    calls = []
+
+    def stage(assets_dir, cancel_cb=None):
+        calls.append((assets_dir, cancel_cb is not None))
+        return (1, 1, [])
+
+    lines = []
+    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch,
+                                            stage=stage, log=lines.append)
+    try:
+        extra = panel._prepare_overrides(img, assets)
+        assert extra and extra[0].startswith("PAD_OVERRIDE_DIR=")
+        # Applied, to THIS folder, and cancellable (a replaced video is a
+        # re-encode, and Stop has to reach it).
+        assert calls == [(assets, True)]
+        root.update()                       # _log goes through after(0, ...)
+        assert any("applied 1 replacement" in ln for ln in lines)
+    finally:
+        root.destroy()
+
+
+def test_a_folder_with_nothing_assigned_is_taken_as_it_stands(tmp_path,
+                                                              monkeypatch):
+    """The ordinary run: staging finds nothing, and says nothing about it."""
+    lines = []
+    root, panel, img, assets = _ready_panel(
+        tmp_path, monkeypatch, stage=lambda a, cancel_cb=None: (0, 0, []),
+        log=lines.append)
+    try:
+        assert panel._prepare_overrides(img, assets)
+        root.update()
+        assert not any("applied" in ln for ln in lines)
+    finally:
+        root.destroy()
+
+
+def test_assignments_that_could_not_be_applied_refuse_the_run(tmp_path,
+                                                              monkeypatch):
+    """A run that plays the stock card while the tab says it is testing the
+    user's edits is the failure this whole path exists to avoid — and one
+    where every replacement failed to convert is exactly that."""
+    root, panel, img, assets = _ready_panel(
+        tmp_path, monkeypatch,
+        stage=lambda a, cancel_cb=None: (2, 0, [("image: 1.png", "no ffmpeg")]))
+    try:
+        assert panel._prepare_overrides(img, assets) is None
+        root.update()
+        text = panel._ovr_hint.cget("text")
+        assert "stock card" in text and "no ffmpeg" in text
+        assert panel._ovr_hint.cget("foreground") != "#888"
+    finally:
+        root.destroy()
+
+
+def test_staging_that_raises_never_starts_a_run(tmp_path, monkeypatch):
+    def boom(assets_dir, cancel_cb=None):
+        raise OSError("the NAS went away")
+
+    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch, stage=boom)
+    try:
+        assert panel._prepare_overrides(img, assets) is None
+        root.update()
+        assert "NAS went away" in panel._ovr_hint.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_the_app_stages_all_three_kinds_the_way_a_build_does():
+    """The other end of the callback: audio, then video, then image.
+
+    Called unbound on a stand-in rather than on a real ``App``, which would
+    build the whole window — what is under test is that the Emulate tab's one
+    call is the same three a Write makes, in the same order, with the cancel
+    handed to the one that re-encodes.
+    """
+    from pinball_decryptor.app import App
+
+    seen = []
+
+    class _Stub:
+        def _stage_pending_audio(self, d):
+            seen.append(("audio", d, None))
+            return (1, 1, [])
+
+        def _stage_pending_video(self, d, cancel_cb=None):
+            seen.append(("video", d, cancel_cb))
+            return (2, 1, [("video: b.mp4", "too long")])
+
+        def _stage_pending_image(self, d):
+            seen.append(("image", d, None))
+            return (1, 0, [("image: c.png", "not a PNG")])
+
+    stop = lambda: False
+    got = App.stage_pending_replacements(_Stub(), "D:/gz", cancel_cb=stop)
+    assert [kind for kind, _d, _c in seen] == ["audio", "video", "image"]
+    assert [d for _k, d, _c in seen] == ["D:/gz"] * 3
+    assert seen[1][2] is stop
+    assert got == (4, 2, [("video: b.mp4", "too long"),
+                          ("image: c.png", "not a PNG")])
+
+
+def test_a_multi_image_card_says_which_image_the_edits_went_to(tmp_path,
+                                                               monkeypatch):
+    """DragonRR's second question, answered on the run it is about."""
+    lines = []
+    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch,
+                                            log=lines.append)
+    try:
+        assert panel._prepare_overrides(img, assets, selector=True)
+        root.update()
+        note = [ln for ln in lines if "boot menu" in ln]
+        assert note and "largest game partition" in note[0]
+        # ...and not on an ordinary single-image run.
+        lines.clear()
+        assert panel._prepare_overrides(img, assets)
+        root.update()
+        assert not any("boot menu" in ln for ln in lines)
     finally:
         root.destroy()
 

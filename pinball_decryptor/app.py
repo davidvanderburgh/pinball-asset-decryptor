@@ -331,6 +331,7 @@ class App:
             on_show_log_history_change=self._on_show_log_history_change,
             initial_compare_row_limit=self._settings.get("compare_row_limit"),
             on_compare_row_limit_change=self._on_compare_row_limit_change,
+            on_stage_pending=self.stage_pending_replacements,
             on_recheck_prereqs=self._recheck_prereqs,
             on_install_prereqs=self._launch_install_prereqs,
             on_back=self._on_back_to_picker,
@@ -3505,6 +3506,35 @@ class App:
             self.msg_queue.put(LogMsg(
                 f"Image replacement failed: {e}", "error"))
             return (len(assignments), 0, [("image replacements", str(e))])
+
+    def stage_pending_replacements(self, assets_dir, cancel_cb=None):
+        """Apply every assigned Replace-tab replacement into *assets_dir* now.
+
+        The three ``_stage_pending_*`` calls a Write makes, in the same order,
+        summed into one ``(pending, staged, failures)`` — for a caller that is
+        NOT a build but still reads the project folder as the state of the
+        user's edits.
+
+        WHY IT IS ITS OWN ENTRY POINT (PAD-121, DragonRR: "If I choose a
+        replacement image do I HAVE to write that? ... only writing a new image
+        replaces the assets").  A Replace tab holds an assignment in memory,
+        mirrored to the folder's ``.staged_changes.json``, and writes it over
+        the folder's own file only when a build runs.  The Emulate tab's
+        "apply my replaced assets" (PAD-103) computes its override set by
+        diffing that folder against the extract baseline, so until a card had
+        been built there was nothing there to find: the box was ticked, the
+        log said there was nothing to apply, and the run played the stock
+        card.  Which is the one outcome the whole feature exists to avoid.
+
+        Runs on the caller's worker thread and logs through the message queue,
+        exactly as the write flow's staging does.
+        """
+        pend_a = self._stage_pending_audio(assets_dir)
+        pend_v = self._stage_pending_video(assets_dir, cancel_cb=cancel_cb)
+        pend_i = self._stage_pending_image(assets_dir)
+        return (pend_a[0] + pend_v[0] + pend_i[0],
+                pend_a[1] + pend_v[1] + pend_i[1],
+                pend_a[2] + pend_v[2] + pend_i[2])
 
     # ------------------------------------------------------------------
     # Revert all changes

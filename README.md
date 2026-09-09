@@ -1147,7 +1147,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    without either starts the ordinary way instead — every title runs,
    one log line says save states are off and how to turn them on.)
    A run that cannot be saved says why on the button instead of failing
-   quietly.
+   quietly. From v0.196.1 the save-state controls take a row of their
+   own when the window is too narrow to hold them beside the game
+   buttons. The two clusters grow from opposite edges of the playfield,
+   and the window is sized from your screen, so on a shorter screen they
+   used to meet in the middle and draw on top of each other — the slot
+   picker over Start, Load state over Plunge, four buttons visible and
+   two of them unclickable. The fit is measured rather than assumed, so
+   a window with room to spare looks exactly as it did.
    A **Volume slider and Mute** sit next to the Sound checkbox — the
    level of the emulator's own sound coming out of your PC speakers,
    not the in-game volume adjustment on the machine's own coin door.
@@ -1279,6 +1286,26 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    Nothing is changed for you: which user a run starts as is a WSL
    setting, and a guessed one is easy to get wrong in a way that trades
    a black window for a renderer that can't start at all.
+   That notice was right about the machine it describes and, until
+   v0.196.1, fired on a second machine it could not help. Every Start is
+   elevated, and the run hands its helpers back to your desktop account
+   before the game window opens, or the renderer cannot reach the
+   display. It worked out which account that is by asking who owns the
+   extracted guest filesystem — the one folder an elevated run creates
+   for itself, which therefore answers *root* on any PC where this app's
+   own Start was the first thing ever to build it. The hand-back was
+   skipped, the window was black on that run and on every run after it,
+   and the notice then blamed a login setting that was already correct:
+   the setup check in the same log said the distro logs in as an
+   ordinary user. The question is now asked of the emulator's home
+   folder, which is where the rest of the emulator already asks it, so
+   an elevated run on an ordinary distro drops back to you as it always
+   meant to. A distro that really does log in as root still owns a root
+   home, still gets the notice above, and the cure named there is still
+   the right one. A stray *"integer expression expected"* line during
+   the same first build is gone too — it came from the count of the
+   ownership notices an elevated extraction never produces, and it was
+   only ever noise in the middle of an extraction that was going fine.
    The run also stopped claiming you closed the window when you didn't.
    *"renderer exited (window closed)"* was printed on nothing more than
    the process being gone, so a renderer that **died** read exactly

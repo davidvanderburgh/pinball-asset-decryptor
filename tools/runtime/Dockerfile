@@ -252,9 +252,23 @@ RUN if [ "$VARIANT" = full ]; then \
 #:   webp               cwebp, the texture re-import in the BOF write pipeline
 #:   psmisc             fuser(1), which the multi-boot card builder asks who
 #:                      is holding a mountpoint before it detaches a stale
-#:                      loop device.  Not in any prerequisite table because
-#:                      every desktop distro has it - and its absence is not a
-#:                      missing feature but a FileNotFoundError mid-build
+#:                      loop device, and killall(1), which the JJP dongle path
+#:                      stops its HASP daemon with.  Not in any prerequisite
+#:                      table because every desktop distro has it - and its
+#:                      absence is not a missing feature but a
+#:                      FileNotFoundError mid-build
+#:   rsync              how the JJP pipeline moves the FINISHED game image to
+#:                      the user's output folder, with per-file progress.  Its
+#:                      absence is the worst kind: that step only logs a
+#:                      warning, so an extract that took twenty minutes
+#:                      reports success and leaves the output folder empty
+#:   parted             partprobe(1), asking the kernel to re-read a partition
+#:                      table the direct-to-SSD write just changed
+#: These three are not in any prerequisite table either.  They were found by
+#: reading every command the plugin pipelines hand to the executor and asking
+#: this image for each one - which is now a test (tests/test_runtime_packages
+#: .py), because "every Linux has it" is exactly the assumption that stops
+#: being true the moment the app stops using the user's Linux.
 #: tar, e2fsprogs, ffmpeg, xxd, zstd, gcc, libc6-dev, util-linux and mount are
 #: already here - from the base image, or from the two blocks above.
 RUN if [ "$VARIANT" = full ]; then \
@@ -271,6 +285,8 @@ RUN if [ "$VARIANT" = full ]; then \
         xauth \
         webp \
         psmisc \
+        rsync \
+        parted \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 

@@ -199,7 +199,7 @@ jobs:
           docker run --rm pad-runtime:${{ inputs.tag }} bash -c '
             set -e
             fail() { echo "FAILED: $1"; exit 1; }
-            for t in gpg partclone.ext4 xorriso pigz curl unzip cwebp xvfb-run tar fuser; do
+            for t in gpg partclone.ext4 xorriso pigz curl unzip cwebp xvfb-run tar fuser killall rsync partprobe; do
               command -v $t >/dev/null || fail "missing: $t"
             done
             gpg --version | head -1

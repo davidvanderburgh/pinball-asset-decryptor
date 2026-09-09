@@ -115,3 +115,115 @@ def test_the_workflow_stages_that_script_into_the_build_context():
     assert "installer/install_gdre.sh tools/runtime/payload/" in workflow
     assert "COPY payload/install_gdre.sh" in DOCKERFILE.read_text(
         encoding="utf-8")
+
+
+# ------------------------------------------- and what the CODE actually runs --
+#
+# The tables above are what the app INSTALLS.  They are not what it RUNS: half
+# the commands the pipelines shell out to were never in any prerequisite table,
+# because every desktop Linux has them and nobody had to think about it.  That
+# assumption stopped being safe the moment the app stopped using the user's
+# Linux and started shipping its own - and it was not safe: reading every
+# command the pipelines hand to the executor turned up rsync and partprobe
+# missing from the image.  rsync is the one that mattered: it is how the JJP
+# extract moves the FINISHED game image to the output folder, and that step
+# logs a warning rather than failing, so a twenty-minute extract would have
+# reported success over an empty folder.
+
+#: command -> the apt package that provides it, for everything NOT in the base
+#: image.  A command in neither this table nor FROM_THE_BASE_IMAGE_COMMANDS
+#: fails the test on purpose: somebody has to say where it comes from.
+COMMAND_PACKAGE = {
+    "cwebp": "webp",
+    "debugfs": "e2fsprogs", "dumpe2fs": "e2fsprogs", "e2fsck": "e2fsprogs",
+    "ffprobe": "ffmpeg", "ffmpeg": "ffmpeg",
+    "gcc": "gcc",
+    "gpg": "gnupg",
+    "killall": "psmisc", "fuser": "psmisc",
+    "partprobe": "parted",
+    "python3": "python3",
+    "rsync": "rsync",
+    "xorriso": "xorriso",
+    "xxd": "xxd",
+    "zstd": "zstd",
+    "pigz": "pigz",
+    "curl": "curl", "unzip": "unzip",
+    "partclone.ext4": "partclone",
+    "nm": "gcc",              # binutils, pulled in by gcc
+}
+
+#: In the base image, so the Dockerfile never names them: coreutils,
+#: util-linux, debianutils, procps, bash, mount, sed, grep, tar, findutils.
+#: Checked for real by the image's own selftest in runtime.yml, not assumed.
+FROM_THE_BASE_IMAGE_COMMANDS = {
+    "base64", "bash", "cat", "cd", "chroot", "command", "cp", "cut", "dd",
+    "df", "du", "echo", "find", "findmnt", "grep", "head", "ls", "lsblk",
+    "md5sum", "mkdir", "mount", "mountpoint", "mv", "pgrep", "rm", "rmdir",
+    "sed", "sort", "stat", "sync", "tail", "test", "true", "truncate",
+    "umount", "wc", "which", "losetup", "apt-get", "tar",
+}
+
+#: Words the scan picks up that are NOT commands: shell variables holding a
+#: path (`$img_exec`), and the two package managers named only in a macOS or
+#: Alpine branch that never runs in this image.
+NOT_COMMANDS = {"apk", "dest", "emmc_exec", "image_exec", "img_exec",
+                "inner_exec", "out_exec", "p3_exec"}
+
+
+def _commands_the_pipelines_run():
+    """Every word sitting where a COMMAND would in the shell strings handed to
+    the executor: the start of the string, or after ``|``, ``&&``, ``;``.
+
+    Read out of the source rather than listed, for the same reason the
+    installer's table is: a list of what the code runs, maintained by hand
+    beside the code that runs it, is a list that goes stale silently."""
+    found = set()
+    roots = [REPO / "pinball_decryptor" / "plugins",
+             REPO / "pinball_decryptor" / "core"]
+    files = [f for r in roots for f in r.rglob("*.py")]
+    call = re.compile(
+        r'(?:self\.)?executor\.(?:run|stream|popen_binary)\(\s*(?:f?["\'])(.*?)["\']',
+        re.S)
+    for f in files:
+        for m in call.finditer(f.read_text(encoding="utf-8", errors="replace")):
+            for tok in re.split(r'\|\||&&|[|;&\n(]', m.group(1)):
+                tok = re.sub(
+                    r'^(?:sudo\s+|env\s+|[A-Z_][A-Z0-9_]*=\S*\s+)+', '',
+                    tok.strip())
+                word = re.match(r'^([a-z][a-z0-9_.+-]{1,24})\b', tok)
+                if word:
+                    found.add(word.group(1))
+    return found - NOT_COMMANDS
+
+
+def test_the_scan_still_finds_the_commands():
+    """A guard on the guard: a refactor that changes how pipelines call the
+    executor would leave this whole check matching nothing."""
+    cmds = _commands_the_pipelines_run()
+    assert len(cmds) >= 40, "only %d commands found - the scan is broken" % len(cmds)
+    assert {"debugfs", "rsync", "losetup"} <= cmds
+
+
+def test_the_image_can_run_every_command_the_pipelines_call():
+    installed = _image_installs()
+    unknown, missing = [], []
+    for cmd in sorted(_commands_the_pipelines_run()):
+        if cmd in FROM_THE_BASE_IMAGE_COMMANDS:
+            continue
+        pkg = COMMAND_PACKAGE.get(cmd)
+        if pkg is None:
+            unknown.append(cmd)
+        elif pkg not in installed:
+            missing.append("%s (needs %s)" % (cmd, pkg))
+    assert not unknown, (
+        "the pipelines run these and nothing says where they come from: %s.\n"
+        "Add each to COMMAND_PACKAGE with its apt package, or to "
+        "FROM_THE_BASE_IMAGE_COMMANDS if Ubuntu's base image carries it."
+        % ", ".join(unknown))
+    assert not missing, (
+        "the pipelines run these and the runtime image cannot: %s.\n"
+        "The app sends every WSL command into that image, so this is a "
+        "pipeline that fails on a user's machine - and some of these steps "
+        "only log a warning, which is worse. Add them to "
+        "tools/runtime/Dockerfile, cut a new runtime-N, bump RUNTIME_VERSION."
+        % ", ".join(missing))

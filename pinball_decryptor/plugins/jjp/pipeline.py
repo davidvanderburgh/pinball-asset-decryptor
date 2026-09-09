@@ -15,6 +15,7 @@ from .resources import DECRYPT_C_SOURCE, ENCRYPT_C_SOURCE, STUB_C_SOURCE
 from .executor import (CommandError, create_executor, find_usbipd,
                        _decode_output as _exec_decode_output,
                        _CREATE_FLAGS as _exec_create_flags)
+from ...core import runtime
 from ...core.ext4_grow import loop_unavailable_reason
 
 # Where the decrypt shim writes what it learns about the running game (inside
@@ -929,6 +930,17 @@ def _install_robust_run_host(executor):
     executor.run_win = _robust_run_host
     executor.run = _robust_run(executor)
     return executor
+
+
+def _ps_list(args):
+    """A PowerShell array literal for -ArgumentList.
+
+    An ARRAY, not one space-joined string, because a distro name is allowed
+    to contain spaces (`wsl --import` permits it) and a single string is
+    split on them by Start-Process - which would hand usbipd half a name and
+    an argument it has never heard of.
+    """
+    return "@(" + ",".join("'%s'" % str(a).replace("'", "''") for a in args) + ")"
 
 
 class _PreventSystemSleep:
@@ -2826,7 +2838,7 @@ class DecryptionPipeline:
 
         # Attach to WSL
         rc, stdout, stderr = self.executor.run_win(
-            [usbipd, "attach", "--wsl", "--hardware-id", config.HASP_VID_PID],
+            self._wsl_attach(usbipd),
             timeout=30,
         )
         if rc != 0:
@@ -2836,7 +2848,7 @@ class DecryptionPipeline:
                 rc2, _, stderr2 = self.executor.run_win(
                     ["powershell", "-Command",
                      f"Start-Process '{usbipd}' -ArgumentList "
-                     f"'attach --wsl --hardware-id {config.HASP_VID_PID}' "
+                     f"{_ps_list(self._wsl_attach(usbipd)[1:])} "
                      f"-Verb RunAs -Wait"],
                     timeout=30,
                 )
@@ -2851,7 +2863,7 @@ class DecryptionPipeline:
                 self._bind_dongle(usbipd)
                 time.sleep(1)
                 rc2, _, stderr2 = self.executor.run_win(
-                    [usbipd, "attach", "--wsl", "--hardware-id", config.HASP_VID_PID],
+                    self._wsl_attach(usbipd),
                     timeout=30,
                 )
                 if rc2 != 0:
@@ -2897,6 +2909,25 @@ class DecryptionPipeline:
         # Now start the HASP daemon (after USB device is confirmed visible)
         self._start_hasp_daemon(step, total_wait)
 
+    def _wsl_attach(self, usbipd):
+        """The `usbipd attach` argv, NAMING THE DISTRO when it is not the
+        machine's default.
+
+        `--wsl` with no name attaches to whatever WSL calls the default, and
+        the JJP pipeline no longer runs there: it runs in the Linux this app
+        installs (core/runtime.py), like every other path into WSL.  Unnamed,
+        the dongle lands in one distro while every lsusb, every daemon and
+        every decrypt looks for it from another - and the failure reads as a
+        dongle that is not plugged in, which is the one thing it is not.
+
+        The name goes where usbipd takes it: `--wsl <DISTRIBUTION>`, an
+        optional value on that option.  On a machine without our runtime the
+        name is omitted and this is the command it always was.
+        """
+        distro = runtime.wsl_distro()
+        return ([usbipd, "attach", "--wsl"] + ([distro] if distro else [])
+                + ["--hardware-id", config.HASP_VID_PID])
+
     def _reattach_dongle(self):
         """Detach and re-attach the HASP dongle to WSL, then restart the daemon.
 
@@ -2919,7 +2950,7 @@ class DecryptionPipeline:
 
         # Attach
         rc, stdout, stderr = self.executor.run_win(
-            [usbipd, "attach", "--wsl", "--hardware-id", config.HASP_VID_PID],
+            self._wsl_attach(usbipd),
             timeout=30,
         )
         if rc != 0 and "already" not in stderr.lower():

@@ -163,3 +163,16 @@ jobs:
       - name: Run tests (macOS / Windows)
         if: runner.os != 'Linux'
         run: python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py
+
+      # How much disk the suite actually needs, printed rather than guessed.
+      # The cleanup step above costs minutes on the scarcest runner we have,
+      # and it exists for a failure mode whose cause -- 29 GB of non-sparse
+      # card images -- is fixed as of this commit.  Whether it can now go is
+      # a question about the number this prints, and it runs on failure too:
+      # a red run that ends near zero says something different from one that
+      # ends with 20 GB spare.
+      - name: Report disk headroom (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host ("C: free after the suite: {0:N1} GB" -f ((Get-PSDrive C).Free / 1GB))

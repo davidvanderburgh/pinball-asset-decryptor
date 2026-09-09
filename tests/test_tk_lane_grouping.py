@@ -31,9 +31,9 @@ import sys
 
 import pytest
 
+from tests import conftest as ctf
+
 CONFTEST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conftest.py")
-sys.path.insert(0, os.path.dirname(CONFTEST))
-import conftest as ctf  # noqa: E402
 
 
 class _Item:

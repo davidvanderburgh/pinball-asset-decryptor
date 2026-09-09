@@ -145,6 +145,55 @@ def _isolate_audio_ctl(tmp_path_factory):
         tmp_path_factory.mktemp("audio_ctl") / "audio_ctl.json")
 
 
+
+
+# ---------------------------------------------------------------------------
+# Multi-gigabyte card images that do not cost multiple gigabytes.
+# ---------------------------------------------------------------------------
+# The mkmulticard tests build stock 8G card images -- 7.32 GB each, one test
+# making three of them -- and only ever touch a few kilobytes of partition
+# table and superblock in each.  On Linux and macOS ``truncate`` leaves the
+# rest as a hole and the file costs nothing.  On Windows it does not: NTFS
+# zero-fills, so those files cost 7.32 GB and 8.6s of real I/O apiece, and
+# pytest keeps the last three tmp_path trees alive at once.
+#
+# That is what exhausted the hosted runner's C: drive on 2026-09-09 ("There
+# is not enough space on the disk", four minutes into the suite, on a runner
+# that came up with 29.4 GB free).  Marking the file sparse first and then
+# extending it with one write at the end costs 0 bytes and 0.03s.
+#
+# ``truncate`` will NOT do on Windows even after the flag is set -- CPython
+# calls _chsize_s, which writes the zeros explicitly and re-allocates every
+# block.  The final write is what leaves the hole intact.
+_FSCTL_SET_SPARSE = 0x900C4
+
+
+def _mark_sparse(fh):
+    """Ask NTFS to leave this handle's unwritten ranges unallocated."""
+    import ctypes
+    import ctypes.wintypes
+    import msvcrt
+    returned = ctypes.wintypes.DWORD()
+    return bool(ctypes.windll.kernel32.DeviceIoControl(
+        ctypes.wintypes.HANDLE(msvcrt.get_osfhandle(fh.fileno())),
+        _FSCTL_SET_SPARSE, None, 0, None, 0, ctypes.byref(returned), None))
+
+
+def sparse_image(path, size):
+    """Create `path` as `size` bytes of zeros without paying for them.
+
+    Falls back to a plain truncate if the filesystem will not take the sparse
+    flag (FAT32, a network share, a future runner image) -- correctness never
+    depends on the hole, only the disk bill does.
+    """
+    with open(path, "wb") as f:
+        if size and sys.platform == "win32" and _mark_sparse(f):
+            f.seek(size - 1)
+            f.write(b"\x00")
+        else:
+            f.truncate(size)
+    return path
+
 # ---------------------------------------------------------------------------
 # Real-Tk tests ride a fixed, narrow set of xdist workers (--dist loadgroup).
 # ---------------------------------------------------------------------------

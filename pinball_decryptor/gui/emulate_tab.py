@@ -39,6 +39,15 @@ Three things about it are worth knowing before changing anything here:
   copy of the card, and then this tab's own copy of that new card onto the WSL
   disk.  Measured on a jurassic_park_le 1.16.0 card, the set is 9 seconds.
 
+  **A replacement PICKED on a Replace tab is one of those edits** (PAD-121).
+  The set is computed by diffing the project folder against its extract
+  baseline, and a Replace tab holds an assignment in memory until a build
+  writes it over the folder's own file — so the box used to see nothing at all
+  until the user had built the card image this feature exists to save them.
+  Start now applies them first (``App.stage_pending_replacements``, the same
+  three calls a Write makes before it repacks) and says so in the log, because
+  it changes the project folder and the user did not press Build.
+
 * **The LAUNCH is root on Windows now, and that is item 13's doing.**  This
   module's original rule was "normal WSL user, never root - root breaks WSLg
   and the audio path", and that stopped being true when ``watch.sh`` learned
@@ -228,6 +237,29 @@ _OVERRIDE_EXPLAIN = (
     "time goes. The set is kept: an unchanged one is reused where it "
     "stands, and a changed one is patched where it changed rather than "
     "built again, so a second run only costs what you have edited since.")
+
+#: PAD-121: what a multi-image card is told when it runs with the edits on
+#: top.  DragonRR asked it exactly: "In a multiboot image - which image does
+#: the replacement assets replace? How do you decide or is it both?"
+#:
+#: THE ANSWER IS ONE IMAGE, AND NOT A CHOSEN ONE.  Everything that writes a
+#: Spike 2 card goes through ``engine._locate``, which walks the card's
+#: PRIMARY ext partitions largest first and takes the first one holding an
+#: ``image.bin`` with a game beside it.  On every layout ``mkmulticard.py``
+#: writes that is p3 - the FIRST image, the one the card was built around;
+#: the extras are logical partitions it never enumerates, or ``imgN``
+#: directories its search reaches later (see ``plugins.stern.multiimage``,
+#: PAD-122, which counts them).  The set built from that image is then bound
+#: over whichever image the boot menu starts.  So it is said, on the run
+#: where it can be wrong, rather than left for the user to work out from a
+#: callout that did not change.
+MULTI_IMAGE_NOTE = (
+    "[emulate] this card carries a boot menu, and your edits were prepared "
+    "from ONE image on it — the first game image on the card, which is the "
+    "one every extract and write on this card uses. They are applied over "
+    "whichever image you pick at the menu, so pick that one. To edit a "
+    "different image, build it on its own first and rebuild the multi-boot "
+    "card from the built image.")
 
 #: Item 74: cardmount.sh narrates a first-boot copy one line every 2 s —
 #: ``[card] copying <name>: 3121 / 7497 MB (41%)``.  Parsed off the drain so
@@ -1989,7 +2021,8 @@ class EmulatePanel:
 
     def __init__(self, parent, log=None, card_var=None, savestates_var=None,
                  theme_fn=None, badge_fn=None, resize_fn=None,
-                 footer_cb=None, assets_var=None, overrides_var=None):
+                 footer_cb=None, assets_var=None, overrides_var=None,
+                 stage_fn=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
         #: Item 78: MainWindow.set_emulate_progress, injected like the log -
@@ -2029,6 +2062,15 @@ class EmulatePanel:
         # item 14 is what forgetting one costs.
         self._overrides_var = overrides_var if overrides_var is not None \
             else tk.BooleanVar(value=False)
+        #: PAD-121: ``App.stage_pending_replacements`` — apply the Replace
+        #: tabs' assigned replacements to the assets folder, which is what a
+        #: build does before it repacks.  The override set is computed from
+        #: that folder, so an assignment which is still only an assignment is
+        #: an edit this feature cannot see; the user who asked for the feature
+        #: is the one who then reported that ("only writing a new image
+        #: replaces the assets").  None in the standalone panel the tests
+        #: build — then the folder is simply taken as it stands.
+        self._stage_fn = stage_fn
         self._theme_fn = theme_fn or (lambda: "dark")
         #: The window's round ⓘ badge factory (``MainWindow._make_round_icon``),
         #: passed in rather than reached for: this panel is built standalone in
@@ -3871,7 +3913,10 @@ class EmulatePanel:
                "live in, and the emulator reads those instead — the card image "
                "is never written to and nothing is rebuilt. Start prepares "
                "them first, which takes as long as the edits need to be "
-               "re-encoded; a set that is already current is reused.")
+               "re-encoded; a set that is already current is reused. A "
+               "replacement you picked on a Replace tab counts as an edit "
+               "here: Start applies it to your project folder exactly as a "
+               "build would, so you do not have to build a card image first.")
     _OVR_NO_ASSETS = ("There is no assets folder set. Extract the card on the "
                       "Extract tab (or point the Write tab at an existing "
                       "extract) and the edits in it can be run here.")
@@ -4382,7 +4427,7 @@ class EmulatePanel:
             return None
         return (self._src_path.get().strip().strip('"'), assets)
 
-    def _prepare_overrides(self, card, assets):
+    def _prepare_overrides(self, card, assets, selector=False):
         """Build (or reuse) the override set, and return its ``watch.sh`` env.
 
         ON THE START WORKER, never the main loop: this re-encodes the edited
@@ -4392,7 +4437,8 @@ class EmulatePanel:
         *card* and *assets* are passed IN, as plain strings, because they live
         in Tk variables and reading one off the main loop raises "main thread
         is not in main loop" — the same rule that sends every log line here
-        back through ``after``.
+        back through ``after``.  *selector* is the Boot selector box, read on
+        the main loop for the same reason.
 
         Returns ``[]`` when there is nothing to apply (a folder with no edits
         left in it is a stock card, and running it is the right answer), a
@@ -4422,6 +4468,18 @@ class EmulatePanel:
                 "and the edits you make in the new folder can be run here."
                 % assets)
             return None
+
+        # THE REPLACE TABS' ASSIGNMENTS, FIRST (PAD-121).  A replacement picked
+        # on Replace Images / Video / Audio is an assignment until a build
+        # writes it over the project folder's own file — and everything below
+        # reads that folder, so without this a ticked box ran the stock card
+        # and said there was nothing to apply.  It is the same three calls, in
+        # the same order, that a Write makes before it repacks; a folder with
+        # nothing assigned costs one scan and returns (0, 0, []).
+        if self._stage_fn is not None and not self._stage_pending(assets):
+            return None
+        if selector:
+            self._log(MULTI_IMAGE_NOTE)
 
         out = overrides_dir()
         fp = assets_fingerprint(assets)
@@ -4461,6 +4519,48 @@ class EmulatePanel:
                   "card: %s" % (len(files),
                                 ", ".join(p for p, _n in files[:6])))
         return ["PAD_OVERRIDE_DIR=%s" % _wsl_path(out)]
+
+    def _stage_pending(self, assets):
+        """Apply the Replace tabs' assigned replacements to *assets*.
+
+        True when the run may go on — including the ordinary case of a folder
+        with nothing assigned, where this is one scan and no writes.  False
+        when it must not: everything the user assigned failed to be applied,
+        so the set built from this folder would be the card they already have.
+
+        ON THE START WORKER, like everything else :meth:`_prepare_overrides`
+        does — staging a replaced video re-encodes it, which is minutes.  The
+        state label says so meanwhile, for the same reason the re-encode below
+        it does: the 2 s status poll would otherwise write "Not running" over
+        the whole wait.
+        """
+        self._preparing = "Applying your replacements…"
+        try:
+            pending, staged, failures = self._stage_fn(
+                assets, cancel_cb=lambda: self._stopping or self._stopped)
+        except Exception as exc:                        # noqa: BLE001
+            self._overrides_refuse(
+                "The replacements you assigned could not be applied to %s: %s"
+                % (assets, exc))
+            return False
+        finally:
+            self._preparing = None
+        if pending and not staged:
+            self._overrides_refuse(
+                "None of the %d replacement(s) you assigned could be applied, "
+                "so this run would be the stock card. %s"
+                % (pending,
+                   "; ".join("%s: %s" % (what, err)
+                             for what, err in failures[:3])
+                   or "See the log above."))
+            return False
+        if staged:
+            # Said out loud because it CHANGED THE PROJECT FOLDER — the same
+            # thing a build does, and the user did not press Build.
+            self._log("[emulate] applied %d replacement(s) you assigned on "
+                      "the Replace tabs to %s (the same thing a build does "
+                      "before it repacks)" % (staged, assets))
+        return True
 
     def _overrides_refuse(self, message):
         """Say why the run is not starting — in the log AND beside the box.
@@ -4658,6 +4758,10 @@ class EmulatePanel:
         # loop" - which is the same rule the log lines and the state label
         # already go through `after` for.
         ovr_request = self._overrides_wanted()
+        # ...and the boot-menu box with it (PAD-121): on a multi-image card
+        # the edits go on top of ONE of the images, and which one that is has
+        # to be said before the run rather than after it.
+        ovr_selector = bool(self._select_var.get())
         # Item 90: ask the card again, off-thread, for the box's own sake.
         # The Multi-boot tab may have REBUILT the file this path names since
         # the last probe, and the verdict on screen would otherwise describe
@@ -4708,7 +4812,8 @@ class EmulatePanel:
             # the Docker probe is: it is the slowest thing a Start can do (a
             # re-encode), and the main loop must stay live while it runs.
             if ovr_request is not None:
-                extra = self._prepare_overrides(*ovr_request)
+                extra = self._prepare_overrides(*ovr_request,
+                                                selector=ovr_selector)
                 if extra is None:
                     try:
                         self._timer().after(

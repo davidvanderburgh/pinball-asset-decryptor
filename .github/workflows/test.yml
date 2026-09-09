@@ -13,13 +13,33 @@ on:
 permissions:
   contents: read
 
+# Windows runners are the scarce resource in this account -- test.yml's
+# matrix and release.yml's build-windows are the only two consumers, and
+# on 2026-09-09 a Tests run's windows job sat in the queue 19 MINUTES
+# (13:10:44 -> 13:30:03) while its ubuntu and macos jobs started in three
+# seconds.  Every Tests run that is still burning a windows runner on a
+# superseded commit is a runner the next RELEASE build cannot have, so a
+# new push to a branch cancels that branch's older run.
+#
+# Only PRs cancel, and only PRs share a group.  A push to main keys its
+# group on the SHA instead, so main's runs neither cancel nor QUEUE BEHIND
+# one another -- a shared non-cancelling group serializes the runs in it and
+# lets a third one evict the pending second, which would delay and then
+# silently drop exactly the run /release watches as its post-tag yank
+# tripwire.  A tripwire that reports "cancelled" because a later merge
+# landed is a tripwire that tells us nothing.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     # A wedged or looping test should fail the job, not hang for the
     # 6-hour default and hold up a release.  Healthy runs finish in
-    # ~3m (Linux/macOS) and ~9m (the slower, tk-serial Windows run).
+    # ~3m (Linux/macOS) and ~9m (Windows, whose Tk lane is 4x macOS's and
+    # is the whole job -- see tests/conftest.py on why it cannot be split).
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -29,37 +49,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The hosted Windows runner starts with only a few GB free on C:,
-      # and shipped an intermittent "There is not enough space on the disk"
-      # (the runner's own _diag block store) partway through the suite.
-      # Delete the big SDK caches our Python tests never touch — Android,
-      # CodeQL, and the .NET/Swift toolchains — to buy back ~10-15 GB.
-      # Best-effort: a missing path is fine, and we deliberately leave
-      # hostedtoolcache\windows\Python alone -- setup-python (next step)
-      # needs it.
-      - name: Free up disk space (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $before = (Get-PSDrive C).Free / 1GB
-          $targets = @(
-            "$env:ANDROID_SDK_ROOT",
-            "$env:ANDROID_HOME",
-            "C:\Android",
-            "C:\hostedtoolcache\windows\CodeQL",
-            "$env:AGENT_TOOLSDIRECTORY\CodeQL",
-            "C:\Program Files\dotnet",
-            "C:\Program Files\Microsoft SDKs\Azure",
-            "C:\Swift"
-          )
-          foreach ($t in $targets) {
-            if ($t -and (Test-Path $t)) {
-              Write-Host "Removing $t"
-              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $t
-            }
-          }
-          $after = (Get-PSDrive C).Free / 1GB
-          Write-Host ("C: free before={0:N1} GB, after={1:N1} GB" -f $before, $after)
+      # There used to be a "Free up disk space (Windows)" step here, deleting
+      # the Android/CodeQL/.NET/Swift trees because the suite intermittently
+      # filled C:.  It cost 1m17s, 5m40s and 5m06s on the three runs that
+      # were timed, on the runner this account queues longest for.
+      #
+      # It is gone because its reason is gone.  The suite filled C: because
+      # two mkmulticard tests built 7.32 GB card images with truncate, which
+      # is a hole on Linux and 7.32 GB of written zeros on Windows; four of
+      # those live at once cost 29 GB.  conftest.sparse_image() fixed that at
+      # the source.  Measured on the first run afterwards:
+      #
+      #   free before the (still-present) cleanup   31.9 GB
+      #   free after it                             34.5 GB
+      #   free after the whole suite                32.7 GB
+      #
+      # 1.8 GB consumed against 31.9 GB a runner comes up with -- a 17x
+      # margin, not a squeaker.  The step below keeps printing the number so
+      # a regression shows up as a shrinking margin rather than as a red job
+      # months from now.
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -71,9 +79,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # pytest-xdist: the suite runs one worker per core (-n auto).
-          # The Windows runner takes ~4m30 single-process vs ~2m on the
-          # other OSes, and the tests wait is on the release critical
-          # path, so parallelism here is what keeps a release fast.
+          # Windows is far slower than the other OSes at the Tk window
+          # churn this suite does, and its runner is the one this account
+          # queues longest for, so parallelism here is what keeps the
+          # release critical path clear.
           pip install pytest pytest-xdist pycryptodome
           # Pillow is in requirements.txt — Williams' DMD render
           # path (dmd_render.py, capture_pipeline.py) imports it at
@@ -108,11 +117,13 @@ jobs:
       # remaining 250+ tests still exercise the picker / mfr-switch /
       # log persistence behaviour through their non-GUI entry points,
       # and the GUI smoke suite is run manually before tagging.
-      # --dist loadgroup honours the xdist_group("tk") marker conftest.py
-      # stamps on every tkinter-touching module: all real-Tk tests run
-      # serially on ONE worker (concurrent Tk across workers crashed a
-      # macOS worker and Windows App() fixtures on the first -n auto
-      # runs), while the other workers parallelize the rest.
+      # --dist loadgroup honours the xdist_group marker conftest.py stamps on
+      # every tkinter-touching module: on CI all real-Tk tests ride ONE
+      # worker, while the others parallelize the rest.  That is measured, not
+      # cautious -- splitting the lane two ways on the Windows runner grew
+      # total Tk work 487s -> 862s and moved the wall clock 20 seconds,
+      # because window create/map/destroy serializes at the desktop layer.
+      # tests/conftest.py carries the numbers.
       - name: Run tests (Linux, under xvfb)
         if: runner.os == 'Linux'
         run: xvfb-run -a python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py
@@ -128,3 +139,16 @@ jobs:
       - name: Run tests (macOS / Windows)
         if: runner.os != 'Linux'
         run: python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py
+
+      # How much disk the suite actually needs, printed rather than guessed.
+      # The cleanup step above costs minutes on the scarcest runner we have,
+      # and it exists for a failure mode whose cause -- 29 GB of non-sparse
+      # card images -- is fixed as of this commit.  Whether it can now go is
+      # a question about the number this prints, and it runs on failure too:
+      # a red run that ends near zero says something different from one that
+      # ends with 20 GB spare.
+      - name: Report disk headroom (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host ("C: free after the suite: {0:N1} GB" -f ((Get-PSDrive C).Free / 1GB))

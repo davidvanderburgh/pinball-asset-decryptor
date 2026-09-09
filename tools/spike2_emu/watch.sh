@@ -781,24 +781,60 @@ unset _v _val
 # root ignores file permissions. Not root (an ordinary run) - nothing changes.
 PAD_USER=${PAD_USER:-${SUDO_USER:-}}
 if [ -z "$PAD_USER" ] && [ "$(id -u)" = 0 ]; then
-    # whoever owns the rootfs is the desktop user whose session this is
-    PAD_USER=$(stat -c %U "$ROOT" 2>/dev/null)
+    # ★ WHOEVER OWNS THE RIG'S HOME. NOT THE ROOTFS - THE ROOTFS ANSWERS ROOT
+    # ON ANY MACHINE WHOSE FIRST RUN CAME FROM THE APP (PAD-119, C FB
+    # 2026-09-08).
+    #
+    # This asked `stat -c %U "$ROOT"`, and $ROOT is the one directory in the
+    # rig that a root run BUILDS ITSELF. ensurebuild.sh makes it and rootfs.sh
+    # fills it with `debugfs rdump`, which as root restores the card's own
+    # ownership - i.e. root. So on a machine where the app's Start was the
+    # first thing ever to build the guest filesystem, this answered "root",
+    # PAD_USER came out empty, DROP stayed 0, and the renderer ran as root
+    # FOREVER AFTER: black window, "MESA: error: Failed to attach to x11 shm"
+    # on repeat, every other counter healthy.
+    #
+    # AND THE BANNER BELOW THEN BLAMED THE WRONG THING. It says the cure is an
+    # ordinary account plus `default=` in /etc/wsl.conf - which is right for a
+    # root-default distro and useless here, because this distro already logs in
+    # as an ordinary user. The reporter did all three commands, restarted WSL,
+    # and got the same black window; his own log had `logs in as: home` from
+    # the setup check and the root banner from here, in the same file.
+    #
+    # $PAD_HOME IS THE RIGHT QUESTION and the rest of the rig already asks it:
+    # cardmount.sh, overrides.sh and buildselect.sh all hand their output back
+    # to `stat -c %U "$HOME"`. padpath.sh's header states the rule this follows
+    # - "ROOT IS ELEVATION, NOT OWNERSHIP: the rig belongs to a human's home" -
+    # and PAD_HOME is that home, resolved there rather than guessed here. A
+    # genuinely root-default distro still lands on /root, which root owns, so
+    # PAD_USER stays empty and the banner below is still the right answer for
+    # the machine it was written for.
+    PAD_USER=$(stat -c %U "$PAD_HOME" 2>/dev/null)
     [ "$PAD_USER" = root ] && PAD_USER=""
+    # The rootfs stays as the fallback: a rig whose home this shell cannot stat
+    # but whose tree is plainly someone's is still theirs to run.
+    if [ -z "$PAD_USER" ]; then
+        PAD_USER=$(stat -c %U "$ROOT" 2>/dev/null)
+        [ "$PAD_USER" = root ] && PAD_USER=""
+    fi
 fi
 
-# ★ THE X SOCKET IS THE ORACLE, and asking the rootfs instead is what put a
-# BLACK WINDOW on the desktop again (David, 2026-09-09, the PAD-Runtime distro).
+# ★ THE X SOCKET IS THE ORACLE, and the third place that had to be asked before
+# the BLACK WINDOW went away (David, 2026-09-09, the PAD-Runtime distro).
 #
-# The test above asks "who owns $ROOT" and calls that the desktop user. On a
-# shared-mount layout that answer is root - $ROOT is
-# /mnt/wsl/paddata/spike2/spike2root, root-owned and 0755 - so PAD_USER came out
-# empty, the drop was skipped, the renderer ran as root and Mesa could not
-# attach to the X server's shared memory. Every counter read healthy: guest
-# booted, clips decoded and handed over at 30.0/s, renderer 60.0 fps, and the
-# picture oracle even said FIRST at frame 4, because it reads what was RENDERED
-# and the loss is downstream of that. The only true line in the log was Mesa's.
+# The block above is a ladder now, and this is the rung under it. PAD-119 made
+# $PAD_HOME the first question, because the ROOTFS answers root on any machine
+# whose first run came from the app; the rootfs stayed as its fallback. On the
+# PAD-Runtime layout BOTH of those answer root - the rig lives on a shared
+# volume, /mnt/wsl/paddata/spike2/spike2root, root-owned and 0755, and $PAD_HOME
+# is /root - so PAD_USER still came out empty, the drop was still skipped, the
+# renderer still ran as root and Mesa still could not attach to the X server's
+# shared memory. Every counter read healthy: guest booted, clips decoded and
+# handed over at 30.0/s, renderer 60.0 fps, and the picture oracle even said
+# FIRST at frame 4, because it reads what was RENDERED and the loss is
+# downstream of that. The only true line in the log was Mesa's.
 #
-# The rootfs never knew the answer. The X SOCKET does, by construction: the
+# Neither directory ever knew the answer. The X SOCKET does, by construction: the
 # renderer has to attach to the shared memory of the server behind
 # $PAD_X11_DIR/XN, so the account owning that socket IS the account it must run
 # as. That distro had a perfectly good `pad` user owning X0 all along.

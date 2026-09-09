@@ -2891,18 +2891,18 @@ class Field(StateOps, LedRing):
         screen, where one row (~26 px) clears it at every scale this window
         runs at, including PAD_PF_SCALE=1. Widths are asked of the widgets
         rather than assumed, so a different theme or DPI still lines up.
+
+        THE STATE CONTROLS TAKE A SECOND ROW WHEN THE FIRST CANNOT HOLD BOTH
+        CLUSTERS, and that is the one case worth the extra ~30 px: see the fit
+        test below for the window it was measured on. Two rows can graze the
+        lowest marker on a small screen; the alternative there is buttons drawn
+        on top of other buttons, which is what the tester actually got.
         """
         self._acts = []
         for label, script, arg in WINDOW_ACTIONS:
             self._acts.append(tk.Button(
                 self.cv, text=label, width=11,
                 command=lambda s=script, a=arg: self.run_action(s, a)))
-        x, y = w - self.ACT_PAD, h - self.ACT_PAD
-        # Right to left, so "Reset balls" is the one against the corner and the
-        # reading order left to right is the order the toolbar had.
-        for b in reversed(self._acts):
-            self.cv.create_window(x, y, anchor="se", window=b)
-            x -= b.winfo_reqwidth() + self.ACT_GAP
 
         # Save/Load state, bottom-LEFT (item 13's GUI half, David 2026-08-08:
         # "i'd like to have gui controls to set and load a save state", surface
@@ -2910,18 +2910,62 @@ class Field(StateOps, LedRing):
         # the Emulate tab). The LEFT corner, not more buttons on the right:
         # game actions stay by the plunger where the hand is, state controls
         # stay apart from them - a misclicked "Load state" yanks the whole game
-        # back to the save, which is not a neighbour "Plunge" wants. One row
-        # still clears the lowest marker for the same reason the right cluster
-        # does (RIGHT FLIPPER BUTTON at y=656; see the docstring above).
+        # back to the save, which is not a neighbour "Plunge" wants.
         # Only on a checkpointable boot: no flag, no controls at all.
+        #
+        # BUILT BEFORE ANYTHING IS PLACED, because where each cluster goes now
+        # depends on how wide the OTHER one is - see the fit test below.
         self._state_btns = []
-        row_h = max([b.winfo_reqheight() for b in self._acts] or [0])
-        if SAVESTATES:
-            x = self.ACT_PAD
-            for wdg in self._build_state_widgets(self.cv, compact=True):
-                self.cv.create_window(x, y, anchor="sw", window=wdg)
+        state = (self._build_state_widgets(self.cv, compact=True)
+                 if SAVESTATES else [])
+        row_h = max([wdg.winfo_reqheight()
+                     for wdg in self._acts + state] or [0])
+
+        # ★ TWO ROWS WHEN ONE CANNOT HOLD BOTH CLUSTERS, AND THAT IS MEASURED
+        # RATHER THAN ASSUMED (PAD-119, C FB 2026-09-08, beatles on a 1080p
+        # screen). The two clusters grow from opposite edges of the canvas -
+        # state controls rightwards from the left, actions leftwards from the
+        # right - and NOTHING STOPPED THEM MEETING IN THE MIDDLE. On his
+        # window the picker sat on top of "Start" and "Load" sat on top of
+        # "Plunge": four buttons drawn, two of them unreachable, and no sign
+        # from here that anything was wrong.
+        #
+        # IT SURVIVED BECAUSE THE CANVAS IS SIZED FROM THE SCREEN. Its width is
+        # the artwork's times pick_scale(), which is the screen height over the
+        # artwork's - so a tall desk monitor makes a canvas wide enough for
+        # both clusters and a 1080p laptop does not. beatles' artwork is
+        # 336x710: at scale 1.25 the canvas is 420 px and the two clusters ask
+        # for 570. The short compact labels were the last answer to this
+        # (2026-08-10, the same collision one action button ago) and "Clear
+        # alerts" spent the room they bought.
+        #
+        # THE ACTIONS KEEP THE BOTTOM ROW. They are down here because the
+        # plunger is (see the docstring above); the state controls are down
+        # here only to be far from them, and one row up is still far.
+        def span(widgets):
+            """What one cluster asks for, its own gaps included."""
+            if not widgets:
+                return 0
+            return (sum(wdg.winfo_reqwidth() for wdg in widgets)
+                    + self.ACT_GAP * (len(widgets) - 1))
+
+        one_row = not state or (self.ACT_PAD + span(state) + self.ACT_GAP
+                                + span(self._acts) + self.ACT_PAD) <= w
+
+        x, y = w - self.ACT_PAD, h - self.ACT_PAD
+        # Right to left, so "Reset balls" is the one against the corner and the
+        # reading order left to right is the order the toolbar had.
+        for b in reversed(self._acts):
+            self.cv.create_window(x, y, anchor="se", window=b)
+            x -= b.winfo_reqwidth() + self.ACT_GAP
+
+        rows = 1
+        if state:
+            rows = 1 if one_row else 2
+            x, sy = self.ACT_PAD, y - (0 if one_row else row_h + self.ACT_GAP)
+            for wdg in state:
+                self.cv.create_window(x, sy, anchor="sw", window=wdg)
                 x += wdg.winfo_reqwidth() + self.ACT_GAP
-                row_h = max(row_h, wdg.winfo_reqheight())
 
         # THE TROUGH PANEL GOES ABOVE THE BOTTOM ROW, not into it: that row is
         # already two clusters wide (state controls left, game actions right)
@@ -2929,7 +2973,10 @@ class Field(StateOps, LedRing):
         # already. Above them it is clear of both at every scale, and it is
         # still down at the apron end of the artwork, which is where the real
         # trough is - the physical position and the readable position agree.
-        self._panel_at = (self.ACT_PAD, y - row_h - self.ACT_GAP)
+        # ABOVE ALL the rows, not one of them: the row count is the thing the
+        # fit test above decides, and a panel that assumed one would land on
+        # the state controls on exactly the windows that needed two.
+        self._panel_at = (self.ACT_PAD, y - rows * (row_h + self.ACT_GAP))
         self._make_trough_panel()
 
     def _make_trough_panel(self):

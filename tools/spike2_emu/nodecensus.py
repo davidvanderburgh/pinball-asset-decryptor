@@ -131,6 +131,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import devicexy
+#: switch_nodes() asks it for a title's switch_list.txt when the caller names
+#: no path. watch.sh always names one, so the missing import only ever bit the
+#: documented by-hand form (`nodecensus.py --game jaws_le`), which died with a
+#: NameError instead of printing a census.
+import gameinfo
 import nbdir
 
 #: A connector that names a board: "8b", "9a", "2a", and bare "8" if it ever

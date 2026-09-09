@@ -187,3 +187,108 @@ def test_a_machine_with_no_tables_still_opens_the_window():
         assert playfield.load_coils() == []
     finally:
         playfield.TDIR = saved
+
+
+# --------------------------------------------------------------------------
+# ...and they have to fit next to the state controls (PAD-119)
+# --------------------------------------------------------------------------
+
+def _bare_field(root, w, h):
+    """A Field with just enough of one to lay its bottom row out.
+
+    Building a real one wants the title's tables and its artwork, and none of
+    that is what these assert - the same shortcut, and the same reason, as
+    test_field_builds_the_same_row_from_the_same_list above.
+    """
+    import playfield
+    import tkinter as tk
+    f = playfield.Field.__new__(playfield.Field)
+    f.cv = tk.Canvas(root, width=w, height=h)
+    f.trough_panel = None
+    f.key_panel = None
+    f.sw = type("SW", (), {"positions": []})()
+    f.drv = FakeDrv()
+    f._place_actions(w, h)
+    return f
+
+
+def _placed(f):
+    """[(label, x0, y0, x1, y1)] for every widget on the canvas."""
+    out = []
+    for item in f.cv.find_all():
+        if f.cv.type(item) != "window":
+            continue
+        wdg = f.cv.nametowidget(f.cv.itemcget(item, "window"))
+        try:
+            label = wdg.cget("text")
+        except Exception:                                   # noqa: BLE001
+            label = "<picker>"                              # the slot combobox
+        out.append((label,) + tuple(f.cv.bbox(item)))
+    return out
+
+
+def _overlaps(placed):
+    return [(a[0], b[0]) for i, a in enumerate(placed) for b in placed[i + 1:]
+            if a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4]]
+
+
+def test_the_bottom_row_never_draws_a_button_on_a_button():
+    """PAD-119, C FB 2026-09-08: beatles on a 1080p screen.
+
+    The state controls grow rightwards from the canvas's left edge and the
+    actions leftwards from its right, and nothing stopped them meeting. On his
+    window the slot picker was drawn over "Start" and "Load" over "Plunge":
+    both buttons were there, neither could be pressed, and the log said
+    nothing because nothing was wrong with the run.
+
+    420x887 IS HIS WINDOW, not a contrived one. The canvas is the artwork
+    (336x710 for beatles) times pick_scale(), which is the screen height over
+    the artwork height - so this is exactly what a 1080p desk gets, and why a
+    taller developer monitor never saw it.
+    """
+    root = _root()
+    import playfield
+    saved, refresh = playfield.SAVESTATES, playfield.StateOps._slots_refresh
+    playfield.SAVESTATES = True
+    # No worker thread: the slot names come off the rig through wsl.exe, and
+    # what is under test is where the widgets land, not what is in them.
+    playfield.StateOps._slots_refresh = lambda self, **kw: None
+    try:
+        f = _bare_field(root, 420, 887)
+        placed = _placed(f)
+        assert _overlaps(placed) == [], \
+            "widgets drawn on top of each other: %r" % (placed,)
+        for label, _s, _a in playfield.WINDOW_ACTIONS:
+            assert any(p[0] == label for p in placed), \
+                "%s is not on the canvas at all" % label
+    finally:
+        playfield.StateOps._slots_refresh = refresh
+        playfield.SAVESTATES = saved
+        root.destroy()
+
+
+def test_a_canvas_with_the_room_keeps_them_on_one_row():
+    """The second row is the narrow window's answer and must not become every
+    window's: on a wide canvas the two clusters share the bottom edge exactly
+    as they always did, which is also what keeps the trough panel where it is.
+    """
+    root = _root()
+    import playfield
+    saved, refresh = playfield.SAVESTATES, playfield.StateOps._slots_refresh
+    playfield.SAVESTATES = True
+    playfield.StateOps._slots_refresh = lambda self, **kw: None
+    try:
+        wide = _bare_field(root, 900, 887)
+        assert _overlaps(_placed(wide)) == []
+        assert len({p[4] for p in _placed(wide)}) == 1, \
+            "one row means one bottom edge: %r" % (_placed(wide),)
+        narrow = _bare_field(root, 420, 887)
+        assert len({p[4] for p in _placed(narrow)}) == 2, \
+            "the narrow window should have taken a second row"
+        # The trough panel sits above whatever the row count came to, or it
+        # lands on the state controls on exactly the windows that needed two.
+        assert narrow._panel_at[1] < wide._panel_at[1]
+    finally:
+        playfield.StateOps._slots_refresh = refresh
+        playfield.SAVESTATES = saved
+        root.destroy()

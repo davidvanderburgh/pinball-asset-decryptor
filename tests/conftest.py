@@ -145,8 +145,57 @@ def _isolate_audio_ctl(tmp_path_factory):
         tmp_path_factory.mktemp("audio_ctl") / "audio_ctl.json")
 
 
+
+
 # ---------------------------------------------------------------------------
-# Real-Tk tests all ride ONE xdist worker (--dist loadgroup).
+# Multi-gigabyte card images that do not cost multiple gigabytes.
+# ---------------------------------------------------------------------------
+# The mkmulticard tests build stock 8G card images -- 7.32 GB each, one test
+# making three of them -- and only ever touch a few kilobytes of partition
+# table and superblock in each.  On Linux and macOS ``truncate`` leaves the
+# rest as a hole and the file costs nothing.  On Windows it does not: NTFS
+# zero-fills, so those files cost 7.32 GB and 8.6s of real I/O apiece, and
+# pytest keeps the last three tmp_path trees alive at once.
+#
+# That is what exhausted the hosted runner's C: drive on 2026-09-09 ("There
+# is not enough space on the disk", four minutes into the suite, on a runner
+# that came up with 29.4 GB free).  Marking the file sparse first and then
+# extending it with one write at the end costs 0 bytes and 0.03s.
+#
+# ``truncate`` will NOT do on Windows even after the flag is set -- CPython
+# calls _chsize_s, which writes the zeros explicitly and re-allocates every
+# block.  The final write is what leaves the hole intact.
+_FSCTL_SET_SPARSE = 0x900C4
+
+
+def _mark_sparse(fh):
+    """Ask NTFS to leave this handle's unwritten ranges unallocated."""
+    import ctypes
+    import ctypes.wintypes
+    import msvcrt
+    returned = ctypes.wintypes.DWORD()
+    return bool(ctypes.windll.kernel32.DeviceIoControl(
+        ctypes.wintypes.HANDLE(msvcrt.get_osfhandle(fh.fileno())),
+        _FSCTL_SET_SPARSE, None, 0, None, 0, ctypes.byref(returned), None))
+
+
+def sparse_image(path, size):
+    """Create `path` as `size` bytes of zeros without paying for them.
+
+    Falls back to a plain truncate if the filesystem will not take the sparse
+    flag (FAT32, a network share, a future runner image) -- correctness never
+    depends on the hole, only the disk bill does.
+    """
+    with open(path, "wb") as f:
+        if size and sys.platform == "win32" and _mark_sparse(f):
+            f.seek(size - 1)
+            f.write(b"\x00")
+        else:
+            f.truncate(size)
+    return path
+
+# ---------------------------------------------------------------------------
+# Real-Tk tests ride a fixed, narrow set of xdist workers (--dist loadgroup).
 # ---------------------------------------------------------------------------
 # Under plain pytest the suite builds and destroys its Tk roots serially, and
 # has been stable that way for months.  Several xdist workers doing it
@@ -155,9 +204,10 @@ def _isolate_audio_ctl(tmp_path_factory):
 # 16-core Windows dev box, it is SLOWER too: the Tk-touching subset ran
 # ~100-130s serial but 172s spread over 8 workers, because window
 # create/map/destroy serializes at the desktop layer whatever the process
-# count.  Spreading Tk work anti-helps everywhere it was tried, so every
-# tkinter-touching module rides ONE xdist_group on every platform, and the
-# other workers parallelize the rest of the suite.
+# count.  So Tk work never spreads freely; it rides named groups, and the
+# other workers parallelize the rest of the suite.  How many groups is the
+# question the hook below answers -- one on CI, two on a dev box, both
+# numbers measured rather than reasoned.
 #
 # MEMBERSHIP IS THE PART THAT WAS WRONG (2026-09-01).  The original sniff
 # looked only for the literal string "tkinter", which missed every file that
@@ -192,10 +242,32 @@ def _touches_tk(path):
 # or the marker arrives after the train has left.
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
-    on_ci = bool(os.environ.get("CI"))
+    # HOW MANY GROUPS.  a76064c split the lane two ways LOCALLY (232s -> 177s)
+    # and left CI on one group, reasoning "CI wall time is not the constraint".
+    # When CI wall time BECAME the constraint (2026-09-09: a release's windows
+    # job spent 8m33s in the test step and the lane was its whole critical
+    # path, 424s on gw0 while the other three workers idled 3m26s), the
+    # obvious move was to split CI too.  It was measured on the real runner
+    # and it does not work:
+    #
+    #     one group    lane 487s on one worker      -- test step 8m33s
+    #     two groups   tk-app 467s + tk-emu 395s    -- test step 8m15s
+    #
+    # Splitting grew the TOTAL Tk work from 487s to 862s -- 77% -- and bought
+    # 20 seconds of critical path, because window create/map/destroy
+    # serializes at the desktop layer no matter how many processes ask.  That
+    # is the same anti-scaling a76064c measured at 8 workers, and it is far
+    # steeper on a 4-core hosted runner than on the 16-core dev box, where a
+    # 2-way split still pays (177s) and stays the default.
+    #
+    # So CI keeps ONE group.  It is not leaving time on the table: there is no
+    # time there to take.  The lane is 4x slower on Windows than on macOS
+    # because of what Windows charges per window, and the only lever left is
+    # opening fewer of them -- a fixture-scope change, not a scheduling one.
+    single_group = bool(os.environ.get("CI"))
     for item in items:
         if _touches_tk(item.path):
-            if on_ci:
+            if single_group:
                 group = "tk"
             else:
                 group = "tk-app" if "test_gui" in str(item.path) else "tk-emu"

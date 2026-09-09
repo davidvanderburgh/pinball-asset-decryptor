@@ -1500,6 +1500,65 @@ def test_unmatched_text_lines_flatten_and_cap_a_long_string(tmp_path):
     assert '"TWO\\nLINES"' in text
 
 
+# ---- PAD-124: the whole unpaired list, not just the first 40 ---------------
+
+def test_full_unmatched_text_report_is_written_and_named_in_the_log(tmp_path):
+    # The tester's run couldn't pair 195 strings; the log showed 40 and
+    # "...and 155 more", and he mailed in "I can only see the first section".
+    mod, stk = str(tmp_path / "modded"), str(tmp_path / "stock")
+    target = str(tmp_path / "new")
+    os.makedirs(target)
+    junk = ["frag%03d" % i for i in range(60)]
+    _mk_extract(mod, {}, strings=([("game_real", "ATTRACT", "")]
+                                  + [("game_real", j, "") for j in junk]
+                                  + [("game_real", "GAME OVER", "")]))
+    _mk_extract(stk, {}, strings=[("game_real", "ATTRACT", ""),
+                                  ("game_real", "GAME OVER", ""),
+                                  ("gone.radium", "YELLOW SUBMARINE", "")])
+    lines = []
+    diff = mod_transfer.diff_baked_mods(
+        mod, stk, log_cb=lambda t, lvl="info": lines.append((lvl, t)),
+        report_dir=target)
+
+    log = "\n".join(t for _lvl, t in lines)
+    assert "...and 20 more" in log            # the pane block is still capped
+    report = os.path.join(target, "logs", mod_transfer.UNMATCHED_TEXT_REPORT)
+    assert report in log                      # ...and the log says where
+    with open(report, encoding="utf-8") as f:
+        body = f.read()
+    # Every one of the 60, including the ones the capped block never printed.
+    assert all(('"%s"' % j) in body for j in junk)
+    assert diff["notes"]["unpaired_text"] == 60
+    # Grouped by asset + side, and the asset the modded extract doesn't carry
+    # is named too.
+    assert "60 string(s) only in your modded extract" in body
+    assert "gone.radium" in body
+
+
+def test_unmatched_text_report_keeps_a_long_string_whole(tmp_path):
+    long_s = "I READ THE NEWS TODAY OH BOY " * 4
+    notes = {"unpaired_text_rows": [
+        {"path": "game_real", "side": "modded", "text": long_s},
+        {"path": "game_real", "side": "stock", "text": "TWO\nLINES"}],
+        "skipped_text_paths": []}
+    dest = mod_transfer.write_unmatched_text_report(notes, str(tmp_path))
+    with open(dest, encoding="utf-8") as f:
+        body = f.read()
+    assert long_s in body and "…" not in body   # not snippet-capped
+    assert '"TWO\\nLINES"' in body               # still one row per line
+
+
+def test_no_unmatched_text_report_when_everything_paired(tmp_path):
+    assert mod_transfer.write_unmatched_text_report(
+        {"unpaired_text_rows": [], "skipped_text_paths": []},
+        str(tmp_path)) is None
+    assert not os.path.exists(os.path.join(str(tmp_path), "logs"))
+    # No folder to write to is not an error either (the direct-diff route).
+    assert mod_transfer.write_unmatched_text_report(
+        {"unpaired_text_rows": [{"path": "a", "side": "stock", "text": "X"}]},
+        None) is None
+
+
 def test_one_sided_sound_slots_are_named(tmp_path):
     mod, stk = str(tmp_path / "modded"), str(tmp_path / "stock")
     _mk_extract(mod, {"audio/idx0001.wav": b"SAME" * 100,

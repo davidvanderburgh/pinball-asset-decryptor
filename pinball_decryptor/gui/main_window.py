@@ -3710,6 +3710,13 @@ class MainWindow:
         # Read-only hints recomputed by _transfer_refresh_meta.
         self.transfer_src_ver_var = tk.StringVar()
         self.transfer_dst_ver_var = tk.StringVar()
+        # Field 3 had no chip at all until a tester noticed the asymmetry
+        # ("when you select a directory it does not update on the right what
+        # Stern code version is but the other three folders work well",
+        # PAD-124).  It is the one field where the version MATTERS most: the
+        # reference has to be the same old version as field 1, or the compare
+        # reads the factory's own changes as the user's mods.
+        self.transfer_oldstock_ver_var = tk.StringVar()
         self.transfer_img_ver_var = tk.StringVar()
         self.transfer_output_var = tk.StringVar()
         self.transfer_next_var = tk.StringVar()
@@ -3748,7 +3755,10 @@ class MainWindow:
                              "card's own update index (it survives renamed "
                              "files). A ~ marks a filename guess — an older "
                              "extract, or a card whose index can't be read. "
-                             "Fields 2 and 4 should show the SAME version.",
+                             "Fields 1 and 3 should show the SAME old "
+                             "version, and fields 2 and 4 the SAME new one; "
+                             "a card modded outside this app often reports "
+                             "no version at all, which is normal.",
                          lambda: self._current_theme)
 
         _picker(0, "1. Old extract (has your mods):",
@@ -3767,6 +3777,7 @@ class MainWindow:
         # wall-of-text (screenshot review, 2026-08-27).
         _picker(2, "3. Stock extract of the OLD version (optional):",
                 self.transfer_oldstock_var, self._browse_transfer_oldstock,
+                self.transfer_oldstock_ver_var,
                 tip="Not an alternative to field 1, and never in conflict "
                     "with it: field 1 is where your mods come FROM; this is "
                     "an unmodified twin of that same version, used only as "
@@ -3834,7 +3845,7 @@ class MainWindow:
         # Recompute version hints + output name whenever a field changes; the
         # new-extract field also auto-fills the base image (row 4).
         for _v in (self.transfer_src_var, self.transfer_dst_var,
-                   self.transfer_newimg_var):
+                   self.transfer_oldstock_var, self.transfer_newimg_var):
             _v.trace_add("write", lambda *_a: self._transfer_refresh_meta())
 
     def _draw_flow(self, canvas):
@@ -20134,6 +20145,7 @@ class MainWindow:
 
         src = (self.transfer_src_var.get() or "").strip()
         dst = (self.transfer_dst_var.get() or "").strip()
+        oldstock = (self.transfer_oldstock_var.get() or "").strip()
 
         def _dir_ver(d):
             if not d:
@@ -20144,6 +20156,7 @@ class MainWindow:
             return ("version " + v) if exact else ("version ~ " + v)
         self.transfer_src_ver_var.set(_dir_ver(src))
         self.transfer_dst_ver_var.set(_dir_ver(dst))
+        self.transfer_oldstock_ver_var.set(_dir_ver(oldstock))
 
         # Auto-fill the base image from the new extract's recorded source,
         # unless the user has typed their own path.

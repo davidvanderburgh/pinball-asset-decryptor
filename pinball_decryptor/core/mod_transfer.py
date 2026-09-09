@@ -75,8 +75,10 @@ import bisect
 import hashlib
 import os
 import re
+import time
 
-from . import checksums, staged_changes, staged_originals, text_manifest
+from . import (checksums, session_log, staged_changes, staged_originals,
+               text_manifest)
 
 # Slot categories that carry ``rel_path -> replacement`` assignment maps.
 _ASSIGN_KEYS = ("audio", "video", "image")
@@ -645,10 +647,12 @@ def _pair_text_lists(stock, modded):
     return pairs, unpaired
 
 
-def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
+def diff_baked_mods(modded_dir, stock_dir, log_cb=None, report_dir=None):
     """Detect mods that are BAKED INTO an extract (the game code itself was
     modded, e.g. with another tool, before extraction) by diffing it against a
-    stock extract of the SAME code version.  Read-only.  Returns::
+    stock extract of the SAME code version.  Read-only (*report_dir*, when
+    given, is the ONE folder written to — see
+    :func:`write_unmatched_text_report`).  Returns::
 
         {"saved": {"audio": {stock_rel: modded_abs_path},
                    "video": {...}, "image": {...}},
@@ -663,6 +667,8 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
     The three lists say WHICH items the counts above them are about (*side* is
     ``"stock"`` / ``"modded"``); :func:`unmatched_text_lines` turns the text
     ones into log lines, and this function already streams them at *log_cb*.
+    That block is capped, so when *report_dir* is given the COMPLETE text list
+    also goes to a file under it and the log names the file.
 
     ``image_rebake_skipped`` counts image pairs whose bytes differ but whose
     pixels are identical (a re-encode, not a mod — see
@@ -781,6 +787,11 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
             % (len(text_rows),
                ("  Skipped " + " and ".join(extra) + ".") if extra else ""))
         _log_lines(log, unmatched_text_lines(notes))
+        report = write_unmatched_text_report(notes, report_dir, modded_dir,
+                                            stock_dir)
+        if report:
+            log("Text: every one of them, in full, is listed in %s" % report,
+                "warning")
 
     return {"saved": saved, "text_rows": text_rows, "notes": notes}
 
@@ -1396,6 +1407,76 @@ def unmatched_text_lines(notes, cap=_DETAIL_CAP):
         "modded one, so their text couldn't be compared:",
         notes.get("skipped_text_paths"), lambda p: p, cap)
     return out
+
+
+#: File that carries the COMPLETE unpaired-string list, written beside the
+#: project's own log.  The log block above is capped because the pane is a
+#: viewport, and on a real card the cap is what the user actually sees: 195
+#: strings couldn't be paired, the log showed 40 and "...and 155 more", and the
+#: tester mailed in "The text does look like Stern items but I can only see the
+#: first section" (PAD-124).  So the whole list — every string, in full, not
+#: snippet-capped — goes to a file he can open, and the log says where.
+UNMATCHED_TEXT_REPORT = "unmatched-text.txt"
+
+
+def _text_full(s):
+    """Like :func:`_text_snippet` but for the report file: quoted and
+    control-char-escaped (a game string can carry a real line break, and one
+    row per line is what makes the file readable), never truncated."""
+    s = (s or "").replace("\\", "\\\\").replace("\r", "\\r")
+    s = s.replace("\n", "\\n").replace("\t", "\\t")
+    return '"%s"' % s
+
+
+def write_unmatched_text_report(notes, out_dir, modded_dir="", stock_dir=""):
+    """Write every string a :func:`diff_baked_mods` compare could NOT pair to
+    ``<out_dir>/logs/unmatched-text.txt`` and return that path.
+
+    Returns None when there is nothing to write, when no folder was given, or
+    when the write failed — like the session log, this is a convenience and
+    must never take a transfer down with it (a read-only folder, a NAS that
+    dropped, a full disk).
+
+    Grouped by asset and side, because on a real card every row of a block
+    repeats the same asset path and the same reason; the counts here match the
+    ones in the log.
+    """
+    rows = list(notes.get("unpaired_text_rows") or ())
+    paths = list(notes.get("skipped_text_paths") or ())
+    if not out_dir or not (rows or paths):
+        return None
+    groups = {}
+    for r in rows:
+        groups.setdefault((r["path"], r["side"]), []).append(r["text"])
+    out = ["Strings that could not be lined up between the two old-version "
+           "extracts", "=" * 74, "",
+           "Your modded extract: %s" % (modded_dir or "?"),
+           "Stock extract of the same version: %s" % (stock_dir or "?"),
+           "Written %s" % time.strftime("%Y-%m-%d %H:%M:%S"), "",
+           "No edit to any of these can be carried across. If you don't "
+           "recognise a line it is",
+           "the factory's own; if you do, it is yours and worth a second "
+           "look.", ""]
+    for (path, side), texts in groups.items():
+        out.append("%s  —  %d string(s) %s:"
+                   % (path, len(texts), _TEXT_SIDE.get(side, side)))
+        out.extend("    " + _text_full(t) for t in texts)
+        out.append("")
+    if paths:
+        out.append("%d asset(s) hold text in the stock extract but aren't in "
+                   "the modded one," % len(paths))
+        out.append("so their text couldn't be compared at all:")
+        out.extend("    " + p for p in paths)
+        out.append("")
+    dest = os.path.join(out_dir, session_log.PROJECT_LOG_DIR,
+                        UNMATCHED_TEXT_REPORT)
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write("\n".join(out))
+    except OSError:
+        return None
+    return dest
 
 
 def _unpaired_audio_lines(slots, cap=_DETAIL_CAP):

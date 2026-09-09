@@ -2752,8 +2752,12 @@ class App:
             "extract — progress below.", "info")
 
         def _work():
+            # report_dir is the NEW extract: the project being built, which
+            # already owns this run's project.log, so the full unpaired-text
+            # list lands beside it instead of in a read-only source folder.
             diff = mod_transfer.diff_baked_mods(modded_dir, stock_dir,
-                                                log_cb=log_cb)
+                                                log_cb=log_cb,
+                                                report_dir=target_dir)
             saved = diff["saved"]
             n_found = (len(saved["audio"]) + len(saved["video"])
                        + len(saved["image"]) + len(diff["text_rows"]))

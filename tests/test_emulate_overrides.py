@@ -780,7 +780,10 @@ def test_a_multi_image_card_says_which_image_the_edits_went_to(tmp_path,
         assert panel._prepare_overrides(img, assets, selector=True)
         root.update()
         note = [ln for ln in lines if "boot menu" in ln]
-        assert note and "largest game partition" in note[0]
+        # PAD-122 re-worded it: "the largest game partition" described the
+        # scan, not the answer — an extra image's partition can be the bigger
+        # one and still never be read, because it is a LOGICAL partition.
+        assert note and "the first game image on the card" in note[0]
         # ...and not on an ordinary single-image run.
         lines.clear()
         assert panel._prepare_overrides(img, assets)

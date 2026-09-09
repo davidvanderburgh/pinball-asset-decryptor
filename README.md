@@ -972,7 +972,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    how many — that pattern means one of the two folders was extracted by
    an older release rather than that the sound was re-recorded, so
    re-extracting both with this version and running the transfer again
-   is the fix. Image
+   is the fix. From v0.196.0 the strings a transfer could NOT line up
+   are named, not just counted: the log quotes each one under the asset
+   it came from and says which of the two old-version extracts it was
+   in, so you can tell at a glance whether the skipped text was one of
+   your own lines or something the factory reworded on its own. Sound
+   slots that exist on only one side, and text assets the modded
+   extract does not have at all, are listed the same way, and the
+   confirm dialog points at the log for the list. Image
    edits (including single-character font-glyph edits) and your renamed
    image-group names ride along too, matched by their on-card identity so
    they land on the right slot even when the new firmware re-baked the art

@@ -1698,3 +1698,58 @@ def test_no_build_script_installs_a_package_the_pinned_files_do_not_carry():
         assert not extra, (
             "%s installs %s outside the pinned requirement files"
             % (script.name, sorted(extra)))
+
+
+# ------------------------------------------- what uninstalling leaves behind --
+
+def test_the_uninstaller_offers_to_remove_everything_the_app_put_outside_itself():
+    """Since the app brings its own Linux, the biggest thing it installs is
+    not in its own folder: a registered WSL distro, a work disk measured in
+    gigabytes, and the downloads that built them.  Inno removes none of that
+    on its own, so an uninstall used to leave a machine's owner believing the
+    app was gone while gigabytes of it stayed.
+
+    The paths are asserted against the code that CREATES them, not written
+    out here a second time: three constants in three modules, and an
+    uninstaller naming a fourth spelling of any of them would delete nothing
+    and say nothing."""
+    import os
+    from pinball_decryptor.core import payloads, rigdata, runtime
+
+    text = ISS.read_text(encoding="utf-8", errors="replace")
+
+    # {localappdata}\pinball_decryptor\... is how Inno spells what these
+    # return under LOCALAPPDATA.
+    def as_inno(path):
+        local = os.environ.get("LOCALAPPDATA") or ""
+        assert local and path.startswith(local), (
+            "%s is no longer under LOCALAPPDATA, so the uninstaller's "
+            "{localappdata} spelling cannot reach it" % path)
+        return "{localappdata}" + path[len(local):]
+
+    saved = dict(os.environ)
+    for var in ("PAD_RUNTIME_DIR", "PAD_DATA_DISK", "PAD_PAYLOAD_DIR"):
+        os.environ.pop(var, None)
+    try:
+        for what, path in (("the runtime", runtime.install_dir()),
+                           ("the work disk", rigdata.disk_path()),
+                           ("the download cache", payloads.cache_root())):
+            assert as_inno(path) in text, (
+                "the uninstaller does not name %s (%s), so uninstalling "
+                "leaves it on the disk" % (what, as_inno(path)))
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+    # The distro is UNREGISTERED, not just deleted: removing the folder alone
+    # leaves WSL holding a registry entry for a distro whose disk is gone,
+    # which the user then has to clean up by hand.
+    assert "--unregister %s" % runtime.DISTRO in text
+    # ...and the work disk is detached before the file is removed, because WSL
+    # holds it open while it is attached.
+    assert "--unmount" in text
+    # Both are QUESTIONS.  An uninstall that silently deleted a user's
+    # extracted games would be a data loss, not a cleanup.
+    assert text.count("MB_YESNO") >= 2
+    # And a silent uninstall, which cannot answer them, removes nothing extra.
+    assert "UninstallSilent" in text

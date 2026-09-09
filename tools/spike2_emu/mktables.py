@@ -361,7 +361,14 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             made["group_node.txt"] = gn_dest
         except OSError as exc:
             say("  group map    FAILED to write %s: %s" % (gn_dest, exc))
-        pf = {g: n for g, n in sorted(mapping.items()) if g >= 6}
+        # WHICH GROUPS THIS LINE IS ABOUT: the ones that resolved to something
+        # other than the CPU/cabinet pin. `g >= 6` was the same set until the
+        # Home Editions arrived (PAD-120) - star_wars_elg and
+        # jurassic_park_the_pin put their whole playfield in GROUP 5, so the
+        # old filter printed "no playfield group resolves" over a map that had
+        # just resolved all 64 of one title's inserts onto node 8.
+        pf = {g: n for g, n in sorted(mapping.items())
+              if n != coilmap.FIXED_GROUPS.get(g)}
         say("  group map    %s" % (", ".join("group %d -> node %d" % (g, n)
                                              for g, n in pf.items())
                                    or "no playfield group resolves"))

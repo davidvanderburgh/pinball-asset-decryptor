@@ -250,6 +250,11 @@ RUN if [ "$VARIANT" = full ]; then \
 #:                      --no-install-recommends - an image with xvfb and no
 #:                      xauth has an xvfb-run that exits before it starts
 #:   webp               cwebp, the texture re-import in the BOF write pipeline
+#:   psmisc             fuser(1), which the multi-boot card builder asks who
+#:                      is holding a mountpoint before it detaches a stale
+#:                      loop device.  Not in any prerequisite table because
+#:                      every desktop distro has it - and its absence is not a
+#:                      missing feature but a FileNotFoundError mid-build
 #: tar, e2fsprogs, ffmpeg, xxd, zstd, gcc, libc6-dev, util-linux and mount are
 #: already here - from the base image, or from the two blocks above.
 RUN if [ "$VARIANT" = full ]; then \
@@ -265,6 +270,7 @@ RUN if [ "$VARIANT" = full ]; then \
         xvfb \
         xauth \
         webp \
+        psmisc \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 

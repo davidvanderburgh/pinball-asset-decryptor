@@ -979,7 +979,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    your own lines or something the factory reworded on its own. Sound
    slots that exist on only one side, and text assets the modded
    extract does not have at all, are listed the same way, and the
-   confirm dialog points at the log for the list. Image
+   confirm dialog points at the log for the list. From v0.199.0 that list is also written out in full: the log block stops at 40 lines so one card can't push the rest of the run out of the pane, and the complete list — every unpaired string entire, never shortened, grouped by the asset it came from and by which extract it was in, plus the text assets the modded extract does not carry at all — goes to `logs/unmatched-text.txt` beside that project's own `project.log`, with the log naming the path on the very next line. Image
    edits (including single-character font-glyph edits) and your renamed
    image-group names ride along too, matched by their on-card identity so
    they land on the right slot even when the new firmware re-baked the art
@@ -997,8 +997,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    panel swaps that one component so the two models' asset trees line
    up. It
    works even for code modded outside this app (mods baked into the game
-   itself), reads a version hint from each extract so you can see what
-   you're combining, and wires the build straight to the new version so
+   itself), reads a version hint from each of the four fields so you can
+   see what you're combining (from v0.199.0 the optional old-version
+   stock extract reports its version too, so the reference you picked
+   can be checked against field 1 at a glance instead of on trust),
+   and wires the build straight to the new version so
    the result can't accidentally come out on the old code.
 9. **Emulate tab** *(Stern Spike 2 — Windows via WSL2, Linux, or macOS in a container)* — run the
    game itself on this PC and watch what you built. Point it at a card

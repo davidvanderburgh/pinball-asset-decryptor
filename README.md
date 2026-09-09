@@ -1077,6 +1077,21 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    which lets loading a checkpoint taken before this change be refused
    in the pre-flight — before the running game is killed for it,
    rather than after.
+   **A Home Edition's inserts light.** Star Wars Home Edition and
+   Jurassic Park The Pin drew every insert dark through the whole
+   attract light show, on a playfield window whose own status bar was
+   counting tens of thousands of decoded lamp writes at the same time.
+   A Home Edition is ONE playfield board, and both titles describe
+   their whole machine — flippers, trough, pops and every positioned
+   insert — in a single group of the game binary's device table: a
+   group the rig had pinned to the board number a full cabinet uses for
+   its cabinet wiring. Neither machine has that board at all, so every
+   lamp on it was addressed to nothing. That pin is now read from the
+   table's own wiring column, when a majority of the group's rows name
+   one board, and it gives way to whatever the running game says about
+   itself instead of overriding it. Measured across every title in the
+   library that carries a device table, exactly two maps change, and
+   they are these two.
    **The switch list carries the game's own names.** A title whose
    device table describes only a handful of its switches used to leave
    the rest of the list as question marks — one 105-switch machine

@@ -146,7 +146,7 @@ def _isolate_audio_ctl(tmp_path_factory):
 
 
 # ---------------------------------------------------------------------------
-# Real-Tk tests all ride ONE xdist worker (--dist loadgroup).
+# Real-Tk tests ride a fixed, narrow set of xdist workers (--dist loadgroup).
 # ---------------------------------------------------------------------------
 # Under plain pytest the suite builds and destroys its Tk roots serially, and
 # has been stable that way for months.  Several xdist workers doing it
@@ -155,9 +155,9 @@ def _isolate_audio_ctl(tmp_path_factory):
 # 16-core Windows dev box, it is SLOWER too: the Tk-touching subset ran
 # ~100-130s serial but 172s spread over 8 workers, because window
 # create/map/destroy serializes at the desktop layer whatever the process
-# count.  Spreading Tk work anti-helps everywhere it was tried, so every
-# tkinter-touching module rides ONE xdist_group on every platform, and the
-# other workers parallelize the rest of the suite.
+# count.  So Tk work never spreads freely; it rides named groups, and the
+# other workers parallelize the rest of the suite.  How many groups is the
+# question the hook below answers, and the trade is written out there.
 #
 # MEMBERSHIP IS THE PART THAT WAS WRONG (2026-09-01).  The original sniff
 # looked only for the literal string "tkinter", which missed every file that
@@ -192,10 +192,27 @@ def _touches_tk(path):
 # or the marker arrives after the train has left.
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
-    on_ci = bool(os.environ.get("CI"))
+    # a76064c split the lane two ways LOCALLY (232s -> 177s) and left CI on
+    # the single group, reasoning that "CI wall time is not the constraint".
+    # It is now.  Measured on the 2026-09-09 Windows CI job: the tk lane ran
+    # 424s on gw0 while gw1/gw2/gw3 finished everything else in 281s and then
+    # sat idle for 3m26s -- the lane WAS the job.  The same lane costs 119s on
+    # the macOS runner, so Windows is both the slow lane and the runner this
+    # account queues longest for.
+    #
+    # Splitting test_gui_* (309s) from the emulator-window files (115s) puts
+    # the biggest group at 309s and the remaining 958s over three workers at
+    # 319s -- within ten seconds of a perfectly balanced 317s, so a 2-way
+    # split gets essentially all of the available win and a wider spread
+    # would only re-buy the desktop-layer anti-scaling a76064c measured.
+    #
+    # macOS CI keeps the single group: that is where the mid-Toplevel worker
+    # crash was seen, splitting it is unretested, and its lane is under two
+    # minutes so there is nothing there to win.
+    single_group = bool(os.environ.get("CI")) and sys.platform == "darwin"
     for item in items:
         if _touches_tk(item.path):
-            if on_ci:
+            if single_group:
                 group = "tk"
             else:
                 group = "tk-app" if "test_gui" in str(item.path) else "tk-emu"

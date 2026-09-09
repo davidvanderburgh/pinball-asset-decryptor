@@ -13,13 +13,32 @@ on:
 permissions:
   contents: read
 
+# Windows runners are the scarce resource in this account -- test.yml's
+# matrix and release.yml's build-windows are the only two consumers, and
+# on 2026-09-09 a Tests run's windows job sat in the queue 19 MINUTES
+# (13:10:44 -> 13:30:03) while its ubuntu and macos jobs started in three
+# seconds.  Every Tests run that is still burning a windows runner on a
+# superseded commit is a runner the next RELEASE build cannot have, so a
+# new push to a branch cancels that branch's older run.
+#
+# Only PRs cancel, and only PRs share a group.  A push to main keys its
+# group on the SHA instead, so main's runs neither cancel nor QUEUE BEHIND
+# one another -- a shared non-cancelling group serializes the runs in it and
+# lets a third one evict the pending second, which would delay and then
+# silently drop exactly the run /release watches as its post-tag yank
+# tripwire.  A tripwire that reports "cancelled" because a later merge
+# landed is a tripwire that tells us nothing.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     # A wedged or looping test should fail the job, not hang for the
     # 6-hour default and hold up a release.  Healthy runs finish in
-    # ~3m (Linux/macOS) and ~9m (the slower, tk-serial Windows run).
+    # ~3m (Linux/macOS) and ~6m (Windows, whose Tk lane is 4x macOS's).
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -29,19 +48,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The hosted Windows runner starts with only a few GB free on C:,
-      # and shipped an intermittent "There is not enough space on the disk"
-      # (the runner's own _diag block store) partway through the suite.
-      # Delete the big SDK caches our Python tests never touch — Android,
-      # CodeQL, and the .NET/Swift toolchains — to buy back ~10-15 GB.
-      # Best-effort: a missing path is fine, and we deliberately leave
-      # hostedtoolcache\windows\Python alone -- setup-python (next step)
+      # The hosted Windows runner once shipped an intermittent "There is not
+      # enough space on the disk" partway through the suite, so we delete the
+      # big SDK caches our Python tests never touch.  Two things were wrong
+      # with doing that unconditionally:
+      #
+      #   * It is usually not needed.  Measured 2026-09-09, the runner starts
+      #     with 31.9 GB free and the cleanup bought 5.9 GB nobody wanted.
+      #   * It is not cheap.  PowerShell's Remove-Item -Recurse walks every
+      #     file; the step took 1m17s on one run and 5m40s on the next, all
+      #     of it on the runner this account has least of.
+      #
+      # So: look first, and only pay when the disk is actually tight.  When
+      # it does run, delete with cmd's rd (one syscall-per-directory-tree,
+      # not a PowerShell object per file) and run the trees in parallel.
+      # hostedtoolcache\windows\Python is deliberately spared -- setup-python
       # needs it.
       - name: Free up disk space (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $before = (Get-PSDrive C).Free / 1GB
+          $free = (Get-PSDrive C).Free / 1GB
+          if ($free -ge 20) {
+            Write-Host ("C: has {0:N1} GB free -- skipping cleanup." -f $free)
+            exit 0
+          }
+          Write-Host ("C: has only {0:N1} GB free -- reclaiming." -f $free)
           $targets = @(
             "$env:ANDROID_SDK_ROOT",
             "$env:ANDROID_HOME",
@@ -51,15 +83,16 @@ jobs:
             "C:\Program Files\dotnet",
             "C:\Program Files\Microsoft SDKs\Azure",
             "C:\Swift"
-          )
-          foreach ($t in $targets) {
-            if ($t -and (Test-Path $t)) {
-              Write-Host "Removing $t"
-              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $t
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $jobs = foreach ($t in $targets) {
+            Write-Host "Removing $t"
+            Start-Job -ArgumentList $t -ScriptBlock {
+              param($p); & cmd.exe /c "rd /s /q `"$p`"" 2>&1 | Out-Null
             }
           }
+          if ($jobs) { $jobs | Wait-Job -Timeout 180 | Out-Null; $jobs | Remove-Job -Force }
           $after = (Get-PSDrive C).Free / 1GB
-          Write-Host ("C: free before={0:N1} GB, after={1:N1} GB" -f $before, $after)
+          Write-Host ("C: free before={0:N1} GB, after={1:N1} GB" -f $free, $after)
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -71,9 +104,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # pytest-xdist: the suite runs one worker per core (-n auto).
-          # The Windows runner takes ~4m30 single-process vs ~2m on the
-          # other OSes, and the tests wait is on the release critical
-          # path, so parallelism here is what keeps a release fast.
+          # Windows is far slower than the other OSes at the Tk window
+          # churn this suite does, and its runner is the one this account
+          # queues longest for, so parallelism here is what keeps the
+          # release critical path clear.
           pip install pytest pytest-xdist pycryptodome
           # Pillow is in requirements.txt — Williams' DMD render
           # path (dmd_render.py, capture_pipeline.py) imports it at
@@ -108,11 +142,13 @@ jobs:
       # remaining 250+ tests still exercise the picker / mfr-switch /
       # log persistence behaviour through their non-GUI entry points,
       # and the GUI smoke suite is run manually before tagging.
-      # --dist loadgroup honours the xdist_group("tk") marker conftest.py
-      # stamps on every tkinter-touching module: all real-Tk tests run
-      # serially on ONE worker (concurrent Tk across workers crashed a
-      # macOS worker and Windows App() fixtures on the first -n auto
-      # runs), while the other workers parallelize the rest.
+      # --dist loadgroup honours the xdist_group markers conftest.py stamps
+      # on every tkinter-touching module.  Real-Tk tests never spread freely
+      # across workers -- concurrent Tk crashed a macOS worker and Windows
+      # App() fixtures on the first -n auto runs, and window create/map/
+      # destroy serializes at the desktop layer anyway.  They ride two
+      # groups (app-fixture files vs emulator windows), except on macOS CI
+      # which keeps the single group; the other workers take the rest.
       - name: Run tests (Linux, under xvfb)
         if: runner.os == 'Linux'
         run: xvfb-run -a python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py

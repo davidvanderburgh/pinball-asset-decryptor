@@ -72,7 +72,7 @@ RUNTIME_VERSION = 6
 #: The image itself, pinned exactly like a payload binary - same download,
 #: same .part-then-verify, same offline "install from file" path.  Filled in
 #: by .github/workflows/runtime.yml, which prints these four fields (run
-#: 34304691929, 2026-09-09).  An empty sha256 means NOT YET PUBLISHED and every
+#: 34353540781, 2026-09-09).  An empty sha256 means NOT YET PUBLISHED and every
 #: entry point below reports "not available" rather than trying to fetch a file
 #: that does not exist - which is how the mechanism shipped before the image
 #: existed.  413 MB compressed, most of it the ARM cross compiler, ffmpeg,
@@ -81,10 +81,10 @@ RUNTIME_VERSION = 6
 IMAGE = Payload(
     key="runtime-full",
     filename="pad-runtime-full.tar.gz",
-    release_tag="runtime-6",
-    sha256="cb056136596f6f9a56265308c5e1578e59f5992687e4b8ff4660d781c972a750",
-    size=434090457,
-    version="PAD Runtime 5 (full)",
+    release_tag="runtime-7",
+    sha256="96d1966825e7a4593dcf1a0e62f581d3c1220ec0921dd603479e66dd50eeaeae",
+    size=434233620,
+    version="PAD Runtime 6 (full)",
     what="the Linux the emulator runs on, built and pinned by us",
     dest="",              # not a path inside Linux: this one becomes a distro
 )

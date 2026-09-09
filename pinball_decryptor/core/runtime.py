@@ -64,7 +64,7 @@ DISTRO = "PAD-Runtime"
 #: What the app expects to find inside an installed runtime
 #: (/etc/pad-runtime.json).  A runtime older than this is upgradeable, not
 #: broken: the app says so and offers to replace it.
-RUNTIME_VERSION = 3
+RUNTIME_VERSION = 4
 
 #: The image itself, pinned exactly like a payload binary - same download,
 #: same .part-then-verify, same offline "install from file" path.  Filled in

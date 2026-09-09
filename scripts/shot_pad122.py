@@ -12,9 +12,9 @@ the real code path over a real (small) multi-boot card image:
 
     python scripts/shot_pad122.py <out_dir> <before|after> [card.raw]
 
-The card is built by ``c:\\tmp\\pad122\\build_card.py`` under WSL (mke2fs -d
-into a real MBR/EBR layout — the extras sit in logical partitions exactly as
-``mkmulticard.py --layout parts`` puts them).  Audio and Text are unticked for
+The card is built by ``scripts/make_multiboot_fixture.py`` under WSL (mke2fs
+-d into a real MBR/EBR layout — the extras sit in logical partitions exactly
+as ``mkmulticard.py --layout parts`` puts them).  Audio and Text are unticked for
 the run so the shot is a complete, honest extract of that card rather than a
 firmware emulation of a fixture ELF.
 
@@ -52,7 +52,7 @@ DIALOG_TITLE = "Multi-boot card"
 
 if not os.path.isfile(CARD):
     sys.exit("No multi-boot card at %s — build it first:\n"
-             "  wsl python3 /mnt/c/tmp/pad122/build_card.py "
+             "  wsl python3 <repo>/scripts/make_multiboot_fixture.py "
              "/mnt/c/tmp/pad122/<name>.raw" % CARD)
 
 os.makedirs(OUT, exist_ok=True)

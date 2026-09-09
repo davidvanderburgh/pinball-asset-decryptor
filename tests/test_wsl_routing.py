@@ -267,3 +267,68 @@ def test_the_escape_hatch_puts_everything_back(monkeypatch):
 def test_off_windows_there_is_no_distro_to_route_into():
     runtime.invalidate()
     assert runtime.wsl_distro() is None
+
+
+# --------------------------------------- EVERY executor, not the one I knew --
+
+def _every_wsl_executor():
+    """Every WslExecutor class in the app, found by importing.
+
+    NAMED ONE AT A TIME IS HOW THIS WAS MISSED.  core/executor.py is not the
+    only executor: Barrels of Fun, Jersey Jack and Spooky each carry their own,
+    lifted from the standalone decryptor each plugin came from.  Routing the
+    core one and testing the core one left three manufacturers' extract and
+    write pipelines running in the user's distro while the prerequisite strip
+    reported on ours - the exact split this work exists to end, still live for
+    three of the seven makers, with a green test suite over it.
+
+    So this discovers them instead of listing them, and a fourth executor
+    added tomorrow is covered on the day it appears.
+    """
+    import importlib
+    import pkgutil
+
+    import pinball_decryptor.plugins as plugins
+    found = {}
+    mods = ["pinball_decryptor.core.executor"]
+    for m in pkgutil.iter_modules(plugins.__path__):
+        mods.append("pinball_decryptor.plugins.%s.executor" % m.name)
+    for name in mods:
+        try:
+            mod = importlib.import_module(name)
+        except ImportError:
+            continue
+        cls = getattr(mod, "WslExecutor", None)
+        if cls is not None:
+            found[name] = cls
+    return found
+
+
+def test_the_app_has_more_than_one_executor_and_the_scan_finds_them():
+    """A guard on the guard: if the plugins stop shipping their own, this test
+    should be deleted deliberately rather than quietly pass over nothing."""
+    found = _every_wsl_executor()
+    assert "pinball_decryptor.core.executor" in found
+    assert len(found) >= 4, (
+        "only %d WslExecutor classes found - the scan is not seeing the "
+        "plugins' own: %s" % (len(found), sorted(found)))
+
+
+def test_every_executor_in_the_app_runs_in_our_runtime(ours):
+    wrong = []
+    for name, cls in sorted(_every_wsl_executor().items()):
+        head = cls()._head()
+        if head[:3] != ["wsl.exe", "-d", DISTRO]:
+            wrong.append("%s -> %s" % (name, head[:4]))
+    assert not wrong, (
+        "these executors do not go to the app's own Linux, so the "
+        "manufacturers that use them run somewhere the prerequisite strip is "
+        "not reporting on: %s" % "; ".join(wrong))
+
+
+def test_every_executor_falls_back_the_same_way(theirs):
+    """And a machine without our runtime must be unchanged for all of them."""
+    for name, cls in sorted(_every_wsl_executor().items()):
+        head = cls()._head()
+        assert "-d" not in head, "%s -> %s" % (name, head)
+        assert head[:3] == ["wsl.exe", "-u", "root"], "%s -> %s" % (name, head)

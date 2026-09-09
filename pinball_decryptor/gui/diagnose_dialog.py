@@ -220,10 +220,18 @@ class DiagnoseCardDialog:
 
     # ------------------------------------------------------------------
     def _append(self, msg):
+        # Follow the tail only while the box is already at the tail, the same
+        # rule the main window's log pane uses: a report the user scrolled back
+        # into must not be yanked away by the next line of it.
+        try:
+            at_end = self._text.yview()[1] >= 0.99999
+        except (tk.TclError, IndexError):
+            at_end = True
         try:
             self._text.configure(state="normal")
             self._text.insert("end", msg + "\n")
-            self._text.see("end")
+            if at_end:
+                self._text.see("end")
             self._text.configure(state="disabled")
         except tk.TclError:
             pass

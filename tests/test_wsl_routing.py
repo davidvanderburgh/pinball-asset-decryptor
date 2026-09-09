@@ -332,3 +332,76 @@ def test_every_executor_falls_back_the_same_way(theirs):
         head = cls()._head()
         assert "-d" not in head, "%s -> %s" % (name, head)
         assert head[:3] == ["wsl.exe", "-u", "root"], "%s -> %s" % (name, head)
+
+
+# ------------------------------------- ...including the wrappers around them --
+#
+# THE HEAD IS NOT THE WHOLE ANSWER, and believing it was cost a working JJP
+# extract.  `_install_robust_run_host` SHADOWS `executor.run` on the instance
+# with a Popen-based version that could tree-kill a wedged WSL, and that
+# replacement spelled the argument list out for itself: ["wsl", "-u", "root",
+# "--", "bash", "-c"].  Nothing shadows `executor.stream`.  So `_head()` was
+# routed, the test above passed, and the two halves of a single phase ran in two
+# different Linuxes - the .iso mounted and listed by run() in the machine's
+# default distro, piped into partclone by stream() in ours, which reported the
+# parts it had been handed a second earlier as "No such file or directory".
+#
+# These ask the question at the level the fault lived at: what argv actually
+# reaches the operating system.
+
+
+class _FakeProc:
+    """Just enough of Popen for both call paths."""
+    returncode = 0
+
+    def __init__(self):
+        self.stdout = iter(())
+
+    def communicate(self, timeout=None):
+        return (b"", b"")
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        pass
+
+
+def _argv_of_each_path(monkeypatch):
+    """The argv `run` and `stream` really launch, in that order."""
+    from pinball_decryptor.plugins.jjp import executor as jjp_exec
+    from pinball_decryptor.plugins.jjp import pipeline as jjp_pipe
+
+    seen = []
+
+    def _popen(cmd, *a, **kw):
+        seen.append(list(cmd))
+        return _FakeProc()
+
+    monkeypatch.setattr(jjp_pipe.subprocess, "Popen", _popen)
+    monkeypatch.setattr(jjp_exec.subprocess, "Popen", _popen)
+
+    ex = jjp_pipe._install_robust_run_host(jjp_exec.WslExecutor())
+    ex.run("true")
+    list(ex.stream("true"))
+    assert len(seen) == 2, seen
+    return seen
+
+
+def test_the_jjp_pipeline_runs_and_streams_in_ONE_linux(ours, monkeypatch):
+    """The two must agree, because one phase uses both over the same files."""
+    ran, streamed = _argv_of_each_path(monkeypatch)
+    assert ran[:3] == ["wsl.exe", "-d", DISTRO], ran
+    assert streamed[:3] == ["wsl.exe", "-d", DISTRO], streamed
+    assert ran[:-1] == streamed[:-1], (
+        "run() and stream() build different heads, so a phase that mounts with "
+        "one and reads with the other looks at two machines: %s vs %s"
+        % (ran[:-1], streamed[:-1]))
+
+
+def test_the_jjp_pipeline_falls_back_in_ONE_linux_too(theirs, monkeypatch):
+    """A machine without our runtime: both go to the default, as they always
+    did.  The agreement is what is being pinned, not the presence of a -d."""
+    ran, streamed = _argv_of_each_path(monkeypatch)
+    assert "-d" not in ran and "-d" not in streamed, (ran, streamed)
+    assert ran[:-1] == streamed[:-1], (ran[:-1], streamed[:-1])

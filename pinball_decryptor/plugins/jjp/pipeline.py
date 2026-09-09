@@ -876,7 +876,18 @@ def _robust_run(executor):
 
     def _argv(bash_cmd):
         if cls == "WslExecutor":
-            return ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd]
+            # THE EXECUTOR'S OWN HEAD, asked for rather than spelled out again.
+            # It used to be written here a second time, as ["wsl", "-u", "root",
+            # "--", "bash", "-c"], and that copy never grew the `-d` that names
+            # the distro this app installs.  Since this function SHADOWS
+            # executor.run and nothing shadows executor.stream, the two halves
+            # of one phase then ran in two different Linuxes: the extract
+            # mounted the .iso with run() in the machine's default distro, and
+            # listed the partclone parts there, and then piped them into
+            # partclone with stream() in ours, where that mount does not exist -
+            # "cat: .../sda3.ext4-ptcl-img.gz.aa: No such file or directory"
+            # over an .iso that was mounted a second earlier.
+            return list(executor._head()) + [bash_cmd]
         if cls == "NativeExecutor":
             return [*executor._cmd_prefix(), bash_cmd]
         if cls == "DockerExecutor":

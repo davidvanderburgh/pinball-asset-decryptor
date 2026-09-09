@@ -2557,6 +2557,24 @@ def _run(argv, ok_rc=(0,)):
     return out
 
 
+def losetup_detach(loop):
+    """Detach `loop`.  -> an error string, or None when it is gone.
+
+    ENXIO ("No such device or address") is NOT an error here: it means the
+    loop is ALREADY detached, which is the state this call exists to reach.
+    The kernel's autoclear gets there first whenever the last opener closed
+    before we asked -- seen on the hosted Linux runner 2026-09-09, where it
+    failed a card build mid-resize2fs and turned a fully green test suite
+    into a red job.  A red job on main yanks a release, so a teardown that
+    reports success-by-another-route as failure is a release hazard.
+    """
+    r = subprocess.run(["losetup", "-d", loop], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    msg = r.stdout.decode("utf-8", "replace").strip()
+    if r.returncode == 0 or "no such device or address" in msg.lower():
+        return None
+    return msg or ("rc=%d" % r.returncode)
+
+
 def parse_losetup_j(text):
     """`losetup -j FILE` lines -> [(loop device, offset)].  Format: '/dev/loop3: [2049]:1234
     (/path/to/file), offset 364904448' (the offset field is absent for offset 0)."""
@@ -2594,7 +2612,7 @@ def sweep_stale_loops(card):
     for loop, _off in parse_losetup_j(r.stdout.decode("utf-8", "replace")):
         mp = loop_mountpoint(loop)
         if mp is None:
-            _run(["losetup", "-d", loop])
+            losetup_detach(loop)
             say("detached a stale loop %s of %s (attached, not mounted)" % (loop, os.path.basename(card)))
             n += 1
             continue
@@ -2606,7 +2624,7 @@ def sweep_stale_loops(card):
                           "still running" % (os.path.basename(card), mp, loop))
         say("unmounting a stale mount %s (loop %s) an interrupted run left" % (mp, loop))
         _run(["umount", mp])
-        _run(["losetup", "-d", loop])
+        losetup_detach(loop)
         try:
             os.rmdir(mp)
         except OSError:
@@ -2727,9 +2745,9 @@ class LoopMount:
             except OSError:
                 pass
         if self.loop:
-            r = subprocess.run(["losetup", "-d", self.loop], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            if r.returncode != 0:
-                problems.append("losetup -d %s: %s" % (self.loop, r.stdout.decode("utf-8", "replace").strip()))
+            err = losetup_detach(self.loop)
+            if err:
+                problems.append("losetup -d %s: %s" % (self.loop, err))
         import signal
         for sig, old in self._old.items():
             try:
@@ -6180,7 +6198,7 @@ def selftest(d, selector_file=None):
         finally:
             _run(["umount", foreign])
     finally:
-        _run(["losetup", "-d", loop])
+        losetup_detach(loop)
         os.rmdir(foreign)
     print("SELFTEST part 5 (update)", "PASS" if ok else "FAIL")
 

@@ -18,6 +18,8 @@ import sys
 
 import pytest
 
+from tests.conftest import sparse_image
+
 RIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "tools", "spike2_emu")
 
@@ -576,9 +578,7 @@ def test_multi_plan_puts_every_extra_inside_one_p7(mk, tmp_path):
     p8, nothing unreachable; the table is p1..p7."""
     extras = []
     for i in range(3):
-        p = str(tmp_path / ("x%d.raw" % i))
-        with open(p, "wb") as f:
-            f.truncate(STOCK_8G_SIZE)
+        p = sparse_image(str(tmp_path / ("x%d.raw" % i)), STOCK_8G_SIZE)
         _fake_ext4(p, 1675263, 760265, offset=712704 * 512)
         extras.append(p)
     plan = mk.Plan(stock_8g(mk), [extra_8g(mk, x) for x in extras], "a.raw", extras, "multi")
@@ -607,9 +607,7 @@ def test_multi_plan_puts_every_extra_inside_one_p7(mk, tmp_path):
 
 
 def test_print_plan_describes_the_multi_partition(mk, tmp_path, capsys):
-    p = str(tmp_path / "x.raw")
-    with open(p, "wb") as f:
-        f.truncate(STOCK_8G_SIZE)
+    p = sparse_image(str(tmp_path / "x.raw"), STOCK_8G_SIZE)
     _fake_ext4(p, 1675263, 760265, offset=712704 * 512)
     plan = mk.Plan(stock_8g(mk), [extra_8g(mk, p), extra_8g(mk, p)], "a.raw", [p, p], "multi")
     mk.print_plan(plan)

@@ -49,32 +49,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The hosted Windows runner once shipped an intermittent "There is not
-      # enough space on the disk" partway through the suite, so we delete the
-      # big SDK caches our Python tests never touch.  Two things were wrong
-      # with doing that unconditionally:
+      # The hosted Windows runner ships an intermittent "There is not enough
+      # space on the disk" (the runner's own _diag block store) partway
+      # through the suite, so we delete the big SDK caches our Python tests
+      # never touch -- Android, CodeQL, the .NET/Swift toolchains.
       #
-      #   * It is usually not needed.  Measured 2026-09-09, the runner starts
-      #     with 31.9 GB free and the cleanup bought 5.9 GB nobody wanted.
-      #   * It is not cheap.  PowerShell's Remove-Item -Recurse walks every
-      #     file; the step took 1m17s on one run and 5m40s on the next, all
-      #     of it on the runner this account has least of.
+      # DO NOT make this conditional on free space.  Tried 2026-09-09, skip
+      # above 20 GB: the runner came up with 29.4 GB free, the step skipped,
+      # and the suite died on a full disk four minutes in.  The ~6 GB this
+      # buys is not slack, it is the margin -- runners start somewhere around
+      # 29-32 GB and the suite needs more than the low end of that.  A run
+      # that starts high enough to skip safely is indistinguishable from one
+      # that does not.
       #
-      # So: look first, and only pay when the disk is actually tight.  When
-      # it does run, delete with cmd's rd (one syscall-per-directory-tree,
-      # not a PowerShell object per file) and run the trees in parallel.
+      # What WAS worth fixing is the cost.  Remove-Item -Recurse walks every
+      # file and took 1m17s on one run and 5m40s on the next, all of it on
+      # the runner this account queues longest for.  cmd's rd hands the whole
+      # tree to the filesystem, and the trees go in parallel.
       # hostedtoolcache\windows\Python is deliberately spared -- setup-python
       # needs it.
       - name: Free up disk space (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $free = (Get-PSDrive C).Free / 1GB
-          if ($free -ge 20) {
-            Write-Host ("C: has {0:N1} GB free -- skipping cleanup." -f $free)
-            exit 0
-          }
-          Write-Host ("C: has only {0:N1} GB free -- reclaiming." -f $free)
+          $before = (Get-PSDrive C).Free / 1GB
           $targets = @(
             "$env:ANDROID_SDK_ROOT",
             "$env:ANDROID_HOME",
@@ -91,9 +89,9 @@ jobs:
               param($p); & cmd.exe /c "rd /s /q `"$p`"" 2>&1 | Out-Null
             }
           }
-          if ($jobs) { $jobs | Wait-Job -Timeout 180 | Out-Null; $jobs | Remove-Job -Force }
+          if ($jobs) { $jobs | Wait-Job -Timeout 300 | Out-Null; $jobs | Remove-Job -Force }
           $after = (Get-PSDrive C).Free / 1GB
-          Write-Host ("C: free before={0:N1} GB, after={1:N1} GB" -f $free, $after)
+          Write-Host ("C: free before={0:N1} GB, after={1:N1} GB" -f $before, $after)
 
       - name: Set up Python
         uses: actions/setup-python@v5

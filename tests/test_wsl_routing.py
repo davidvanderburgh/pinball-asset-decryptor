@@ -399,6 +399,47 @@ def test_the_jjp_pipeline_runs_and_streams_in_ONE_linux(ours, monkeypatch):
         % (ran[:-1], streamed[:-1]))
 
 
+# ------------------------------------- ...and the way back out of Linux --
+#
+# ★ A PATH INTO LINUX IS ALSO A PATH BACK.  Three places in the app turn a
+# Linux path into a Windows one, `\\wsl.localhost\<distro>\...`, and every one
+# of them has to name the distro the work was actually done in.  Chicago
+# Gaming's did not: it took the first name `wsl -l -q` printed.  That agreed
+# with the executor for exactly as long as the executor also used the machine's
+# default distro - so this branch, which moved the executor and not the
+# read-back, broke every CGC extract on a machine with our runtime.  The whole
+# game was staged into PAD-Runtime by `debugfs rdump` (up to 1800 s) and then
+# read back out of Ubuntu, where the directory does not exist.
+
+
+def _cgc_host_path():
+    from pinball_decryptor.plugins.cgc import pipeline as cgc
+    p = cgc.ExtractPipeline.__new__(cgc.ExtractPipeline)
+    return cgc.ExtractPipeline._exec_to_host(p, "/var/tmp/cgc_stage_x/out")
+
+
+def test_the_cgc_extract_reads_back_from_the_linux_it_staged_into(
+        ours, monkeypatch):
+    from pinball_decryptor.plugins.cgc import pipeline as cgc
+    monkeypatch.setattr(cgc.sys, "platform", "win32")
+    # The old guess, still there as the no-runtime fallback, must not win.
+    monkeypatch.setattr(cgc, "_detect_wsl_distro", lambda: "Ubuntu")
+    host = _cgc_host_path()
+    assert DISTRO in host, (
+        "CGC stages into %s and reads back from %s, so the extract dies on a "
+        "directory that is not there: %s" % (DISTRO, "somewhere else", host))
+    assert "Ubuntu" not in host
+
+
+def test_without_our_runtime_cgc_reads_back_the_way_it_always_did(
+        theirs, monkeypatch):
+    """A machine with no runtime keeps the old guess, unchanged."""
+    from pinball_decryptor.plugins.cgc import pipeline as cgc
+    monkeypatch.setattr(cgc.sys, "platform", "win32")
+    monkeypatch.setattr(cgc, "_detect_wsl_distro", lambda: "Ubuntu")
+    assert "Ubuntu" in _cgc_host_path()
+
+
 def test_the_jjp_pipeline_falls_back_in_ONE_linux_too(theirs, monkeypatch):
     """A machine without our runtime: both go to the default, as they always
     did.  The agreement is what is being pinned, not the presence of a -d."""

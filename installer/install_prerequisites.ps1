@@ -149,6 +149,23 @@ function Get-WslDefaultDistro($Want) {
 # Detected by asking the distro to describe itself rather than by trusting
 # the name: a distro someone else called PAD-Runtime is not ours, and the
 # manifest is the same file the app reads to decide the very same question.
+# ★ AND THE VERSION HAS TO MATCH, not merely be present.
+#
+# The app REFUSES a runtime whose stamp is not the number it expects:
+# runtime.wsl_distro() answers None and every command goes to the machine's
+# default distro instead. This asked only "is there a runtime_version field at
+# all", so on an updating machine - which is every machine that had the runtime
+# before this app version - the two disagreed: the app ran in the user's own
+# distro while this installed apt packages into PAD-Runtime. The user presses
+# the thing that is supposed to fix their setup, waits, and the red rows stay
+# red because the tools went to a Linux nothing runs in. That is the exact
+# failure this whole routing effort exists to end, arriving through the
+# installer instead of the app.
+#
+# MUST MATCH pinball_decryptor/core/runtime.py RUNTIME_VERSION.
+# tests/test_installer.py fails if the two ever drift.
+$script:PadRuntimeVersion = 6
+
 function Get-PadRuntimeDistro {
     if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) { return $null }
     $name = "PAD-Runtime"
@@ -158,7 +175,9 @@ function Get-PadRuntimeDistro {
         $out = ((& wsl -d $name -u root -- bash -c "cat /etc/pad-runtime.json" 2>&1 |
                  Out-String) -replace "`0", "")
     } catch { return $null }
-    if ($out -match '"runtime_version"') { return $name }
+    if ($out -match '"runtime_version"\s*:\s*(\d+)') {
+        if ([int]$Matches[1] -eq $script:PadRuntimeVersion) { return $name }
+    }
     return $null
 }
 

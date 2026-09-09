@@ -3230,6 +3230,42 @@ class EmulatePanel:
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _reattach_data_disk(self):
+        """Attach the work disk again if it exists and is not attached.
+        ATTACH ONLY - this never creates one.  Worker thread; Start calls it.
+
+        ★ /mnt/wsl IS A TMPFS, and the disk is an ext4 volume attached over the
+        top of it.  `wsl --shutdown`, a reboot and WSL's own idle timeout all
+        drop that mount and leave the FILE, and `_rig_env` hands the rig the
+        path whenever the file exists - so without this, the first Start after
+        a restart writes the extracted rootfs and then the card cache into the
+        tmpfs underneath.  Several GB into RAM, silently.  rootfs.sh now
+        refuses that outright, which turns it into a stopped run with an
+        explanation; this is what stops it being a stopped run at all.
+
+        THE LINE BETWEEN THIS AND _ensure_data_disk IS THE WHOLE POINT.
+        Creating a disk here would be a migration - it would move a user who
+        has been running without one and leave their card cache behind in the
+        distro, which is a re-copy of several GB that looks like losing it.
+        Re-attaching a disk they already have strands nothing and repairs the
+        one state that silently costs them memory.
+        """
+        if not runtime.wsl_distro() or not rigdata.exists():
+            return
+        d = runtime.wsl_distro()
+        try:
+            if rigdata.attached(d):
+                return
+            self._log("[emulate] the emulator's work disk came unattached "
+                      "(a WSL restart does that); attaching it again.")
+            rigdata.attach(d)
+        except Exception as exc:                           # noqa: BLE001
+            # Not fatal here: rootfs.sh refuses a memory-backed destination on
+            # its own, so the worst case is a run that stops and says why
+            # rather than one that fills RAM.
+            self._log("[emulate] could not re-attach the work disk (%s). The "
+                      "run will stop rather than write into memory." % exc)
+
     def _ensure_data_disk(self):
         """Make the work disk, RIGHT AFTER a runtime install and nowhere else.
 
@@ -4943,6 +4979,7 @@ class EmulatePanel:
 
         def run():
             self._note_the_runtime_is_a_different_machine()
+            self._reattach_data_disk()
             # DOCKER IS CHECKED HERE, in the worker, so a slow probe cannot
             # freeze the tab - and it is checked on every Start rather than
             # trusted from build time, because the user may have installed or

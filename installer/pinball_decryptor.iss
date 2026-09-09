@@ -254,10 +254,21 @@ begin
                '{localappdata}\pinball_decryptor\data\pad-data.vhdx'));
 
   if HasRuntime then
+    { IT IS NOT ALWAYS "not your data", AND SAYING SO WAS A LIE THE USER      }
+    { COULD NOT CHECK.  The rigs keep their extracted games, their card       }
+    { caches and their SAVE-STATE SLOTS on the work disk below - but only     }
+    { when there IS one.  A machine that never made that disk keeps all of it }
+    { INSIDE this distro, which is what this prompt is offering to delete.    }
+    { A save state is something a person made and cannot get back, so the     }
+    { sentence in front of it has to say that it might be in there.           }
     if MsgBox('Also remove the Linux this app installed (PAD-Runtime) and the ' +
               'files it downloaded?' + #13#10 + #13#10 +
-              'This is about a gigabyte. It is not your data, and a ' +
-              'reinstalled app can fetch it again.',
+              'This is about a gigabyte, and a reinstalled app can fetch it ' +
+              'again.' + #13#10 + #13#10 +
+              'If you used the emulator BEFORE the work disk below existed, ' +
+              'your extracted games, cached cards and SAVE STATES are inside ' +
+              'this Linux, and removing it deletes them. Choose No if you are ' +
+              'not sure.',
               mbConfirmation, MB_YESNO) = IDYES then
       RemoveTheRuntimeDistro();
 

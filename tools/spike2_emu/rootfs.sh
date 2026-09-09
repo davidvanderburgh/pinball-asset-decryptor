@@ -89,6 +89,37 @@ case "$ROOT_FS" in
         echo "[rootfs] intact - ld-linux.so.3 would vanish and nothing in the" >&2
         echo "[rootfs] guest would link. Put PAD_ROOT on the WSL disk." >&2
         exit 1 ;;
+    # ★ AND RAM, WHICH THE /mnt RULE USED TO CATCH BY ACCIDENT AND THE
+    # FILESYSTEM RULE ABOVE LET THROUGH.
+    #
+    # /mnt/wsl IS A TMPFS. The data disk is an ext4 volume attached over the
+    # top of it at /mnt/wsl/paddata, and the app hands the rig that path
+    # whenever the disk FILE exists - not whenever it is attached. A WSL
+    # restart drops the mount and leaves the file, so the next Start writes
+    # into the tmpfs underneath: the extracted rootfs and then the card cache,
+    # several GB, into memory. The old "refuse anything under /mnt" shorthand
+    # stopped that with a clear message; replacing it with a filesystem test
+    # that has no tmpfs in it turned a refusal into a silent multi-GB write
+    # into RAM, on the arrangement the app sets up by default.
+    #
+    # It is also just wrong on its own terms, disk or no disk: a rootfs on
+    # tmpfs is gone at the next restart, so every run would re-extract it.
+    tmpfs|ramfs)
+        echo "[rootfs] REFUSING: $ROOT is in MEMORY ($ROOT_FS), not on a disk." >&2
+        case "$ROOT" in
+            /mnt/wsl/*)
+                echo "[rootfs] That path is the emulator's work disk, and it is" >&2
+                echo "[rootfs] NOT ATTACHED right now - /mnt/wsl is a tmpfs, so" >&2
+                echo "[rootfs] this run would put the rootfs and the card cache" >&2
+                echo "[rootfs] in RAM and lose them at the next WSL restart." >&2
+                echo "[rootfs] Attach it again from the app (the Emulate tab" >&2
+                echo "[rootfs] re-attaches it), or restart WSL and try again." >&2 ;;
+            *)
+                echo "[rootfs] A rootfs there does not survive a restart, so the" >&2
+                echo "[rootfs] guest would re-extract on every run. Point" >&2
+                echo "[rootfs] PAD_ROOT at a real filesystem." >&2 ;;
+        esac
+        exit 1 ;;
 esac
 
 command -v debugfs >/dev/null 2>&1 || {

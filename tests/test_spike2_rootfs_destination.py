@@ -171,6 +171,50 @@ def test_the_home_disk_is_still_allowed(tmp_path):
 
 
 @needs_bash
+@pytest.mark.parametrize("fstype", ["tmpfs", "ramfs"])
+def test_a_memory_backed_destination_is_refused(tmp_path, fstype):
+    """★ WHAT THE OLD /mnt RULE CAUGHT BY ACCIDENT AND THE FILESYSTEM RULE LET
+    THROUGH.
+
+    /mnt/wsl is a tmpfs; the data disk is an ext4 volume attached over the top
+    of it.  A WSL restart drops that mount and leaves the FILE, and the app
+    hands the rig the path whenever the file exists - so the next Start wrote
+    the extracted rootfs and then the card cache into the tmpfs underneath.
+    Several GB into RAM, with no message.  "Refuse anything under /mnt" used to
+    stop that; replacing it with a filesystem test that had no tmpfs in it
+    turned a refusal into a silent memory write, on the arrangement the app
+    sets up by default.
+
+    It is wrong on its own terms too, disk or no disk: a rootfs on tmpfs is
+    gone at the next restart, so every run would re-extract it.
+    """
+    r = _run_rootfs(tmp_path, fstype, "/mnt/wsl/paddata/spike2/spike2root")
+    said = r.stdout + r.stderr
+    assert "REFUSING" in said, (
+        "the rig would extract the rootfs and the card cache into RAM:\n"
+        + said[:800])
+    assert r.returncode == 1
+    # And it has to say WHICH thing is wrong.  "Windows or network filesystem"
+    # would send the reader to look at their drives; the fault is an unattached
+    # disk, and the cure is to attach it.
+    assert "MEMORY" in said, said[:600]
+    assert "NOT ATTACHED" in said, said[:600]
+
+
+@needs_bash
+def test_a_memory_destination_outside_the_work_disk_says_the_other_thing(
+        tmp_path):
+    """A tmpfs that is NOT the work disk (someone pointing PAD_ROOT at /tmp)
+    gets the reason that actually applies to them, not an instruction to
+    re-attach a disk they never had."""
+    r = _run_rootfs(tmp_path, "tmpfs", "/tmp/spike2root")
+    said = r.stdout + r.stderr
+    assert "REFUSING" in said and r.returncode == 1
+    assert "NOT ATTACHED" not in said, said[:600]
+    assert "does not survive a restart" in said, said[:600]
+
+
+@needs_bash
 def test_the_script_is_really_running(tmp_path):
     """A guard on the guard.  The two assertions above are about the ABSENCE
     of a word, so a run that died before it ever reached the filesystem check

@@ -1848,3 +1848,69 @@ def test_no_two_string_literals_in_the_iss_are_joined_by_nothing():
         "these string literals in pinball_decryptor.iss are followed by "
         "another with no '+' between them, which Inno rejects as a syntax "
         "error on the NEXT line: %s" % "; ".join(offenders))
+
+
+# --------------------------------------------------------------------------
+# ...and the two places the installer has to agree with the app about
+# --------------------------------------------------------------------------
+
+def test_the_prereq_installer_only_targets_a_runtime_the_app_will_use():
+    """★ THE VERSION HAS TO MATCH, not merely be present.
+
+    The app REFUSES a runtime whose stamp is not the number it expects:
+    ``runtime.wsl_distro()`` answers None and every command goes to the
+    machine's default distro.  This script asked only whether a
+    ``runtime_version`` field existed at all, so on an updating machine - which
+    is every machine that had the runtime before this app version - the two
+    disagreed: the app ran in the user's own distro while the installer put apt
+    packages into PAD-Runtime.  The user presses the thing that is meant to fix
+    their setup, waits, and the red rows stay red, because the tools went to a
+    Linux nothing runs in.
+    """
+    from pinball_decryptor.core import runtime
+
+    body = PS1.read_text(encoding="utf-8", errors="replace")
+
+    m = re.search(r"\$script:PadRuntimeVersion\s*=\s*(\d+)", body)
+    assert m, "install_prerequisites.ps1 does not pin a runtime version at all"
+    assert int(m.group(1)) == runtime.RUNTIME_VERSION, (
+        "the installer targets runtime version %s and the app expects %s, so "
+        "one of them is aiming at a Linux the other will not use"
+        % (m.group(1), runtime.RUNTIME_VERSION))
+
+    # And the probe must actually COMPARE it. A pinned constant nothing reads
+    # is worse than none: it reads as covered.
+    probe = body[body.index("function Get-PadRuntimeDistro"):]
+    probe = probe[:probe.index("\n}")]
+    assert "PadRuntimeVersion" in probe, (
+        "Get-PadRuntimeDistro does not compare the version it found against "
+        "the one this build expects")
+    assert "runtime_version" in probe and r"(\d+)" in probe, (
+        "the version is not captured out of the manifest, so there is nothing "
+        "to compare against: %s" % probe[-400:])
+
+
+def test_the_uninstaller_does_not_call_the_runtime_not_your_data():
+    """★ IT IS NOT ALWAYS "not your data", AND THE USER CANNOT CHECK.
+
+    The rigs keep extracted games, cached cards and SAVE-STATE SLOTS on the
+    work disk - but only when there IS one, and only the Spike 1 tab ever made
+    it.  A machine that never made that disk keeps all of it INSIDE the distro
+    this prompt offers to delete.  A save state is something a person made and
+    cannot get back, so the sentence in front of an irreversible delete may not
+    tell them it is not theirs.
+    """
+    body = ISS.read_text(encoding="utf-8", errors="replace")
+    i = body.index("Also remove the Linux this app installed")
+    prompt = body[i:i + 900]
+
+    assert "not your data" not in prompt, (
+        "the runtime prompt still tells the user the distro holds nothing of "
+        "theirs, immediately before deleting it:\n" + prompt[:400])
+    assert "SAVE STATES" in prompt, (
+        "the prompt does not name what can be inside:\n" + prompt[:400])
+
+    # The work-disk prompt was always honest; it must stay that way.
+    j = body.index("Also delete the emulator")
+    disk = body[j:j + 700]
+    assert "YOUR work" in disk and "cannot be undone" in disk, disk[:400]

@@ -33,6 +33,7 @@ import zipfile
 from ...core.checksums import (CHECKSUMS_FILE, NON_ASSET_DIRS,
                                TRACKING_SIDECARS, generate_checksums,
                                md5_file, read_checksums)
+from ...core import runtime
 from ...core.executor import CommandError, create_executor
 from ...core.pipeline_base import BasePipeline, PipelineError
 from ...core.elevated_flash import flash_image_with_privileges
@@ -155,14 +156,29 @@ class ExtractPipeline(BasePipeline):
         self.decode_dmd = decode_dmd
 
     def _exec_to_host(self, exec_path):
-        """Inverse of ``executor.to_exec_path`` for our /tmp/cgc_stage_*
-        staging paths.
+        """Inverse of ``executor.to_exec_path`` for our staging paths.
 
-        On Windows/WSL, ``/tmp/cgc_stage_<pid>`` on the WSL side is
-        reachable from Windows at
-        ``\\\\wsl.localhost\\<distro>\\tmp\\cgc_stage_<pid>``.  We can't
-        ask the executor for the distro name without a subprocess call,
-        but we can list the WSL distros once and cache.
+        A staging directory written on the WSL side is reachable from Windows
+        at ``\\\\wsl.localhost\\<distro>\\<unix path>`` - and THE DISTRO HAS TO
+        BE THE ONE THE EXECUTOR ACTUALLY RAN IN.  It asks
+        :func:`core.runtime.wsl_distro` for that, exactly as
+        :mod:`core.clonezilla` does for the ISO share, and for the same reason.
+
+        ★ IT DID NOT, AND THAT BROKE EVERY CGC EXTRACT ON A MACHINE WITH OUR
+        RUNTIME.  This guessed - it took the first name ``wsl -l -q`` printed -
+        which agreed with the executor for as long as the executor also used
+        the machine's default distro.  Once the executor moved into our own
+        Linux, the two halves of one phase looked at two machines: `debugfs
+        rdump` staged the whole game into PAD-Runtime (the long step, up to
+        1800 s), and then this built a path into Ubuntu, where the directory
+        does not exist.  ``_copy_tree_into`` raises "Source staging dir
+        missing", naming a path the user can go and confirm is not there, which
+        points them at the wrong Linux - and the ``finally`` deletes the stage,
+        so a retry pays the whole cost again.
+
+        The old guess stays as the fallback for a machine with no runtime,
+        where it is what it always was.  Both answers are cached together: a
+        run must not change its mind halfway through.
         """
         if not exec_path.startswith("/"):
             return exec_path
@@ -171,7 +187,8 @@ class ExtractPipeline(BasePipeline):
         if sys.platform != "win32":
             return exec_path
         if not hasattr(self, "_wsl_distro"):
-            self._wsl_distro = _detect_wsl_distro() or "Ubuntu"
+            self._wsl_distro = (runtime.wsl_distro()
+                                or _detect_wsl_distro() or "Ubuntu")
         return rf"\\wsl.localhost\{self._wsl_distro}{exec_path.replace('/', os.sep)}"
 
     def _run(self):

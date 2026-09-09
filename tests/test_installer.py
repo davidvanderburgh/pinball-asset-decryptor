@@ -1753,3 +1753,61 @@ def test_the_uninstaller_offers_to_remove_everything_the_app_put_outside_itself(
     assert text.count("MB_YESNO") >= 2
     # And a silent uninstall, which cannot answer them, removes nothing extra.
     assert "UninstallSilent" in text
+
+
+def test_no_pascal_comment_in_the_iss_contains_a_brace():
+    """In Inno's Pascal, ``{`` opens a comment and the FIRST ``}`` closes it -
+    so a constant written into prose, ``{localappdata}`` say, ends the comment
+    early and everything after it is parsed as code.
+
+    The compiler's whole account of this is ``'BEGIN' expected`` on a line of
+    English, and there is no Inno on a developer's machine to hear it from -
+    it costs a CI round trip on a release build to find out.  That is what
+    this test is for: it happened once, to the uninstall block, and the
+    symptom was a release that would not build.
+
+    Scanned rather than grepped, because a brace inside a STRING is ordinary
+    and correct - the code is full of ExpandConstant calls that need them;
+    only a brace inside a comment is the fault.
+    """
+    text = ISS.read_text(encoding="utf-8", errors="replace")
+    code = text[text.index("[Code]"):]
+    line, col = code[:0].count("\n") + 1, 0
+    in_string = in_comment = False
+    comment_started_at = 0
+    offenders = []
+    i = 0
+    while i < len(code):
+        ch = code[i]
+        if ch == "\n":
+            line += 1
+        if in_comment:
+            if ch == "{":
+                offenders.append(line)
+            elif ch == "}":
+                in_comment = False
+        elif in_string:
+            if ch == "'":
+                in_string = False
+        elif ch == "'":
+            in_string = True
+        elif ch == "/" and code[i:i + 2] == "//":
+            nl = code.find("\n", i)
+            if nl < 0:
+                break
+            line += 1
+            i = nl + 1
+            continue
+        elif ch == "{":
+            in_comment = True
+            comment_started_at = line
+        i += 1
+    assert not offenders, (
+        "these lines of pinball_decryptor.iss put a brace inside a Pascal "
+        "comment, which ends the comment there and makes the rest of the "
+        "sentence into code: lines %s (offsets within the [Code] section). "
+        "Write the constant's name without braces."
+        % ", ".join(str(n) for n in offenders))
+    assert not in_comment, (
+        "a Pascal comment opened at line %d of the [Code] section and is "
+        "never closed" % comment_started_at)

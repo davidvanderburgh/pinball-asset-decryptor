@@ -198,8 +198,12 @@ end;
   Silent uninstalls remove nothing extra.  A script that cannot answer a
   question must not have data deleted on its behalf.
 
-  AND THIS RUNS ELEVATED (PrivilegesRequired=admin), so {localappdata} is the
-  ELEVATING account's, while the app itself ran unelevated as its owner.  On
+  AND THIS RUNS ELEVATED (PrivilegesRequired=admin), so the localappdata
+  constant below is the ELEVATING account's - note that a brace pair cannot
+  be written inside a Pascal comment here, because the first closing brace
+  ENDS the comment and everything after it is parsed as code, which is how
+  this block first failed to compile - while the app itself ran unelevated as
+  its owner.  On
   the ordinary machine those are one account and UAC only raised it.  Where
   they are not - a standard user who typed an administrator's password - the
   paths below simply do not exist, both questions are skipped, and nothing is

@@ -322,6 +322,31 @@ def s_wait(n=0):
 def s_log():
     tail_log()
     snap("%s_extract_log.png" % WHEN)
+    root.after(600, s_info)
+
+
+def s_info():
+    """Third shot: the Info window's own report on the same card.
+
+    Its probe runs on a worker with a "Reading image…" overlay, so the grab
+    waits rather than photographing the spinner.
+    """
+    win._open_image_info(win.extract_input_var)
+    root.after(4000, s_info_snap)
+
+
+def s_info_snap():
+    import tkinter as tk
+    dlg = next((w for w in root.winfo_children()
+                if isinstance(w, tk.Toplevel) and w.title() == "Image Info"),
+               None)
+    if dlg is None:
+        print("no Image Info window", flush=True)
+    else:
+        root.update_idletasks()
+        img, _r, _b = _shot(user32.GetAncestor(dlg.winfo_id(), 2),
+                            crop_border=False)
+        save(img, "%s_image_info.png" % WHEN)
     root.after(600, s_done)
 
 

@@ -1017,8 +1017,15 @@ HELP_CONTENT = {
          "private WSL distro called PAD-Runtime with the emulator already in "
          "it, so your own distro is not touched and a PC with WSL enabled but "
          "no distro installed at all can still run a game. That is a one-time "
-         "download of about 370 MB, and it is Fix setup that does it — Start "
-         "uses the runtime once it is there but never installs it for you. "
+         "download of about 414 MB, and Start never does it for you — Fix "
+         "setup here, or “Update emulator Linux…” on the Stern Spike 2 "
+         "Emulate tab, which appears there when the installed one is from an "
+         "older version of this app. "
+         "Everything the app sends to Linux now goes to that runtime once it "
+         "is installed, not only the emulators: the extract and write "
+         "pipelines, the disk tools and the card builder run there too, which "
+         "is why the prerequisite list finally describes the same machine the "
+         "work happens on. "
          "Set PAD_RUNTIME=0 if you would rather everything used the machine's "
          "default distro."),
         ("Fix setup, if anything is missing",
@@ -1320,6 +1327,18 @@ HELP_CONTENT = {
          "Finder inherits almost no PATH at all; PAD_DOCKER overrides if "
          "yours lives somewhere else. It disappears once Docker is ready. "
          "Windows and Linux never see it and never need Docker to emulate."),
+        ("Update emulator Linux… (Windows)",
+         "This appears only when the Linux this app installs is from an older "
+         "version of it. The app will not run in a runtime it does not "
+         "recognise, so until you press this the emulator runs in whatever "
+         "distro your PC calls default — which does not carry the emulator's "
+         "toolchain, so things here may not work. Nothing has been lost when "
+         "that happens: your cards, extractions and save states are still in "
+         "the old one, and the button moves you to the current runtime. "
+         "It asks first if there is one to replace, and says what is inside "
+         "it before it does, because replacing means removing the old one. "
+         "A machine that has never had the runtime is not asked at all and "
+         "keeps using its own distro, exactly as before."),
         ("Set up emulator… (Windows and macOS)",
          "The tab asks this PC what the emulator still needs before you press "
          "anything, so a run does not stop on a missing tool a minute after "

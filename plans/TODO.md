@@ -7828,6 +7828,58 @@ These have each been violated at least once and each cost a run or a window:
       — S3: a workaround exists (a 32 GB card). D4: a new on-card layout
       whose hardware proof is one flash away.
 
+- [ ] **104. A replacement callout LONGER than the stock sound is trimmed to
+      the slot; let it grow.** `S2 D4` *(Planned 2026-09-09; the authoritative
+      design, phases, acceptance tests and rig oracles are in
+      `plans/spike2_longer_audio.md` — read it before touching anything, and
+      keep its Findings section true as passes learn.)*
+      Today `_encode_mono`/`_encode_stereo` fit every replacement to
+      `emitted_length(p["length"])` and the GUI hides Trim/pad for Spike 2,
+      because resizing a sound IN PLACE strands every later absolute offset in
+      the master directory. The way out is to APPEND: a 24-byte master-directory
+      record N' = record N with body_off/length replaced, its body appended past
+      the old end of image.bin (16-byte zero pad first), hdr[0x60] = n+1,
+      hdr[0x40] unchanged; deliver image.bin as ONE grow job through
+      core/ext4_grow (hardware-proven for videos), placed before the firmware
+      sentinel job and owned by the grow cleanup dir; opt-in
+      `PAD_STERN_AUDIO_GROW=1`, never Direct-SD. No firmware edit anywhere.
+      **Established (probed on 5 cards, 2026-09-09):** the directory is the file
+      tail (`hdr[0x40] + 24*hdr[0x60] + 16 == filesize`); the record count is
+      always ODD and the seed word moves with the parity (trailer[8:12] odd,
+      trailer[0:4] even, because the decode copies `align16(24n)` bytes); the
+      decode is seed -> permuted expected CRC + PRNG/permute/XOR/vf2-stream
+      KEY DERIVATION -> AES-192-CBC in place -> per-record post-transform ->
+      CRC(init per build) compare -> band loop; the constants are PER BUILD
+      (LZ 1.22 has none of TMNT's); the S-box and CRC table sit in rodata on
+      every build; the directory memcpy is a host-side `_imp` stub that
+      `UC_HOOK_MEM_READ` never sees; `LENGTH_XOR` is TMNT-only; nothing in the
+      repo parses or writes the directory. **Ruled out:** resizing in place, a
+      new image-scNN.bin category (sids are category-tagged, the loader
+      hard-fails on a missing shard), any firmware patch (grown ELFs boot-loop,
+      three deliveries, zero confirmed boots).
+      **Phases:** 0 = the directory codec + the duplicate-key / own-window /
+      even-count experiments in the emulator (desk work, scratchpad
+      `grow_probe.py`, firmware-assisted keygen, no PRNG port); 1 =
+      `spike2/masterdir.py` + locator keys + tests; 2 = engine (gate, staged
+      image by rename, pass-A derive with the consumed hook, `params_grow`
+      rows, `collapse_shadowed`, fingerprint tail, delivery + `.sidx` size);
+      3 = Advanced Audio checkbox, docs; 4 = rig capture (`/dump/audio.raw`,
+      `audioscore.py`, Sound Test via `nav.sh`) then one hardware boot.
+      **Acceptance:** a Write with one WAV longer than its slot produces a card
+      whose emulator boot plays that callout for its FULL new length from the
+      Sound Test (the capture correlates with the source over the whole
+      length, no burst at the old slot end), every other sound derives stock
+      params (`_assert_param_integrity` 0 shifts, a 20-sound decode census
+      bit-exact), a re-extract of that card names the live sound
+      `idxNNNN.wav` under its ORIGINAL number, and Direct-SD or gate-off
+      builds fit as today with one named log line. Hardware: David plays it
+      on his own machine; the flag stays opt-in until then.
+      — S2: a truncated callout is a visible quality defect every audio mod
+      works around by cutting its clip. D4: a new instrument (the directory
+      encoder, validated against the firmware decode on every card) has to
+      exist before anything can be judged; budget more than one pass, one
+      phase per pass.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

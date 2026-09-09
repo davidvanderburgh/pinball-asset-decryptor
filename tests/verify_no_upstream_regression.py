@@ -25,6 +25,11 @@ the unified shell.  Three classes of files exist in each plugin:
                tests/test_<mfr>_e2e.py — synthetic Extract -> modify ->
                Write -> re-extract -> verify-bytes-survived.
 
+  DIVERGED     Deliberately no longer verbatim, with the reason recorded
+               in WHY_DIVERGED.  Does not gate the exit code - but a
+               diverged file that goes BACK to matching upstream does,
+               because that means the change it was excused for is gone.
+
 Exits 0 if every IDENTICAL file matches and every IMPORT-ONLY file
 only has accepted import changes.  PORTED files don't gate the exit
 code — the test suite does.
@@ -85,9 +90,9 @@ PLAN = {
     "pinball_decryptor/plugins/spooky/p3_video.py":
         ("spooky/spooky_decryptor/p3_video.py", "identical"),
     "pinball_decryptor/plugins/spooky/clonezilla.py":
-        ("spooky/spooky_decryptor/clonezilla.py", "identical"),
+        ("spooky/spooky_decryptor/clonezilla.py", "diverged"),
     "pinball_decryptor/plugins/spooky/executor.py":
-        ("spooky/spooky_decryptor/executor.py", "identical"),
+        ("spooky/spooky_decryptor/executor.py", "diverged"),
     "pinball_decryptor/plugins/spooky/Dockerfile":
         ("spooky/spooky_decryptor/Dockerfile", "identical"),
 
@@ -116,7 +121,7 @@ PLAN = {
     "pinball_decryptor/plugins/bof/manufacturer.py":
         (None, "new"),
     "pinball_decryptor/plugins/bof/executor.py":
-        ("bof/bof_decryptor/executor.py", "identical"),
+        ("bof/bof_decryptor/executor.py", "diverged"),
     # pipeline.py DIVERGED from upstream as of v0.7.12: the BOF May 2026
     # firmware renamed the embedded Godot PCK magic from "GDPC" to "GBOF"
     # to defeat off-the-shelf tools, so DecryptPipeline now patches the
@@ -143,7 +148,7 @@ PLAN = {
     "pinball_decryptor/plugins/jjp/config.py":
         ("jjp/jjp_decryptor/config.py", "identical"),
     "pinball_decryptor/plugins/jjp/executor.py":
-        ("jjp/jjp_decryptor/executor.py", "identical"),
+        ("jjp/jjp_decryptor/executor.py", "diverged"),
     "pinball_decryptor/plugins/jjp/wsl.py":
         ("jjp/jjp_decryptor/wsl.py", "identical"),
     "pinball_decryptor/plugins/jjp/crypto.py":
@@ -203,6 +208,23 @@ ACCEPTED_IMPORT_REWIRES = (
 )
 
 
+#: WHY a "diverged" file is no longer verbatim.  A divergence without a
+#: recorded reason is indistinguishable from an accident, which is the whole
+#: point of this script - so the kind and the reason are added together.
+WHY_DIVERGED = {
+    "pinball_decryptor/plugins/spooky/clonezilla.py":
+        "`which` -> `command -v`: which is a package (debianutils has been "
+        "shedding it) and command -v is a shell builtin, so the probe no "
+        "longer reports a tool missing on a machine that has it",
+    "pinball_decryptor/plugins/spooky/executor.py":
+        "runs in the Linux the app installs, not the machine's default",
+    "pinball_decryptor/plugins/bof/executor.py":
+        "runs in the Linux the app installs, not the machine's default",
+    "pinball_decryptor/plugins/jjp/executor.py":
+        "runs in the Linux the app installs, not the machine's default",
+}
+
+
 def _read(p):
     return p.read_bytes()
 
@@ -220,7 +242,8 @@ def _decode(b):
 
 def main():
     issues = []
-    counts = {"identical": 0, "import-only": 0, "ported": 0, "new": 0}
+    counts = {"identical": 0, "import-only": 0, "ported": 0, "new": 0,
+              "diverged": 0}
     summary_lines = []
 
     for unified_rel, (upstream_rel, kind) in PLAN.items():
@@ -245,6 +268,16 @@ def main():
         u_bytes = _read(unified_path)
         up_bytes = _read(upstream_path)
         bytes_equal = (u_bytes == up_bytes)
+
+        if kind == "diverged":
+            why = WHY_DIVERGED.get(unified_rel, "no reason recorded")
+            if bytes_equal:
+                issues.append(
+                    f"NO LONGER DIVERGED: {unified_rel} now matches upstream "
+                    f"again, so the change it was excused for is gone: {why}")
+            else:
+                summary_lines.append(f"  DIVERGED     {unified_rel}  ({why})")
+            continue
 
         if kind == "identical":
             if bytes_equal:
@@ -315,6 +348,7 @@ def main():
     print(f"{counts['import-only']:3d} files with import-only rewires")
     print(f"{counts['ported']:3d} files ported (E2E-tested for regressions)")
     print(f"{counts['new']:3d} files new to the unified app (wrappers + manifests)")
+    print(f"{counts['diverged']:3d} files deliberately diverged (reason recorded above)")
     print("-" * 76)
 
     if issues:

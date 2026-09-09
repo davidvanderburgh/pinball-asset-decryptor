@@ -31,6 +31,7 @@ match" is exactly the kind of claim that reads true and is false.
 """
 import os
 import re
+import shlex
 import shutil
 import subprocess
 
@@ -39,6 +40,7 @@ import pytest
 RIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "tools", "spike2_emu")
 AWK = shutil.which("awk")
+BASH = shutil.which("bash")
 
 pytestmark = pytest.mark.skipif(not os.path.isdir(RIG), reason="rig not present")
 
@@ -189,6 +191,27 @@ def test_the_event_filter_carries_the_picture_lines_to_the_pane():
 # ...and the configuration that actually produces a black window
 # --------------------------------------------------------------------------
 
+#: The gate around every "your window will be black" message.
+ROOT_GATE = 'if [ "$(id -u)" = 0 ] && [ "$DROP" = 0 ]; then'
+
+
+def _block(opening, closing="fi"):
+    """One shell block out of watch.sh BY LINE, opener and closer included.
+
+    Both of the tests below used to cut the file with a byte window either side
+    of a message and an index of the first ``\\nfi\\n``.  Both broke the day the
+    block grew an inner ``if`` (the self-heal, 2026-09-09): one stopped reaching
+    back far enough to see its own gate, the other handed bash a dangling ``fi``
+    and read the syntax error as a failure of the message.  Neither noticed
+    anything about the shell that was actually wrong, which is the whole problem
+    with cutting a script by character count.
+    """
+    lines = _read("watch.sh").split("\n")
+    start = next(i for i, ln in enumerate(lines) if ln.startswith(opening))
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == closing)
+    return "\n".join(lines[start:end + 1])
+
+
 def test_root_with_nobody_to_drop_to_is_told_its_window_will_be_black():
     """The one configuration that makes the window black on purpose.
 
@@ -198,31 +221,142 @@ def test_root_with_nobody_to_drop_to_is_told_its_window_will_be_black():
     with no user to drop to, which is a WSL whose DEFAULT USER IS ROOT.  That
     case used to run the renderer as root in silence; PAD-63 is what it costs.
     """
-    src = _read("watch.sh")
-    i = src.index("THIS WSL RUNS AS ROOT")
-    guard = src[max(0, i - 2200):i]
-    assert '[ "$(id -u)" = 0 ] && [ "$DROP" = 0 ]' in guard, \
+    block = _block(ROOT_GATE)
+    assert "THIS WSL RUNS AS ROOT" in block, \
         "the warning is not gated on root-with-no-drop-target"
-    block = src[i:i + 1800]
     assert "BLACK" in block
     assert "default=<name>" in block, "it does not name the cure"
-    assert "exit" not in block.split("fi", 1)[0], \
+    assert not re.search(r"^\s*exit\b", block, re.M), \
         "this became fatal; the rest of the run is real (see the ffmpeg guard)"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="no bash")
+def _run_root_gate(refused=""):
+    """Run the whole gate as root-with-no-drop-target, and give back its text.
+
+    Only ``id`` is stubbed, and only because a test cannot be root.  Everything
+    that decides which message comes out is the real script.
+    """
+    script = "\n".join([
+        "id() { echo 0; }",
+        "DROP=0",
+        "ROOT=/mnt/wsl/paddata/spike2/spike2root",
+        "XOWNER_REFUSED=%s" % shlex.quote(refused),
+        _block(ROOT_GATE),
+    ])
+    out = subprocess.run([BASH, "-c", script], capture_output=True, text=True,
+                         timeout=60)
+    assert out.returncode == 0, out.stderr
+    return out.stderr
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
 def test_the_cure_survives_shell_quoting():
     """The middle line of the cure carries nested quotes and a \\n, which is
     exactly the kind of thing that reaches a user mangled.  Run the block."""
-    src = _read("watch.sh")
-    i = src.index('echo "[watch] THIS WSL RUNS AS ROOT')
-    end = src.index("\nfi\n", i)
-    out = subprocess.run([shutil.which("bash"), "-c", src[i:end]],
-                         capture_output=True, text=True, timeout=60)
-    assert out.returncode == 0, out.stderr
-    text = out.stderr
+    text = _run_root_gate()
     assert 'printf "[user]\\ndefault=<name>\\n" >> /etc/wsl.conf' in text, text
     assert "adduser <name>" in text
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_a_refused_desktop_user_is_named_rather_than_denied():
+    """When the self-heal FOUND a desktop user and would not use it, the old
+    text - "there is nobody to drop to, run adduser" - is false twice over, and
+    sends the reader off to create an account that already exists.  Reaching
+    this branch means the account is there and cannot get to $ROOT."""
+    text = _run_root_gate(refused="pad")
+    assert "there IS a desktop user" in text, text
+    assert "'pad' owns the X socket" in text
+    assert "spike2root/dump" in text, "it does not name the path to open up"
+    assert "adduser <name>" not in text, \
+        "it still tells him to create the user he already has"
+
+
+# --------------------------------------------------------------------------
+# ...and the self-heal, which is what keeps the run out of that branch
+# --------------------------------------------------------------------------
+#
+# THE SECOND BLACK WINDOW (David, 2026-09-09, the PAD-Runtime distro).  The rig
+# asked the ROOTFS who the desktop user was.  On a shared-mount layout $ROOT is
+# root-owned, so the answer was "root", the drop was skipped, the renderer ran
+# as the one account that cannot attach to the X server's shared memory - and
+# every counter in the run read healthy, the picture oracle included, because it
+# reads what was RENDERED and the loss is downstream of that.
+#
+# The X socket is the oracle instead, and the candidate it names is PROVEN
+# before it is used.  These run the real block: only `id` and `stat` are stubbed
+# (a test cannot be root and cannot own a socket as somebody else), and the
+# reachability check is the script's own, run against real directories.
+
+
+def _run_self_heal(tmp_path, owner, dump=True, socket=True):
+    """The X-socket self-heal, deciding against a real directory tree."""
+    x11 = tmp_path / "x11"
+    x11.mkdir()
+    if socket:
+        (x11 / "X0").write_bytes(b"")
+    root = tmp_path / "spike2root"
+    root.mkdir()
+    if dump:
+        (root / "dump").mkdir()
+
+    def sh(p):
+        return shlex.quote(str(p).replace("\\", "/"))
+
+    script = "\n".join([
+        "PAD_X11_DIR=%s" % sh(x11),
+        "ROOT=%s" % sh(root),
+        'PAD_USER=""',
+        'pad_x_socket() { printf "%s\\n" "$PAD_X11_DIR/X0"; }',
+        # The socket is the only thing `stat` is asked about, and only for %U.
+        "stat() { printf '%%s\\n' %s; }" % shlex.quote(owner),
+        # `id -u` alone is the root test; `id -u <name>` asks whether a user
+        # exists.  Both are answered, and nothing else calls it.
+        'id() { [ $# -gt 1 ] && return 0; echo 0; }',
+        # Not a stub of the ANSWER: the -u/-- prefix is dropped and the
+        # script's own reachability test runs, as this user, for real.
+        'runuser() { shift 3; "$@"; }',
+        _block("pad_x_owner() {", "DROP=0").rsplit("\n", 1)[0],
+        'echo "PAD_USER=[$PAD_USER] REFUSED=[$XOWNER_REFUSED]"',
+    ])
+    out = subprocess.run([BASH, "-c", script], capture_output=True, text=True,
+                         timeout=60)
+    assert out.returncode == 0, out.stdout + out.stderr
+    return out.stdout
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_the_x_socket_owner_is_taken_when_it_can_reach_the_ring(tmp_path):
+    """The cure for the second black window: a run that heals itself."""
+    out = _run_self_heal(tmp_path, "pad")
+    assert "PAD_USER=[pad] REFUSED=[]" in out, out
+    assert "the X socket can, and does" in out, \
+        "it drops silently; the log has to say why the user changed"
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_a_candidate_that_cannot_reach_the_ring_is_refused_not_used(tmp_path):
+    """The objection the old refusal was really about: a 0700 home in the way.
+    Dropping there trades a black window for a renderer that cannot open its
+    ring, which is worse, so the candidate is named and NOT used."""
+    out = _run_self_heal(tmp_path, "pad", dump=False)
+    assert "PAD_USER=[] REFUSED=[pad]" in out, out
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_a_root_owned_socket_names_no_candidate(tmp_path):
+    """A desktop that really is root's: there is nobody to drop to, and root
+    must not be "dropped" to itself."""
+    out = _run_self_heal(tmp_path, "root")
+    assert "PAD_USER=[] REFUSED=[]" in out, out
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_no_x_socket_at_all_is_not_an_error(tmp_path):
+    """A headless run has no socket to ask.  It must fall through quietly
+    rather than fail the run before the guest ever starts."""
+    out = _run_self_heal(tmp_path, "pad", socket=False)
+    assert "PAD_USER=[] REFUSED=[]" in out, out
 
 
 @pytest.mark.skipif(not AWK, reason="no awk")

@@ -4,10 +4,17 @@
 #
 # The GUI parses this (pinball_decryptor/gui/_rig.parse_status), so every line
 # MUST be key=value and nothing here may print prose to stdout.
+#
+# THE PATHS COME FROM prereqs.sh, not from a copy of them here.  This script
+# carried its own three lines of "where the rig lives" and they were right
+# until the user's WORK moved onto its own disk while the binaries we install
+# stayed in the home (core/rigdata.py, S1_SHIM_DIR).  After that this file
+# looked for the device model under $S1_WORK, did not find it, and reported
+# hwshim_built=0 to the control panel OVER A RUNNING GAME that was using it.
+# Two scripts answering "where is the shim" is how they start disagreeing.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-: "${S1_DESKTOP_USER:=$(getent passwd 1000 2>/dev/null | cut -d: -f1)}"
-: "${S1_WORK:=/home/${S1_DESKTOP_USER:-david}/s1emu}"
-: "${S1_QEMU:=/home/${S1_DESKTOP_USER:-david}/qemubuild/qemu-arm}"
+. "$HERE/prereqs.sh"
+s1_paths
 
 echo "wsl=1"
 echo "work=$S1_WORK"
@@ -16,7 +23,7 @@ echo "distro=${WSL_DISTRO_NAME:-}"
 
 # one-time setup present?
 [ -x "$S1_QEMU" ] && echo "qemu_built=1" || echo "qemu_built=0"
-[ -x "$S1_WORK/s1hwshim" ] && echo "hwshim_built=1" || echo "hwshim_built=0"
+[ -x "$S1_SHIM_DIR/s1hwshim" ] && echo "hwshim_built=1" || echo "hwshim_built=0"
 [ -f "$S1_WORK/game/game" ] && echo "game_ready=1" || echo "game_ready=0"
 
 # the emulated game.  By COMM, not cmdline: pgrep -f qemu-arm-pad counted the

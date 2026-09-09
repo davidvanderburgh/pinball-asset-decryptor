@@ -53,12 +53,73 @@ IMG=${IMG:-${PAD_CARD:-}}
 }
 [ -f "$IMG" ] || { echo "[rootfs] no card image at $IMG" >&2; exit 1; }
 
-case "$ROOT" in
-    /mnt/*) echo "[rootfs] REFUSING: $ROOT is a Windows drive (drvfs), which" >&2
-            echo "[rootfs] cannot hold symlinks - ld-linux.so.3 would vanish" >&2
-            echo "[rootfs] and nothing in the guest would link. Put PAD_ROOT" >&2
-            echo "[rootfs] on the WSL disk." >&2
-            exit 1 ;;
+# WHAT MAKES A DESTINATION BAD IS ITS FILESYSTEM, NOT ITS PATH.
+#
+# This refused any $ROOT under /mnt, which was a fair shorthand for "a Windows
+# drive" while /mnt/c and its siblings were the only things mounted there.  It
+# stopped being one the day the app gave the rigs a data disk of their own:
+# that is an ext4 volume attached to the WSL VM by name, so it appears at
+# /mnt/wsl/paddata in every distro - a real Linux filesystem, holding symlinks
+# perfectly - and this refused it, which meant the emulator would not start at
+# all on the arrangement the app now sets up by default.
+#
+# So ask the filesystem.  `findmnt -T` answers for a path that does not exist
+# yet by walking up to the mount that will hold it, which is the normal case
+# here since $ROOT is about to be created; the loop is for the machines where
+# even the parent is missing, and `stat -f` is the fallback for a distro
+# without findmnt.
+#
+# AND NOT BY TRYING TO MAKE A SYMLINK, which was the other obvious test and is
+# wrong: on this Windows the drives are 9p rather than drvfs, and 9p DOES
+# create a symlink when asked.  The reason to stay off it is that the extract
+# does not survive the round trip, not that the syscall fails.
+_pad_fstype() {
+    _d=$1
+    while [ ! -d "$_d" ] && [ "$_d" != / ]; do _d=$(dirname "$_d"); done
+    _t=$(findmnt -no FSTYPE -T "$_d" 2>/dev/null | tail -1)
+    [ -n "$_t" ] || _t=$(stat -f -c %T "$_d" 2>/dev/null)
+    echo "$_t"
+}
+
+ROOT_FS=$(_pad_fstype "$ROOT")
+case "$ROOT_FS" in
+    9p|v9fs|drvfs|virtiofs|cifs|smb3|smbfs|nfs|nfs4)
+        echo "[rootfs] REFUSING: $ROOT is on a Windows or network filesystem" >&2
+        echo "[rootfs] ($ROOT_FS), which does not carry an extracted rootfs" >&2
+        echo "[rootfs] intact - ld-linux.so.3 would vanish and nothing in the" >&2
+        echo "[rootfs] guest would link. Put PAD_ROOT on the WSL disk." >&2
+        exit 1 ;;
+    # ★ AND RAM, WHICH THE /mnt RULE USED TO CATCH BY ACCIDENT AND THE
+    # FILESYSTEM RULE ABOVE LET THROUGH.
+    #
+    # /mnt/wsl IS A TMPFS. The data disk is an ext4 volume attached over the
+    # top of it at /mnt/wsl/paddata, and the app hands the rig that path
+    # whenever the disk FILE exists - not whenever it is attached. A WSL
+    # restart drops the mount and leaves the file, so the next Start writes
+    # into the tmpfs underneath: the extracted rootfs and then the card cache,
+    # several GB, into memory. The old "refuse anything under /mnt" shorthand
+    # stopped that with a clear message; replacing it with a filesystem test
+    # that has no tmpfs in it turned a refusal into a silent multi-GB write
+    # into RAM, on the arrangement the app sets up by default.
+    #
+    # It is also just wrong on its own terms, disk or no disk: a rootfs on
+    # tmpfs is gone at the next restart, so every run would re-extract it.
+    tmpfs|ramfs)
+        echo "[rootfs] REFUSING: $ROOT is in MEMORY ($ROOT_FS), not on a disk." >&2
+        case "$ROOT" in
+            /mnt/wsl/*)
+                echo "[rootfs] That path is the emulator's work disk, and it is" >&2
+                echo "[rootfs] NOT ATTACHED right now - /mnt/wsl is a tmpfs, so" >&2
+                echo "[rootfs] this run would put the rootfs and the card cache" >&2
+                echo "[rootfs] in RAM and lose them at the next WSL restart." >&2
+                echo "[rootfs] Attach it again from the app (the Emulate tab" >&2
+                echo "[rootfs] re-attaches it), or restart WSL and try again." >&2 ;;
+            *)
+                echo "[rootfs] A rootfs there does not survive a restart, so the" >&2
+                echo "[rootfs] guest would re-extract on every run. Point" >&2
+                echo "[rootfs] PAD_ROOT at a real filesystem." >&2 ;;
+        esac
+        exit 1 ;;
 esac
 
 command -v debugfs >/dev/null 2>&1 || {

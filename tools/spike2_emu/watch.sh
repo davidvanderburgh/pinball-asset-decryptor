@@ -818,6 +818,77 @@ if [ -z "$PAD_USER" ] && [ "$(id -u)" = 0 ]; then
         [ "$PAD_USER" = root ] && PAD_USER=""
     fi
 fi
+
+# ★ THE X SOCKET IS THE ORACLE, and the third place that had to be asked before
+# the BLACK WINDOW went away (David, 2026-09-09, the PAD-Runtime distro).
+#
+# The block above is a ladder now, and this is the rung under it. PAD-119 made
+# $PAD_HOME the first question, because the ROOTFS answers root on any machine
+# whose first run came from the app; the rootfs stayed as its fallback. On the
+# PAD-Runtime layout BOTH of those answer root - the rig lives on a shared
+# volume, /mnt/wsl/paddata/spike2/spike2root, root-owned and 0755, and $PAD_HOME
+# is /root - so PAD_USER still came out empty, the drop was still skipped, the
+# renderer still ran as root and Mesa still could not attach to the X server's
+# shared memory. Every counter read healthy: guest booted, clips decoded and
+# handed over at 30.0/s, renderer 60.0 fps, and the picture oracle even said
+# FIRST at frame 4, because it reads what was RENDERED and the loss is
+# downstream of that. The only true line in the log was Mesa's.
+#
+# Neither directory ever knew the answer. The X SOCKET does, by construction: the
+# renderer has to attach to the shared memory of the server behind
+# $PAD_X11_DIR/XN, so the account owning that socket IS the account it must run
+# as. That distro had a perfectly good `pad` user owning X0 all along.
+#
+# AND THE DROP IS PROVEN BEFORE IT IS TAKEN, which is what the refusal below was
+# really protecting. A HOME=/root layout puts $ROOT under a 0700 directory the
+# dropped helper cannot traverse, and trading a black window for a renderer that
+# cannot open its ring is not a fix. So the candidate is TESTED - as that user,
+# can it reach the ring directory and the socket - and only a user that passes
+# is used. A candidate that fails leaves the message below, naming it.
+pad_x_owner() {
+    local sock
+    sock=$(pad_x_socket 2>/dev/null) || sock=""
+    if [ -z "$sock" ] || [ ! -e "$sock" ]; then
+        # No usable $DISPLAY to parse: take whatever socket is actually there.
+        for sock in "$PAD_X11_DIR"/X*; do [ -e "$sock" ] && break; done
+    fi
+    [ -e "$sock" ] || return 1
+    stat -c %U "$sock" 2>/dev/null
+}
+
+pad_user_can_render() {
+    local u=$1 sock
+    [ -n "$u" ] && [ "$u" != root ] || return 1
+    id -u "$u" >/dev/null 2>&1 || return 1
+    sock=$(pad_x_owner_sock) || return 1
+    runuser -u "$u" -- sh -c \
+        'test -x "$1" && test -r "$1" && test -r "$2"' _ "$ROOT/dump" "$sock" \
+        2>/dev/null
+}
+
+pad_x_owner_sock() {
+    local sock
+    sock=$(pad_x_socket 2>/dev/null) || sock=""
+    if [ -z "$sock" ] || [ ! -e "$sock" ]; then
+        for sock in "$PAD_X11_DIR"/X*; do [ -e "$sock" ] && break; done
+    fi
+    [ -e "$sock" ] && printf '%s\n' "$sock"
+}
+
+XOWNER_REFUSED=""
+if [ -z "$PAD_USER" ] && [ "$(id -u)" = 0 ]; then
+    XOWNER=$(pad_x_owner 2>/dev/null) || XOWNER=""
+    if [ -n "$XOWNER" ] && [ "$XOWNER" != root ]; then
+        if pad_user_can_render "$XOWNER"; then
+            PAD_USER=$XOWNER
+            echo "[watch] the rootfs is root-owned, so it could not name the" \
+                 "desktop user; the X socket can, and does: helpers drop to" \
+                 "$PAD_USER (tested: it can reach the ring and the socket)"
+        else
+            XOWNER_REFUSED=$XOWNER
+        fi
+    fi
+fi
 DROP=0
 [ "$(id -u)" = 0 ] && [ -n "$PAD_USER" ] && DROP=1
 as_user() {
@@ -860,12 +931,28 @@ if [ "$(id -u)" = 0 ] && [ "$DROP" = 0 ]; then
     # sound plays, the switches and the playfield work, and a machine that is
     # one `adduser` away from a picture should not be refused.
     #
-    # AND NO AUTOMATIC DROP HERE, deliberately. The X socket names the desktop
-    # user, so guessing one is easy - and wrong: with HOME=/root, $ROOT lives
-    # under a 0700 /root that the dropped helper cannot even traverse, so it
-    # would trade a black window for a renderer that cannot open the ring. The
-    # fix is which user the run STARTS as, which is the app's decision and the
-    # user's setting, not something to patch over from in here.
+    # THE DROP IS NOW TAKEN AUTOMATICALLY WHEN IT IS PROVABLY SAFE (2026-09-09).
+    # This paragraph used to say the opposite - that the X socket names the
+    # desktop user, so guessing one is easy and wrong, because with HOME=/root
+    # $ROOT lives under a 0700 /root the dropped helper cannot traverse. That
+    # objection was about TRAVERSAL, not about the oracle, and it is now tested
+    # instead of assumed: the block near PAD_USER asks the X socket who owns
+    # the display and then checks, as that user, that it can actually reach the
+    # ring. A user that passes is used and the run heals itself; one that fails
+    # lands here and is NAMED. Reaching this text at all now means either there
+    # is no desktop user, or there is one who cannot get to $ROOT.
+  if [ -n "$XOWNER_REFUSED" ]; then
+    # The self-heal found a candidate and would not use it. Say WHICH user and
+    # why: "there is nobody to drop to" is now false here, and a message that
+    # still said it would send the reader after the wrong fix entirely.
+    echo "[watch] THE GAME WINDOW WILL BE BLACK, and there IS a desktop user:" >&2
+    echo "[watch]   '$XOWNER_REFUSED' owns the X socket. The helpers were NOT" >&2
+    echo "[watch]   dropped to it because it cannot reach $ROOT/dump, and that" >&2
+    echo "[watch]   would trade a black window for a renderer that cannot open" >&2
+    echo "[watch]   its ring. Make that path reachable by '$XOWNER_REFUSED'" >&2
+    echo "[watch]   (a 0700 home in the way is the usual cause) and the next" >&2
+    echo "[watch]   run heals itself." >&2
+  else
     echo "[watch] THIS WSL RUNS AS ROOT, and its game window will be BLACK." >&2
     echo "[watch]   Everything else on this run is real - sound, switches, the" >&2
     echo "[watch]   playfield - but as root the renderer cannot attach to the X" >&2
@@ -879,6 +966,7 @@ if [ "$(id -u)" = 0 ] && [ "$DROP" = 0 ]; then
     echo "[watch]   then 'Restart WSL...' on the Emulate tab and start again." >&2
     echo "[watch]   (A distro that already has an ordinary account needs only" >&2
     echo "[watch]   the last line.)" >&2
+  fi
 fi
 if [ "$DROP" = 1 ]; then
     echo "[watch] running the guest as root, helpers as $PAD_USER"

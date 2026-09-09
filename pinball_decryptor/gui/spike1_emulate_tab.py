@@ -43,7 +43,7 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import _rig
+from . import _rig, _runtime_ui
 from ..core import payloads, rigdata, runtime
 # The volume/mute control FILE and its load/store belong to the Spike 2 tab
 # (item 56) and are deliberately shared, not copied: one knob value, one file,
@@ -1174,46 +1174,19 @@ class Spike1EmulatePanel:
         if self._last_up:
             say("Spike 1: the emulator is running — stop it first.")
             return None
-        state, detail = runtime.status(refresh=True)
-        if state in ("unsupported", "unpublished"):
-            return None
-        if state == "ready":
-            say("Spike 1: %s" % detail)
-            return state
-        if state == "foreign":
-            say("Spike 1: %s" % detail)
-            return state
-        say("Spike 1: installing the Linux the emulator runs on (%s)…"
-            % runtime.IMAGE.version)
-        try:
-            runtime.install(log=lambda m: say("Spike 1: %s" % m),
-                            progress=self._download_progress)
-        # THE SPECIFIC ONE FIRST.  RuntimeNeedsReplacing IS a RuntimeError, so
-        # with the broad handler above it the narrow one below never ran - and
-        # a `raise` inside an except block leaves the whole try statement
-        # rather than falling through to its siblings.  Written the wrong way
-        # round, the consent dialog this whole change exists for was
-        # unreachable, and the user just saw the refusal in the log.
-        except runtime.RuntimeNeedsReplacing:
-            # THE ONE PLACE ALLOWED TO SAY YES, and only after saying what it
-            # costs.  Replacing the runtime unregisters the distro, and the
-            # rigs keep extracted games, card caches and SAVE-STATE SLOTS
-            # inside it - a slot is something a person made and cannot get
-            # back.  The button that leads here says "Fix setup"; nobody
-            # pressing it has agreed to that.
-            if not self._ask_before_replacing():
-                say("Spike 1: left the installed runtime alone.")
-                return "stale"
-            runtime.install(log=lambda m: say("Spike 1: %s" % m),
-                            progress=self._download_progress, replace=True)
-        except RuntimeError as exc:
-            # A blocked download, a proxy, an antivirus: the runtime has an
-            # offline route too, and this is where it is offered.
-            self._log("Spike 1: %s" % exc)
-            self._timer().after(
-                0, lambda e=exc: self._offer_runtime_from_file(e))
-            return "absent"
-        return "ready"
+        # THE LADDER MOVED TO _runtime_ui, unchanged, so that the Spike 2 tab
+        # can offer the same thing in the same words.  It had to: this file
+        # held the app's ONLY three calls to runtime.install, so before the
+        # version stamp was ever bumped, a Spike 2 user whose runtime went
+        # stale had no button anywhere that could move them off it.  The
+        # consent gate is still this panel's own method, so it is still the
+        # thing a test answers.
+        return _runtime_ui.ensure(
+            say=lambda m: say("Spike 1: %s" % m),
+            progress=self._download_progress,
+            ask=self._ask_before_replacing,
+            on_blocked=lambda exc: self._timer().after(
+                0, lambda e=exc: self._offer_runtime_from_file(e)))
 
     def _download_progress(self, done, total):
         """A 371 MB download with no progress looks like a hang, and the app
@@ -1228,18 +1201,14 @@ class Spike1EmulatePanel:
                       % (pct, total // (1024 * 1024)))
 
     def _ask_before_replacing(self):
-        """Name what is about to be destroyed, then let a human decide."""
-        return messagebox.askyesno(
-            "Replace the emulator's Linux?",
-            "This app installs its own Linux (%s), and one is already "
-            "installed here from an older version.\n\n"
-            "Replacing it DELETES everything inside it:\n"
-            "  - games extracted from your cards (about a minute each to redo)\n"
-            "  - cached cards\n"
-            "  - any SAVE STATES you made while running in it\n\n"
-            "Nothing outside it is touched: your cards, your extractions on "
-            "this PC and your own WSL distro all stay as they are.\n\n"
-            "Replace it now?" % runtime.DISTRO)
+        """Name what is about to be destroyed, then let a human decide.
+
+        THE WORDING LIVES IN _runtime_ui now, because the Spike 2 tab asks the
+        same question, and two copies of the sentence standing between a user
+        and a save state would eventually stop matching.  Kept as a method so
+        it is still the one thing a test answers.
+        """
+        return _runtime_ui.ask_before_replacing()
 
     def _ensure_data_disk(self):
         """Make the work disk before the rig writes to it.
@@ -1408,25 +1377,9 @@ class Spike1EmulatePanel:
         The image is the download most likely to be refused - 370 MB from a
         host some proxies do not allow - and it was the one with no way round.
         Same checksum, different delivery."""
-        if not messagebox.askyesno(
-                "Install the runtime from a file",
-                "%s\n\nIf you can copy %s onto this machine another way, "
-                "choose it now - it is checked against the same checksum "
-                "before anything is installed.\n\nChoose a file?"
-                % (exc, runtime.IMAGE.filename)):
-            return
-        path = filedialog.askopenfilename(
-            title="Choose the downloaded %s" % runtime.IMAGE.filename,
-            initialfile=runtime.IMAGE.filename)
-        if not path:
-            return
-        try:
-            runtime.install(log=lambda m: self._log("Spike 1: %s" % m),
-                            source=path,
-                            replace=self._ask_before_replacing()
-                            if runtime.status()[0] not in ("absent",) else False)
-        except Exception as e:                              # noqa: BLE001
-            self._log("Spike 1: %s" % e)
+        _runtime_ui.offer_from_file(
+            say=lambda m: self._log("Spike 1: %s" % m), exc=exc,
+            ask=self._ask_before_replacing)
 
     def _offer_file_install(self, exc):
         """The blocked-download path, on the UI thread.

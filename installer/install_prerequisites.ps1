@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Per-manufacturer prerequisite installer for Pinball Asset Decryptor.
 
@@ -72,7 +72,7 @@ function Test-WslHasApt {
         return $false
     }
     try {
-        & wsl -u root -- bash -c "command -v apt-get >/dev/null 2>&1" *> $null
+        & wsl @script:PadWslArgs -u root -- bash -c "command -v apt-get >/dev/null 2>&1" *> $null
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
@@ -110,19 +110,81 @@ function Get-WslRegisteredDistros {
              Where-Object { $_ -and ($_ -notmatch '^Windows Subsystem') })
 }
 
-function Get-WslDefaultDistro {
+# $Want names a distro to look up instead of the default - which is what this
+# installer passes once the app's own runtime is installed, because that is
+# where its checks run and a verdict about the DEFAULT distro would be a
+# verdict about a Linux nothing in this app touches.
+function Get-WslDefaultDistro($Want) {
     if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) { return $null }
     $out = ""
     try {
         $out = ((& wsl -l -v 2>&1 | Out-String) -replace "`0", "")
     } catch { return $null }
     foreach ($line in ($out -split "`r?`n")) {
-        if ($line -match '^\s*\*\s*(.+?)\s+\S+\s+(\d+)\s*$') {
+        if ($Want) {
+            # Any row, starred or not; the marker is stripped before the name
+            # is compared so the default distro can also be the named one.
+            if ($line -match '^\s*\*?\s*(.+?)\s+\S+\s+(\d+)\s*$' -and
+                $Matches[1].Trim() -eq $Want) {
+                return @{ Name = $Matches[1].Trim(); Version = [int]$Matches[2] }
+            }
+        } elseif ($line -match '^\s*\*\s*(.+?)\s+\S+\s+(\d+)\s*$') {
             return @{ Name = $Matches[1].Trim(); Version = [int]$Matches[2] }
         }
     }
     return $null
 }
+
+# --- WHICH LINUX IS THE APP ACTUALLY USING? ------------------------------
+# The app ships its own WSL distro now (PAD-Runtime: a rootfs we build, pin
+# by SHA-256 and import, see pinball_decryptor/core/runtime.py), and when it
+# is installed EVERY command the app sends into Linux goes there - the
+# emulator rigs, the extract pipelines, the write pipelines, all of it.
+#
+# So this installer has to go there too.  Probing the machine's DEFAULT
+# distro while the app uses ours is how a user ends up staring at a column of
+# red beside an app that works perfectly, being told to apt-get install tools
+# he already has - and, worse, installing them into a Linux nothing runs in.
+#
+# Detected by asking the distro to describe itself rather than by trusting
+# the name: a distro someone else called PAD-Runtime is not ours, and the
+# manifest is the same file the app reads to decide the very same question.
+# ★ AND THE VERSION HAS TO MATCH, not merely be present.
+#
+# The app REFUSES a runtime whose stamp is not the number it expects:
+# runtime.wsl_distro() answers None and every command goes to the machine's
+# default distro instead. This asked only "is there a runtime_version field at
+# all", so on an updating machine - which is every machine that had the runtime
+# before this app version - the two disagreed: the app ran in the user's own
+# distro while this installed apt packages into PAD-Runtime. The user presses
+# the thing that is supposed to fix their setup, waits, and the red rows stay
+# red because the tools went to a Linux nothing runs in. That is the exact
+# failure this whole routing effort exists to end, arriving through the
+# installer instead of the app.
+#
+# MUST MATCH pinball_decryptor/core/runtime.py RUNTIME_VERSION.
+# tests/test_installer.py fails if the two ever drift.
+$script:PadRuntimeVersion = 6
+
+function Get-PadRuntimeDistro {
+    if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) { return $null }
+    $name = "PAD-Runtime"
+    if ((Get-WslRegisteredDistros) -notcontains $name) { return $null }
+    $out = ""
+    try {
+        $out = ((& wsl -d $name -u root -- bash -c "cat /etc/pad-runtime.json" 2>&1 |
+                 Out-String) -replace "`0", "")
+    } catch { return $null }
+    if ($out -match '"runtime_version"\s*:\s*(\d+)') {
+        if ([int]$Matches[1] -eq $script:PadRuntimeVersion) { return $name }
+    }
+    return $null
+}
+
+$script:PadDistro  = Get-PadRuntimeDistro
+#: Splatted into every `wsl` call that runs a command: empty on a machine
+#: without our runtime, so those machines behave exactly as they always have.
+$script:PadWslArgs = if ($script:PadDistro) { @("-d", $script:PadDistro) } else { @() }
 
 # --- wsl --install capability probe --------------------------------------
 # Older inbox wsl.exe builds (pre-Store WSL) reject options they don't
@@ -644,6 +706,18 @@ $wslAvailable = $false
 $ubuntuFound = $false
 
 if ($needsWsl) {
+    # SAY WHICH LINUX, BEFORE ANY VERDICT ABOUT IT.  On a machine with the
+    # app's own runtime every check below runs in there, and a summary that
+    # does not say so is describing a distro the reader can see in `wsl -l -v`
+    # and cannot reconcile with what he is being told.
+    if ($script:PadDistro) {
+        Write-Host ""
+        Write-Host ("  This app brings its own Linux ({0}) and it is installed here." -f $script:PadDistro) -ForegroundColor Cyan
+        Write-Host  "  Every check below runs in THAT distro, which is where the app" -ForegroundColor Gray
+        Write-Host  "  runs everything - not in this machine's default one.  Normally" -ForegroundColor Gray
+        Write-Host  "  there is nothing to install: the tools are baked into the image." -ForegroundColor Gray
+        Write-Host ""
+    }
     Write-Step "Checking WSL2..."
     try {
         wsl --status 2>&1 | Out-Null
@@ -700,7 +774,8 @@ if ($needsWsl) {
     Write-Step "Checking for an apt-based WSL distro..."
     if ($wslAvailable -and (Test-WslHasApt)) {
         $ubuntuFound = $true
-        Write-OK "Ubuntu / apt-based distro"
+        if ($script:PadDistro) { Write-OK ("{0} (the app's own Linux)" -f $script:PadDistro) }
+        else                   { Write-OK "Ubuntu / apt-based distro" }
     }
 
     if (-not $ubuntuFound -and $wslAvailable -and -not $needsReboot -and
@@ -831,12 +906,16 @@ if ($needsWsl) {
     # check exists to break (PAD-73).
     $loopNeeded = @($wslPlan | Where-Object { $_.probe -eq "losetup" }).Count -gt 0
     if ($loopNeeded -and $wslAvailable -and $ubuntuFound) {
-        Write-Step "Checking the WSL version of the default distro..."
-        $def = Get-WslDefaultDistro
+        if ($script:PadDistro) {
+            Write-Step ("Checking the WSL version of {0}..." -f $script:PadDistro)
+        } else {
+            Write-Step "Checking the WSL version of the default distro..."
+        }
+        $def = Get-WslDefaultDistro $script:PadDistro
         if ($null -eq $def) {
             Write-Host "  Could not read 'wsl -l -v' - skipping the version check." -ForegroundColor Yellow
         } elseif ($def.Version -ge 2) {
-            Write-OK ("WSL 2 (default distro: {0})" -f $def.Name)
+            Write-OK ("WSL 2 ({0})" -f $def.Name)
         } else {
             $dn = $def.Name
             Write-Host ""
@@ -936,13 +1015,13 @@ function Repair-WslPackages($failed) {
         return
     }
 
-    $wslFix = wsl -u root -- wslpath -a "$fix"
+    $wslFix = wsl @script:PadWslArgs -u root -- wslpath -a "$fix"
     if ($wslFix) { $wslFix = "$wslFix".Trim() }
     if (-not $wslFix) {
         Write-Host "  Could not reach the repair script from inside WSL." -ForegroundColor Yellow
         return
     }
-    wsl -u root -- bash $wslFix --packages $names 2>&1 |
+    wsl @script:PadWslArgs -u root -- bash $wslFix --packages $names 2>&1 |
         ForEach-Object { Write-Host "    $_" }
 
     # RE-PROBED, not trusted.  The script's own exit status answers for apt;
@@ -965,7 +1044,7 @@ function Repair-WslPackages($failed) {
 if ($wslPlan.Count -gt 0) {
     if ($wslAvailable -and $ubuntuFound) {
         Write-Step "Refreshing apt indexes (one-time)..."
-        wsl -u root -- bash -c "apt-get update -qq" 2>&1 |
+        wsl @script:PadWslArgs -u root -- bash -c "apt-get update -qq" 2>&1 |
             ForEach-Object { Write-Host "    $_" }
 
         # A package with a probeCmd is tested by running that command
@@ -985,9 +1064,9 @@ if ($wslPlan.Count -gt 0) {
         function Test-WslPkg($p) {
             try {
                 if ($p.probeCmd) {
-                    wsl -u root -- bash -c "$($p.probeCmd)" 2>&1 | Out-Null
+                    wsl @script:PadWslArgs -u root -- bash -c "$($p.probeCmd)" 2>&1 | Out-Null
                 } else {
-                    wsl -u root -- bash -c "command -v $($p.probe)" 2>&1 |
+                    wsl @script:PadWslArgs -u root -- bash -c "command -v $($p.probe)" 2>&1 |
                         Out-Null
                 }
                 return ($LASTEXITCODE -eq 0)
@@ -1005,7 +1084,7 @@ if ($wslPlan.Count -gt 0) {
             if (-not $found) {
                 Write-Host ("  Installing {0}..." -f $p.label) -ForegroundColor Cyan
                 $cmd = "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq " + $p.pkg
-                wsl -u root -- bash -c $cmd 2>&1 | ForEach-Object { Write-Host "    $_" }
+                wsl @script:PadWslArgs -u root -- bash -c $cmd 2>&1 | ForEach-Object { Write-Host "    $_" }
                 if (Test-WslPkg $p) { Write-Installed $p.label }
                 else                { Write-FAIL $p.label; $wslFailed += $p }
             }
@@ -1054,7 +1133,7 @@ function Install-GdreTools {
         return
     }
     # Check if it's already installed.
-    wsl -u root -- bash -c "test -x /opt/gdre_tools/gdre_tools.x86_64" *> $null
+    wsl @script:PadWslArgs -u root -- bash -c "test -x /opt/gdre_tools/gdre_tools.x86_64" *> $null
     if ($LASTEXITCODE -eq 0) {
         Write-OK "GDRE Tools (already installed at /opt/gdre_tools)"
         return
@@ -1069,9 +1148,9 @@ function Install-GdreTools {
         Write-FAIL "GDRE Tools (install_gdre.sh missing beside the installer)"
         return
     }
-    $wslSh = (wsl -u root -- wslpath -a "$gdreSh").Trim()
-    wsl -u root -- bash $wslSh 2>&1 | ForEach-Object { Write-Host "    $_" }
-    wsl -u root -- bash -c "test -x /usr/local/bin/gdre_tools" *> $null
+    $wslSh = (wsl @script:PadWslArgs -u root -- wslpath -a "$gdreSh").Trim()
+    wsl @script:PadWslArgs -u root -- bash $wslSh 2>&1 | ForEach-Object { Write-Host "    $_" }
+    wsl @script:PadWslArgs -u root -- bash -c "test -x /usr/local/bin/gdre_tools" *> $null
     if ($LASTEXITCODE -eq 0) {
         Write-Installed "GDRE Tools (wrapper at /usr/local/bin/gdre_tools)"
     } else {

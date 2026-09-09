@@ -799,8 +799,18 @@ pad_display_repair() {
 # asks WSL to translate the value from a WSL path to a Windows one, so the
 # playfield window receives `\\wsl.localhost\<distro>\...` without either side
 # having to know how that string is spelled on this machine.
+# PAD_ROOT_WSL IS NOT A DUPLICATE OF PAD_ROOT, and the difference is the whole
+# point of it. PAD_ROOT crosses with `/p`, so the Windows child receives
+# `\\wsl.localhost\<distro>\...` - correct for a window that opens those files
+# itself, and wrong the moment that window calls BACK into WSL to drive a
+# switch, because a helper on the Linux side needs the POSIX spelling again.
+# Sending the translated form back would have padpath resolve a UNC string as a
+# directory. So the same directory crosses twice, in both spellings, and each
+# side uses the one it can open.
 pad_export_win() {
-    WSLENV="${WSLENV:+$WSLENV:}PAD_ROOT/p:PAD_TABLES/p:PAD_WSL_DISTRO"
+    PAD_ROOT_WSL=$ROOT
+    export PAD_ROOT_WSL
+    WSLENV="${WSLENV:+$WSLENV:}PAD_ROOT/p:PAD_TABLES/p:PAD_WSL_DISTRO:PAD_ROOT_WSL"
     export WSLENV
 }
 

@@ -38,8 +38,13 @@
 #   * the cmdline cannot tell them apart: under pivot BOTH rigs' guests read
 #     `/.padqemu/game ./game`.
 set -u
-: "${S1_DESKTOP_USER:=$(getent passwd 1000 2>/dev/null | cut -d: -f1)}"
-: "${S1_WORK:=/home/${S1_DESKTOP_USER:-david}/s1emu}"
+# THE WORK DIR COMES FROM prereqs.sh, not from a default written here.  Its
+# callers all export S1_WORK, so this changed nothing for them - but a copy of
+# "where the work is" that nobody exercises is a copy that goes stale
+# unnoticed, which is exactly what status.sh's did when the work moved onto
+# its own disk.  One fact, one place.
+. "$(cd "$(dirname "$0")" && pwd)/prereqs.sh"
+s1_paths
 # mountinfo carries resolved paths, and $S1_WORK/game is a symlink into the
 # extraction cache, so compare against the canonical work dir.
 W=$(readlink -f "$S1_WORK" 2>/dev/null); : "${W:=$S1_WORK}"

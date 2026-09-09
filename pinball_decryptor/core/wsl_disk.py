@@ -37,6 +37,8 @@ import subprocess
 import sys
 import tempfile
 
+from . import runtime
+
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
@@ -102,13 +104,15 @@ def is_supported():
 
 
 def _wsl_bash(bash_cmd, timeout=120):
-    """Run *bash_cmd* in the default WSL distro as root; return stdout.
+    """Run *bash_cmd* in the WSL distro the app uses, as root; return stdout.
 
-    Mirrors :class:`core.executor.WslExecutor` (same ``wsl -u root -- bash -c``
-    target) so we see exactly the distro the pipelines stage into.
+    Mirrors :class:`core.executor.WslExecutor` - the same head, from the same
+    function - so this module reports on exactly the Linux the pipelines stage
+    into, which since the app brought its own is not necessarily the machine's
+    default one.
     """
     proc = subprocess.run(
-        ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd],
+        runtime.wsl_head(root=True) + ["--", "bash", "-c", bash_cmd],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=timeout, creationflags=_CREATE_FLAGS,
     )
@@ -360,12 +364,41 @@ def delete_all():
 # Reclaim to Windows (compact the .vhdx -- disruptive, needs admin)
 # ---------------------------------------------------------------------------
 
+def _guid_named(lxss_key, want):
+    """The Lxss subkey GUID whose ``DistributionName`` is *want*, or None.
+
+    WSL keys its distros by GUID and keeps the name inside, so finding one by
+    name means walking the subkeys.  None rather than an exception when it is
+    not there: the caller then falls back to the default distro, which is what
+    a machine without our runtime uses anyway."""
+    import winreg
+    i = 0
+    while True:
+        try:
+            sub = winreg.EnumKey(lxss_key, i)
+        except OSError:
+            return None
+        i += 1
+        try:
+            with winreg.OpenKey(lxss_key, sub) as k:
+                if winreg.QueryValueEx(k, "DistributionName")[0] == want:
+                    return sub
+        except OSError:
+            continue
+
+
 def _default_distro_vhdx():
-    """Return ``(distro_name, vhdx_path)`` for the default WSL distro.
+    """Return ``(distro_name, vhdx_path)`` for the distro THE APP USES.
 
     Read from ``HKCU\\...\\Lxss``: the ``DefaultDistribution`` GUID points at
     the per-distro subkey holding ``BasePath`` (and ``DistributionName``); the
     disk is ``ext4.vhdx`` under it.  Returns ``(None, None)`` if not found.
+
+    NOT NECESSARILY THE DEFAULT ONE, despite the name this has always carried.
+    Everything else in this module measures the Linux the app actually runs in
+    - :func:`usage` df's the filesystem the pipelines stage into - and this is
+    what the RESIZE acts on.  Left pointing at the default, the dialog would
+    report one distro filling up and its Resize button would grow another.
     """
     if not is_supported():
         return None, None
@@ -374,9 +407,12 @@ def _default_distro_vhdx():
     except ImportError:
         return None, None
     base = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
+    want = runtime.wsl_distro()
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as k:
             guid = winreg.QueryValueEx(k, "DefaultDistribution")[0]
+            if want:
+                guid = _guid_named(k, want) or guid
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                             base + "\\" + guid) as k:
             base_path = winreg.QueryValueEx(k, "BasePath")[0]

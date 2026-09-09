@@ -167,3 +167,117 @@ begin
   end;
   Result := True;
 end;
+
+{ ---------------------------------------------------------------- uninstall
+
+  WHAT THIS APP LEAVES OUTSIDE ITS OWN FOLDER, and why uninstalling has to
+  ask about it.
+
+  Since the app started bringing its own Linux there are three things under
+  %LOCALAPPDATA% that Inno knows nothing about, and together they are the
+  largest thing on the disk by far:
+
+    * PAD-Runtime, a registered WSL distro (~1 GB unpacked).  Removing the
+      folder is NOT enough and is actively wrong - WSL keeps its own registry
+      entry, and a distro whose disk vanished underneath it is a broken entry
+      the user then has to unregister by hand.  So it is unregistered through
+      wsl.exe, which is the only thing that removes both halves.
+    * pad-data.vhdx, the rigs' work disk - extracted games, cached cards,
+      save states.  Measured in gigabytes, and it is the user's own work.
+    * the payload cache: the runtime image and emulator binaries as
+      downloaded, kept so a repair needs no second download.
+
+  ASKED, NOT ASSUMED, and asked as two separate questions, because they are
+  two different kinds of thing.  The runtime and the cache are ours and can
+  be rebuilt by pressing one button in a reinstalled app; the work disk is
+  the user's and cannot.  Defaulting either to "yes" would make an uninstall
+  a data loss, and defaulting both to "no" would leave gigabytes behind on a
+  machine whose owner thinks the app is gone.  So: one question each, and the
+  work disk's question says what is on it.
+
+  Silent uninstalls remove nothing extra.  A script that cannot answer a
+  question must not have data deleted on its behalf.
+
+  AND THIS RUNS ELEVATED (PrivilegesRequired=admin), so the localappdata
+  constant below is the ELEVATING account's - note that a brace pair cannot
+  be written inside a Pascal comment here, because the first closing brace
+  ENDS the comment and everything after it is parsed as code, which is how
+  this block first failed to compile - while the app itself ran unelevated as
+  its owner.  On
+  the ordinary machine those are one account and UAC only raised it.  Where
+  they are not - a standard user who typed an administrator's password - the
+  paths below simply do not exist, both questions are skipped, and nothing is
+  removed.  That is the right way round: a wrong guess here costs disk space,
+  and the other wrong guess would cost somebody's extracted games. }
+
+procedure RemoveTheRuntimeDistro;
+var
+  ResultCode: Integer;
+begin
+  { Hidden: this is the only thing on screen at this point and a console
+    flashing past says nothing a user could act on.  A failure leaves the
+    distro registered, which the app's own Fix setup can still remove. }
+  Exec(ExpandConstant('{sys}\wsl.exe'), '--unregister PAD-Runtime',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\runtime'),
+          True, True, True);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\payloads'),
+          True, True, True);
+end;
+
+procedure RemoveTheWorkDisk;
+var
+  ResultCode: Integer;
+  Disk: String;
+begin
+  Disk := ExpandConstant('{localappdata}\pinball_decryptor\data\pad-data.vhdx');
+  { Detached first: the file is held open while the WSL VM has it attached,
+    and a delete would simply fail. }
+  Exec(ExpandConstant('{sys}\wsl.exe'), '--unmount "' + Disk + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\data'),
+          True, True, True);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  HasRuntime, HasDisk: Boolean;
+begin
+  if CurUninstallStep <> usPostUninstall then
+    Exit;
+  if UninstallSilent() then
+    Exit;
+
+  HasRuntime := DirExists(ExpandConstant('{localappdata}\pinball_decryptor\runtime'))
+             or DirExists(ExpandConstant('{localappdata}\pinball_decryptor\payloads'));
+  HasDisk := FileExists(ExpandConstant(
+               '{localappdata}\pinball_decryptor\data\pad-data.vhdx'));
+
+  if HasRuntime then
+    { IT IS NOT ALWAYS "not your data", AND SAYING SO WAS A LIE THE USER      }
+    { COULD NOT CHECK.  The rigs keep their extracted games, their card       }
+    { caches and their SAVE-STATE SLOTS on the work disk below - but only     }
+    { when there IS one.  A machine that never made that disk keeps all of it }
+    { INSIDE this distro, which is what this prompt is offering to delete.    }
+    { A save state is something a person made and cannot get back, so the     }
+    { sentence in front of it has to say that it might be in there.           }
+    if MsgBox('Also remove the Linux this app installed (PAD-Runtime) and the ' +
+              'files it downloaded?' + #13#10 + #13#10 +
+              'This is about a gigabyte, and a reinstalled app can fetch it ' +
+              'again.' + #13#10 + #13#10 +
+              'If you used the emulator BEFORE the work disk below existed, ' +
+              'your extracted games, cached cards and SAVE STATES are inside ' +
+              'this Linux, and removing it deletes them. Choose No if you are ' +
+              'not sure.',
+              mbConfirmation, MB_YESNO) = IDYES then
+      RemoveTheRuntimeDistro();
+
+  if HasDisk then
+    if MsgBox('Also delete the emulator''s work disk?' + #13#10 + #13#10 +
+              'This holds extracted games, cached cards and save states, and ' +
+              'it can be many gigabytes. It is YOUR work, and deleting it ' +
+              'cannot be undone.' + #13#10 + #13#10 +
+              'Choose No to keep it for a future install.',
+              mbConfirmation, MB_YESNO) = IDYES then
+      RemoveTheWorkDisk();
+end;

@@ -1686,6 +1686,11 @@ class MainWindow:
         # Forward to the same mfr restores their full log history.
         self._log_widgets = {}    # mfr.key -> tk.Text
         self._log_text = None     # alias for the currently-packed widget
+        # The pane follows new lines until the user scrolls it away; the button
+        # is the way back while it is parked.  See LOG_AT_BOTTOM_EPS.
+        self._log_follow = True
+        self._log_follow_btn = None
+        self._log_follow_btn_shown = False
         # Lines logged before any mfr is selected (e.g. the startup update
         # check while the picker is showing) — flushed into the first log
         # widget that appears.  Entries: ("line", ts, text, level) or
@@ -2635,8 +2640,11 @@ class MainWindow:
         # Log section.  We keep ONE log LabelFrame, but its contents
         # (the Text widget + its scrollbar) are swapped per-manufacturer
         # by _swap_log_widget() so each mfr has its own scrollback.
+        # Log section.  We keep ONE log LabelFrame, but its contents
+        # (the Text widget + its scrollbar) are swapped per-manufacturer
+        # by _swap_log_widget() so each mfr has its own scrollback.
         self._log_frame = ttk.LabelFrame(mv, text="Log")
-        self._log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(6, 8))
+        self._log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 8))
 
     def _build_extract_tab(self):
         f = self._tab_extract
@@ -16512,6 +16520,9 @@ class MainWindow:
                            height=8)
             scroll = ttk.Scrollbar(self._log_frame, command=text.yview)
             text.configure(yscrollcommand=scroll.set)
+            # The pane parks itself only when the USER moves it: appending a
+            # line, trimming the top and laying the widget out must not.
+            self._bind_log_follow(text, scroll)
             self._apply_log_theme(text)
             # Right-click → Copy / Save As… / Clear (Button-2 + Control-Click
             # cover the Mac trackpad / one-button conventions, matching the
@@ -16530,6 +16541,10 @@ class MainWindow:
         bundle["scroll"].pack(side=tk.RIGHT, fill=tk.Y)
         bundle["text"].pack(fill=tk.BOTH, expand=True)
         self._log_text = bundle["text"]  # alias for append_log/append_log_link
+        # One button for the frame, not one per manufacturer: only the packed
+        # pane is ever visible, and it is the one _log_text points at.
+        self._ensure_log_follow_button()
+        self._sync_log_follow_button()
         # Flush anything logged while the picker was showing (the startup
         # update check) into the first log widget to appear, keeping the
         # timestamps of when the events actually happened.
@@ -16565,6 +16580,141 @@ class MainWindow:
     #: Only count the pane every N lines: the count is a Tcl round trip and
     #: an emulator run appends thousands of lines a minute.
     LOG_PANE_CHECK_EVERY = 200
+
+    # ------------------------------------------------------------------
+    # Following the tail
+    # ------------------------------------------------------------------
+    #
+    # THE PANE FOLLOWS THE END UNTIL YOU TOUCH IT, and that is the whole rule.
+    # It used to call `see(END)` on every appended line, so scrolling up to read
+    # something during an emulator run (thousands of lines a minute) yanked the
+    # view straight back down before it could be read.
+    #
+    # FOLLOWING IS THE DEFAULT, AND IT IS A DECISION RATHER THAN A POSITION.
+    # The first version inferred it - at the bottom means follow - which reads
+    # the symptom instead of the intent and is wrong twice: a pane the app has
+    # not laid out yet is not "scrolled away" however its scrollbar reads, and a
+    # trim from the top can move the view with nobody asking. So `_log_follow`
+    # starts True and is reconsidered ONLY when the USER moves the view: the
+    # wheel, a drag on the scrollbar, the paging and arrow keys. Then, and only
+    # then, position decides - away from the end parks it, back at the end
+    # resumes - which is what lets scrolling back down re-attach without going
+    # near the button.
+    #
+    # The button appears exactly while the pane is parked, so it is both the way
+    # back and the only indication that anything is being held.
+    #
+    # `yview()[1] == 1.0` EXACTLY when the end is visible - measured on a
+    # 4,000-line pane, including a wrapped last line, where one line of scroll
+    # takes it to 0.99975 and `dlineinfo("end-1c")` agrees at every step. So the
+    # epsilon below is float insurance, not a tolerance.
+    LOG_AT_BOTTOM_EPS = 1e-5
+
+    #: What counts as the user moving the view. A drag on the scrollbar calls
+    #: `text.yview` directly and raises no event on the Text at all, so the
+    #: scrollbar is bound as well as the pane.
+    LOG_SCROLL_EVENTS = ("<MouseWheel>", "<Button-4>", "<Button-5>",
+                         "<Prior>", "<Next>", "<Home>", "<End>",
+                         "<Up>", "<Down>", "<B1-Motion>")
+
+    def _bind_log_follow(self, text, scroll):
+        """Let the pane hear when the USER moves it, as opposed to when we do."""
+        for seq in self.LOG_SCROLL_EVENTS:
+            text.bind(seq, self._on_log_user_scroll, add="+")
+        for seq in ("<Button-1>", "<B1-Motion>", "<MouseWheel>",
+                    "<Button-4>", "<Button-5>"):
+            scroll.bind(seq, self._on_log_user_scroll, add="+")
+
+    def _on_log_user_scroll(self, event=None):
+        """A wheel tick, drag or paging key arrived. Decide AFTER Tk applies it:
+        these bindings run BEFORE the widget scrolls, so reading the position
+        here would judge the view the user is leaving."""
+        t = self._log_text
+        if t is not None:
+            try:
+                t.after_idle(self._log_reassess_follow)
+            except tk.TclError:
+                pass
+        return None                      # never consume the scroll itself
+
+    def _log_reassess_follow(self):
+        if self._log_text is None:
+            return
+        self._log_follow = self._log_at_bottom(self._log_text)
+        self._sync_log_follow_button()
+
+    def _ensure_log_follow_button(self):
+        """Create the jump-to-latest button once, hidden."""
+        if getattr(self, "_log_follow_btn", None) is not None:
+            return
+        try:
+            self._log_follow_btn = ttk.Button(
+                self._log_frame, text="↓  Jump to latest", takefocus=False,
+                command=self._jump_to_latest_log)
+        except tk.TclError:
+            self._log_follow_btn = None
+        self._log_follow_btn_shown = False
+
+    @staticmethod
+    def _log_at_bottom(text):
+        """Is *text* scrolled to its end?
+
+        True when the widget cannot answer, because this decides whether to
+        follow and following is the default.
+
+        "Cannot answer" INCLUDES A PANE WITH NO SIZE YET: a Text in a window
+        that has never been laid out is 1x1, and `see(END)` on a 1-pixel-tall
+        widget leaves `yview()[1]` at 0.9953. Nobody can scroll a pane that was
+        never drawn, so it is at the bottom by definition."""
+        try:
+            if text.winfo_height() <= 1:
+                return True
+            return text.yview()[1] >= 1.0 - MainWindow.LOG_AT_BOTTOM_EPS
+        except (tk.TclError, IndexError, TypeError):
+            return True
+
+    def _log_follow_end(self, text):
+        """Scroll *text* to the end unless the user has parked it."""
+        if getattr(self, "_log_follow", True):
+            try:
+                text.see(tk.END)
+            except tk.TclError:
+                pass
+
+    def _sync_log_follow_button(self):
+        """Show the jump-to-latest button exactly while the pane is parked.
+
+        Does nothing unless the state actually changed: `place`/`place_forget`
+        move the geometry, which can bring us straight back here."""
+        btn = getattr(self, "_log_follow_btn", None)
+        if btn is None or self._log_text is None:
+            return
+        want = not getattr(self, "_log_follow", True)
+        if want == getattr(self, "_log_follow_btn_shown", False):
+            return
+        self._log_follow_btn_shown = want
+        try:
+            if want:
+                # Clear of the horizontal edge and of the scrollbar, so it never
+                # covers the newest line or the thumb.
+                btn.place(relx=1.0, rely=1.0, anchor=tk.SE, x=-18, y=-6)
+                btn.lift()
+            else:
+                btn.place_forget()
+        except tk.TclError:
+            pass
+
+    def _jump_to_latest_log(self):
+        """The button: go to the end and follow again."""
+        if self._log_text is None:
+            return
+        self._log_follow = True
+        try:
+            self._log_text.see(tk.END)
+        except tk.TclError:
+            pass
+        self._sync_log_follow_button()
+
 
     def _seed_log_history(self, text):
         """Load the previous sessions' log into the TOP of a log widget,
@@ -21670,7 +21820,7 @@ class MainWindow:
         self._log_text.insert(tk.END, text + "\n", level)
         self._trim_log_pane(self._log_text)
         self._log_text.configure(state=tk.DISABLED)
-        self._log_text.see(tk.END)
+        self._log_follow_end(self._log_text)
 
     def _trim_log_pane(self, text):
         """Drop the oldest lines once a pane passes ``LOG_PANE_MAX_LINES``.
@@ -21719,12 +21869,13 @@ class MainWindow:
         if rng:
             t.delete(rng[0], rng[1])
             t.insert(rng[0], text, (tag, level))
+            t.configure(state=tk.DISABLED)
         else:
             t.insert(tk.END, text, (tag, level))
             t.insert(tk.END, "\n")
             self._trim_log_pane(t)
-            t.see(tk.END)
-        t.configure(state=tk.DISABLED)
+            t.configure(state=tk.DISABLED)
+            self._log_follow_end(t)
 
     def _install_callback_error_logger(self, root):
         """Send exceptions raised inside Tk callbacks to the session log.
@@ -21781,7 +21932,7 @@ class MainWindow:
                                 lambda e: self._log_text.configure(cursor=""))
         self._log_text.insert(tk.END, text + "\n", tag)
         self._log_text.configure(state=tk.DISABLED)
-        self._log_text.see(tk.END)
+        self._log_follow_end(self._log_text)
 
     # ------------------------------------------------------------------
     # Phases / progress

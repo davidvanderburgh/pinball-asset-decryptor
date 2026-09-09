@@ -1698,3 +1698,219 @@ def test_no_build_script_installs_a_package_the_pinned_files_do_not_carry():
         assert not extra, (
             "%s installs %s outside the pinned requirement files"
             % (script.name, sorted(extra)))
+
+
+# ------------------------------------------- what uninstalling leaves behind --
+
+def test_the_uninstaller_offers_to_remove_everything_the_app_put_outside_itself(
+        monkeypatch):
+    """Since the app brings its own Linux, the biggest thing it installs is
+    not in its own folder: a registered WSL distro, a work disk measured in
+    gigabytes, and the downloads that built them.  Inno removes none of that
+    on its own, so an uninstall used to leave a machine's owner believing the
+    app was gone while gigabytes of it stayed.
+
+    The paths are asserted against the code that CREATES them, not written
+    out here a second time: three constants in three modules, and an
+    uninstaller naming a fourth spelling of any of them would delete nothing
+    and say nothing.
+
+    ASKED AS WINDOWS, whatever machine this runs on.  The installer is a
+    Windows artifact and its paths have to match on the Linux and macOS
+    runners too - the first version of this read the real LOCALAPPDATA, which
+    made it a test of the runner rather than of the code, green on Windows
+    and red on the other two."""
+    from pinball_decryptor.core import payloads, rigdata, runtime
+
+    local = "C:" + chr(92) + "Users" + chr(92) + "t" + chr(92) + "AppData" \
+        + chr(92) + "Local"
+    monkeypatch.setenv("LOCALAPPDATA", local)
+    for var in ("PAD_RUNTIME_DIR", "PAD_DATA_DISK", "PAD_PAYLOAD_DIR"):
+        monkeypatch.delenv(var, raising=False)
+    # cache_root() is the one of the three that branches on the platform.
+    monkeypatch.setattr(payloads.sys, "platform", "win32")
+
+    text = ISS.read_text(encoding="utf-8", errors="replace")
+
+    def as_inno(path):
+        assert path.startswith(local), (
+            "%s is no longer under LOCALAPPDATA, so the uninstaller's "
+            "localappdata spelling cannot reach it" % path)
+        # os.path.join joins with "/" off Windows; the .iss is spelled with
+        # backslashes, so the tail is normalised before it is compared.
+        return "{localappdata}" + path[len(local):].replace("/", chr(92))
+
+    for what, path in (("the runtime", runtime.install_dir()),
+                       ("the work disk", rigdata.disk_path()),
+                       ("the download cache", payloads.cache_root())):
+        assert as_inno(path) in text, (
+            "the uninstaller does not name %s (%s), so uninstalling "
+            "leaves it on the disk" % (what, as_inno(path)))
+
+    # The distro is UNREGISTERED, not just deleted: removing the folder alone
+    # leaves WSL holding a registry entry for a distro whose disk is gone,
+    # which the user then has to clean up by hand.
+    assert "--unregister %s" % runtime.DISTRO in text
+    # ...and the work disk is detached before the file is removed, because WSL
+    # holds it open while it is attached.
+    assert "--unmount" in text
+    # Both are QUESTIONS.  An uninstall that silently deleted a user's
+    # extracted games would be a data loss, not a cleanup.
+    assert text.count("MB_YESNO") >= 2
+    # And a silent uninstall, which cannot answer them, removes nothing extra.
+    assert "UninstallSilent" in text
+
+
+def test_no_pascal_comment_in_the_iss_contains_a_brace():
+    """In Inno's Pascal, ``{`` opens a comment and the FIRST ``}`` closes it -
+    so a constant written into prose, ``{localappdata}`` say, ends the comment
+    early and everything after it is parsed as code.
+
+    The compiler's whole account of this is ``'BEGIN' expected`` on a line of
+    English, and there is no Inno on a developer's machine to hear it from -
+    it costs a CI round trip on a release build to find out.  That is what
+    this test is for: it happened once, to the uninstall block, and the
+    symptom was a release that would not build.
+
+    Scanned rather than grepped, because a brace inside a STRING is ordinary
+    and correct - the code is full of ExpandConstant calls that need them;
+    only a brace inside a comment is the fault.
+    """
+    text = ISS.read_text(encoding="utf-8", errors="replace")
+    code = text[text.index("[Code]"):]
+    line, col = code[:0].count("\n") + 1, 0
+    in_string = in_comment = False
+    comment_started_at = 0
+    offenders = []
+    i = 0
+    while i < len(code):
+        ch = code[i]
+        if ch == "\n":
+            line += 1
+        if in_comment:
+            if ch == "{":
+                offenders.append(line)
+            elif ch == "}":
+                in_comment = False
+        elif in_string:
+            if ch == "'":
+                in_string = False
+        elif ch == "'":
+            in_string = True
+        elif ch == "/" and code[i:i + 2] == "//":
+            nl = code.find("\n", i)
+            if nl < 0:
+                break
+            line += 1
+            i = nl + 1
+            continue
+        elif ch == "{":
+            in_comment = True
+            comment_started_at = line
+        i += 1
+    assert not offenders, (
+        "these lines of pinball_decryptor.iss put a brace inside a Pascal "
+        "comment, which ends the comment there and makes the rest of the "
+        "sentence into code: lines %s (offsets within the [Code] section). "
+        "Write the constant's name without braces."
+        % ", ".join(str(n) for n in offenders))
+    assert not in_comment, (
+        "a Pascal comment opened at line %d of the [Code] section and is "
+        "never closed" % comment_started_at)
+
+
+def test_no_two_string_literals_in_the_iss_are_joined_by_nothing():
+    """Pascal does not concatenate adjacent string literals the way C does.
+
+    A message split over several lines therefore needs a ``+`` on every one
+    of them, and a missing one is reported as a bare ``Syntax error.`` on the
+    following line - by a compiler that only exists on the build runner.
+    That cost a release-build round trip once already, on the uninstall
+    prompts, immediately after the brace-in-a-comment above.
+
+    The rule this checks is narrow and exact: a line whose last character
+    closes a string, followed by a line that opens one.  Anything ending in
+    an operator, a comma or a bracket is a continuation and is fine.
+    """
+    text = ISS.read_text(encoding="utf-8", errors="replace")
+    code = text[text.index("[Code]"):].splitlines()
+    offenders = []
+    for i in range(len(code) - 1):
+        here, nxt = code[i].rstrip(), code[i + 1].strip()
+        if not here.endswith("'") or here.endswith("''"):
+            continue
+        # A line that is only a comment, or that opens one, is not code.
+        if here.lstrip().startswith(("{", "//")):
+            continue
+        if nxt.startswith("'"):
+            offenders.append(here.strip()[:50])
+    assert not offenders, (
+        "these string literals in pinball_decryptor.iss are followed by "
+        "another with no '+' between them, which Inno rejects as a syntax "
+        "error on the NEXT line: %s" % "; ".join(offenders))
+
+
+# --------------------------------------------------------------------------
+# ...and the two places the installer has to agree with the app about
+# --------------------------------------------------------------------------
+
+def test_the_prereq_installer_only_targets_a_runtime_the_app_will_use():
+    """★ THE VERSION HAS TO MATCH, not merely be present.
+
+    The app REFUSES a runtime whose stamp is not the number it expects:
+    ``runtime.wsl_distro()`` answers None and every command goes to the
+    machine's default distro.  This script asked only whether a
+    ``runtime_version`` field existed at all, so on an updating machine - which
+    is every machine that had the runtime before this app version - the two
+    disagreed: the app ran in the user's own distro while the installer put apt
+    packages into PAD-Runtime.  The user presses the thing that is meant to fix
+    their setup, waits, and the red rows stay red, because the tools went to a
+    Linux nothing runs in.
+    """
+    from pinball_decryptor.core import runtime
+
+    body = PS1.read_text(encoding="utf-8", errors="replace")
+
+    m = re.search(r"\$script:PadRuntimeVersion\s*=\s*(\d+)", body)
+    assert m, "install_prerequisites.ps1 does not pin a runtime version at all"
+    assert int(m.group(1)) == runtime.RUNTIME_VERSION, (
+        "the installer targets runtime version %s and the app expects %s, so "
+        "one of them is aiming at a Linux the other will not use"
+        % (m.group(1), runtime.RUNTIME_VERSION))
+
+    # And the probe must actually COMPARE it. A pinned constant nothing reads
+    # is worse than none: it reads as covered.
+    probe = body[body.index("function Get-PadRuntimeDistro"):]
+    probe = probe[:probe.index("\n}")]
+    assert "PadRuntimeVersion" in probe, (
+        "Get-PadRuntimeDistro does not compare the version it found against "
+        "the one this build expects")
+    assert "runtime_version" in probe and r"(\d+)" in probe, (
+        "the version is not captured out of the manifest, so there is nothing "
+        "to compare against: %s" % probe[-400:])
+
+
+def test_the_uninstaller_does_not_call_the_runtime_not_your_data():
+    """★ IT IS NOT ALWAYS "not your data", AND THE USER CANNOT CHECK.
+
+    The rigs keep extracted games, cached cards and SAVE-STATE SLOTS on the
+    work disk - but only when there IS one, and only the Spike 1 tab ever made
+    it.  A machine that never made that disk keeps all of it INSIDE the distro
+    this prompt offers to delete.  A save state is something a person made and
+    cannot get back, so the sentence in front of an irreversible delete may not
+    tell them it is not theirs.
+    """
+    body = ISS.read_text(encoding="utf-8", errors="replace")
+    i = body.index("Also remove the Linux this app installed")
+    prompt = body[i:i + 900]
+
+    assert "not your data" not in prompt, (
+        "the runtime prompt still tells the user the distro holds nothing of "
+        "theirs, immediately before deleting it:\n" + prompt[:400])
+    assert "SAVE STATES" in prompt, (
+        "the prompt does not name what can be inside:\n" + prompt[:400])
+
+    # The work-disk prompt was always honest; it must stay that way.
+    j = body.index("Also delete the emulator")
+    disk = body[j:j + 700]
+    assert "YOUR work" in disk and "cannot be undone" in disk, disk[:400]

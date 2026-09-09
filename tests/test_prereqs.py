@@ -99,7 +99,7 @@ def _scripted_run(monkeypatch, *, registered, probe_outcomes, calls):
     outcomes = list(probe_outcomes)
 
     def _run(cmd, *a, **kw):
-        assert cmd[0] == "wsl"
+        assert cmd[0] in ("wsl", "wsl.exe")
         if "-l" in cmd:
             calls.append(("list", kw.get("timeout")))
             return subprocess.CompletedProcess(
@@ -273,7 +273,7 @@ def _loop_probe_run(monkeypatch, *, version_line, calls=None,
     *dead_err* model the other machine — a registered distro that no longer
     starts, where every command fails with wsl.exe's own error (PAD-113)."""
     def _run(cmd, *a, **kw):
-        assert cmd[0] == "wsl"
+        assert cmd[0] in ("wsl", "wsl.exe")
         if list(cmd[1:3]) == ["-l", "-v"]:
             if calls is not None:
                 calls.append("version")
@@ -669,7 +669,7 @@ def _release(monkeypatch, osrelease, distro=("Ubuntu", 2)):
     monkeypatch.setattr(prereqs, "_WSL_RELEASE", [("", "", ""), False])
     monkeypatch.setattr(prereqs.sys, "platform", "win32")
     monkeypatch.setattr(prereqs.shutil, "which", lambda n: "/wsl.exe")
-    monkeypatch.setattr(prereqs, "_wsl_default_distro", lambda: distro)
+    monkeypatch.setattr(prereqs, "_wsl_default_distro", lambda want=None: distro)
     monkeypatch.setattr(
         prereqs, "_run_in_wsl",
         lambda cmd, t: subprocess.CompletedProcess(cmd, 0, stdout=osrelease,
@@ -731,8 +731,124 @@ def test_no_release_read_says_nothing_at_all(monkeypatch):
     monkeypatch.setattr(prereqs, "_WSL_RELEASE", [("", "", ""), False])
     monkeypatch.setattr(prereqs.sys, "platform", "win32")
     monkeypatch.setattr(prereqs.shutil, "which", lambda n: "/wsl.exe")
-    monkeypatch.setattr(prereqs, "_wsl_default_distro", lambda: ("", None))
+    monkeypatch.setattr(prereqs, "_wsl_default_distro", lambda want=None: ("", None))
     monkeypatch.setattr(
         prereqs, "_run_in_wsl",
         lambda cmd, t: subprocess.CompletedProcess(cmd, 1, stdout="", stderr=""))
     assert prereqs.wsl_release_lines() == []
+
+
+# ------------------------------------- which Linux the strip reports about --
+#
+# THE STRIP MUST ASK THE MACHINE THE APP USES.  Once the app installs its own
+# WSL distro, every rig and every pipeline runs in there - and these probes
+# went to the machine's DEFAULT distro, which on a PC whose default is thin
+# (or absent) meant a column of red beside an app that worked perfectly, and
+# an instruction to apt-get install tools the user already had.
+
+def _using_our_runtime(monkeypatch, distro="PAD-Runtime"):
+    monkeypatch.setattr(prereqs.runtime, "wsl_distro", lambda runner=None: distro)
+    monkeypatch.setattr(prereqs.runtime, "wsl_head",
+                        lambda root=False, runner=None:
+                        ["wsl.exe", "-d", distro] + (["-u", "root"] if root else []))
+
+
+def test_the_probe_runs_in_the_distro_the_app_uses(monkeypatch):
+    _wsl_env(monkeypatch)
+    _using_our_runtime(monkeypatch)
+    seen = []
+
+    def _run(cmd, *a, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+    ok, _msg, _hint = prereqs._probe_wsl("command -v partclone.ext4")
+    assert ok is True
+    assert seen[0][:5] == ["wsl.exe", "-d", "PAD-Runtime", "-u", "root"], seen[0]
+
+
+def test_without_our_runtime_the_probe_is_the_bare_wsl_it_always_was(monkeypatch):
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(prereqs.runtime, "wsl_distro", lambda runner=None: None)
+    monkeypatch.setattr(prereqs.runtime, "wsl_head",
+                        lambda root=False, runner=None:
+                        ["wsl.exe"] + (["-u", "root"] if root else []))
+    seen = []
+    monkeypatch.setattr(
+        prereqs.subprocess, "run",
+        lambda cmd, *a, **kw: (seen.append(cmd),
+                               subprocess.CompletedProcess(cmd, 0, stdout="ok\n",
+                                                           stderr=""))[1])
+    prereqs._probe_wsl("command -v gpg")
+    assert "-d" not in seen[0]
+
+
+def test_a_missing_tool_in_our_own_linux_is_not_blamed_on_the_user(monkeypatch):
+    """apt-get advice is wrong there and it is worse than wrong: the tools are
+    baked into the image, so a red row means OUR image is short one, and
+    telling the user to install it has him patching a distro he did not build
+    to work around a bug he cannot see."""
+    _wsl_env(monkeypatch)
+    _using_our_runtime(monkeypatch)
+    monkeypatch.setattr(
+        prereqs, "_probe_wsl",
+        lambda cmd: (False, "not found", ""))
+    p = Prerequisite(name="partclone", where="wsl",
+                     probe="command -v partclone.ext4", reason="r",
+                     install_hint="apt-get install partclone (in WSL)")
+    res = check_prerequisite(p)
+    assert res.ok is False
+    assert "apt-get" not in res.install_hint
+    assert "PAD-Runtime" in res.install_hint
+    assert "Fix setup" in res.install_hint
+
+
+def test_a_missing_tool_in_the_users_own_linux_still_names_the_package(monkeypatch):
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(prereqs.runtime, "wsl_distro", lambda runner=None: None)
+    monkeypatch.setattr(prereqs, "_probe_wsl", lambda cmd: (False, "not found", ""))
+    p = Prerequisite(name="partclone", where="wsl",
+                     probe="command -v partclone.ext4", reason="r",
+                     install_hint="apt-get install partclone (in WSL)")
+    assert "apt-get install partclone" in check_prerequisite(p).install_hint
+
+
+def test_the_log_line_names_our_distro_and_drops_the_age_advice(monkeypatch):
+    """The "your Ubuntu is older than we test against" line is advice about a
+    machine detail the user chose.  Ours is a release WE chose and pinned, so
+    the same sentence there would be the app complaining about itself."""
+    _wsl_env(monkeypatch)
+    _using_our_runtime(monkeypatch)
+    monkeypatch.setattr(prereqs, "_wsl_default_distro",
+                        lambda want=None: (want or "Ubuntu", 2))
+    monkeypatch.setattr(prereqs, "wsl_release",
+                        lambda: ("ubuntu", "20.04", "Ubuntu 20.04.6 LTS"))
+    lines = prereqs.wsl_release_lines()
+    assert lines == ["WSL: PAD-Runtime (Ubuntu 20.04.6 LTS, WSL 2)"]
+
+
+def test_the_age_advice_survives_for_the_users_own_distro(monkeypatch):
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(prereqs.runtime, "wsl_distro", lambda runner=None: None)
+    monkeypatch.setattr(prereqs, "_wsl_default_distro", lambda want=None: ("Ubuntu", 2))
+    monkeypatch.setattr(prereqs, "wsl_release",
+                        lambda: ("ubuntu", "20.04", "Ubuntu 20.04.6 LTS"))
+    lines = prereqs.wsl_release_lines()
+    assert len(lines) == 2 and "older than" in lines[1]
+
+
+def test_a_named_distro_is_found_whether_or_not_it_is_the_default(monkeypatch):
+    """`wsl -l -v` stars the default; ours may or may not be it, and the row
+    has to be found either way."""
+    listing = ("  NAME          STATE      VERSION\r\n"
+               "* Ubuntu        Running    2\r\n"
+               "  PAD-Runtime   Stopped    2\r\n")
+    monkeypatch.setattr(prereqs.sys, "platform", "win32")
+    monkeypatch.setattr(
+        prereqs.subprocess, "run",
+        lambda *a, **kw: subprocess.CompletedProcess([], 0, stdout=listing,
+                                                     stderr=""))
+    assert prereqs._wsl_default_distro() == ("Ubuntu", 2)
+    assert prereqs._wsl_default_distro(want="PAD-Runtime") == ("PAD-Runtime", 2)
+    assert prereqs._wsl_default_distro(want="Nope") == ("", None)

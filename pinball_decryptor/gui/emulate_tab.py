@@ -83,7 +83,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from ..core import config, pkgnames, prereqs, rigdata, runtime
-from . import _rig
+from . import _rig, _runtime_ui
 from .widgets import _Tooltip
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -820,9 +820,7 @@ def _wsl_path(win_path):
 #: different machine than the rest would produce answers that are individually
 #: true and collectively nonsense.
 def _wsl_head(root=False):
-    d = runtime.distro_for("spike2")
-    head = ["wsl.exe"] + (["-d", d] if d else [])
-    return head + (["-u", "root"] if root else []) + ["-e"]
+    return runtime.wsl_head(root=root) + ["-e"]
 
 
 #: WHERE THIS RIG'S WORK GOES.  padpath.sh says "explicit PAD_HOME always
@@ -2367,6 +2365,18 @@ class EmulatePanel:
         self._setup_btn = ttk.Button(btns, text="Set up emulator…",
                                      command=self._setup_fix, width=18)
 
+        # ★ THE BUTTON THAT MOVES A USER OFF A STALE RUNTIME, and the reason it
+        # had to exist before the version stamp was ever bumped: until it did,
+        # runtime.install had three call sites and every one of them was in the
+        # Spike 1 tab.  A Spike 2 user whose runtime went out of date with an
+        # app update would have found the emulator quietly running in the
+        # machine's own distro, without the toolchain, with the card cache and
+        # the save states left behind in a distro nothing was looking at - and
+        # the only cure on a tab they had no reason to open.  Packs itself from
+        # _runtime_apply, so a machine whose runtime is current never sees it.
+        self._rt_btn = ttk.Button(btns, text="Update emulator Linux…",
+                                  command=self._runtime_fix, width=24)
+
         # ★ AND THE ONE THAT IS ALWAYS THERE, because LOOKING is not something
         # a user should have to consent to - setupcheck.sh's own header has
         # said that since it was written, and the UI never offered the looking
@@ -2477,6 +2487,14 @@ class EmulatePanel:
         self._setup_msg = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
                                     foreground="#c07000", text="")
         self._setup_pad = pad
+
+        # ★ AND THE ONE THAT SAYS WHERE THE EMULATOR WENT (see _runtime_apply).
+        # Its own label for the same reason as the two above, and separate from
+        # them because it is a different KIND of fault: the machine is set up
+        # correctly and the emulator is simply running somewhere else.
+        self._rt_msg = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
+                                 foreground="#c07000", text="")
+        self._rt_pad = pad
 
         # The key list that used to be here is gone. The virtual playfield's
         # key panel lists every binding (item 39; before that, the Controls
@@ -3112,6 +3130,187 @@ class EmulatePanel:
             self._refit()
         except (tk.TclError, AttributeError):
             pass            # the tab was never built, or is being torn down
+
+    def _runtime_apply(self, rt):
+        """Say that the emulator is not in the Linux it is supposed to be in,
+        and offer the one button that fixes it.  Main loop only.
+
+        ★ WHY THIS TAB HAS TO SAY IT.  A runtime whose version stamp is not
+        the one this build expects is refused: `wsl_distro()` answers None and
+        every path into Linux falls back to the machine's default distro.  That
+        is the correct fallback and it destroys nothing - but it is silent, and
+        what the user sees is an emulator that worked yesterday, red
+        prerequisite rows, and a card cache and save-state slots that appear to
+        have vanished.  They have not; they are in the old distro, which
+        nothing is looking at any more.  Before this, the only place in the app
+        that could act on that was the Spike 1 tab.
+
+        ``None`` means the poll could not ask, which is not the same as "there
+        is nothing wrong" - so it leaves whatever is on screen alone.
+        """
+        if rt is None:
+            return
+        state, _detail = rt
+        try:
+            # A machine that never had a runtime says NOTHING here - see
+            # _runtime_ui.UNPROMPTED.  It is not broken; it is every Spike 2
+            # user since before the runtime existed, and a banner offering a
+            # 414 MB download to a working setup is a nag, not a warning.
+            if state not in _runtime_ui.UNPROMPTED and state != "foreign":
+                self._rt_btn.pack_forget()
+                self._rt_msg.pack_forget()
+                self._refit()
+                return
+            self._rt_msg.configure(text=_runtime_ui.notice(state, _detail))
+            # THE BUTTON GOES AWAY WHEN IT CANNOT HELP, exactly as the setup
+            # button does and for the same reason: a `foreign` distro is
+            # somebody else's and the app will not delete it, so offering a
+            # press that must refuse is an invitation to press it twice.
+            if state in _runtime_ui.UNPROMPTED and _runtime_ui.can_install():
+                self._rt_btn.pack(side=tk.LEFT, padx=(6, 0))
+            else:
+                self._rt_btn.pack_forget()
+            self._rt_msg.pack(anchor=tk.W, **getattr(self, "_rt_pad", {}))
+            # ONCE, IN THE LOG TOO.  The notice is a label a user can look
+            # past; the log is what gets pasted into a report, and "why is the
+            # emulator suddenly broken" is exactly the question this answers.
+            if not getattr(self, "_rt_noted", False):
+                self._rt_noted = True
+                self._log("[emulate] " + " ".join(
+                    _runtime_ui.notice(state, _detail).split()))
+            self._refit()
+        except (tk.TclError, AttributeError):
+            pass            # the tab was never built, or is being torn down
+
+    def _runtime_fix(self):
+        """Install or replace the app's own Linux, from this tab.
+
+        On a worker, because it is a 414 MB download and an import; and never
+        while the emulator is up, because replacing the distro a run lives in
+        kills the run and takes its work with it.
+        """
+        # THE SAME TRIPLE THE OTHER DESTRUCTIVE PATHS USE, not just _last_up:
+        # that flag is blind between polls, and a Start pressed two seconds ago
+        # is exactly when this must refuse.
+        if self._proc is not None or self._last_up or self._starting:
+            self._log("[emulate] the emulator is running — stop it first.")
+            return
+        self._rt_btn.configure(state=tk.DISABLED, text="Updating…")
+
+        def work():
+            try:
+                state = _runtime_ui.ensure(
+                    say=lambda m: self._log("[emulate] %s" % m),
+                    progress=self._runtime_progress,
+                    on_blocked=lambda exc: self._timer().after(
+                        0, lambda e=exc: _runtime_ui.offer_from_file(
+                            say=lambda m: self._log("[emulate] %s" % m),
+                            exc=e)))
+                if state == "ready":
+                    self._ensure_data_disk()
+            except Exception as exc:                       # noqa: BLE001
+                self._log("[emulate] %s" % exc)
+            finally:
+                # SAY IT AGAIN ON THE NEXT POLL.  A second attempt after a
+                # failure has to be able to re-log why, or a user who pressed
+                # once and missed the line has nothing to send.
+                self._rt_noted = False
+                runtime.invalidate()
+
+                def done():
+                    try:
+                        self._rt_btn.configure(state=tk.NORMAL,
+                                               text="Update emulator Linux…")
+                    except (tk.TclError, AttributeError):
+                        pass
+                try:
+                    self._timer().after(0, done)
+                except (tk.TclError, RuntimeError):
+                    pass
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _reattach_data_disk(self):
+        """Attach the work disk again if it exists and is not attached.
+        ATTACH ONLY - this never creates one.  Worker thread; Start calls it.
+
+        ★ /mnt/wsl IS A TMPFS, and the disk is an ext4 volume attached over the
+        top of it.  `wsl --shutdown`, a reboot and WSL's own idle timeout all
+        drop that mount and leave the FILE, and `_rig_env` hands the rig the
+        path whenever the file exists - so without this, the first Start after
+        a restart writes the extracted rootfs and then the card cache into the
+        tmpfs underneath.  Several GB into RAM, silently.  rootfs.sh now
+        refuses that outright, which turns it into a stopped run with an
+        explanation; this is what stops it being a stopped run at all.
+
+        THE LINE BETWEEN THIS AND _ensure_data_disk IS THE WHOLE POINT.
+        Creating a disk here would be a migration - it would move a user who
+        has been running without one and leave their card cache behind in the
+        distro, which is a re-copy of several GB that looks like losing it.
+        Re-attaching a disk they already have strands nothing and repairs the
+        one state that silently costs them memory.
+        """
+        if not runtime.wsl_distro() or not rigdata.exists():
+            return
+        d = runtime.wsl_distro()
+        try:
+            if rigdata.attached(d):
+                return
+            self._log("[emulate] the emulator's work disk came unattached "
+                      "(a WSL restart does that); attaching it again.")
+            rigdata.attach(d)
+        except Exception as exc:                           # noqa: BLE001
+            # Not fatal here: rootfs.sh refuses a memory-backed destination on
+            # its own, so the worst case is a run that stops and says why
+            # rather than one that fills RAM.
+            self._log("[emulate] could not re-attach the work disk (%s). The "
+                      "run will stop rather than write into memory." % exc)
+
+    def _ensure_data_disk(self):
+        """Make the work disk, RIGHT AFTER a runtime install and nowhere else.
+
+        Its whole point is that extractions, card caches and SAVE STATES do not
+        live inside a Linux the app replaces - and this is the one moment when
+        making it can strand nothing, because the distro it would have stranded
+        work in has just been replaced and is empty.
+
+        DELIBERATELY NOT ON START, which is where the Spike 1 tab does it.  On
+        this tab `_rig_env` already hands the rig this disk whenever the file
+        exists, so creating one on Start would move a user who has been running
+        in the runtime without it: their existing card cache would stay in the
+        distro, unreferenced, and the next Start would re-copy several GB.
+        Nothing would be lost and it would look exactly like losing it.  That
+        is a migration, and a migration is not a thing to do to somebody as a
+        side effect of pressing Start.
+
+        Never fatal: `rigdata.rig_env` returns nothing when the disk is not
+        ready, and the rig then uses the same in-distro defaults it always has.
+        """
+        d = runtime.wsl_distro()
+        if not d:
+            return
+        try:
+            if rigdata.ensure(d, log=lambda m: self._log("[emulate] %s" % m)):
+                free = rigdata.free_bytes(d)
+                if free and free < rigdata.LOW_SPACE_BYTES:
+                    self._log("[emulate] the emulator's data disk is nearly "
+                              "full (%.1f GB free)." % (free / 1073741824.0))
+        except Exception as exc:                           # noqa: BLE001
+            self._log("[emulate] could not set aside the work disk (%s); the "
+                      "emulator will keep its work inside the Linux instead."
+                      % exc)
+
+    def _runtime_progress(self, done, total):
+        """A 414 MB download with no progress looks like a hang, and this tab
+        has a hang that looks exactly the same (a wedged WSL) — so silence here
+        makes two different problems indistinguishable."""
+        if not total:
+            return
+        pct = int(done * 100 / total)
+        if pct >= getattr(self, "_rt_pct", -10) + 10:
+            self._rt_pct = pct
+            self._log("[emulate] downloading… %d%% of %d MB"
+                      % (pct, total // (1024 * 1024)))
 
     def _refit(self):
         """Tell the window this tab is a different height now.
@@ -4780,6 +4979,7 @@ class EmulatePanel:
 
         def run():
             self._note_the_runtime_is_a_different_machine()
+            self._reattach_data_disk()
             # DOCKER IS CHECKED HERE, in the worker, so a slow probe cannot
             # freeze the tab - and it is checked on every Start rather than
             # trusted from build time, because the user may have installed or
@@ -5449,6 +5649,16 @@ class EmulatePanel:
             except Exception:                            # noqa: BLE001
                 text = ""
             info = parse_status(text)
+            # ★ AND WHICH LINUX THIS ALL JUST HAPPENED IN.  Asked HERE, on the
+            # worker, because a cold runtime.status() costs two wsl.exe
+            # launches and answering it on the Tk thread is one of the four
+            # ways this window has been frozen before; on the main thread it
+            # deliberately answers "not known yet" instead.  Cached for 60 s,
+            # so this is free on all but the first poll.
+            try:
+                rt = runtime.status()
+            except Exception:                            # noqa: BLE001
+                rt = None
             # Tk is not thread safe — every widget touch goes back to the main
             # loop.  Doing it from the worker is the exact bug that froze the
             # Partition Explorer's extract.  The busy flag is cleared THERE
@@ -5463,6 +5673,7 @@ class EmulatePanel:
                 # One poll has answered (even emptily): the fast first-poll
                 # retry has done its job, drop to the normal cadence.
                 self._polled_once = True
+                self._runtime_apply(rt)
                 self._apply(info)
 
             try:

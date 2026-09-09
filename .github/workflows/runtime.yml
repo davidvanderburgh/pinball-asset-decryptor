@@ -73,6 +73,17 @@ jobs:
               print("verified %s (%d bytes)" % (p.filename, p.size))
           PY
 
+      # STAGED, NOT COPIED OUT.  The image installs GDRE Tools by running the
+      # app's own installer script, so the version, URL and SHA-256 have one
+      # home (installer/install_gdre.sh) instead of a second copy in a
+      # Dockerfile that would drift the first time one of them changed.  The
+      # build context is tools/runtime, so the file has to come to it.
+      - name: Stage the GDRE Tools installer for the image
+        run: |
+          cp installer/install_gdre.sh tools/runtime/payload/install_gdre.sh
+          grep -q 'SHA256=' tools/runtime/payload/install_gdre.sh \
+            || { echo "install_gdre.sh no longer pins a hash"; exit 1; }
+
       # THE APP DECIDES WHAT VERSION THIS IMAGE IS.  Read out of core/runtime.py
       # rather than written down twice - see the check after the selftest for
       # what the second copy cost.
@@ -172,6 +183,69 @@ jobs:
             file "$(command -v busybox)" | grep -q "statically linked"               || fail "busybox is not static, so the save-state boot has no umount"
             echo "busybox is static, so the pivot boot has its umount"
             echo "spike 2 toolchain OK"
+          '
+
+      # THE PIPELINE TOOLS, and the same rule applies: asked to do their job,
+      # not merely to be on PATH.  These are what the extract and write paths
+      # shell out to for every manufacturer, and the app routes those here now
+      # - so a tool missing or unable to run is a user whose Write fails
+      # halfway through, on a machine that was working before he installed our
+      # Linux.  GDRE Tools especially: it is a Godot binary that opens a
+      # display even when told to be headless, so it is run the way the BOF
+      # pipeline runs it (LD_LIBRARY_PATH + xvfb-run), not merely stat'ed.
+      - name: Prove the pipeline tools work
+        if: ${{ inputs.variant == 'full' }}
+        run: |
+          docker run --rm pad-runtime:${{ inputs.tag }} bash -c '
+            set -e
+            fail() { echo "FAILED: $1"; exit 1; }
+            for t in gpg partclone.ext4 xorriso pigz curl unzip cwebp xvfb-run tar fuser killall rsync partprobe modprobe; do
+              command -v $t >/dev/null || fail "missing: $t"
+            done
+            gpg --version | head -1
+            partclone.ext4 --help 2>&1 | head -1
+            xorriso -version 2>&1 | head -2
+            python3 -c "import zstandard; print(\"python3-zstandard\", zstandard.__version__)" || fail "the app python cannot import zstandard"
+            printf "P6\n1 1\n255\n\0\0\0" > /tmp/p.ppm
+            cwebp -quiet /tmp/p.ppm -o /tmp/p.webp || fail "cwebp cannot encode"
+            test -s /tmp/p.webp || fail "cwebp wrote nothing"
+            echo "cwebp encodes"
+            test -x /opt/gdre_tools/gdre_tools.x86_64 || fail "GDRE Tools is not installed"
+            # JUDGED ON WHAT IT SAYS, NOT ON WHAT IT RETURNS.  GDRE prints its
+            # own banner and then exits non-zero for `--version` (Godot treats
+            # a run with no work to do as a failure), so an `|| fail` here
+            # rejects an image whose GDRE is perfectly fine - which is what
+            # this step did on its first run.  The banner is the proof that
+            # matters anyway: it means the binary started under xvfb and found
+            # its libraries, which is the whole question.
+            said=$(LD_LIBRARY_PATH=/opt/gdre_tools xvfb-run -a \
+                     /opt/gdre_tools/gdre_tools.x86_64 --headless --version 2>&1 || true)
+            case "$said" in
+              *"Godot RE Tools"*) echo "GDRE Tools runs headless: $said" ;;
+              *) fail "GDRE Tools did not start under xvfb (the way the BOF pipeline runs it): $said" ;;
+            esac
+            # modprobe is asked to do its job, not merely to exist: usbipd
+            # runs it INSIDE this distro to load vhci_hcd, which is how the
+            # JJP dongle reaches WSL at all.  There is no kernel under docker
+            # to load a module into, so the proof here is that it runs and
+            # reports a missing MODULE rather than a missing PROGRAM - the
+            # error the shipped image answered with was that the modprobe
+            # command is unavailable.
+            #
+            # NO APOSTROPHE ANYWHERE IN THIS BLOCK, comments included.  It is
+            # all one single-quoted argument to bash -c, so one apostrophe
+            # closes the quote and the step dies with "unexpected EOF while
+            # looking for matching quote" - pointing at the END of the block
+            # rather than at the word.  That is what happened here twice, and
+            # tests/test_runtime.py now scans for it.
+            said=$(modprobe --dry-run vhci_hcd 2>&1 || true)
+            case "$said" in
+              *unavailable*|*"not found: modprobe"*)
+                fail "modprobe is not installed: $said" ;;
+              *) echo "modprobe runs: ${said:-clean}" ;;
+            esac
+            command -v modprobe >/dev/null || fail "modprobe is not installed"
+            echo "pipeline tools OK"
           '
 
       # THE RIG'S OWN SOURCES, COMPILED WITH THE IMAGE'S OWN TOOLCHAIN, and

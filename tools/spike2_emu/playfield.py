@@ -607,6 +607,49 @@ class SwitchDriver:
                 self.q.task_done()
 
 
+def wsl_head(root=False):
+    """``wsl.exe`` plus the selector that says WHICH Linux, and ``-u root``.
+
+    ★ THE DISTRO HAS TO BE NAMED, and leaving it out is what made every click in
+    this window do nothing (David, 2026-09-09). A bare ``wsl.exe -e`` runs in the
+    DEFAULT distro, which was fine for as long as there was only one - and the
+    app now runs the emulator inside its own PAD-Runtime. So the game sat in one
+    Linux while every switch this window drove was delivered into another, wrote
+    a ring nobody was reading, and vanished. The game window's keyboard kept
+    working throughout, because the renderer is a process INSIDE the run and its
+    keys never cross a distro boundary; only this window does. That asymmetry is
+    exactly what the report described.
+
+    ``PAD_WSL_DISTRO`` is already handed to this process for the purpose (see
+    pad_export_win in padpath.sh); it is simply never a guess."""
+    head = ["wsl.exe"]
+    distro = os.environ.get("PAD_WSL_DISTRO")
+    if distro:
+        head += ["-d", distro]
+    if root:
+        head += ["-u", "root"]
+    return head
+
+
+def wsl_rig_env():
+    """``PAD_ROOT=<posix path>`` for a helper we are calling back into WSL.
+
+    THE OTHER HALF OF THE SAME BUG. Naming the distro gets the helper into the
+    right Linux; it still has to find the right RIG inside it. A fresh
+    ``wsl.exe`` starts with that distro's own defaults, so padpath would resolve
+    ``$HOME/spike2root`` - and under the runtime distro the rig actually lives on
+    a shared volume somewhere else entirely, so the helper would write a third
+    ring nobody reads.
+
+    ``PAD_ROOT`` reaches this process translated to its WINDOWS spelling (WSLENV
+    marks it ``/p``), which is the wrong thing to send back; ``PAD_ROOT_WSL``
+    carries the same directory in its POSIX spelling for exactly this round
+    trip. Absent - an older watch.sh, or a run started by hand - this returns
+    nothing and the helper resolves the rig the way it always did."""
+    root = os.environ.get("PAD_ROOT_WSL")
+    return ["PAD_ROOT=%s" % root] if root else []
+
+
 def wsl_run(script, *args):
     """Run one of the rig's switch helpers in WSL. None if it did not run.
 
@@ -631,7 +674,7 @@ def wsl_run(script, *args):
     # ~200 ms interop spawn that SwitchDriver's whole serialised queue exists to
     # cope with.
     if sys.platform == "win32":
-        cmd = (["wsl.exe", "-e", "env"] + env
+        cmd = (wsl_head() + ["-e", "env"] + env + wsl_rig_env()
                + ["python3", "%s/%s" % (WSL_DIR, script)] + list(args))
     else:
         cmd = ["env"] + env + ["python3", os.path.join(HERE, script)] + list(args)
@@ -661,8 +704,8 @@ def state_run(script, slot="quicksave", label=None):
     """
     extra = [label] if label else []
     if sys.platform == "win32":
-        cmd = (["wsl.exe", "-u", "root", "-e", "bash",
-                "%s/%s" % (WSL_DIR, script), slot] + extra)
+        cmd = (wsl_head(root=True) + ["-e", "env"] + wsl_rig_env()
+               + ["bash", "%s/%s" % (WSL_DIR, script), slot] + extra)
     else:
         # The native-Linux path: run it plainly; without root the script's own
         # "needs root" line lands in the status bar, which is the honest hint.
@@ -1775,7 +1818,8 @@ class SwitchPipe:
             return False
         try:
             if sys.platform == "win32":
-                cmd = ["wsl.exe", "-e", "python3", "%s/swkeys.py" % WSL_DIR]
+                cmd = (wsl_head() + ["-e", "env"] + wsl_rig_env()
+                       + ["python3", "%s/swkeys.py" % WSL_DIR])
             else:
                 cmd = ["python3", os.path.join(HERE, "swkeys.py")]
             self._p = subprocess.Popen(cmd, stdin=subprocess.PIPE,
@@ -1960,8 +2004,8 @@ def state_slots():
     is what savegame.sh/loadgame.sh take - they resolve the game from the
     running guest themselves."""
     if sys.platform == "win32":
-        cmd = ["wsl.exe", "-u", "root", "-e", "bash",
-               "%s/slots.sh" % WSL_DIR, "list"]
+        cmd = (wsl_head(root=True) + ["-e", "env"] + wsl_rig_env()
+               + ["bash", "%s/slots.sh" % WSL_DIR, "list"])
     else:
         cmd = ["bash", os.path.join(HERE, "slots.sh"), "list"]
     try:

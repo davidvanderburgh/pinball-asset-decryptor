@@ -119,16 +119,35 @@ def test_off_windows_it_is_not_a_failure_it_is_not_applicable(monkeypatch):
 
 # ------------------------------------------------------------- the routing --
 
-def test_only_rigs_the_image_can_actually_run_are_routed_into_it():
-    """Naming a rig in RIGS is a PROMISE that the image carries its tools -
-    checked in CI by running each one, not by looking for it.  The full image
-    carries both emulator rigs; the multi-boot card builder is a different
-    feature with its own tool list that has never been audited against this
-    image, so it keeps using the machine's default distro."""
+def test_everything_is_routed_into_it_not_only_the_rigs():
+    """This used to be per rig, and being per rig was the bug: the emulators
+    ran in ours while the extract and write pipelines ran in the user's own,
+    which left the app with two Linuxes and a prerequisite strip reporting on
+    whichever one it was not using.  The image carries the pipelines' tools
+    now (tests/test_runtime_packages.py holds it to the installer's lists), so
+    there is one answer for the whole app."""
     r = _runner(listed=[runtime.DISTRO])
-    assert runtime.distro_for("spike1", runner=r) == runtime.DISTRO
-    assert runtime.distro_for("spike2", runner=r) == runtime.DISTRO
-    assert runtime.distro_for("multiboot", runner=r) is None
+    assert runtime.wsl_distro(runner=r) == runtime.DISTRO
+    for rig in ("spike1", "spike2", "multiboot"):
+        assert runtime.distro_for(rig, runner=r) == runtime.DISTRO
+
+
+def test_the_head_puts_the_selector_before_the_user():
+    """`wsl.exe -u root -d X` is not the same command line as `-d X -u root`:
+    the selector has to come first.  Six modules used to spell this out
+    separately, which is six chances to route one path and not its
+    neighbour."""
+    r = _runner(listed=[runtime.DISTRO])
+    assert runtime.wsl_head(runner=r) == ["wsl.exe", "-d", runtime.DISTRO]
+    assert runtime.wsl_head(root=True, runner=r) == [
+        "wsl.exe", "-d", runtime.DISTRO, "-u", "root"]
+
+
+def test_the_head_is_the_bare_wsl_when_there_is_no_runtime():
+    """A machine without ours keeps doing exactly what it always did."""
+    r = _runner(listed=["Ubuntu"])
+    assert runtime.wsl_head(runner=r) == ["wsl.exe"]
+    assert runtime.wsl_head(root=True, runner=r) == ["wsl.exe", "-u", "root"]
 
 
 def test_a_rig_is_not_routed_into_a_runtime_that_is_not_ready():
@@ -252,7 +271,17 @@ def test_the_pinned_image_is_the_one_the_workflow_publishes():
     wf = WORKFLOW.read_text(encoding="utf-8")
     assert "pad-runtime-${{ inputs.variant }}.tar.gz" in wf
     assert runtime.IMAGE.filename == "pad-runtime-full.tar.gz"
-    assert "--version 2" not in wf, "the workflow does not import; the app does"
+    # The workflow builds and publishes a rootfs; REGISTERING it is the app's
+    # job, so nothing here may run `wsl --import`.  Matched on the import
+    # itself rather than on its `--version 2` flag, which this test used to
+    # look for and which a shell redirect (`--version 2>&1`) matches by
+    # accident - a false failure over a line about a completely different
+    # program.
+    # ...and read past the prose, which explains at length what `wsl --import`
+    # wants from the rootfs this workflow builds.
+    ran = "\n".join(ln for ln in wf.splitlines()
+                    if not ln.lstrip().startswith("#"))
+    assert "--import" not in ran, "the workflow does not import; the app does"
 
 
 def test_the_image_carries_what_the_rig_looks_for():
@@ -326,7 +355,8 @@ def test_the_image_carries_the_spike2_toolchain_it_promises():
                 "e2fsprogs", "fuse2fs", "fuse3", "ffmpeg", "busybox-static"):
         assert pkg in installed, (
             "the full variant must INSTALL %s, not merely mention it" % pkg)
-    assert "spike2" in runtime.RIGS
+    assert runtime.distro_for("spike2", runner=_runner(
+        listed=[runtime.DISTRO])) == runtime.DISTRO
 
 
 def test_criu_is_built_in_the_image_because_no_ubuntu_packages_it():
@@ -497,3 +527,33 @@ def test_the_image_carries_file_because_save_states_depend_on_it():
     rig = (REPO / "tools" / "spike1_emu" / "emu_root.sh").read_text(
         encoding="utf-8")
     assert "file -L" in rig, "if the rig stopped using it, drop this test"
+
+
+def test_no_apostrophe_inside_the_workflows_single_quoted_shell_blocks():
+    """The image's checks run as ``docker run ... bash -c '<block>'``, one
+    single-quoted argument - so an apostrophe anywhere inside it closes the
+    quote and the step dies with "unexpected EOF while looking for matching
+    quote", pointing at the END of the block rather than at the word.
+
+    Only a CI run can report that, and it costs a fifteen-minute image build
+    to find out; it happened on the modprobe check, over the word "can not"
+    spelled the ordinary way.  Scanned here instead.
+    """
+    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    offenders, inside, opened_at = [], False, 0
+    for n, line in enumerate(lines, 1):
+        if not inside:
+            if line.rstrip().endswith("bash -c '"):
+                inside, opened_at = True, n
+            continue
+        if line.strip() == "'":          # the block's closing quote
+            inside = False
+            continue
+        if "'" in line:
+            offenders.append("line %d: %s" % (n, line.strip()[:60]))
+    assert not offenders, (
+        "these lines sit inside a single-quoted `bash -c` block in "
+        "runtime.yml and contain an apostrophe, which ends the block there: "
+        "%s" % "; ".join(offenders))
+    assert not inside, (
+        "a `bash -c '` block opened at line %d is never closed" % opened_at)

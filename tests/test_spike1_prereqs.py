@@ -296,3 +296,51 @@ def test_the_workflow_hashes_the_source_the_same_way_the_rig_does():
     assert r"sed 's/\r$//'" in line[0], (
         "payloads.yml must normalise line endings before hashing the source, "
         "the same way prereqs.sh's s1_source_hash does: %s" % line[0])
+
+
+# ------------------------------------------------- one fact, one place ------
+
+#: Scripts allowed to name a rig path without asking prereqs.sh, and why.
+#: Nothing is on it: the list exists so that adding one is a decision somebody
+#: writes down rather than a line that slips in.
+MAY_INVENT_PATHS = {}
+
+
+def test_no_rig_script_invents_its_own_path_table():
+    """Every script that needs to know where the rig lives must ask
+    prereqs.sh, not carry a default of its own.
+
+    THIS IS NOT STYLE.  status.sh carried three lines of "where the rig
+    lives" and they were right until the user's WORK moved onto its own disk
+    (core/rigdata.py) while the binaries the app installs stayed in the home.
+    After that it looked for the device model under the work dir, did not find
+    it, and reported hwshim_built=0 to the control panel over a RUNNING GAME
+    that was using that very shim.  Nothing failed, nothing was logged, and
+    the only symptom was a panel quietly describing a rig that was not there.
+
+    A `:?` (require it, fail loudly if absent) is fine and is not a default -
+    what this refuses is a script inventing a plausible-looking answer.
+    """
+    offenders = []
+    for script in sorted(RIG.glob("*.sh")):
+        if script.name in ("prereqs.sh",) or script.name in MAY_INVENT_PATHS:
+            continue
+        text = script.read_text(encoding="utf-8", errors="replace")
+        for var in ("S1_WORK", "S1_QEMU", "S1_SHIM_DIR", "QEMU_WORK", "S1_HOME"):
+            # `: "${VAR:=something}"` is a default; `${VAR:?...}` is a demand.
+            if re.search(r':\s*"\$\{%s:=' % var, text):
+                if not re.search(r'\.\s+[^\n]*prereqs\.sh', text):
+                    offenders.append("%s defaults %s itself" % (script.name, var))
+    assert not offenders, (
+        "these scripts answer 'where does the rig live' without asking "
+        "prereqs.sh, so they will disagree with it the next time a path "
+        "moves: %s" % "; ".join(offenders))
+
+
+def test_the_status_panel_looks_for_the_shim_where_the_app_installs_it():
+    """The regression itself, pinned: the device model is OURS and lives in
+    the home; the work dir is the USER'S and lives on its own disk.  A status
+    line that conflates them reports a rig that is not built while it runs."""
+    text = (RIG / "status.sh").read_text(encoding="utf-8")
+    assert "$S1_SHIM_DIR/s1hwshim" in text
+    assert "$S1_WORK/s1hwshim" not in text

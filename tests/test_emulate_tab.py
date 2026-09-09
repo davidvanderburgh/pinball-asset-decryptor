@@ -16,11 +16,12 @@ import json
 import os
 import pathlib
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
 
-from pinball_decryptor.gui import emulate_tab
+from pinball_decryptor.gui import _runtime_ui, emulate_tab
 
 from pinball_decryptor.gui.emulate_tab import (DEFAULT_RIG_DIR, parse_status,
                                                rig_cmd_root, setup_extras,
@@ -50,14 +51,15 @@ def _no_real_setup_probe(monkeypatch):
 def _no_runtime_unless_asked(monkeypatch):
     """THE TESTS MUST NOT DEPEND ON WHETHER THIS MACHINE HAS THE RUNTIME.
 
-    `runtime.distro_for` asks WSL which distro to route a rig into, and on a
+    `runtime.wsl_distro` asks WSL which distro to route into, and on a
     developer's box - where the runtime IS installed - that answer costs two
     wsl.exe launches and starts a distro, inside the Start path these tests
     time.  Three of them failed that way, on the dev box only, while every CI
     runner passed: the worst shape a test can have.  So the default here is
     "no runtime", and the tests that are ABOUT routing patch it themselves.
     """
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: None)
     monkeypatch.setattr(emulate_tab.runtime, "known_state", lambda: None)
     # AND NOTHING HERE MAY REACH THE NETWORK OR A REAL DISTRO.  `_fix_setup`
     # calls `_install_runtime`, which on a machine whose runtime is a version
@@ -3568,8 +3570,8 @@ def test_every_wsl_call_in_this_module_goes_to_the_same_distro(monkeypatch):
     machine than the rest gives answers that are each true and together
     nonsense, so they all go through _wsl_head."""
     monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for",
-                        lambda rig: "PAD-Runtime")
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: "PAD-Runtime")
     assert emulate_tab._wsl_head() == ["wsl.exe", "-d", "PAD-Runtime", "-e"]
     assert emulate_tab._wsl_head(root=True) == [
         "wsl.exe", "-d", "PAD-Runtime", "-u", "root", "-e"]
@@ -3580,7 +3582,8 @@ def test_every_wsl_call_in_this_module_goes_to_the_same_distro(monkeypatch):
 
     # ...and with no runtime installed, nothing changes from how it has always
     # worked: the machine's default distro, no -d at all.
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: None)
     assert emulate_tab._wsl_head() == ["wsl.exe", "-e"]
     assert emulate_tab.rig_cmd("watch.sh")[:2] == ["wsl.exe", "-e"]
 
@@ -3606,8 +3609,8 @@ def test_the_first_run_in_the_apps_own_linux_says_what_it_will_rebuild(
     panel._runtime_noted = False
     logged = []
     panel._log = lambda m: logged.append(m)
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for",
-                        lambda rig: "PAD-Runtime")
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: "PAD-Runtime")
     monkeypatch.setattr(emulate_tab.runtime, "known_state", lambda: "ready")
 
     panel._note_the_runtime_is_a_different_machine()
@@ -3621,7 +3624,8 @@ def test_the_first_run_in_the_apps_own_linux_says_what_it_will_rebuild(
 
     # And silence entirely when the rig is where it has always been.
     panel._runtime_noted = False
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for", lambda rig: None)
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: None)
     panel._note_the_runtime_is_a_different_machine()
     assert not logged
 
@@ -3634,8 +3638,8 @@ def test_the_wsl_account_belongs_to_the_distro_it_was_probed_in(monkeypatch):
     belongs to nobody there.  The cache is keyed by distro now."""
     monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
     where = {"distro": None}
-    monkeypatch.setattr(emulate_tab.runtime, "distro_for",
-                        lambda rig: where["distro"])
+    monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                        lambda runner=None: where["distro"])
     probes = []
 
     def fake_run(argv, **kw):
@@ -3656,3 +3660,308 @@ def test_the_wsl_account_belongs_to_the_distro_it_was_probed_in(monkeypatch):
     emulate_tab.wsl_account()
     assert len(probes) > n, "a different distro must be asked again"
     assert probes[-1][:3] == ["wsl.exe", "-d", "PAD-Runtime"], probes[-1]
+
+
+# --------------------------------------------------------------------------
+# A runtime this build will not use, and the tab that has to say so
+# --------------------------------------------------------------------------
+#
+# ★ THE RELEASE THIS WAS WRITTEN FOR.  core/runtime.py carries a version stamp
+# and refuses a runtime whose stamp is not the number this build expects:
+# `wsl_distro()` answers None and every path into Linux falls back to the
+# machine's default distro.  Nothing is deleted and nothing crashes, which is
+# why it went unnoticed - but the emulator leaves the Linux that carries its
+# toolchain, the prerequisite rows go red, and the card cache and SAVE-STATE
+# SLOTS sit in a distro nothing is looking at any more.  From the outside that
+# is indistinguishable from losing them.
+#
+# And until `_runtime_ui` existed, `runtime.install` had exactly three call
+# sites and all three were in the Spike 1 tab.  So the FIRST bump of that stamp
+# would have reached a Spike 2 user as an emulator that broke itself, with the
+# cure on a tab they had no reason to open.
+
+
+def _packed(w):
+    """Is this widget packed?  Asked of the GEOMETRY MANAGER, not the window.
+
+    NOT winfo_ismapped(), which was the first spelling and failed on macOS CI:
+    these tests build an alpha-0 root parked off-screen, and macOS never maps
+    it, so every widget on it reports ismapped()==0 no matter what the panel
+    did.  That failed the three positive assertions outright and, worse, made
+    every NEGATIVE one pass without testing anything.  winfo_manager() returns
+    "pack" while packed and "" after pack_forget(), on every platform, with no
+    window manager and no timing in the way.
+    """
+    return bool(w.winfo_manager())
+
+def _rt(monkeypatch, state, detail="because"):
+    monkeypatch.setattr(_runtime_ui.runtime, "status",
+                        lambda *a, **k: (state, detail))
+
+
+def test_a_stale_runtime_puts_a_notice_and_a_button_on_the_tab(tmp_path,
+                                                               monkeypatch):
+    root, panel = _panel(tmp_path)
+    try:
+        monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
+        panel._runtime_apply(("stale", "version 3; expects 6"))
+        root.update()
+        assert _packed(panel._rt_msg), "the tab says nothing"
+        assert _packed(panel._rt_btn), "there is nothing to press"
+        said = panel._rt_msg.cget("text")
+        # The three things the user is actually holding.
+        assert "own WSL distro" in said, said
+        assert "Nothing has been lost" in said, said
+        assert "Update emulator Linux" in said, said
+    finally:
+        root.destroy()
+
+
+def test_a_current_runtime_carries_no_notice_and_no_button(tmp_path,
+                                                           monkeypatch):
+    """A machine that is fine must not be told anything at all."""
+    root, panel = _panel(tmp_path)
+    try:
+        panel._runtime_apply(("stale", "old"))
+        root.update()
+        panel._runtime_apply(("ready", "Runtime 6 (full)"))
+        root.update()
+        assert not _packed(panel._rt_msg)
+        assert not _packed(panel._rt_btn)
+    finally:
+        root.destroy()
+
+
+def test_a_machine_that_never_had_a_runtime_is_not_nagged(tmp_path,
+                                                          monkeypatch):
+    """★ THE LINE BETWEEN WARNING AND NAGGING.
+
+    ``absent`` is not a fault: it is how every Spike 2 user has run since
+    before the app had a Linux of its own, in the machine's own distro, and it
+    works.  A permanent orange banner offering a 414 MB download to a setup
+    that works is noise - and a machine that really is missing tools already
+    hears about it from the prerequisite notice, which knows WHICH tools.
+
+    ``stale`` is different in kind and that is why it is the one that speaks:
+    nothing about that machine changed, WE changed, and the emulator moved out
+    from under them.
+    """
+    root, panel = _panel(tmp_path)
+    try:
+        monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
+        panel._runtime_apply(("absent", "not installed"))
+        root.update()
+        assert not _packed(panel._rt_msg), \
+            "a working machine is being nagged to download 414 MB"
+        assert not _packed(panel._rt_btn)
+    finally:
+        root.destroy()
+
+
+def test_a_foreign_distro_is_explained_but_never_offered(tmp_path, monkeypatch):
+    """A WSL distro of our name that we did not build is SOMEBODY ELSE'S, and
+    the fix would be to delete it.  So it is named and the button stays away -
+    the same rule the setup button follows, for the same reason: a press that
+    must refuse is an invitation to press it twice."""
+    root, panel = _panel(tmp_path)
+    try:
+        monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
+        panel._runtime_apply(("foreign", "not ours"))
+        root.update()
+        assert _packed(panel._rt_msg)
+        assert not _packed(panel._rt_btn), \
+            "the app must not offer to delete a distro it did not build"
+        assert "will not touch it" in panel._rt_msg.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_not_being_able_to_ask_is_not_an_answer(tmp_path, monkeypatch):
+    """None is "the poll could not ask", which is not "nothing is wrong".
+    Clearing the notice there would blink the warning off every time a wsl.exe
+    call timed out - which is exactly when it is most likely to time out."""
+    root, panel = _panel(tmp_path)
+    try:
+        monkeypatch.setattr(_runtime_ui, "can_install", lambda: True)
+        panel._runtime_apply(("stale", "old"))
+        root.update()
+        panel._runtime_apply(None)
+        root.update()
+        assert _packed(panel._rt_msg), \
+            "a failed probe wiped a warning that is still true"
+    finally:
+        root.destroy()
+
+
+def test_the_update_refuses_while_the_emulator_is_running(tmp_path, monkeypatch):
+    """Replacing the distro a run lives in kills the run and takes its work
+    with it.  _last_up alone is blind between polls, so a Start pressed two
+    seconds ago has to refuse too."""
+    root, panel = _panel(tmp_path)
+    try:
+        started = []
+        monkeypatch.setattr(_runtime_ui, "ensure",
+                            lambda **kw: started.append(1))
+        logged = []
+        monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
+        for flag in ("_last_up", "_starting"):
+            setattr(panel, flag, True)
+            panel._runtime_fix()
+            setattr(panel, flag, False)
+        assert not started, "it would have replaced the Linux under a run"
+        assert len(logged) == 2 and "stop it first" in logged[0]
+    finally:
+        root.destroy()
+
+
+def test_a_replaced_runtime_gets_the_work_disk_before_the_rig_writes(
+        tmp_path, monkeypatch):
+    """★ The half that keeps the NEXT replacement cheap.
+
+    A replaced runtime is an empty Linux, and whatever the rig puts back into
+    it - the card cache, the save-state slots - is inside the thing the app
+    replaces.  Making the work disk here is free of the usual objection: there
+    is nothing left in that distro to strand.
+    """
+    root, panel = _panel(tmp_path)
+    try:
+        made = []
+        monkeypatch.setattr(_runtime_ui, "ensure", lambda **kw: "ready")
+        monkeypatch.setattr(emulate_tab.runtime, "wsl_distro",
+                            lambda runner=None: "PAD-Runtime")
+        monkeypatch.setattr(emulate_tab.rigdata, "ensure",
+                            lambda d, log=None: made.append(d) or "/mnt/x")
+        monkeypatch.setattr(emulate_tab.rigdata, "free_bytes",
+                            lambda d: 500 * 1024 ** 3)
+        monkeypatch.setattr(panel, "_log", lambda m: None)
+        monkeypatch.setattr(panel, "_timer",
+                            lambda: SimpleNamespace(after=lambda ms, fn: fn()))
+        panel._runtime_fix()
+        for _ in range(200):                # it runs on a worker
+            if made:
+                break
+            time.sleep(0.01)
+        assert made == ["PAD-Runtime"], \
+            "the rig would put its save states back inside the replaceable one"
+    finally:
+        root.destroy()
+
+
+def test_the_work_disk_is_not_made_behind_a_plain_start(tmp_path):
+    """And NOT on Start, which is where the Spike 1 tab makes it.
+
+    `_rig_env` on this tab already hands the rig the disk whenever the file
+    exists, so making one on Start would move a user who has been running in
+    the runtime without it: the card cache would stay behind, unreferenced,
+    and the next Start would re-copy several GB.  Nothing lost, and it would
+    look exactly like losing it.  A migration is not a side effect of Start.
+    """
+    src = pathlib.Path(emulate_tab.__file__).read_text(encoding="utf-8",
+                                                       errors="replace")
+    callers = [ln.strip() for ln in src.splitlines()
+               if "self._ensure_data_disk()" in ln]
+    assert len(callers) == 1, (
+        "the work disk is made from %d places; it belongs to the runtime "
+        "install alone" % len(callers))
+    # ...and that one caller is inside the runtime install, not somewhere a
+    # Start can reach.  Sliced by method rather than by line order, which a
+    # tidy-up would reorder without changing anything that matters.
+    j = src.index("def _runtime_fix(self)")
+    fix = src[j:src.index("\n    def ", j + 1)]
+    assert "self._ensure_data_disk()" in fix, \
+        "the work disk is no longer made where the distro has just been replaced"
+
+
+def test_the_poll_asks_which_linux_off_the_tk_thread(tmp_path, monkeypatch):
+    """The answer costs two wsl.exe launches when cold, and asking on the Tk
+    thread is one of the four ways this window has been frozen.  On the main
+    thread runtime.status() deliberately answers "not known yet" instead, so
+    asking there would never see a stale runtime at all."""
+    src = pathlib.Path(emulate_tab.__file__).read_text(encoding="utf-8",
+                                                       errors="replace")
+    i = src.index("def _poll(self)")
+    # To the END of the method, not a byte window: _poll is long, and a window
+    # short enough to miss the hand-off makes this test pass by not looking.
+    body = src[i:src.index("\n    def ", i + 1)]
+    ask = body.index("runtime.status()")
+    hand_off = body.index("def apply_and_release")
+    assert ask < hand_off, \
+        "the runtime is asked after the hand-off to the main loop"
+    assert "self._runtime_apply(rt)" in body, \
+        "the poll no longer tells the tab which Linux it is in"
+
+
+# ----------------------------------------------------------- the ladder --
+
+def test_consent_is_required_before_a_runtime_is_replaced(monkeypatch):
+    """The whole point of the module.  Replacing unregisters the distro, and
+    a save state is something a person made and cannot get back."""
+    asked, installed = [], []
+    _rt(monkeypatch, "stale")
+
+    def install(log=None, progress=None, replace=False, **kw):
+        if not replace:
+            raise _runtime_ui.runtime.RuntimeNeedsReplacing("already there")
+        installed.append("replaced")
+
+    monkeypatch.setattr(_runtime_ui.runtime, "install", install)
+    state = _runtime_ui.ensure(say=lambda m: None,
+                               ask=lambda: asked.append(1) or True)
+    assert asked and installed == ["replaced"] and state == "ready"
+
+
+def test_a_refusal_leaves_the_installed_runtime_exactly_as_it_was(monkeypatch):
+    installed = []
+    _rt(monkeypatch, "stale")
+
+    def install(log=None, progress=None, replace=False, **kw):
+        if not replace:
+            raise _runtime_ui.runtime.RuntimeNeedsReplacing("already there")
+        installed.append("replaced")
+
+    monkeypatch.setattr(_runtime_ui.runtime, "install", install)
+    said = []
+    state = _runtime_ui.ensure(say=said.append, ask=lambda: False)
+    assert not installed, "a no must not destroy anything"
+    assert state == "stale"
+    assert any("left the installed runtime alone" in s for s in said), said
+
+
+def test_a_blocked_download_offers_the_file_route(monkeypatch):
+    """370 MB from a host some proxies refuse is the download most likely to
+    be stopped, and it was the one with no way round."""
+    offered = []
+    _rt(monkeypatch, "absent")
+
+    def boom(*a, **kw):
+        raise RuntimeError("could not download: blocked")
+
+    monkeypatch.setattr(_runtime_ui.runtime, "install", boom)
+    state = _runtime_ui.ensure(say=lambda m: None,
+                               on_blocked=offered.append)
+    assert offered, "no way round a blocked download"
+    assert state == "absent"
+
+
+def test_a_machine_that_cannot_have_one_is_told_nothing(monkeypatch):
+    """Not Windows, or no image pinned in this build: not a fault, so not a
+    sentence.  None is the caller's signal to say nothing at all."""
+    for state in ("unsupported", "unpublished"):
+        _rt(monkeypatch, state)
+        said = []
+        assert _runtime_ui.ensure(say=said.append) is None
+        assert said == [], said
+
+
+def test_more_than_one_tab_can_move_a_user_off_a_stale_runtime():
+    """THE REGRESSION THIS MODULE EXISTS FOR.  Before it, runtime.install had
+    three call sites and every one was in the Spike 1 tab - so the first bump
+    of the version stamp would have left a Spike 2 user with a broken emulator
+    and the cure on a tab they had no reason to open."""
+    gui = pathlib.Path(emulate_tab.__file__).parent
+    users = sorted(p.name for p in gui.glob("*.py")
+                   if "_runtime_ui.ensure(" in p.read_text(encoding="utf-8",
+                                                           errors="replace"))
+    assert len(users) >= 2, (
+        "only %s can act on a stale runtime; a user who never opens that tab "
+        "has no way off one" % (users or "nothing"))

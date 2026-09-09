@@ -33,14 +33,19 @@
 #
 #   base   what the SPIKE 1 rig needs: python3 and a few shell tools, plus the
 #          emulator and device model we build.  45 MB.
-#   full   base plus everything the SPIKE 2 rig needs - the ARM cross compiler
+#   full   base plus everything the SPIKE 2 rig needs AND everything the
+#          extract/write pipelines need - the ARM cross compiler
 #          and qemu-user-static it runs a guest with, ffmpeg for the picture
 #          and the sound, e2fsprogs and fuse3 for the card, a static busybox
 #          for the checkpointable boot, and criu, which no Ubuntu has ever
 #          packaged and which this image therefore BUILDS.  That last one is
 #          the point of the whole exercise: `getcriu.sh` compiles criu from
 #          source on the user's machine today, and a compile on a machine we
-#          have never seen is exactly what this is here to end.
+#          have never seen is exactly what this is here to end.  It also
+#          carries the pipeline tools - partclone, xorriso, gnupg, GDRE Tools
+#          and the rest - because every extract and write path shells into
+#          Linux as well, and the app now sends those here too.  A rig is not
+#          the only thing that used to depend on a stranger's distro.
 
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS apt
 
@@ -216,6 +221,102 @@ RUN if [ "$VARIANT" = full ]; then \
         libprotobuf-c1 libnl-3-200 libnet1 libcap2 libbsd0 libuuid1 \
       && rm -rf /var/lib/apt/lists/*; \
     fi
+
+#: WHAT THE PIPELINES USE - the OTHER half of this app, and the reason this
+#: image is not merely an emulator detail.  Every manufacturer's extract and
+#: write path shells into Linux too: partclone opens a Clonezilla restore
+#: image, xorriso rebuilds a JJP .iso, gnupg decrypts a .fun, cwebp re-imports
+#: a texture.  All of that has until now run in whichever distro the machine
+#: happened to have, installed by asking apt on the user's machine - which is
+#: the arrangement this runtime exists to end, and the only reason the app
+#: could not simply route everything here: an image missing these would trade
+#: a working default distro for one with tools missing from it.
+#:
+#: THE LIST IS THE UNION of installer/install_prerequisites.ps1's WslPackages
+#: tables, minus what the two blocks above already installed, and a test holds
+#: the two together (tests/test_runtime_packages.py) so a package added to a
+#: manufacturer and forgotten here cannot ship quietly.
+#:   gnupg              Barrels of Fun: .fun decryption and re-encryption
+#:   partclone          Spooky and JJP: Clonezilla restore images
+#:   python3-zstandard  zstd-compressed images, read by this image's python3
+#:   xorriso            JJP: rebuilding the .iso on Write
+#:   pigz               JJP: parallel gzip, over images measured in gigabytes
+#:   curl, unzip        what install_gdre.sh below needs for its download
+#:   xvfb               GDRE Tools is a Godot BINARY and opens a display even
+#:                      for a headless job, so the pipeline runs it under
+#:                      xvfb-run
+#:   xauth              which xvfb-run itself shells out to for the display's
+#:                      cookie, and which nothing pulls in under
+#:                      --no-install-recommends - an image with xvfb and no
+#:                      xauth has an xvfb-run that exits before it starts
+#:   webp               cwebp, the texture re-import in the BOF write pipeline
+#:   psmisc             fuser(1), which the multi-boot card builder asks who
+#:                      is holding a mountpoint before it detaches a stale
+#:                      loop device, and killall(1), which the JJP dongle path
+#:                      stops its HASP daemon with.  Not in any prerequisite
+#:                      table because every desktop distro has it - and its
+#:                      absence is not a missing feature but a
+#:                      FileNotFoundError mid-build
+#:   rsync              how the JJP pipeline moves the FINISHED game image to
+#:                      the user's output folder, with per-file progress.  Its
+#:                      absence is the worst kind: that step only logs a
+#:                      warning, so an extract that took twenty minutes
+#:                      reports success and leaves the output folder empty
+#:   parted             partprobe(1), asking the kernel to re-read a partition
+#:                      table the direct-to-SSD write just changed
+#:   kmod               modprobe(1).  WSL 2 shares ONE kernel between every
+#:                      distro, so a module loaded from any of them is loaded
+#:                      for all - but something has to load it, and usbipd
+#:                      does that by running modprobe INSIDE the distro it is
+#:                      told to attach through.  Once the app started naming
+#:                      ours, "usbipd attach" died on `The 'modprobe' command
+#:                      is unavailable` and the JJP dongle never appeared.
+#:                      ext4_grow's loop-device probe does the same for
+#:                      `modprobe loop`, quietly - it is written `|| true`, so
+#:                      its absence is not an error, just a loop device that
+#:                      never arrives on a machine where nothing else loaded
+#:                      the module first.  Found by plugging the Sentinel key
+#:                      in, which is the only way it could have been found
+#: These three are not in any prerequisite table either.  They were found by
+#: reading every command the plugin pipelines hand to the executor and asking
+#: this image for each one - which is now a test (tests/test_runtime_packages
+#: .py), because "every Linux has it" is exactly the assumption that stops
+#: being true the moment the app stops using the user's Linux.
+#: tar, e2fsprogs, ffmpeg, xxd, zstd, gcc, libc6-dev, util-linux and mount are
+#: already here - from the base image, or from the two blocks above.
+RUN if [ "$VARIANT" = full ]; then \
+      apt-get -o Acquire::Retries=10 update \
+      && apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
+        gnupg \
+        partclone \
+        python3-zstandard \
+        xorriso \
+        pigz \
+        curl \
+        unzip \
+        xvfb \
+        xauth \
+        webp \
+        psmisc \
+        rsync \
+        parted \
+        kmod \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# GDRE TOOLS, INSTALLED BY THE APP'S OWN INSTALLER SCRIPT rather than by a copy
+# of it.  installer/install_gdre.sh is the single place its version, URL and
+# SHA-256 live - it is what both prerequisite installers already run - so the
+# workflow stages that same file here and this line runs it.  The tool baked
+# into this image is therefore the tool, at the version, a user on his own
+# distro gets, verified against the same hash before anything is unpacked.
+#
+# It is not in apt and never has been, which is why it needed a downloader at
+# all.  Baked in, the Barrels of Fun write path needs no download on a user's
+# machine, and no third-party release still being there years from now.
+COPY payload/install_gdre.sh /tmp/install_gdre.sh
+RUN if [ "$VARIANT" = full ]; then bash /tmp/install_gdre.sh; fi \
+ && rm -f /tmp/install_gdre.sh
 
 COPY --from=criu /out/ /
 

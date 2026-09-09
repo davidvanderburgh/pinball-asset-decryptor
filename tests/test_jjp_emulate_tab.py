@@ -88,6 +88,62 @@ def test_attach_dongle_is_none_without_usbipd(monkeypatch):
     assert attach_dongle_cmd() is None
 
 
+# ------------------------------------------------- ONE Linux, whichever one --
+#
+# This tab is the one place in the app that deliberately did NOT move into the
+# Linux the app installs, and the reason is worth keeping written down: the JJP
+# rig keeps its restored images in /var/tmp INSIDE the distro (padpath.sh keys
+# them on the .iso so a title you have run once comes back instantly).  Moving
+# the tab would strand several GB per title in the old distro and put the new
+# copies somewhere a runtime version bump deletes - which is the one thing
+# core/runtime.py's replace flag exists to prevent.  The Spike rigs could move
+# because their work lives on the shared data disk (core/rigdata.py); this one
+# needs that treatment first.
+#
+# So what has to hold is AGREEMENT, not a particular answer.  Three separate
+# places name a distro here - the usbipd attach, the probe that asks whether the
+# key arrived, and the rig commands themselves - and a half-done move would
+# attach the key into one Linux and then look for it from another, which reads
+# to the user as a key that is not plugged in.  That is exactly the failure the
+# whole branch exists to end, and it is why this asserts they match rather than
+# asserting they have no -d.
+
+
+def _distro_named(argv):
+    """Which distro this argument list targets, however it spells it."""
+    for flag in ("-d", "--distribution", "--wsl"):
+        if flag in argv:
+            i = argv.index(flag) + 1
+            # `--wsl` takes an OPTIONAL value: the next word is the distro only
+            # when it is not another option.
+            if i < len(argv) and not argv[i].startswith("-"):
+                return argv[i]
+            return None
+    return None
+
+
+def test_every_jjp_emulate_path_names_the_same_linux(monkeypatch):
+    monkeypatch.setattr(jjp_emulate_tab, "usbipd_path", lambda: "usbipd")
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+
+    probe = []
+    monkeypatch.setattr(
+        jjp_emulate_tab.subprocess, "run",
+        lambda cmd, *a, **kw: probe.append(list(cmd)) or SimpleNamespace(
+            stdout=b"no", returncode=0))
+    JJPEmulatePanel._key_visible_in_wsl(object())
+
+    named = {
+        "usbipd attach": _distro_named(attach_dongle_cmd()),
+        "the key probe": _distro_named(probe[0]),
+        "the rig, as the user": _distro_named(rig_cmd("status.sh")),
+        "the rig, as root": _distro_named(rig_cmd_root("watch.sh")),
+    }
+    assert len(set(named.values())) == 1, (
+        "the key would be attached into one Linux and looked for in another: %s"
+        % named)
+
+
 # ------------------------------------------------------------------ wording --
 
 def test_state_missing_key_beats_stopped():

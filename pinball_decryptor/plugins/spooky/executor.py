@@ -17,6 +17,8 @@ import sys
 import threading
 from collections import deque
 
+from ...core import runtime
+
 # Prevent console windows from flashing when launched via pythonw.exe on Windows
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
@@ -118,8 +120,18 @@ class CommandExecutor:
 class WslExecutor(CommandExecutor):
     """Execute commands in WSL2 via subprocess (Windows)."""
 
+    #: IN THE DISTRO THE APP USES, which since it started shipping its own
+    #: Linux is not necessarily the machine's default.  This plugin carries
+    #: its own executor - lifted from the standalone decryptor it came from -
+    #: so routing core/executor.py did NOT route this one, and the result was
+    #: the exact split the runtime exists to end: the prerequisite strip
+    #: reporting on our distro while this manufacturer's extract and write ran
+    #: in the user's.  Every launcher below goes through here.
+    def _head(self):
+        return runtime.wsl_head(root=True) + ["--", "bash", "-c"]
+
     def run(self, bash_cmd, timeout=120):
-        full_cmd = ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd]
+        full_cmd = self._head() + [bash_cmd]
         try:
             result = subprocess.run(
                 full_cmd,
@@ -140,7 +152,7 @@ class WslExecutor(CommandExecutor):
         return result.stdout
 
     def stream(self, bash_cmd, timeout=600):
-        full_cmd = ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd]
+        full_cmd = self._head() + [bash_cmd]
         proc = subprocess.Popen(
             full_cmd,
             stdout=subprocess.PIPE,

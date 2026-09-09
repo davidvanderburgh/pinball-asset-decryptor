@@ -53,12 +53,42 @@ IMG=${IMG:-${PAD_CARD:-}}
 }
 [ -f "$IMG" ] || { echo "[rootfs] no card image at $IMG" >&2; exit 1; }
 
-case "$ROOT" in
-    /mnt/*) echo "[rootfs] REFUSING: $ROOT is a Windows drive (drvfs), which" >&2
-            echo "[rootfs] cannot hold symlinks - ld-linux.so.3 would vanish" >&2
-            echo "[rootfs] and nothing in the guest would link. Put PAD_ROOT" >&2
-            echo "[rootfs] on the WSL disk." >&2
-            exit 1 ;;
+# WHAT MAKES A DESTINATION BAD IS ITS FILESYSTEM, NOT ITS PATH.
+#
+# This refused any $ROOT under /mnt, which was a fair shorthand for "a Windows
+# drive" while /mnt/c and its siblings were the only things mounted there.  It
+# stopped being one the day the app gave the rigs a data disk of their own:
+# that is an ext4 volume attached to the WSL VM by name, so it appears at
+# /mnt/wsl/paddata in every distro - a real Linux filesystem, holding symlinks
+# perfectly - and this refused it, which meant the emulator would not start at
+# all on the arrangement the app now sets up by default.
+#
+# So ask the filesystem.  `findmnt -T` answers for a path that does not exist
+# yet by walking up to the mount that will hold it, which is the normal case
+# here since $ROOT is about to be created; the loop is for the machines where
+# even the parent is missing, and `stat -f` is the fallback for a distro
+# without findmnt.
+#
+# AND NOT BY TRYING TO MAKE A SYMLINK, which was the other obvious test and is
+# wrong: on this Windows the drives are 9p rather than drvfs, and 9p DOES
+# create a symlink when asked.  The reason to stay off it is that the extract
+# does not survive the round trip, not that the syscall fails.
+_pad_fstype() {
+    _d=$1
+    while [ ! -d "$_d" ] && [ "$_d" != / ]; do _d=$(dirname "$_d"); done
+    _t=$(findmnt -no FSTYPE -T "$_d" 2>/dev/null | tail -1)
+    [ -n "$_t" ] || _t=$(stat -f -c %T "$_d" 2>/dev/null)
+    echo "$_t"
+}
+
+ROOT_FS=$(_pad_fstype "$ROOT")
+case "$ROOT_FS" in
+    9p|v9fs|drvfs|virtiofs|cifs|smb3|smbfs|nfs|nfs4)
+        echo "[rootfs] REFUSING: $ROOT is on a Windows or network filesystem" >&2
+        echo "[rootfs] ($ROOT_FS), which does not carry an extracted rootfs" >&2
+        echo "[rootfs] intact - ld-linux.so.3 would vanish and nothing in the" >&2
+        echo "[rootfs] guest would link. Put PAD_ROOT on the WSL disk." >&2
+        exit 1 ;;
 esac
 
 command -v debugfs >/dev/null 2>&1 || {
@@ -136,7 +166,11 @@ echo "[rootfs] extracting the OS partition (offset $OFF) - several minutes"
 # script is that it needs no root, so the noise is summarised rather than shown.
 XLOG=$(mktemp "${TMPDIR:-/var/tmp}/rootfs.XXXXXX")
 debugfs -R "rdump / $STAGE" "$IMG?offset=$OFF" > "$XLOG" 2>&1
-CHOWN_WARN=$(grep -c 'changing ownership' "$XLOG" 2>/dev/null || echo 0)
+# `grep -c` PRINTS 0 AND EXITS 1 when it matches nothing, so `|| echo 0`
+# appended a SECOND zero and the test below read "0\n0" - "integer expression
+# expected", printed in the middle of a first run that was otherwise going
+# fine.  The exit code is what needs the fallback, not the output.
+CHOWN_WARN=$(grep -c 'changing ownership' "$XLOG" 2>/dev/null) || CHOWN_WARN=0
 grep -v 'changing ownership' "$XLOG" | grep -v '^debugfs' | grep -v '^$' | head -8
 [ "${CHOWN_WARN:-0}" -gt 0 ] && \
     echo "[rootfs] ($CHOWN_WARN ownership notices - expected without root, files still extracted)"

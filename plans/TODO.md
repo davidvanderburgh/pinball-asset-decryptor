@@ -7884,7 +7884,7 @@ These have each been violated at least once and each cost a run or a window:
       booted all three images. `--layout store` is proven on hardware, so a
       group may force the compact tick and the tab's "experimental" wording
       comes off (still to do, in the tab commit).
-      **Established (35%, commits 1-3 of 9 done, 8f93f7a):** the SELECTOR half
+      **Established (45%, commits 1-4 of 9 done, 8f93f7a + fbd521b):** the SELECTOR half
       is built and its whole suite is green. `group=<members>|<title>|...`
       parses; images and cards are now different numbers (`CONF_MAX_IMAGES` 64,
       `CONF_MAX_CARDS` 16, `CONF_MAX_GROUPS` 8) and everything visual walks
@@ -7909,12 +7909,23 @@ These have each been violated at least once and each cost a run or a window:
       **Also:** `make check` must run with the build dir on a Linux-native path
       (`make check BUILD=/tmp/i106b`); `os.mkfifo` is Errno 95 on the Windows
       mount and padsw_test.py dies there. Pre-existing, not this item.
+      Commit 4 is done too: `run_game.sh` carries the card's `group=` lines into
+      the rig conf when its `image=` count equals the resolved tree count (else
+      drops them out loud), places each one before its first member so the menu
+      order matches the card's, and takes `PAD_SELECT_PICK=<image>` -> `--pick`.
+      No rig knob for `--seed`, on purpose. The awk was proven against real
+      input under both awks, and three new cases in
+      `tests/test_spike2_codeselect_rig.py` were checked against a broken tree
+      before being trusted.
       **Uncommitted:** nothing. The branch is pushed.
-      **Resume:** commit 4 of 9 - `run_game.sh` carries `group=` lines into the
-      rig conf when the card's `image=` count equals the resolved tree count,
-      plus `PAD_SELECT_PICK=<image>` -> `--pick`, and the rig test that pins the
-      chroot line. Then 5-6 (mkmulticard grammar, manifests, plan rows, layout
-      gate, selector-version gate, selftest part), 7-8 (the tab), 9 (the
+      **Resume:** commit 5 of 9 - `mkmulticard.py`: `render_images_conf` /
+      `parse_images_conf` carry groups, the refusals (< 2 members, overlapping
+      or non-contiguous runs, image 0, > 16 cards, > 64 images, an over-long
+      line), `build_manifest` / `inspect_card` / `print_inspect` / `print_plan`
+      (`image-group` rows), the ordered `--group` / `--member` / `--members-list`
+      CLI, `auto` -> `store` when a group exists with `parts`/`multi` refused
+      naming the cost, and `stage_selector`/`inject` refusing a `group=` conf on
+      a selector below 3.0. Then 6 (the selftest part), 7-8 (the tab), 9 (the
       emulator proof run). Full ordered list and every trap: handoff REMAINING
       item 106.
       — S3: a workaround exists (choose by hand). D4: a conf grammar and

@@ -4997,3 +4997,57 @@ def test_settings_tab_loads_spike1_card(app, manufacturers_by_key):
     # a real firmware label made it through (not a raw AD_ id)
     assert any("VOLUME" in r["label"].upper() or "COIN" in r["label"].upper()
                for r in rows)
+
+
+def test_audio_advanced_offers_longer_replacements_and_wires_them_up(
+        app, manufacturers_by_key, monkeypatch):
+    """The "Allow replacements longer than the original" option exists, says
+    it is unverified on a machine, and OK carries it out to the env var the
+    engine gates on.
+
+    The dialog is the ONLY way a user can turn this on, and the engine reads
+    it from os.environ (spawned encode workers inherit that, nothing else), so
+    a dialog that builds but doesn't wire the box up would look completely
+    normal and silently keep trimming."""
+    import os
+
+    import tkinter as _tk_mod
+
+    def _descendants(w):
+        out = []
+        for c in w.winfo_children():
+            out.append(c)
+            out += _descendants(c)
+        return out
+
+    win = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
+
+    win._open_audio_advanced()
+    app.root.update()
+    dlg = [c for c in win.root.winfo_children()
+           if isinstance(c, _tk_mod.Toplevel)][-1]
+    kids = _descendants(dlg)
+    texts = [str(w.cget("text")) for w in kids if "text" in w.keys()]
+    box = [t for t in texts if "longer than the original" in t]
+    assert box, "the longer-replacements checkbox is missing"
+    assert any("hardware-unverified" in t for t in box)
+    assert any("no real machine has booted" in t for t in texts), (
+        "the explanation must say no machine has booted one")
+
+    cb = next(w for w in kids
+              if "text" in w.keys()
+              and "longer than the original" in str(w.cget("text")))
+    assert not dlg.getvar(cb.cget("variable")), "it must default to off"
+    cb.invoke()
+    ok = next(w for w in kids if "text" in w.keys()
+              and str(w.cget("text")) == "OK")
+    ok.invoke()
+    app.root.update()
+    assert os.environ.get("PAD_STERN_AUDIO_GROW") == "1"
+    assert app._settings["audio_advanced"]["audio_grow"] is True
+    # Leave a clean slate for later tests.
+    app._on_audio_advanced_change({})
+    assert "PAD_STERN_AUDIO_GROW" not in os.environ

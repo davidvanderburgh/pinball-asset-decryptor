@@ -37,7 +37,13 @@
 
 #include "theme.h"
 
+/* The most images one card can offer.  Overridable from the command line
+ * ONLY so `make check` can build a second binary past 32 and prove the
+ * animation tick has no width limit any more (item 105); a card is built
+ * against the default and mkmulticard.py's MAX_IMAGES must match it. */
+#ifndef CONF_MAX_IMAGES
 #define CONF_MAX_IMAGES 16
+#endif
 #define CONF_STR 200
 
 struct conf_image {

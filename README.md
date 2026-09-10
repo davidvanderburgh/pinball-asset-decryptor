@@ -53,7 +53,9 @@ on the card for one of your own, at any size:
 
 The Multi-boot tab builds one SD card that carries several complete Spike 2
 game images — stock code beside a custom build — and shows a menu at
-power-up, drawn here exactly as the machine draws it:
+power-up, drawn here exactly as the machine draws it. **Up to 16 images fit
+one card**; from five the menu scrolls three at a time, with a counter under
+them, so a card is not limited to what fits on the screen at once:
 
 ![The Multi-boot tab: two TMNT images on one card, the boot menu previewed with art and a countdown, and the SD card size the images need](docs/screenshots/multi-boot.png)
 

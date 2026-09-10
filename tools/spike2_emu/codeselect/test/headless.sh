@@ -3,7 +3,9 @@
 # EGL under qemu-arm-static against the card rootfs libs, check the choice/last
 # files, the PPM shape, the default/last-choice precedence, the -invert
 # rotation, the art panels (stills, a pinned GIF frame, a missing picture),
-# the 5- and 9-image carousels, the --snapshot frame (the preview: one frame,
+# the 5- and 9-image carousels, that every clip ticks on or off screen, the
+# past-32 tick at a raised cap when $CAPBIN is set, the --snapshot frame
+# (the preview: one frame,
 # nothing else started or written), the --frames K run (a whole animation out
 # of ONE load), and convert every frame to PNG in $T for eyes.
 # The emulator comes from the ENVIRONMENT, not argv: the rig's teardown does
@@ -40,8 +42,11 @@ timeout=30
 EOF
 
 run() {   # run PPM CONF [extra args...]
-    local ppm=$1 conf=$2; shift 2
-    "$QEMU" -L "$ROOT" "$BIN" --headless "$ppm" --conf "$conf" --input none --timeout 1 \
+    runbin "$BIN" "$@"
+}
+runbin() {   # runbin BINARY PPM CONF [extra args...]
+    local bin=$1 ppm=$2 conf=$3; shift 3
+    "$QEMU" -L "$ROOT" "$bin" --headless "$ppm" --conf "$conf" --input none --timeout 1 \
         --out "$T/choice" --last "$T/last" --log "$T/headless.log" --font "$FONT" --audio none "$@"
 }
 expect() {   # expect FILE VALUE
@@ -172,6 +177,52 @@ pix "$T/menu_nine.ppm" $((60 + 28 + 166)) 262 00C000
 { for i in $(seq 1 17); do echo "image=p7:img$i|B$i|x"; done; } > "$T/many.conf"
 rm -f "$T/choice"
 if run "$T/x.ppm" "$T/many.conf"; then echo "headless: FAIL 17 images accepted"; exit 1; fi
+
+# 10a. EVERY clip ticks, on-screen or not.  The carousel shows three cards, but
+#      media_tick walks all n images, so image 8 of nine plays while it is off
+#      screen.  `played N` in the exit stats is the instrument the past-32 case
+#      below is measured with, so it is validated HERE first, at the shipped
+#      cap, on an image whose panel is visible (8 is the highlight) and on one
+#      whose panel never is (0).
+{ for i in 0 1 2 3 4 5 6 7 8; do
+      echo "image=/dev/mmcblk0p7:img$i|BUILD $i|custom build number $i|art0.png|anim1.gif|"
+  done
+  echo default=8; echo timeout=0; } > "$T/nineanim.conf"
+rm -f "$T/choice" "$T/last" "$T/tick.log"
+run "$T/menu_nineanim.ppm" "$T/nineanim.conf" --no-invert --media "$T/media" --log "$T/tick.log"
+expect "$T/choice" 8
+for i in 0 8; do
+    grep -qE "anim: image $i: played [1-9][0-9]* drawn [1-9][0-9]*," "$T/tick.log" || {
+        echo "headless: FAIL image $i's clip did not both advance AND repaint in a 1 s run"; grep "anim: image" "$T/tick.log"; exit 1; }
+done
+
+# 10b. PAST 32 (item 105).  The tick used to mark the images that moved in an
+#      `unsigned` bitmask (`1u << i`) - undefined from image 32 up, and silent
+#      about it.  $CAPBIN is the same sources built at CONF_MAX_IMAGES=$CAP_N
+#      (the Makefile's `capbin`), which is the only way to reach that width
+#      while a card's cap is 16.  Images 32 and 39 must play exactly as 0 does.
+if [ -n "$CAPBIN" ] && [ -f "$CAPBIN" ]; then
+    n=${CAP_N:-40}
+    { for i in $(seq 0 $((n - 1))); do
+          echo "image=/dev/mmcblk0p7:img$i|BUILD $i|custom build number $i|art0.png|anim1.gif|"
+      done
+      echo default=33; echo timeout=0; } > "$T/cap.conf"
+    rm -f "$T/choice" "$T/last" "$T/cap40.log"
+    runbin "$CAPBIN" "$T/menu_cap.ppm" "$T/cap.conf" --no-invert --media "$T/media" --log "$T/cap40.log"
+    expect "$T/choice" 33
+    for i in 0 31 32 33 39; do
+        grep -qE "anim: image $i: played [1-9][0-9]* drawn [1-9][0-9]*," "$T/cap40.log" || {
+            echo "headless: FAIL image $i ticked without repainting in a $n-image menu (the past-32 mask is back)"
+            grep "anim: image" "$T/cap40.log"; exit 1; }
+    done
+    # and the shipped binary still refuses that conf: the cap is a build-time
+    # decision, not something a card can talk the menu into
+    rm -f "$T/choice"
+    if run "$T/x.ppm" "$T/cap.conf"; then echo "headless: FAIL a $n-image conf was accepted at cap 16"; exit 1; fi
+    python3 "$HERE/ppm2png.py" "$T/menu_cap.ppm" "$T/codeselect_menu_cap.png"
+else
+    echo "headless: SKIP the past-32 case (no CAPBIN; make check builds it)"
+fi
 
 # 11. --snapshot: ONE frame, what the machine shows the moment the menu
 #     appears, nothing started or written but the PPM. --highlight 1
@@ -462,4 +513,5 @@ python3 "$HERE/ppm2png.py" "$T/menu_media_invert.ppm" "$T/codeselect_menu_media_
 python3 "$HERE/ppm2png.py" "$T/menu_missing.ppm" "$T/codeselect_menu_missing.png"
 python3 "$HERE/ppm2png.py" "$T/menu_five.ppm" "$T/codeselect_menu_five.png"
 python3 "$HERE/ppm2png.py" "$T/menu_nine.ppm" "$T/codeselect_menu_nine.png"
+python3 "$HERE/ppm2png.py" "$T/menu_nineanim.ppm" "$T/codeselect_menu_nineanim.png"
 echo "headless: OK (frames in $T/*.png, font $FONT)"

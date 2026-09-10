@@ -662,12 +662,58 @@ def manifest_files(m):
     return names
 
 
-def check_budget(sizes):
-    """{name: bytes} -> total; Refused when the set is over MEDIA_BUDGET."""
+def media_costs(m, sizes):
+    """What each CARD asks the budget for -> ([(index, bytes, heaviest, its bytes)], shared).
+
+    Biggest card first.  A file two cards name is counted for BOTH: the
+    question these rows answer is "which card is expensive", not "what does
+    the directory store", and the two differ only when art is reused.
+    `shared` is the menu-wide move/confirm sounds, which no card owns.
+    mkmulticard.py's plan_media derives the same rows for its own refusal.
+    """
+    rows = []
+    for i, im in enumerate(m.get("images") or []):
+        names = [im.get(k) for k in ("art", "anim", "music", "confirm")]
+        names = [n for n in names if n and n in sizes]
+        big = max(names, key=lambda n: sizes[n]) if names else None
+        rows.append((i, sum(sizes[n] for n in names), big, sizes[big] if big else 0))
+    shared = sum(sizes[n] for n in (m.get("sound_move"), m.get("sound_confirm"))
+                 if n and n in sizes)
+    rows.sort(key=lambda r: -r[1])
+    return rows, shared
+
+
+def budget_share(nimages, shared):
+    """What ONE card may spend: the budget less the menu-wide sounds, split evenly."""
+    return max(0, MEDIA_BUDGET - shared) // max(1, nimages)
+
+
+def check_budget(sizes, manifest=None):
+    """{name: bytes} -> total; Refused when the set is over MEDIA_BUDGET.
+
+    With the manifest the refusal SAYS WHERE THE BUDGET WENT - the per-image
+    share and the heaviest cards - because "over budget" on its own leaves the
+    owner to guess which of five animations to re-encode (item 105).
+    """
     total = sum(sizes.values())
-    if total > MEDIA_BUDGET:
-        raise Refused("media set is %s, over the %s budget" % (fmt_bytes(total), fmt_bytes(MEDIA_BUDGET)))
-    return total
+    if total <= MEDIA_BUDGET:
+        return total
+    why = ["media set is %s, over the %s budget (%d files)"
+           % (fmt_bytes(total), fmt_bytes(MEDIA_BUDGET), len(sizes))]
+    rows, shared = media_costs(manifest, sizes) if manifest else ([], 0)
+    if rows:
+        share = budget_share(len(rows), shared)
+        why.append("  the menu-wide sounds cost %s, leaving %s for %d images: %s each"
+                   % (fmt_bytes(shared), fmt_bytes(max(0, MEDIA_BUDGET - shared)),
+                      len(rows), fmt_bytes(share)))
+        why.append("  heaviest: " + ", ".join(
+            "image %d asks %s%s" % (i, fmt_bytes(b), " (%s %s)" % (big, fmt_bytes(bb)) if big else "")
+            for i, b, big, bb in rows[:3] if b))
+        over = [i for i, b, _, _ in rows if b > share]
+        if over:
+            why.append("  over the share: %s" % ", ".join("image %d" % i for i in over))
+        why.append("  a file two images share is counted for both")
+    raise Refused("\n".join(why))
 
 
 def fmt_bytes(n):
@@ -1505,14 +1551,21 @@ def check_media_dir(d, log=say):
                 raise Refused("%s: %s" % (name, why))
         else:
             raise Refused("%s: only png/gif/wav belong in a media set" % name)
-    total = check_budget(sizes)
+    total = check_budget(sizes, m)
     for name in sizes:
         log(describe(os.path.join(d, name)))
     own = sum(1 for im in m["images"] if im.get("confirm"))
+    rows, shared = media_costs(m, sizes)
     log("%d files, %s of the %s budget; media.json OK (%d images, move=%s confirm=%s%s volume=%d)"
         % (len(sizes), fmt_bytes(total), fmt_bytes(MEDIA_BUDGET), len(m["images"]),
            "y" if m["sound_move"] else "n", "y" if m["sound_confirm"] else "n",
            " +%d own" % own if own else "", m["volume"]))
+    # where the budget went, so a set that is merely CLOSE says so before the
+    # next image tips it over (item 105)
+    if rows:
+        log("per image: %s each is the share (%s menu-wide); heaviest %s"
+            % (fmt_bytes(budget_share(len(rows), shared)), fmt_bytes(shared),
+               ", ".join("%d=%s" % (i, fmt_bytes(b)) for i, b, _, _ in rows[:3] if b) or "none"))
     return m
 
 

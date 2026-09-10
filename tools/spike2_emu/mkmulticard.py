@@ -1102,6 +1102,15 @@ def _gb(n):
     return "%.2f GB" % (n / 1e9)
 
 
+def _mb(n):
+    """Media is megabytes, not gigabytes: _gb would print every file as 0.00 GB."""
+    if n >= 1 << 20:
+        return "%.2f MB" % (n / float(1 << 20))
+    if n >= 1024:
+        return "%.1f KB" % (n / 1024.0)
+    return "%d B" % n
+
+
 def _used_bytes_or_none(path, offset):
     """The used bytes of the ext4 at `offset` in `path`, or None when there is no superblock
     there (a synthetic test card, an unreadable source)."""
@@ -1175,7 +1184,7 @@ def plan_room(plan):
     return room
 
 
-def print_plan(plan):
+def print_plan(plan, media=None):
     print("primary %s (%d bytes)" % (plan.primary, plan.primary_geom.size))
     for x, g in zip(plan.extras, plan.extra_geoms):
         print("extra   %s (%d bytes)" % (x, g.size))
@@ -1233,6 +1242,20 @@ def print_plan(plan):
         # which is the point; a word where the index goes, like the free row
         print("image-size shared %d stored once, shared by content" % (plan.store_shared or 0))
     print("image-size overhead %d boot + rootfs + data + dump + metadata" % max(0, overhead))
+    # WHAT THE MENU COSTS, per card (item 105).  The games' bytes are the whole
+    # story on a 4-image card; from 5 up the menu's own art and clips are the
+    # thing that runs out first, and they come out of a flat 96 MB in p2 that
+    # nothing else on this page mentions.  Same 'media-size' word-where-the-
+    # index-goes convention as the rows above, so a reader of either cannot
+    # mistake one for the other.
+    if media is not None:
+        rows, shared = media["costs"], media["shared"]
+        for i, b, big, bb in sorted(rows):
+            print("media-size %d %d %s" % (i, b, ("%s %d" % (big, bb)) if big else "(no media)"))
+        print("media-size shared %d menu-wide move + confirm sounds" % shared)
+        print("media-size share %d what one image may spend (%d images, %d byte budget)"
+              % (media_share(len(rows), shared), len(rows), MEDIA_BUDGET))
+        print("media-size total %d of the %d byte budget" % (media["total"], MEDIA_BUDGET))
     print("image: %d sectors = %d bytes (%s)" % (plan.total, plan.total_bytes, _gb(plan.total_bytes)))
     for k, spare in plan.fits().items():
         print("  fits Stern %-3s image size %d: %s (spare %d)%s" % (k, STERN_SIZES[k], "YES" if spare >= 0 else "NO", spare,
@@ -1628,6 +1651,7 @@ def plan_media(media_dir, n_images):
         raise Refused("%s/%s lists %d images; the card holds %d" % (media_dir, MEDIA_MANIFEST, len(imgs), n_images))
     files = collections.OrderedDict()
     kinds = {}
+    sizes = {}
     total = 0
 
     def take(name, kind, what):
@@ -1642,6 +1666,7 @@ def plan_media(media_dir, n_images):
             word, size = check_media_file(src, kind)
             files[name] = src
             kinds[name] = word
+            sizes[name] = size
             total += size
         return name
 
@@ -1656,14 +1681,66 @@ def plan_media(media_dir, n_images):
     out = {"rows": rows,
            "sound_move": take(man.get("sound_move"), "wav", "sound_move") or None,
            "sound_confirm": take(man.get("sound_confirm"), "wav", "sound_confirm") or None,
-           "volume": None, "mixer_volume": None, "files": files, "total": total, "kinds": kinds}
+           "volume": None, "mixer_volume": None, "files": files, "total": total, "kinds": kinds,
+           "sizes": sizes}
+    out["costs"], out["shared"] = media_costs(out)
     if man.get("volume") is not None:
         out["volume"] = _int_range(man.get("volume"), "volume", 0, 100)
     if man.get("mixer_volume") is not None:
         out["mixer_volume"] = _int_range(man.get("mixer_volume"), "mixer_volume", 0, 63)
     if total > MEDIA_BUDGET:
-        raise Refused("media set is %d bytes, over the %d byte budget (%d files)" % (total, MEDIA_BUDGET, len(files)))
+        raise Refused(media_budget_refusal(out))
     return out
+
+
+def media_costs(media):
+    """What each CARD asks the media budget for -> ([(index, bytes, heaviest, its bytes)], shared).
+
+    Biggest card first.  A file two cards name is counted for BOTH: the
+    question these rows answer is "which card is expensive", not "what does
+    the directory store".  `shared` is the two menu-wide sounds, which no card
+    owns.  selectmedia.py's media_costs derives the same rows for the staging
+    tool's own refusal - the two agree the way the rest of that contract does.
+    """
+    sizes = media["sizes"]
+    rows = []
+    for i, row in enumerate(media["rows"]):
+        names = [n for n in row if n and n in sizes]
+        big = max(names, key=lambda n: sizes[n]) if names else None
+        rows.append((i, sum(sizes[n] for n in names), big, sizes[big] if big else 0))
+    shared = sum(sizes[n] for n in (media.get("sound_move"), media.get("sound_confirm"))
+                 if n and n in sizes)
+    rows.sort(key=lambda r: -r[1])
+    return rows, shared
+
+
+def media_share(nimages, shared):
+    """What ONE card may spend: the budget less the menu-wide sounds, split evenly."""
+    return max(0, MEDIA_BUDGET - shared) // max(1, nimages)
+
+
+def media_budget_refusal(media):
+    """Say WHERE the budget went, not just that it is gone (item 105).
+
+    "media set is 118 MB, over the 96 MB budget" leaves the owner of a
+    five-image card to guess which animation to re-encode; one busy 5 s GIF is
+    7.65 MB, so at five images the answer is rarely the one they would guess.
+    """
+    rows, shared = media["costs"], media["shared"]
+    why = ["media set is %s, over the %s budget (%d files)"
+           % (_mb(media["total"]), _mb(MEDIA_BUDGET), len(media["files"]))]
+    if rows:
+        share = media_share(len(rows), shared)
+        why.append("  the menu-wide sounds cost %s, leaving %s for %d images: %s each"
+                   % (_mb(shared), _mb(max(0, MEDIA_BUDGET - shared)), len(rows), _mb(share)))
+        why.append("  heaviest: " + ", ".join(
+            "image %d asks %s%s" % (i, _mb(b), " (%s %s)" % (big, _mb(bb)) if big else "")
+            for i, b, big, bb in rows[:3] if b))
+        over = [i for i, b, _n, _bb in rows if b > share]
+        if over:
+            why.append("  over the share: %s" % ", ".join("image %d" % i for i in over))
+        why.append("  a file two images share is counted for both")
+    return "\n".join(why)
 
 
 def default_title(path):
@@ -6959,6 +7036,8 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("plan", help="print the layout + byte totals; writes nothing")
     _add_images(s, None)
+    s.add_argument("--media-dir", help="as for build: check the menu media too and print its per-image "
+                                       "cost beside the games' (media-size rows)")
     s.add_argument("--size", choices=list(STORE_SIZES), help="as for build (the store layout is sized by it)")
     s.add_argument("--cache-dir", help="where hashed source manifests are kept (the store layout hashes to plan)")
     s = sub.add_parser("check-stock", help="regenerate a stock card's tables with this writer and byte-compare")
@@ -7062,7 +7141,11 @@ def main(argv=None):
                              progress=meter)
             if meter is not None:
                 meter.finish()
-            print_plan(plan)
+            # the media is checked HERE, not after the layout, so `plan` says
+            # the same thing `build` would refuse with - before anything is
+            # copied (item 105)
+            media = plan_media(a.media_dir, len(plan.trees)) if a.media_dir else None
+            print_plan(plan, media)
             check_reachable(plan, a.allow_unreachable)
             recs = plan_identities(plan, progress=None)
             try:                                 # plan writes nothing, so it reports and does

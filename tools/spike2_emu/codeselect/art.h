@@ -21,6 +21,10 @@ struct art_image {
 };
 
 struct art_anim {
+    int idx;                  /* WHICH IMAGE this clip belongs to, for the log alone:
+                                 art_cache_set names the clips it kept, and "the
+                                 budget went to 0, 1, 2" is only useful if those are
+                                 image numbers.  The menu sets it; 0 if nobody does. */
     int n;                    /* frames in the file (counted at open, at most the cap
                                  asked for); lowered when decoding stops early */
     int w, h;                 /* fitted frame size (every frame) */
@@ -71,7 +75,7 @@ const struct art_image *art_anim_frame(struct art_anim *a, int k);
 const struct art_image *art_anim_still(const struct art_anim *a);
 void art_anim_free(struct art_anim *a);
 
-/* Cache every frame of these animations in RAM, decoded by ONE background
+/* Cache the frames of these animations in RAM, decoded by ONE background
  * thread at a lower priority than the caller (round-robin across the
  * clips, so they all stay ahead of playback together).  budget_bytes caps
  * the total; a clip that does not fit stays on demand.  From then on
@@ -81,6 +85,17 @@ void art_anim_free(struct art_anim *a);
  * modes, which need frame k exactly.  Returns the clips being cached; why
  * says what was decided. */
 int  art_cache_start(struct art_anim **anims, int n, size_t budget_bytes, char *why, int whylen);
+/* RE-AIM the cache while the menu is up (item 109), idempotent: the clips are
+ * taken in the order given until budget_bytes is gone, so THE CALLER RANKS
+ * THEM and the cached set is whatever fits rather than a prefix of the images.
+ * A clip in both the old set and the new keeps the frames it already has and
+ * carries on filling; one that falls out is released and goes back to the
+ * on-demand path; one that comes in is allocated and starts from frame 0.
+ * Stops and rejoins the decoder thread, which waits at most one frame's
+ * decode.  An allocation that fails leaves that clip on demand, never stops
+ * the menu.  Safe to call with the same set: nothing is freed or re-decoded.
+ * art_cache_start is this with the images in index order. */
+int  art_cache_set(struct art_anim **anims, int n, size_t budget_bytes, char *why, int whylen);
 /* stop and join the decoder - before art_anim_free on a cached clip */
 void art_cache_stop(void);
 /* frames of a in the cache so far (a->n = all; 0 = not a cached clip) */

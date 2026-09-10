@@ -220,8 +220,37 @@ if [ -n "$CAPBIN" ] && [ -f "$CAPBIN" ]; then
     rm -f "$T/choice"
     if run "$T/x.ppm" "$T/cap.conf"; then echo "headless: FAIL a $n-image conf was accepted at cap 16"; exit 1; fi
     python3 "$HERE/ppm2png.py" "$T/menu_cap.ppm" "$T/codeselect_menu_cap.png"
+
+    # 10c. THE FRAME CACHE FOLLOWS THE HIGHLIGHT (item 109).  The budget only
+    #      stretches to a handful of clips, and it used to be spent on images
+    #      0..k whatever the highlight was - so on a big card the cards being
+    #      LOOKED AT could be the ones decoding a frame at a time, at 13 ms a
+    #      frame on the machine.  PAD_ANIM_CACHE_MB forces the budget small
+    #      enough that a synthetic clip set can reach it; the cached list must
+    #      then sit on the highlight and image 0 must NOT be in it.
+    rm -f "$T/choice" "$T/last" "$T/aim.log"
+    PAD_ANIM_CACHE_MB=2 runbin "$CAPBIN" "$T/menu_aim.ppm" "$T/cap.conf" --no-invert \
+        --media "$T/media" --default 33 --log "$T/aim.log"
+    aim=$(grep -oE "anim: cache on image 33: .*" "$T/aim.log" | head -1)
+    [ -n "$aim" ] || { echo "headless: FAIL no cache line for highlight 33"; grep "anim: cache" "$T/aim.log"; exit 1; }
+    set=$(echo "$aim" | sed -n 's/.*\[\([0-9 ]*\)\].*/\1/p')
+    [ -n "$set" ] || { echo "headless: FAIL the cache line does not name its clips: $aim"; exit 1; }
+    case " $set " in
+        *" 33 "*) ;;
+        *) echo "headless: FAIL the highlighted card is not cached: [$set]"; exit 1;;
+    esac
+    case " $set " in
+        *" 0 "*) echo "headless: FAIL image 0 is cached at highlight 33 - the budget still goes in image order: [$set]"; exit 1;;
+    esac
+    # nearest first: the highlight, then its two neighbours, before anything further out
+    [ "${set%% *}" = 33 ] || { echo "headless: FAIL the highlight is not first in the cached set: [$set]"; exit 1; }
+    echo "headless: cache aimed on 33 -> [$set]"
+    # and the budget really did bind, or the test proved nothing
+    grep -q "on demand, over the 2 MB budget" "$T/aim.log" || {
+        echo "headless: FAIL the 2 MB budget did not bind, so eviction was never exercised"
+        grep "anim: cache" "$T/aim.log"; exit 1; }
 else
-    echo "headless: SKIP the past-32 case (no CAPBIN; make check builds it)"
+    echo "headless: SKIP the past-32 and cache-aim cases (no CAPBIN; make check builds it)"
 fi
 
 # 11. --snapshot: ONE frame, what the machine shows the moment the menu

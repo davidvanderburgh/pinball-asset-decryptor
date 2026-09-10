@@ -444,6 +444,24 @@ void art_anim_free(struct art_anim *a)
 
 /* ---------------------------------------------------------- the cache */
 
+/* Give back one clip's cached frames and put it back on the on-demand path.
+ * The DECODER is deliberately left where it is: art_anim_frame seeks from
+ * wherever a->cur happens to be, so there is nothing to reset and nothing
+ * that can fail.  The caller must have stopped the decoder thread. */
+static void cache_release(struct art_anim *a)
+{
+    int k;
+    if (!a || !a->cache) return;
+    for (k = 1; k < a->n; k++) {
+        free(a->cache[k].rgba);
+        a->cache[k].rgba = NULL;
+    }
+    free(a->cache);
+    a->cache = NULL;
+    a->caching = 0;
+    __atomic_store_n(&a->ready, 0, __ATOMIC_RELEASE);
+}
+
 static struct {
     pthread_t th;
     int on, stop;
@@ -464,7 +482,13 @@ static void *cache_thread(void *arg)
             struct art_anim *a = cache.anims[i];
             long long t0;
             if (!a || !a->caching || k >= a->n) continue;
-            any = 1;
+            any = 1;                              /* this clip has frames past k */
+            /* A RE-AIM CAN KEEP A HALF-FILLED CLIP (art_cache_set): the thread
+             * restarts at k = 1, and re-decoding into a slot that already holds
+             * pixels would leak them.  Skipping walks k up to where this clip's
+             * decoder actually is - they meet, because a->cur only advanced on
+             * the frames this clip decoded. */
+            if (a->cache[k].rgba) continue;
             t0 = now_us();
             if (!anim_decode_next(a)) {
                 /* fewer frames than the walk counted: the clip is what did
@@ -483,49 +507,112 @@ static void *cache_thread(void *arg)
     return NULL;
 }
 
-int art_cache_start(struct art_anim **anims, int n, size_t budget_bytes, char *why, int whylen)
+int art_cache_set(struct art_anim **anims, int n, size_t budget_bytes, char *why, int whylen)
 {
     size_t used = 0;
-    int i, on = 0, skipped = 0;
-    if (cache.on) { snprintf(why, whylen, "already running"); return 0; }
-    cache.n = 0;
-    cache.stop = 0;
-    for (i = 0; i < n && cache.n < (int)(sizeof cache.anims / sizeof *cache.anims); i++) {
+    int i, j, on = 0, skipped = 0, kept = 0, added = 0, dropped = 0, w;
+    struct art_anim *want[sizeof cache.anims / sizeof *cache.anims];
+    int nwant = 0;
+
+    /* the decoder owns every caching clip, so it stops before anything here
+     * frees or allocates one.  Bounded: it checks cache.stop between frames,
+     * so the join waits at most one frame's decode. */
+    art_cache_stop();
+
+    /* WHO GETS THE BUDGET.  In the order the caller gave, which is the whole
+     * point: the menu ranks the clips by distance from the highlight, so what
+     * fits is a window around the card being looked at rather than images
+     * 0..k.  A clip too big for what is left is skipped and the smaller ones
+     * behind it are still considered. */
+    for (i = 0; i < n; i++) {
         struct art_anim *a = anims[i];
         size_t need;
         if (!a || a->n < 2) continue;
+        /* the list has its own ceiling, and a clip past it is on demand like
+         * any other clip that did not fit - COUNTED, not silently missing */
+        if (nwant >= (int)(sizeof want / sizeof *want)) { skipped++; continue; }
         need = (size_t)(a->n - 1) * (size_t)a->w * (size_t)a->h * 4;
         if (used + need > budget_bytes) { skipped++; continue; }
-        a->cache = calloc((size_t)a->n, sizeof *a->cache);
-        if (!a->cache) { skipped++; continue; }
-        /* the thread continues the decoder from frame 0 (art_anim_open
-         * decoded it); put it back there if anything moved it since */
-        if (a->cur != 0) { gifdec_rewind((struct gifdec *)a->dec); a->cur = -1; anim_decode_next(a); }
-        a->ready = 1;
-        a->caching = 1;
         used += need;
+        want[nwant++] = a;
+    }
+
+    /* GIVE BACK what is no longer wanted, before allocating what is - so a
+     * re-aim never needs the old set and the new set in memory at once. */
+    for (i = 0; i < n; i++) {
+        struct art_anim *a = anims[i];
+        int keep = 0;
+        if (!a || !a->cache) continue;
+        for (j = 0; j < nwant; j++) if (want[j] == a) { keep = 1; break; }
+        if (!keep) { cache_release(a); dropped++; }
+    }
+
+    cache.n = 0;
+    cache.stop = 0;
+    for (i = 0; i < nwant; i++) {
+        struct art_anim *a = want[i];
+        if (a->cache) {
+            kept++;                 /* keeps its frames and carries on filling */
+        } else {
+            a->cache = calloc((size_t)a->n, sizeof *a->cache);
+            if (!a->cache) { skipped++; continue; }   /* on demand, never fatal */
+            /* the thread continues the decoder from frame 0 (art_anim_open
+             * decoded it); put it back there if anything moved it since */
+            if (a->cur != 0) { gifdec_rewind((struct gifdec *)a->dec); a->cur = -1; anim_decode_next(a); }
+            __atomic_store_n(&a->ready, 1, __ATOMIC_RELEASE);
+            added++;
+        }
+        a->caching = 1;
         cache.anims[cache.n++] = a;
         on++;
     }
+
     if (!on) {
         snprintf(why, whylen, "nothing to cache%s", skipped ? " (over the budget)" : "");
         return 0;
     }
     if (pthread_create(&cache.th, NULL, cache_thread, NULL) != 0) {
-        for (i = 0; i < cache.n; i++) { cache.anims[i]->caching = 0; cache.anims[i]->ready = 0; }
+        /* no thread means no owner for the decoders: hand every clip back to
+         * the on-demand path rather than leave it pointing at a cache nobody
+         * is filling */
+        for (i = 0; i < cache.n; i++) cache_release(cache.anims[i]);
         cache.n = 0;
         snprintf(why, whylen, "pthread_create failed, decoding on demand");
         return 0;
     }
     cache.on = 1;
-    {
-        int w = snprintf(why, whylen, "%d clip(s), %zu MB of frames, decoding on a thread at nice 10",
-                         on, (used + 512 * 1024) / (1024 * 1024));
-        if (skipped && w > 0 && w < whylen)
-            snprintf(why + w, (size_t)(whylen - w), "; %d clip(s) left on demand, over the %zu MB budget",
-                     skipped, (budget_bytes + 512 * 1024) / (1024 * 1024));
-    }
+
+    /* WHICH clips, not just how many - the whole question this item exists to
+     * answer is whether the budget went to the cards being looked at.  APPEND
+     * carries its own cursor and never lets it past the buffer: snprintf
+     * returns the length it WANTED, so `k += snprintf(...)` can walk k past
+     * whylen, and the next call would then be handed a negative length as a
+     * size_t.  This runs on the way to a boot. */
+#define APPEND(...)                                                       \
+    do {                                                                  \
+        int _r;                                                           \
+        if (w < 0 || w >= whylen - 1) break;                              \
+        _r = snprintf(why + w, (size_t)(whylen - w), __VA_ARGS__);        \
+        w = (_r < 0 || _r >= whylen - w) ? whylen - 1 : w + _r;           \
+    } while (0)
+
+    w = 0;
+    APPEND("%d clip(s), %zu MB of frames [", on, (used + 512 * 1024) / (1024 * 1024));
+    for (i = 0; i < cache.n; i++)
+        APPEND("%s%d", i ? " " : "", cache.anims[i]->idx);
+    APPEND("]");
+    if (kept || added || dropped)
+        APPEND(", %d kept %d new %d dropped", kept, added, dropped);
+    if (skipped)
+        APPEND("; %d clip(s) on demand, over the %zu MB budget",
+               skipped, (budget_bytes + 512 * 1024) / (1024 * 1024));
+#undef APPEND
     return on;
+}
+
+int art_cache_start(struct art_anim **anims, int n, size_t budget_bytes, char *why, int whylen)
+{
+    return art_cache_set(anims, n, budget_bytes, why, whylen);
 }
 
 void art_cache_stop(void)

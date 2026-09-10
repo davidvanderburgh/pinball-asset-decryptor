@@ -669,6 +669,82 @@ def main():
           "%d frames dropped = %.2f s, %d bytes after, %.1f s, exit 0)"
           % (t_lost - t0, gap, dropped, dropped / 44100.0, after, time.monotonic() - t0))
 
+    # --- THE FRAME CACHE FOLLOWS THE HIGHLIGHT, ONCE PER SETTLE (item 109) ---
+    # The budget stretches to a few clips, and it used to be spent on images
+    # 0..k whatever the highlight was, so on a big card the cards being LOOKED
+    # AT could be the ones decoding a frame at a time - 13 ms a frame on the
+    # machine, in a 33 ms frame, three panels at once.  Nine animated images
+    # and a 1 MB budget make room for exactly three clips, so the window is
+    # unambiguous.  Three RIGHTs pressed faster than the settle must produce
+    # ONE re-aim, not three: a re-aim frees and allocates, and doing it per
+    # keypress would thrash on a scroll.
+    aimconf = os.path.join(t, "padsw_aim.conf")
+    with open(aimconf, "w") as f:
+        for i in range(9):
+            f.write("image=p7:img%d|BUILD %d|custom build %d|art0.png|anim1.gif|\n" % (i, i, i))
+        f.write("default=0\ntimeout=0\n")
+    for pth in (choice, last):
+        if os.path.exists(pth):
+            os.unlink(pth)
+    with open(padsw, "wb") as f:                 # a fresh switch block
+        f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
+    # the settle is widened, not the shipped constant: the switch block cannot
+    # be driven faster than ~320 ms a move, which is wider than the 200 ms the
+    # menu ships with, so at the real value each press rightly gets its own
+    # re-aim and the collapsing this asserts could never be observed
+    env = dict(os.environ, PAD_ANIM_CACHE_MB="1", PAD_ANIM_SETTLE_MS="1500")
+    cmd = [qemu, "-L", root, binp, "--headless", os.path.join(t, "padsw_aim.ppm"),
+           "--conf", aimconf, "--input", "padsw", "--padsw", padsw, "--tables", tables,
+           "--timeout", "4", "--out", choice, "--last", last,
+           "--log", os.path.join(t, "padsw_aim.log"), "--font", font, "--no-invert",
+           "--media", media, "--audio", "none"]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    time.sleep(1.0)
+    for _ in range(3):                           # 0 -> 1 -> 2 -> 3, inside one settle
+        set_held(padsw, right, 1)
+        time.sleep(0.1)
+        set_held(padsw, right, 0)
+        time.sleep(0.25)                         # a shorter gap loses the press
+    time.sleep(1.9)                              # let the 1500 ms settle fire
+    set_held(padsw, start, 1)
+    try:
+        out, err = proc.communicate(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+        raise SystemExit("padsw_test: FAIL (cache aim) codeselect did not exit")
+    if proc.returncode != 0 or "[select] chose 3" not in out:
+        sys.stderr.write(err)
+        raise SystemExit("padsw_test: FAIL (cache aim) exit %d, wanted 'chose 3'\n%s"
+                         % (proc.returncode, out))
+    log = open(os.path.join(t, "padsw_aim.log")).read()
+    sets = re.findall(r"anim: cache (?:on image|re-aimed on image) (\d+): .*?\[([0-9 ]*)\]", log)
+    if len(sets) != 2:
+        raise SystemExit("padsw_test: FAIL (cache aim) %d cache line(s), wanted an initial aim "
+                         "and exactly ONE re-aim - a re-aim per keypress would thrash\n%s"
+                         % (len(sets), "\n".join(l for l in log.splitlines() if "anim: cache" in l)))
+    (hl0, set0), (hl1, set1) = sets
+    if hl0 != "0" or set0.split()[0] != "0":
+        raise SystemExit("padsw_test: FAIL (cache aim) the first aim is on %s [%s], wanted 0" % (hl0, set0))
+    if hl1 != "3" or set1.split()[0] != "3":
+        raise SystemExit("padsw_test: FAIL (cache aim) the re-aim is on %s [%s], wanted 3" % (hl1, set1))
+    if "0" in set1.split():
+        raise SystemExit("padsw_test: FAIL (cache aim) image 0 is still cached at highlight 3 [%s]" % set1)
+    if "1 MB budget" not in log:
+        raise SystemExit("padsw_test: FAIL (cache aim) the 1 MB budget never bound, so nothing was evicted")
+    # every clip keeps TICKING whether or not its frames are cached: that is
+    # the 2026-09-03 rule (all the cards animate, not only the hovered one)
+    played = dict((int(a), int(b)) for a, b in re.findall(r"anim: image (\d+): played (\d+) ", log))
+    cold = [i for i in range(9) if str(i) not in set1.split()]
+    if not cold:
+        raise SystemExit("padsw_test: FAIL (cache aim) nothing was left uncached, so the test is empty")
+    for i in cold:
+        if played.get(i, 0) < 1:
+            raise SystemExit("padsw_test: FAIL (cache aim) uncached image %d stopped animating (played %r) "
+                             "- every card plays, cached or not" % (i, played.get(i)))
+    print("padsw_test: OK (cache aim: [%s] -> [%s] in ONE re-aim after 3 keys; %d uncached clip(s) still playing)"
+          % (set0, set1, len(cold)))
+
     # --- a card's OWN confirm sound (images.conf field 7) -------------------
     # David, 2026-09-02: "the 'confirm sound' we should be able to customize
     # for each entry if we want to." Image 1 names confirm1.wav (2.5 s), image

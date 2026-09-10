@@ -1120,6 +1120,23 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    itself instead of overriding it. Measured across every title in the
    library that carries a device table, exactly two maps change, and
    they are these two.
+   **And those inserts light at the brightness the game asked for.**
+   The one lamp command a Home Edition drives its whole attract picture
+   through carries the level as two bytes — the shape the frame has
+   always been written down in here — and the rig read only the first
+   of them. Jurassic Park The Pin holds nine lamps up during attract;
+   seven of them came out as off and the other two at 2 and 3 parts in
+   255, which is a field report of exactly two lit inserts on a machine
+   that should show nine. Both bytes are read now, against a full scale
+   of 0x800 taken from what the wire actually carries rather than from
+   the width of the field: across 10728 writes on two titles the levels
+   land on eighths of full and stop at eight eighths, and a title that
+   ever sends past that reads as full rather than wrapping back around
+   into a dark lamp. It is the command that decides this and never the
+   model — the full-size Jurassic Park cabinet lights 42 inserts the
+   same way and was dimmed the same way — and a level of zero still
+   decodes as zero, so the titles that only ever use this command to
+   turn a lamp off are unmoved.
    **The switch list carries the game's own names.** A title whose
    device table describes only a handful of its switches used to leave
    the rest of the list as question marks — one 105-switch machine

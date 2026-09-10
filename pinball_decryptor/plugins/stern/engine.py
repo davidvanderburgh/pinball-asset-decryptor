@@ -4435,15 +4435,17 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 _vbypass, _vmode = _vp.bypass_overlay(_f.read())
                             grow_work = grow_work or _work_dir(
                                 label, base="spike2_grow_")
-                            # A body appended past the old end of the bank runs
-                            # LAST in the firmware's chain, so nothing reads it
-                            # and it needs no redirect; leaving it out keeps the
-                            # cave's limited address space for the sounds that
-                            # do (measured blip-free in the PC emulator).
+                            # The LAST appended body runs at the end of the
+                            # firmware's chain, so nothing reads it and it needs
+                            # no redirect; leaving it out keeps the cave's
+                            # limited address space for the sounds that do.
+                            # Every earlier appended body has a successor and is
+                            # as ordinary as a stock sound.
                             _cave_patches = {
                                 o: b for o, b in audio_patches.items()
                                 if o not in _appended_body_offsets(
-                                    audio_patches, grow_places)}
+                                    audio_patches, grow_places,
+                                    last_only=True)}
                             patched_gr, _fw_size = _build_derive_redirect_cave(
                                 gr_path, img_path, _cave_patches, np, log,
                                 grow_work, progress, extra_fw_writes=_vbypass)
@@ -4483,7 +4485,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, audio_patches, log, progress,
                             cancel,
                             skip_offsets=_appended_body_offsets(
-                                audio_patches, grow_places))
+                                audio_patches, grow_places, last_only=True))
                         if audio_patches is None:
                             return None, None, None, None
                         _assert_param_integrity(gr_path, img_path, audio_patches,
@@ -4514,7 +4516,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                     gr_path, img_path, audio_patches, params,
                                     np, log, cancel, no_restore=pathA_applied,
                                     no_scrap_offsets=_appended_body_offsets(
-                                        audio_patches, grow_places))
+                                        audio_patches, grow_places,
+                                        last_only=True))
                             except Exception as e:
                                 log("Final-bytes check skipped (%s)." % e,
                                     "info")
@@ -8798,15 +8801,25 @@ def _card_rel_path(reader, node):
     return None
 
 
-def _appended_body_offsets(patches, places):
+def _appended_body_offsets(patches, places, last_only=False):
     """The patch offsets that land in a body appended past the old end of the
     bank.  The encoder writes from a word or two BELOW a sound's body offset,
-    so match by range rather than by equality."""
+    so match by range rather than by equality.
+
+    ``last_only`` narrows it to the body of the LAST appended record, and that
+    distinction is load-bearing.  The firmware's decode is one forward chain
+    over the record array, so a record's own bytes set the parameters of every
+    record AFTER it.  Only the final appended record has nothing after it; the
+    others are as ordinary as any stock sound and their consumed windows have
+    to be restored like any other.  Growing two sounds in one build without
+    that shifted the second one's codec parameters and the integrity check
+    stopped the write — which is exactly what it is for."""
     if not places:
         return set()
+    want = places[-1:] if last_only else places
     out = set()
     for off in patches:
-        for pl in places:
+        for pl in want:
             if pl.body_off - 64 <= off < pl.body_off + pl.body_bytes:
                 out.add(off)
                 break
@@ -8977,12 +8990,19 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
     cur = {r["idx"]: (r["scale"], r["pred16"]) for r in rows}
     shifted = [i for i in stock if i in cur and stock[i] != cur[i]]
     if shifted:
+        # Name them.  Which sounds moved is the whole diagnosis: a run of
+        # consecutive indexes means the chain desynced at the first of them,
+        # and a lone index means that one sound's own bytes are the cause.
         raise RuntimeError(
             "Master-directory integrity check FAILED: %d of %d sounds would "
             "decode with the wrong codec parameters (the card would reboot on "
             "audio). The re-encode could not preserve the firmware's "
             "forward-chain; aborting the write rather than producing a broken "
-            "card." % (len(shifted), len(stock)))
+            "card. First shifted: %s%s."
+            % (len(shifted), len(stock),
+               ", ".join("idx %d (%s -> %s)" % (i, stock[i], cur[i])
+                         for i in sorted(shifted)[:5]),
+               " and %d more" % (len(shifted) - 5) if len(shifted) > 5 else ""))
     log("Master-directory integrity verified: all %d sounds keep valid decode "
         "parameters." % len(stock), "success")
 

@@ -188,6 +188,24 @@ def test_collapse_survives_a_row_whose_record_could_not_be_read():
 # --------------------------------------------------------------------------
 # small helpers the delivery depends on
 # --------------------------------------------------------------------------
+def test_only_the_last_appended_body_is_exempt_from_the_chain():
+    """The firmware decodes the record array as one forward chain, so a
+    record's bytes set the parameters of every record AFTER it.  Only the last
+    appended record has nothing after it.
+
+    Growing two sounds in one build and exempting BOTH from the
+    master-directory restore shifted the second one's codec parameters on a
+    real card (Godzilla Pro 1.15, idx 597 and idx 1047: scale 18 -> 7,
+    predictor 39237 -> 11536) and the integrity check stopped the write."""
+    from pinball_decryptor.plugins.stern.spike2.masterdir import Placement
+    places = [Placement(597, 2534, 0x8000, 1000, 0x1000),
+              Placement(1047, 2535, 0x9010, 1000, 0x1000)]
+    patches = {0x8000: b"", 0x9010: b"", 0x1000: b""}
+    assert engine._appended_body_offsets(patches, places) == {0x8000, 0x9010}
+    assert engine._appended_body_offsets(
+        patches, places, last_only=True) == {0x9010}
+
+
 def test_appended_body_offsets_covers_the_encoder_window():
     """The encoder writes from a word or two BELOW a sound's body offset, so
     the patch key is not always the body offset itself."""
@@ -343,10 +361,9 @@ def _edits(tmp_path, seconds):
 
 
 def _run(monkeypatch, assets, params, encode_off, log, dest_is_device=False):
-    monkeypatch.setattr(
-        engine, "_encode_cat0_sounds",
-        lambda gr, img, prm, ed, np, lg, pr, cx, **k: ({encode_off: b"\xaa" * 64},
-                                                      []))
+    def _fake_encode(gr, img, prm, ed, np, lg, pr, cx, **k):
+        return {encode_off: b"\xaa" * 64}, []
+    monkeypatch.setattr(engine, "_encode_cat0_sounds", _fake_encode)
     monkeypatch.setattr(engine, "_select_changed_idx_wavs",
                         lambda a, b: {0: "audio/idx0000.wav"})
     return engine._compute_patches(

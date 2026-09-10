@@ -7830,7 +7830,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
       and choosing it (by hand or by the countdown) boots one member at random,
-      a different one every power-up.** `S3 D4` ← IN PROGRESS *(A tester's "random jukebox",
+      a different one every power-up.** `S3 D3` ← WORKING ON, IN PROGRESS *(A tester's "random jukebox",
       2026-09-09: 20-40 song-set variants of one title, "everything looks
       standard except for the songs". David's first answer to him was a
       hold-START gesture; REJECTED below, his call.)* **GATE FIRST:** everything

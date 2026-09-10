@@ -199,6 +199,51 @@ def test_the_staged_bank_is_repointed_after_it_is_derived(monkeypatch,
     assert _said(msgs, "the sound bank grows to keep it whole")
 
 
+def test_a_grown_bank_keeps_the_sound_engines_failed_count_at_zero(
+        monkeypatch, tmp_path, _grow_on):
+    """The band build counts every appended record as failed (no expected
+    word in the ELF's table) and the Tech Alerts screen shows '#4 549:2'.
+    A grow build therefore NOPs that count's failed store in the game ELF,
+    in place on the standard path, and folds it into the firmware's .sidx
+    digest; a build that grows nothing leaves the firmware alone."""
+    from pinball_decryptor.plugins.stern import valpatch
+    from tests.test_stern_audio_grow import _CardReader
+    params = _params(4)
+    grown = [dict(p) for p in params]
+    grown[0].update(body_off=0x40000, length=2 * 44100 + BLOCK, grown=True,
+                    shadows=4)
+    _reader, _staged = _grow_card(monkeypatch, tmp_path, params,
+                                  grown_rows=grown)
+    seen = []
+    monkeypatch.setattr(valpatch, "sound_count_overlay",
+                        lambda elf, log=None: seen.append(len(elf)) or {0x40: valpatch._NOP})
+    folded = {}
+
+    def fake_compute(reader, log, fw_overlay=None):
+        folded.update(fw_overlay or {})
+        return [], ("bypassed", "")
+    monkeypatch.setattr(valpatch, "compute_writes", fake_compute)
+    assets, _wavp = _edits(tmp_path, 2.0)
+    msgs, log = _capture()
+
+    writes, counts, plan, _mode, _vp = _run(
+        monkeypatch, assets, params, 0x40000, log)
+
+    assert seen, "the count patch was never asked for on a grow build"
+    assert (_CardReader.FW_DISK + 0x40, valpatch._NOP) in writes
+    assert folded.get(0x40) == valpatch._NOP
+
+    # and not on a build that fits every replacement
+    seen.clear()
+    folded.clear()
+    _reader, _staged = _grow_card(monkeypatch, tmp_path, params)
+    assets2, _w2 = _edits(tmp_path / "b", 0.5)
+    writes2, _c, _p, _m, _v = _run(
+        monkeypatch, assets2, params, params[0]["body_off"], log)
+    assert not seen
+    assert (_CardReader.FW_DISK + 0x40, valpatch._NOP) not in writes2
+
+
 def test_a_sound_no_play_table_names_trims_instead_of_growing(monkeypatch,
                                                               tmp_path,
                                                               _grow_on):

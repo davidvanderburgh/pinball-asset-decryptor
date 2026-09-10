@@ -4452,7 +4452,15 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             # copy would undo it.
                             from . import valpatch as _vp
                             with open(_lp(gr_path), "rb") as _f:
-                                _vbypass, _vmode = _vp.bypass_overlay(_f.read())
+                                _fwb = _f.read()
+                            _vbypass, _vmode = _vp.bypass_overlay(_fwb)
+                            if grow_places is not None:
+                                # A grown bank has records the sound engine's
+                                # own count has no expected word for; keep
+                                # its failed count at zero (see valpatch).
+                                _vbypass.update(
+                                    _vp.sound_count_overlay(_fwb, log))
+                            del _fwb
                             grow_work = grow_work or _work_dir(
                                 label, base="spike2_grow_")
                             # The LAST appended body runs at the end of the
@@ -4794,6 +4802,16 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if patched_gr is None:
             try:
                 from . import valpatch
+                if grow_places is not None and fw_node is not None:
+                    # A grown bank has records the sound engine's own count
+                    # has no expected word for; keep its failed count at
+                    # zero, in place, and let the bypass below fold the edit
+                    # into the firmware's .sidx digest (see valpatch).
+                    _sw, _sov = valpatch.sound_count_writes(reader, fw_node,
+                                                            log)
+                    writes += _sw
+                    fw_text_overlay = dict(fw_text_overlay)
+                    fw_text_overlay.update(_sov)
                 _vwrites, valpatch_mode = valpatch.compute_writes(
                     reader, log, fw_overlay=fw_text_overlay)
                 writes += _vwrites

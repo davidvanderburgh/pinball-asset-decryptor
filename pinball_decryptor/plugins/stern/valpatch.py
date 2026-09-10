@@ -82,6 +82,135 @@ import struct
 _CRC32_POLY = 0xEDB88320
 _BX_LR = bytes.fromhex("1eff2fe1")          # ARM A32 ``bx lr``
 _MOV_R0_0 = bytes.fromhex("0000a0e3")       # ARM A32 ``mov r0, #0``
+_NOP = bytes.fromhex("0000a0e1")            # ARM A32 ``mov r0, r0``
+
+# THE SOUND ENGINE'S OWN COUNT (item 104, 2026-09-10).  ``validation_exec`` is not
+# the only thing that grades the card.  The boot-time band build -- the loop that
+# registers every sound-bank record with the sound container -- hashes each
+# record's decoder windows and compares the result with an expected word from a
+# table in the game ELF (one word per STOCK record, consumed in record order),
+# and counts the outcome:
+#
+#     cmp   rA, rB                  ; computed vs expected
+#     ldrne rX, [rY, #failed]       ; the two counters sit 4 bytes apart in the
+#     ldreq rX, [rY, #valid]        ; sound registry (led_zeppelin: -0x374/-0x378
+#     addne rX, rX, #1              ; off its base; most titles +0x978/+0x974)
+#     addeq rX, rX, #1
+#     strne rX, [rY, #failed]
+#     streq rX, [rY, #valid]
+#
+# The validator's "SS" stage merely READS those two counters back (a getter of
+# two loads, reached from the ``SS: %u:%u`` reporter), so a bypassed
+# ``validation_exec`` changes nothing here: the Tech Alerts screen still puts up
+# ``GAME VALIDATION ERROR - #4 valid:failed UPDATE SD CARD`` whenever ``failed``
+# is non-zero.  A card whose sound bank has been GROWN (a longer replacement,
+# appended as a copy of a stock record) has records the table has no word for,
+# so each of them lands in ``failed``: a two-sound grow reads ``549:2`` on Led
+# Zeppelin 1.22, and a stock card, or a card whose re-encoded sounds keep their
+# stock decoder windows (every other Write), reads ``549:0``.
+#
+# The one instruction that ever writes ``failed`` is the ``strne`` above, and it
+# is unique on every one of the 52 vendor firmwares on hand once the ``cmp`` is
+# required within two words above the block (a plain load of the base may sit
+# between them, as on james_bond_le 1.06).  Replacing it with a NOP leaves the
+# count at zero; ``valid`` and everything else in the loop are untouched, and
+# the check's flow does not depend on either counter.  Only a grown-bank build
+# asks for it (see the engine): a Write that leaves every window stock has
+# nothing to hide, and a wrongly-located site would corrupt a hot loop.
+_SS_COND_NE, _SS_COND_EQ = 0x1, 0x0
+
+
+def _sound_count_sites(elf):
+    """``[(failed_store_off, cmp_off)]`` for every count block in *elf* -- see
+    the note above.  A block whose failed store is already a NOP (a firmware
+    this module patched before) still matches, so locating is idempotent."""
+    out = []
+    n = len(elf) - 24
+    for i in range(8, n, 4):
+        w = struct.unpack_from("<6I", elf, i)
+        c1 = w[0] >> 28
+        if c1 not in (_SS_COND_NE, _SS_COND_EQ):
+            continue
+        c2 = _SS_COND_EQ if c1 == _SS_COND_NE else _SS_COND_NE
+        # ldr<c1> rX,[rY,#+-o1] ; ldr<c2> rX,[rY,#+-o2], same sign, 4 apart
+        if (w[0] & 0x0F700000) != 0x05100000 or (w[1] & 0x0F700000) != 0x05100000:
+            continue
+        if (w[1] >> 28) != c2 or ((w[0] ^ w[1]) & 0x00800000):
+            continue
+        o1, o2 = w[0] & 0xFFF, w[1] & 0xFFF
+        if abs(o1 - o2) != 4:
+            continue
+        rx, ry = (w[0] >> 12) & 0xF, (w[0] >> 16) & 0xF
+        if ((w[1] >> 12) & 0xF, (w[1] >> 16) & 0xF) != (rx, ry):
+            continue
+        add1 = (c1 << 28) | 0x02800001 | (rx << 16) | (rx << 12)
+        add2 = (c2 << 28) | 0x02800001 | (rx << 16) | (rx << 12)
+        if w[2] != add1 or w[3] != add2:
+            continue
+        st1 = (c1 << 28) | 0x05000000 | (w[0] & 0x00800000) | (ry << 16) | (rx << 12) | o1
+        st2 = (c2 << 28) | 0x05000000 | (w[0] & 0x00800000) | (ry << 16) | (rx << 12) | o2
+        nop = struct.unpack("<I", _NOP)[0]
+        if c1 == _SS_COND_NE:
+            failed_ok, valid_ok, failed_off = w[4] in (st1, nop), w[5] == st2, i + 16
+        else:
+            failed_ok, valid_ok, failed_off = w[5] in (st2, nop), w[4] == st1, i + 20
+        if not (failed_ok and valid_ok):
+            continue
+        cmp_off = None
+        for back in (4, 8):
+            wc = struct.unpack_from("<I", elf, i - back)[0]
+            if (wc & 0xFFF00FF0) == 0xE1500000:          # cmp rA, rB
+                cmp_off = i - back
+                break
+        if cmp_off is None:
+            continue
+        out.append((failed_off, cmp_off))
+    return out
+
+
+def find_sound_count_failed_store(elf):
+    """File offset of the one ``strne`` that counts a sound record as failed
+    (see the note above), or None when the shape is not found exactly once."""
+    sites = _sound_count_sites(elf)
+    return sites[0][0] if len(sites) == 1 else None
+
+
+def sound_count_overlay(elf_bytes, log=None):
+    """``{file_off: bytes}`` that keeps the sound engine's ``failed`` count at
+    zero inside *elf_bytes* -- empty, with a warning on *log*, when the site
+    can't be located exactly once.  For a build that grew the sound bank."""
+    off = find_sound_count_failed_store(elf_bytes)
+    if off is None:
+        if log is not None:
+            log("The sound engine's record count could not be located in this "
+                "firmware, so the machine may show a '#4 ... UPDATE SD CARD' "
+                "tech alert for the longer sound(s).", "warning")
+        return {}
+    if log is not None:
+        log("Sound-bank record count patched (one instruction in the game "
+            "firmware), so the longer sound(s) don't raise a '#4 ... UPDATE "
+            "SD CARD' tech alert.", "info")
+    return {off: _NOP}
+
+
+def sound_count_writes(reader, fw_node, log=None):
+    """``([(disk_offset, bytes)], {file_off: bytes})`` -- the in-place card
+    writes of :func:`sound_count_overlay` for the game ELF at *fw_node*, and
+    the same edit as a file overlay for whoever computes the ELF's ``.sidx``
+    digest next (:func:`compute_writes`).  Never raises."""
+    try:
+        elf = reader.read_file_bytes(fw_node)
+        overlay = sound_count_overlay(bytes(elf), log)
+        writes = []
+        for off, b in sorted(overlay.items()):
+            for disk, n in reader.disk_ranges(fw_node, off, len(b)):
+                writes.append((disk, b[:n]))
+                b = b[n:]
+        return writes, overlay
+    except Exception as e:                     # never fail a Write over this
+        if log is not None:
+            log("Sound-count patch skipped (%s)." % e, "warning")
+        return [], {}
 
 # THE GRADE RESTORE (item 98).  ``validation_exec`` is only the state machine's TICK.  The
 # module's START function runs first, at boot, and RESTORES a persisted blob over the

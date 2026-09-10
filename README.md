@@ -30,6 +30,14 @@ Replace Audio lists every sound slot with side-by-side seekable
 spectrograms to A/B the original against your replacement; Replace
 Images searches every image on the card with live previews:
 
+On Spike 2 a replacement is normally fitted to the sound it replaces, so
+a longer clip is trimmed: the card's sound bank records where every sound
+starts, and lengthening one in place would strand all the rest. An
+Advanced Audio option instead appends your audio past the end of the bank
+and points a copy of that sound's record at it, so every other sound on
+the card is untouched. It is off by default — proven in the PC emulator,
+but no machine has booted a card built that way yet.
+
 <p>
   <a href="docs/screenshots/replace-audio.png"><img src="docs/screenshots/replace-audio.png" width="49%" alt="The Replace Audio tab: 2,534 sound slots from a Godzilla Pro card with a spectrogram preview of the selected sound"></a>
   <a href="docs/screenshots/replace-images.png"><img src="docs/screenshots/replace-images.png" width="49%" alt="The Replace Images tab: searching 5,877 on-card images for 'logo' with a preview of the game-logo art"></a>

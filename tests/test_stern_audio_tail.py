@@ -1193,6 +1193,9 @@ def test_final_patches_preview_keeps_stereo(monkeypatch, tmp_path):
         def boot(self):
             pass
 
+        def warm_slots_for_grown(self, params):
+            pass       # nothing is grown here, and the real one is then a no-op
+
         def decode(self, p, cancel=None, progress=None):
             return (L, R, True)
 

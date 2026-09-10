@@ -89,7 +89,7 @@ _MUSIC_WAV_RE = re.compile(r"(music_cat\d+_\d+)", re.IGNORECASE)
 #      and every one of the 514 records from 419 to the end of its catalog
 #      decoded to noise -- 55% of the card (PAD-108).  A rev-2 cache for any
 #      card that took such a hit holds those wrong params.
-_DERIVE_REV = 3
+_DERIVE_REV = 4
 _REV_TAG = ".r%d" % _DERIVE_REV
 # Everything this module keeps in the cache directory, as (current-rev suffix,
 # regex matching that file kind at ANY revision including the unsuffixed rev-1).
@@ -101,12 +101,23 @@ _CACHE_KINDS = (
 
 
 def _fingerprint(game_real_path, image_path):
+    """Identify a card's (firmware, sound bank) pair for the params cache.
+
+    The size and the file's TAIL are in here as well as its head, because a
+    grown sound bank differs from its stock self in the record array at the end
+    of the file and in one header word — and a cache hit across that difference
+    would hand a build the wrong table for its own card."""
     h = hashlib.sha256()
     with open(_lp(game_real_path), "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
+    size = os.path.getsize(_lp(image_path))
+    h.update(struct.pack("<Q", size))
     with open(_lp(image_path), "rb") as f:
         h.update(f.read(0x20000))   # header + master-directory source region
+        if size > 0x40000:
+            f.seek(-0x20000, 2)
+            h.update(f.read(0x20000))     # the record array lives at the end
     return h.hexdigest()
 
 
@@ -300,6 +311,12 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
             emu.mu.hook_del(hh)
         except Exception:
             pass
+    # A card whose sound bank was grown carries a retired record beside each
+    # appended one.  Report only the sounds the game will play, under the
+    # numbers they have always had, so a re-extract names the LIVE body
+    # idxN.wav and a later edit of that file encodes into the body that plays.
+    from .spike2.emulator import collapse_shadowed
+    params = collapse_shadowed(params)
     try:
         pickle.dump(params, open(cache, "wb"))
     except Exception:
@@ -2966,6 +2983,85 @@ def _text_grow_gate(dest_is_device):
     return True, ""
 
 
+def _audio_grow_gate(dest_is_device, gr_path=None):
+    """``(ok, why)`` — may this write place a replacement callout LONGER than
+    its stock slot in new space at the end of the sound bank?
+
+    Off unless ``PAD_STERN_AUDIO_GROW=1`` asks for it: no machine has booted a
+    grown sound bank yet, so a build that quietly produced one would be a
+    hardware experiment the user never agreed to.  Beyond the flag it needs the
+    same things a longer game program needs — an image build, and a host that
+    can grow a file inside an ext4 image — plus a firmware whose codec objects
+    carry their own length, which is what lets a sound decode past its stock
+    range at all.  A closed gate is never an error: the sound is fitted to its
+    slot exactly as it is today and the log says why."""
+    if os.environ.get("PAD_STERN_AUDIO_GROW") != "1":
+        return False, ("longer replacements are off (no machine has booted a "
+                       "grown sound bank yet)")
+    if dest_is_device:
+        return False, ("a direct-SD write can't grow the sound bank; build an "
+                       "image file")
+    from ...core import ext4_grow
+    ok, why = ext4_grow.available()
+    if not ok:
+        return False, ("this system can't grow files inside an ext4 image "
+                       "(%s)" % why)
+    from .spike2.emulator import firmware_build_supported
+    if gr_path is not None and firmware_build_supported(gr_path):
+        # The validated build's chain replay rebuilds each codec object from
+        # the record instead of replaying a raw one, so ``codec.extend_length``
+        # returns None there and the encoder cannot drive a sound past its
+        # stock range.  Every other title takes the generic path and can.
+        return False, ("this game version's audio engine is the one build "
+                       "whose sounds can't be driven past their original "
+                       "length")
+    return True, ""
+
+
+def _asset_path(assets_dir, wav):
+    return wav if os.path.isabs(wav) else os.path.join(assets_dir or "", wav)
+
+
+def _wav_frames_44k(path):
+    """A WAV's length in card samples (44.1 kHz), or ``None`` if it can't be
+    read cheaply.
+
+    Resampling happens later, inside the encoder; this only has to be right
+    about whether the clip runs past its slot."""
+    try:
+        w = wave.open(_lp(path), "rb")
+        try:
+            n, rate = w.getnframes(), w.getframerate()
+        finally:
+            w.close()
+        if not n or not rate:
+            return None
+        return int(round(n * 44100.0 / rate))
+    except Exception:
+        return None
+
+
+def _classify_audio_edits(byidx, audio_edits, assets_dir):
+    """Split the user's sound replacements into ``(fits, grows)``.
+
+    ``grows`` maps idx -> ``(room, wanted)`` in samples for every replacement
+    whose audio runs past what its slot can emit.  Costs a header read per
+    file, and has to run before the encode cache is consulted: a clip that was
+    fitted on the last build has a cached body for the STOCK slot, and
+    replaying that into a grown build would write the trimmed version."""
+    from .spike2.emulator import emitted_length
+    fits, grows = {}, {}
+    for idx, wav in audio_edits.items():
+        p = byidx.get(idx)
+        want = _wav_frames_44k(_asset_path(assets_dir, wav)) if p else None
+        room = emitted_length(p.get("length", 0)) if p else 0
+        if want is None or want <= room:
+            fits[idx] = wav
+        else:
+            grows[idx] = (room, want)
+    return fits, grows
+
+
 def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
                         grow_dir=None, dest_is_device=False):
     """Resolve the user's display-text edits to a flat list of in-place writes
@@ -4226,6 +4322,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # else -- it goes on the card as a whole-file copy through the ext4
         # driver, and its .sidx record carries the new size as well as digests.
         patched_gr = None
+        # A sound bank grown to hold a replacement longer than its slot.  Like
+        # the rebuilt firmware it is longer than the file it replaces, so it
+        # goes on the card whole through the ext4 driver and its in-place
+        # writes are never emitted.
+        grow_places = None
         reader = None
         gr_path = img_path = None
         if audio_edits or music_edits:
@@ -4259,11 +4360,53 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     # a single-process fallback.  Params come from the
                     # Extract-time cache; only a cold cache boots an emulator here.
                     params = _params_for(gr_path, img_path, log, progress)
+                    # The encode cache is keyed on the STOCK bank even when this
+                    # build grows it, so one longer callout doesn't re-encode
+                    # every other sound in the mod.  Captured before the grow
+                    # stages its copy over the extracted file.
+                    stock_ident = _image_identity(img_path)
+                    # A replacement longer than its slot is trimmed to fit
+                    # unless this write may grow the bank.  Deciding it HERE,
+                    # before the cache is consulted, is what stops a clip that
+                    # was trimmed on the last build replaying its trimmed body
+                    # into a build that could have kept it whole.
+                    grows = {}
+                    grow_places = None
+                    _fits, _grows = _classify_audio_edits(
+                        {p["idx"]: p for p in params}, audio_edits, assets_dir)
+                    if _grows:
+                        _gok, _gwhy = _audio_grow_gate(dest_is_device, gr_path)
+                        if _gok:
+                            grows = _grows
+                        else:
+                            log("%d replacement(s) run past their original "
+                                "sound's length and are trimmed to fit: %s."
+                                % (len(_grows), _gwhy), "info")
+                    if grows:
+                        t0 = time.monotonic()
+                        grow_work = grow_work or _work_dir(
+                            label, base="spike2_grow_")
+                        img_path, grow_places = _stage_grown_image(
+                            gr_path, img_path, grow_work,
+                            {p["idx"]: p for p in params}, grows, log)
+                        for idx in sorted(grows):
+                            room, want = grows[idx]
+                            log("idx %d: the replacement runs %.2f s where the "
+                                "original ran %.2f s; the sound bank grows to "
+                                "keep it whole." % (idx, want / 44100.0,
+                                                    room / 44100.0), "info")
+                        if progress:
+                            progress(12, 100,
+                                     "Deriving the grown sound bank...")
+                        params, _greads = _derive_grown(
+                            gr_path, img_path, params, log, progress)
+                        _stage_done(log, "staging a sound bank with %d longer "
+                                    "sound(s)" % len(grows), t0)
                     t0 = time.monotonic()
                     audio_patches, _askip = _encode_cat0_sounds(
                         gr_path, img_path, params, audio_edits, np, log,
                         progress, cancel, assets_dir=assets_dir,
-                        gains=slot_gains)
+                        gains=slot_gains, cache_img_ident=stock_ident)
                     if audio_patches is None:
                         return None, None, None, None
                     _stage_done(log, "re-encoding %d replaced sound(s)"
@@ -4292,8 +4435,17 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 _vbypass, _vmode = _vp.bypass_overlay(_f.read())
                             grow_work = grow_work or _work_dir(
                                 label, base="spike2_grow_")
+                            # A body appended past the old end of the bank runs
+                            # LAST in the firmware's chain, so nothing reads it
+                            # and it needs no redirect; leaving it out keeps the
+                            # cave's limited address space for the sounds that
+                            # do (measured blip-free in the PC emulator).
+                            _cave_patches = {
+                                o: b for o, b in audio_patches.items()
+                                if o not in _appended_body_offsets(
+                                    audio_patches, grow_places)}
                             patched_gr, _fw_size = _build_derive_redirect_cave(
-                                gr_path, img_path, audio_patches, np, log,
+                                gr_path, img_path, _cave_patches, np, log,
                                 grow_work, progress, extra_fw_writes=_vbypass)
                             # Safety net: boot the PATCHED firmware on the patched
                             # image (our whole bodies) and confirm every sound
@@ -4329,7 +4481,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         t0 = time.monotonic()
                         audio_patches = _restore_masterdir_consumed(
                             gr_path, img_path, audio_patches, log, progress,
-                            cancel)
+                            cancel,
+                            skip_offsets=_appended_body_offsets(
+                                audio_patches, grow_places))
                         if audio_patches is None:
                             return None, None, None, None
                         _assert_param_integrity(gr_path, img_path, audio_patches,
@@ -4358,7 +4512,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             try:
                                 _verify_final_patches(
                                     gr_path, img_path, audio_patches, params,
-                                    np, log, cancel, no_restore=pathA_applied)
+                                    np, log, cancel, no_restore=pathA_applied,
+                                    no_scrap_offsets=_appended_body_offsets(
+                                        audio_patches, grow_places))
                             except Exception as e:
                                 log("Final-bytes check skipped (%s)." % e,
                                     "info")
@@ -4480,6 +4636,20 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 color_writes = _drop_writes_in(color_writes, reader, _gnode)
                 layout_writes = _drop_writes_in(layout_writes, reader, _gnode)
                 radimg_writes = _drop_writes_in(radimg_writes, reader, _gnode)
+        # A grown sound bank rides the same mechanism: a whole-file copy with
+        # its manifest record's size rewritten alongside its digests.
+        image_grow_job = None
+        if grow_places is not None and img_node is not None:
+            img_rel = _card_rel_path(reader, img_node)
+            if img_rel:
+                image_grow_job = (img_rel, img_path)
+                grown_files[bytes(img_node["i_block"])] = img_path
+            else:
+                raise RuntimeError(
+                    "Couldn't resolve the sound bank's path on the card, so "
+                    "the grown bank could not be written; aborting rather "
+                    "than shipping a card whose sounds don't match its "
+                    "manifest.")
 
         video_patches = []     # (inode, payload bytes == inode size)
         video_grow_jobs = []   # (card_rel, source_file) — grown via ext4 driver
@@ -4541,7 +4711,24 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # helper resolved them through disk_ranges itself).
         writes = (list(text_writes) + list(color_writes) + list(layout_writes)
                   + list(radimg_writes))
-        for body_off, body in audio_patches.items():
+        # A grown sound bank is longer than the file on the card, so it can't be
+        # patched in place: every re-encoded body is composed into the staged
+        # file and the whole thing is copied on by the ext4 driver.  Emitting
+        # the in-place writes as well would be wasted work on an image build
+        # and actively wrong on an override set, which patches the file and
+        # then copies over it.
+        audio_inplace = audio_patches
+        if grow_places is not None:
+            with open(_lp(img_path), "r+b") as f:
+                for body_off, body in audio_patches.items():
+                    f.seek(body_off)
+                    f.write(body)
+            log("Sound bank: %d re-encoded sound(s) composed into the grown "
+                "file (%.1f MB), which is written whole."
+                % (len(audio_patches),
+                   os.path.getsize(_lp(img_path)) / 1e6), "info")
+            audio_inplace = {}
+        for body_off, body in audio_inplace.items():
             for disk, n in reader.disk_ranges(img_node, body_off, len(body)):
                 writes.append((disk, body[:n]))
                 body = body[n:]
@@ -4564,7 +4751,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         t0 = time.monotonic()
         try:
             writes += _compute_sidx_writes(
-                reader, disk_f, img_node, audio_patches, music_patches,
+                reader, disk_f, img_node, audio_inplace, music_patches,
                 full_repl, radium_overlays, log,
                 fw_node=fw_node, fw_patched_path=patched_gr,
                 grown_files=grown_files)
@@ -4597,6 +4784,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # fail from the end, so anything short of the full count means the
         # firmware didn't land (write_image reads it that way).
         grow_jobs = list(video_grow_jobs) + list(radium_grow_jobs)
+        if image_grow_job is not None:
+            grow_jobs.append(image_grow_job)
         if patched_gr is not None and fw_node is not None:
             from .valpatch import _game_manifest_path
             fw_rel = _game_manifest_path(reader, fw_node)
@@ -4608,9 +4797,15 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # ``cleanup`` is the scratch dir holding the rebuilt firmware; it has to
         # survive until the caller has copied it onto the card, so the caller
         # removes it (see the note where grow_work is created).
-        uses_work = bool(radium_grow_jobs) or patched_gr is not None
+        uses_work = (bool(radium_grow_jobs) or patched_gr is not None
+                     or image_grow_job is not None)
         grow_plan = ({"offset": reader.base, "jobs": grow_jobs,
                       "n_video": len(video_grow_jobs),
+                      # Where the grown sound bank sits in the queue, so a
+                      # partial run can say whether the sounds landed (jobs
+                      # fail from the end).  None when nothing was grown.
+                      "audio_job": (grow_jobs.index(image_grow_job)
+                                    if image_grow_job is not None else None),
                       "cleanup": grow_work if uses_work else None}
                      if grow_jobs else None)
         # Only a plan that actually carries a staged file (the firmware, a
@@ -4758,12 +4953,20 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
             # (or re-serialised scene), so the card now claims a file it
             # doesn't have.
             log("A rebuilt game file (the game program with longer text or "
-                "the blip-free cave, or a re-serialised scene) could NOT be "
+                "the blip-free cave, a re-serialised scene, or a sound bank "
+                "grown to hold a longer callout) could NOT be "
                 "written to the card. Its SD-validation record was already "
                 "updated to match, so this card will fail validation — re-run "
                 "the Write, or build with PAD_STERN_TEXT_GROW=0 (and "
-                "PAD_STERN_SKIP_KEYPATCH=1 for the cave) for a standard "
+                "PAD_STERN_SKIP_KEYPATCH=1 for the cave, "
+                "PAD_STERN_AUDIO_GROW=0 for the bank) for a standard "
                 "(size-neutral) build.", "error")
+            aj = grow_plan.get("audio_job")
+            if aj is not None and n_grown <= aj:
+                log("The grown sound bank was one of them, so NONE of the "
+                    "re-encoded sounds are on this card.", "error")
+                n_audio = 0
+                counts = (n_audio, n_video, n_image, n_text)
             # The completion dialog must not claim a blip-free card either.
             if audio_mode and audio_mode[0] == "blip-free":
                 audio_mode = ("standard", "the rebuilt blip-free firmware "
@@ -5368,22 +5571,34 @@ def _rmtree_grow_plan(grow_plan):
 
 
 def _grow_video_slots(image_or_device, grow_plan, log):
-    """Copy oversized replacement videos into their (grown) slots via the ext4
-    driver.  A growth failure is surfaced loudly but does NOT discard the rest
-    of the write — the in-place edits already landed, and the un-grown videos
-    simply keep their stock content until the user retries.  Returns the
-    number of videos actually grown so the caller can report honest counts."""
+    """Copy every file this write replaces WHOLE onto the card through the ext4
+    driver — full-size videos, a re-serialised scene, the rebuilt game program,
+    a grown sound bank.  A growth failure is surfaced loudly but does NOT
+    discard the rest of the write: the in-place edits already landed, and the
+    files that didn't land keep their stock content until the user retries.
+    Returns how many actually landed so the caller can report honest counts."""
     if not grow_plan or not grow_plan.get("jobs"):
         return 0
     from ...core import ext4_grow
+    jobs = grow_plan["jobs"]
+    # The default 1800 s is generous for a handful of videos and thin for a
+    # 1-2 GB sound bank on a slow disk (macOS writes it through debugfs).
+    # Scale by the bytes actually being copied, and never go below the default.
+    total = 0
+    for _rel, src in jobs:
+        try:
+            total += os.path.getsize(_lp(src))
+        except OSError:
+            pass
+    timeout = max(1800, int(total / (2 << 20)) + 600)   # ~2 MB/s plus slack
     try:
         return ext4_grow.grow_files(image_or_device, grow_plan["offset"],
-                                    grow_plan["jobs"], log=log)
+                                    jobs, log=log, timeout=timeout)
     except ext4_grow.Ext4GrowUnavailable as e:
-        log("Could not grow the full-size videos: %s" % e, "warning")
+        log("Could not write the full-size file(s): %s" % e, "warning")
         return 0
     except ext4_grow.Ext4GrowError as e:
-        log("Video growth failed: %s" % e, "error")
+        log("Writing the full-size file(s) failed: %s" % e, "error")
         return getattr(e, "grown", 0)
 
 
@@ -7012,6 +7227,21 @@ def _params_for(gr_path, img_path, log, progress):
         emu.close()
 
 
+def _image_identity(img_path):
+    """A cheap identity for a sound bank: its size and the md5 of its first and
+    last 4 MB.  Taken as bytes rather than a path so a caller can capture the
+    STOCK bank's identity before staging a grown copy over it."""
+    h = hashlib.md5()
+    sz = os.path.getsize(_lp(img_path))
+    h.update(b"%d" % sz)
+    with open(_lp(img_path), "rb") as f:
+        h.update(f.read(4 << 20))
+        if sz > (8 << 20):
+            f.seek(-(4 << 20), 2)
+            h.update(f.read(4 << 20))
+    return h.digest()
+
+
 class _AudioBodyCache:
     """Persistent per-sound encode-result cache under
     ``<assets>/.write_cache/audio``.
@@ -7054,7 +7284,8 @@ class _AudioBodyCache:
     _MAGIC_BODY = b"PADAC1\n"
     _MAGIC_SKIP = b"PADAC0\n"
 
-    def __init__(self, assets_dir, gr_path, img_path, byidx, ends, gains=None):
+    def __init__(self, assets_dir, gr_path, img_path, byidx, ends, gains=None,
+                 img_ident=None):
         from ... import __version__
         self.assets_dir = assets_dir
         self.dir = os.path.join(assets_dir, ".write_cache", "audio")
@@ -7065,13 +7296,8 @@ class _AudioBodyCache:
         h = hashlib.md5()
         with open(_lp(gr_path), "rb") as f:
             h.update(f.read())
-        sz = os.path.getsize(_lp(img_path))
-        h.update(b"%d" % sz)
-        with open(_lp(img_path), "rb") as f:
-            h.update(f.read(4 << 20))
-            if sz > (8 << 20):
-                f.seek(-(4 << 20), 2)
-                h.update(f.read(4 << 20))
+        h.update(img_ident if img_ident is not None
+                 else _image_identity(img_path))
         env = sorted((k, v) for k, v in os.environ.items()
                      if k.startswith("PAD_STERN_")
                      and k not in self._PATH_ONLY)
@@ -7161,6 +7387,7 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
     log("Booting firmware codec engine...", "info")
     emu = Spike2Emu(gr_path, img_path)
     emu.boot()
+    emu.warm_slots_for_grown(list(byidx.values()))
     patches, skipped, results = {}, [], {}
     gr = sr = None
     ends = _slot_end_map(byidx.values())
@@ -8331,7 +8558,7 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
 
 
 def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
-                                cancel=None):
+                                cancel=None, skip_offsets=()):
     """Keep each re-encoded body byte-identical to stock in the bytes the
     firmware's master-directory decode CONSUMES.
 
@@ -8350,9 +8577,17 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
     real audio, so that scattered sub-window of the replaced sound reverts toward
     the original — acceptable for a call-out swap.  Mutates and returns *patches*
     (``{body_off: body}``); returns ``None`` if cancelled.
+
+    *skip_offsets* names bodies appended past the old end of the bank (a sound
+    grown past its slot).  Those run LAST in the chain, so nothing downstream
+    reads them and restoring their windows would only push a scrap of the
+    scaffold body into the user's audio for no gain — measured on Led Zeppelin
+    LE 1.22 and Godzilla Pro 1.15, where an appended sound's own parameters did
+    not move when its body was replaced wholesale.
     """
     if not patches:
         return patches
+    skip_offsets = set(skip_offsets or ())
     from unicorn import UC_HOOK_MEM_READ
 
     from .spike2 import emulator as EM
@@ -8376,6 +8611,8 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
         import numpy as np
         with open(img_path, "rb") as f:
             for off, body in patches.items():
+                if off in skip_offsets:
+                    continue
                 lo = int(np.searchsorted(cached, off, "left"))
                 hi = int(np.searchsorted(cached, off + len(body), "left"))
                 if lo >= hi:
@@ -8395,7 +8632,8 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
         return patches
 
     _note_cold_consumed(log)
-    reads = {off: set() for off in patches}     # body_off -> consumed file offsets
+    # body_off -> consumed file offsets
+    reads = {off: set() for off in patches if off not in skip_offsets}
 
     def _mk(b0, e0, acc):
         def on_read(mu, access, addr, size, value, ud):
@@ -8409,6 +8647,8 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
     try:
         emu.boot()
         for off, body in patches.items():
+            if off in skip_offsets:
+                continue
             end = off + len(body)
             emu.mu.hook_add(UC_HOOK_MEM_READ, _mk(off, end, reads[off]),
                             begin=(EM.DESC_BASE + off) & ~0xfff,
@@ -8417,6 +8657,8 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
         # to a Write and a stationary bar here is what reads as a hang.
         emu.derive_params(progress=progress)    # the real MASTERDIR_DECODE pass
         for off, body in patches.items():
+            if off in skip_offsets:
+                continue
             stock = bytes(emu.mm[off:off + len(body)])
             b = bytearray(body)
             for fo in reads[off]:
@@ -8432,7 +8674,7 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
 
 
 def _verify_final_patches(gr_path, img_path, patches, params, np, log,
-                          cancel=None, no_restore=False):
+                          cancel=None, no_restore=False, no_scrap_offsets=()):
     """Decode the ACTUAL card bytes — after ``_restore_masterdir_consumed`` —
     and report what each replaced sound really plays.  ``no_restore=True`` (the
     blip-free firmware-cave build) means the whole body is our audio with no
@@ -8468,6 +8710,7 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
     emu = Spike2Emu(gr_path, img_path)
     try:
         emu.boot()
+        emu.warm_slots_for_grown(params)
         if not isinstance(emu.mm, _BodyOverlay):
             emu.mm = _BodyOverlay(emu.mm)
         for off in sorted(patches):
@@ -8486,8 +8729,12 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
             # directory restore), so there is no original-scrap to flag; the body
             # differs from stock nearly everywhere and the scrap heuristic below
             # would false-positive.  Skip it.
+            # An appended body (a sound grown past its slot) has no original
+            # underneath it at all — what it starts as is a scaffold this write
+            # laid down — so comparing against it would report a scrap of a
+            # sound that was never there.
             reverted = (
-                np.empty(0, int) if no_restore
+                np.empty(0, int) if (no_restore or off in no_scrap_offsets)
                 else np.flatnonzero(
                     np.frombuffer(body, "<u2") != np.frombuffer(stock, "<u2")))
             saved = emu.mm.patch
@@ -8541,6 +8788,152 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
     return out
 
 
+def _card_rel_path(reader, node):
+    """A file's path on the card, matched by extent block — the form the grow
+    jobs and the ``.sidx`` manifest both name files by."""
+    want = bytes(node["i_block"])
+    for path, _ino, n in reader.iter_regular_files(min_size=1, max_depth=20):
+        if bytes(n["i_block"]) == want:
+            return path.lstrip("/")
+    return None
+
+
+def _appended_body_offsets(patches, places):
+    """The patch offsets that land in a body appended past the old end of the
+    bank.  The encoder writes from a word or two BELOW a sound's body offset,
+    so match by range rather than by equality."""
+    if not places:
+        return set()
+    out = set()
+    for off in patches:
+        for pl in places:
+            if pl.body_off - 64 <= off < pl.body_off + pl.body_bytes:
+                out.add(off)
+                break
+    return out
+
+
+def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
+    """Build the sound bank a longer replacement needs, and return
+    ``(staged_path, placements)``.
+
+    The bank keeps everything it already had: every stock record and every
+    stock body stays exactly where it is.  What changes is that the record
+    array gains one entry per grown sound — a copy of that sound's record with
+    only its body offset and its length replaced — and the file gains one body
+    per entry, appended past where it used to end.  The game's play-time lookup
+    finds a sound by an identity the copy keeps, and the copy is built last, so
+    it is the copy that answers.
+
+    The appended body starts as the stock sound's own bytes, repeated to fill
+    the new length.  It is a scaffold the encoder overwrites, but it has to be
+    real card audio rather than zeros: the codec is driven over these bytes to
+    recover the keystream, and a degenerate body gives a degenerate one.
+
+    The extracted image is MOVED rather than copied — both directories are in
+    the same temp filesystem, so it costs nothing — and the caller owns the
+    staged file until it has been copied onto the card."""
+    from .spike2 import masterdir as MD
+    from .spike2.emulator import BLOCK, Spike2Emu
+
+    staged = os.path.join(grow_work, "image.bin")
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        d = MD.read_directory(img_path, emu)
+        edits, sizes = [], {}
+        for idx in sorted(grows):
+            _room, want = grows[idx]
+            p = byidx[idx]
+            new_len = int(want) + BLOCK
+            step = 4 if p.get("chan") == 2 else 2
+            # Room for the encoder's whole window: it writes from a word or
+            # two BELOW the body offset (the shared-boundary word) up to the
+            # last frame of the new length.
+            sizes[idx] = step * new_len + 4096
+            edits.append(MD.GrowEdit(idx, int(p["length"]), new_len, sizes[idx]))
+        grown, places = MD.plan_grow_records(d, edits)
+        writes = MD.write_directory(grown, emu)
+    finally:
+        emu.close()
+
+    os.replace(_lp(img_path), _lp(staged))
+    with open(_lp(staged), "r+b") as f:
+        stock_bodies = {}
+        for pl in places:
+            p = byidx[pl.idx]
+            step = 4 if p.get("chan") == 2 else 2
+            f.seek(p["body_off"])
+            stock_bodies[pl.idx] = f.read(step * int(p["length"])) or b"\x00"
+        for off, data in writes.items():
+            f.seek(off)
+            f.write(data)
+        end = 0
+        for pl in places:
+            src = stock_bodies[pl.idx]
+            reps = -(-pl.body_bytes // len(src))
+            f.seek(pl.body_off - MD.BODY_PAD)
+            f.write(b"\x00" * MD.BODY_PAD)
+            f.write((src * reps)[:pl.body_bytes])
+            end = max(end, pl.body_off + pl.body_bytes)
+        f.truncate(end)
+    return staged, places
+
+
+def _derive_grown(gr_path, staged, params_stock, log, progress=None):
+    """Derive the codec parameters of the staged bank (pass A) and return the
+    table the rest of the write uses.
+
+    The appended records are only decodable by running the firmware's own chain
+    over the new array, so this is a full derive of the staged file.  Its
+    result is collapsed (:func:`~.spike2.emulator.collapse_shadowed`), which
+    retires each grown sound's stock record in favour of its appended one under
+    the same index, so every later stage — the encoder, the integrity check,
+    the final decode — sees one row per sound with the NEW geometry and needs
+    no special case of its own.
+
+    Raises if any sound that was not grown moved: records before an appended
+    one are byte-identical, so their parameters must be too, and anything else
+    means the bank was not staged the way this function believes."""
+    from .spike2.emulator import Spike2Emu, collapse_shadowed
+    emu = Spike2Emu(gr_path, staged)
+    reads = hh = None
+    try:
+        emu.boot()
+        try:
+            reads, hh = _install_consumed_hook(emu)
+        except Exception:
+            reads = hh = None
+        rows = emu.derive_params(progress=progress)
+        if hh is not None:
+            try:
+                emu.mu.hook_del(hh)
+            except Exception:
+                pass
+    finally:
+        emu.close()
+    params = collapse_shadowed(rows)
+    grown_idx = {p["idx"] for p in params if p.get("shadows") is not None}
+    for p in params:
+        p["grown"] = p["idx"] in grown_idx
+    stock = {p["idx"]: (p["scale"], p["pred16"], p["body_off"], p["length"])
+             for p in params_stock}
+    moved = [p["idx"] for p in params
+             if not p["grown"] and p["idx"] in stock
+             and stock[p["idx"]] != (p["scale"], p["pred16"], p["body_off"],
+                                     p["length"])]
+    if moved:
+        raise RuntimeError(
+            "Staging the longer sound(s) moved %d sound(s) that should not "
+            "have changed (first: idx %d); aborting rather than building a "
+            "card whose other callouts would play as noise."
+            % (len(moved), moved[0]))
+    log("Sound bank staged with %d longer sound(s); the other %d are "
+        "byte-identical." % (len(grown_idx), len(params) - len(grown_idx)),
+        "info")
+    return params, reads
+
+
 def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
                             work_dir, progress=None):
     """Write-time safety net: apply *patches* to a temp ``image.bin`` and confirm
@@ -8556,7 +8949,7 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
         return
     import shutil
 
-    from .spike2.emulator import Spike2Emu
+    from .spike2.emulator import Spike2Emu, collapse_shadowed
     tmp = os.path.join(work_dir, "image_verify.bin")
     shutil.copyfile(img_path, tmp)
     try:
@@ -8575,6 +8968,11 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
             os.remove(tmp)
         except OSError:
             pass
+    # On a grown bank the array holds two records per grown sound; the collapse
+    # keeps the one the game will actually play, under the index the rest of
+    # the write knows it by (:func:`~.spike2.emulator.collapse_shadowed`).  On
+    # a stock bank it is a no-op.
+    rows = collapse_shadowed(rows)
     stock = {p["idx"]: (p["scale"], p["pred16"]) for p in params}
     cur = {r["idx"]: (r["scale"], r["pred16"]) for r in rows}
     shifted = [i for i in stock if i in cur and stock[i] != cur[i]]
@@ -8590,14 +8988,22 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
 
 
 def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
-                        progress, cancel, assets_dir=None, gains=None):
+                        progress, cancel, assets_dir=None, gains=None,
+                        cache_img_ident=None):
     """Re-encode every edited cat-0 sound to its body bytes — parallel across
     processes with a single-process fallback.  Returns ``({body_off: body},
     [skipped_idx])`` or ``(None, None)`` if cancelled.
 
     With *assets_dir*, sounds unchanged since their last encode replay from
     that folder's :class:`_AudioBodyCache` instead of re-encoding.  *gains*
-    maps idx -> that clip's total loudness dB (:func:`_slot_gain_maps`)."""
+    maps idx -> that clip's total loudness dB (:func:`_slot_gain_maps`).
+
+    *cache_img_ident* is the identity the CACHE should be keyed on.  When this
+    build grew the bank, the encode runs against the staged file but the cache
+    is keyed on the stock one, so a mod with a hundred replaced sounds does not
+    re-encode all of them because one of them got longer.  A grown sound misses
+    the cache anyway: its own param record is part of its key and it now says a
+    different body offset and length."""
     gains = gains or {}
     byidx = {p["idx"]: p for p in params}
     for idx in sorted(set(audio_edits) - set(byidx)):
@@ -8618,7 +9024,8 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     if assets_dir and os.environ.get("PAD_STERN_AUDIO_CACHE") != "0":
         try:
             cache = _AudioBodyCache(assets_dir, gr_path, img_path, byidx,
-                                    _slot_end_map(params), gains=gains)
+                                    _slot_end_map(params), gains=gains,
+                                    img_ident=cache_img_ident)
         except Exception as e:
             log("Audio encode cache unavailable (%s); encoding everything "
                 "fresh." % e, "info")

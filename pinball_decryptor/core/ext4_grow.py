@@ -51,8 +51,9 @@ class Ext4GrowUnavailable(Ext4GrowError):
 class Ext4GrowNoSpace(Ext4GrowError):
     """The partition hasn't room for the requested growth.  Split out from the
     generic error so a caller can word it for what IT was growing — the base
-    message talks about videos on the data partition, which is wrong for e.g.
-    a Partition Explorer swap on the OS partition."""
+    message says "file(s)" because the same path now carries videos, a
+    re-serialised scene, a rebuilt game program and a grown sound bank, and it
+    is wrong for e.g. a Partition Explorer swap on the OS partition."""
 
 
 # Can the executor's Linux hand out a loop device?  ``losetup -f`` only ASKS
@@ -254,7 +255,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
     if not ok:
         raise Ext4GrowUnavailable(
             "Can't grow files on this system: %s. The affected "
-            "videos keep their stock content on the card." % msg)
+            "file(s) keep their stock content on the card." % msg)
     # Re-checked here (not only in available()) so a caller that skipped the
     # planning-time check still degrades to the graceful Unavailable path —
     # a loop-less host used to reach losetup inside the mount script and come
@@ -263,7 +264,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
     if reason:
         raise Ext4GrowUnavailable(
             "Can't grow files on this system: %s. The affected "
-            "videos keep their stock content on the card." % reason)
+            "file(s) keep their stock content on the card." % reason)
 
     image_exec = ex.to_exec_path(image_path)
     jobs_exec = [(rel, ex.to_exec_path(src)) for rel, src in jobs]
@@ -292,9 +293,9 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
         n_ok = text.count("PAD_GROW_OK ")
         if "PAD_GROW_ENOSPC" in text:
             raise Ext4GrowNoSpace(
-                "Not enough free space on the card's data partition to grow "
-                "the videos to full size. The affected videos keep their "
-                "stock content on the card.", grown=n_ok) from e
+                "Not enough free space on the card's data partition to write "
+                "the larger file(s). They keep their stock content on the "
+                "card.", grown=n_ok) from e
         raise Ext4GrowError(
             "Couldn't grow files:\n%s" % text, grown=n_ok) from e
     finally:
@@ -408,9 +409,9 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
         need += max(os.path.getsize(src) - cur, 0)
     if need > avail:
         raise Ext4GrowNoSpace(
-            "Not enough free space on the card's data partition to grow the "
-            "videos to full size (need %d B more, %d B free). The affected "
-            "videos keep their stock content on the card." % (need, avail))
+            "Not enough free space on the card's data partition to write the "
+            "larger file(s) (need %d B more, %d B free). They keep their "
+            "stock content on the card." % (need, avail))
 
     grown, touched = 0, False
     try:

@@ -217,6 +217,41 @@ def _progress_step(nrec):
     return max(1, -(-n // PROGRESS_UPDATES))
 
 
+def collapse_shadowed(rows):
+    """Rows with the dead half of each duplicated sound removed.
+
+    A card whose sound bank has been grown carries TWO records for a grown
+    sound: the stock one, still pointing at the old short body, and an appended
+    one pointing at the longer body past the old end of the file.  Both build a
+    codec object, but the appended one runs last and takes over the entry the
+    game looks a sound up by, so the stock record is dead weight -- and leaving
+    it in the params would name the dead slot ``idxN.wav`` on the next Extract
+    and encode a later edit of that file into a body nothing plays.
+
+    So: keep the LAST row of each identity, give it the FIRST's index (that is
+    the number the sound has always had), and record the index it actually came
+    from in ``row["shadows"]``.  Rows on a stock card are all distinct, so this
+    returns them unchanged."""
+    first, last, order = {}, {}, []
+    for r in rows:
+        ident = r.get("identity")
+        if ident is None:                 # a row that faulted; keep it as is
+            ident = ("idx", r.get("idx"))
+        if ident not in first:
+            first[ident] = r.get("idx")
+            order.append(ident)
+        last[ident] = r
+    if len(order) == len(rows):
+        return rows
+    out = []
+    for ident in order:
+        r = last[ident]
+        if r.get("idx") != first[ident]:
+            r = dict(r, idx=first[ident], shadows=r.get("idx"))
+        out.append(r)
+    return out
+
+
 def _record_write_addr(md_range, r9, rec_idx=None):
     """Where the chain replay may write a master-directory record, or None.
 
@@ -1098,7 +1133,15 @@ class Spike2Emu:
                     idx=idx, body_off=dw0, length=length,
                     pred16=_u16(obj, 0x18), seed_a=_u32(obj, 0x14),
                     band0_keyoff_rel=(_u32(obj, 0x0c) - self.VF2_VA) & 0xffffffff,
-                    stride=obj[0x1a], chan=obj[0x1b], scale=obj[0x1d])
+                    stride=obj[0x1a], chan=obj[0x1b], scale=obj[0x1d],
+                    # The record bytes that are NOT its geometry.  Two records
+                    # with the same identity are the same sound to the game's
+                    # play-time lookup, which is how a grown sound bank retires
+                    # a stock slot in favour of an appended one (see
+                    # collapse_shadowed).  Measured unique across every record
+                    # of all 53 shipped cards examined, so collapsing on it
+                    # cannot merge two genuinely different sounds.
+                    identity=rec[4:16] + rec[20:24])
                 # Sound-container identity key snapshotted at the skipped find
                 # (generic builds only) — pairs this idx with the play-time
                 # descriptor for SFX auto-naming (spike2.sfx_names).  None on the
@@ -1421,6 +1464,30 @@ class Spike2Emu:
             sf = max(sf, self._specflat(res[1]))
             rms = max(rms, float(np.sqrt(np.mean(np.asarray(res[1], float) ** 2))))
         return sf, rms
+
+    def warm_slots_for_grown(self, params):
+        """Resolve the codec entry of every GROWN sound from a stock sound of
+        the same ``(scale, chan)`` before anything decodes the grown one.
+
+        :meth:`_resolve_entry` chooses between codec sub-slots by decoding the
+        sound and scoring the result, and caches the winner per ``(scale,
+        chan)``.  A grown sound's body is a scaffold -- its stock bytes
+        repeated -- and scored from THAT the probe picks a different entry than
+        the same key resolves to from real card audio.  Measured on Led
+        Zeppelin LE 1.22: every re-encode of the grown sound then failed to
+        decode back to the audio it was given, while the very same sound at its
+        stock length was bit-exact; seeded from a stock sound it was bit-exact
+        too.  Cheap and harmless when nothing is grown."""
+        want = {(p["scale"], p["chan"]) for p in params if p.get("grown")}
+        for key in sorted(want - set(self._slot_cache)):
+            for q in params:
+                if (q["scale"], q["chan"]) == key and not q.get("grown") \
+                        and q.get("length", 0) > 8000:
+                    try:
+                        self._resolve_entry(q)
+                    except Exception:
+                        pass
+                    break
 
     def _resolve_entry(self, p):
         """Pick the codec function that actually decodes audio for a generic

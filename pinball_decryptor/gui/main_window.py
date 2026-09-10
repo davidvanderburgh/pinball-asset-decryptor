@@ -10084,7 +10084,8 @@ class MainWindow:
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "blip_free_optin": False, "loudness": "match", "loudness_db": 0,
+        "blip_free_optin": False, "audio_grow": False,
+        "loudness": "match", "loudness_db": 0,
     }
     _AUDIO_LOUDNESS_CHOICES = (
         ("match", "Match the sound being replaced (default)"),
@@ -10300,6 +10301,39 @@ class MainWindow:
 
         _rule()
 
+        # Longer-than-stock replacements.  Off by default for the same reason
+        # the blip-free cave is: no machine has booted a card built this way.
+        grow_var = tk.BooleanVar(value=bool(cfg.get("audio_grow", False)))
+        ttk.Checkbutton(
+            dlg, variable=grow_var,
+            text="Allow replacements longer than the original (grows the "
+                 "sound bank; image builds only, hardware-unverified)"
+        ).pack(anchor=tk.W, padx=12)
+        ttk.Label(
+            dlg, justify=tk.LEFT, wraplength=wrap,
+            font=(_SANS_FONT, 8, "italic"),
+            text="What it does. A replacement that runs longer than the sound "
+                 "it replaces is trimmed to fit, because the card's sound bank "
+                 "records where every sound starts and how long it is, and "
+                 "making one longer in place would strand every sound after "
+                 "it. Ticking this appends instead: your audio goes into new "
+                 "space at the end of the bank, and a copy of that sound's "
+                 "record is added pointing at it. Nothing that already exists "
+                 "moves, so every other sound on the card is untouched, and "
+                 "the game finds the copy rather than the original because the "
+                 "copy is built last. The file gets bigger, so this needs the "
+                 "Linux filesystem driver, the same as full-size video "
+                 "replacement, and it is skipped for a direct-SD write. "
+                 "Why it is off. It is proven on this PC: a grown sound "
+                 "decodes and re-encodes exactly at its new length, and no "
+                 "other sound's settings move. But no real machine has booted "
+                 "a card with a grown sound bank, so tick it only if you are "
+                 "willing to rebuild the card from your original image. "
+                 "Leaving it off trims longer clips exactly as before.").pack(
+            anchor=tk.W, padx=12, pady=(2, 8))
+
+        _rule()
+
         prev_var = tk.BooleanVar(value=bool(cfg["previews"]))
         ttk.Checkbutton(
             dlg, variable=prev_var,
@@ -10336,6 +10370,7 @@ class MainWindow:
                 "slot_seed": bool(seed_var.get()),
                 "slot_seed_db": num(seed_db_var, 40, 90, 65),
                 "blip_free_optin": bool(blip_var.get()),
+                "audio_grow": bool(grow_var.get()),
                 "loudness": keys_v.get(loud_var.get(), "match"),
                 "loudness_db": num(loud_db_var, -12, 12, 0),
             }

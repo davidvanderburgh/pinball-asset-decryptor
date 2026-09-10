@@ -7877,8 +7877,15 @@ These have each been violated at least once and each cost a run or a window:
       extracted cards); 2 = engine (gate, staged
       image by rename, pass-A derive with the consumed hook, `params_grow`
       rows, `collapse_shadowed`, fingerprint tail, delivery + `.sidx` size);
-      3 = Advanced Audio checkbox, docs; 4 = rig capture (`/dump/audio.raw`,
-      `audioscore.py`, Sound Test via `nav.sh`) then one hardware boot.
+      3 = DONE (Advanced Audio checkbox, docs, README); 4 = 4.1-4.3 DONE
+      2026-09-10 (a real card built by the engine's own Write; the game
+      boots it under qemu indistinguishably from the stock card; the
+      decode census says 0 stock records moved, 24 of 24 sampled stock
+      sounds bit-identical, and the grown sound decodes its whole new
+      length at correlation 1.0000) — what is LEFT is the Sound Test walk
+      (Godzilla's attract writes no PCM in the rig, so hearing the callout
+      needs the operator menu, whose path is not scripted) and 4.4, the
+      hardware boot, which is David's.
       **Acceptance:** a Write with one WAV longer than its slot produces a card
       whose emulator boot plays that callout for its FULL new length from the
       Sound Test (the capture correlates with the source over the whole

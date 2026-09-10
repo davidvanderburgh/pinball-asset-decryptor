@@ -29,6 +29,12 @@ firmware set includes ws2812node, ws2812pinnode and hdmi_ws2812node - while node
 8 and 9 are the coil4_lednode boards driving individual inserts. That last part
 is a hypothesis, not a finding.
 
+`cmd 70` IS A FAMILY OF ITS OWN and level70() below is all of it: one lamp, one
+16-bit LITTLE-ENDIAN level, always an 8-byte frame. godzilla and turtles only
+ever send it as the base layer's CLEAR, which is why it reads as a footnote
+here; on a HOME EDITION it is the entire attract picture (PAD-125) and the
+indexed shapes above never appear on the board at all.
+
 THE OTHER DIALECT lives in wide_decode() at the bottom of this file, and it is
 a different generation's, not a different shape of this one. The titles this
 rig calls swelf-generation (batman and its siblings) drive every lamp through
@@ -65,6 +71,28 @@ INSERT_NODES = (1, 8, 9)
 _SHAPES = ((1, 1),      # [N idx][0x0f][N val]              len = 2N+1
            (2, 1),      # [N idx][B][N val][C]              len = 2N+2
            (3, 2))      # [N idx][B][0x0f][N val][C]        len = 2N+3
+
+
+#: FULL BRIGHTNESS in a `cmd 70` level, measured rather than assumed - the high
+#: byte of every one of the 10728 writes captured on jurassic_park_the_pin and
+#: star_wars_elg walks 0..8 and stops there. hwshim.c's led_level70 carries the
+#: evidence and the two must stay twins; tests/test_spike2_led_level70.py is
+#: what checks that they do.
+LEVEL70_FULL = 0x800
+
+
+def level70(lo, hi):
+    """The 0..255 level a `cmd 70` base-layer lamp write carries.
+
+    THE TWIN OF hwshim.c's led_level70, byte for byte. The frame is
+    [node][05][70][idx][v16 lo][v16 hi][cksum][rlen]; reading `lo` alone - which
+    the shim did until PAD-125 - drops seven of a Home Edition's nine lit lamps
+    and renders the other two at 2/255.
+    """
+    v = lo | (hi << 8)
+    if v > LEVEL70_FULL:
+        v = LEVEL70_FULL
+    return v * 255 // LEVEL70_FULL
 
 
 def decode_frame(b, valid):
@@ -270,7 +298,16 @@ def main():
         if t > until:
             break
         node = b[0] & 0x3F
-        if node not in INSERT_NODES or node not in wire or b[2] not in INDEXED:
+        if node not in INSERT_NODES:
+            continue
+        # NO WIRE GATE ON `cmd 70`, matching hwshim.c: the shim's own branch
+        # bounds the index and nothing else, and a board that never sent the
+        # 6-byte enumeration would otherwise read as an empty playfield.
+        if len(b) == 8 and b[2] == 0x70:
+            if b[3] < 96:
+                state[(node, b[3])] = level70(b[4], b[5])
+            continue
+        if node not in wire or b[2] not in INDEXED:
             continue
         tried += 1
         got = decode_frame(b, wire[node])

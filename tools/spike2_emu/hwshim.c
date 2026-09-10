@@ -10326,6 +10326,49 @@ static int led_wide_publish(unsigned node, unsigned cmd,
     return 1;
 }
 
+/* THE LEVEL A `cmd 70` LAMP WRITE CARRIES, AS THE 0..255 val[] TAKES.
+ *
+ * The frame is [node][05][70][idx][v16 lo][v16 hi][cksum][rlen] - item 50 read
+ * that shape off turtles_pro's Single LED Test and wrote it down right there in
+ * led_publish - and the decode then took p[4] ALONE. A whole byte of the level
+ * was dropped and nothing noticed, because on every title measured then the
+ * value was 0x0000: godzilla_pro sent 6579 of 6579 and turtles_pro 7755 of 7755
+ * as ZEROS. This command was the base layer's own CLEAR on those titles and
+ * never anything else, so the half that was read was always the right half.
+ *
+ * ★ A HOME EDITION DRIVES ITS WHOLE ATTRACT PICTURE THROUGH IT (PAD-125,
+ * 2026-09-10), and that is what exposed the other half. jurassic_park_the_pin
+ * 1.05 and star_wars_elg 1.10 have ONE playfield board and speak none of the
+ * indexed shapes below to it at all: measured over two full runs with the bus
+ * logged, node 8 took 4260 and 6468 `cmd 70` writes and 0 of 97/a2..a6/b4/b5.
+ * The Pin holds nine lamps up - 0x0400 on LEFT RAMP H, LEFT RAMP RESCUE,
+ * BRACHIOSAURUS MODE and 2X, 0x0500 on PTERANODON MODE and DOUBLE SCORE,
+ * 0x0800 on BACKPANEL FLASH, 0x0702 on STEGOSAURUS MODE, 0x0303 on GALLIMIMUS
+ * MODE - and read as p[4] those are 0, 0, 0, 2 and 3. SEVEN of the nine went
+ * dark and the other two rendered at 2/255 and 3/255, which is the ticket, word
+ * for word: "Jurassic Park only has 2 static LEDs lit in attract mode".
+ *
+ * ★ 0x800 IS FULL BRIGHTNESS, and the ladder is what says so rather than an
+ * assumption about the field's width. Every `cmd 70` value on the wire across
+ * both titles, 10728 writes on nodes 8 and 12:
+ *
+ *     0x0000  0x0200  0x0303  0x0400  0x0500  0x0600  0x0700  0x0702  0x0800
+ *
+ * The high byte walks 0..8 and STOPS at 8 - eighths of full, with 0x0303 and
+ * 0x0702 sitting a hair off 3/8 and 7/8 - so the range is 0..0x800 and not the
+ * 0..0xffff the two bytes could hold. Nothing above 0x800 has ever been seen;
+ * the clamp keeps a title that sends one from wrapping into a dark lamp, which
+ * is the failure this whole function exists to avoid.
+ *
+ * A ZERO IS STILL A ZERO, so godzilla and turtles decode exactly as they did. */
+static unsigned char led_level70(unsigned lo, unsigned hi)
+{
+    enum { FULL = 0x800 };               /* 8/8, measured - see above */
+    unsigned v = lo | (hi << 8);
+    if (v > FULL) v = FULL;
+    return (unsigned char)(v * 255u / FULL);
+}
+
 static void led_publish(const unsigned char *p, int n)
 {
     unsigned node, cmd, blen, i;
@@ -10525,7 +10568,7 @@ static void led_publish(const unsigned char *p, int n)
         if (p[3] < 96) {
             led_map();
             if (!led_shm) return;
-            led_shm->val[node][p[3]] = p[4];
+            led_shm->val[node][p[3]] = led_level70(p[4], p[5]);
             led_seen(node, p[3]);
             led_shm->decoded++;
             led_shm->gen++;

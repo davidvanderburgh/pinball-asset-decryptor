@@ -7830,7 +7830,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **105. A multi-boot card with 5 to 16 images: the carousel is unproven on
       hardware, the menu media budget starves it silently, and the tab never
-      says the real cap.** `S3 D2` ← WORKING ON, IN PROGRESS **65%**
+      says the real cap.** `S3 D2` ← IN PROGRESS **90%** — waiting on David's hardware proof
       *(A tester with five custom Beatles builds
       plus Stern's asked on 2026-09-09 "how much effort to go past the 4 game
       limit".)* There is no such limit: `CONF_MAX_IMAGES 16`
@@ -7896,13 +7896,34 @@ These have each been violated at least once and each cost a run or a window:
       reads healthy right through the bug, because the mask gated the REPAINT
       and not the frame advance — the first version of this pass's test would
       have passed against the broken binary.
-      **Uncommitted:** nothing. Both halves are committed and pushed.
-      **Resume:** the rig run. Build a 5-image TMNT card (the same source twice
-      is fine; `--allow-version-mismatch` if mixed), then `PAD_CARD=<raw>
-      PAD_SELECT=1 PAD_AUDIO=0 watch.sh` UNDER THE RIG LOCK: LEFT/RIGHT across
-      the wrap, read the `< n / N >` counter, choose image 4, see attract.
-      Record it as proof row 8 in `codeselect/DESIGN.md`. Hardware proof stays
-      David's, and the item waits at 90% for it.
+      **THE RIG RUN IS DONE — proof row 8 in `codeselect/DESIGN.md`.** Card
+      `D:/Pinball/TMNT 1987/multi/turtles_pro-1_59_0.store-5image-item105.16G.sdcard.raw`,
+      five turtles_pro 1.59.0 trees on the store layout (15.49 GB = the 16G
+      class exactly, 13.96 GB shared and stored once, 9.24 GB free). Two runs.
+      **`layout: carousel of 5 (3 visible, 389 px cards)`** — the 5+ layout has
+      now run somewhere other than `headless.sh` for the first time. THE WRAP:
+      from card 1 of 5 one left flipper gave `menu: highlight 0 -> 4 (1987 PRO
+      B), card 5/5 - wrap`, and the two `glshot.sh` frames show `< 1 / 5 >` with
+      1987 PRO B as card 1's LEFT neighbour and `< 5 / 5 >` with STERN STOCK as
+      card 5's RIGHT neighbour. START gave `chose 4 p3:img4 turtles_pro - bound
+      over /games/turtles_pro`; the game reached attract and streamed its scene
+      video at 29.6 fps. `alive.sh` 0 after both; the lock was held throughout
+      and released.
+      **Also added on the way:** the selector logs every highlight move —
+      `menu: highlight A -> B (title), card k/n[ - wrap]`. Without it a run log
+      cannot tell a menu that moved twice from one that moved four times and
+      wrapped, which is precisely what a carousel proof has to show; run 8a was
+      read by INFERENCE for want of it, and 8b was not.
+      **Note on the card:** only four distinct turtles_pro 1.59.0 images are on
+      the disk, so card 5 repeats card 4's source. Deliberate — a card whose
+      images disagree on NODE FIRMWARE can reflash the node boards on every
+      swap, and this one is meant to be flashable for the hardware proof.
+      **Uncommitted:** nothing.
+      **Resume:** nothing until David reports the hardware run. Flash that card
+      to the TMNT, power up, walk the carousel across the wrap and boot a card
+      other than the primary. The card carries `log=` so `/dump/log/codeselect.log`
+      on it holds the same `menu: highlight ... card k/n` lines the rig showed.
+      Then check the box.
 
 - [ ] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
       and choosing it (by hand or by the countdown) boots one member at random,

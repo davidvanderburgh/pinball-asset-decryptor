@@ -1246,6 +1246,17 @@ int main(int argc, char **argv)
         }
         if (chosen >= 0) break;
         if (hl != old_hl) {
+            /* WHERE THE HIGHLIGHT WENT, one line per move.  From five images
+             * up the menu is a carousel of three and the highlight is the
+             * only thing that says where in the set you are, so a run log
+             * without this cannot tell a menu that moved twice from one that
+             * moved four times and wrapped - which is exactly what a carousel
+             * proof has to show.  `card k/n` is the counter the player sees
+             * under the panels, 1-based like the display, and `wrap` marks
+             * the step that crossed the end. */
+            sel_log("menu: highlight %d -> %d (%s), card %d/%d%s", old_hl, hl,
+                    c.img[hl].title, hl + 1, n,
+                    (old_hl == 0 && hl == n - 1) || (old_hl == n - 1 && hl == 0) ? " - wrap" : "");
             /* a new card: its music takes over (hard switch); the
              * animations all keep running - they were never paused */
             if (media.music[hl] != music_clip) {

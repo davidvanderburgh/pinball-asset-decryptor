@@ -4282,6 +4282,37 @@ These have each been violated at least once and each cost a run or a window:
       with `2a` on 287 of them — same shape of evidence, bigger majority — but
       nothing pins group 1 and nobody has reported those lamps, so it is its
       own change with its own proof.
+      **★ 2026-09-10, TICKET PAD-125 — THE ADDRESS WAS RIGHT AND THE LEVEL WAS
+      HALF-READ.** Same reporter, next run: "Jurassic Park only has 2 static
+      LEDs lit in attract mode". `jurassic_park_the_pin` 1.05 and
+      `star_wars_elg` 1.10 drive their whole attract picture through **`cmd 70`
+      and nothing else** — measured on the wire, 4260 and 6468 writes to node 8
+      against **0** of `97/a2..a6/b4/b5` — and that frame carries a **16-bit
+      little-endian level** (`[idx][v16 lo][v16 hi]`, item 50's own shape) of
+      which `led_publish` read the LOW BYTE alone. godzilla_pro (6579 of 6579)
+      and turtles_pro (7755 of 7755) only ever send it as a CLEAR, so half a
+      field went unread for the rig's whole life with nothing able to notice.
+      The Pin holds **nine** lamps up at 0x0400/0x0500/0x0800/0x0702/0x0303;
+      read as `lo` those are 0, 0, 0, 2 and 3, so **seven went dark and two
+      rendered at 2/255** — the ticket, byte for byte. **0x800 is full
+      brightness and the wire says so**: across 10728 writes on both titles the
+      value ladder is 0, 0x200, 0x303, 0x400, 0x500, 0x600, 0x700, 0x702,
+      0x800 — the high byte walks 0..8 and stops. Fixed on `ticket/PAD-125`:
+      `hwshim.c`'s `led_level70()` (clamped, so a title that ever sends past
+      full scale dims rather than wraps), a Python twin in `leddecode.py` that
+      also reads `cmd 70` out of a capture, and
+      `tests/test_spike2_led_level70.py` (17). **Live proof, not synthetic:**
+      the rig booted the real card and the window went **2 of 50 -> 9 of 50
+      inserts lit** with BACKPANEL FLASH at full. **It was never only the Home
+      Editions** — star_wars_elg went 2 lit -> 31, and `jurassic_park_le` 1.16,
+      an ordinary full-size cabinet on nodes 1/8/9, lights **42** with every
+      level on 8 and 9 a rung of that same ladder. The rule is the COMMAND and
+      not the model. godzilla_pro is the control and is unmoved: 62 lamps, the
+      indexed shapes untouched, its `cmd 70` clears still writing 0. NOT DONE: node 12 on
+      star_wars_elg (the R2-D2 topper) takes 441 `cmd 70` writes and
+      `led_insert_node()` still refuses everything outside 1/8/9, so the topper
+      lamps stay dark; nobody has reported them and the artwork view does not
+      draw them.
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the

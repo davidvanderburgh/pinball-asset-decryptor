@@ -8665,3 +8665,24 @@ def test_a_groups_block_this_tool_cannot_make_sense_of_is_left_alone(tmp_path):
     info.pop("groups")
     rows, _w = mb.rows_from_inspect(info)
     assert len(rows) == 4 and not any(mb.is_group(r) for r in rows)
+def test_the_add_row_is_the_way_into_a_group(tmp_path):
+    """Both group commands were on the right-click menu only, while the big
+    obvious row at the bottom of the list still added a plain image - so
+    somebody looking for the feature would not find it (David, on the built
+    branch: "I don't see any interface in the GUI for a user to do so")."""
+    root, panel = _panel()
+    try:
+        # an EMPTY list offers nothing to choose from: the first image is the
+        # primary and can never be a group, so that click is not worth a menu
+        assert panel.add_row_choices() == ()
+        panel.add_image(_images(tmp_path, 1)[0])
+        labels = [lbl for lbl, _attr in panel.add_row_choices()]
+        assert labels == ["Add image…", "Add random group…",
+                          "Add random group from folder…"]
+        # every one of them names a method that exists and is callable
+        for _lbl, attr in panel.add_row_choices():
+            assert callable(getattr(panel, attr))
+        # and the row itself says a group is on offer, not just an image
+        assert "random group" in panel.ADD_ROW_TEXT.lower()
+    finally:
+        root.destroy()

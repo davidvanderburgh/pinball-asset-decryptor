@@ -5669,7 +5669,7 @@ class MultibootPanel:
             on_select=self._on_table_select,
             on_activate=lambda i: self.edit_image(i),
             on_action=self._table_action,
-            on_add=lambda: self._add_image(),
+            on_add=lambda: self._add_row_clicked(),
             on_context=self._popup_list_menu,
             add_text=self.ADD_ROW_TEXT, add_tip=self.LIST_TIP,
             visible_rows=LIST_MIN_ROWS, max_rows=LIST_MAX_ROWS)
@@ -5700,8 +5700,8 @@ class MultibootPanel:
     #: entries are greyed when the click missed every image row, so a
     #: right-click on the template row or on empty space offers Add… alone.
     LIST_ACTIONS = (("Add image…", "_add_image", False),
-                    ("Add group…", "_add_group", False),
-                    ("Add group from folder…", "_add_group_folder", False),
+                    ("Add random group…", "_add_group", False),
+                    ("Add random group from folder…", "_add_group_folder", False),
                     ("Edit image…", "edit_image", True),
                     ("Remove image", "_remove_image", True),
                     (None, None, False),
@@ -6805,7 +6805,7 @@ class MultibootPanel:
 
     #: What the template row says.  Dim, with a green '+': an empty card
     #: shows only this, which is both the way in and the lesson.
-    ADD_ROW_TEXT = "Add an image…"
+    ADD_ROW_TEXT = "Add an image or a random group…"
 
     def _values(self, i, row):
         """ONE ROW OF THE TABLE, as a dict keyed by column id: the title
@@ -7091,6 +7091,45 @@ class MultibootPanel:
         if len(self._rows) == 1:
             self._maybe_default_output()
         self._ok("")
+
+    #: What the add row at the foot of the list offers, as
+    #: ``(label, method name)``.  Pure, so a test can ask what the row would
+    #: show without popping a menu.
+    ADD_ROW_CHOICES = (("Add image…", "_add_image"),
+                       ("Add random group…", "_add_group"),
+                       ("Add random group from folder…", "_add_group_folder"))
+
+    def add_row_choices(self):
+        """The add row's choices for the list as it stands.
+
+        AN EMPTY LIST OFFERS NOTHING TO CHOOSE FROM: the first image is the
+        primary, the machine boots it when the menu is not honoured, and it
+        can never be a random group - so the first click goes straight to the
+        file dialog with no menu in the way.
+        """
+        return () if not self._rows else self.ADD_ROW_CHOICES
+
+    def _add_row_clicked(self):
+        """The add row at the foot of the list.
+
+        A GROUP HAD NO DISCOVERABLE WAY IN.  Both group commands were on the
+        right-click menu only, while the big obvious row at the bottom of the
+        list still added a plain image - so somebody looking for the feature
+        would not find it (David, 2026-09-10, on the built branch: "I don't see
+        any interface in the GUI for a user to do so").  The row asks now."""
+        choices = self.add_row_choices()
+        if not choices:
+            self._add_image()
+            return
+        menu = tk.Menu(self._table, tearoff=0)
+        for label, attr in choices:
+            menu.add_command(label=label,
+                             command=lambda a=attr: getattr(self, a)())
+        try:
+            x, y = self._table.winfo_pointerxy()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
 
     def _add_image(self):
         path = filedialog.askopenfilename(

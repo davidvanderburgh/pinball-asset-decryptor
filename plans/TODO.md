@@ -7843,24 +7843,36 @@ These have each been violated at least once and each cost a run or a window:
       core/ext4_grow (hardware-proven for videos), placed before the firmware
       sentinel job and owned by the grow cleanup dir; opt-in
       `PAD_STERN_AUDIO_GROW=1`, never Direct-SD. No firmware edit anywhere.
-      **Established (probed on 5 cards, 2026-09-09):** the directory is the file
-      tail (`hdr[0x40] + 24*hdr[0x60] + 16 == filesize`); the record count is
-      always ODD and the seed word moves with the parity (trailer[8:12] odd,
-      trailer[0:4] even, because the decode copies `align16(24n)` bytes); the
-      decode is seed -> permuted expected CRC + PRNG/permute/XOR/vf2-stream
-      KEY DERIVATION -> AES-192-CBC in place -> per-record post-transform ->
-      CRC(init per build) compare -> band loop; the constants are PER BUILD
-      (LZ 1.22 has none of TMNT's); the S-box and CRC table sit in rodata on
-      every build; the directory memcpy is a host-side `_imp` stub that
-      `UC_HOOK_MEM_READ` never sees; `LENGTH_XOR` is TMNT-only; nothing in the
-      repo parses or writes the directory. **Ruled out:** resizing in place, a
+      **Measured (Phase 0, 53 cards / 50 builds, 2026-09-09 — full detail in
+      the plan's section 4A):** the directory is the file tail, at
+      `hdr[0x40] + align16(24*hdr[0x60]) + 8 == filesize` (NOT `24n + 16`, which
+      only looked right because the first five cards had odd counts — 20 of the
+      53 are EVEN); the decode is one host-side `_imp` memcpy that
+      `UC_HOOK_MEM_READ` never sees, then key+IV derived from the seed word
+      alone, AES-192-CBC in place, a per-record post-transform, and
+      `zlib.crc32(buf, per-build init)` compared with a pure bit permutation of
+      the seed. `encode(decode(tail))` is byte-exact on 53/53 cards and an
+      appended record that flips the count's parity passes the firmware's own
+      CRC gate on 53/53. A grown appended record decodes and re-encodes
+      BIT-EXACT at its new length, mono and stereo, and is BLIP-FREE: its own
+      params do not move when the user's audio replaces the placeholder, and no
+      stock row moves. The constants are PER BUILD (50 distinct CRC inits); the
+      S-box and CRC table sit in rodata on every build; `LENGTH_XOR` is
+      TMNT-only and is learnable from data (`record[16:20] ^ length` is one
+      constant per card). **Ruled out:** resizing in place — changing one
+      record's length word, body untouched, shifts EVERY later record's params
+      including its sound-container key, so the in-place fallback is dead; a
       new image-scNN.bin category (sids are category-tagged, the loader
-      hard-fails on a missing shard), any firmware patch (grown ELFs boot-loop,
-      three deliveries, zero confirmed boots).
-      **Phases:** 0 = the directory codec + the duplicate-key / own-window /
-      even-count experiments in the emulator (desk work, scratchpad
-      `grow_probe.py`, firmware-assisted keygen, no PRNG port); 1 =
-      `spike2/masterdir.py` + locator keys + tests; 2 = engine (gate, staged
+      hard-fails on a missing shard); any firmware patch (grown ELFs boot-loop,
+      three deliveries, zero confirmed boots). **Still open:** whether a
+      duplicate identity key is last-writer-wins — the sound container does not
+      run in the emulator at all, so the lookup's code shape (get-or-create,
+      value overwritten) is the working assumption and the rig decides it.
+      **Phases:** 0 = DONE 2026-09-09 (the directory codec + the own-window and
+      parity experiments; the probe harness is kept at
+      `plans/spike2_longer_audio_probe/`, and Phase 1 should port it rather than
+      start over — firmware-assisted keygen costs ~3 ms and needs no PRNG port);
+      1 = `spike2/masterdir.py` + locator keys + tests; 2 = engine (gate, staged
       image by rename, pass-A derive with the consumed hook, `params_grow`
       rows, `collapse_shadowed`, fingerprint tail, delivery + `.sidx` size);
       3 = Advanced Audio checkbox, docs; 4 = rig capture (`/dump/audio.raw`,

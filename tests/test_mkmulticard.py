@@ -992,16 +992,19 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
         {"device": "/dev/mmcblk0p3", "source": os.path.abspath("/img/a.raw"), "title": "STERN 1.59.0",
          "subtitle": "Original Stern code", "art": "art0.png", "anim": None, "music": None,
          "confirm": None,
-         "title_dir": "turtles_pro", "version": "1.59.0", "node_fw_version": "1.33.0"},
+         "title_dir": "turtles_pro", "version": "1.59.0", "node_fw_version": "1.33.0",
+         # item 106: null = this image is a card of its own
+         "group": None},
         {"device": "/dev/mmcblk0p7", "source": os.path.abspath("/img/b.raw"), "title": "TMNT 1987",
          "subtitle": "1987 cartoon upscale", "art": "art1.png", "anim": "anim1.gif", "music": "music1.wav",
          "confirm": None,
-         "title_dir": "turtles_pro", "version": "1.58.0", "node_fw_version": "1.19.0"}]
+         "title_dir": "turtles_pro", "version": "1.58.0", "node_fw_version": "1.19.0",
+         "group": None}]
     # it is JSON, and exactly the keys contract A names
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
                       "volume", "machine_volume", "mixer_volume", "sound_move", "sound_confirm", "theme",
-                      "colors"}
+                      "colors", "groups"}
     # a card with no media at all: the fields are null, not absent
     plain = mk.build_manifest(plan, mk.parse_images_conf(_menu_conf(mk, plan)), None)
     assert [im["art"] for im in plain["images"]] == [None, None]
@@ -2220,3 +2223,276 @@ def test_extract_refuses_before_reading_anything(mk, tmp_path, capsys):
     assert mk.main(["extract", "--card", str(tmp_path / "nope.img"), "--out-dir", str(tmp_path)]) == 2
     err = capsys.readouterr()
     assert "no image 5" in err.out + err.err and "also an input" in err.out + err.err
+# ---- item 106: image groups, one card that boots a member at random --------
+
+#: six trees: the primary, two customs, and three song sets behind one card
+GROUP_DEVICES = ["/dev/mmcblk0p3", "/dev/mmcblk0p3:img1", "/dev/mmcblk0p3:img2",
+                 "/dev/mmcblk0p3:img3", "/dev/mmcblk0p3:img4", "/dev/mmcblk0p3:img5"]
+GROUP_TITLES = ["STERN STOCK", "CUSTOM A", "CUSTOM B", "SET 1", "SET 2", "SET 3"]
+GROUP_SUBS = ["the primary", "first", "second", "Help!", "Let It Be", "Come Together"]
+JUKEBOX = {"title": "JUKEBOX", "subtitle": "a different set every power-up",
+           "media": ("art3.png", "anim3.gif", "", ""), "members": [3, 4, 5]}
+
+
+def test_a_group_line_is_written_before_its_first_member(mk):
+    """conf.c lays the cards out in LINE ORDER, so a group= line written after every
+    image= line would put its card at the end of the menu - the order on the glass
+    would stop matching the order the builder laid out."""
+    text = mk.render_images_conf(GROUP_DEVICES, GROUP_TITLES, GROUP_SUBS, default=4,
+                                 timeout=10, groups=[JUKEBOX])
+    lines = [l for l in text.splitlines() if l and not l.startswith("#")]
+    assert lines == [
+        "image=/dev/mmcblk0p3|STERN STOCK|the primary|||",
+        "image=/dev/mmcblk0p3:img1|CUSTOM A|first|||",
+        "image=/dev/mmcblk0p3:img2|CUSTOM B|second|||",
+        "group=3-5|JUKEBOX|a different set every power-up|art3.png|anim3.gif|",
+        "image=/dev/mmcblk0p3:img3|SET 1|Help!|||",
+        "image=/dev/mmcblk0p3:img4|SET 2|Let It Be|||",
+        "image=/dev/mmcblk0p3:img5|SET 3|Come Together|||",
+        "default=4", "timeout=10", "media=" + mk.MEDIA_DIR]
+
+
+def test_a_group_round_trips_and_carries_its_own_media(mk):
+    """A group card has ONE art, animation, music and confirm sound however many
+    members it has, which is why a jukebox of forty variants costs no more media than
+    a plain image does."""
+    text = mk.render_images_conf(GROUP_DEVICES, GROUP_TITLES, GROUP_SUBS, default=4,
+                                 timeout=10, groups=[JUKEBOX])
+    conf = mk.parse_images_conf(text)
+    assert len(conf["images"]) == 6
+    assert len(conf["groups"]) == 1
+    g = conf["groups"][0]
+    assert g["members"] == [3, 4, 5]
+    assert (g["title"], g["subtitle"]) == ("JUKEBOX", "a different set every power-up")
+    assert g["media"] == ("art3.png", "anim3.gif", "", "")
+    assert mk.conf_media_names(conf) == ["anim3.gif", "art3.png"]
+    assert mk.render_images_conf_text(conf) == text, "the like-for-like compare must survive a group"
+
+
+def test_a_conf_with_no_group_is_byte_identical_to_before(mk):
+    """The compatibility surface: a card built before item 106 must read and re-render
+    exactly as it did, or every existing card looks changed to `verify`."""
+    text = mk.render_images_conf(GROUP_DEVICES[:2], GROUP_TITLES[:2], GROUP_SUBS[:2])
+    assert "group=" not in text
+    conf = mk.parse_images_conf(text)
+    assert conf["groups"] == []
+    assert mk.render_images_conf_text(conf) == text
+
+
+def test_the_member_spec_reads_ranges_and_lists(mk):
+    assert mk.parse_member_spec("3-5") == [3, 4, 5]
+    assert mk.parse_member_spec("3,5,7-9") == [3, 5, 7, 8, 9]
+    assert mk.parse_member_spec(" 4 ") == [4]
+    with pytest.raises(mk.Refused):
+        mk.parse_member_spec("1-x")
+    with pytest.raises(mk.Refused):
+        mk.parse_member_spec("5-3")
+
+
+def test_a_builder_refuses_every_group_the_selector_merely_drops(mk):
+    """conf.c drops a bad member and logs it, because a mistyped conf must never stop a
+    pinball machine booting. A BUILDER has no such excuse: it is being asked to write
+    the file, and refusing is the only way the person writing it finds out."""
+    def refuse(needle, **kw):
+        with pytest.raises(mk.Refused) as e:
+            mk.render_images_conf(GROUP_DEVICES, GROUP_TITLES, GROUP_SUBS,
+                                  groups=[dict(JUKEBOX, **kw)])
+        assert needle in str(e.value), str(e.value)
+
+    refuse("at least 2", members=[3])
+    refuse("must be consecutive", members=[3, 5])
+    refuse("primary must stay bootable", members=[0, 1])
+    refuse("not one of the 6 image lines", members=[3, 4, 9])
+    refuse("may not contain", title="a|b")
+    refuse("the selector reads at most", subtitle="x" * 1200)
+    with pytest.raises(mk.Refused) as e:
+        mk.render_images_conf(GROUP_DEVICES, GROUP_TITLES, GROUP_SUBS,
+                              groups=[dict(JUKEBOX, members=[1, 2, 3]),
+                                      dict(JUKEBOX, title="OTHER", members=[3, 4, 5])])
+    assert "belongs to one card" in str(e.value)
+    with pytest.raises(mk.Refused):
+        mk.parse_images_conf("image=p3|A|a\nimage=p3:img1|B|b\ngroup=1-x|G|g\n")
+
+
+def test_images_and_cards_are_different_caps(mk):
+    """A group of forty song-set variants is forty IMAGES and one CARD, so the two caps
+    do different jobs: 64 trees on the card, 16 things the player scrolls through."""
+    assert (mk.MAX_IMAGES, mk.MAX_CARDS, mk.MAX_GROUPS) == (64, 16, 8)
+    dev = lambda n: ["/dev/mmcblk0p3"] + ["/dev/mmcblk0p3:img%d" % i for i in range(1, n)]
+
+    # 46 trees behind one group are two cards, and load
+    big = mk.render_images_conf(dev(46), groups=[{"title": "BIG", "subtitle": "45 sets",
+                                                  "members": list(range(1, 46))}])
+    conf = mk.parse_images_conf(big)
+    assert len(conf["images"]) == 46 and conf["groups"][0]["members"] == list(range(1, 46))
+
+    # 65 trees are past the image cap
+    with pytest.raises(mk.Refused) as e:
+        mk.render_images_conf(dev(65))
+    assert "at most 64" in str(e.value)
+
+    # 17 UNGROUPED images are past the CARD cap, though they are well inside the image
+    # one. This is the case an early return in check_groups let through: with no group
+    # in the file, nothing counted the cards at all.
+    with pytest.raises(mk.Refused) as e:
+        mk.render_images_conf(dev(17))
+    assert "17 cards" in str(e.value) and "at most 16" in str(e.value)
+
+    # and a group buys room back under that cap
+    fine = mk.render_images_conf(dev(17), groups=[{"title": "G", "subtitle": "",
+                                                   "members": [15, 16]}])
+    assert mk.parse_images_conf(fine)["groups"][0]["members"] == [15, 16]
+def _resolved(mk, argv):
+    """`build` argv -> the resolved (extras, groups). The parser is the thing under test,
+    so it is driven through main's own argument definitions rather than a hand-built
+    namespace."""
+    import argparse
+    ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest="cmd")
+    b = sub.add_parser("build")
+    mk._add_images(b, "--out")
+    a = ap.parse_args(argv)
+    mk.resolve_image_args(a)
+    return a.extra, a.groups
+
+
+def test_group_flags_are_ordered_against_extra(mk):
+    """A group names its members by IMAGE INDEX, and the only thing that fixes an index is
+    where the flag sat on the command line. argparse's `append` throws that away, which is
+    why --extra/--group/--member share one ordered action."""
+    extras, groups = _resolved(mk, [
+        "build", "--primary", "P", "--out", "O",
+        "--extra", "A",
+        "--group", "JUKEBOX|a different set every power-up",
+        "--member", "B", "--member", "C",
+        "--extra", "D"])
+    assert extras == ["A", "B", "C", "D"]
+    assert len(groups) == 1
+    assert groups[0]["title"] == "JUKEBOX"
+    assert groups[0]["subtitle"] == "a different set every power-up"
+    # the primary is image 0, so A is 1 and the members are 2 and 3 - and D, typed after
+    # the group, closes it rather than joining it
+    assert groups[0]["members"] == [2, 3]
+
+
+def test_two_groups_and_a_members_list(mk, tmp_path):
+    lst = tmp_path / "sets.txt"
+    lst.write_text("# the Beatles variants\nS1.raw\n\nS2.raw\nS3.raw\n", encoding="utf-8")
+    extras, groups = _resolved(mk, [
+        "build", "--primary", "P", "--out", "O",
+        "--group", "FIRST|x", "--member", "A", "--member", "B",
+        "--group", "SECOND|y", "--members-list", str(lst)])
+    assert extras == ["A", "B", "S1.raw", "S2.raw", "S3.raw"]
+    assert [g["title"] for g in groups] == ["FIRST", "SECOND"]
+    assert groups[0]["members"] == [1, 2]
+    assert groups[1]["members"] == [3, 4, 5]
+
+
+def test_a_member_without_a_group_is_refused(mk):
+    with pytest.raises(mk.Refused) as e:
+        _resolved(mk, ["build", "--primary", "P", "--out", "O", "--member", "A"])
+    assert "must follow a --group" in str(e.value)
+
+
+def test_a_group_forces_the_compact_layout_and_names_the_cost(mk):
+    """David, 2026-09-09. The members of a jukebox card are the same title with a few songs
+    changed, so on parts or multi each one costs a FULL COPY. Someone who asked for a group
+    and got a card that will not fit has been failed silently."""
+    g = [{"title": "J", "subtitle": "", "members": [1, 2, 3]}]
+    assert mk.resolve_layout("auto", 3, g) == "store"
+    assert mk.resolve_layout("auto", 3, None) == "multi"
+    assert mk.resolve_layout("auto", 1, None) == "parts"
+    assert mk.resolve_layout("store", 3, g) == "store"
+    for lay in ("parts", "multi"):
+        with pytest.raises(mk.Refused) as e:
+            mk.resolve_layout(lay, 3, g)
+        assert "3 member(s) would each cost a full copy" in str(e.value)
+        assert "--layout store" in str(e.value), "the refusal must say what to do instead"
+
+
+def test_a_group_is_never_written_for_a_menu_that_cannot_read_it(mk, tmp_path):
+    """An old selector ignores group= and then refuses the file for having more than 16
+    image lines, so it exits 2 and the machine boots its primary: degraded, not bricked.
+    Degraded is still not what anybody asked for."""
+    assert mk.SELECTOR_GROUP_VERSION == (3, 0)
+    old = tmp_path / "old"
+    new = tmp_path / "new"
+    none = tmp_path / "none"
+    old.write_bytes(b"\x7fELF...codeselect 2.9 starting...")
+    new.write_bytes(b"\x7fELF...codeselect 3.0 starting...")
+    none.write_bytes(b"\x7fELF...no version here...")
+    assert mk.selector_file_version(old) == (2, 9)
+    assert mk.selector_file_version(new) == (3, 0)
+    assert mk.selector_file_version(none) is None
+
+    plain = "image=p3|A|a\ndefault=0\ntimeout=15\n"
+    grouped = "image=p3|A|a\nimage=p3:img1|B|b\ngroup=1-2|G|g\nimage=p3:img2|C|c\n"
+    # a conf with no group is written by any selector, which is the compatibility promise
+    for b in (old, new, none):
+        mk.check_selector_reads_conf(str(b), plain)
+    mk.check_selector_reads_conf(str(new), grouped)
+    with pytest.raises(mk.Refused) as e:
+        mk.check_selector_reads_conf(str(old), grouped)
+    assert "needs codeselect 3.0 or later" in str(e.value) and "is 2.9" in str(e.value)
+    with pytest.raises(mk.Refused) as e:
+        mk.check_selector_reads_conf(str(none), grouped)
+    assert "carries no version string" in str(e.value)
+def test_build_json_says_which_card_each_image_belongs_to(mk):
+    """A loader has to be able to rebuild the CARD rows without re-deriving the members
+    from the conf's index arithmetic, so build.json carries both halves: a per-image
+    `group` (null when the image is a card of its own) and a `groups` block with the
+    media keys the tab's staleness check reads."""
+    text = mk.render_images_conf(GROUP_DEVICES, GROUP_TITLES, GROUP_SUBS, default=4,
+                                 timeout=10, groups=[JUKEBOX])
+    man = mk.build_manifest(None, mk.parse_images_conf(text), None, written="2026-09-10T00:00:00Z")
+    assert [im["group"] for im in man["images"]] == [None, None, None, 0, 0, 0]
+    assert man["groups"] == [{"title": "JUKEBOX", "subtitle": "a different set every power-up",
+                              "members": [3, 4, 5], "art": "art3.png", "anim": "anim3.gif",
+                              "music": None, "confirm": None}]
+    # and it is still JSON with no surprises in it
+    assert json.loads(json.dumps(man))["groups"][0]["members"] == [3, 4, 5]
+    # a card with no group says so by having an empty block, not a missing one
+    plain = mk.build_manifest(None, mk.parse_images_conf(
+        mk.render_images_conf(GROUP_DEVICES[:2])), None, written="2026-09-10T00:00:00Z")
+    assert plain["groups"] == []
+    assert [im["group"] for im in plain["images"]] == [None, None]
+def test_the_plan_says_which_images_the_player_sees_as_one_card(mk, tmp_path, capsys):
+    """The members already get their own per-tree size rows, which is what the GUI's size
+    strip draws. `image-group` says which of them the player will only ever meet as a
+    single card - a word where the index goes, on the same rule as the free and shared
+    rows, so a reader of the size rows cannot mistake one for an image."""
+    A = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    B = mk.make_synthetic_card(str(tmp_path / "B.img"), "B", 0x0B0B0B0B)
+    plan = mk.make_plan(A, [B], "parts")
+    mk.print_plan(plan, groups=[{"title": "JUKEBOX", "subtitle": "", "members": [1, 2, 3]}])
+    out = capsys.readouterr().out
+    assert "image-group 0 1 3 JUKEBOX" in out
+    # and a card with no group prints no such row at all
+    mk.print_plan(plan)
+    assert "image-group" not in capsys.readouterr().out
+
+
+def test_inspect_prints_the_cards_before_the_images(mk, capsys):
+    """"Which of these do I actually see" is the first question a group raises, and the
+    image list alone cannot answer it."""
+    rep = {"card": "c.raw", "size": 1, "layout": "store", "partitions": [],
+           "selector": {"version": "3.0", "bytes": 10}, "has_build_json": True,
+           "has_media_json": False, "default": 4, "timeout": 10, "volume": None,
+           "mixer_volume": None, "sound_move": None, "sound_confirm": None, "font": None,
+           "theme": None, "colors": {},
+           "groups": [{"index": 0, "title": "JUKEBOX", "subtitle": "a set every power-up",
+                       "members": [3, 4, 5], "art": "art3.png", "anim": None,
+                       "music": None, "confirm": None}],
+           "images": [{"index": 3, "device": "p3:img3", "title": "SET 1", "subtitle": "Help!",
+                       "art": None, "anim": None, "music": None, "confirm": None,
+                       "art_source": None, "anim_source": None, "confirm_source": None,
+                       "source": None, "source_exists": False, "title_dir": "t",
+                       "bypass": "none", "version": "1.0", "version_source": "x",
+                       "sidx_version": None, "elf_version": None, "elf_date": None,
+                       "node_fw_version": None, "node_fw": [], "built_version": None}],
+           "trees": [], "media": [], "warnings": []}
+    mk.print_inspect(rep)
+    out = capsys.readouterr().out
+    assert "group 0    'JUKEBOX' / 'a set every power-up'  members 3-5" in out
+    assert "one card; it boots a different member every power-up" in out
+    assert "(in group 0)" in out, "an image must say which card it hides behind"

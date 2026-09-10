@@ -548,14 +548,70 @@ static void media_stats(const struct media *m)
     }
 }
 
+/* HOW LONG THE HIGHLIGHT MUST SIT STILL before the cache is re-aimed.  A
+ * re-aim frees and allocates tens of megabytes, so doing one per keypress
+ * would have a fast scroll thrashing the allocator and re-decoding clips it
+ * is about to pass anyway.  Long enough to ride out a scroll, short enough
+ * that a card you stop on is playing from RAM before you have read its
+ * subtitle. */
+#define CACHE_SETTLE_MS 200
+
+/* PAD_ANIM_SETTLE_MS forces the settle, FOR THE TESTS.  The property worth
+ * proving is that several moves inside ONE window produce ONE re-aim, and the
+ * fastest a test can drive the switch block is about 320 ms a move - wider
+ * than the shipped 200 ms, so at the real value every press legitimately gets
+ * its own re-aim and the collapsing can never be seen.  The test widens the
+ * window instead of the constant being chosen to suit it. */
+static long long cache_settle_ms(void)
+{
+    const char *forced = getenv("PAD_ANIM_SETTLE_MS");
+    if (forced && *forced) {
+        long ms = strtol(forced, NULL, 10);
+        if (ms >= 0) return (long long)ms;
+    }
+    return CACHE_SETTLE_MS;
+}
+
+/* The clips the cache budget should go to, NEAREST THE HIGHLIGHT FIRST:
+ * hl, hl+1, hl-1, hl+2, hl-2 ... wrapping at both ends, which is the order
+ * the carousel itself wraps in.  art_cache_set takes them in this order until
+ * the budget is gone, so the cached set is a WINDOW around the card being
+ * looked at and its size is whatever fits - never a number someone guessed,
+ * and never images 0..k, which is what it used to be.  Writes n entries
+ * (NULLs and stills included: the cache skips them). */
+static int rank_by_distance(struct art_anim **out, struct art_anim *const *anim, int n, int hl)
+{
+    int d, k = 0;
+    if (n <= 0) return 0;
+    out[k++] = anim[hl];
+    for (d = 1; d <= n / 2 && k < n; d++) {
+        int r = (hl + d) % n, l = ((hl - d) % n + n) % n;
+        out[k++] = anim[r];
+        if (l != r && k < n) out[k++] = anim[l];
+    }
+    return k;
+}
+
 /* RAM for the frame cache: half of what the kernel calls available, capped
  * - the game's own working set is not running yet, and the cache is freed
  * before the game starts; 64 MB when /proc/meminfo cannot be read */
 static size_t anim_cache_budget(void)
 {
-    FILE *f = fopen("/proc/meminfo", "r");
+    FILE *f;
     char line[128];
     size_t avail_kb = 0, free_kb = 0, budget;
+    /* PAD_ANIM_CACHE_MB forces the budget, FOR THE TESTS.  The interesting
+     * behaviour of the cache is what it does when the budget runs out, and on
+     * any machine a test can run on there is far too much memory for a
+     * synthetic clip set to reach it - so without this the eviction path is
+     * unreachable and the window around the highlight cannot be shown to
+     * exist.  Never set on a card; the machine's own memory answers there. */
+    const char *forced = getenv("PAD_ANIM_CACHE_MB");
+    if (forced && *forced) {
+        long mb = strtol(forced, NULL, 10);
+        if (mb >= 0) return (size_t)mb * 1024 * 1024;
+    }
+    f = fopen("/proc/meminfo", "r");
     if (f) {
         while (fgets(line, sizeof line, f)) {
             unsigned long v;
@@ -1002,6 +1058,9 @@ int main(int argc, char **argv)
     const struct audio_clip *music_clip = NULL;
     const char *how, *fmt_path;
     long long start, deadline, last_key;   /* sel_now_ms() values: long long, see log.h */
+    /* when the cache is due to be re-aimed on the highlight; 0 = not due.
+     * Armed by a move, disarmed by the re-aim (item 109). */
+    long long reaim_due = 0;
     int remain_shown = -2, dirty;
     int rc = 2;
 
@@ -1171,14 +1230,21 @@ int main(int argc, char **argv)
     snprintf(media.dir, sizeof media.dir, "%s", media_dir(&o, &c));
     media_load(&media, &c, &L, audio_active(au));
     media_log(&media);
-    /* THE FRAME CACHE (art.h): every clip decoded once, on a thread below
-     * this one, and played from RAM - on the machine a frame costs 13 ms to
-     * decode and two clips at their rate were more than half the CPU in this
-     * loop.  Not when the frames are pinned: those modes need frame k exactly. */
+    /* THE FRAME CACHE (art.h): clips decoded once, on a thread below this one,
+     * and played from RAM - on the machine a frame costs 13 ms to decode,
+     * which is not a cost the menu loop can pay three times in a 33 ms frame,
+     * and two clips at their rate were already more than half the CPU here.
+     * The budget only stretches to a handful of clips, so it goes to the ones
+     * NEAREST THE HIGHLIGHT and follows it from here (item 109).  Not when the
+     * frames are pinned: those modes need frame k exactly. */
     if (!pinned) {
+        struct art_anim *rank[CONF_MAX_IMAGES];
         char why[240];
-        art_cache_start(media.anim, n, anim_cache_budget(), why, sizeof why);
-        sel_log("anim: cache: %s", why);
+        int k, ai;
+        for (ai = 0; ai < n; ai++) if (media.anim[ai]) media.anim[ai]->idx = ai;
+        k = rank_by_distance(rank, media.anim, n, hl);
+        art_cache_set(rank, k, anim_cache_budget(), why, sizeof why);
+        sel_log("anim: cache on image %d: %s", hl, why);
     }
 
     /* (the input backend was opened before the sound: see THE AUDIO SECTION) */
@@ -1257,6 +1323,8 @@ int main(int argc, char **argv)
             sel_log("menu: highlight %d -> %d (%s), card %d/%d%s", old_hl, hl,
                     c.img[hl].title, hl + 1, n,
                     (old_hl == 0 && hl == n - 1) || (old_hl == n - 1 && hl == 0) ? " - wrap" : "");
+            /* the cache follows, once the scrolling stops (item 109) */
+            if (!pinned) reaim_due = now + cache_settle_ms();
             /* a new card: its music takes over (hard switch); the
              * animations all keep running - they were never paused */
             if (media.music[hl] != music_clip) {
@@ -1264,6 +1332,20 @@ int main(int argc, char **argv)
                 music_clip = media.music[hl];
                 music_voice = music_clip ? audio_play(au, music_clip, 1) : -1;
             }
+        }
+        /* THE CACHE FOLLOWS THE HIGHLIGHT, on a settle rather than on every
+         * press.  Everything else about the animations is untouched: every
+         * clip's timeline keeps ticking whether or not its frames are cached
+         * (media_tick), because all the cards animate together rather than
+         * only the highlighted one, and a card you scroll to has to be
+         * mid-loop rather than starting over. Only the FRAMES move. */
+        if (reaim_due && now >= reaim_due) {
+            struct art_anim *rank[CONF_MAX_IMAGES];
+            char why[240];
+            int k = rank_by_distance(rank, media.anim, n, hl);
+            art_cache_set(rank, k, anim_cache_budget(), why, sizeof why);
+            sel_log("anim: cache re-aimed on image %d: %s", hl, why);
+            reaim_due = 0;
         }
         if (deadline) {
             /* a key restarts the countdown so a reader is not cut off */

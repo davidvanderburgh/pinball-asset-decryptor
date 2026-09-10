@@ -2733,7 +2733,49 @@ def rows_from_inspect(info):
                             "can still be changed, but the card cannot be "
                             "rebuilt here." % (i, row.path))
         rows.append(row)
-    return rows, warnings
+    return group_rows(rows, info.get("groups")), warnings
+
+
+def group_rows(rows, groups):
+    """Fold the images a card's ``groups`` block names back into GROUP ROWS.
+
+    inspect reports one entry per game and a separate groups block (which is
+    what mkmulticard writes); the tab's list is CARDS, so a load has to put
+    them back together or a loaded jukebox card would come up as N ordinary
+    rows and an Apply would flatten it.  A group whose members do not all
+    exist in the image list is left alone rather than half-folded - a report
+    this tool cannot make sense of must not silently change the card."""
+    if not groups:
+        return rows
+    owned, out = {}, []
+    for gi, g in enumerate(groups or []):
+        members = [m for m in (g.get("members") or [])
+                   if isinstance(m, int) and 0 <= m < len(rows)]
+        if len(members) != len(g.get("members") or []) or len(members) < 2:
+            continue
+        for m in members:
+            owned[m] = gi
+    for i, row in enumerate(rows):
+        gi = owned.get(i)
+        if gi is None:
+            out.append(row)
+            continue
+        if i != min(m for m, g in owned.items() if g == gi):
+            continue                       # a later member: its card is made
+        g = groups[gi]
+        members = [MemberRow(path=rows[m].path, title=rows[m].title,
+                             version=rows[m].version)
+                   for m in sorted(k for k, v in owned.items() if v == gi)]
+        card = ImageRow(path="", title=g.get("title") or "RANDOM",
+                        subtitle=g.get("subtitle") or "", members=members)
+        # the card's own media is the group's, not its first member's row
+        for key in ("art", "anim", "music", "confirm"):
+            val = (g.get(key) or "")
+            if val:
+                setattr(card, key, val)
+                setattr(card, key + "_on_card", True)
+        out.append(card)
+    return out
 
 
 def form_from_inspect(info, card, media_dir="", selector_dir=None):
@@ -3891,6 +3933,16 @@ def list_title(row, index=0):
     back to), and - because a list with no Image column must still say it -
     what is wrong with the .raw this image came from."""
     title = (row.title or "").strip()
+    if is_group(row):
+        # A GROUP ROW SAYS SO IN THE LIST.  Nothing else in this table can
+        # tell one from a plain image, and "why does this card have no file"
+        # is the first thing a person would otherwise ask.
+        missing = [q for q in row_paths(row) if not q or not os.path.isfile(q)]
+        cell = "%s  (random, %d sets)" % (title or "image %d" % index,
+                                          len(row.members))
+        if missing:
+            cell += "  [%d not on this machine]" % len(missing)
+        return cell
     path = (row.path or "").strip().strip('"')
     if not title:
         title = suggest_title(path)[0] if path else "image %d" % index
@@ -3899,6 +3951,23 @@ def list_title(row, index=0):
     if not os.path.isfile(path):
         return "%s  [not on this machine]" % title
     return title
+
+
+def list_code(row):
+    """The list's Code cell for a row: the game code version, or - for a group
+    whose members do not agree - `mixed`.  The members of a jukebox card are
+    meant to be one title with different songs, so a `mixed` here is worth
+    seeing: swapping between two code versions reflashes the node boards."""
+    if not is_group(row):
+        return (row.version or "").strip()
+    known = sorted(set((m.version or "").strip() for m in row.members
+                       if (m.version or "").strip()))
+    if not known:
+        return ""
+    # ONLY TWO DIFFERENT KNOWN VERSIONS ARE MIXED.  A version is read off the
+    # .raw and a member that has not been read yet is blank, so treating a
+    # blank as a disagreement would alarm somebody over nothing.
+    return "mixed" if len(known) > 1 else known[0]
 
 
 def menu_summary(form):
@@ -5631,6 +5700,8 @@ class MultibootPanel:
     #: entries are greyed when the click missed every image row, so a
     #: right-click on the template row or on empty space offers Add… alone.
     LIST_ACTIONS = (("Add image…", "_add_image", False),
+                    ("Add group…", "_add_group", False),
+                    ("Add group from folder…", "_add_group_folder", False),
                     ("Edit image…", "edit_image", True),
                     ("Remove image", "_remove_image", True),
                     (None, None, False),
@@ -6752,7 +6823,7 @@ class MultibootPanel:
             "media": cell_media(row),
             "music": _cell(row.music),
             "sound": self._confirm_cell(row),
-            "code": (row.version or "").strip(),
+            "code": list_code(row),
         }
 
     def _refresh_tree(self, select=None):
@@ -6767,6 +6838,7 @@ class MultibootPanel:
         rebuild that a caller is about to cancel (a restore) or that no one
         is watching (a non-interactive test) never leaves a premature
         'being drawn' caption on the strip."""
+        self._sync_compact_lock()
         table = getattr(self, "_table", None)
         if table is None:
             return
@@ -7026,6 +7098,89 @@ class MultibootPanel:
             filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
         if path:
             self.add_image(path)
+
+    def add_group(self, paths, title="", subtitle=""):
+        """Append a GROUP card: one row the menu draws, several games behind it,
+        a different one booted every power-up (item 106).  The public half of
+        Add group…, and what the tests drive."""
+        paths = [(q or "").strip().strip('"') for q in (paths or [])]
+        paths = [q for q in paths if q]
+        if not paths:
+            return
+        if len(self._rows) >= MAX_CARDS:
+            self._error("At most %d images fit one card." % MAX_CARDS)
+            return
+        if not self._rows:
+            # image 0 is the primary and the machine boots it when the menu is
+            # not honoured, so it cannot be a roll
+            self._error("Add the primary (stock) image first: the first image "
+                        "cannot be a random group.")
+            return
+        trees = len(form_trees(self.form())) + len(paths)
+        if trees > MAX_TREES:
+            self._error("That would be %d games; at most %d fit one card."
+                        % (trees, MAX_TREES))
+            return
+        if sum(1 for r in self._rows if is_group(r)) >= MAX_GROUPS:
+            self._error("At most %d random groups fit one card." % MAX_GROUPS)
+            return
+        members = [MemberRow(path=q, title=suggest_title(q)[0]) for q in paths]
+        self._rows.append(ImageRow(path="", title=title or "RANDOM",
+                                   subtitle=subtitle, members=members))
+        self._refresh_tree(select=len(self._rows) - 1)
+        # a group forces the compact build; show that in the tick straight away
+        self._sync_compact_lock()
+        self._ok("")
+
+    def _add_group(self):
+        paths = filedialog.askopenfilenames(
+            title="Pick the card images this one card will choose between",
+            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+        if paths:
+            self.add_group(list(paths))
+
+    def add_group_from_folder(self, folder):
+        """Every ``*.raw`` in *folder*, sorted, as one group card.  Forty
+        song-set variants are a folder, not a file dialog somebody should have
+        to shift-click through - which is the case that filed this item."""
+        try:
+            names = sorted(n for n in os.listdir(folder)
+                           if n.lower().endswith((".raw", ".img")))
+        except OSError as e:
+            self._error("Cannot read %s: %s" % (folder, e))
+            return
+        if not names:
+            self._error("No .raw card images in %s." % folder)
+            return
+        self.add_group([os.path.join(folder, n) for n in names],
+                       title=os.path.basename(os.path.normpath(folder)).upper())
+
+    def _add_group_folder(self):
+        folder = filedialog.askdirectory(
+            title="Pick a folder of card images for one random card")
+        if folder:
+            self.add_group_from_folder(folder)
+
+    def _sync_compact_lock(self):
+        """A group forces the compact build, so the tick goes on and greys out
+        while one is in the list - with the tooltip saying why.  mkmulticard
+        refuses parts/multi with a group outright; this is the same fact where
+        a person can see it BEFORE the press (David, 2026-09-09)."""
+        chk = getattr(self, "_compact_chk", None)
+        if chk is None:
+            return
+        locked = any(is_group(r) for r in self._rows)
+        try:
+            if locked:
+                self._compact_var.set(True)
+                chk.state(["disabled"])
+            else:
+                chk.state(["!disabled"])
+        except tk.TclError:                             # pragma: no cover
+            return
+        tip = getattr(self, "_compact_tip", None)
+        if tip is not None:
+            tip.text = self.COMPACT_TIP_GROUP if locked else self.COMPACT_TIP
 
     def _remove_image(self):
         i = self._selected()

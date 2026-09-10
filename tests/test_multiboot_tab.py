@@ -8461,3 +8461,207 @@ def test_a_saved_state_brings_a_group_back_as_rows_not_as_a_string(tmp_path):
     assert [m.path for m in back[2].members] == paths[2:]
     assert [m.title for m in back[2].members] == ["SET 1", "SET 2", "SET 3"]
     assert mb._image_args(MultibootForm(images=back, out="x")) == mb._image_args(form)
+def test_the_list_says_a_row_is_a_group_and_what_code_it_runs():
+    """Nothing else in the table can tell a group from a plain image, and "why
+    does this card have no file" is the first thing a person would otherwise
+    ask."""
+    mb = multiboot_tab
+    row = ImageRow(path="", title="JUKEBOX",
+                   members=[mb.MemberRow(path="/nope/a.raw", version="1.29.0"),
+                            mb.MemberRow(path="/nope/b.raw", version="1.29.0"),
+                            mb.MemberRow(path="/nope/c.raw", version="1.29.0")])
+    cell = list_title(row, 2)
+    assert "JUKEBOX" in cell and "(random, 3 sets)" in cell
+    assert "[3 not on this machine]" in cell
+    assert mb.list_code(row) == "1.29.0"
+    # a jukebox whose members run different code is worth seeing: swapping
+    # between two versions reflashes the node boards at every boot
+    row.members[1].version = "1.30.0"
+    assert mb.list_code(row) == "mixed"
+    # ...but a version that has simply not been READ yet is blank, and calling
+    # that a disagreement would alarm somebody over nothing: only two different
+    # KNOWN versions are mixed.
+    row.members[1].version = ""
+    assert mb.list_code(row) == "1.29.0"
+    for m in row.members:
+        m.version = ""
+    assert mb.list_code(row) == "", "nothing read yet says nothing"
+    plain = ImageRow(path="", title="CUSTOM", version="1.29.0")
+    assert mb.list_code(plain) == "1.29.0"
+    assert "(random" not in list_title(plain, 1)
+
+
+def test_add_group_builds_one_row_out_of_several_games(tmp_path):
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        form = panel.form()
+        assert len(form.images) == 2, "two cards"
+        assert len(multiboot_tab.form_trees(form)) == 4, "four games"
+        assert multiboot_tab.is_group(form.images[1])
+        assert [m.path for m in form.images[1].members] == paths[1:]
+        assert validate_form(form) == []
+    finally:
+        root.destroy()
+
+
+def test_a_group_cannot_be_the_primary(tmp_path):
+    """The machine boots image 0 when the menu is not honoured, so it has to be
+    one known game rather than a roll."""
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_group(paths[1:], title="JUKEBOX")
+        assert panel.form().images == [], "nothing was added"
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        assert len(panel.form().images) == 2
+    finally:
+        root.destroy()
+
+
+def test_a_folder_of_variants_becomes_one_group(tmp_path):
+    """Forty song-set variants are a folder, not a file dialog somebody should
+    have to shift-click through - which is the case that filed this item."""
+    root, panel = _panel()
+    try:
+        panel.add_image(_images(tmp_path, 1)[0])
+        d = tmp_path / "beatles sets"
+        d.mkdir()
+        for n in ("c.raw", "a.raw", "b.raw"):
+            (d / n).write_bytes(bytes(16))
+        (d / "notes.txt").write_text("not a card", encoding="utf-8")
+        panel.add_group_from_folder(str(d))
+        row = panel.form().images[1]
+        assert [os.path.basename(m.path) for m in row.members] == \
+            ["a.raw", "b.raw", "c.raw"], "sorted, and the .txt left alone"
+        assert row.title == "BEATLES SETS"
+        # an empty folder says so rather than making a row with no games
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        panel.add_group_from_folder(str(empty))
+        assert len(panel.form().images) == 2
+    finally:
+        root.destroy()
+
+
+def test_a_group_locks_the_compact_tick_on(tmp_path):
+    """mkmulticard refuses parts/multi with a group outright; the tick is the
+    same fact where a person can see it BEFORE the press."""
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        root.update()
+        assert panel._compact_var.get() is False
+        assert "disabled" not in panel._compact_chk.state()
+        assert panel._compact_tip.text == panel.COMPACT_TIP
+        panel.add_group(paths[2:], title="JUKEBOX")
+        root.update()
+        assert panel._compact_var.get() is True
+        assert "disabled" in panel._compact_chk.state()
+        assert "needs it" in panel._compact_tip.text
+        # ...and removing the group hands the tick back
+        panel._rows.pop()
+        panel._refresh_tree()
+        root.update()
+        assert "disabled" not in panel._compact_chk.state()
+        assert panel._compact_tip.text == panel.COMPACT_TIP
+    finally:
+        root.destroy()
+
+
+def test_the_compact_tick_is_no_longer_called_experimental():
+    """Item 95's gate is cleared: David flashed the TMNT store card and booted
+    all three images on 2026-09-10."""
+    root, panel = _panel()
+    try:
+        assert "experimental" not in panel.COMPACT_TIP.lower()
+        assert "experimental" not in panel.COMPACT_TIP_GROUP.lower()
+    finally:
+        root.destroy()
+def test_the_table_actually_shows_the_group_cells(tmp_path):
+    """list_title and list_code are only worth having if _values calls them -
+    the Code cell read row.version straight for a while, which is blank on a
+    group row however many of its members have been probed."""
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        for m in panel._rows[1].members:
+            m.version = "1.29.0"
+        cells = panel._values(1, panel._rows[1])
+        assert "(random, 3 sets)" in cells["title"]
+        assert cells["code"] == "1.29.0"
+        panel._rows[1].members[0].version = "1.30.0"
+        assert panel._values(1, panel._rows[1])["code"] == "mixed"
+    finally:
+        root.destroy()
+def _grouped_inspect(tmp_path):
+    """An inspect report for a card of: the primary, then a 3-member group -
+    the shape mkmulticard writes (one entry per GAME plus a groups block)."""
+    paths = []
+    for n in ("stock", "s1", "s2", "s3"):
+        f = tmp_path / (n + ".raw")
+        f.write_bytes(bytes(16))
+        paths.append(str(f))
+    images = [{"index": i, "device": "/dev/mmcblk0p3" if i == 0
+               else "/dev/mmcblk0p3:img%d" % i,
+               "source": paths[i], "source_exists": True,
+               "title": ["STERN STOCK", "SET 1", "SET 2", "SET 3"][i],
+               "subtitle": "", "version": "1.29.0"} for i in range(4)]
+    info = {"card": "c.raw", "images": images, "warnings": [],
+            "groups": [{"index": 0, "title": "JUKEBOX",
+                        "subtitle": "a different set every power-up",
+                        "members": [1, 2, 3], "art": "art1.png",
+                        "anim": None, "music": None, "confirm": None}],
+            "default": 1, "timeout": 15, "volume": 50, "layout": "store"}
+    return info, paths
+
+
+def test_loading_a_card_folds_its_groups_back_into_rows(tmp_path):
+    """inspect reports one entry per GAME plus a groups block; the tab's list is
+    CARDS. Without the fold a loaded jukebox card would come up as three
+    ordinary rows and an Apply would flatten it."""
+    mb = multiboot_tab
+    info, paths = _grouped_inspect(tmp_path)
+    rows, _warnings = mb.rows_from_inspect(info)
+    assert len(rows) == 2, "one primary and one group card"
+    assert not mb.is_group(rows[0]) and rows[0].path == host_path(paths[0])
+    g = rows[1]
+    assert mb.is_group(g)
+    assert g.title == "JUKEBOX" and g.subtitle == "a different set every power-up"
+    assert [m.path for m in g.members] == [host_path(q) for q in paths[1:]]
+    assert [m.title for m in g.members] == ["SET 1", "SET 2", "SET 3"]
+    assert [m.version for m in g.members] == ["1.29.0"] * 3
+    # the CARD's media is the group's own, not its first member's row
+    assert g.art == "art1.png" and g.art_on_card is True
+    # ...and it comes straight back out as the same flags
+    form = mb.MultibootForm(images=rows, out="x")
+    args = mb._image_args(form)
+    assert args[2:4] == ["--group", "JUKEBOX|a different set every power-up"]
+    assert args[4:] == ["--member", mb.wsl(host_path(paths[1])),
+                        "--member", mb.wsl(host_path(paths[2])),
+                        "--member", mb.wsl(host_path(paths[3]))]
+
+
+def test_a_groups_block_this_tool_cannot_make_sense_of_is_left_alone(tmp_path):
+    """A report whose members do not all exist must not be half-folded: the
+    card would then be silently changed by a load."""
+    mb = multiboot_tab
+    info, _paths = _grouped_inspect(tmp_path)
+    info["groups"][0]["members"] = [1, 2, 99]
+    rows, _w = mb.rows_from_inspect(info)
+    assert len(rows) == 4 and not any(mb.is_group(r) for r in rows)
+    # ...and a one-member group is a plain card, not a group
+    info["groups"][0]["members"] = [2]
+    rows, _w = mb.rows_from_inspect(info)
+    assert len(rows) == 4 and not any(mb.is_group(r) for r in rows)
+    # a card with no groups at all is exactly what it always was
+    info.pop("groups")
+    rows, _w = mb.rows_from_inspect(info)
+    assert len(rows) == 4 and not any(mb.is_group(r) for r in rows)

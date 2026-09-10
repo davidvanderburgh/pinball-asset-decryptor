@@ -457,6 +457,10 @@ class Spike2Emu:
         # malloc-return PC — the capture there is correct for it.
         self.MASTERDIR_COUNT = None
         self.COUNTREG = None
+        # Cipher sites for the on-disk master directory (see :mod:`.masterdir`).
+        # Optional: None here just means that module locates them itself from
+        # the ELF, and a build where they can't be found still decodes audio.
+        self.MASTERDIR_CRYPTO = None
         if addrs:
             for k in ("BOOT_LO", "BOOT_HI", "VF2_VA", "REG_BASE", "PROV",
                       "DISPATCH", "QMUL_TABLE", "CAT0_REGISTER", "RBTREE_HDR",
@@ -465,6 +469,7 @@ class Spike2Emu:
                 setattr(self, k, addrs[k])
             self.MASTERDIR_COUNT = addrs.get("MASTERDIR_COUNT")
             self.COUNTREG = addrs.get("COUNTREG")
+            self.MASTERDIR_CRYPTO = addrs.get("MASTERDIR_CRYPTO")
             self.OBJREG = addrs["OBJREG"]
             # generic derive skips the template lookup (find-skip) instead of
             # stubbing the chain helpers, and takes the length from the raw obj.

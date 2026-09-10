@@ -7872,7 +7872,9 @@ These have each been violated at least once and each cost a run or a window:
       parity experiments; the probe harness is kept at
       `plans/spike2_longer_audio_probe/`, and Phase 1 should port it rather than
       start over — firmware-assisted keygen costs ~3 ms and needs no PRNG port);
-      1 = `spike2/masterdir.py` + locator keys + tests; 2 = engine (gate, staged
+      1 = DONE 2026-09-09 (`spike2/masterdir.py` + the crypto keys in
+      `locate.py` + `tests/test_spike2_masterdir.py`, swept clean over all 53
+      extracted cards); 2 = engine (gate, staged
       image by rename, pass-A derive with the consumed hook, `params_grow`
       rows, `collapse_shadowed`, fingerprint tail, delivery + `.sidx` size);
       3 = Advanced Audio checkbox, docs; 4 = rig capture (`/dump/audio.raw`,

@@ -10360,6 +10360,12 @@ static int led_wide_publish(unsigned node, unsigned cmd,
  * the clamp keeps a title that sends one from wrapping into a dark lamp, which
  * is the failure this whole function exists to avoid.
  *
+ * ★ AND IT IS NOT ONLY THE HOME EDITIONS. jurassic_park_le 1.16 - a full-size
+ * cabinet with the ordinary three insert boards - lights 42 lamps across nodes
+ * 1, 8 and 9 and every level on 8 and 9 is one of this ladder's rungs, so the
+ * same half-read was dimming or hiding most of its picture too. The rule is
+ * the COMMAND, never the model: any title that speaks `cmd 70` was affected.
+ *
  * A ZERO IS STILL A ZERO, so godzilla and turtles decode exactly as they did. */
 static unsigned char led_level70(unsigned lo, unsigned hi)
 {

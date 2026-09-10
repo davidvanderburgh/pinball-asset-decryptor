@@ -4303,9 +4303,12 @@ These have each been violated at least once and each cost a run or a window:
       also reads `cmd 70` out of a capture, and
       `tests/test_spike2_led_level70.py` (17). **Live proof, not synthetic:**
       the rig booted the real card and the window went **2 of 50 -> 9 of 50
-      inserts lit** with BACKPANEL FLASH at full. **Both Home Editions were
-      affected** — star_wars_elg measured `lit=2` on the same run shape — so
-      this is the whole generation, not one title. NOT DONE: node 12 on
+      inserts lit** with BACKPANEL FLASH at full. **It was never only the Home
+      Editions** — star_wars_elg went 2 lit -> 31, and `jurassic_park_le` 1.16,
+      an ordinary full-size cabinet on nodes 1/8/9, lights **42** with every
+      level on 8 and 9 a rung of that same ladder. The rule is the COMMAND and
+      not the model. godzilla_pro is the control and is unmoved: 62 lamps, the
+      indexed shapes untouched, its `cmd 70` clears still writing 0. NOT DONE: node 12 on
       star_wars_elg (the R2-D2 topper) takes 441 `cmd 70` writes and
       `led_insert_node()` still refuses everything outside 1/8/9, so the topper
       lamps stay dark; nobody has reported them and the artwork view does not

@@ -454,6 +454,240 @@ def _resolve_prov_qmul(fw, disp):
 
 
 # --------------------------------------------------------------------------
+# master-directory crypto (optional; consumed by :mod:`.masterdir`)
+# --------------------------------------------------------------------------
+# First 16 bytes of each table -- unique in a 6-70 MB ELF, and present in
+# rodata on every Spike 2 build examined.
+_SBOX16 = bytes.fromhex("637c777bf26b6fc53001672bfed7ab76")
+_CRC_TAB16 = struct.pack("<4I", 0x00000000, 0x77073096, 0xEE0E612C, 0x990951BA)
+# A table's address may be taken a little way in (an inner loop indexing
+# ``table + k``), so accept a load anywhere in its first quarter.
+_TABLE_SPAN = 0x400
+
+
+def _va_of_off(fw, off):
+    for s in fw.segs:
+        if s["off"] <= off < s["off"] + s["filesz"]:
+            return s["vaddr"] + (off - s["off"])
+    return None
+
+
+def _find_table(fw, pat):
+    """vaddr of the first occurrence of ``pat`` inside a load segment."""
+    start = 0
+    while True:
+        i = fw.raw.find(pat, start)
+        if i == -1:
+            return None
+        va = _va_of_off(fw, i)
+        if va is not None:
+            return va
+        start = i + 1
+
+
+def _func_end_late_push(fw, start, maxspan=0x1c00):
+    """Function end for a routine whose ``push {..,lr}`` is NOT its first
+    instruction.
+
+    The AES and CRC entries set up a register or two before pushing, so
+    :func:`_func_end` -- "the next push" -- stops on the function's OWN
+    prologue a couple of instructions in, and a constant scan bounded by it
+    sees nothing at all.  Skip any push inside the first 0x20 bytes, then take
+    the next one."""
+    t = fw.secs[".text"]
+    o = t["off"]
+    base = t["addr"]
+    if not (base <= start < base + t["size"]):
+        return start
+    hi = min(start + maxspan, base + t["size"])
+    for va in range(start + 4, hi, 4):
+        w = _u32(fw.raw, o + (va - base))
+        if (w & 0xFFFF0000) == 0xE92D0000 and (w & 0x4000):
+            if va - start <= 0x20:
+                continue                  # this function's own late prologue
+            return va
+    return start + maxspan
+
+
+def _consts_in(fw, lo, hi):
+    """Every 32-bit constant materialised in ``[lo, hi)``: movw/movt pairs and
+    PC-relative literal loads (the two ways these builds form a table
+    address)."""
+    vals = set()
+    pend = {}
+    for va in range(lo, hi, 4):
+        w = fw.u32_va(va)
+        if w is None:
+            break
+        d = _decode_movw_movt(w)
+        if d:
+            kind, rd, imm = d
+            if kind == "movw":
+                pend[rd] = imm
+            elif rd in pend:
+                vals.add((imm << 16) | pend[rd])
+            continue
+        if (w & 0x0F7F0000) in (0x051F0000, 0x059F0000):   # ldr rD, [pc, #imm]
+            imm = w & 0xFFF
+            lit = va + 8 + (imm if (w & 0x00800000) else -imm)
+            v = fw.u32_va(lit)
+            if v is not None:
+                vals.add(v)
+    return vals
+
+
+def _bl_sites(fw, lo, hi):
+    """``[(call_site, target), ...]`` for every ARM ``bl`` in ``[lo, hi)``."""
+    out = []
+    for va in range(lo, hi, 4):
+        w = fw.u32_va(va)
+        if w is None:
+            break
+        if (w & 0x0F000000) == 0x0B000000:
+            off = w & 0x00FFFFFF
+            if off & 0x800000:
+                off -= 0x1000000
+            out.append((va, (va + 8 + off * 4) & 0xFFFFFFFF))
+    return out
+
+
+def _reaches_table(fw, fn, table_va, depth=1, span=0x400, _seen=None):
+    """True if ``fn`` -- or, within ``depth`` levels, something it calls --
+    materialises an address inside the table at ``table_va``."""
+    if fn is None or table_va is None:
+        return False
+    if _seen is None:
+        _seen = set()
+    if fn in _seen:
+        return False
+    _seen.add(fn)
+    hi = min(fn + span, _func_end_late_push(fw, fn))
+    for v in _consts_in(fw, fn, hi):
+        if table_va <= v < table_va + _TABLE_SPAN:
+            return True
+    if depth > 0:
+        for _site, tgt in _bl_sites(fw, fn, hi):
+            if _reaches_table(fw, tgt, table_va, depth - 1, span, _seen):
+                return True
+    return False
+
+
+def _crc_init_arg(fw, site, back=0x28):
+    """The CRC's initial value: the movw/movt pair loading r0 just before the
+    call (TMNT ``movw r0,#0x8ff1 ; movt r0,#0x11a5`` -> 0x11a58ff1)."""
+    lo16 = hi16 = None
+    for va in range(max(fw.secs[".text"]["addr"], site - back), site, 4):
+        d = _decode_movw_movt(fw.u32_va(va) or 0)
+        if not d or d[1] != 0:
+            continue
+        if d[0] == "movw":
+            lo16 = d[2]
+        else:
+            hi16 = d[2]
+    if lo16 is None or hi16 is None:
+        return None
+    return (hi16 << 16) | lo16
+
+
+def _crc_gate(fw, crc_site, hi):
+    """The ``cmp`` of the computed CRC against the permuted seed word, and
+    which register holds the expected value.  Either operand order."""
+    for va in range(crc_site + 4, min(crc_site + 0x40, hi), 4):
+        w = fw.u32_va(va)
+        if w is None:
+            break
+        if (w & 0x0FFF0FF0) != 0x01500000:        # cmp rN, rM (no shift)
+            continue
+        rn = (w >> 16) & 0xF
+        rm = w & 0xF
+        if rn == 0 and rm != 0:
+            return va, rm
+        if rm == 0 and rn != 0:
+            return va, rn
+    return None, None
+
+
+def _loop_bound_slot(fw, md_start):
+    """The stack slot the band loop compares its record counter against
+    (TMNT ``ldr r2,[sp,#0x14c] ; cmp r3,r2 ; beq``).  Raising it is what lets
+    the chain run one record past the catalog, onto an appended record."""
+    ipc = _find_internal_pcs(fw, md_start)
+    top = ipc.get("_bandobj_target")
+    if top is None:
+        return None
+    slot = None
+    for x in _disasm(fw, top, top + 0x40):
+        if x.mnemonic == "ldr" and "[sp," in x.op_str and "#" in x.op_str:
+            try:
+                slot = int(x.op_str.rsplit("#", 1)[1].rstrip("]"), 0)
+            except ValueError:
+                slot = None
+        elif x.mnemonic == "cmp" and slot is not None:
+            return slot
+    return None
+
+
+def find_masterdir_crypto(fw, md_start, md_end=None):
+    """Locate the master-directory cipher sites, or return ``None``.
+
+    Keys: ``SBOX_VA``, ``CRC_TABLE_VA``, ``AES_INIT``, ``CBC``, ``CRC``,
+    ``CRC_GATE``, ``CRC_EXPECT_REG``, ``CRC_INIT``, ``LOOP_BOUND_SLOT``.
+
+    ``AES_INIT`` and ``CBC`` are the decoder's two calls into the AES module,
+    taken in program order -- the key schedule must precede the decrypt.  They
+    are NOT told apart by the inverse S-box: neither call reaches it on any
+    build examined, so :mod:`.masterdir` confirms the pairing at runtime, where
+    the CBC call's buffer argument is the record array.
+
+    Everything here is read from the ELF; nothing boots.  Reported as OPTIONAL
+    keys from :func:`locate_all`, so a build this misses still decodes audio --
+    only growing the sound bank is refused there, with a named reason."""
+    if md_end is None:
+        md_end = _func_end(fw, md_start)
+    sbox = _find_table(fw, _SBOX16)
+    crctab = _find_table(fw, _CRC_TAB16)
+    if sbox is None or crctab is None:
+        return None
+    calls = _bl_sites(fw, md_start, md_end)
+    aes = [s for s, t in calls if _reaches_table(fw, t, sbox, depth=1)]
+    crc = [s for s, t in calls if _reaches_table(fw, t, crctab, depth=1)]
+    if len(aes) < 2 or not crc:
+        return None
+    out = {"SBOX_VA": sbox, "CRC_TABLE_VA": crctab,
+           "AES_INIT": aes[0], "CBC": aes[1], "CRC": crc[0]}
+    gate, reg = _crc_gate(fw, out["CRC"], md_end)
+    out["CRC_GATE"] = gate
+    out["CRC_EXPECT_REG"] = reg
+    out["CRC_INIT"] = _crc_init_arg(fw, out["CRC"])
+    out["LOOP_BOUND_SLOT"] = _loop_bound_slot(fw, md_start)
+    if any(out[k] is None for k in
+           ("CRC_GATE", "CRC_EXPECT_REG", "CRC_INIT", "LOOP_BOUND_SLOT")):
+        return None
+    return out
+
+
+def masterdir_crypto(raw=None, game_real_path=None, md_start=None):
+    """:func:`find_masterdir_crypto` from raw ELF bytes, locating
+    ``MASTERDIR_DECODE`` first when it isn't given.  ``None`` on any failure --
+    an unmappable build must degrade, never raise."""
+    try:
+        if raw is None:
+            with open(game_real_path, "rb") as f:
+                raw = f.read()
+        fw = _FwView(raw)
+        if md_start is None:
+            boot = _find_boot(fw, _loader_index(fw)) or {}
+            if not boot.get("BOOT_LO"):
+                return None
+            md_start, _bh = _boot_md_hi(fw, boot["BOOT_LO"])
+            if md_start is None:
+                return None
+        return find_masterdir_crypto(fw, md_start)
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------
 # top-level
 # --------------------------------------------------------------------------
 _REQUIRED = ("BOOT_LO", "BOOT_HI", "VF2_VA", "REG_BASE", "CAT0_REGISTER",
@@ -500,6 +734,10 @@ def locate_all(game_real_path=None, raw=None):
             # back to the malloc-return capture.
             MASTERDIR_COUNT=ipc.get("MASTERDIR_COUNT"),
             COUNTREG=ipc.get("COUNTREG"))
+        # Optional: the master-directory cipher sites.  A build these miss
+        # decodes audio exactly as before; only growing the sound bank is
+        # refused, with a named reason (see :mod:`.masterdir`).
+        res["MASTERDIR_CRYPTO"] = find_masterdir_crypto(fw, md, ipc["_end"])
     except Exception:
         return None
     if any(res.get(k) is None for k in _REQUIRED) or objreg is None:

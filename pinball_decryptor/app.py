@@ -5289,7 +5289,8 @@ class App:
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "blip_free_optin": False, "loudness": "match", "loudness_db": 0,
+        "blip_free_optin": False, "audio_grow": False,
+        "loudness": "match", "loudness_db": 0,
     }
 
     def _apply_audio_advanced_env(self, cfg):
@@ -5346,6 +5347,12 @@ class App:
         # which touches no game code at all.
         setenv("PAD_STERN_BLIP_FREE",
                "1" if d.get("blip_free_optin", False) else None)
+        # Replacements longer than their slot.  Same polarity rule and the same
+        # reason: unset means the build every headless caller and every spawned
+        # encode worker already makes, which trims a long clip to fit.  Only an
+        # explicit "1" grows the sound bank.
+        setenv("PAD_STERN_AUDIO_GROW",
+               "1" if d.get("audio_grow", False) else None)
 
     def _on_audio_advanced_change(self, cfg):
         """Persist + apply the Advanced audio options."""

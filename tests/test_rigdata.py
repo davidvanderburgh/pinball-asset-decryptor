@@ -126,3 +126,68 @@ def test_the_device_model_does_not_live_with_the_users_work():
         rig = (REPO / "tools" / "spike1_emu" / name).read_text(encoding="utf-8")
         assert "S1_SHIM_DIR" in rig, "%s still looks beside the work" % name
         assert '"$S1_WORK/s1hwshim"' not in rig, name
+
+
+def test_a_leftover_directory_is_not_an_attached_disk():
+    """``/mnt/wsl`` is a tmpfs, so the per-rig directories ``ensure`` makes
+    under the mountpoint SURVIVE the disk being dropped.
+
+    Testing for the directory therefore says "attached" over a WSL restart that
+    dropped the mount: ``attach`` is skipped, and the rig is handed a path in
+    RAM.  The rig refuses that — correctly, it would put an extracted rootfs
+    and a 7 GB card cache in memory — so the user is simply unable to start the
+    emulator until they restart WSL by hand.  That is what happened on David's
+    machine after a Windows reboot (2026-09-10): the disk was not attached
+    anywhere, ``/mnt/wsl/paddata/spike2`` existed on the tmpfs, and Start said
+    "REFUSING: ... is in MEMORY (tmpfs)"."""
+    seen = []
+
+    def runner(args, timeout=300, distro=None):
+        seen.append(args)
+        return _proc(0, b"")            # the script printed nothing = not a mount
+
+    assert rigdata.attached("PAD-Runtime", runner=runner) is False
+    # and it asked about the MOUNT, not merely about a directory existing
+    joined = " ".join(str(a) for a in seen[0])
+    assert "findmnt" in joined or "stat -c" in joined
+    assert "test -d" not in joined
+
+
+def test_a_real_mount_reads_as_attached():
+    def runner(args, timeout=300, distro=None):
+        return _proc(0, b"mounted\n")
+
+    assert rigdata.attached("PAD-Runtime", runner=runner) is True
+
+
+def test_a_distro_that_cannot_answer_is_treated_as_not_attached():
+    """Any doubt has to mean "attach it": attaching an already-attached disk
+    is a no-op error we can recover from, writing gigabytes into RAM is not."""
+    def missing(args, timeout=300, distro=None):
+        raise OSError("wsl.exe not found")
+
+    def failed(args, timeout=300, distro=None):
+        return _proc(127, b"", b"bash: not found")
+
+    assert rigdata.attached("PAD-Runtime", runner=missing) is False
+    assert rigdata.attached("PAD-Runtime", runner=failed) is False
+
+
+def test_ensure_attaches_when_the_mount_was_dropped(monkeypatch, tmp_path):
+    """The whole point: a dropped mount is re-attached without the user having
+    to know what a mount is."""
+    disk = tmp_path / "pad-data.vhdx"
+    disk.write_bytes(b"x")
+    monkeypatch.setenv("PAD_DATA_DISK", str(disk))
+    monkeypatch.setattr(rigdata.sys, "platform", "win32")
+    calls = []
+
+    def runner(args, timeout=300, distro=None):
+        calls.append(list(args))
+        if args and args[0] == "bash" and "findmnt" in " ".join(args):
+            return _proc(0, b"")        # not a mount
+        return _proc(0, b"")
+
+    assert rigdata.ensure("PAD-Runtime", runner=runner) == rigdata.MOUNT
+    assert any(a[:2] == ["wsl.exe", "--mount"] for a in calls), \
+        "a dropped mount must be re-attached"

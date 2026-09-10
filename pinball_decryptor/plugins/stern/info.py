@@ -162,6 +162,11 @@ def container_counts(head):
       * ``u32 @ 0x60`` — the packed cat-0 sounds.  Equals
         ``len(derive_params())`` (the Extract decode count) on every card
         with a cached derive (LZ 1.22 both editions = 549, Elvira 3 = 5597).
+        On a card whose sound bank has been GROWN to hold a replacement
+        longer than its slot it reads HIGHER, by one per grown sound: the
+        bank carries the retired record as well as the appended one, while
+        Extract reports only the sounds the game will actually play (see
+        ``spike2.emulator.collapse_shadowed``).
 
     Verified across all 33 vendor images on hand (word @ 0x58 is always 0,
     fragments >= sounds always holds); anything off-pattern returns

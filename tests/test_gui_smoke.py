@@ -811,6 +811,58 @@ def test_audio_preview_limit_caps_trimmed_replacement(app,
     assert win._audio_compute_preview_limit(rel, 30.0) is None
 
 
+def test_audio_preview_keeps_a_longer_replacement_whole_when_the_bank_grows(
+        app, manufacturers_by_key):
+    """With the Stern longer-replacements option on, a replacement longer
+    than its slot is kept whole on Write, so the Replacement pane must not
+    hatch its tail as trimmed: no cap, the original's end marked instead,
+    and the clock says the bank grows.  Off, or on Spike 1 (no grow path),
+    it trims exactly as before."""
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    win = app.window
+
+    class _Slot:
+        duration = 0.32
+
+    rel = "audio/idx0044.wav"
+    win._audio_slots_by_rel = {rel: _Slot()}
+    win._audio_current_rel = rel
+    win._audio_assignments = {rel: "C:/rep.wav"}
+    win._audio_keep_full_flags = {}
+    win.audio_trim_var.set(True)
+
+    win._audio_advanced = dict(win._audio_advanced, audio_grow=False)
+    assert win._audio_compute_preview_limit(rel, 45.6) == 0.32
+    assert win._audio_preview_grow_from(rel, 45.6) is None
+
+    win._audio_advanced = dict(win._audio_advanced, audio_grow=True)
+    assert win._audio_compute_preview_limit(rel, 45.6) is None
+    assert win._audio_preview_grow_from(rel, 45.6) == 0.32
+    # a replacement that fits its slot has nothing to mark
+    assert win._audio_preview_grow_from(rel, 0.30) is None
+
+    # the pane's clock says so where "trimmed from" used to be
+    pane = win._audio_pane_rep
+    pane.path, pane.dur, pane.limit, pane.grow_from, pane.pos = (
+        "C:/rep.wav", 45.6, None, 0.32, 0.0)
+    pane._update_time()
+    assert "the sound bank grows" in pane.time_var.get()
+    assert "trimmed" not in pane.time_var.get()
+    pane.limit = 0.32
+    pane._update_time()
+    assert "trimmed from" in pane.time_var.get()
+
+    # Spike 1 has no grow path, so the option does not reach its preview
+    mfr = manufacturers_by_key["stern"]
+    if hasattr(mfr, "set_era"):
+        mfr.set_era("spike1")
+        try:
+            assert win._audio_compute_preview_limit(rel, 45.6) == 0.32
+        finally:
+            mfr.set_era("")
+
+
 def test_preview_panes_side_by_side(app, manufacturers_by_key):
     """Replace Audio + Replace Video previews show Original and Replacement
     side by side (like the image tab), each with its own play/stop transport
@@ -4997,3 +5049,57 @@ def test_settings_tab_loads_spike1_card(app, manufacturers_by_key):
     # a real firmware label made it through (not a raw AD_ id)
     assert any("VOLUME" in r["label"].upper() or "COIN" in r["label"].upper()
                for r in rows)
+
+
+def test_audio_advanced_offers_longer_replacements_and_wires_them_up(
+        app, manufacturers_by_key, monkeypatch):
+    """The "Allow replacements longer than the original" option exists, says
+    it is unverified on a machine, and OK carries it out to the env var the
+    engine gates on.
+
+    The dialog is the ONLY way a user can turn this on, and the engine reads
+    it from os.environ (spawned encode workers inherit that, nothing else), so
+    a dialog that builds but doesn't wire the box up would look completely
+    normal and silently keep trimming."""
+    import os
+
+    import tkinter as _tk_mod
+
+    def _descendants(w):
+        out = []
+        for c in w.winfo_children():
+            out.append(c)
+            out += _descendants(c)
+        return out
+
+    win = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
+
+    win._open_audio_advanced()
+    app.root.update()
+    dlg = [c for c in win.root.winfo_children()
+           if isinstance(c, _tk_mod.Toplevel)][-1]
+    kids = _descendants(dlg)
+    texts = [str(w.cget("text")) for w in kids if "text" in w.keys()]
+    box = [t for t in texts if "longer than the original" in t]
+    assert box, "the longer-replacements checkbox is missing"
+    assert any("hardware-unverified" in t for t in box)
+    assert any("no real machine has booted" in t for t in texts), (
+        "the explanation must say no machine has booted one")
+
+    cb = next(w for w in kids
+              if "text" in w.keys()
+              and "longer than the original" in str(w.cget("text")))
+    assert not dlg.getvar(cb.cget("variable")), "it must default to off"
+    cb.invoke()
+    ok = next(w for w in kids if "text" in w.keys()
+              and str(w.cget("text")) == "OK")
+    ok.invoke()
+    app.root.update()
+    assert os.environ.get("PAD_STERN_AUDIO_GROW") == "1"
+    assert app._settings["audio_advanced"]["audio_grow"] is True
+    # Leave a clean slate for later tests.
+    app._on_audio_advanced_change({})
+    assert "PAD_STERN_AUDIO_GROW" not in os.environ

@@ -501,7 +501,10 @@ class SternManufacturer(Manufacturer):
                     "matched to the original (soft-limited).")
         return ("Replacements are encoded size-neutral: each sound is fit to "
                 "its original slot length (longer is trimmed, shorter padded "
-                "with silence) and amplitude-limited into the codec's range.")
+                "with silence) and amplitude-limited into the codec's range. "
+                "Advanced audio options can let a longer replacement grow the "
+                "sound bank instead of being trimmed — image builds only, and "
+                "no machine has booted a card built that way yet.")
 
     def video_length_note(self):
         return ("Video is patched into the SD-card image in place, so each "

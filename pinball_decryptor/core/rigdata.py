@@ -140,18 +140,40 @@ def create(runner=None) -> None:
                                    or "diskpart exit %s" % out.returncode))
 
 
+#: Ask whether MOUNT is a real mount rather than an ordinary directory.
+#: ``findmnt`` with a bare path matches only an actual mountpoint; where it is
+#: missing, a directory sitting on a different device from its parent is one.
+#: Prints "mounted" or nothing, so the caller reads the text and not an exit
+#: code that a missing tool would also produce.
+_IS_MOUNTED = (
+    'if findmnt -no FSTYPE "%s" >/dev/null 2>&1; then echo mounted; '
+    'elif [ "$(stat -c %%d "%s" 2>/dev/null)" != '
+    '"$(stat -c %%d "$(dirname "%s")" 2>/dev/null)" ]; then echo mounted; fi'
+    % (MOUNT, MOUNT, MOUNT))
+
+
 def attached(distro: str, runner=None) -> bool:
-    """Is the disk mounted in the WSL VM right now?
+    """Is the disk MOUNTED in the WSL VM right now?
 
     Asked of the mountpoint rather than remembered: `wsl --shutdown`, a reboot
     and WSL's own idle timeout all drop it, and every one of those looks
-    exactly like a working machine until something tries to write."""
+    exactly like a working machine until something tries to write.
+
+    And asked as "is this a mount", NOT as "does this directory exist".  The
+    two are not the same here and the difference is a whole failed session:
+    ``/mnt/wsl`` is a tmpfs, so once :func:`ensure` has made the per-rig
+    directories under it, those directories SURVIVE the disk being dropped.
+    A ``test -d`` then says the disk is attached when it is not, ``attach`` is
+    skipped, and the rig is handed a path in RAM — which the rig refuses,
+    correctly, leaving a user who has done nothing wrong unable to start the
+    emulator until they restart WSL by hand (David's machine after a Windows
+    reboot, 2026-09-10)."""
     run = runner or _run
     try:
-        out = run(["test", "-d", MOUNT], timeout=60, distro=distro)
+        out = run(["bash", "-c", _IS_MOUNTED], timeout=60, distro=distro)
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return out.returncode == 0
+    return out.returncode == 0 and "mounted" in _text(out.stdout)
 
 
 def _devices(distro: str, runner) -> set:

@@ -127,6 +127,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.rbtree" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.emulator" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.locate" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike2.masterdir" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.codec" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.parallel" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.category" \

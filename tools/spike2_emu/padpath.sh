@@ -75,6 +75,58 @@ ROOT=$PAD_ROOT
 export PAD_TABLES
 TABLES=$PAD_TABLES
 
+# WHERE A BUILD STAGES, AND WHO IS LEFT OWNING IT.
+#
+# Every build script here copies its sources somewhere on the WSL ext4 disk
+# before compiling them (/mnt is drvfs and drops the symlinks and the modes),
+# and all six picked the same directory by writing "$HOME/emusrc" out
+# separately. That is one fact defined in six places, and the fact is wrong
+# in the one case this rig hits constantly:
+#
+# THE APP RUNS SOME STEPS AS ROOT CARRYING THE DESKTOP USER'S HOME
+# (multiboot_tab.wsl_shell_root does it on purpose, so root and the user
+# agree about where ~/spike2root is). A root step that stages through this
+# directory therefore CREATES IT OWNED BY ROOT inside a human's home, and
+# every later unprivileged build dies on
+#
+#   mkdir: cannot create directory '/home/pad/emusrc/codeselect-preview': Permission denied
+#
+# with nothing in it about elevation, which is where it came from. Measured
+# on 2026-09-09: one elevated emulator run left ~/emusrc, ~/.cache and
+# ~/padglhost owned by root, and from that moment the Multi-boot tab could
+# never build its menu program again on that machine - the preview failed at
+# its first step, every time, and the sentence it showed named a rootfs path
+# that had nothing to do with it.
+#
+# ROOT IS ELEVATION, NOT OWNERSHIP - the rule at the top of this file, applied
+# to writes instead of to reads. A root step hands the directory back to the
+# human whose home it is, and a root step is also the only thing that CAN
+# repair one that an earlier root step left behind, so it repairs it.
+: "${PAD_STAGE:=$PAD_HOME/emusrc}"
+export PAD_STAGE
+
+#: Make the staging directory usable BY THE CALLER, and say so plainly when it
+#: cannot be. Returns 1 rather than exiting: a caller decides whether staging
+#: is fatal for it (buildselect.sh cannot compile without it; the app's
+#: preview would rather fall back to an installed selector than stop).
+pad_stage() {
+    local owner=
+    mkdir -p "$PAD_STAGE" 2>/dev/null
+    if [ "$(id -u)" = 0 ]; then
+        owner=$(stat -c '%u:%g' "$PAD_HOME" 2>/dev/null)
+        # Only when the home belongs to a human: chowning /root to 0:0 is a
+        # no-op with a confusing recursive walk attached.
+        case "$owner" in
+            ""|0:0) ;;
+            *) chown -R "$owner" "$PAD_STAGE" 2>/dev/null ;;
+        esac
+    fi
+    [ -w "$PAD_STAGE" ] && return 0
+    echo "[stage] $PAD_STAGE is not writable by $(id -un 2>/dev/null || id -u) - an elevated run made it." >&2
+    echo "[stage] Hand it back with:  sudo chown -R $(id -un 2>/dev/null || id -u) $PAD_STAGE" >&2
+    return 1
+}
+
 # Which distro this is, so a Windows child can ask questions of the RIGHT one.
 # WSL sets WSL_DISTRO_NAME; if it is somehow unset the Windows side falls back
 # to the default distro, which is right far more often than it is wrong.

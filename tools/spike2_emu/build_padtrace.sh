@@ -7,12 +7,12 @@
 set -e
 R=$ROOT
 OUT="${1:-$HOME/padtrace.so}"
-mkdir -p "$HOME/emusrc"
-cp "$RIG/padtrace.c" "$HOME/emusrc/padtrace.c"
+pad_stage || exit 1
+cp "$RIG/padtrace.c" "$PAD_STAGE/padtrace.c"
 arm-linux-gnueabihf-gcc -std=gnu17 -fno-stack-protector -shared -fPIC -O2 -nostdlib \
   -Werror=implicit-function-declaration \
   -Wl,-soname,padtrace.so -o "$R/lib/padtrace.so" \
-  "$HOME/emusrc/padtrace.c" \
+  "$PAD_STAGE/padtrace.c" \
   -L"$R/lib" -l:libdl.so.2 -l:libc.so.6 -l:librt.so.1
 cp "$R/lib/padtrace.so" "$OUT"
 echo "built ok: $(ls -l "$R/lib/padtrace.so" | awk '{print $5}') bytes -> $OUT"

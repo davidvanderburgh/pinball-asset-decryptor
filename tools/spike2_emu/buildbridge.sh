@@ -33,14 +33,14 @@ esac
 # made by hand once and is a `cp: No such file or directory` on any
 # other. Compiling from /mnt/c is what it avoids - drvfs is slow enough
 # to matter over a few thousand lines of C.
-mkdir -p "$HOME/emusrc"
+pad_stage || exit 1
 # ONE LIST PER HALF, from padpath.sh, and the same list decides whether a
 # rebuild is needed - so the copy list and the compile line cannot drift apart.
 # build.sh's own comment records what that costs: alsastub.c was on the compile
 # line and missing from the copy list, an edit was silently never built, and the
 # build still said "built ok".
 for f in $PAD_GLHOST_SRCS $PAD_GLGUEST_SRCS; do
-    cp "$S/$f" "$HOME/emusrc/$f"
+    cp "$S/$f" "$PAD_STAGE/$f"
 done
 
 # -Werror=implicit-function-declaration for the reason build.sh records at
@@ -52,15 +52,15 @@ done
 # to gnu23, and a build that silently changes language when the distro does is
 # the same class of surprise this flag exists to stop.
 CFLAGS="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -nostdlib -Wall \
--Werror=implicit-function-declaration -I$HOME/emusrc"
+-Werror=implicit-function-declaration -I$PAD_STAGE"
 
 if [ "$WHICH" != host ]; then
     arm-linux-gnueabihf-gcc $CFLAGS -Wl,-soname,libGLESv2.so.2 \
-      -o "$R/usr/lib/libGLESv2.so.2" "$HOME/emusrc/glbridge.c" \
+      -o "$R/usr/lib/libGLESv2.so.2" "$PAD_STAGE/glbridge.c" \
       -L"$R/lib" -l:libc.so.6
 
     arm-linux-gnueabihf-gcc $CFLAGS -Wl,-soname,libEGL.so.1 \
-      -o "$R/usr/lib/libEGL.so.1" "$HOME/emusrc/eglshim.c" \
+      -o "$R/usr/lib/libEGL.so.1" "$PAD_STAGE/eglshim.c" \
       -L"$R/lib" -L"$R/usr/lib" -l:libGLESv2.so.2 -l:libc.so.6
 
     # WHAT WAS COMPILED, recorded beside what came out of it, and only after a
@@ -76,9 +76,9 @@ if [ "$WHICH" != guest ]; then
     # -lEGL / -lX11 fail to link. libxcb comes in via libX11's DT_NEEDED.
     # padglhost.c declares every EGL/GLES/X11 entry point it uses itself, so
     # this needs the runtime libraries and no -dev packages at all.
-    gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -I$HOME/emusrc \
+    gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -I$PAD_STAGE \
       -o "$PAD_GLHOST_BIN" \
-      "$HOME/emusrc/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
+      "$PAD_STAGE/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 
     pad_glhost_hash "$S" > "$PAD_GLHOST_STAMP"
     echo "host  padglhost      : $(stat -c%s "$PAD_GLHOST_BIN") bytes"

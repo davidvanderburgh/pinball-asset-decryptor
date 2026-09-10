@@ -7,7 +7,7 @@ R=$ROOT
 # made by hand once and is a `cp: No such file or directory` on any
 # other. Compiling from /mnt/c is what it avoids - drvfs is slow enough
 # to matter over a few thousand lines of C.
-mkdir -p "$HOME/emusrc"
+pad_stage || exit 1
 # Sync EVERY source this build compiles, and COMPILE THE SAME LIST. alsastub.c
 # used to be missing from the copy list while still being on the compile line,
 # so an edit to the Windows copy was silently never built - and the build still
@@ -16,8 +16,8 @@ mkdir -p "$HOME/emusrc"
 # two cannot disagree again, and watch.sh's staleness check reads the same list.
 CC_SRCS=()
 for f in $PAD_SHIM_SRCS; do
-    cp "$RIG/$f" "$HOME/emusrc/$f"
-    case $f in *.c) CC_SRCS+=("$HOME/emusrc/$f") ;; esac
+    cp "$RIG/$f" "$PAD_STAGE/$f"
+    case $f in *.c) CC_SRCS+=("$PAD_STAGE/$f") ;; esac
 done
 # THE SAME VERDICT ON EVERY COMPILER, and that flag is the whole of it.
 #

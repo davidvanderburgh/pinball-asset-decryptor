@@ -1672,7 +1672,11 @@ HELP_CONTENT = {
          "Selecting a row in the table points it at that image. It is the "
          "same media the build will use, so the card carries exactly what "
          "you previewed. It draws itself when you open the tab and after "
-         "every change, so there is nothing to press."),
+         "every change, so there is nothing to press. THE VERY FIRST ONE "
+         "ON A NEW PC TAKES A FEW MINUTES: the menu program is built "
+         "against the machine's own filesystem, so that is unpacked from "
+         "a card first. It happens once, the log says so while it runs, "
+         "and every render after it is the third of a second above."),
         ("The flippers, the animation and the sound",
          "The two flipper buttons under the picture are the machine's: "
          "they move the highlight one card and wrap round at the ends, "

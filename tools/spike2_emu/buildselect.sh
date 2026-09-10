@@ -64,7 +64,8 @@ fi
 # is also what ensurebuild.sh digests, so a file missing from it is a file
 # whose edits never trigger a rebuild. A missing one stops the build here
 # with its name, rather than as an `#include` error inside make.
-STAGE=$HOME/emusrc
+pad_stage || exit 1
+STAGE=$PAD_STAGE
 mkdir -p "$STAGE/codeselect/third_party"
 for f in $PAD_SELECT_SRCS; do
     if [ ! -f "$RIG/$f" ]; then

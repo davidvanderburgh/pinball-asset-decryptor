@@ -250,6 +250,29 @@ if sys.platform == "win32":
     _FSCTL_LOCK_VOLUME = 0x00090018
     _FSCTL_UNLOCK_VOLUME = 0x0009001C
     _FSCTL_DISMOUNT_VOLUME = 0x00090020
+    _FSCTL_SET_SPARSE = 0x000900C4
+    _FSCTL_SET_ZERO_DATA = 0x000980C8
+
+    class _ZeroDataInformation(ctypes.Structure):
+        """FILE_ZERO_DATA_INFORMATION: the half-open range to turn into a
+        hole."""
+        _fields_ = [("FileOffset", ctypes.c_longlong),
+                    ("BeyondFinalZero", ctypes.c_longlong)]
+
+    def _win_fsctl(fileobj, code, arg=None):
+        """One control code against an open Python file.  False rather than
+        an exception: every caller here is asking the filesystem for a
+        favour it is allowed to refuse."""
+        try:
+            import msvcrt
+            handle = wintypes.HANDLE(msvcrt.get_osfhandle(fileobj.fileno()))
+        except (OSError, ValueError, AttributeError):    # pragma: no cover
+            return False
+        ret = wintypes.DWORD(0)
+        size = ctypes.sizeof(arg) if arg is not None else 0
+        ptr = ctypes.byref(arg) if arg is not None else None
+        return bool(_DeviceIoControl(handle, code, ptr, size, None, 0,
+                                     ctypes.byref(ret), None))
 
     _CreateFileW = _kernel32.CreateFileW
     _CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
@@ -1550,6 +1573,38 @@ def menu_read_ranges(read_at, dev_size):
     return [r for r in ranges if r[0] < dev_size]
 
 
+def sparse_truncate(fileobj, size):
+    """Grow *fileobj* to *size* and leave the part nobody writes as HOLES.
+    True when the filesystem kept them, False when it could not.
+
+    ON POSIX THERE IS NOTHING TO ARRANGE: extending a file past its end is
+    sparse already, so this is one ``truncate`` and a True.
+
+    ON WINDOWS IT TAKES TWO CALLS AND NEITHER IS THE OBVIOUS ONE.
+    ``truncate`` is ``SetEndOfFile``, which ALLOCATES, so a menu image of a
+    32 GB card read 364.9 MB off the card and then took 29.7 GiB of the
+    user's TEMP directory - and nothing in the app noticed, because every
+    size it printed was the number of bytes READ (measured 2026-09-09 on a
+    32 GB card, reported by David: "confirm it's just copying over the 300
+    ish MB instead of the 32GB").
+
+    Marking the file sparse is NOT enough on its own - measured, both
+    orders: the attribute changes what a hole is allowed to be, and NTFS
+    still allocates the whole extent.  The hole has to be asked for, once,
+    over the file, with FSCTL_SET_ZERO_DATA.  A later write allocates only
+    the clusters it lands on, and everything else still reads as zeroes.
+
+    Not fatal either way: a destination that cannot do sparse files (FAT32,
+    exFAT, a network share) gives a bigger file, not a failed read."""
+    if sys.platform != "win32":
+        fileobj.truncate(size)
+        return True
+    ok = _win_fsctl(fileobj, _FSCTL_SET_SPARSE)
+    fileobj.truncate(size)
+    return _win_fsctl(fileobj, _FSCTL_SET_ZERO_DATA,
+                      _ZeroDataInformation(0, size)) and ok
+
+
 def read_device_menu_to_image(device_path, image_path, *, log=None, progress=None,
                               cancel=None):
     """Read only what the boot MENU needs off *device_path* into *image_path*: a SPARSE
@@ -1583,7 +1638,7 @@ def read_device_menu_to_image(device_path, image_path, *, log=None, progress=Non
             if log is not None:
                 log("Reading the boot menu off %s: %s of %s (the menu, not the games)"
                     % (device_path, format_size(total), format_size(dev_size)), "info")
-            out.truncate(dev_size)
+            sparse_truncate(out, dev_size)
             for off, length, _what in ranges:
                 done = 0
                 while done < length:

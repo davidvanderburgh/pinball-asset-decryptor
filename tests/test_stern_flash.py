@@ -20,6 +20,7 @@ card + a backup).
 import json
 import os
 import struct
+import sys
 
 import pytest
 
@@ -1043,6 +1044,68 @@ def test_the_menu_read_takes_the_menu_ranges_and_nothing_else(tmp_path):
     with rd.RawDeviceFile(card, writable=False) as dev, open(img, "rb") as src:
         ok, what = rd._ranges_match(dev, src, plan["prove"])
     assert ok, what
+
+
+def _allocated(path):
+    """What the filesystem actually gave the file - holes not counted.
+    ``st_size`` cannot see this, which is exactly how a menu image that read
+    364.9 MB came to occupy 29.7 GiB without anything noticing."""
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.GetCompressedFileSizeW.argtypes = [wintypes.LPCWSTR,
+                                             ctypes.POINTER(wintypes.DWORD)]
+        k.GetCompressedFileSizeW.restype = wintypes.DWORD
+        hi = wintypes.DWORD(0)
+        lo = k.GetCompressedFileSizeW(str(path), ctypes.byref(hi))
+        return (hi.value << 32) | lo
+    return os.stat(path).st_blocks * 512
+
+
+def test_a_grown_image_is_a_hole_with_the_written_parts_in_it(tmp_path):
+    """``sparse_truncate`` is the whole reason a menu image is cheap, and
+    NOTHING used to check it: the read only ever reported the bytes it took
+    off the card, so on Windows - where ``truncate`` allocates, and where
+    marking the file sparse is not enough on its own - a 32 GB card's menu
+    image quietly took 29.7 GiB of TEMP (measured 2026-09-09).
+
+    A gigabyte of file with two pages written into it: the size is the whole
+    gigabyte, what it costs is not, and the hole still reads as zeroes."""
+    p = tmp_path / "grown.raw"
+    size = 1 << 30
+    with open(p, "wb") as f:
+        assert rd.sparse_truncate(f, size) is True
+        f.write(b"x" * 4096)
+        f.seek(size - 4096)                 # a far write, as the menu does
+        f.write(b"y" * 4096)
+    assert os.path.getsize(p) == size
+    assert _allocated(p) < size // 2, (
+        "%d of %d bytes allocated - the holes were not kept"
+        % (_allocated(p), size))
+    with open(p, "rb") as f:
+        assert f.read(4096) == b"x" * 4096
+        f.seek(size // 2)
+        assert f.read(4096) == bytes(4096)  # the hole, and it reads as zeroes
+        f.seek(size - 4096)
+        assert f.read(4096) == b"y" * 4096
+
+
+def test_the_menu_read_asks_for_a_sparse_file(tmp_path):
+    """The miniature card is 384 KB, far too small for :func:`_allocated` to
+    tell holes from clusters, so this asks the other half of the question:
+    did the read go through :func:`sparse_truncate` at all.  On Windows that
+    leaves a mark on the file itself."""
+    card = _spike_image(tmp_path / "card.raw", 0x0BADCAFE)
+    img = str(tmp_path / "menu.raw")
+    rd.read_device_menu_to_image(card, img)
+    if sys.platform == "win32":
+        _FILE_ATTRIBUTE_SPARSE_FILE = 0x200
+        attrs = os.stat(img).st_file_attributes
+        assert attrs & _FILE_ATTRIBUTE_SPARSE_FILE, \
+            "the menu image was never marked sparse (attrs 0x%X)" % attrs
+    else:                                   # POSIX extends sparsely already
+        assert os.path.getsize(img) == os.path.getsize(card)
 
 
 def test_the_menu_read_refuses_a_card_without_a_table(tmp_path):

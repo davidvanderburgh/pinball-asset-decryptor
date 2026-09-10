@@ -1687,31 +1687,90 @@ def cache_dir_args():
 
 
 def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
-                         rootfs=None):
+                         rootfs=None, card=""):
     """The shell line that ends with ``[preview] selector: <binary>``: build
     the selector from *src_dir* into *build_dir* (``make`` is incremental -
     a no-op once built, so the preview always draws with THIS checkout's
     selector), or when that fails (no cross compiler) fall back to the
-    tab's installed selector build; neither installs anything.  No ``$``:
-    wsl.exe would eat it."""
+    tab's installed selector build; neither installs anything.
+
+    *card* is the one exception, and it is a machine that has no guest
+    filesystem at all: see the comment below, where ensureselect.sh unpacks
+    one and does install a selector, because nothing can be compiled until
+    it has.  No ``$``: wsl.exe would eat it."""
     rootfs = rootfs or rootfs_for(selector_dir)
     built = build_dir.rstrip("/") + "/codeselect"
     installed = (selector_dir or DEFAULT_SELECTOR_DIR).rstrip("/") \
         + "/codeselect"
     tag = _q(SELECTOR_LINE)
-    return ("if make -C %s BUILD=%s ROOT=%s all; then echo %s %s; "
-            "elif [ -x %s ]; then echo %s %s; else echo %s; exit 1; fi"
+    lib = rootfs.rstrip("/") + "/usr/lib"
+    # A MACHINE THAT HAS NEVER UNPACKED ONE CANNOT BUILD ANYTHING, and that
+    # is not what the old sentence said.  The menu program is cross-compiled
+    # against the CARD's own headers and libraries (-nostdinc -isystem
+    # <rootfs>/usr/include, and the card's own crt1.o), so with no guest
+    # filesystem the make dies on `stdio.h: No such file or directory`, the
+    # fallback finds no installed selector either, and the preview reported
+    #
+    #   [preview] error: no selector - the build failed and
+    #   ~/spike2root/usr/local/codeselect/codeselect is not there
+    #
+    # which names the SYMPTOM's path and never the missing filesystem.  A
+    # freshly imported runtime is exactly this machine, so somebody who had
+    # only ever loaded a card - never run the emulator - could not preview
+    # at all (2026-09-09, on a multi-boot card built by somebody else).
+    #
+    # So ask the question the rest of the app already asks, with the rest of
+    # the app's own answer: ensureselect.sh unpacks the filesystem from a
+    # card, builds the menu program and installs it (minutes, once).  It is
+    # NEVER fatal here - a preview would rather fall through to whatever is
+    # installed than stop - and it runs only when the filesystem is missing,
+    # so a healthy machine pays one `[ -d ]` per keystroke render.
+    ensure = ""
+    if card:
+        ensure = ("if [ ! -d %s ] && [ -f %s ]; then PAD_ROOT=%s bash %s %s; "
+                  "fi; " % (_q(lib), _q(card), _q(rootfs), _q(ENSURESELECT),
+                            _q(card)))
+    return (ensure
+            + "if make -C %s BUILD=%s ROOT=%s all; then echo %s %s; "
+              "elif [ -x %s ]; then echo %s %s; "
+              "elif [ ! -d %s ]; then echo %s; exit 1; "
+              "else echo %s; exit 1; fi"
             % (_q(src_dir), _q(build_dir), _q(rootfs), tag, _q(built),
-               _q(installed), tag, _q(installed),
+               _q(installed), tag, _q(installed), _q(lib),
+               _q("[preview] error: no selector - the menu program is built "
+                  "against the machine's own filesystem, and this PC has not "
+                  "unpacked one yet (nothing at %s). Point the tab at a card "
+                  "image that is on this PC and preview again and it is "
+                  "built for you, once." % rootfs),
                _q("[preview] error: no selector - the build failed and %s "
                   "is not there" % installed)))
 
 
-def ensure_selector_args(form, cwd=None):
+def selector_card(form, loaded_card=""):
+    """The card image the selector step may unpack a guest filesystem from,
+    or ``''`` when neither candidate is on this machine.
+
+    THE LOADED CARD COMES FIRST, and that order is the whole point: a card
+    somebody else built names its images' sources on THEIR machine, so
+    ``images[0].path`` is a path that is not here, while the card file the
+    tab was just pointed at - the download, or the menu read off the SD
+    card - is.  A menu read is p1+p2 and p2 IS the filesystem, so even the
+    few-hundred-MB menu image is enough to build one from."""
+    rows = getattr(form, "images", None) or []
+    first = getattr(rows[0], "path", "") if rows else ""
+    for cand in (loaded_card, first):
+        cand = (cand or "").strip().strip('"')
+        if cand and os.path.isfile(cand):
+            return cand
+    return ""
+
+
+def ensure_selector_args(form, cwd=None, card=""):
     """The 'selector' step's argv (see :func:`ensure_selector_line`)."""
     if cwd is None:
         cwd = wsl(repo_dir())
-    line = ensure_selector_line(form.selector_dir, cwd + "/" + CODESELECT_SRC)
+    line = ensure_selector_line(form.selector_dir, cwd + "/" + CODESELECT_SRC,
+                                card=wsl(card) if card else "")
     return wsl_shell("cd %s && %s" % (_q(cwd), line))
 
 
@@ -2015,8 +2074,8 @@ def audio_prepare_commands(form, media_dir, cwd=None):
     return [(AUDIO_LABEL, wsl_command(prepare_args(form, media_dir), cwd))]
 
 
-def ensure_selector_commands(form, cwd=None):
-    return [("selector", ensure_selector_args(form, cwd))]
+def ensure_selector_commands(form, cwd=None, card=""):
+    return [("selector", ensure_selector_args(form, cwd, card))]
 
 
 def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
@@ -10029,7 +10088,8 @@ class MultibootPanel:
         # no-op once built), and at once when the build PATH changes.
         if (not self._pv_bin
                 or time.time() - self._pv_bin_at > self.SELECTOR_TTL_S):
-            cmds += ensure_selector_commands(form)
+            cmds += ensure_selector_commands(
+                form, card=selector_card(form, self._loaded_card))
         # THE DIRECTORY IS PART OF THE KEY.  media_fingerprint leaves the
         # output path out on purpose (a retyped output does not change what
         # the media IS), but the directory the media is written into comes

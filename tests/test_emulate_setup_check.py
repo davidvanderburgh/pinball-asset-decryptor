@@ -23,6 +23,7 @@ way.
 """
 import os
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -35,6 +36,8 @@ from pinball_decryptor.gui.emulate_tab import (setup_env_faults, setup_fixable,
                                                setup_fix_steps, setup_notice,
                                                setup_ok, setup_report,
                                                setup_settled)
+
+LF = chr(10)
 
 RIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "tools", "spike2_emu")
@@ -344,6 +347,76 @@ def test_the_windows_python_search_has_one_definition():
         play = fh.read()
     assert "pad_win_python" in play
     assert "AppData/Local/Programs" not in play, "the copy is back"
+
+
+#: Every script that stages sources somewhere before compiling them.  They
+#: wrote "$HOME/emusrc" out one at a time until 2026-09-09; see pad_stage.
+STAGERS = ("build.sh", "buildbridge.sh", "buildgl.sh", "build_padtrace.sh",
+           "buildselect.sh", "sync.sh")
+
+
+@pytest.mark.skipif(not os.path.isdir(RIG), reason="rig not present")
+def test_the_build_staging_directory_has_one_definition():
+    """It was written out separately in six scripts, and the one case this
+    rig hits constantly makes that wrong rather than merely repetitive: the
+    app runs some steps as root CARRYING THE DESKTOP USER'S HOME, so a root
+    step created ~/emusrc owned by root inside a human's home, and every
+    later unprivileged build died on `Permission denied` from then on.
+
+    Measured on 2026-09-09: one elevated emulator run left ~/emusrc,
+    ~/.cache and ~/padglhost owned by root, and after it the Multi-boot tab
+    could not build its menu program on that machine at all - the preview
+    failed at its first step every time."""
+    for name in STAGERS:
+        with open(os.path.join(RIG, name), encoding="utf8") as fh:
+            src = fh.read()
+        assert "HOME/emusrc" not in src, "%s spells the directory out" % name
+        assert "pad_stage" in src or "PAD_STAGE" in src, \
+            "%s does not go through the one definition" % name
+    with open(os.path.join(RIG, "padpath.sh"), encoding="utf8") as fh:
+        pad = fh.read()
+    assert "pad_stage()" in pad
+    assert "PAD_STAGE:=$PAD_HOME/emusrc" in pad
+    # ROOT IS ELEVATION, NOT OWNERSHIP: a root step hands the directory back
+    # to the human whose home it is, and is the only thing that can repair
+    # one an earlier root step left behind.
+    assert "chown -R" in pad
+    # ...and the shared name is the long one: STAGE is already a scratch
+    # directory of its own in loadgame.sh, overrides.sh and rootfs.sh.
+    assert LF + "STAGE=" not in pad
+    with open(os.path.join(RIG, "buildselect.sh"), encoding="utf8") as fh:
+        assert "STAGE=$PAD_STAGE" in fh.read()
+
+
+def _stage_env():
+    """A staging home of our own, so the test never touches a real rig's."""
+    env = dict(os.environ)
+    env["PAD_HOME"] = tempfile.mkdtemp(prefix="padstage")
+    env.pop("PAD_STAGE", None)
+    return env
+
+
+@pytest.mark.skipif(not (os.path.isdir(RIG) and HAS_BASH),
+                    reason="rig or working bash not present")
+def test_pad_stage_makes_the_directory_and_names_it_once():
+    """``pad_stage`` creates the staging directory.  Fed on stdin for the
+    reason the next test writes out.
+
+    The short name STAGE is deliberately NOT claimed here: loadgame.sh,
+    overrides.sh and rootfs.sh each already use it for a scratch directory
+    of their own, so buildselect.sh - the one script that wants the short
+    spelling - sets it from PAD_STAGE itself."""
+    with open(os.path.join(RIG, "padpath.sh"), "rb") as fh:
+        pad = fh.read().decode("utf-8")
+    script = (pad
+              + LF + "pad_stage || exit 3"
+              + LF + '[ -d "$PAD_STAGE" ] || exit 4'
+              + LF + 'echo "stage=$PAD_STAGE"' + LF)
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         capture_output=True, timeout=120, env=_stage_env())
+    got = out.stdout.decode("utf-8", "replace")
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace") + got
+    assert "stage=" in got and got.rstrip().endswith("/emusrc"), got
 
 
 @pytest.mark.skipif(not (os.path.isdir(RIG) and HAS_BASH),

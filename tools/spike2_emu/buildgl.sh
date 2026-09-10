@@ -24,17 +24,17 @@ S=$RIG
 # made by hand once and is a `cp: No such file or directory` on any
 # other. Compiling from /mnt/c is what it avoids - drvfs is slow enough
 # to matter over a few thousand lines of C.
-mkdir -p "$HOME/emusrc"
-cp "$S/glraster.c" "$S/eglshim.c" "$HOME/emusrc/"
+pad_stage || exit 1
+cp "$S/glraster.c" "$S/eglshim.c" "$PAD_STAGE/"
 
 CFLAGS="-fno-stack-protector -shared -fPIC -O2 -nostdlib -Wall"
 
 arm-linux-gnueabihf-gcc $CFLAGS -Wl,-soname,libGLESv2.so.2 \
-  -o "$R/usr/lib/libGLESv2.so.2" "$HOME/emusrc/glraster.c" \
+  -o "$R/usr/lib/libGLESv2.so.2" "$PAD_STAGE/glraster.c" \
   -L"$R/lib" -l:libc.so.6
 
 arm-linux-gnueabihf-gcc $CFLAGS -Wl,-soname,libEGL.so.1 \
-  -o "$R/usr/lib/libEGL.so.1" "$HOME/emusrc/eglshim.c" \
+  -o "$R/usr/lib/libEGL.so.1" "$PAD_STAGE/eglshim.c" \
   -L"$R/lib" -L"$R/usr/lib" -l:libGLESv2.so.2 -l:libc.so.6
 
 echo "libGLESv2.so.2 : $(stat -c%s "$R/usr/lib/libGLESv2.so.2") bytes (RASTER - see header)"

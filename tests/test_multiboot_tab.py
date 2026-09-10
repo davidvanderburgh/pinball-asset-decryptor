@@ -47,6 +47,7 @@ from pinball_decryptor.gui.multiboot_tab import (
     eta_text, menu_summary, parse_anim_frames, parse_inspect, parse_plan,
     parse_progress, parse_refusal,
     parse_selector_path, plan_commands, prepare_commands, preview_box,
+    selector_card,
     preview_fingerprint, preview_prepare_args, preview_snapshot_args,
     rebuild_blockers, snapshot_commands, split_anim_source,
     split_art_source, suggest_title, under_library, validate_form,
@@ -693,9 +694,12 @@ def test_ensure_selector_builds_from_the_checkout_then_falls_back(
                            "elif [ -x ~/spike2root/usr/local/codeselect/"
                            "codeselect ]; then echo '[preview] selector:' "
                            "~/spike2root/usr/local/codeselect/codeselect; "
-                           "else echo "), line
+                           "elif [ ! -d ~/spike2root/usr/lib ]; then echo "),\
+        line
     assert line.endswith("; exit 1; fi")
     assert "$" not in line and "install" not in line
+    # ...and with no card to unpack one from, nothing runs before the make
+    assert line.startswith("cd /mnt/c/repo && if make")
     assert PREVIEW_BUILD_DIR == "~/emusrc/codeselect-preview"
     # a selector build elsewhere names its own rootfs
     form.selector_dir = "~/my root/usr/local/codeselect"
@@ -707,6 +711,58 @@ def test_ensure_selector_builds_from_the_checkout_then_falls_back(
                                "codeselect-preview/codeselect\n") == \
         "/home/d/emusrc/codeselect-preview/codeselect"
     assert parse_selector_path("[preview] error: no selector") == ""
+
+
+def test_selector_card_prefers_the_card_in_hand(tmp_path):
+    """Which card a guest filesystem may be unpacked from.  The LOADED card
+    first: a card somebody else built names its images' sources on THEIR
+    machine, so row 0's path is a path that is not here, while the card file
+    the tab was pointed at is."""
+    here = tmp_path / "downloaded.multi.raw"
+    here.write_bytes(b"x")
+    form = _form(tmp_path, 2)
+    row0 = form.images[0].path
+    form.images[0].path = "G:/somebody elses/machine.raw"
+    assert selector_card(form, str(here)) == str(here)
+    # no loaded card: row 0, when row 0 is on this machine
+    form.images[0].path = row0
+    assert selector_card(form, "") == row0
+    # neither is here, and a directory is not a card either
+    form.images[0].path = "G:/somebody elses/machine.raw"
+    assert selector_card(form, "G:/gone.raw") == ""
+    assert selector_card(form, str(tmp_path)) == ""
+    form.images = []
+    assert selector_card(form, "") == ""
+
+
+def test_ensure_selector_unpacks_a_guest_filesystem_when_there_is_none(
+        monkeypatch, tmp_path):
+    """A machine that has never unpacked one cannot compile the menu program
+    at all - it is built against the CARD's own headers and libraries - so
+    the step runs the rig's ensureselect.sh first, from a card that IS on
+    this machine.  Guarded twice (no filesystem, and the card is there), so
+    a healthy machine pays one `[ -d ]` per keystroke render, and never
+    fatally: a preview would rather fall through to an installed selector
+    than stop."""
+    _win(monkeypatch)
+    form = _form(tmp_path, 2)
+    card = tmp_path / "downloaded.multi.raw"
+    card.write_bytes(b"x")
+    quoted = multiboot_tab._q(multiboot_tab.wsl(str(card)))
+    line = _line(ensure_selector_args(form, cwd="/mnt/c/repo",
+                                      card=str(card)))
+    head, _make = line.split("; if make", 1)
+    assert head == ("cd /mnt/c/repo && if [ ! -d ~/spike2root/usr/lib ] "
+                    "&& [ -f %s ]; then PAD_ROOT=~/spike2root bash "
+                    "tools/spike2_emu/ensureselect.sh %s; fi"
+                    % (quoted, quoted)), head
+    assert "$" not in line
+    # the refusal names the missing filesystem, not a selector path nobody
+    # has heard of, which is all the old one said
+    assert ("elif [ ! -d ~/spike2root/usr/lib ]; then echo '[preview] error: "
+            "no selector - the menu program is built against the machine") \
+        in line
+    assert "unpacked one yet (nothing at ~/spike2root)" in line
 
 
 def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
@@ -2424,7 +2480,8 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
     seen = {"snapshot": []}
     length = frames
 
-    def ensure(form, cwd=None):
+    def ensure(form, cwd=None, card=""):
+        seen.setdefault("selector_card", []).append(card)
         code = ("print('[preview] selector: /fake/codeselect')"
                 if fail != "selector" else
                 "print('[preview] error: no selector'); raise SystemExit(2)")
@@ -2481,6 +2538,35 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
     monkeypatch.setattr(multiboot_tab, "audio_prepare_commands", audio)
     monkeypatch.setattr(multiboot_tab, "snapshot_commands", snapshot)
     return seen
+
+
+def test_the_preview_hands_the_selector_step_the_card_it_has(tmp_path,
+                                                             monkeypatch):
+    """The wiring behind :func:`selector_card`, end to end: the step is
+    given a card so a machine with no guest filesystem can unpack one, and
+    for a LOADED card that is the card file itself - row 0 of a card
+    somebody else built names a path on their machine, not on this one."""
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path)
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        # nothing loaded: image 0, which is on this machine
+        assert seen["selector_card"] == [_images(tmp_path, 2)[0]]
+        # ...and the card the tab was pointed at wins over image 0, which
+        # for a card somebody else built is the only one that is here
+        card = tmp_path / "downloaded.multi.raw"
+        card.write_bytes(b"x")
+        panel._loaded_card = str(card)
+        panel._pv_bin = ""
+        panel._rows[1].title = "changed, so the frame is drawn again"
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert seen["selector_card"][-1] == str(card)
+    finally:
+        root.destroy()
 
 
 def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,

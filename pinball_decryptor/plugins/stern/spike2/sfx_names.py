@@ -356,8 +356,20 @@ def _func_start(fw, off):
     return off + 0x8000
 
 
-def _try_resolve(emu, addr, out, sid):
-    """Call *addr* as the resolver; return de-whitened descriptor bytes or None."""
+#: How much of a descriptor is read.  Every primary op11 seen sits well
+#: inside it, and the keystream the resolver hands back is only guaranteed
+#: this far past the largest offset it reports.
+DESC_WINDOW = 0x50
+
+
+def resolve_descriptor(emu, addr, out, sid):
+    """Call *addr* as the resolver for *sid*.
+
+    Returns ``(dec0, keystream, desc)`` -- the descriptor's offset in
+    ``image.bin``, the :data:`DESC_WINDOW` keystream bytes that whiten it
+    there, and the de-whitened bytes -- or ``None`` when the sid does not
+    resolve to a magic-5 descriptor.  A caller that has to write a descriptor
+    back needs the first two: the bytes on the card are ``desc ^ keystream``."""
     emu.mu.mem_write(out, b"\x00" * 0x40)
     st = emu.call(addr, (sid, out), limit=5_000_000)
     if st[0] != "ok":
@@ -370,12 +382,30 @@ def _try_resolve(emu, addr, out, sid):
     if not (0 <= keyoff < 0x3F00):
         return None
     dec0 = d - IMG_BASE
-    body = emu.mm[dec0:dec0 + 0x50]
-    if len(body) < 0x50:
+    body = emu.mm[dec0:dec0 + DESC_WINDOW]
+    if len(body) < DESC_WINDOW:
         return None
-    vf2 = bytes(emu.mu.mem_read(emu.VF2_VA + keyoff, 0x50))
-    desc = bytes(body[k] ^ vf2[k] for k in range(0x50))
-    return desc if desc and desc[0] == 5 else None
+    vf2 = bytes(emu.mu.mem_read(emu.VF2_VA + keyoff, DESC_WINDOW))
+    desc = bytes(body[k] ^ vf2[k] for k in range(DESC_WINDOW))
+    return (dec0, vf2, desc) if desc and desc[0] == 5 else None
+
+
+def _try_resolve(emu, addr, out, sid):
+    """Call *addr* as the resolver; return de-whitened descriptor bytes or None."""
+    r = resolve_descriptor(emu, addr, out, sid)
+    return r[2] if r else None
+
+
+def sid_ceiling(img_path, default=4096):
+    """The last sid worth asking the resolver about: the container header's
+    fragment count (see :func:`..info.container_counts`), else *default*."""
+    try:
+        from ..info import container_counts
+        with open(img_path, "rb") as f:
+            frags, _sounds = container_counts(f.read(0x100))
+        return int(frags) if frags else default
+    except Exception:
+        return default
 
 
 # Records at least this long are music beds/masters, not effects.  Led Zeppelin

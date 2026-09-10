@@ -330,6 +330,24 @@ def _grow_card(monkeypatch, tmp_path, params, grown_rows=None, places=None):
     def derive(gr, staged, params_stock, log, progress=None):
         return (grown_rows if grown_rows is not None else params_stock), None
 
+    # The play tables name every sound by its key's first word; the re-point
+    # itself is an emulator step and is only recorded here.
+    def sites(gr, img, log=None):
+        return [(100 + p["idx"], 0x300 + 8 * p["idx"], b"\x00" * 8,
+                 struct.pack("<II", p["key0"], 0))
+                for p in params if p.get("key0") is not None]
+
+    repointed = {}
+
+    def repoint(gr, staged, prm, st, log):
+        repointed["path"] = staged
+        repointed["params"] = prm
+        repointed["sites"] = st
+        return {}
+
+    staged_seen["repointed"] = repointed
+    monkeypatch.setattr(engine, "_descriptor_sites", sites)
+    monkeypatch.setattr(engine, "_repoint_descriptors", repoint)
     monkeypatch.setattr(engine, "_locate",
                         lambda f, p: (reader, reader.fw_node, reader.img_node))
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [(0, 1 << 30)])

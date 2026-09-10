@@ -4382,6 +4382,20 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             log("%d replacement(s) run past their original "
                                 "sound's length and are trimmed to fit: %s."
                                 % (len(_grows), _gwhy), "info")
+                    desc_sites = []
+                    if grows:
+                        # A longer copy is only worth appending if a play
+                        # table names the sound: the copy registers under a
+                        # key of its own, and the table is re-pointed at it
+                        # once the staged bank has been derived.
+                        t0 = time.monotonic()
+                        if progress:
+                            progress(10, 100, "Reading the game's play tables...")
+                        desc_sites = _descriptor_sites(gr_path, img_path, log)
+                        grows = _grows_named_by_a_descriptor(
+                            grows, {p["idx"]: p for p in params}, desc_sites,
+                            log)
+                        _stage_done(log, "reading the game's play tables", t0)
                     if grows:
                         t0 = time.monotonic()
                         grow_work = grow_work or _work_dir(
@@ -4400,6 +4414,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                      "Deriving the grown sound bank...")
                         params, _greads = _derive_grown(
                             gr_path, img_path, params, log, progress)
+                        if progress:
+                            progress(14, 100, "Re-pointing the game's play "
+                                     "tables at the longer sounds...")
+                        _repoint_descriptors(gr_path, img_path, params,
+                                             desc_sites, log)
                         _stage_done(log, "staging a sound bank with %d longer "
                                     "sound(s)" % len(grows), t0)
                     t0 = time.monotonic()
@@ -8834,9 +8853,10 @@ def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
     stock body stays exactly where it is.  What changes is that the record
     array gains one entry per grown sound — a copy of that sound's record with
     only its body offset and its length replaced — and the file gains one body
-    per entry, appended past where it used to end.  The game's play-time lookup
-    finds a sound by an identity the copy keeps, and the copy is built last, so
-    it is the copy that answers.
+    per entry, appended past where it used to end.  The copy registers with the
+    game's sound container under a key of its own (the key moves with a
+    record's geometry), so on its own it would sit there unplayed; the play
+    tables are re-pointed at it afterwards (:func:`_repoint_descriptors`).
 
     The appended body starts as the stock sound's own bytes, repeated to fill
     the new length.  It is a scaffold the encoder overwrites, but it has to be
@@ -8927,8 +8947,14 @@ def _derive_grown(gr_path, staged, params_stock, log, progress=None):
         emu.close()
     params = collapse_shadowed(rows)
     grown_idx = {p["idx"] for p in params if p.get("shadows") is not None}
+    raw_by_idx = {r.get("idx"): r for r in rows}
     for p in params:
         p["grown"] = p["idx"] in grown_idx
+        if p["grown"]:
+            # The key the STOCK record registered under, from the row the
+            # collapse retired.  The play tables name the sound by it, and
+            # the re-point matches on it exactly (all eight bytes).
+            p["stock_findkey"] = (raw_by_idx.get(p["idx"]) or {}).get("findkey")
     stock = {p["idx"]: (p["scale"], p["pred16"], p["body_off"], p["length"])
              for p in params_stock}
     moved = [p["idx"] for p in params
@@ -8945,6 +8971,195 @@ def _derive_grown(gr_path, staged, params_stock, log, progress=None):
         "byte-identical." % (len(grown_idx), len(params) - len(grown_idx)),
         "info")
     return params, reads
+
+
+# --------------------------------------------------------------------------
+# Re-pointing the play tables at an appended record
+# --------------------------------------------------------------------------
+# The game does not find a sound by its record's identity bytes.  The boot-time
+# band build registers every record with the sound container under a key of
+# its own, and that key moves with the record's geometry: the appended copy of
+# a sound registers under a DIFFERENT key from the stock record it copies, so
+# both entries exist and the descriptor that names the sound keeps naming the
+# stock one.  Measured on a built Led Zeppelin 1.22 card: idx 44's stock key
+# 0xf3e13d92, its appended copy's 0xb0c13c9e, and the Sound Test played the
+# original.  So the descriptor is re-pointed: its op11 payload is rewritten to
+# the appended record's key.
+#
+# What the firmware makes of that payload, read off both callers of the
+# container find on Led Zeppelin 1.22 (0x209858 and 0x2090f8):
+#
+#     key.w1 = payload.w1
+#     key.w2 = (payload.w2 & 0xe0001fff) | ((sid >> 16) << 13)
+#
+# and the find itself compares all 64 bits (ldrd / cmp / cmpeq at 0x16fe80).
+# The sixteen bits in the middle of the second word are something else the
+# descriptor carries; they are kept as they are.
+_DESC_KEY2_MASK = 0xE0001FFF
+_DESC_OP11 = b"\x0b\x00\x00\x00"
+
+
+def _play_key(payload8, sid):
+    """The 8-byte container key the game derives from an op11 payload."""
+    w1, w2 = struct.unpack("<II", payload8)
+    w2 = (w2 & _DESC_KEY2_MASK) | (((sid >> 16) << 13) & 0xFFFFFFFF)
+    return struct.pack("<II", w1, w2)
+
+
+def _op11_payloads(desc):
+    """``[(offset, payload8)]`` for every op11 marker in a descriptor, from
+    the first position a primary asset can sit at (see sfx_names)."""
+    out = []
+    p = 9
+    while True:
+        p = desc.find(_DESC_OP11, p)
+        if p < 0 or p + 12 > len(desc):
+            return out
+        out.append((p + 4, desc[p + 4:p + 12]))
+        p += 4
+
+
+def _descriptor_sites(gr_path, img_path, log=None):
+    """Every op11 payload the card's play tables carry, as
+    ``[(sid, off, keystream8, payload8)]``: *off* is where the eight payload
+    bytes sit in ``image.bin``, *keystream8* the bytes that whiten them there
+    and *payload8* the plain value.  Empty when the resolver can't be
+    located, which a caller treats as "no descriptor names anything"."""
+    from .spike2 import sfx_names as SN
+    from .spike2.emulator import Spike2Emu
+    out = []
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        resolver, buf = SN._find_resolver(emu)
+        if resolver is None:
+            if log:
+                log("The game's descriptor resolver could not be located, so "
+                    "no play table can be re-pointed on this build.", "info")
+            return out
+        for sid in range(SN.sid_ceiling(img_path) + 1):
+            r = SN.resolve_descriptor(emu, resolver, buf, sid)
+            if r is None:
+                continue
+            dec0, ks, desc = r
+            for p, payload in _op11_payloads(desc):
+                out.append((sid, dec0 + p, ks[p:p + 8], payload))
+    finally:
+        emu.close()
+    return out
+
+
+def _grows_named_by_a_descriptor(grows, byidx, sites, log):
+    """*grows* less every sound no play table names, each dropped with a
+    reason in the log: a longer copy nothing points at would never be played,
+    so that replacement trims to fit exactly as it did before.
+
+    Matches on the key's first word here, which is all the cached params
+    carry; the exact eight-byte match happens once the staged bank has been
+    derived (:func:`_plan_descriptor_repoint`)."""
+    named = set()
+    for _sid, _off, _ks, payload in sites:
+        named.add(struct.unpack_from("<I", payload)[0])
+    kept = {}
+    for idx, spec in grows.items():
+        k0 = (byidx.get(idx) or {}).get("key0")
+        if k0 is None:
+            log("idx %d: this firmware's decode reports no container key for "
+                "the sound, so its play tables can't be re-pointed at a "
+                "longer copy; the replacement is trimmed to fit." % idx,
+                "info")
+        elif k0 not in named:
+            log("idx %d: nothing in the game's play tables names this sound, "
+                "so a longer copy would never be played; the replacement is "
+                "trimmed to fit." % idx, "info")
+        else:
+            kept[idx] = spec
+    return kept
+
+
+def _plan_descriptor_repoint(params, sites):
+    """``({off: bytes}, {sid: {key8}})`` -- the writes that re-point every
+    descriptor naming a grown sound's stock record at its appended record,
+    and what each touched sid must then resolve to.
+
+    Raises when a grown sound's appended key has bits no descriptor can
+    carry, or when no descriptor names its stock record: either would ship
+    a card that plays the original, the very thing this exists to prevent."""
+    writes, expect = {}, {}
+    for p in params:
+        if not p.get("grown"):
+            continue
+        old, new = p.get("stock_findkey"), p.get("findkey")
+        if not old or not new:
+            raise RuntimeError(
+                "idx %d: the staged bank's decode reported no container key "
+                "for the sound, so its play tables can't be re-pointed."
+                % p["idx"])
+        hits = 0
+        for sid, off, ks, payload in sites:
+            if _play_key(payload, sid) != old:
+                continue
+            if _play_key(new, sid) != new:
+                raise RuntimeError(
+                    "idx %d: the appended record's container key (%s) has "
+                    "bits no descriptor can carry, so the game could never "
+                    "look it up." % (p["idx"], new.hex()))
+            w1, w2 = struct.unpack("<II", new)
+            _o1, o2 = struct.unpack("<II", payload)
+            plain = struct.pack(
+                "<II", w1,
+                (o2 & ~_DESC_KEY2_MASK & 0xFFFFFFFF) | (w2 & _DESC_KEY2_MASK))
+            writes[off] = bytes(a ^ b for a, b in zip(plain, ks))
+            expect.setdefault(sid, set()).add(new)
+            hits += 1
+        if not hits:
+            raise RuntimeError(
+                "idx %d: no descriptor in the game's play tables names this "
+                "sound's record, so the longer copy could never be played."
+                % p["idx"])
+    return writes, expect
+
+
+def _repoint_descriptors(gr_path, staged, params, sites, log):
+    """Rewrite the play tables in the staged bank so every descriptor that
+    named a grown sound's stock record names its appended record instead,
+    then prove it through the game's own resolver on the file as written.
+    Returns the ``{off: bytes}`` written."""
+    from .spike2 import sfx_names as SN
+    from .spike2.emulator import Spike2Emu
+    writes, expect = _plan_descriptor_repoint(params, sites)
+    with open(_lp(staged), "r+b") as f:
+        for off, data in writes.items():
+            f.seek(off)
+            f.write(data)
+    emu = Spike2Emu(gr_path, staged)
+    try:
+        emu.boot()
+        resolver, buf = SN._find_resolver(emu)
+        if resolver is None:
+            raise RuntimeError(
+                "The game's descriptor resolver could not be located on the "
+                "staged bank, so the re-point could not be verified.")
+        for sid, keys in sorted(expect.items()):
+            r = SN.resolve_descriptor(emu, resolver, buf, sid)
+            got = set()
+            if r is not None:
+                for _p, payload in _op11_payloads(r[2]):
+                    got.add(_play_key(payload, sid))
+            missing = keys - got
+            if missing:
+                raise RuntimeError(
+                    "sid %d: after the re-point the game's resolver does not "
+                    "hand back the appended record's key (%s); aborting "
+                    "rather than shipping a card that plays the original."
+                    % (sid, ", ".join(k.hex() for k in sorted(missing))))
+    finally:
+        emu.close()
+    n_grown = sum(1 for p in params if p.get("grown"))
+    log("Play tables re-pointed: %d descriptor(s) now name the longer copy "
+        "of %d sound(s), confirmed through the game's own resolver."
+        % (len(writes), n_grown), "info")
+    return writes
 
 
 def _assert_param_integrity(gr_path, img_path, patches, params, np, log,

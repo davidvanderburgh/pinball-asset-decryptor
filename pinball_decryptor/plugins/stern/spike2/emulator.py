@@ -223,10 +223,12 @@ def collapse_shadowed(rows):
     A card whose sound bank has been grown carries TWO records for a grown
     sound: the stock one, still pointing at the old short body, and an appended
     one pointing at the longer body past the old end of the file.  Both build a
-    codec object, but the appended one runs last and takes over the entry the
-    game looks a sound up by, so the stock record is dead weight -- and leaving
-    it in the params would name the dead slot ``idxN.wav`` on the next Extract
-    and encode a later edit of that file into a body nothing plays.
+    codec object and both register with the game's sound container, each
+    under a key of its own; the build re-points the play tables that named
+    the stock record at the appended one, so the stock record is dead weight
+    -- and leaving it in the params would name the dead slot ``idxN.wav`` on
+    the next Extract and encode a later edit of that file into a body nothing
+    plays.
 
     So: keep the LAST row of each identity, give it the FIRST's index (that is
     the number the sound has always had), and record the index it actually came
@@ -1135,12 +1137,14 @@ class Spike2Emu:
                     band0_keyoff_rel=(_u32(obj, 0x0c) - self.VF2_VA) & 0xffffffff,
                     stride=obj[0x1a], chan=obj[0x1b], scale=obj[0x1d],
                     # The record bytes that are NOT its geometry.  Two records
-                    # with the same identity are the same sound to the game's
-                    # play-time lookup, which is how a grown sound bank retires
-                    # a stock slot in favour of an appended one (see
-                    # collapse_shadowed).  Measured unique across every record
-                    # of all 53 shipped cards examined, so collapsing on it
-                    # cannot merge two genuinely different sounds.
+                    # with the same identity are one sound whose bank has been
+                    # grown -- the appended copy of a stock record -- which is
+                    # how Extract retires the stock slot in favour of the copy
+                    # (see collapse_shadowed).  It is NOT what the game looks
+                    # a sound up by: that is the container key below, which
+                    # moves with the geometry.  Measured unique across every
+                    # record of all 53 shipped cards examined, so collapsing
+                    # on it cannot merge two genuinely different sounds.
                     identity=rec[4:16] + rec[20:24])
                 # Sound-container identity key snapshotted at the skipped find
                 # (generic builds only) — pairs this idx with the play-time
@@ -1149,6 +1153,10 @@ class Spike2Emu:
                 # faulted; naming degrades to unnamed for those.
                 fk = getattr(self, "_last_find_key", None)
                 row["key0"] = _u32(fk, 0) if fk and len(fk) >= 4 else None
+                # The whole 8-byte key, for a build that has to re-point a
+                # play-time descriptor at an appended record (the descriptor
+                # carries all eight bytes, not just the low word).
+                row["findkey"] = bytes(fk) if fk and len(fk) >= 8 else None
                 if self._generic:
                     # The generic decode replays the raw band-build obj verbatim
                     # (no per-build field reassembly), with body_off / length /

@@ -253,6 +253,22 @@ HELP_CONTENT = {
          "cause is not yet known and no card built this way has been "
          "confirmed to boot. Leaving it off costs you only the brief scrap "
          "described above, which a tester listening for it could not hear."),
+        ("Longer replacements (Advanced Audio Options)",
+         "Off by default. On Spike 2 a replacement is normally fitted to "
+         "the sound it replaces, so a longer clip is trimmed: the card's "
+         "sound bank records where every sound starts, and lengthening one "
+         "in place would strand all the rest. Ticking this appends your "
+         "audio past the end of the bank instead, adds a copy of that "
+         "sound's record pointing at it, and re-points the game's play "
+         "tables at the copy, so every other sound on the card is untouched "
+         "and the whole clip plays. The preview shows such a clip whole, "
+         "with a green line where the original ended, instead of hatching "
+         "its tail as trimmed. It needs the Linux filesystem driver (the "
+         "file gets bigger) and is skipped for a direct-SD write, which "
+         "trims as before. Proven in the PC emulator, where the grown "
+         "sound plays its full length and every neighbouring sound matches "
+         "a stock card; no real machine has booted a card built this way "
+         "yet, which is why it is off."),
     ],
     "Replace Video": [
         ("Scan and assign",

@@ -7830,14 +7830,14 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
       and choosing it (by hand or by the countdown) boots one member at random,
-      a different one every power-up.** `S3 D4` ← WORKING ON *(A tester's "random jukebox",
+      a different one every power-up.** `S3 D4` ← WORKING ON, IN PROGRESS *(A tester's "random jukebox",
       2026-09-09: 20-40 song-set variants of one title, "everything looks
       standard except for the songs". David's first answer to him was a
       hold-START gesture; REJECTED below, his call.)* **GATE FIRST:** everything
       here needs `--layout store`, which has never been on a machine (item 95's
       open flash, the card is built and verified: `D:/Pinball/TMNT
       1987/multi/turtles-1_59_0.store-stock+1987pro+1987le.16G.sdcard.raw`);
-      David flashes it and boots all three images before this item starts.
+      CLEARED 2026-09-10: David flashed it and booted all three.
       DESIGN (decided): members stay ordinary `image=` lines; ONE new key
       `group=<members>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]`
       (`3-5`, `3,5,7-9`) names them and carries a card's display fields, written
@@ -7880,6 +7880,43 @@ These have each been violated at least once and each cost a run or a window:
       variants. Full design, files, ordered commits, traps: handoff REMAINING
       item 106 (also the loose end "members from override sets", because 40 x
       8 GB source images on the tester's PC is the real pain).
+      **GATE CLEARED, 2026-09-10:** David flashed the TMNT store card and
+      booted all three images. `--layout store` is proven on hardware, so a
+      group may force the compact tick and the tab's "experimental" wording
+      comes off (still to do, in the tab commit).
+      **Established (35%, commits 1-3 of 9 done, 8f93f7a):** the SELECTOR half
+      is built and its whole suite is green. `group=<members>|<title>|...`
+      parses; images and cards are now different numbers (`CONF_MAX_IMAGES` 64,
+      `CONF_MAX_CARDS` 16, `CONF_MAX_GROUPS` 8) and everything visual walks
+      cards through `conf_card_face()`; the roll excludes the last-choice
+      member and is stirred from urandom ^ CLOCK_MONOTONIC ^ time ^ pid at the
+      confirm; `--pick`/`--seed` are test-only and a `--pick` that is not a
+      member of the confirmed card is refused. Selector VERSION 3.0.
+      `select.sh` is UNTOUCHED and proven so: byte-identical lookups either
+      side of a `group=` line, under the host awk and the card's busybox awk.
+      **Ruled out / decided, do not re-open:** renaming the `anim: image N` and
+      `image N sound W` log strings to say "card" - the tab's `_ANIM_RE` and
+      eleven tests match on them and the number was always the card's; the note
+      on `struct media` says so, and renaming both sides together belongs with
+      the tab commit. The `card K/M` clause is emitted ONLY when the conf has
+      groups, so a group-free card's log and snapshot output stay byte-identical
+      (an existing headless case pins that line).
+      **Trap found, emulator only:** under `qemu-arm-static -L $ROOT` the open
+      of `/dev/urandom` is redirected into the rootfs copy, where it is an empty
+      regular file, so the read returns 0 and the clock seeds the roll. The log
+      says which happened (`group: /dev/urandom gave 0 byte(s)`). Not a card
+      fault, and not worth a test - it would pin an artefact.
+      **Also:** `make check` must run with the build dir on a Linux-native path
+      (`make check BUILD=/tmp/i106b`); `os.mkfifo` is Errno 95 on the Windows
+      mount and padsw_test.py dies there. Pre-existing, not this item.
+      **Uncommitted:** nothing. The branch is pushed.
+      **Resume:** commit 4 of 9 - `run_game.sh` carries `group=` lines into the
+      rig conf when the card's `image=` count equals the resolved tree count,
+      plus `PAD_SELECT_PICK=<image>` -> `--pick`, and the rig test that pins the
+      chroot line. Then 5-6 (mkmulticard grammar, manifests, plan rows, layout
+      gate, selector-version gate, selftest part), 7-8 (the tab), 9 (the
+      emulator proof run). Full ordered list and every trap: handoff REMAINING
+      item 106.
       — S3: a workaround exists (choose by hand). D4: a conf grammar and
       selector model change, a tool grammar, a tab editor, several rig runs and
       a hardware proof at the end.

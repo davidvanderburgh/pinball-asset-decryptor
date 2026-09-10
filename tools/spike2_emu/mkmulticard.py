@@ -102,12 +102,18 @@ the version record decoder) are tested on Windows.
   mkmulticard.py check-stock IMG
         regenerate IMG's own MBR entries + EBR chain with this writer and byte-compare them
   mkmulticard.py build       --primary P --extra E [...] --out OUT --selector-dir DIR
-                             [--layout auto|parts|multi] [--media-dir DIR] [--bypass-validation]
+                             [--group "TITLE|SUBTITLE" --member M --member M2 ...]
+                             [--members-list FILE]
+                             [--layout auto|parts|multi|store] [--media-dir DIR] [--bypass-validation]
                              [--allow-version-mismatch]
                              [--titles "T0;T1;..."] [--subtitles "S0;S1;..."] [--timeout N]
                              [--default N] [--volume V] [--machine-volume] [--mixer-volume M] [--conf FILE]
                              [--theme NAME] [--color ROLE=RRGGBB ...]
                              [--no-inject] [--dd] [--force] [--workdir DIR] [--allow-unreachable]
+        A --group shows its --member images as ONE card, which boots a different member on
+        every power-up and never the one it booted last (item 106); the flags are ordered
+        against --extra, and a group forces --layout store because its members would each
+        otherwise cost a full copy.
         write the sparse OUT (partition ranges copied, MBR entries + EBR chain regenerated; for
         the multi layout the p7 image is built first), then inject DIR/{codeselect,select.sh
         [,font.ttf]} + the media + a generated images.conf + the hooked /etc/init.d/game into
@@ -6483,7 +6489,8 @@ def synth_media_dir(d, n_images):
 
 
 class Checks:
-    """``ok &= <expression>`` that SAYS WHICH EXPRESSION FAILED.
+    """``ok &= <expression>`` - or ``ok &= <expression>, <diagnostic>`` - that SAYS
+    WHICH EXPRESSION FAILED.
 
     The selftest is one long chain of `ok &=`, and a False in the middle of
     it used to print nothing at all: the run just ended in FAIL, and the
@@ -6496,14 +6503,24 @@ class Checks:
         self.failed = []
 
     def __iand__(self, value):
+        # ok &= <check>, <diagnostic> is an augmented assignment, so Python builds a
+        # TUPLE out of the two - and a 2-tuple is always truthy.  Eleven checks in this
+        # file were written that way and every one of them was a no-op that could never
+        # fail (found 2026-09-10, when a new one passed over a card built the wrong way).
+        # The intent is unambiguous, so it is honoured rather than banned: the first item
+        # is the check and the second is printed when it fails.
+        why = None
+        if isinstance(value, tuple) and len(value) == 2:
+            value, why = value
         if not value:
             # the CALLER's frame, file and line together: a name taken from
             # this module and a line taken from the caller would point at a
             # line that is not the check
             frame = sys._getframe(1)
             line = frame.f_lineno
-            print("    CHECK FAILED at %s:%d"
-                  % (os.path.basename(frame.f_code.co_filename), line))
+            print("    CHECK FAILED at %s:%d%s"
+                  % (os.path.basename(frame.f_code.co_filename), line,
+                     "" if why is None else "  %r" % (why,)))
             self.failed.append(line)
             self.ok = False
         return self
@@ -6531,7 +6548,11 @@ def selftest(d, selector_file=None):
     sel = os.path.join(d, "seldir")
     os.makedirs(sel, exist_ok=True)
     with open(os.path.join(sel, "codeselect"), "wb") as f:
-        f.write(open(selector_file, "rb").read() if selector_file else b"#!/bin/sh\necho '[select] chose 0 selftest'\n")
+        # the stand-in carries a VERSION STRING, because the group gate (item 106) reads
+        # one off this file before it will write a group= line beside it; a fake with no
+        # version is exactly what that gate is meant to refuse, and part 8 covers that too
+        f.write(open(selector_file, "rb").read() if selector_file
+                else b"#!/bin/sh\n# codeselect 3.0 (selftest stand-in)\necho '[select] chose 0 selftest'\n")
     with open(os.path.join(sel, "select.sh"), "w", newline="\n") as f:
         f.write("#!/bin/sh\n# selftest placeholder\nexit 0\n")
     media = synth_media_dir(os.path.join(d, "media dir"), 3)
@@ -7195,6 +7216,62 @@ def selftest(d, selector_file=None):
         ok &= not any(n in (".blobs", "img1", "img2") for n in
                       (e[4] for e in debugfs_ls(fs_ref(x, gx.part(3)[1] * SECTOR), "/")))
     print("SELFTEST part 7 (extract)", "PASS" if ok else "FAIL")
+
+    # ---- PART 8: a GROUP card - several images the player meets as one (item 106)
+    print("== build (store) with a group: A stock, plus B and C as ONE jukebox card")
+    out8 = os.path.join(d, "group.img")
+    ok &= main(["build", "--primary", A, "--group", "JUKEBOX|a different set every power-up",
+                "--member", B, "--member", C, "--out", out8, "--selector-dir", sel,
+                "--size", "content", "--allow-version-mismatch", "--force"]) == 0
+    # --layout was never given: a group makes `auto` pick the compact build, because the
+    # members are the same title with a few songs changed and each would otherwise cost a
+    # full copy
+    plan8 = plan_from_card(out8)
+    ok &= plan8.layout == "store", plan8.layout
+    conf8 = card_conf(out8)
+    ok &= [d_ for (d_, _t, _s) in conf8["images"]] == [
+        "/dev/mmcblk0p3", "/dev/mmcblk0p3:img1", "/dev/mmcblk0p3:img2"], conf8["images"]
+    ok &= len(conf8["groups"]) == 1 and conf8["groups"][0]["members"] == [1, 2], conf8["groups"]
+    ok &= conf8["groups"][0]["title"] == "JUKEBOX"
+    # THE GROUP LINE SITS WHERE ITS CARD SITS: before image 1, not at the end
+    raw8 = debugfs_cat(select_ref(out8), SELECT_DIR + "/images.conf").decode("utf-8")
+    kinds8 = [ln.split("=")[0] for ln in raw8.splitlines() if ln[:6] in ("image=", "group=")]
+    ok &= kinds8 == ["image", "group", "image", "image"], kinds8
+    print("== three trees, but the menu draws two cards")
+    rep8 = inspect_card(out8)
+    ok &= len(rep8["images"]) == 3 and len(rep8["groups"]) == 1
+    ok &= rep8["groups"][0]["members"] == [1, 2] and rep8["groups"][0]["title"] == "JUKEBOX"
+    ok &= [im["title_dir"] for im in rep8["images"]] == ["A_title", "B_title", "C_title"]
+    b8 = json.loads(debugfs_cat(select_ref(out8), SELECT_DIR + "/" + BUILD_MANIFEST).decode("utf-8"))
+    ok &= [im["group"] for im in b8["images"]] == [None, 0, 0], b8["images"]
+    ok &= b8["groups"][0]["members"] == [1, 2]
+    print("== parts.py --list-games still sees three trees: a group is a MENU idea, not a layout one")
+    r8 = subprocess.run([sys.executable, parts_py, "--list-games", out8],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    rows8 = [ln.split() for ln in r8.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
+    ok &= r8.returncode == 0 and [(rw[0], rw[3]) for rw in rows8] == [
+        ("3", "A_title"), ("3", "B_title"), ("3", "C_title")], rows8
+    ok &= verify_card(out8, verify_plan(out8, [A, B, C]), sel, mode="full")
+    print("== --layout multi with a group is refused, and the refusal says what it would have cost")
+    buf8 = io.StringIO()
+    with contextlib.redirect_stdout(buf8), contextlib.redirect_stderr(buf8):
+        rc8 = main(["build", "--primary", A, "--group", "J|x", "--member", B, "--member", C,
+                    "--out", os.path.join(d, "nope.img"), "--selector-dir", sel,
+                    "--layout", "multi", "--allow-version-mismatch", "--force"])
+    ok &= rc8 == 2 and "each cost a full copy" in buf8.getvalue(), (rc8, buf8.getvalue()[-400:])
+    print("== a selector with no version string is refused a group= conf")
+    sel8 = os.path.join(d, "seldir noversion")
+    os.makedirs(sel8, exist_ok=True)
+    for name in os.listdir(sel):
+        if os.path.isfile(os.path.join(sel, name)):
+            shutil.copyfile(os.path.join(sel, name), os.path.join(sel8, name))
+    with open(os.path.join(sel8, "codeselect"), "wb") as f:
+        f.write(b"#!/bin/sh\necho no version here\n")
+    buf8b = io.StringIO()
+    with contextlib.redirect_stdout(buf8b), contextlib.redirect_stderr(buf8b):
+        rc8b = main(["inject", "--card", out8, "--selector-dir", sel8])
+    ok &= rc8b == 2 and "carries no version string" in buf8b.getvalue(), (rc8b, buf8b.getvalue()[-400:])
+    print("SELFTEST part 8 (group)", "PASS" if ok else "FAIL")
     print("SELFTEST", "PASS" if ok else "FAIL")
     return bool(ok)
 
@@ -7459,7 +7536,7 @@ def main(argv=None):
                 PROGRESS.start(measure_total([a.primary] + list(a.extra)), "measuring")
                 meter = PROGRESS
             plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size, cache_dir=a.cache_dir,
-                             progress=meter)
+                             progress=meter, groups=a.groups)
             if meter is not None:
                 meter.finish()
             # the media is checked HERE, not after the layout, so `plan` says
@@ -7479,8 +7556,13 @@ def main(argv=None):
             check_output_path(a.out, [a.primary] + a.extra + [a.conf, a.selector_dir, a.media_dir], force=a.force)
             if not a.no_inject and not a.selector_dir:
                 raise Refused("build needs --selector-dir (or --no-inject)")
-            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size, cache_dir=a.cache_dir)
-            print_plan(plan, groups=getattr(a, "groups", None))
+            # THE GROUPS REACH THE PLANNER, not only the conf: --layout auto picks the
+            # compact build when one exists, and parts/multi with one is refused. Without
+            # this the gate is dead and a group quietly lands on a multi card, where every
+            # member costs a full copy - which is the whole thing it exists to prevent.
+            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size,
+                             cache_dir=a.cache_dir, groups=a.groups)
+            print_plan(plan, groups=a.groups)
             check_reachable(plan, a.allow_unreachable)       # before a byte is written
             if plan.layout == "store":
                 ok, why = loop_available()

@@ -7828,103 +7828,6 @@ These have each been violated at least once and each cost a run or a window:
       — S3: a workaround exists (a 32 GB card). D4: a new on-card layout
       whose hardware proof is one flash away.
 
-- [ ] **105. A multi-boot card with 5 to 16 images: the carousel is unproven on
-      hardware, the menu media budget starves it silently, and the tab never
-      says the real cap.** `S3 D2` ← IN PROGRESS **90%** — waiting on David's hardware proof
-      *(A tester with five custom Beatles builds
-      plus Stern's asked on 2026-09-09 "how much effort to go past the 4 game
-      limit".)* There is no such limit: `CONF_MAX_IMAGES 16`
-      (`codeselect/conf.h:40`), `MAX_IMAGES = 16` (`mkmulticard.py:276`,
-      `multiboot_tab.py:263`); from 5 up `layout_compute` (`codeselect.c:350`)
-      draws a 3-card carousel with a `< n / N >` counter, proven only by
-      `headless.sh` cases 5 and 9 - never in the rig, never on a machine (the
-      biggest real card is 4 Godzilla images). What starves it: `selectmedia`'s
-      `MEDIA_BUDGET` is a flat 96 MB for the whole set (one busy 5 s GIF is
-      7.65 MB) and the refusal never says the per-image share. What breaks past
-      16: `media_tick`'s `1u << i` mask (`codeselect.c:624`) is silent past 32,
-      and every media array is `[CONF_MAX_IMAGES]`. DO: say 16 where the user
-      looks (the README's Multi-boot sentence, the table tooltip: "from 5 the
-      menu scrolls three at a time"); make the media refusal name the per-image
-      share and the heaviest images, and `plan` print `media-size` rows beside
-      `image-size`; replace the mask with a flag array plus a static assert
-      (item 106 raises the cap and must not inherit it); then the run: a
-      5-image TMNT card (the same source twice is fine;
-      `--allow-version-mismatch` if mixed) through `PAD_CARD=<raw> PAD_SELECT=1
-      PAD_AUDIO=0 watch.sh` under the rig lock, LEFT/RIGHT across the wrap,
-      choose image 4, attract - proof row 8 in `codeselect/DESIGN.md`. Hardware
-      proof is David's (the same card on the TMNT); the item waits at 90% for
-      it. Acceptance: the tab builds a 5-image card that boots each image
-      through the carousel in the emulator; the media refusal names the share;
-      a 40-image conf passes the mask headless; README and tooltip say 16.
-      Facts and design: `plans/spike2_pc_emulation_handoff.md` REMAINING item 105.
-      — S3: friction with a workaround (four images build today). D2: desk work
-      plus one confirming rig run.
-
-      **Established, 2026-09-10 (commits `169c5e4`, `e542e9c` on `item/105`):**
-      the past-32 mask is GONE and the removal is measured, not asserted.
-      `media_tick` marks the images that moved in a flag array instead of an
-      `unsigned` bitmask, and each animation's exit line now carries TWO
-      counters, `played N drawn N` — how many times the clip advanced, and how
-      many of those reached the repaint step. With a correct tick they are
-      equal. **Against a CONTROL binary built at cap 40 with the bitmask put
-      back, images 32, 33 and 39 read `played 9 drawn 0` while 0 and 31 read
-      `played 9 drawn 9`** — and 33 was the HIGHLIGHTED card, so the bug would
-      have frozen the clip in front of the player. That control is the
-      instrument validation; it is a scratch build, not committed.
-      `CONF_MAX_IMAGES` is `#ifndef`-guarded now so `make check` can build a
-      second binary of the same sources at 40 (`make capbin`, gitignored) —
-      without it the fix would stay untested until item 106 raised the cap for
-      real. Two headless cases: every clip ticks AND repaints on or off screen
-      (validated at the shipped cap first, on image 0, which is off screen),
-      and a 40-image carousel boots image 33 with 0/31/32/33/39 all drawing;
-      the shipped binary still refuses that conf. The media budget refusal now
-      names the per-image share, the three heaviest cards with their heaviest
-      file, and who is over; `plan --media-dir` prints `media-size` rows beside
-      the `image-size` ones; both copies of the accounting (mkmulticard.py's
-      and selectmedia.py's) are pinned together by a test over one manifest.
-      16 is said in the app README, the images-table tooltip (interpolated from
-      `MAX_IMAGES`) and codeselect's README, with "from five the menu scrolls
-      three at a time".
-      **Green:** `make check` OK (check_elf, headless incl. both new cases,
-      padsw_test 13, select_sh_test 11); `test_mkmulticard` 129, `test_selectmedia`
-      110, `test_multiboot_tab` + `test_spike2_codeselect_rig` 340.
-      **Trap for the next pass:** run `make check` with `BUILD=` on a LINUX path.
-      `padsw_test` needs a FIFO and `/mnt/c` cannot make one, so a check run from
-      the checkout dies at `os.mkfifo` with `Errno 95`. Main fails the same way;
-      it is not this branch.
-      **Ruled out:** counting only the tick (`played`) as the instrument. It
-      reads healthy right through the bug, because the mask gated the REPAINT
-      and not the frame advance — the first version of this pass's test would
-      have passed against the broken binary.
-      **THE RIG RUN IS DONE — proof row 8 in `codeselect/DESIGN.md`.** Card
-      `D:/Pinball/TMNT 1987/multi/turtles_pro-1_59_0.store-5image-item105.16G.sdcard.raw`,
-      five turtles_pro 1.59.0 trees on the store layout (15.49 GB = the 16G
-      class exactly, 13.96 GB shared and stored once, 9.24 GB free). Two runs.
-      **`layout: carousel of 5 (3 visible, 389 px cards)`** — the 5+ layout has
-      now run somewhere other than `headless.sh` for the first time. THE WRAP:
-      from card 1 of 5 one left flipper gave `menu: highlight 0 -> 4 (1987 PRO
-      B), card 5/5 - wrap`, and the two `glshot.sh` frames show `< 1 / 5 >` with
-      1987 PRO B as card 1's LEFT neighbour and `< 5 / 5 >` with STERN STOCK as
-      card 5's RIGHT neighbour. START gave `chose 4 p3:img4 turtles_pro - bound
-      over /games/turtles_pro`; the game reached attract and streamed its scene
-      video at 29.6 fps. `alive.sh` 0 after both; the lock was held throughout
-      and released.
-      **Also added on the way:** the selector logs every highlight move —
-      `menu: highlight A -> B (title), card k/n[ - wrap]`. Without it a run log
-      cannot tell a menu that moved twice from one that moved four times and
-      wrapped, which is precisely what a carousel proof has to show; run 8a was
-      read by INFERENCE for want of it, and 8b was not.
-      **Note on the card:** only four distinct turtles_pro 1.59.0 images are on
-      the disk, so card 5 repeats card 4's source. Deliberate — a card whose
-      images disagree on NODE FIRMWARE can reflash the node boards on every
-      swap, and this one is meant to be flashable for the hardware proof.
-      **Uncommitted:** nothing.
-      **Resume:** nothing until David reports the hardware run. Flash that card
-      to the TMNT, power up, walk the carousel across the wrap and boot a card
-      other than the primary. The card carries `log=` so `/dump/log/codeselect.log`
-      on it holds the same `menu: highlight ... card k/n` lines the rig showed.
-      Then check the box.
-
 - [ ] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
       and choosing it (by hand or by the countdown) boots one member at random,
       a different one every power-up.** `S3 D4` *(A tester's "random jukebox",
@@ -8545,6 +8448,57 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **105. A multi-boot card with 5 to 16 images: the carousel is unproven on
+      hardware, the menu media budget starves it silently, and the tab never
+      says the real cap.** `S3 D2` *(A tester with five custom Beatles builds
+      plus Stern's asked on 2026-09-09 "how much effort to go past the 4 game
+      limit".)*
+      **CLOSED 2026-09-10 at David's word** ("let's skip the hardware run, if we
+      tested in emulation that's good enough for me"). `item/105`, `f5feb40`.
+      **PROVEN IN THE EMULATOR, NOT ON A MACHINE** — the acceptance originally
+      held a hardware run and David waived it; nobody should later read this as
+      hardware-proven. The card is built and flashable if that ever changes:
+      `D:/Pinball/TMNT 1987/multi/turtles_pro-1_59_0.store-5image-item105.16G.sdcard.raw`.
+      **What shipped, and the one thing that was actually broken:** the boot
+      menu's animation tick marked the images that had moved in an `unsigned`
+      bitmask (`moved |= 1u << i`), which is undefined from image 32 up and
+      fails in the quietest possible way — the frame advances and the panel is
+      never repainted. It is a flag array now, with no width at all. Nothing
+      could reach 32 while `CONF_MAX_IMAGES` is 16, but item 106 raises it well
+      past that and would have inherited the trap.
+      **The removal was MEASURED, and the obvious instrument was wrong.** Each
+      animation's exit line carries `played P drawn D` — advances, and advances
+      that reached the repaint step; equal when the tick is correct. The first
+      version of this pass's test counted only `played` and WOULD HAVE PASSED
+      against the broken binary, because the mask gated the repaint and not the
+      frame advance. Against a control built at cap 40 with the bitmask put
+      back, images 32, 33 and 39 read `played 9 drawn 0` while 0 and 31 read
+      `played 9 drawn 9` — and 33 was the HIGHLIGHTED card. `CONF_MAX_IMAGES`
+      is `#ifndef`-guarded so `make check` builds a second binary at 40
+      (`make capbin`, gitignored); without it the fix stays untested until 106.
+      **Proof run 8** (`codeselect/DESIGN.md`): a five-image store card, five
+      turtles_pro 1.59.0 trees, 15.49 GB = the 16G class exactly, 13.96 GB
+      shared and stored once. `layout: carousel of 5 (3 visible, 389 px
+      cards)` — the 5+ layout had never run outside `headless.sh`. One LEFT
+      from card 1/5 gave `menu: highlight 0 -> 4, card 5/5 - wrap`, START gave
+      `chose 4 p3:img4 turtles_pro - bound over /games/turtles_pro`, attract
+      streamed at 29.6 fps. Frames in `C:/tmp/item105/`.
+      **Also:** the media budget refusal names the per-image share, the three
+      heaviest cards and who is over; `plan --media-dir` prints `media-size`
+      rows beside `image-size`; a test runs mkmulticard's and selectmedia's
+      two copies of that accounting over one manifest and demands identical
+      rows; 16 is stated in the app README, the images-table tooltip
+      (interpolated from `MAX_IMAGES`) and codeselect's README, with "from five
+      the menu scrolls three at a time"; and the selector logs every highlight
+      move, without which run 8a had to be read backwards from its choice.
+      **Trap for anyone repeating the checks:** run `make check` with `BUILD=`
+      on a LINUX path. `padsw_test` needs a FIFO and `/mnt/c` cannot make one,
+      so a check run from the checkout dies at `os.mkfifo` with `Errno 95`.
+      Main fails identically; it is not the branch. And the store layout needs
+      `wsl -u root`, with `--workdir`/`--cache-dir` on drvfs so nothing
+      root-owned lands in the WSL home.
+      Facts and design: `plans/spike2_pc_emulation_handoff.md` REMAINING item 105.
 
 - [x] **104. A replacement callout LONGER than the stock sound is trimmed to
       the slot; let it grow.** `S2 D4` *(Planned 2026-09-09; the authoritative

@@ -1730,10 +1730,18 @@ def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
         ensure = ("if [ ! -d %s ] && [ -f %s ]; then PAD_ROOT=%s bash %s %s; "
                   "fi; " % (_q(lib), _q(card), _q(rootfs), _q(ENSURESELECT),
                             _q(card)))
+    # ...AND THE TOOL THAT RUNS THE BUILD, asked last because it is asked
+    # only of a machine where everything else was in place: `make` is what
+    # this line's first word IS, so a PC without one fails here with
+    # `make: command not found` and then again in the fallback's sentence
+    # about a build that "failed", which names no package to install
+    # (PAD-126).  Nothing about the emulator needs it, so a machine that runs
+    # every title can still be this one.
     return (ensure
             + "if make -C %s BUILD=%s ROOT=%s all; then echo %s %s; "
               "elif [ -x %s ]; then echo %s %s; "
               "elif [ ! -d %s ]; then echo %s; exit 1; "
+              "elif ! command -v make >/dev/null 2>&1; then echo %s; exit 1; "
               "else echo %s; exit 1; fi"
             % (_q(src_dir), _q(build_dir), _q(rootfs), tag, _q(built),
                _q(installed), tag, _q(installed), _q(lib),
@@ -1742,6 +1750,11 @@ def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
                   "unpacked one yet (nothing at %s). Point the tab at a card "
                   "image that is on this PC and preview again and it is "
                   "built for you, once." % rootfs),
+               _q("[preview] error: no selector - the menu program is built "
+                  "by a Makefile and this Linux has no make (on "
+                  "Debian/Ubuntu: apt install make). Nothing else about the "
+                  "emulator needs it, which is why a PC that runs games can "
+                  "still be missing it."),
                _q("[preview] error: no selector - the build failed and %s "
                   "is not there" % installed)))
 

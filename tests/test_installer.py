@@ -1200,8 +1200,8 @@ def test_both_installers_offer_every_emulator_package_the_tab_names():
     # package list would fail the whole apt-get and take the packages beside it
     # down with it.  getcriu.sh is where that one comes from, and the Emulate
     # tab's "Set up emulator..." is what runs it.
-    rows = ([t + ("apt",) for t in _SETUP_TOOLS] + list(_SETUP_OPTIONAL))
-    for _key, pkg, _why, how in rows:
+    rows = ([t + ("apt", "") for t in _SETUP_TOOLS] + list(_SETUP_OPTIONAL))
+    for _key, pkg, _why, how, _feat in rows:
         if how != "apt":
             assert pkg not in ps1_stern and pkg not in linux_stern[0], (
                 f"{pkg} is in an installer's apt list, and no Ubuntu "

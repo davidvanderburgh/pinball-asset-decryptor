@@ -1215,14 +1215,45 @@ _SETUP_TOOLS = (
 #: checkpointable boot, the Save and Load buttons, and a failure naming a
 #: directory they had never heard of. Both halves are probed now, and both
 #: are obtainable.
+#: THE FIFTH FIELD IS WHICH FEATURE, and it is new because there are now two
+#: of them.  Everything here used to cost save states, so the notice could
+#: name that feature in its own text; the boot menu program's `make` costs
+#: something else entirely, and "Save states need: make" over a machine whose
+#: save states are fine would be a false sentence of exactly the kind this
+#: file is built to avoid.  The rows are GROUPED by this and each group says
+#: its own name (see :func:`setup_extra_groups`).
 _SETUP_OPTIONAL = (
     ("busybox", "busybox-static",
      "save states: the guest is booted in the one shape that can be frozen "
-     "and reloaded, and that shape needs a static busybox", "apt"),
+     "and reloaded, and that shape needs a static busybox", "apt",
+     "Save states"),
     ("criu", "criu",
      "save states: this is the program that freezes the running game and "
-     "thaws it again, and no Ubuntu publishes it — PAD builds it", "build"),
+     "thaws it again, and no Ubuntu publishes it — PAD builds it", "build",
+     "Save states"),
+    # ★ PAD-126.  The menu program a multi-boot card boots into is compiled
+    # by codeselect/Makefile (buildselect.sh calls `make`, because the
+    # hand-built-sysroot recipe belongs in one file), and `make` is not a
+    # compiler - so no list here, in setupcheck.sh or in either installer had
+    # ever named it, while every machine that has built anything else happens
+    # to have one.  A user's WSL did not, and pressing Build on the Multi-boot
+    # tab answered him with the shell's own words from inside a script he had
+    # never run: `buildselect.sh: line 78: make: command not found`.  His
+    # emulator was and is perfect, which is why this is here and not above.
+    ("make", "make",
+     "multi-boot cards: the boot menu the card starts up into is a program, "
+     "and this is what builds it", "apt",
+     "Multi-boot cards"),
 )
+
+#: OF THOSE FEATURES, THE ONES ONLY A WSL RUN EVER WANTS.  ``watch_cmd`` asks
+#: for the checkpointable boot on Windows and nowhere else, so a Linux
+#: desktop's Start never wants a static busybox or a criu - and naming a
+#: package that machine's runs would never use is a wrong accusation.  Card
+#: building is not like that: the Multi-boot tab builds its menu program the
+#: same way on every desktop, so the feature added by PAD-126 is deliberately
+#: NOT here.
+_WSL_ONLY_FEATURES = ("Save states",)
 
 #: How long to give the setup probe.  It is five `command -v`s, one small
 #: compile and a read of /proc, so it answers in well under a second on a warm
@@ -1300,11 +1331,57 @@ def setup_extras(facts):
     would never use is the same wrong accusation as any other.  Decided from
     the rig's own ``iswsl`` fact rather than from sys.platform, so the answer
     is about the machine the run happens on.
+
+    PER FEATURE, THOUGH, not for the whole list: that gate belongs to the
+    checkpointable boot, and a Linux desktop builds a multi-boot card's menu
+    program exactly as Windows does (_WSL_ONLY_FEATURES).
     """
-    if not facts or facts.get("iswsl") == "0":
+    return [(pkg, why) for _feat, pkg, why in _setup_optional_rows(facts)]
+
+
+def _setup_optional_rows(facts):
+    """``(feature, package, why)`` for every extra this machine is missing.
+
+    The one place the ``iswsl`` gate and the "absent keys accuse nobody" rule
+    are applied to this list; everything else here is a view of it.
+    """
+    if not facts:
         return []
-    return [(pkg, why) for key, pkg, why, _how in _SETUP_OPTIONAL
-            if facts.get(key) == "0"]
+    wsl = facts.get("iswsl") != "0"
+    return [(feat, pkg, why) for key, pkg, why, _how, feat in _SETUP_OPTIONAL
+            if facts.get(key) == "0"
+            and (wsl or feat not in _WSL_ONLY_FEATURES)]
+
+
+def _and_list(names):
+    """The feature names in one sentence: "Save states", "Save states and
+    multi-boot cards".  Only the first keeps its capital, because the rest are
+    mid-sentence by then."""
+    names = [n if i == 0 else n[:1].lower() + n[1:]
+             for i, n in enumerate(names)]
+    if len(names) < 3:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def setup_extra_groups(facts):
+    """The same rows as :func:`setup_extras`, gathered under their feature:
+    ``[("Save states", [(pkg, why), …]), …]``, in _SETUP_OPTIONAL's order.
+
+    The notice is written from this rather than from the flat list because
+    what a missing package COSTS is the whole point of listing it apart from
+    the six that stop a run - and with two features on the list, one heading
+    would have to be wrong about one of them.
+    """
+    groups = []
+    for feat, pkg, why in _setup_optional_rows(facts):
+        for name, rows in groups:
+            if name == feat:
+                rows.append((pkg, why))
+                break
+        else:
+            groups.append((feat, [(pkg, why)]))
+    return groups
 
 
 def setup_built(facts):
@@ -1317,10 +1394,9 @@ def setup_built(facts):
     consent to something it did not describe — and would name a package
     ``apt-get install`` cannot resolve, which fails the packages beside it.
     """
-    if not facts or facts.get("iswsl") == "0":
-        return []
-    return [(pkg, why) for key, pkg, why, how in _SETUP_OPTIONAL
-            if how == "build" and facts.get(key) == "0"]
+    built = {pkg for _key, pkg, _why, how, _feat in _SETUP_OPTIONAL
+             if how == "build"}
+    return [(pkg, why) for pkg, why in setup_extras(facts) if pkg in built]
 
 
 def setup_unavailable(facts):
@@ -1817,7 +1893,13 @@ def setup_notice(facts, can_fix):
         # will be black, and "Save states do not yet" would be a false
         # description of that machine.
         if extras:
-            parts = ["The emulator runs on this PC. Save states do not yet."]
+            # NAMED, because there is more than one of them now: save states,
+            # and building a multi-boot card's menu program.  A machine
+            # missing only the second must not be told its save states are
+            # off, which is what one hard-coded headline said.
+            feats = [f for f, _rows in setup_extra_groups(facts)]
+            parts = ["The emulator runs on this PC. %s do not yet."
+                     % _and_list(feats)]
         else:
             parts = ["The emulator runs on this PC, but this WSL will spoil "
                      "it."]
@@ -1843,9 +1925,9 @@ def setup_notice(facts, can_fix):
     # this one does not.  A run started without it boots normally and simply
     # cannot be frozen (watch.sh says the same thing in the log), so the line
     # says what it costs rather than filing it under "missing".
-    if extras:
-        parts.append("Save states need:\n" + "\n".join(
-            "     •  %s — %s" % (label(pkg), why) for pkg, why in extras))
+    for feat, rows in setup_extra_groups(facts):
+        parts.append("%s need:\n" % feat + "\n".join(
+            "     •  %s — %s" % (label(pkg), why) for pkg, why in rows))
     # NOT INSTALLABLE IS NOT THE SAME AS MISSING, and saying only the first is
     # what sent a tester to press a button that could never work: the tab
     # named qemu-user-static, he pressed “Set up emulator…”, and apt answered
@@ -1893,11 +1975,17 @@ def setup_notice(facts, can_fix):
             # ...and when the emulator itself is fine, "replace your Linux" is
             # a wildly out-of-proportion answer to a feature that is off.  Say
             # what is lost, and leave the working machine alone.
+            # ...and WHICH feature, from the same grouping the list above
+            # uses: this sentence used to say "save states" because that was
+            # the only extra there was.
+            lost = [f.lower() for f, rows in setup_extra_groups(facts)
+                    if any(pkg in unavailable for pkg, _why in rows)]
             parts.append(
-                "“Set up emulator…” cannot get %s from this distro, so save "
-                "states stay off. Everything else about the emulator is "
+                "“Set up emulator…” cannot get %s from this distro, so %s "
+                "stay off. Everything else about the emulator is "
                 "unaffected — titles start and run exactly as they do now."
-                % (", ".join(unavailable) or "that"))
+                % (", ".join(unavailable) or "that",
+                   _and_list(lost) or "that feature"))
         else:
             parts.append(
                 "“Set up emulator…” cannot get past this — there is nothing "
@@ -1939,6 +2027,18 @@ def setup_notice(facts, can_fix):
             # A different act from registering one, and setup_fix_steps has
             # said so since it was written.
             does.append("switches the 32-bit ARM handler back on")
+        # AND THE STEP THAT CAN BE THE WHOLE OF IT.  Everything above is a
+        # package or the kernel handler; this one is neither, and it is the
+        # only step that can turn up ALONE - a fully installed machine, its
+        # handler registered, whose distro does not boot systemd, and which
+        # the notice is in front of because of an environment warning
+        # (setup_env_faults).  Left out of this summary it was not merely
+        # unsaid: `does[0]` ran off an empty list, so the tab answered such a
+        # machine with an internal error where its notice should have been.
+        # Seen on this PC while photographing PAD-126.
+        if facts.get("iswsl") == "1" and facts.get("wslconf") == "0":
+            does.append("turns systemd on in /etc/wsl.conf, so the handler "
+                        "is still registered after a WSL restart")
         parts.append(
             "“Set up emulator…” %s. It lists exactly what it will change "
             "first, and needs no password."

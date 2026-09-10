@@ -475,10 +475,42 @@ where groups exist.  An old selector (2.9 or below) ignores `group=` and refuses
 16 image lines, so it exits 2 and the primary boots: degraded, not bricked.  `inject` gates
 on the selector reading 3.0 or above.
 
-**A trap for the emulator, not the machine.**  Under `qemu-arm-static -L $ROOT` the open of
-`/dev/urandom` is redirected into the rootfs copy, where it is an empty regular file, so the
-read returns 0 bytes and the clock seeds the roll.  The log says so on the line
-`group: /dev/urandom gave 0 byte(s)`.  On the machine it is the real character device.
+**A trap for the HEADLESS HARNESS ALONE, and narrower than it first looked.**  Under a bare
+`qemu-arm-static -L $ROOT` the open of `/dev/urandom` is redirected into the rootfs copy, where
+`dev/urandom` is an empty regular file, so the read returns 0 bytes and the clock seeds the
+roll; the log says so on the line `group: /dev/urandom gave 0 byte(s)`.  That is the
+headless tests' harness and nothing else.  **A real rig run chroots into the rootfs, where
+`/dev/urandom` is the device node, and the seed line reads `urandom+clock`** - measured on the
+2026-09-10 proof run below.  On the machine it is the real character device too.  The fallback
+exists for the case where the card's 3.14 kernel does not answer, not because this path is
+normally starved.
+
+**PROVEN IN THE EMULATOR, 2026-09-10.**  David's TMNT store card
+(`turtles-1_59_0.store-stock+1987pro+1987le.16G.sdcard.raw`, the one he flashed and booted on
+the machine for item 95's gate) had its MENU alone re-injected: the stock build as image 0, and
+the 1987 pro and the 1987 LE as one card called `1987 RANDOM`.  Three image lines, two cards.
+`default=1` names a MEMBER, so the countdown lands on the group and every boot below is an
+UNATTENDED POWER-UP with no key press at all - the tester's actual case, and a stricter test
+than pressing START on the card.
+
+| boot | last choice | the menu said | it booted | rendering |
+|---|---|---|---|---|
+| 1 | 0 (left from the machine) | `highlight 0 (STERN 1.59.0) from last choice, card 1/2` | `chose 0` - no rolled clause, because a plain card does not roll | stock |
+| 2 | none | `highlight 1 (1987 RANDOM) from conf default, card 2/2 (group 1987 RANDOM, 2 members)` | `group: card 2 boots image 1 (rolled from 1987 RANDOM: 2 candidates, urandom+clock)`, `p3:img1` bound | 51 fps |
+| 3 | 1 | `highlight 1 (1987 RANDOM) from last choice, card 2/2 (...)` | `group: card 2 boots image 2 (rolled from 1987 RANDOM: 1 candidate)`, `p3:img2` bound | 45 fps |
+
+What each row is for.  **Boot 1** is the control: a plain card in the same menu still behaves
+exactly as it did, and its `chose` line is unchanged.  **Boot 2** is the roll itself - the seed
+came from `urandom+clock`, and `run_game.sh` reported `1 group line(s) carried from the card`,
+so the emulator's index gate agreed the card's image count matched what it resolved.  **Boot 3
+is the property the whole item exists for**: the remembered member re-highlighted its GROUP's
+card (which is why a group needs no state file of its own), and the roll then excluded it,
+leaving `1 candidate` - so the card played the other build.  Two consecutive unattended
+power-ups, two different games.
+
+**Hardware proof is David's**: the same card, two power-ups of his machine.  The card is left as
+a group card for exactly that; its previous three-image menu was saved first and can be injected
+back.
 
 ## What is deliberately NOT in the proof of concept
 

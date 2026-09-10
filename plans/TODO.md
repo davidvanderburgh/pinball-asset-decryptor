@@ -7828,79 +7828,6 @@ These have each been violated at least once and each cost a run or a window:
       — S3: a workaround exists (a 32 GB card). D4: a new on-card layout
       whose hardware proof is one flash away.
 
-- [ ] **104. A replacement callout LONGER than the stock sound is trimmed to
-      the slot; let it grow.** `S2 D4` *(Planned 2026-09-09; the authoritative
-      design, phases, acceptance tests and rig oracles are in
-      `plans/spike2_longer_audio.md` — read it before touching anything, and
-      keep its Findings section true as passes learn.)*
-      Today `_encode_mono`/`_encode_stereo` fit every replacement to
-      `emitted_length(p["length"])` and the GUI hides Trim/pad for Spike 2,
-      because resizing a sound IN PLACE strands every later absolute offset in
-      the master directory. The way out is to APPEND: a 24-byte master-directory
-      record N' = record N with body_off/length replaced, its body appended past
-      the old end of image.bin (16-byte zero pad first), hdr[0x60] = n+1,
-      hdr[0x40] unchanged; deliver image.bin as ONE grow job through
-      core/ext4_grow (hardware-proven for videos), placed before the firmware
-      sentinel job and owned by the grow cleanup dir; opt-in
-      `PAD_STERN_AUDIO_GROW=1`, never Direct-SD. No firmware edit anywhere.
-      **Measured (Phase 0, 53 cards / 50 builds, 2026-09-09 — full detail in
-      the plan's section 4A):** the directory is the file tail, at
-      `hdr[0x40] + align16(24*hdr[0x60]) + 8 == filesize` (NOT `24n + 16`, which
-      only looked right because the first five cards had odd counts — 20 of the
-      53 are EVEN); the decode is one host-side `_imp` memcpy that
-      `UC_HOOK_MEM_READ` never sees, then key+IV derived from the seed word
-      alone, AES-192-CBC in place, a per-record post-transform, and
-      `zlib.crc32(buf, per-build init)` compared with a pure bit permutation of
-      the seed. `encode(decode(tail))` is byte-exact on 53/53 cards and an
-      appended record that flips the count's parity passes the firmware's own
-      CRC gate on 53/53. A grown appended record decodes and re-encodes
-      BIT-EXACT at its new length, mono and stereo, and is BLIP-FREE: its own
-      params do not move when the user's audio replaces the placeholder, and no
-      stock row moves. The constants are PER BUILD (50 distinct CRC inits); the
-      S-box and CRC table sit in rodata on every build; `LENGTH_XOR` is
-      TMNT-only and is learnable from data (`record[16:20] ^ length` is one
-      constant per card). **Ruled out:** resizing in place — changing one
-      record's length word, body untouched, shifts EVERY later record's params
-      including its sound-container key, so the in-place fallback is dead; a
-      new image-scNN.bin category (sids are category-tagged, the loader
-      hard-fails on a missing shard); any firmware patch (grown ELFs boot-loop,
-      three deliveries, zero confirmed boots). **Still open:** whether a
-      duplicate identity key is last-writer-wins — the sound container does not
-      run in the emulator at all, so the lookup's code shape (get-or-create,
-      value overwritten) is the working assumption and the rig decides it.
-      **Phases:** 0 = DONE 2026-09-09 (the directory codec + the own-window and
-      parity experiments; the probe harness is kept at
-      `plans/spike2_longer_audio_probe/`, and Phase 1 should port it rather than
-      start over — firmware-assisted keygen costs ~3 ms and needs no PRNG port);
-      1 = DONE 2026-09-09 (`spike2/masterdir.py` + the crypto keys in
-      `locate.py` + `tests/test_spike2_masterdir.py`, swept clean over all 53
-      extracted cards); 2 = engine (gate, staged
-      image by rename, pass-A derive with the consumed hook, `params_grow`
-      rows, `collapse_shadowed`, fingerprint tail, delivery + `.sidx` size);
-      3 = DONE (Advanced Audio checkbox, docs, README); 4 = 4.1-4.3 DONE
-      2026-09-10 (a real card built by the engine's own Write; the game
-      boots it under qemu indistinguishably from the stock card; the
-      decode census says 0 stock records moved, 24 of 24 sampled stock
-      sounds bit-identical, and the grown sound decodes its whole new
-      length at correlation 1.0000) — what is LEFT is the Sound Test walk
-      (Godzilla's attract writes no PCM in the rig, so hearing the callout
-      needs the operator menu, whose path is not scripted) and 4.4, the
-      hardware boot, which is David's.
-      **Acceptance:** a Write with one WAV longer than its slot produces a card
-      whose emulator boot plays that callout for its FULL new length from the
-      Sound Test (the capture correlates with the source over the whole
-      length, no burst at the old slot end), every other sound derives stock
-      params (`_assert_param_integrity` 0 shifts, a 20-sound decode census
-      bit-exact), a re-extract of that card names the live sound
-      `idxNNNN.wav` under its ORIGINAL number, and Direct-SD or gate-off
-      builds fit as today with one named log line. Hardware: David plays it
-      on his own machine; the flag stays opt-in until then.
-      — S2: a truncated callout is a visible quality defect every audio mod
-      works around by cutting its clip. D4: a new instrument (the directory
-      encoder, validated against the firmware decode on every card) has to
-      exist before anything can be judged; budget more than one pass, one
-      phase per pass.
-
 - [ ] **105. A multi-boot card with 5 to 16 images: the carousel is unproven on
       hardware, the menu media budget starves it silently, and the tab never
       says the real cap.** `S3 D2` *(A tester with five custom Beatles builds
@@ -8552,6 +8479,106 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **104. A replacement callout LONGER than the stock sound is trimmed to
+      the slot; let it grow.** `S2 D4` *(Planned 2026-09-09; the authoritative
+      design, phases, acceptance tests and rig oracles are in
+      `plans/spike2_longer_audio.md` — read it before touching anything, and
+      keep its Findings section true as passes learn.)*
+      **CLOSED 2026-09-10 at David's word** ("everything checks out in the v3
+      emulation now"). `item/104`.
+      **What shipped:** phases 0-4.3 as measured above, plus the finding the
+      plan's 0.6 could not make in the emulator: the appended copy is NOT
+      what the game plays on its own. The boot-time band build registers
+      every record with the sound container under a key that moves with the
+      record's geometry, so the copy got a key of its own and the descriptor
+      naming the sound kept naming the stock record (the Led Zeppelin Sound
+      Test played the originals). The build now re-points the play tables:
+      every sid through the firmware's own get_asset_descriptor, the op11
+      payloads whose derived key (w1 whole, w2 & 0xe0001fff, the sid's high
+      half above bit 12) equals the stock record's rewritten to the appended
+      record's key under the same whitening, the declared duration at bytes
+      3..6 (1/4000 s) moved by the growth, both proven through the resolver
+      again before the encode starts; a sound no descriptor names trims, with
+      the reason logged. The rig then heard it: driven on the PAD-Runtime rig
+      with the PCM capture on, Sound Test #241 plays 45.94 s at correlation
+      0.990 / -17.0 dB against its reference and #230 5.57 s at 0.986 /
+      -15.5 dB, while #229, #231, #240, #242 and #243 score byte-identical
+      numbers on the stock card and the grown card, and stepping to another
+      entry stops the playing sound. The audio preview no longer hatches a
+      longer replacement as trimmed when the option is on. Full suite 5105
+      passed. Rig how-to and probes: the plan's section 6A and
+      `plans/spike2_longer_audio_probe/`.
+      **Still owed:** 4.4, the hardware boot (David's, stock reflash ready);
+      the flag stays off by default and the GUI keeps saying so until it
+      passes.
+      Today `_encode_mono`/`_encode_stereo` fit every replacement to
+      `emitted_length(p["length"])` and the GUI hides Trim/pad for Spike 2,
+      because resizing a sound IN PLACE strands every later absolute offset in
+      the master directory. The way out is to APPEND: a 24-byte master-directory
+      record N' = record N with body_off/length replaced, its body appended past
+      the old end of image.bin (16-byte zero pad first), hdr[0x60] = n+1,
+      hdr[0x40] unchanged; deliver image.bin as ONE grow job through
+      core/ext4_grow (hardware-proven for videos), placed before the firmware
+      sentinel job and owned by the grow cleanup dir; opt-in
+      `PAD_STERN_AUDIO_GROW=1`, never Direct-SD. No firmware edit anywhere.
+      **Measured (Phase 0, 53 cards / 50 builds, 2026-09-09 — full detail in
+      the plan's section 4A):** the directory is the file tail, at
+      `hdr[0x40] + align16(24*hdr[0x60]) + 8 == filesize` (NOT `24n + 16`, which
+      only looked right because the first five cards had odd counts — 20 of the
+      53 are EVEN); the decode is one host-side `_imp` memcpy that
+      `UC_HOOK_MEM_READ` never sees, then key+IV derived from the seed word
+      alone, AES-192-CBC in place, a per-record post-transform, and
+      `zlib.crc32(buf, per-build init)` compared with a pure bit permutation of
+      the seed. `encode(decode(tail))` is byte-exact on 53/53 cards and an
+      appended record that flips the count's parity passes the firmware's own
+      CRC gate on 53/53. A grown appended record decodes and re-encodes
+      BIT-EXACT at its new length, mono and stereo, and is BLIP-FREE: its own
+      params do not move when the user's audio replaces the placeholder, and no
+      stock row moves. The constants are PER BUILD (50 distinct CRC inits); the
+      S-box and CRC table sit in rodata on every build; `LENGTH_XOR` is
+      TMNT-only and is learnable from data (`record[16:20] ^ length` is one
+      constant per card). **Ruled out:** resizing in place — changing one
+      record's length word, body untouched, shifts EVERY later record's params
+      including its sound-container key, so the in-place fallback is dead; a
+      new image-scNN.bin category (sids are category-tagged, the loader
+      hard-fails on a missing shard); any firmware patch (grown ELFs boot-loop,
+      three deliveries, zero confirmed boots). **Still open:** whether a
+      duplicate identity key is last-writer-wins — the sound container does not
+      run in the emulator at all, so the lookup's code shape (get-or-create,
+      value overwritten) is the working assumption and the rig decides it.
+      **Phases:** 0 = DONE 2026-09-09 (the directory codec + the own-window and
+      parity experiments; the probe harness is kept at
+      `plans/spike2_longer_audio_probe/`, and Phase 1 should port it rather than
+      start over — firmware-assisted keygen costs ~3 ms and needs no PRNG port);
+      1 = DONE 2026-09-09 (`spike2/masterdir.py` + the crypto keys in
+      `locate.py` + `tests/test_spike2_masterdir.py`, swept clean over all 53
+      extracted cards); 2 = engine (gate, staged
+      image by rename, pass-A derive with the consumed hook, `params_grow`
+      rows, `collapse_shadowed`, fingerprint tail, delivery + `.sidx` size);
+      3 = DONE (Advanced Audio checkbox, docs, README); 4 = 4.1-4.3 DONE
+      2026-09-10 (a real card built by the engine's own Write; the game
+      boots it under qemu indistinguishably from the stock card; the
+      decode census says 0 stock records moved, 24 of 24 sampled stock
+      sounds bit-identical, and the grown sound decodes its whole new
+      length at correlation 1.0000) — what is LEFT is the Sound Test walk
+      (Godzilla's attract writes no PCM in the rig, so hearing the callout
+      needs the operator menu, whose path is not scripted) and 4.4, the
+      hardware boot, which is David's.
+      **Acceptance:** a Write with one WAV longer than its slot produces a card
+      whose emulator boot plays that callout for its FULL new length from the
+      Sound Test (the capture correlates with the source over the whole
+      length, no burst at the old slot end), every other sound derives stock
+      params (`_assert_param_integrity` 0 shifts, a 20-sound decode census
+      bit-exact), a re-extract of that card names the live sound
+      `idxNNNN.wav` under its ORIGINAL number, and Direct-SD or gate-off
+      builds fit as today with one named log line. Hardware: David plays it
+      on his own machine; the flag stays opt-in until then.
+      — S2: a truncated callout is a visible quality defect every audio mod
+      works around by cutting its clip. D4: a new instrument (the directory
+      encoder, validated against the firmware decode on every card) has to
+      exist before anything can be judged; budget more than one pass, one
+      phase per pass.
 
 - [x] **102. The emulation matrix's remaining rows: a switch list that
       survives a new build, X-Men's playfield, a topper mounted sideways, the

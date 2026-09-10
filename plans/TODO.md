@@ -7830,7 +7830,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **105. A multi-boot card with 5 to 16 images: the carousel is unproven on
       hardware, the menu media budget starves it silently, and the tab never
-      says the real cap.** `S3 D2` *(A tester with five custom Beatles builds
+      says the real cap.** `S3 D2` ← WORKING ON *(A tester with five custom Beatles builds
       plus Stern's asked on 2026-09-09 "how much effort to go past the 4 game
       limit".)* There is no such limit: `CONF_MAX_IMAGES 16`
       (`codeselect/conf.h:40`), `MAX_IMAGES = 16` (`mkmulticard.py:276`,

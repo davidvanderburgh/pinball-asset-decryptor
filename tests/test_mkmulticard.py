@@ -11,6 +11,7 @@ the tool's own `selftest` subcommand under WSL instead.
 import argparse
 import hashlib
 import json
+import io
 import os
 import re
 import subprocess
@@ -462,11 +463,50 @@ def test_media_checks_accept_the_synthetic_set_and_refuse_the_wrong_shapes(mk, t
     with pytest.raises(mk.Refused, match="%d frames" % (mk.GIF_MAX_FRAMES + 1)):
         mk.check_media_file(str(many), "anim")
     monkeypatch.setattr(mk, "MEDIA_BUDGET", 100)
-    with pytest.raises(mk.Refused, match="over the 100 byte budget"):
+    with pytest.raises(mk.Refused, match="over the 100 B budget"):
         mk.plan_media(d, 2)
     monkeypatch.setattr(mk, "GIF_MAX_BYTES", 10)
     with pytest.raises(mk.Refused, match="over the 10 byte cap"):
         mk.check_media_file(os.path.join(d, "anim1.gif"), "anim")
+
+
+def test_media_budget_says_where_it_went(mk, tmp_path, monkeypatch):
+    """Item 105: "over budget" alone leaves the owner of a five-image card to
+    guess which animation to re-encode.  The refusal names the per-image share
+    and the heaviest cards, and `plan --media-dir` prints the same numbers as
+    media-size rows beside the games' image-size ones."""
+    d = mk.synth_media_dir(str(tmp_path / "media"), 5)
+    media = mk.plan_media(d, 5)
+
+    # every file is attributed to a card, and the two menu-wide sounds to none
+    assert len(media["costs"]) == 5
+    assert media["total"] == sum(media["sizes"].values())
+    assert media["shared"] > 0
+    assert media["costs"] == sorted(media["costs"], key=lambda r: -r[1]), "heaviest first"
+    per_card = sum(b for _i, b, _n, _bb in media["costs"])
+    assert per_card + media["shared"] <= media["total"] * 5, "shared files may be counted twice"
+
+    # the share is the budget less the menu-wide sounds, split evenly
+    assert mk.media_share(5, media["shared"]) == (mk.MEDIA_BUDGET - media["shared"]) // 5
+    assert mk.media_share(0, 0) == mk.MEDIA_BUDGET, "no images: no division by zero"
+    assert mk.media_share(5, mk.MEDIA_BUDGET * 2) == 0, "sounds alone over budget: never negative"
+
+    # and the refusal SAYS all of it
+    monkeypatch.setattr(mk, "MEDIA_BUDGET", 1024)
+    why = mk.media_budget_refusal(media)
+    assert "over the 1.0 KB budget" in why
+    assert "the menu-wide sounds cost" in why
+    assert "heaviest: image" in why
+    assert "over the share:" in why
+    assert why.count("\n") >= 3, "the detail is lines, not one long sentence"
+
+    # selectmedia.py keeps its own copy of this accounting: they must agree
+    sm = pytest.importorskip("selectmedia")
+    with open(os.path.join(d, "media.json"), encoding="utf-8") as f:
+        man = json.load(f)
+    sizes = {n: os.path.getsize(os.path.join(d, n))
+             for n in os.listdir(d) if n != "media.json"}
+    assert sm.media_costs(man, sizes) == (media["costs"], media["shared"])
 
 
 def test_media_manifest_refusals(mk, tmp_path):

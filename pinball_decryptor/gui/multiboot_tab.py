@@ -4398,7 +4398,9 @@ class MultibootPanel:
                 "row adds one. A double-click or Enter opens a row, and a "
                 "right-click - or the menu key - offers the same five "
                 "commands. The first image is the PRIMARY: its boot files "
-                "are the card's, and the machine falls back to it.")
+                "are the card's, and the machine falls back to it. Up to %d "
+                "images fit one card; from five the menu scrolls three at a "
+                "time, with a counter under them." % MAX_IMAGES)
 
     PREVIEW_TIP = ("The boot menu as the machine will draw it. It redraws "
                    "itself about a third of a second after you stop typing; "

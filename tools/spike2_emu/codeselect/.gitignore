@@ -1,2 +1,4 @@
 # the default BUILD= dir of the Makefile (objects, the ARM binary, test frames)
 build/
+# and the raised-cap build make check makes beside it (BUILD-capN)
+build-cap*/

@@ -41,7 +41,7 @@ CRTEND   := $(shell $(CC) -print-file-name=crtend.o)
 CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
             -U_TIME_BITS -U_FILE_OFFSET_BITS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
             -fno-stack-protector -fno-pie -no-pie \
-            -nostdinc -isystem $(GCCINC) -isystem $(ROOT)/usr/include -I$(BUILD)
+            -nostdinc -isystem $(GCCINC) -isystem $(ROOT)/usr/include -I$(BUILD) $(EXTRA_CFLAGS)
 LDPRE     = -nostdlib -nostartfiles $(ROOT)/usr/lib/crt1.o $(ROOT)/usr/lib/crti.o $(CRTBEGIN)
 LDPOST    = $(CRTEND) $(ROOT)/usr/lib/crtn.o -L$(ROOT)/lib -L$(ROOT)/usr/lib \
             -Wl,-rpath-link,$(ROOT)/lib -Wl,-rpath-link,$(ROOT)/usr/lib \
@@ -54,6 +54,17 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 # the rootfs alsa-lib 1.0.28 (GLIBC_2.4 only; its libdl/libpthread/librt are
 # in the rootfs). Hand prototypes in audio_alsa.c: no headers on the box.
 AUDLIBS   = -l:libasound.so.2
+
+# THE PAST-32 BINARY (item 105).  The animation tick used to mark the images
+# that moved in an `unsigned` bitmask (`1u << i`), which is undefined from
+# image 32 up and fails silently.  It is a flag array now, and this second
+# build of the SAME sources at a raised cap is what proves it: nothing else
+# in the tree can reach 32 images while CONF_MAX_IMAGES is 16, so without it
+# the fix would stay untested until item 106 raised the cap for real.  Built
+# by `make check`, never installed, never written to a card.
+CAP_N    ?= 40
+CAPBUILD  = $(BUILD)-cap$(CAP_N)
+CAPBIN    = $(CAPBUILD)/codeselect
 
 SRCS = codeselect.c conf.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
 HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
@@ -82,9 +93,13 @@ $(BIN): $(OBJS)
 > $(CC) $(CFLAGS) $(LDPRE) $(OBJS) $(LDPOST) $(GLLIBS) $(AUDLIBS) $(LIBC) -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
 
-check: $(BIN)
+# a recursive build of the same sources: only BUILD and the cap differ
+capbin:
+> $(MAKE) BUILD="$(CAPBUILD)" EXTRA_CFLAGS=-DCONF_MAX_IMAGES=$(CAP_N) "$(CAPBIN)"
+
+check: $(BIN) capbin
 > bash test/check_elf.sh "$(CROSS)" "$(BIN)"
-> bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > python3 test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
 > bash -n select.sh && bash test/select_sh_test.sh
 > @echo "check: OK"
@@ -102,6 +117,6 @@ install: $(BIN)
 > if [ -d media ]; then install -d "$(DESTDIR)$(PREFIX)/media"; for f in media/*; do if [ -f "$$f" ]; then install -m 644 "$$f" "$(DESTDIR)$(PREFIX)/media/"; fi; done; fi
 
 clean:
-> rm -rf "$(BUILD)"
+> rm -rf "$(BUILD)" "$(CAPBUILD)"
 
-.PHONY: all check check-hw install clean
+.PHONY: all capbin check check-hw install clean

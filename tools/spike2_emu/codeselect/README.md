@@ -461,7 +461,10 @@ the seventh field is ignored. `<device>` is the block device on hardware -
 `/dev/mmcblk0p3`, `/dev/mmcblk0p7`, or
 `/dev/mmcblk0p7:img2` for a games tree in a subdirectory of a shared
 partition - and an opaque token in the emulator (`p3`, `p7`, `p7:img2`). Up
-to 16 images (`CONF_MAX_IMAGES`). `volume` is clamped to 0-100,
+to 16 images (`CONF_MAX_IMAGES`) - **from five the menu scrolls three at a
+time**, centred on the highlight and wrapping at both ends, with a `< n / N >`
+counter under them, so the cap is not what fits the screen. `volume` is
+clamped to 0-100,
 `mixer_volume` to 0-63. Unknown keys are ignored so the file can grow.
 
 **The machine's own volume.** `volume=machine` makes the menu play at the

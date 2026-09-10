@@ -407,6 +407,12 @@ struct clip_cache {
     struct audio_clip *clip;
 };
 
+/* Every per-image array here, and media_tick's moved[] flags, are sized off
+ * CONF_MAX_IMAGES and live on the stack or in one struct; raising the cap is
+ * free up to the point where that stops being true. */
+_Static_assert(CONF_MAX_IMAGES >= 1 && CONF_MAX_IMAGES <= 256,
+               "CONF_MAX_IMAGES sizes every per-image array in this file");
+
 struct media {
     struct art_image *art[CONF_MAX_IMAGES];
     struct art_anim *anim[CONF_MAX_IMAGES];
@@ -426,6 +432,15 @@ struct media {
      * a still) */
     int frame[CONF_MAX_IMAGES];
     double due[CONF_MAX_IMAGES];
+    /* ticks[i]: how many times clip i has advanced since media_start.
+     * paints[i]: how many of those advances reached the repaint step.  TWO
+     * counters, not one, because the past-32 bug moved the frame and then
+     * dropped the repaint - a single "played" count would have read healthy
+     * right through it.  With a correct tick the two are EQUAL; a clip whose
+     * ticks climb while its paints stay at 0 is animating into a panel
+     * nobody is drawing, which is the bug seen from the log. */
+    int ticks[CONF_MAX_IMAGES];
+    int paints[CONF_MAX_IMAGES];
     char dir[CONF_STR];
 };
 
@@ -524,11 +539,12 @@ static void media_stats(const struct media *m)
         const struct art_anim *a = m->anim[i];
         if (!a || !a->decodes) continue;
         if (a->caching)
-            sel_log("anim: image %d: %d of %d frames cached, %.2f ms each on the cache thread",
-                    i, art_anim_ready(a), a->n, a->decodes ? a->decode_us / 1000.0 / a->decodes : 0.0);
+            sel_log("anim: image %d: played %d drawn %d, %d of %d frames cached, %.2f ms each on the cache thread",
+                    i, m->ticks[i], m->paints[i], art_anim_ready(a), a->n,
+                    a->decodes ? a->decode_us / 1000.0 / a->decodes : 0.0);
         else
-            sel_log("anim: image %d: %d frame decodes, %.2f ms each",
-                    i, a->decodes, a->decode_us / 1000.0 / a->decodes);
+            sel_log("anim: image %d: played %d drawn %d, %d frame decodes, %.2f ms each",
+                    i, m->ticks[i], m->paints[i], a->decodes, a->decode_us / 1000.0 / a->decodes);
     }
 }
 
@@ -610,32 +626,43 @@ static void media_start(struct media *m, int n, double now)
     for (i = 0; i < n; i++) {
         struct art_anim *a = m->anim[i];
         m->frame[i] = 0;
+        m->ticks[i] = 0;
+        m->paints[i] = 0;
         m->due[i] = (a && a->n > 1) ? now + anim_step_ms(a, 0) : 0;
     }
 }
 
-/* Advance every animation that is due.  Returns a bitmask of the images
- * that moved (bit i), so the caller can repaint just those panels.  ON THE
- * CLIP'S OWN TIMELINE, not the loop's: the swap paces this loop to the
- * LCD's vsync (16.7 ms), so 'now + delay' rounded EVERY frame up to the
- * next vsync and a 30 fps clip played at 24.  Due times accumulate instead
- * - late ticks catch up - and only a stall of more than a frame is
- * forgiven (the timeline restarts from now rather than bursting). */
-static unsigned media_tick(struct media *m, int n, double now)
+/* Advance every animation that is due.  Sets moved[i] for each image whose
+ * frame changed and returns how many did, so the caller can repaint just
+ * those panels.  ON THE CLIP'S OWN TIMELINE, not the loop's: the swap paces
+ * this loop to the LCD's vsync (16.7 ms), so 'now + delay' rounded EVERY
+ * frame up to the next vsync and a 30 fps clip played at 24.  Due times
+ * accumulate instead - late ticks catch up - and only a stall of more than
+ * a frame is forgiven (the timeline restarts from now rather than
+ * bursting).
+ *
+ * A FLAG ARRAY, not the `unsigned moved` bitmask this used to be: `1u << i`
+ * is undefined from image 32 up, and it fails SILENTLY - image 32's clip
+ * simply never repaints while every log line says the menu is healthy.  The
+ * cap is 16 today so nothing could reach it, but item 106 raises
+ * CONF_MAX_IMAGES well past 32 and must not inherit the trap. */
+static int media_tick(struct media *m, int n, double now, unsigned char *moved)
 {
-    unsigned moved = 0;
-    int i;
+    int i, nmoved = 0;
     for (i = 0; i < n; i++) {
         struct art_anim *a = m->anim[i];
         double step;
+        moved[i] = 0;
         if (!a || a->n < 2 || m->due[i] <= 0 || now < m->due[i]) continue;
         m->frame[i] = (m->frame[i] + 1) % a->n;
         step = anim_step_ms(a, m->frame[i]);
         m->due[i] += step;
         if (now - m->due[i] > step) m->due[i] = now + step;
-        moved |= 1u << i;
+        m->ticks[i]++;
+        moved[i] = 1;
+        nmoved++;
     }
-    return moved;
+    return nmoved;
 }
 
 /* ----------------------------------------------------------------- draw */
@@ -1219,6 +1246,17 @@ int main(int argc, char **argv)
         }
         if (chosen >= 0) break;
         if (hl != old_hl) {
+            /* WHERE THE HIGHLIGHT WENT, one line per move.  From five images
+             * up the menu is a carousel of three and the highlight is the
+             * only thing that says where in the set you are, so a run log
+             * without this cannot tell a menu that moved twice from one that
+             * moved four times and wrapped - which is exactly what a carousel
+             * proof has to show.  `card k/n` is the counter the player sees
+             * under the panels, 1-based like the display, and `wrap` marks
+             * the step that crossed the end. */
+            sel_log("menu: highlight %d -> %d (%s), card %d/%d%s", old_hl, hl,
+                    c.img[hl].title, hl + 1, n,
+                    (old_hl == 0 && hl == n - 1) || (old_hl == n - 1 && hl == 0) ? " - wrap" : "");
             /* a new card: its music takes over (hard switch); the
              * animations all keep running - they were never paused */
             if (media.music[hl] != music_clip) {
@@ -1254,14 +1292,16 @@ int main(int argc, char **argv)
          * the panels that moved are repainted - or none, when the whole
          * menu is about to be */
         {
-            unsigned moved = pinned ? 0 : media_tick(&media, n, (double)now);
+            unsigned char moved[CONF_MAX_IMAGES];
+            int nmoved = pinned ? 0 : media_tick(&media, n, (double)now, moved);
             int i;
-            for (i = 0; moved && i < n; i++) {
-                if (!(moved & (1u << i))) continue;
+            for (i = 0; nmoved && i < n; i++) {
+                if (!moved[i]) continue;
                 if (!dirty) {
                     int slot = image_slot(&L, hl, i);
                     if (slot >= 0) draw_panel(&g, &L, &media, i, slot, i == hl);
                 }
+                media.paints[i]++;      /* what the tick was FOR (media_stats) */
                 media_check(&media, i);
             }
         }

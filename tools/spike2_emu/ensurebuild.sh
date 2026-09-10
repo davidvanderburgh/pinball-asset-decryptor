@@ -206,8 +206,35 @@ pad_ensure_shim() {
 # line here, because the selector links against the card's own glibc 2.21
 # with the rootfs as a hand-built sysroot - a recipe with a dozen flags that
 # belongs in one Makefile, not in a shell script that copies it.
+
+#: WHAT THAT BUILD IS DONE WITH, and the first of the two this PC has not
+#: got: "<command> <package>", or nothing when both are here.
+#:
+#: TWO TOOLS, NOT ONE, and that is the whole of PAD-126. The sources are cross
+#: compiled AND the recipe is a Makefile, so the build needs `make` every bit
+#: as much as it needs the compiler - but make is not a compiler, nobody
+#: thinks of it as a prerequisite, and it was named on no list this app or its
+#: installers carry. A WSL that has never built anything does not have it. So
+#: the gate below cleared a machine that could not build, the build started,
+#: and what the user got back was the shell's own words from inside a script
+#: he had never run by hand (2026-09-10):
+#:
+#:   [build] .../buildselect.sh: line 78: make: command not found
+#:   [build] build FAILED, and a PAD_SELECT run has no menu without it.
+#:
+#: Asked in the order the build needs them, so the sentence names one thing to
+#: install rather than a list to work through.
+_pad_select_gap() {
+    local pair
+    for pair in "arm-linux-gnueabihf-gcc gcc-arm-linux-gnueabihf" "make make"
+    do
+        command -v "${pair%% *}" >/dev/null 2>&1 || { echo "$pair"; return 0; }
+    done
+    return 1
+}
+
 pad_ensure_select() {
-    local bin=$PAD_SELECT_BIN
+    local bin=$PAD_SELECT_BIN gap tool pkg
     if [ ! -f "$RIG/codeselect/Makefile" ]; then
         # No sources in this copy of the rig: an installed app older than the
         # selector, or a checkout without it. What is built still runs.
@@ -222,10 +249,11 @@ pad_ensure_select() {
         return 1
     fi
     if [ ! -x "$bin" ]; then
-        if ! command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
+        if gap=$(_pad_select_gap); then
+            tool=${gap%% *}; pkg=${gap#* }
             echo "[build] the boot selector is not built, and there is no" >&2
-            echo "[build] arm-linux-gnueabihf-gcc here to build it (on" >&2
-            echo "[build] Debian/Ubuntu: apt install gcc-arm-linux-gnueabihf)." >&2
+            echo "[build] $tool here to build it (on" >&2
+            echo "[build] Debian/Ubuntu: apt install $pkg)." >&2
             echo "[build] Expected at: $bin" >&2
             return 1
         fi
@@ -242,9 +270,11 @@ pad_ensure_select() {
         echo "[build] Stop it (killgame.sh) and start again to pick up the fix." >&2
         return 0
     fi
-    if ! command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
+    if gap=$(_pad_select_gap); then
+        tool=${gap%% *}; pkg=${gap#* }
         echo "[build] the boot selector is out of date, but there is no" >&2
-        echo "[build] arm-linux-gnueabihf-gcc here to rebuild it. Running as built." >&2
+        echo "[build] $tool here to rebuild it (on Debian/Ubuntu: apt" >&2
+        echo "[build] install $pkg). Running as built." >&2
         return 0
     fi
     echo "[build] the boot selector is out of date; rebuilding"

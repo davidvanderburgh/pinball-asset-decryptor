@@ -1155,6 +1155,31 @@ def test_buildselect_stages_the_list_and_calls_the_makefile_contract():
         "the compile line is the Makefile's, not this script's"
 
 
+def test_the_build_asks_for_make_before_it_needs_it():
+    """★ PAD-126 - the tool nobody called a prerequisite.
+
+    The selector is built by codeselect/Makefile, so `make` is as much a part
+    of that build as the compiler is - and being no compiler, it was on no
+    list in this rig, in the app or in either installer.  A user pressed Build
+    on the Multi-boot tab and got, out of a script he had never run by hand:
+
+        [build] .../buildselect.sh: line 78: make: command not found
+        [build] build FAILED, and a PAD_SELECT run has no menu without it.
+
+    with no package named anywhere in it.  Asked with the other pre-flight
+    questions now, before a single source is staged, and answered with the
+    package to install.
+    """
+    code = _code(_read("buildselect.sh"))
+    assert "command -v make" in code, (
+        "buildselect.sh runs a Makefile without ever asking for make")
+    assert code.index("command -v make") < code.index("make -C"), (
+        "the question has to come before the build it is about")
+    ask = code[code.index("command -v make"):code.index("make -C")]
+    assert "apt install make" in ask, (
+        "the refusal must name the package, not only the missing command")
+
+
 def test_ensurebuild_gates_the_selector_like_the_shim():
     eb = _read("ensurebuild.sh")
     body = eb[eb.index("pad_ensure_select() {"):]
@@ -1163,12 +1188,36 @@ def test_ensurebuild_gates_the_selector_like_the_shim():
     assert "_pad_run_live" in body, "never rebuilt under a live run"
     assert "_pad_stale" in body and "$PAD_SELECT_STAMP" in body
     assert "pad_select_hash" in body
-    assert "arm-linux-gnueabihf-gcc" in body
+    # THE TOOLS ARE ASKED FOR BY ONE HELPER, and there are TWO of them: the
+    # sources are cross compiled and the recipe is a Makefile (PAD-126).
+    assert "_pad_select_gap" in body
+    gap = eb[eb.index("_pad_select_gap() {"):]
+    gap = gap[:gap.index("\n}")]
+    assert "arm-linux-gnueabihf-gcc gcc-arm-linux-gnueabihf" in gap
+    assert "make make" in gap
     # MISSING is fatal (return 1 after a failed build), STALE is not.
     missing = body[body.index('if [ ! -x "$bin" ]; then'):body.index("_pad_stale")]
     assert "return 1" in missing
     stale = body[body.index("_pad_stale"):]
     assert "return 1" not in stale
+
+
+def test_the_refusal_the_tab_shows_names_the_missing_tool():
+    """★ PAD-126.  The app puts ensureselect.sh's LAST `[selector] error:`
+    line in the Multi-boot tab's status bar, and for a build that could not
+    start it said "see the lines above" - the lines above being the shell's
+    own `make: command not found` from inside buildselect.sh.  It asks the
+    gate's own question now and answers it in that one line, so the sentence
+    a user reads first names the package.
+    """
+    text = _read("ensureselect.sh")
+    body = text[text.index("if ! pad_ensure_select"):]
+    assert "_pad_select_gap" in body, (
+        "the refusal keeps a second opinion about what is missing")
+    assert "apt install ${gap#* }" in body
+    # ...and the old sentence is still there for a build that DID start and
+    # failed, where "see the lines above" is the accurate answer.
+    assert "see the lines above" in body
 
 
 def _selector_tree():

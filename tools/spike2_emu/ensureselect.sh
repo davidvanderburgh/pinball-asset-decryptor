@@ -66,7 +66,17 @@ if ! pad_ensure_rootfs; then
     exit 1
 fi
 if ! pad_ensure_select; then
-    echo "$ERR the boot menu program could not be built - see the lines above. It belongs at $PAD_SELECT_BIN" >&2
+    # ...AND WHEN THE REASON IS A MISSING TOOL, SAY THE TOOL. "see the lines
+    # above" is the honest answer to a compile that failed and a poor one to a
+    # machine that never started compiling: the app shows THIS line in the
+    # tab's status bar, and above it were the shell's own words about a
+    # command it could not find (PAD-126). Asked with the gate's own question,
+    # so the two can never name different tools.
+    if gap=$(_pad_select_gap); then
+        echo "$ERR the boot menu program could not be built: this Linux has no ${gap%% *} (on Debian/Ubuntu: apt install ${gap#* }), and that is what builds it. It belongs at $PAD_SELECT_BIN" >&2
+    else
+        echo "$ERR the boot menu program could not be built - see the lines above. It belongs at $PAD_SELECT_BIN" >&2
+    fi
     exit 1
 fi
 

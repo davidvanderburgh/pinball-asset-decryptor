@@ -47,7 +47,7 @@ else
     echo "  BOF:    gnupg tar curl unzip xvfb (xorg-server-xvfb) webp (libwebp) + GDRE Tools (download from GitHub)"
     echo "  JJP:    partclone e2fsprogs xorriso (libisoburn) pigz ffmpeg python3-zstandard (python-zstandard) gcc libc6-dev (glibc)"
     echo "  CGC:    e2fsprogs xxd (tinyxxd, or vim's) + pip (python-pip)"
-    echo "  Stern:  qemu-user-static (+ qemu-user-static-binfmt) gcc-arm-linux-gnueabihf (arm-linux-gnueabihf-gcc, AUR) gcc libc6-dev (glibc) e2fsprogs fuse3 python3-tk (tk) ffmpeg busybox-static (busybox)"
+    echo "  Stern:  qemu-user-static (+ qemu-user-static-binfmt) gcc-arm-linux-gnueabihf (arm-linux-gnueabihf-gcc, AUR) gcc libc6-dev (glibc) make e2fsprogs fuse3 python3-tk (tk) ffmpeg busybox-static (busybox)"
     exit 1
 fi
 
@@ -104,6 +104,16 @@ declare -A MFR_PACKAGES=(
     #                             the emulator starts, opens its window, and
     #                             plays black and silent, which is the one
     #                             failure here that does not look like one.
+    #   make                      MULTI-BOOT CARDS. The boot menu a card with
+    #                             several games starts up into is a program,
+    #                             built by codeselect/Makefile - and make is
+    #                             not a compiler, so it was on no list here
+    #                             while every other build tool was. A user's
+    #                             Build answered him with the shell's own
+    #                             `make: command not found` from inside one of
+    #                             our scripts (PAD-126). Nothing else on this
+    #                             line needs it, which is why a machine that
+    #                             emulates perfectly could still be without it.
     #   busybox-static            SAVE STATES. The checkpointable boot pivots
     #                             away from the host tree and then has to
     #                             umount it, which needs a NATIVE STATIC
@@ -113,7 +123,7 @@ declare -A MFR_PACKAGES=(
     #                             refused to start at all without it - the rig
     #                             now runs the ordinary boot instead, and this
     #                             is what buys the feature back.
-    [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk ffmpeg busybox-static"
+    [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev make e2fsprogs fuse3 python3-tk ffmpeg busybox-static"
 )
 
 # The same manifest in pacman's spelling, one entry per manufacturer above - a
@@ -146,7 +156,7 @@ declare -A MFR_PACMAN_PACKAGES=(
     # python-pip: Arch's python does not carry pip, and the pip step below is
     # how CGC's transcribe button gets faster-whisper.
     [5]="e2fsprogs tinyxxd python-pip"
-    [6]="qemu-user-static qemu-user-static-binfmt gcc e2fsprogs fuse3 tk ffmpeg busybox"
+    [6]="qemu-user-static qemu-user-static-binfmt gcc make e2fsprogs fuse3 tk ffmpeg busybox"
 )
 
 # What pacman cannot supply.  The AUR is not a repository, it is recipes, and

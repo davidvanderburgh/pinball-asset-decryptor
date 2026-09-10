@@ -697,7 +697,11 @@ def test_ensure_selector_builds_from_the_checkout_then_falls_back(
                            "elif [ ! -d ~/spike2root/usr/lib ]; then echo "),\
         line
     assert line.endswith("; exit 1; fi")
-    assert "$" not in line and "install" not in line
+    assert "$" not in line
+    # THE PREVIEW INSTALLS NOTHING - the target is `all`, never `install`.
+    # Asked of the build itself rather than of the whole line, because the
+    # refusal at the end of it names `apt install make` (PAD-126).
+    assert "install" not in line.split("elif ! command -v make", 1)[0]
     # ...and with no card to unpack one from, nothing runs before the make
     assert line.startswith("cd /mnt/c/repo && if make")
     assert PREVIEW_BUILD_DIR == "~/emusrc/codeselect-preview"
@@ -763,6 +767,25 @@ def test_ensure_selector_unpacks_a_guest_filesystem_when_there_is_none(
             "no selector - the menu program is built against the machine") \
         in line
     assert "unpacked one yet (nothing at ~/spike2root)" in line
+
+
+def test_the_preview_names_make_rather_than_calling_the_build_a_failure(
+        monkeypatch, tmp_path):
+    """★ PAD-126.  The preview line's first word IS `make`, so a PC without
+    one fails it with `make: command not found` and then meets the fallback's
+    sentence about a build that "failed" - which names a path and no package.
+    Nothing about the emulator needs make, so a machine that runs every title
+    can be exactly this machine, and a user's was."""
+    _win(monkeypatch)
+    line = _line(ensure_selector_args(_form(tmp_path, 2), cwd="/mnt/c/repo"))
+    assert "elif ! command -v make >/dev/null 2>&1; then" in line
+    assert "this Linux has no make (on Debian/Ubuntu: apt install make)" \
+        in line
+    # ...and it is asked AFTER the installed selector and the missing
+    # filesystem: a preview would rather draw with what is installed than
+    # explain a tool it did not need.
+    assert line.index("elif [ -x ") < line.index("command -v make")
+    assert line.index("[ ! -d ") < line.index("command -v make")
 
 
 def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):

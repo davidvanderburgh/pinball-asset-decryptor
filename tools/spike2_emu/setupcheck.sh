@@ -36,6 +36,12 @@
 #                              pivot_root to run - see pad_can_pivot. Its
 #                              absence costs SAVE STATES, not the emulator, so
 #                              the tab reports it apart from the six above
+#   make                       1 = this machine can run a Makefile, which is
+#                              what the MULTI-BOOT card's boot menu program is
+#                              built by (buildselect.sh). Like busybox it
+#                              costs a feature and not the emulator, and
+#                              unlike busybox it costs it on every desktop -
+#                              a card is built the same way on Linux
 #   criu                       1 = there is a criu to freeze the guest with.
 #                              NOT A PACKAGE ON ANY UBUNTU - it is built from
 #                              source by getcriu.sh, which is why its `-`
@@ -135,6 +141,16 @@ _have() {
 #: the question is now pad_can_pivot: both halves, one answer. busybox-static
 #: stays the package, because it carries a pivot_root applet as well as the
 #: static binary and so repairs either half (see pad_pivot_root_cmd).
+#: AND THE ONE THAT IS NOT ABOUT THE EMULATOR AT ALL. `make` builds the boot
+#: menu program a MULTI-BOOT card carries (buildselect.sh runs
+#: codeselect/Makefile, because the sysroot recipe belongs in one file). It is
+#: not a compiler, so it was named on no list here, in either installer, or in
+#: the tab - and a WSL that has never built anything has not got one. A user
+#: pressed Build on 2026-09-10 and got the shell's words from inside a script
+#: he had never run: `buildselect.sh: line 78: make: command not found`, then
+#: "build FAILED", with nothing anywhere naming a package. Reported with the
+#: extras rather than with the six above because a machine without it emulates
+#: perfectly; what it cannot do is build a card.
 #: AND THE ONE APT CANNOT SUPPLY AT ALL, which is why the package field is `-`.
 #: criu is the program that does the freezing, and NO Ubuntu publishes it -
 #: `apt-cache policy criu` prints an empty version table on 24.04. Putting a
@@ -155,6 +171,7 @@ debugfs:debugfs:e2fsprogs:0
 fuse:fusermount3:fuse3:0
 ffmpeg:ffmpeg:ffmpeg:0
 busybox:@pad_pivot_programs:busybox-static:0
+make:make:make:0
 criu:@pad_criu_runs:-:0"
 
 need= _xrel_ok=

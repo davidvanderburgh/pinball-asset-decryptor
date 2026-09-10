@@ -42,7 +42,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         `# padglhost is a NATIVE binary - the whole GL bridge exists to get the` \
         `# rendering out of the emulated guest - so buildbridge.sh needs plain` \
         `# gcc as well, and fails with "gcc: command not found" without it.` \
-        gcc \
+        `# ...AND make, for the same kind of reason one layer up: the BOOT` \
+        `# MENU program (codeselect) is built by a Makefile, so a "Boot` \
+        `# selector" run in here compiles nothing without it and stops on` \
+        `# the shell's own "make: command not found" (PAD-126, where a WSL` \
+        `# user met exactly that).` \
+        gcc make \
         `# fuse2fs INSTALLED, not downloaded. cardmount.sh can fetch it into a` \
         `# private prefix with apt-get download, which is how it works on a` \
         `# machine with no root - but this image drops apt's package lists, so` \

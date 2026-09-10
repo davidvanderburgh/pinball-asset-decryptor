@@ -1691,6 +1691,94 @@ def test_a_rig_that_never_heard_of_the_save_state_package_accuses_nobody():
     assert setup_notice(_facts(), can_fix=True) == ""
 
 
+# ----------------------------------------------------------------------
+# ...AND THE SECOND FEATURE ON THAT LIST (★ PAD-126).
+#
+# The boot menu a multi-boot card starts up into is an ARM program, built by
+# codeselect/Makefile - so `make` is as much a part of that build as the cross
+# compiler is.  It is not a compiler, nobody thinks of it as a prerequisite,
+# and it was named on no list: not here, not in setupcheck.sh, not in either
+# installer.  A user pressed Build on 2026-09-10 and got, out of a script he
+# had never run by hand:
+#
+#     [build] .../buildselect.sh: line 78: make: command not found
+#     [build] build FAILED, and a PAD_SELECT run has no menu without it.
+#
+# His emulator was perfect, which is why this is an EXTRA - and why the one
+# hard-coded "Save states" headline the extras used to get had to go.
+# ----------------------------------------------------------------------
+
+def test_the_menu_program_tool_costs_a_card_and_not_the_emulator():
+    facts = _facts(make="0")
+    assert setup_ok(facts), "a missing extra must not read as a dead emulator"
+    assert not setup_settled(facts), "...but there IS something to say"
+    assert [pkg for pkg, _ in setup_extras(facts)] == ["make"]
+    assert setup_summary(facts)[0] == []
+    text = setup_notice(facts, can_fix=True)
+    assert "cannot run the emulator" not in text
+    assert "The emulator runs on this PC. Multi-boot cards do not yet." in text
+    assert "Multi-boot cards need:" in text and "make" in text
+    # ...and NOT under the other feature's name, which is the whole point of
+    # grouping them: this machine's save states are fine.
+    assert "Save states" not in text
+
+
+def test_the_button_offers_to_install_the_menu_program_tool():
+    steps = emulate_tab.setup_fix_steps(_facts(make="0"))
+    assert any(s.startswith("Install in WSL:") and "make" in s
+               for s in steps), steps
+
+
+def test_a_linux_desktop_is_asked_for_it_too():
+    """Unlike the save-state pair.  The freezable boot shape is a Windows
+    one, so a Linux desktop is never asked for busybox-static - but a card is
+    built the same way on every desktop, and a Linux PC without make cannot
+    build one either."""
+    facts = _facts(make="0", busybox="0", iswsl="0", wslconf="1")
+    assert [pkg for pkg, _ in setup_extras(facts)] == ["make"]
+    assert not setup_settled(facts)
+    assert "sudo apt install make" in setup_notice(facts, can_fix=False)
+
+
+def test_the_two_features_are_named_apart_when_both_are_missing():
+    facts = _facts(make="0", busybox="0")
+    assert [pkg for pkg, _ in setup_extras(facts)] == ["busybox-static",
+                                                       "make"]
+    text = setup_notice(facts, can_fix=True)
+    assert ("The emulator runs on this PC. Save states and multi-boot cards "
+            "do not yet.") in text
+    assert "Save states need:" in text and "Multi-boot cards need:" in text
+    groups = emulate_tab.setup_extra_groups(facts)
+    assert [feat for feat, _rows in groups] == ["Save states",
+                                                "Multi-boot cards"]
+    assert [pkg for _f, rows in groups for pkg, _why in rows] == [
+        "busybox-static", "make"]
+
+
+def test_a_rig_that_never_heard_of_make_accuses_nobody():
+    """An older setupcheck.sh emits no `make` line - the direction every fact
+    here takes."""
+    assert setup_extras(_facts()) == []
+    assert setup_settled(_facts())
+
+
+def test_the_notice_survives_a_machine_whose_only_repair_is_wsl_conf():
+    """A crash, found on David's own PC while photographing PAD-126.
+
+    Everything installed, the ARM handler registered, a distro that does not
+    boot systemd, and an environment warning to put the notice on screen: the
+    only thing “Set up emulator…” would do is write /etc/wsl.conf, that step
+    was in the consent list and in no summary, and the sentence built from
+    the summary indexed an empty list.  What the tab showed instead of its
+    notice was “Internal error: list index out of range”.
+    """
+    facts = _facts(wslconf="0", user="root")
+    assert emulate_tab.setup_fix_steps(facts), "there IS a step to consent to"
+    text = setup_notice(facts, can_fix=True)
+    assert "systemd on in /etc/wsl.conf" in text
+    assert "stay BLACK" in text, "the warning it is on screen for"
+
+
 def test_an_uninstallable_extra_does_not_ask_for_a_new_linux():
     """"Replace your distro" is the answer to an emulator that cannot run.
     Answering a switched-off feature with it would be wildly out of
@@ -1817,9 +1905,9 @@ def test_the_repair_installs_exactly_the_packages_the_tab_names():
     # supply at all, which is what the fourth field says.  criu is on no
     # Ubuntu, so its seam is with getcriu.sh instead, and its package field in
     # setupcheck.sh is `-` precisely so it never reaches `need`.
-    rows = ([t + ("apt",) for t in emulate_tab._SETUP_TOOLS]
+    rows = ([t + ("apt", "") for t in emulate_tab._SETUP_TOOLS]
             + list(emulate_tab._SETUP_OPTIONAL))
-    for key, pkg, _why, how in rows:
+    for key, pkg, _why, how, _feat in rows:
         assert 'sudo' not in pkg
         assert "%s:" % key in check
         if how == "apt":

@@ -57,6 +57,17 @@ if [ ! -f "$R/usr/include/stdio.h" ] || [ ! -f "$R/usr/lib/libEGL.so.1" ]; then
     echo "the selector is linked against the card's own glibc and GL libraries" >&2
     exit 1
 fi
+# ...AND THE PROGRAM THAT READS THAT MAKEFILE. Everything above is asked
+# before anything is staged; this used to be asked by `make` itself, on line
+# 78, in the shell's words, half way through a build the app had started for
+# somebody (PAD-126). make is not a compiler, so no prerequisite list here or
+# in either installer had ever named it, and a WSL that has never built
+# anything does not carry one.
+if ! command -v make >/dev/null 2>&1; then
+    echo "no make on this PC, and the boot menu program is built by $RIG/codeselect/Makefile" >&2
+    echo "(on Debian/Ubuntu: apt install make). Nothing else about the emulator needs it." >&2
+    exit 1
+fi
 
 # The staging directory the sources are copied into, for the reason build.sh
 # records: compiling from /mnt/c is slow, and Program Files is read-only.

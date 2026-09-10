@@ -450,6 +450,16 @@ $ManufacturerPrereqs = [ordered]@{
             # and would not do).
             @{ probe="/bin/busybox";           pkg="busybox-static";           label="busybox-static";          reason="Emulate tab: save states - the guest boots in the one shape that can be frozen and reloaded";
                probeCmd="test -f /bin/busybox && ! ldd /bin/busybox 2>&1 | grep -q '=>'" }
+            # MULTI-BOOT CARDS, and the one line here that is not about
+            # running a game at all.  The boot menu a card with several games
+            # starts up into is an ARM program built by codeselect/Makefile,
+            # so the build needs `make` as much as it needs the compiler two
+            # lines up - but make is not a compiler, so nobody put it on a
+            # list, and a WSL that has never built anything has not got one.
+            # A user's Build came back with the shell's own words from inside
+            # one of our scripts, `make: command not found`, on a machine
+            # whose emulator was perfect (PAD-126).
+            @{ probe="make";                   pkg="make";                     label="make";                    reason="Multi-boot tab: builds the boot menu program a multi-game card starts up into" }
         )
         HostPackages = @(
             # Probed by ffplay (see the CGC entry): ffmpeg alone is not

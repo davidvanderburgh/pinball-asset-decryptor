@@ -7828,278 +7828,29 @@ These have each been violated at least once and each cost a run or a window:
       — S3: a workaround exists (a 32 GB card). D4: a new on-card layout
       whose hardware proof is one flash away.
 
-- [ ] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
-      and choosing it (by hand or by the countdown) boots one member at random,
-      a different one every power-up.** `S3 D3` ← WORKING ON, IN PROGRESS *(A tester's "random jukebox",
-      2026-09-09: 20-40 song-set variants of one title, "everything looks
-      standard except for the songs". David's first answer to him was a
-      hold-START gesture; REJECTED below, his call.)* **GATE FIRST:** everything
-      here needs `--layout store`, which has never been on a machine (item 95's
-      open flash, the card is built and verified: `D:/Pinball/TMNT
-      1987/multi/turtles-1_59_0.store-stock+1987pro+1987le.16G.sdcard.raw`);
-      CLEARED 2026-09-10: David flashed it and booted all three.
-      DESIGN (decided): members stay ordinary `image=` lines; ONE new key
-      `group=<members>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]`
-      (`3-5`, `3,5,7-9`) names them and carries a card's display fields, written
-      right before its first member. **`select.sh` is UNTOUCHED** (its awk
-      counts `image=` lines; the choice file still carries an image index).
-      Limits: `CONF_MAX_IMAGES` 64, `CONF_MAX_CARDS` 16 (visible),
-      `CONF_MAX_GROUPS` 8, mirrored in mkmulticard and the tab. Never fatal: a
-      bad member is dropped and logged, an empty group dropped, a one-member
-      group is a plain card. The selector draws CARDS (media arrays, layout,
-      counter, snapshot) and keeps `default=`/`--highlight`/
-      `/data/codeselect.last` as IMAGE indexes: a member highlights its group,
-      so a remembered roll re-rolls on the next countdown, no new state file.
-      The roll: the members minus the last-choice member, seeded from
-      /dev/urandom ^ CLOCK_MONOTONIC ^ time ^ pid at the confirm moment;
-      `--pick <image>` and `--seed N` for tests only; the LOADING frame names
-      the member; the log keeps `chose %d` and adds `(rolled from X: N
-      candidates)`. Selector 3.0; `inject` refuses a `group=` conf on a selector
-      below 3.0. mkmulticard: `--group 'TITLE|SUBTITLE'` then `--member <raw>`
-      ... or `--members-list FILE`; render/parse/inspect/plan (`image-group`
-      rows) carry groups; `auto` -> `store` when a group exists and
-      `parts`/`multi` with a group is refused naming the cost (David,
-      2026-09-09: the Compact tick is forced ON and disabled while a group row
-      exists, with the experimental wording). Tab: `ImageRow.members`, an "Add
-      group..." row whose editor has Add files / Add folder (every `*.raw`) /
-      Remove; one card per row in the preview; a merged size band.
-      `run_game.sh` carries `group=` lines when the tree count matches, plus
-      `PAD_SELECT_PICK`. Sizing, measured on beatles-1_29_0: a variant costs
-      ~450 MB in the store (`image.bin` 380 MB + clips + ELF), so 40 variants
-      are a 32 GB card. REJECTED: hold START/ACTION (START confirms on the press
-      edge, the debouncer sees rising edges only, and an unattended power-up
-      presses nothing); a `member=` line kind (changes select.sh's awk for no
-      gain); a full non-repeat cycle (needs a state file). Oracle: headless
-      group.conf cases (`--default 4` writes a member, `--pick`, `--seed` twice
-      equal, ten seeds never the last member, 46 lines load / 65 refused / 17
-      cards refused); `select_sh_test.sh` `--lookup 4` -> `img4` with `group=`
-      lines present; the rig: a TMNT store card with `--group '1987 RANDOM'
-      --member <pro> --member <LE>` alternates on two boots. Hardware proof is
-      David's. Acceptance: that card boots a different member on two power-ups
-      of his TMNT, and the tab builds a Beatles group card from a folder of
-      variants. Full design, files, ordered commits, traps: handoff REMAINING
-      item 106 (also the loose end "members from override sets", because 40 x
-      8 GB source images on the tester's PC is the real pain).
-      **GATE CLEARED, 2026-09-10:** David flashed the TMNT store card and
-      booted all three images. `--layout store` is proven on hardware, so a
-      group may force the compact tick and the tab's "experimental" wording
-      comes off (still to do, in the tab commit).
-      **Established (90%, commits 1-8 of 9 done, 8f93f7a fbd521b 9a92e6c 44f8536 d0c51cf 8942de7):** the SELECTOR half
-      is built and its whole suite is green. `group=<members>|<title>|...`
-      parses; images and cards are now different numbers (`CONF_MAX_IMAGES` 64,
-      `CONF_MAX_CARDS` 16, `CONF_MAX_GROUPS` 8) and everything visual walks
-      cards through `conf_card_face()`; the roll excludes the last-choice
-      member and is stirred from urandom ^ CLOCK_MONOTONIC ^ time ^ pid at the
-      confirm; `--pick`/`--seed` are test-only and a `--pick` that is not a
-      member of the confirmed card is refused. Selector VERSION 3.0.
-      `select.sh` is UNTOUCHED and proven so: byte-identical lookups either
-      side of a `group=` line, under the host awk and the card's busybox awk.
-      **Ruled out / decided, do not re-open:** renaming the `anim: image N` and
-      `image N sound W` log strings to say "card" - the tab's `_ANIM_RE` and
-      eleven tests match on them and the number was always the card's; the note
-      on `struct media` says so, and renaming both sides together belongs with
-      the tab commit. The `card K/M` clause is emitted ONLY when the conf has
-      groups, so a group-free card's log and snapshot output stay byte-identical
-      (an existing headless case pins that line).
-      **Trap found, emulator only:** under `qemu-arm-static -L $ROOT` the open
-      of `/dev/urandom` is redirected into the rootfs copy, where it is an empty
-      regular file, so the read returns 0 and the clock seeds the roll. The log
-      says which happened (`group: /dev/urandom gave 0 byte(s)`). Not a card
-      fault, and not worth a test - it would pin an artefact.
-      **Also:** `make check` must run with the build dir on a Linux-native path
-      (`make check BUILD=/tmp/i106b`); `os.mkfifo` is Errno 95 on the Windows
-      mount and padsw_test.py dies there. Pre-existing, not this item.
-      Commit 4 is done too: `run_game.sh` carries the card's `group=` lines into
-      the rig conf when its `image=` count equals the resolved tree count (else
-      drops them out loud), places each one before its first member so the menu
-      order matches the card's, and takes `PAD_SELECT_PICK=<image>` -> `--pick`.
-      No rig knob for `--seed`, on purpose. The awk was proven against real
-      input under both awks, and three new cases in
-      `tests/test_spike2_codeselect_rig.py` were checked against a broken tree
-      before being trusted.
-      **Uncommitted:** nothing. The branch is pushed.
-      Commits 5-6 are done too: `mkmulticard.py` writes and reads the grammar
-      (the group line goes before its first member), refuses what the selector
-      merely drops (< 2 members, a gap in the run, overlapping groups, image 0,
-      a member naming no image line, a '|' in a title, a line past 1000 chars),
-      has the ordered `--group` / `--member` / `--members-list` CLI, both gates
-      (a group forces `store` and `parts`/`multi` is refused naming the cost; a
-      `group=` conf is never staged beside a codeselect below 3.0), and the
-      report rows (build.json per-image `group` plus a `groups` block, inspect
-      prints the cards before the images, plan prints `image-group`). Selftest
-      part 8 builds a real group card end to end; all 8 parts PASS under
-      `wsl -u root` with HOME redirected to a temp dir.
-      **TWO BUGS THIS PASS FOUND AND FIXED, both worth knowing:**
-      (1) `check_groups` returned early when there were no groups, so NOTHING
-      counted the cards and 17 plain images sailed through to be refused by the
-      selector on the machine instead.
-      (2) `ok &= <check>, <diagnostic>` in mkmulticard's selftest is a TUPLE and
-      always truthy: ELEVEN checks in that file could never fail.
-      `Checks.__iand__` honours the form now; all eleven are live and all pass.
-      That second one is why the selftest passed over a group card built on the
-      MULTI layout - the groups reached the conf but never `make_plan`, so the
-      layout gate was dead code. Both call sites pass them now.
-      Commit 7 is done too, THE TAB'S PURE LAYER. A table row is a CARD now:
-      `MemberRow`, `ImageRow.members`, `is_group`, `row_paths`, `form_trees`
-      (the ONE place the row/game index spaces meet) and `row_first_image`.
-      `_image_args` emits `--group` / `--member` in row order; `validate_form`
-      covers >= 2 members, row 0 never a group, no tree twice anywhere,
-      <= 16 cards / 64 trees / 8 groups; `form_compact` makes a group force the
-      compact build; `write_preview_conf` draws one card per row; `_row_key`
-      keys a group on its members so a member change is a REBUILD; and the
-      "experimental" wording is OFF the Compact tick now the gate is cleared.
-      **FOUR PLACES WERE USING A ROW WHERE THEY MEANT A GAME** and each is
-      fixed and pinned: `--default`, the `--art/--anim/--music N=` indexes in
-      prepare, `--highlight` in the preview, and `--titles`.
-      **A THIRD BUG, older than this item:** saved state put every non-bool row
-      field through `str()`, and `str([])` is the truthy STRING `"[]"` - so an
-      ordinary row restored from a state file read as a group with one member
-      called `"["`. `rows_from_state` rebuilds member rows properly now and
-      `is_group` asks for a list rather than for truthiness.
-      **AND A BUG IN MY OWN TEST, found by the negative control:** the
-      `--default` case first put the group at row 2, where the row index and the
-      image index happen to agree, so reverting the fix left it green. The group
-      goes first among the extras now. Every new behaviour with a wrong-index
-      failure mode was checked against a deliberately broken tree before being
-      trusted.
-      Commit 8 is done too, THE TAB'S WIDGETS - the part a person can reach.
-      "Add group..." (several images as one row) and "Add group from folder..."
-      (every `*.raw` in a folder, sorted, the folder's name as the title - the
-      case that FILED this item); the Title cell `JUKEBOX (random, 3 sets)` with
-      a count of the games missing from this machine; the Code cell showing the
-      version the members agree on or `mixed` (a version not yet READ is blank
-      and is NOT a disagreement); both wired into `_values`, which is not
-      automatic - the Code cell read `row.version` straight for a while, and
-      that is always blank on a group row. The Compact tick locks ON with
-      `COMPACT_TIP_GROUP` while a group is in the list and follows the LIST, not
-      only the Add, so a remove / load / restore / undo hands it back. A group
-      cannot be the primary. And `rows_from_inspect` folds a loaded card's
-      `groups` block back into rows (`group_rows`), so a loaded jukebox does not
-      come up as N ordinary rows that an Apply would flatten; a block this tool
-      cannot make sense of is left alone rather than half-folded.
-      **STILL OPEN in the tab:** a Members section in the Edit-image dialog, so
-      a group's games can be changed without removing the row and adding it
-      again. That IS the workaround meanwhile and it is a real one - the row
-      carries no state a rebuild would miss.
-      **Resume:** commit 9 of 9, THE EMULATOR PROOF RUN (rig lock; `alive.sh`
-      0 after). A store card from David's TMNT trio as stock plus
-      `--group '1987 RANDOM|pro or LE, rolled at boot' --member <1987 pro>
-      --member <1987 LE>`; boot 1: RIGHT, START -> `chose 1 ... rolled` ->
-      `p3:img1` bound, attract; boot 2: no keys, the countdown -> `chose 2`
-      (a 2-member group alternates by the exclusion rule) -> `p3:img2`,
-      attract; `glshot.sh` shows the two builds' different art. Recorded as a
-      proof row in `codeselect/DESIGN.md`. Then the Edit-dialog Members
-      section, and David's own hardware proof (two power-ups of his TMNT).
-      Full ordered list and every trap: handoff REMAINING item 106.
-      **Uncommitted:** nothing. The branch is pushed.
-      Commits 5-6 are done too: `mkmulticard.py` writes and reads the grammar
-      (the group line goes before its first member), refuses what the selector
-      merely drops (< 2 members, a gap in the run, overlapping groups, image 0,
-      a member naming no image line, a '|' in a title, a line past 1000 chars),
-      has the ordered `--group` / `--member` / `--members-list` CLI, both gates
-      (a group forces `store` and `parts`/`multi` is refused naming the cost; a
-      `group=` conf is never staged beside a codeselect below 3.0), and the
-      report rows (build.json per-image `group` plus a `groups` block, inspect
-      prints the cards before the images, plan prints `image-group`). Selftest
-      part 8 builds a real group card end to end; all 8 parts PASS under
-      `wsl -u root` with HOME redirected to a temp dir.
-      **TWO BUGS THIS PASS FOUND AND FIXED, both worth knowing:**
-      (1) `check_groups` returned early when there were no groups, so NOTHING
-      counted the cards and 17 plain images sailed through to be refused by the
-      selector on the machine instead.
-      (2) `ok &= <check>, <diagnostic>` in mkmulticard's selftest is a TUPLE and
-      always truthy: ELEVEN checks in that file could never fail.
-      `Checks.__iand__` honours the form now; all eleven are live and all pass.
-      That second one is why the selftest passed over a group card built on the
-      MULTI layout - the groups reached the conf but never `make_plan`, so the
-      layout gate was dead code. Both call sites pass them now.
-      Commit 7 is done too, THE TAB'S PURE LAYER. A table row is a CARD now:
-      `MemberRow`, `ImageRow.members`, `is_group`, `row_paths`, `form_trees`
-      (the ONE place the row/game index spaces meet) and `row_first_image`.
-      `_image_args` emits `--group` / `--member` in row order; `validate_form`
-      covers >= 2 members, row 0 never a group, no tree twice anywhere,
-      <= 16 cards / 64 trees / 8 groups; `form_compact` makes a group force the
-      compact build; `write_preview_conf` draws one card per row; `_row_key`
-      keys a group on its members so a member change is a REBUILD; and the
-      "experimental" wording is OFF the Compact tick now the gate is cleared.
-      **FOUR PLACES WERE USING A ROW WHERE THEY MEANT A GAME** and each is
-      fixed and pinned: `--default`, the `--art/--anim/--music N=` indexes in
-      prepare, `--highlight` in the preview, and `--titles`.
-      **A THIRD BUG, older than this item:** saved state put every non-bool row
-      field through `str()`, and `str([])` is the truthy STRING `"[]"` - so an
-      ordinary row restored from a state file read as a group with one member
-      called `"["`. `rows_from_state` rebuilds member rows properly now and
-      `is_group` asks for a list rather than for truthiness.
-      **AND A BUG IN MY OWN TEST, found by the negative control:** the
-      `--default` case first put the group at row 2, where the row index and the
-      image index happen to agree, so reverting the fix left it green. The group
-      goes first among the extras now. Every new behaviour with a wrong-index
-      failure mode was checked against a deliberately broken tree before being
-      trusted.
-      **Resume:** commit 8 of 9, THE TAB'S WIDGETS - the only part of the
-      feature a person can actually reach. An "Add group..." toolbar row; a
-      Members section in the Edit-image dialog (Add files... multi-select,
-      **Add folder...** = every `*.raw` in it sorted, Remove); the table cell
-      `JUKEBOX (random, 3 sets)` with code = the common member version or
-      `mixed`; the members' size bands merged into one; the Compact tick forced
-      ON and DISABLED while a group row exists, with `COMPACT_TIP_GROUP` as its
-      tooltip (both already written, not yet wired to the widget);
-      `form_from_inspect` rebuilding group rows from the card's `groups` block
-      (mkmulticard already reports it). Then commit 9, the emulator proof run.
-      Full ordered list and every trap: handoff REMAINING item 106.
-      **Uncommitted:** nothing. The branch is pushed.
-      Commits 5-6 are done too: `mkmulticard.py` writes and reads the grammar
-      (the group line goes before its first member), refuses what the selector
-      merely drops (< 2 members, a gap in the run, overlapping groups, image 0,
-      a member naming no image line, a '|' in a title, a line past 1000 chars),
-      has the ordered `--group` / `--member` / `--members-list` CLI, both gates
-      (a group forces `store` and `parts`/`multi` is refused naming the cost; a
-      `group=` conf is never staged beside a codeselect below 3.0), and the
-      report rows (build.json per-image `group` plus a `groups` block, inspect
-      prints the cards before the images, plan prints `image-group`). Selftest
-      part 8 builds a real group card end to end; all 8 parts PASS under
-      `wsl -u root` with HOME redirected to a temp dir.
-      **TWO BUGS THIS PASS FOUND AND FIXED, both worth knowing:**
-      (1) `check_groups` returned early when there were no groups, so NOTHING
-      counted the cards and 17 plain images sailed through to be refused by the
-      selector on the machine instead.
-      (2) `ok &= <check>, <diagnostic>` in mkmulticard's selftest is a TUPLE and
-      always truthy: ELEVEN checks in that file could never fail.
-      `Checks.__iand__` honours the form now; all eleven are live and all pass.
-      That second one is why the selftest passed over a group card built on the
-      MULTI layout - the groups reached the conf but never `make_plan`, so the
-      layout gate was dead code. Both call sites pass them now.
-      **Resume:** commits 7-8 of 9, THE TAB. `ImageRow.members`, `is_group`;
-      `validate_form` (>= 2 members each an existing file, no tree twice
-      anywhere, row 0 never a group, <= 16 cards, <= 64 trees); `_image_args`
-      emitting `--group` / `--member` in row order with `--layout store`, the
-      Compact tick forced ON - and the "experimental" wording COMES OFF now the
-      gate is cleared (`multiboot_tab.py:5514`, the rule note at `:5817`).
-      Preview: one card per row through `--snapshot`; load from `inspect`
-      rebuilds group rows; `diff_forms` keys a group on its members so a member
-      change is a rebuild. Table cell `JUKEBOX (random, 3 sets)`, an
-      "Add group..." toolbar row, a Members section in the Edit dialog (Add
-      files / Add folder / Remove), a merged size band. Then commit 9, the
-      emulator proof run.
-      **ONE OPEN QUESTION for the tab:** it passes ROW numbers to `--highlight`,
-      which names an IMAGE. Reconcile it there, not in the selector - the
-      snapshot line already echoes the image asked for and says `card K/M` for
-      where it landed.
-      Full ordered list and every trap: handoff REMAINING item 106.
-      **Uncommitted:** nothing. The branch is pushed.
-      **Resume:** commit 5 of 9 - `mkmulticard.py`: `render_images_conf` /
-      `parse_images_conf` carry groups, the refusals (< 2 members, overlapping
-      or non-contiguous runs, image 0, > 16 cards, > 64 images, an over-long
-      line), `build_manifest` / `inspect_card` / `print_inspect` / `print_plan`
-      (`image-group` rows), the ordered `--group` / `--member` / `--members-list`
-      CLI, `auto` -> `store` when a group exists with `parts`/`multi` refused
-      naming the cost, and `stage_selector`/`inject` refusing a `group=` conf on
-      a selector below 3.0. Then 6 (the selftest part), 7-8 (the tab), 9 (the
-      emulator proof run). Full ordered list and every trap: handoff REMAINING
-      item 106.
-      — S3: a workaround exists (choose by hand). D4: a conf grammar and
-      selector model change, a tool grammar, a tab editor, several rig runs and
-      a hardware proof at the end.
+- [ ] **110. A random group's games cannot be CHANGED once the row exists: the
+      Edit-image dialog has no Members section.** `S3 D2` *(Split out of item
+      106 on 2026-09-10, when everything else about a group card closed. The
+      workaround is real - remove the row and add it again, and the row carries
+      no state a rebuild would miss - so this is friction, not a hole.)*
+      The tab can ADD a group ("Add group…", "Add group from folder…") and
+      REMOVE one (the row goes whole), and a loaded card's groups fold back into
+      rows. What is missing is the middle: adding a game to an existing group,
+      dropping one, or reordering them. The design David asked for on
+      2026-09-09 is a Members section in the Edit-image dialog with **Add
+      files…** (multi-select), **Add folder…** (every `*.raw` in it, sorted) and
+      **Remove**.
+      Everything under it is already built and tested: `ImageRow.members`,
+      `MemberRow`, `is_group`, `row_paths`, `form_trees`, `validate_form`'s
+      member checks, and `_row_key` keying a group on its members so a member
+      change is a REBUILD rather than a menu edit. So this is dialog work
+      against a settled model, which is why it is D2 and not more.
+      Acceptance: a group row's games can be added to, dropped and reordered
+      from Edit image…, `validate_form` still refuses < 2 members and a tree
+      listed twice, and the edit shows up as a rebuild in the card's edit
+      status rather than as a menu change.
+      — S3: friction with a real workaround. D2: one dialog section over a
+      model that is already proven, plus its tests.
 
 - [ ] **107. A variant that changes a few songs costs a whole `image.bin` per
       copy on a compact card; store only the changed byte ranges and rebuild the
@@ -8664,6 +8415,33 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
+      and choosing it (by hand or by the countdown) boots one member at random,
+      a different one every power-up.** EMULATOR-PROVEN 2026-09-10, closing
+      commit 8f98809 on `item/106`. One new conf key,
+      `group=<members>|<title>|<subtitle>[|media…]`, whose members stay ordinary
+      `image=` lines - which is why `select.sh` and the choice file never
+      learned that groups exist, proven by byte-identical lookups either side of
+      a group line under both awks. Images and cards became different numbers
+      (64 / 16 / 8). The roll happens at the confirm, excludes the member the
+      last-choice file names, and is seeded from urandom ^ CLOCK_MONOTONIC ^
+      time ^ pid. mkmulticard writes and reads the grammar, refuses what the
+      selector merely drops, has the ordered `--group`/`--member`/
+      `--members-list` CLI, forces the compact layout for a group and refuses to
+      stage a group conf beside a selector below 3.0. The Multi-boot tab's rows
+      are CARDS now, and a loaded card's groups fold back into them.
+      **Proof:** David's TMNT store card, menu-only re-inject, three unattended
+      power-ups - the stock card unchanged, then image 1 (51 fps), then image 2
+      (45 fps) by the exclusion rule. Two power-ups, two different games. The
+      full table is in `codeselect/DESIGN.md`. Hardware proof is David's and the
+      card is left as a group card for it.
+      **Found and fixed on the way:** a card-count check that never ran without
+      a group; four places in the tab using a row index where they meant a game
+      index; `str([])` making an ordinary restored row read as a group; and
+      eleven `ok &= check, diagnostic` lines in mkmulticard's selftest that were
+      always-truthy tuples and could never fail.
+      **Split out:** item 110, the Edit-image dialog's Members section.
 
 - [x] **109. The boot menu decided which animations to keep in RAM ONCE, before
       the menu opened, in image order — so on a card with more than about five

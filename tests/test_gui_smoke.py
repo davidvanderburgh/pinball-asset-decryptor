@@ -811,6 +811,58 @@ def test_audio_preview_limit_caps_trimmed_replacement(app,
     assert win._audio_compute_preview_limit(rel, 30.0) is None
 
 
+def test_audio_preview_keeps_a_longer_replacement_whole_when_the_bank_grows(
+        app, manufacturers_by_key):
+    """With the Stern longer-replacements option on, a replacement longer
+    than its slot is kept whole on Write, so the Replacement pane must not
+    hatch its tail as trimmed: no cap, the original's end marked instead,
+    and the clock says the bank grows.  Off, or on Spike 1 (no grow path),
+    it trims exactly as before."""
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    win = app.window
+
+    class _Slot:
+        duration = 0.32
+
+    rel = "audio/idx0044.wav"
+    win._audio_slots_by_rel = {rel: _Slot()}
+    win._audio_current_rel = rel
+    win._audio_assignments = {rel: "C:/rep.wav"}
+    win._audio_keep_full_flags = {}
+    win.audio_trim_var.set(True)
+
+    win._audio_advanced = dict(win._audio_advanced, audio_grow=False)
+    assert win._audio_compute_preview_limit(rel, 45.6) == 0.32
+    assert win._audio_preview_grow_from(rel, 45.6) is None
+
+    win._audio_advanced = dict(win._audio_advanced, audio_grow=True)
+    assert win._audio_compute_preview_limit(rel, 45.6) is None
+    assert win._audio_preview_grow_from(rel, 45.6) == 0.32
+    # a replacement that fits its slot has nothing to mark
+    assert win._audio_preview_grow_from(rel, 0.30) is None
+
+    # the pane's clock says so where "trimmed from" used to be
+    pane = win._audio_pane_rep
+    pane.path, pane.dur, pane.limit, pane.grow_from, pane.pos = (
+        "C:/rep.wav", 45.6, None, 0.32, 0.0)
+    pane._update_time()
+    assert "the sound bank grows" in pane.time_var.get()
+    assert "trimmed" not in pane.time_var.get()
+    pane.limit = 0.32
+    pane._update_time()
+    assert "trimmed from" in pane.time_var.get()
+
+    # Spike 1 has no grow path, so the option does not reach its preview
+    mfr = manufacturers_by_key["stern"]
+    if hasattr(mfr, "set_era"):
+        mfr.set_era("spike1")
+        try:
+            assert win._audio_compute_preview_limit(rel, 45.6) == 0.32
+        finally:
+            mfr.set_era("")
+
+
 def test_preview_panes_side_by_side(app, manufacturers_by_key):
     """Replace Audio + Replace Video previews show Original and Replacement
     side by side (like the image tab), each with its own play/stop transport

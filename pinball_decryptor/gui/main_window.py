@@ -264,6 +264,10 @@ class _AudioPreviewPane:
         # Effective stop point (s) when Write will trim this file to its slot
         # length — None when the whole file plays (originals are always None).
         self.limit = None
+        # Where the ORIGINAL ended (s) when this replacement is longer and
+        # Write will grow the sound bank to keep it whole — the strip marks
+        # it instead of hatching the tail as trimmed.  None otherwise.
+        self.grow_from = None
         # This clip's own loudness offset (dB), previewed in the picture and
         # in playback so moving the box on the Audio tab is something you can
         # see and hear.  0 on the Original pane, always.
@@ -320,10 +324,12 @@ class _AudioPreviewPane:
     # ---- loading ------------------------------------------------------
 
     def load(self, path, dur, limit=None, autoplay=False, label=None,
-             gain_db=0.0):
+             gain_db=0.0, grow_from=None):
         """Load *path* into the strip.  *dur* is its probed duration (s);
         *limit* is the trim stop point (s), or None to play the whole file;
-        *gain_db* is this clip's loudness offset (see :attr:`gain_db`).
+        *gain_db* is this clip's loudness offset (see :attr:`gain_db`);
+        *grow_from* is where the original ended when this longer clip will
+        grow the sound bank instead of being trimmed (see :attr:`grow_from`).
 
         *label* names the file in the title instead of *path*'s own name —
         for the folder's own copy of a slot, whose name is the SLOT's, when
@@ -332,6 +338,7 @@ class _AudioPreviewPane:
         self.path = path
         self.dur = dur or 0.0
         self.limit = limit
+        self.grow_from = grow_from if limit is None else None
         self.gain_db = float(gain_db or 0.0)
         self.pos = 0.0
         self._hint = ""
@@ -463,10 +470,23 @@ class _AudioPreviewPane:
         canvas = self.spec_canvas
         canvas.delete("cutmark")
         lim, dur = self.limit, self.dur
-        if lim is None or dur <= 0:
+        if dur <= 0:
             return
         w = max(1, canvas.winfo_width())
         h = canvas.winfo_height() or 90
+        if lim is None:
+            # Kept whole: the bank grows past the original's end.  A green
+            # line where that end was, nothing hatched — the whole strip is
+            # what the machine plays.
+            if self.grow_from and self.grow_from < dur:
+                x = max(0, min(w, int((self.grow_from / dur) * w)))
+                canvas.create_line(x, 0, x, h, fill="#7fd98a", width=1,
+                                   dash=(3, 2), tags=("cutmark",))
+                if x < w - 80:
+                    canvas.create_text(x + 3, 8, anchor=tk.W, fill="#9de8a6",
+                                       text="original ended; bank grows",
+                                       tags=("cutmark",))
+            return
         x = max(0, min(w, int((lim / dur) * w)))
         # Hatch the trimmed tail (stipple = pseudo-transparency in Tk) and
         # draw a red cut line + a small label.
@@ -632,6 +652,12 @@ class _AudioPreviewPane:
                 self.time_var.set(
                     f"{_fmt(self.pos)} / {_fmt(self.limit)}  "
                     f"(trimmed from {_fmt(self.dur)})")
+            elif self.grow_from:
+                # Longer than the original and kept whole: say so, and how
+                # long the original was, where "trimmed" used to be.
+                self.time_var.set(
+                    f"{_fmt(self.pos)} / {_fmt(self.dur)}  "
+                    f"(original {_fmt(self.grow_from)}; the sound bank grows)")
             else:
                 self.time_var.set(f"{_fmt(self.pos)} / {_fmt(self.dur)}")
         else:
@@ -6423,7 +6449,8 @@ class MainWindow:
             self._audio_pane_rep.load(
                 rpath, rdur, self._audio_compute_preview_limit(rel, rdur),
                 autoplay=autoplay,
-                gain_db=self._audio_level_db.get(rel, 0))
+                gain_db=self._audio_level_db.get(rel, 0),
+                grow_from=self._audio_preview_grow_from(rel, rdur))
             return
         # No new assignment, but the slot is already changed on disk and the
         # true original is on the left (its .orig snapshot): the on-disk file
@@ -6538,9 +6565,39 @@ class MainWindow:
             return None
         if self._audio_keep_full_flags.get(rel):
             return None
+        # No cap when a longer replacement will grow the sound bank instead
+        # of being trimmed (Stern Spike 2, Advanced audio options): the
+        # machine plays the whole clip, so the preview does too.
+        if self._audio_grow_active():
+            return None
         slot = self._audio_slots_by_rel.get(rel)
         slot_dur = slot.duration if slot else 0.0
         # Only cap when the replacement is actually longer than the slot.
+        if slot_dur > 0 and rep_dur > slot_dur + 0.02:
+            return slot_dur
+        return None
+
+    def _audio_grow_active(self):
+        """True when a replacement longer than its slot will GROW the sound
+        bank rather than be trimmed: the Stern Spike 2 tab with the
+        longer-replacements option on.  (The option lives in the Stern
+        Advanced dialog, but the dict is the window's, so the manufacturer
+        is checked here rather than trusted.)"""
+        mfr = self._current_mfr
+        if getattr(mfr, "key", None) != "stern":
+            return False
+        if getattr(mfr, "current_era", "spike2") != "spike2":
+            return False
+        return bool(self._audio_advanced.get("audio_grow"))
+
+    def _audio_preview_grow_from(self, rel, rep_dur):
+        """Where the original ended (s) when *rel*'s replacement of *rep_dur*
+        seconds is longer and will grow the bank -- the Replacement pane
+        marks it -- else None."""
+        if rel is None or not self._audio_grow_active():
+            return None
+        slot = self._audio_slots_by_rel.get(rel)
+        slot_dur = slot.duration if slot else 0.0
         if slot_dur > 0 and rep_dur > slot_dur + 0.02:
             return slot_dur
         return None
@@ -10379,6 +10436,12 @@ class MainWindow:
             self._audio_advanced = _collect()
             if self._on_audio_advanced_change:
                 self._on_audio_advanced_change(dict(self._audio_advanced))
+            # The longer-replacements option changes what the Replacement
+            # preview shows (trimmed tail vs. kept whole), so reload it.
+            try:
+                self._audio_load_rep_pane(self._audio_current_rel)
+            except Exception:
+                pass
             self._refresh_audio_adv_marker()
             dlg.destroy()
 

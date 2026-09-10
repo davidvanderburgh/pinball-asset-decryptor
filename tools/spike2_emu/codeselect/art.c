@@ -524,10 +524,13 @@ int art_cache_set(struct art_anim **anims, int n, size_t budget_bytes, char *why
      * fits is a window around the card being looked at rather than images
      * 0..k.  A clip too big for what is left is skipped and the smaller ones
      * behind it are still considered. */
-    for (i = 0; i < n && nwant < (int)(sizeof want / sizeof *want); i++) {
+    for (i = 0; i < n; i++) {
         struct art_anim *a = anims[i];
         size_t need;
         if (!a || a->n < 2) continue;
+        /* the list has its own ceiling, and a clip past it is on demand like
+         * any other clip that did not fit - COUNTED, not silently missing */
+        if (nwant >= (int)(sizeof want / sizeof *want)) { skipped++; continue; }
         need = (size_t)(a->n - 1) * (size_t)a->w * (size_t)a->h * 4;
         if (used + need > budget_bytes) { skipped++; continue; }
         used += need;

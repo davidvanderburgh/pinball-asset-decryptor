@@ -56,8 +56,20 @@ def test_op11_payloads_starts_after_the_header_and_finds_every_marker():
 # --------------------------------------------------------------------------
 # which grows survive, and what is written
 # --------------------------------------------------------------------------
-def _site(sid, off, payload, ks=b"\x00" * 8):
-    return (sid, off, ks, payload)
+def _site(sid, off, payload, ks=b"\x00" * 8, dur=2000, dur_ks=b"\x00" * 4):
+    """A site whose declared duration sits at off - 7 (the op11 payload of a
+    plain descriptor is at +10 and the duration at +3)."""
+    return engine._DescSite(sid, off, ks, payload, off - 7, dur_ks, dur)
+
+
+def test_duration_units_are_1_4000ths_of_a_second_rounded_up():
+    """Measured on Led Zeppelin 1.22: a 22050-sample sound declares 2000 or
+    2001, a 14112-sample one 1281 (ceil(1280.0) = 1280; the card says 1281
+    for both, so the base is kept and only the growth is applied)."""
+    assert engine._duration_units(22050) == 2000
+    assert engine._duration_units(14112) == 1280
+    assert engine._duration_units(66026) == 5989      # sid 2, exact on the card
+    assert engine._duration_units(0) == 0
 
 
 def test_a_sound_no_play_table_names_is_not_grown_and_says_why():
@@ -78,18 +90,34 @@ def test_the_plan_rewrites_only_the_key_bits_under_the_same_whitening():
     kept; the whitening the descriptor already has is re-applied."""
     stock, new = _key(0xd2694790, 0x00000d81), _key(0xd7094794, 0x80000b86)
     ks = bytes(range(8))
+    dks = bytes([0x11, 0x22, 0x33, 0x44])
     payload = _key(0xd2694790, 0x1eef6d81)
-    sites = [_site(180, 0x2af2bdf2, payload, ks),
+    sites = [_site(180, 0x2af2bdf2, payload, ks, dur=2001, dur_ks=dks),
              _site(181, 0x2af2c000, _key(0x55, 0x66), ks)]   # someone else's
     params = [{"idx": 39, "grown": True, "stock_findkey": stock,
-               "findkey": new},
+               "findkey": new, "length": 230819, "stock_length": 22050},
               {"idx": 40, "grown": False}]
     writes, expect = engine._plan_descriptor_repoint(params, sites)
     want_plain = _key(0xd7094794, (0x1eef6d81 & ~MASK) | 0x80000b86)
-    assert writes == {0x2af2bdf2: bytes(a ^ b for a, b in zip(want_plain, ks))}
-    assert expect == {180: {new}}
+    # the declared duration moves by the growth, on top of whatever the card
+    # said: 2001 + (ceil(230819 * 4000 / 44100) - 2000) = 2001 + 18937
+    want_dur = 2001 + (engine._duration_units(230819) - 2000)
+    assert writes == {
+        0x2af2bdf2: bytes(a ^ b for a, b in zip(want_plain, ks)),
+        0x2af2bdf2 - 7: bytes(a ^ b for a, b in
+                              zip(struct.pack("<I", want_dur), dks))}
+    assert expect == {180: ({new}, want_dur)}
     # what the game would derive from the rewritten payload IS the new key
     assert engine._play_key(want_plain, 180) == new
+
+
+def test_a_row_without_a_stock_length_keeps_the_declared_duration():
+    sites = [_site(1, 0x100, _key(0x11, 0x0d81), dur=777)]
+    params = [{"idx": 0, "grown": True, "stock_findkey": _key(0x11, 0x0d81),
+               "findkey": _key(0x99, 0x0b86), "length": 5000}]
+    writes, expect = engine._plan_descriptor_repoint(params, sites)
+    assert expect == {1: ({_key(0x99, 0x0b86)}, 777)}
+    assert writes[0x100 - 7] == struct.pack("<I", 777)
 
 
 def test_the_plan_matches_on_all_eight_bytes_not_just_the_first_word():
@@ -100,8 +128,8 @@ def test_the_plan_matches_on_all_eight_bytes_not_just_the_first_word():
     params = [{"idx": 0, "grown": True, "stock_findkey": stock,
                "findkey": _key(0x99, 0x0b86)}]
     writes, expect = engine._plan_descriptor_repoint(params, sites)
-    assert list(writes) == [0x100]
-    assert expect == {1: {_key(0x99, 0x0b86)}}
+    assert sorted(writes) == [0x100 - 7, 0x100]
+    assert expect == {1: ({_key(0x99, 0x0b86)}, 2000)}
 
 
 def test_the_plan_refuses_a_key_no_descriptor_can_carry():
@@ -127,15 +155,23 @@ def test_the_plan_refuses_a_grown_sound_nothing_names_or_without_a_key():
 
 
 def test_two_grown_sounds_in_one_descriptor_are_both_expected():
+    """Both keys are re-pointed and the declared duration moves by BOTH
+    growths (the descriptor's figure covers the whole sequence)."""
     a, b = _key(0x11, 0x0d81), _key(0x22, 0x0d82)
-    sites = [_site(1, 0x100, a), _site(1, 0x120, b)]
+    sites = [_site(1, 0x100, a, dur=4000),
+             engine._DescSite(1, 0x120, b"\x00" * 8, b, 0x100 - 7,
+                              b"\x00" * 4, 4000)]
     params = [{"idx": 0, "grown": True, "stock_findkey": a,
-               "findkey": _key(0x91, 1)},
+               "findkey": _key(0x91, 1), "length": 88200,
+               "stock_length": 44100},
               {"idx": 1, "grown": True, "stock_findkey": b,
-               "findkey": _key(0x92, 2)}]
+               "findkey": _key(0x92, 2), "length": 66150,
+               "stock_length": 22050}]
     writes, expect = engine._plan_descriptor_repoint(params, sites)
-    assert set(writes) == {0x100, 0x120}
-    assert expect == {1: {_key(0x91, 1), _key(0x92, 2)}}
+    assert set(writes) == {0x100, 0x120, 0x100 - 7}
+    assert expect == {1: ({_key(0x91, 1), _key(0x92, 2)},
+                          4000 + 4000 + 4000)}
+    assert writes[0x100 - 7] == struct.pack("<I", 12000)
 
 
 # --------------------------------------------------------------------------
@@ -171,7 +207,7 @@ def test_a_sound_no_play_table_names_trims_instead_of_growing(monkeypatch,
     # nothing names idx 0
     monkeypatch.setattr(engine, "_descriptor_sites",
                         lambda gr, img, log=None: [
-                            (101, 0x308, b"\x00" * 8, struct.pack("<II", 1, 0))])
+                            _site(101, 0x308, struct.pack("<II", 1, 0))])
     assets, _wavp = _edits(tmp_path, 2.0)
     msgs, log = _capture()
 

@@ -333,8 +333,9 @@ def _grow_card(monkeypatch, tmp_path, params, grown_rows=None, places=None):
     # The play tables name every sound by its key's first word; the re-point
     # itself is an emulator step and is only recorded here.
     def sites(gr, img, log=None):
-        return [(100 + p["idx"], 0x300 + 8 * p["idx"], b"\x00" * 8,
-                 struct.pack("<II", p["key0"], 0))
+        return [engine._DescSite(100 + p["idx"], 0x300 + 8 * p["idx"],
+                                 b"\x00" * 8, struct.pack("<II", p["key0"], 0),
+                                 0x200 + 4 * p["idx"], b"\x00" * 4, 4000)
                 for p in params if p.get("key0") is not None]
 
     repointed = {}

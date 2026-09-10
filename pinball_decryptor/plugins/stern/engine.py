@@ -28,6 +28,7 @@ import struct
 import tempfile
 import time
 import wave
+from collections import namedtuple
 
 # Glyph slices sit 120+ characters below the project folder and the build
 # output goes wherever the user pointed it, so both routinely pass Windows'
@@ -8955,6 +8956,9 @@ def _derive_grown(gr_path, staged, params_stock, log, progress=None):
             # collapse retired.  The play tables name the sound by it, and
             # the re-point matches on it exactly (all eight bytes).
             p["stock_findkey"] = (raw_by_idx.get(p["idx"]) or {}).get("findkey")
+            # and its length, which is what the descriptor's declared
+            # duration was written from.
+            p["stock_length"] = (raw_by_idx.get(p["idx"]) or {}).get("length")
     stock = {p["idx"]: (p["scale"], p["pred16"], p["body_off"], p["length"])
              for p in params_stock}
     moved = [p["idx"] for p in params
@@ -8995,8 +8999,32 @@ def _derive_grown(gr_path, staged, params_stock, log, progress=None):
 # and the find itself compares all 64 bits (ldrd / cmp / cmpeq at 0x16fe80).
 # The sixteen bits in the middle of the second word are something else the
 # descriptor carries; they are kept as they are.
+#
+# A descriptor also DECLARES its sound's duration: the little-endian word at
+# bytes 3..6 (three bytes on every descriptor seen, the fourth always zero) in
+# 1/4000 s, i.e. ceil(length * 4000 / 44100) of the record it names on 421 of
+# Led Zeppelin's 560 plain descriptors, the rest being multi-part entries
+# whose figure covers the whole sequence.  The voice setup (0x170548..0x1705f8)
+# assembles it and keeps it on the voice, so a grown sound that still declared
+# its old 0.32 s would be cut, or worse, at 0.32 s.  It is moved by the
+# difference between the new and the stock length, which keeps whatever base
+# a multi-part entry had.
 _DESC_KEY2_MASK = 0xE0001FFF
 _DESC_OP11 = b"\x0b\x00\x00\x00"
+_DESC_DUR_OFF = 3
+_DESC_DUR_RATE = 4000
+
+#: One op11 payload in one descriptor, as the card carries it.  ``off`` is
+#: where the eight payload bytes sit in ``image.bin`` and ``keystream`` the
+#: eight bytes whitening them there; ``dur_off`` / ``dur_keystream`` are the
+#: same for the four-byte declared duration, ``duration`` its plain value.
+_DescSite = namedtuple(
+    "_DescSite", "sid off keystream payload dur_off dur_keystream duration")
+
+
+def _duration_units(samples):
+    """A length in card samples as the descriptor declares it."""
+    return -(-int(samples) * _DESC_DUR_RATE // 44100)
 
 
 def _play_key(payload8, sid):
@@ -9020,11 +9048,9 @@ def _op11_payloads(desc):
 
 
 def _descriptor_sites(gr_path, img_path, log=None):
-    """Every op11 payload the card's play tables carry, as
-    ``[(sid, off, keystream8, payload8)]``: *off* is where the eight payload
-    bytes sit in ``image.bin``, *keystream8* the bytes that whiten them there
-    and *payload8* the plain value.  Empty when the resolver can't be
-    located, which a caller treats as "no descriptor names anything"."""
+    """Every op11 payload the card's play tables carry, as a list of
+    :class:`_DescSite`.  Empty when the resolver can't be located, which a
+    caller treats as "no descriptor names anything"."""
     from .spike2 import sfx_names as SN
     from .spike2.emulator import Spike2Emu
     out = []
@@ -9042,8 +9068,11 @@ def _descriptor_sites(gr_path, img_path, log=None):
             if r is None:
                 continue
             dec0, ks, desc = r
+            d0 = _DESC_DUR_OFF
+            dur = struct.unpack_from("<I", desc, d0)[0]
             for p, payload in _op11_payloads(desc):
-                out.append((sid, dec0 + p, ks[p:p + 8], payload))
+                out.append(_DescSite(sid, dec0 + p, ks[p:p + 8], payload,
+                                     dec0 + d0, ks[d0:d0 + 4], dur))
     finally:
         emu.close()
     return out
@@ -9058,8 +9087,8 @@ def _grows_named_by_a_descriptor(grows, byidx, sites, log):
     carry; the exact eight-byte match happens once the staged bank has been
     derived (:func:`_plan_descriptor_repoint`)."""
     named = set()
-    for _sid, _off, _ks, payload in sites:
-        named.add(struct.unpack_from("<I", payload)[0])
+    for s in sites:
+        named.add(struct.unpack_from("<I", s.payload)[0])
     kept = {}
     for idx, spec in grows.items():
         k0 = (byidx.get(idx) or {}).get("key0")
@@ -9078,9 +9107,10 @@ def _grows_named_by_a_descriptor(grows, byidx, sites, log):
 
 
 def _plan_descriptor_repoint(params, sites):
-    """``({off: bytes}, {sid: {key8}})`` -- the writes that re-point every
-    descriptor naming a grown sound's stock record at its appended record,
-    and what each touched sid must then resolve to.
+    """``({off: bytes}, {sid: ({key8}, duration)})`` -- the writes that
+    re-point every descriptor naming a grown sound's stock record at its
+    appended record and move its declared duration by the growth, and what
+    each touched sid must then resolve to.
 
     Raises when a grown sound's appended key has bits no descriptor can
     carry, or when no descriptor names its stock record: either would ship
@@ -9095,22 +9125,33 @@ def _plan_descriptor_repoint(params, sites):
                 "idx %d: the staged bank's decode reported no container key "
                 "for the sound, so its play tables can't be re-pointed."
                 % p["idx"])
+        grew = 0
+        if p.get("stock_length") is not None:
+            grew = (_duration_units(p["length"])
+                    - _duration_units(p["stock_length"]))
         hits = 0
-        for sid, off, ks, payload in sites:
-            if _play_key(payload, sid) != old:
+        for s in sites:
+            if _play_key(s.payload, s.sid) != old:
                 continue
-            if _play_key(new, sid) != new:
+            if _play_key(new, s.sid) != new:
                 raise RuntimeError(
                     "idx %d: the appended record's container key (%s) has "
                     "bits no descriptor can carry, so the game could never "
                     "look it up." % (p["idx"], new.hex()))
             w1, w2 = struct.unpack("<II", new)
-            _o1, o2 = struct.unpack("<II", payload)
+            _o1, o2 = struct.unpack("<II", s.payload)
             plain = struct.pack(
                 "<II", w1,
                 (o2 & ~_DESC_KEY2_MASK & 0xFFFFFFFF) | (w2 & _DESC_KEY2_MASK))
-            writes[off] = bytes(a ^ b for a, b in zip(plain, ks))
-            expect.setdefault(sid, set()).add(new)
+            writes[s.off] = bytes(a ^ b for a, b in zip(plain, s.keystream))
+            keys, dur = expect.get(s.sid, (set(), s.duration))
+            keys.add(new)
+            # One descriptor can name two grown sounds; each moves the
+            # declared duration by its own growth.
+            dur = (dur + grew) & 0xFFFFFFFF
+            expect[s.sid] = (keys, dur)
+            writes[s.dur_off] = bytes(
+                a ^ b for a, b in zip(struct.pack("<I", dur), s.dur_keystream))
             hits += 1
         if not hits:
             raise RuntimeError(
@@ -9140,12 +9181,13 @@ def _repoint_descriptors(gr_path, staged, params, sites, log):
             raise RuntimeError(
                 "The game's descriptor resolver could not be located on the "
                 "staged bank, so the re-point could not be verified.")
-        for sid, keys in sorted(expect.items()):
+        for sid, (keys, dur) in sorted(expect.items()):
             r = SN.resolve_descriptor(emu, resolver, buf, sid)
-            got = set()
+            got, got_dur = set(), None
             if r is not None:
                 for _p, payload in _op11_payloads(r[2]):
                     got.add(_play_key(payload, sid))
+                got_dur = struct.unpack_from("<I", r[2], _DESC_DUR_OFF)[0]
             missing = keys - got
             if missing:
                 raise RuntimeError(
@@ -9153,12 +9195,18 @@ def _repoint_descriptors(gr_path, staged, params, sites, log):
                     "hand back the appended record's key (%s); aborting "
                     "rather than shipping a card that plays the original."
                     % (sid, ", ".join(k.hex() for k in sorted(missing))))
+            if got_dur != dur:
+                raise RuntimeError(
+                    "sid %d: after the re-point the descriptor declares a "
+                    "duration of %s where %d was written; aborting rather "
+                    "than shipping a card whose sound would be cut short."
+                    % (sid, got_dur, dur))
     finally:
         emu.close()
     n_grown = sum(1 for p in params if p.get("grown"))
     log("Play tables re-pointed: %d descriptor(s) now name the longer copy "
-        "of %d sound(s), confirmed through the game's own resolver."
-        % (len(writes), n_grown), "info")
+        "of %d sound(s) and declare the new length, confirmed through the "
+        "game's own resolver." % (len(expect), n_grown), "info")
     return writes
 
 

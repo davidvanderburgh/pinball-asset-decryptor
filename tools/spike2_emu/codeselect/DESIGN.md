@@ -452,6 +452,16 @@ PAD_CARD_CACHE=0 PAD_SELECT=1 PAD_AUDIO=0 watch.sh`, four times:
 
 | 8 (item 105: FIVE images, the carousel) | 8a: right, right, left, left, left, start / 8b: left (one press, over the wrap), start | 8a: 0 STERN STOCK (p3, primary in place) — the highlight had been remembered at 1, so five presses walked 1→2→3→2→1→0 / 8b: **4 `1987 PRO B` (`p3:img4`, bound over /games/turtles_pro)** | card `turtles_pro-1_59_0.store-5image-item105.16G.sdcard.raw` (15.49 GB = the 16G class exactly; five turtles_pro 1.59.0 trees, 3.35 + 1.65 GB unique, **13.96 GB shared and stored once**, 9.24 GB free; `--bypass-validation`, `--debug-log`, a five-image synthetic media set, `timeout=30`). `PAD_CARD=<raw> PAD_CARD_CACHE=0 PAD_SELECT=1 PAD_AUDIO=0 watch.sh`, twice. **`layout: carousel of 5 (3 visible, 389 px cards)`** — the first time the 5+ layout has run anywhere but `headless.sh`. The selector drew at 60/s (`perf: 301 loops in 5 s, longest 27 ms`), the EGL bridge at 59.9 fps. Run 8b is the WRAP: from card 1 of 5, ONE left flipper gave `menu: highlight 0 -> 4 (1987 PRO B), card 5/5 - wrap`, and the two `glshot.sh` frames show `< 1 / 5 >` with *1987 PRO B* as card 1's left neighbour and then `< 5 / 5 >` with *STERN STOCK* as card 5's right neighbour — the set is a ring, and the counter says where in it you are. START gave `[select] chose 4 p3:img4 turtles_pro - bound over /games/turtles_pro`; the game reached ATTRACT and streamed its scene video at 29.6 fps (`ch0 handed the game 60 frames in 2022 ms, late 1`), PLAYER 1 / CREDITS 1/4 on the glass. Both runs torn down with `killgame.sh`, `alive.sh` 0 after each. Hardware proof is David's: the same card on the TMNT. |
 
+**Item 109, 2026-09-10, on the same five-image card.** The frame cache follows
+the highlight now instead of being filled once in image order, so this card was
+re-run to show the no-regression case: its one animated clip fits the budget
+outright, and every re-aim logged `1 kept 0 new 0 dropped` — nothing freed,
+nothing re-decoded, because the wanted set did not change. The clip finished
+`played 104 drawn 104`, equal, so no repaint was lost to the re-aiming, and the
+wrap still logged `highlight 4 -> 0, card 1/5 - wrap`. Attract reached, torn
+down, `alive.sh` 0. The cases where the budget actually binds are headless and
+padsw, not here: this card cannot exhaust it.
+
 The selector attached to the live GL bridge after padglhost was already up,
 drew at ~60 fps, mapped the flipper ids from the title's switch table, and
 exited 0 within 30 ms of START; watch.sh rode the `dump/selecting` flag

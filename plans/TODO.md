@@ -8031,7 +8031,8 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **109. The boot menu decides which animations to keep in RAM ONCE, before
       the menu opens, in image order — so on a card with more than about five
       animated images the cards you are LOOKING at can be the ones decoding
-      frame by frame.** `S2 D3` ← IN PROGRESS **85%** *(David, 2026-09-10, reading item
+      frame by frame.** `S2 D3` ← IN PROGRESS **90%** — code done and proven,
+      waiting on David's hardware run *(David, 2026-09-10, reading item
       105's cap answer: "we should probably make it that the animations are
       only loaded into RAM lazily and not all at once. For example, as you are
       scrolling, they drop off screen ones from RAM and pull close neighbors

@@ -1,6 +1,7 @@
 /* conf.c - see conf.h */
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -30,6 +31,95 @@ static void copy_field(char *dst, const char *src)
     dst[n] = 0;
 }
 
+/* something the file got wrong that must NOT stop the machine booting: kept
+ * for the caller to log.  The count keeps climbing after the text runs out,
+ * so a conf with forty bad members says forty and shows the first sixteen. */
+static void conf_warn(struct conf *c, const char *fmt, ...)
+{
+    va_list ap;
+    if (c->nwarn < CONF_MAX_WARN) {
+        va_start(ap, fmt);
+        vsnprintf(c->warn[c->nwarn], CONF_WARN_STR, fmt, ap);
+        va_end(ap);
+    }
+    c->nwarn++;
+}
+
+/* split a '|'-separated line into up to seven trimmed fields; missing ones
+ * come back NULL.  Shared by image= and group=, which carry the same seven. */
+static void split_fields(char *val, char *fld[7])
+{
+    char *p = val;
+    int k, nf = 0;
+    for (k = 0; k < 7; k++) fld[k] = NULL;
+    while (p && nf < 7) {
+        char *bar = strchr(p, '|');
+        if (bar) *bar++ = 0;
+        fld[nf++] = trim(p);
+        p = bar;
+    }
+}
+
+/* the display half of an image= or group= line: fields 1..6 */
+static void copy_card_fields(struct conf_image *im, char *fld[7])
+{
+    copy_field(im->title, fld[1] ? fld[1] : "");
+    copy_field(im->subtitle, fld[2] ? fld[2] : "");
+    copy_field(im->art, fld[3] ? fld[3] : "");
+    copy_field(im->anim, fld[4] ? fld[4] : "");
+    copy_field(im->music, fld[5] ? fld[5] : "");
+    copy_field(im->confirm, fld[6] ? fld[6] : "");
+}
+
+/* '3-5', '3,5,7-9' -> image indexes, in the order written.  Range ends are
+ * inclusive.  A token that is not a number or a range is dropped with a
+ * warning rather than refusing the file; so is a range written backwards.
+ * Bounds are NOT checked here - the image lines may not all be read yet - so
+ * resolve_groups does that once the file is done. */
+static void parse_members(struct conf *c, struct conf_group *g, const char *spec,
+                          const char *path, int lineno)
+{
+    char buf[CONF_STR], *p;
+    snprintf(buf, sizeof buf, "%s", spec);
+    p = buf;
+    while (*p) {
+        char *comma = strchr(p, ',');
+        char *tok, *dash, *end;
+        long a, b, v;
+        if (comma) *comma++ = 0;
+        tok = trim(p);
+        p = comma ? comma : p + strlen(p);
+        if (!*tok) continue;
+        dash = strchr(tok + 1, '-');   /* +1: a leading '-' is a bad token, not a range */
+        if (dash) *dash++ = 0;
+        a = strtol(tok, &end, 10);
+        if (end == tok || *end) {
+            conf_warn(c, "%s:%d: group member '%s' is not a number: dropped", path, lineno, tok);
+            continue;
+        }
+        b = a;
+        if (dash) {
+            b = strtol(dash, &end, 10);
+            if (end == dash || *end) {
+                conf_warn(c, "%s:%d: group range end '%s' is not a number: dropped", path, lineno, dash);
+                continue;
+            }
+            if (b < a) {
+                conf_warn(c, "%s:%d: group range %ld-%ld runs backwards: dropped", path, lineno, a, b);
+                continue;
+            }
+        }
+        for (v = a; v <= b; v++) {
+            if (g->nmember >= CONF_MAX_IMAGES) {
+                conf_warn(c, "%s:%d: group names more than %d members: the rest are dropped",
+                          path, lineno, CONF_MAX_IMAGES);
+                return;
+            }
+            g->member[g->nmember++] = (int)v;
+        }
+    }
+}
+
 static int clamp_int(const char *val, int lo, int hi)
 {
     long v = strtol(val, NULL, 10);
@@ -38,13 +128,112 @@ static int clamp_int(const char *val, int lo, int hi)
     return (int)v;
 }
 
+/* append one card and record which images it owns.  The ONLY thing in the
+ * group machinery that can refuse a file: too many cards is the same class of
+ * mistake as too many image lines, and is refused the same way. */
+static int add_card(struct conf *c, int image, int group, const char *path, char *err, int errlen)
+{
+    struct conf_card *cd;
+    if (c->ncards >= CONF_MAX_CARDS) {
+        snprintf(err, errlen, "%s: more than %d cards (%d images, %d group(s))",
+                 path, CONF_MAX_CARDS, c->n, c->ngroups);
+        return -1;
+    }
+    cd = &c->cards[c->ncards];
+    cd->image = image;
+    cd->group = group;
+    if (image >= 0) {
+        c->card_of[image] = (short)c->ncards;
+    } else {
+        int k;
+        for (k = 0; k < c->grp[group].nmember; k++)
+            c->card_of[c->grp[group].member[k]] = (short)c->ncards;
+    }
+    c->ncards++;
+    return 0;
+}
+
+/* ONCE THE WHOLE FILE IS READ: bound-check every member, hand each image to
+ * the first group that claims it, drop whatever is left empty, and lay the
+ * cards out in line order.  Everything here except the card limit is a
+ * warning, because a mistyped group must never stop a machine booting. */
+static int resolve_groups(struct conf *c, const int *gpos, const int *gline,
+                          const char *path, char *err, int errlen)
+{
+    int owner[CONF_MAX_IMAGES];
+    int dropped[CONF_MAX_GROUPS], placed[CONF_MAX_GROUPS];
+    int i, gi, k, keep;
+
+    for (i = 0; i < CONF_MAX_IMAGES; i++) { owner[i] = -1; c->card_of[i] = -1; }
+    for (gi = 0; gi < CONF_MAX_GROUPS; gi++) { dropped[gi] = 0; placed[gi] = 0; }
+
+    for (gi = 0; gi < c->ngroups; gi++) {
+        struct conf_group *g = &c->grp[gi];
+        keep = 0;
+        for (k = 0; k < g->nmember; k++) {
+            int m = g->member[k];
+            if (m < 0 || m >= c->n) {
+                conf_warn(c, "%s:%d: group member %d names no image line: dropped",
+                          path, gline[gi], m);
+                continue;
+            }
+            if (m == 0) {
+                conf_warn(c, "%s:%d: image 0 is the primary and cannot be a group member: dropped",
+                          path, gline[gi]);
+                continue;
+            }
+            if (owner[m] >= 0) {
+                conf_warn(c, "%s:%d: image %d is already in the group on line %d: dropped",
+                          path, gline[gi], m, gline[owner[m]]);
+                continue;
+            }
+            owner[m] = gi;
+            g->member[keep++] = m;
+        }
+        g->nmember = keep;
+        if (keep == 0) {
+            conf_warn(c, "%s:%d: group '%s' has no usable member: dropped",
+                      path, gline[gi], g->card.title);
+            dropped[gi] = 1;
+            continue;
+        }
+        if (keep == 1)
+            conf_warn(c, "%s:%d: group '%s' has one member: it behaves as a plain card",
+                      path, gline[gi], g->card.title);
+        if (!*g->card.title) copy_field(g->card.title, c->img[g->member[0]].title);
+    }
+
+    /* line order: a group card sits where its group= line sat, and the images
+     * it owns do not get cards of their own */
+    for (i = 0; i < c->n; i++) {
+        for (gi = 0; gi < c->ngroups; gi++) {
+            if (dropped[gi] || placed[gi] || gpos[gi] != i) continue;
+            if (add_card(c, -1, gi, path, err, errlen) < 0) return -1;
+            placed[gi] = 1;
+        }
+        if (owner[i] >= 0) continue;
+        if (add_card(c, i, -1, path, err, errlen) < 0) return -1;
+    }
+    /* a group= line written past the last image line still gets its card */
+    for (gi = 0; gi < c->ngroups; gi++) {
+        if (dropped[gi] || placed[gi]) continue;
+        if (add_card(c, -1, gi, path, err, errlen) < 0) return -1;
+        placed[gi] = 1;
+    }
+    return 0;
+}
+
 int conf_load(struct conf *c, const char *path, char *err, int errlen)
 {
     FILE *f;
     char line[1024];
     int lineno = 0;
+    int gpos[CONF_MAX_GROUPS];    /* the image index each group= line sits before */
+    int gline[CONF_MAX_GROUPS];   /* and the line it was on, for the warnings */
 
     memset(c, 0, sizeof *c);
+    memset(gpos, 0, sizeof gpos);
+    memset(gline, 0, sizeof gline);
     c->def = -1;
     c->timeout = -1;
     c->volume = -1;
@@ -74,29 +263,16 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
              * the v1 form and a 6-field line the first v2 form; both stay
              * valid, and anything past the seventh field is ignored. */
             char *fld[7];
-            char *p = val;
             struct conf_image *im;
-            int k, nf = 0;
             if (c->n >= CONF_MAX_IMAGES) {
                 snprintf(err, errlen, "%s:%d: more than %d images", path, lineno, CONF_MAX_IMAGES);
                 fclose(f);
                 return -1;
             }
             im = &c->img[c->n];
-            for (k = 0; k < 7; k++) fld[k] = NULL;
-            while (p && nf < 7) {
-                char *bar = strchr(p, '|');
-                if (bar) *bar++ = 0;
-                fld[nf++] = trim(p);
-                p = bar;
-            }
+            split_fields(val, fld);
             copy_field(im->device, fld[0] ? fld[0] : "");
-            copy_field(im->title, fld[1] ? fld[1] : "");
-            copy_field(im->subtitle, fld[2] ? fld[2] : "");
-            copy_field(im->art, fld[3] ? fld[3] : "");
-            copy_field(im->anim, fld[4] ? fld[4] : "");
-            copy_field(im->music, fld[5] ? fld[5] : "");
-            copy_field(im->confirm, fld[6] ? fld[6] : "");
+            copy_card_fields(im, fld);
             if (!*im->device) {
                 snprintf(err, errlen, "%s:%d: image without a device", path, lineno);
                 fclose(f);
@@ -104,6 +280,26 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             }
             if (!*im->title) copy_field(im->title, im->device);
             c->n++;
+        } else if (!strcmp(key, "group")) {
+            /* <members>|<title>|<subtitle>[|art|anim|music[|confirm]] - the
+             * same seven fields an image line carries, with the member list
+             * where the device would be.  The card sits where this line sits,
+             * which mkmulticard writes immediately before the first member,
+             * so remember the image index the line arrived at. */
+            char *fld[7];
+            struct conf_group *g;
+            if (c->ngroups >= CONF_MAX_GROUPS) {
+                snprintf(err, errlen, "%s:%d: more than %d groups", path, lineno, CONF_MAX_GROUPS);
+                fclose(f);
+                return -1;
+            }
+            g = &c->grp[c->ngroups];
+            split_fields(val, fld);
+            copy_card_fields(&g->card, fld);
+            parse_members(c, g, fld[0] ? fld[0] : "", path, lineno);
+            gpos[c->ngroups] = c->n;
+            gline[c->ngroups] = lineno;
+            c->ngroups++;
         } else if (!strcmp(key, "default")) {
             c->def = atoi(val);
         } else if (!strcmp(key, "timeout")) {
@@ -158,6 +354,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
         snprintf(err, errlen, "%s: no image= lines", path);
         return -1;
     }
+    if (resolve_groups(c, gpos, gline, path, err, errlen) < 0) return -1;
     if (c->def >= c->n) c->def = -1;
     return 0;
 }
@@ -165,9 +362,44 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
 int conf_has_art(const struct conf *c)
 {
     int i;
-    for (i = 0; i < c->n; i++)
-        if (c->img[i].art[0] || c->img[i].anim[0]) return 1;
+    for (i = 0; i < c->ncards; i++) {
+        const struct conf_image *im = conf_card_face(c, i);
+        if (im->art[0] || im->anim[0]) return 1;
+    }
     return 0;
+}
+
+const struct conf_image *conf_card_face(const struct conf *c, int k)
+{
+    if (k < 0 || k >= c->ncards) return &c->img[0];
+    if (c->cards[k].group >= 0) return &c->grp[c->cards[k].group].card;
+    return &c->img[c->cards[k].image];
+}
+
+int conf_card_of_image(const struct conf *c, int i)
+{
+    if (i < 0 || i >= c->n) return -1;
+    return c->card_of[i];
+}
+
+int conf_card_boots(const struct conf *c, int k)
+{
+    if (k < 0 || k >= c->ncards) return -1;
+    return c->cards[k].image;
+}
+
+int conf_card_nmembers(const struct conf *c, int k)
+{
+    if (k < 0 || k >= c->ncards) return 0;
+    if (c->cards[k].group >= 0) return c->grp[c->cards[k].group].nmember;
+    return 1;
+}
+
+int conf_card_member(const struct conf *c, int k, int m)
+{
+    if (k < 0 || k >= c->ncards || m < 0 || m >= conf_card_nmembers(c, k)) return -1;
+    if (c->cards[k].group >= 0) return c->grp[c->cards[k].group].member[m];
+    return c->cards[k].image;
 }
 
 int conf_read_last(const char *path)

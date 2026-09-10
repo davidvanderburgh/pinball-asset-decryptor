@@ -4,6 +4,7 @@
 # form that carries a card's own confirm sound: the lookup reads $1 and must
 # not care how many fields follow) with the host awk and, when QEMU/ROOT are
 # given (or found), with the card's own busybox awk under qemu-arm-static;
+# a conf carrying a group= line, whose lookups must be unchanged;
 # then the whole hook against a fake selector and fake mount/umount: index 0
 # touches nothing, a plain device is remounted, a '<dev>:<sub>' device is
 # mounted under the multi dir and bind-mounted, and every failure puts the
@@ -51,12 +52,36 @@ lookups() {   # lookups LABEL
 }
 lookups host
 
+# GROUP LINES ARE INVISIBLE TO select.sh (item 106).  This is the whole reason
+# a group names ordinary image= lines instead of adding a line kind of its own:
+# the hook's awk counts image= lines to find index N, and the choice file the
+# menu writes still holds an image index.  A conf carrying a group must give
+# byte-identical lookups to the same conf without one - including the indexes
+# AFTER the group line, which is where a parser that counted group= too would
+# come apart.
+gtmp=$(mktemp)
+printf 'image=/dev/mmcblk0p3|STOCK|the primary\nimage=/dev/mmcblk0p3:img1|A|first\ngroup=2-4|JUKEBOX|a different set every power-up|art0.png|anim1.gif|\nimage=/dev/mmcblk0p3:img2|SET 1|x\nimage=/dev/mmcblk0p3:img3|SET 2|y\nimage=/dev/mmcblk0p3:img4|SET 3|z\ndefault=2\n' > "$gtmp"
+glookups() {   # glookups LABEL
+    check "$1" 0 /dev/mmcblk0p3 "$gtmp"
+    check "$1" 1 /dev/mmcblk0p3 "$gtmp"
+    check "$1" 2 /dev/mmcblk0p3 "$gtmp"
+    check "$1" 4 /dev/mmcblk0p3 "$gtmp"
+    check "$1" 5 "" "$gtmp"
+    checksub "$1" 0 "" "$gtmp"
+    checksub "$1" 1 img1 "$gtmp"
+    checksub "$1" 2 img2 "$gtmp"
+    checksub "$1" 3 img3 "$gtmp"
+    checksub "$1" 4 img4 "$gtmp"
+}
+glookups "host group"
+
 if command -v "$QEMU" >/dev/null 2>&1 && [ -x "$ROOT/bin/busybox.nosuid" ]; then
     export AWK="$QEMU -L $ROOT $ROOT/bin/busybox.nosuid awk"
     check busybox 0 /dev/mmcblk0p3
     check busybox 1 /dev/mmcblk0p7
     check busybox 2 ""
     lookups busybox
+    glookups "busybox group"
     unset AWK
     awks="host awk and the card's busybox awk under qemu"
 else

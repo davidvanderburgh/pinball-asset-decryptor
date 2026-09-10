@@ -37,6 +37,9 @@
 #include <string.h>
 #include <signal.h>
 #include <errno.h>
+#include <time.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include "conf.h"
 #include "gfx.h"
 #include "egl_stern.h"
@@ -47,7 +50,7 @@
 #include "codec.h"
 #include "log.h"
 
-#define VERSION "2.9"
+#define VERSION "3.0"
 
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
 #define DEF_OUT      "/var/volatile/codeselect.choice"
@@ -90,8 +93,13 @@ struct opts {
     int invert;       /* -1 = auto */
     int volume;       /* -1 = from conf */
     int anim_frame;   /* -1 = animate; else every animation shows this frame */
-    int highlight;    /* --snapshot: the highlighted card; -1 = the conf default */
+    int highlight;    /* --snapshot: the highlighted image; -1 = the conf default */
     int frames;       /* --snapshot: how many frames to write from one load (1) */
+    /* THE TWO GROUP KNOBS, FOR TESTS AND PROOF RUNS ONLY (item 106).  Neither
+     * is ever written to a card: a jukebox that always picked the same member
+     * would look exactly like one that was working. */
+    int pick;         /* boot this image instead of rolling; -1 = roll */
+    int seed;         /* make the roll reproducible; -1 = stir it for real */
 };
 
 static volatile sig_atomic_t g_stop;
@@ -123,6 +131,8 @@ static void usage(FILE *f)
         "                     audio, choice or last file (the preview)\n"
         "  --highlight N      --snapshot only: the highlighted card (default conf default=, else 0;\n"
         "                     the last-choice file is never read)\n"
+        "  --pick N           boot image N instead of rolling a group card's member (tests)\n"
+        "  --seed N           make a group card's roll reproducible (tests)\n"
         "  --frames K         --snapshot only: write K frames (1-%d) from one load, starting at\n"
         "                     --anim-frame and stepping by one (wrapping); K > 1 makes the\n"
         "                     --snapshot value a printf pattern holding exactly one %%d, the\n"
@@ -200,6 +210,8 @@ static int parse_args(struct opts *o, int argc, char **argv)
     o->anim_frame = -1;
     o->highlight = -1;
     o->frames = 1;
+    o->pick = -1;
+    o->seed = -1;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : NULL;
@@ -229,6 +241,8 @@ static int parse_args(struct opts *o, int argc, char **argv)
         if (!strcmp(a, "--anim-frame")) { if (!v) goto missing; o->anim_frame = atoi(v); i++; continue; }
         if (!strcmp(a, "--highlight")) { if (!v) goto missing; o->highlight = atoi(v); i++; continue; }
         if (!strcmp(a, "--frames")) { if (!v) goto missing; o->frames = atoi(v); i++; continue; }
+        if (!strcmp(a, "--pick")) { if (!v) goto missing; o->pick = atoi(v); i++; continue; }
+        if (!strcmp(a, "--seed")) { if (!v) goto missing; o->seed = atoi(v); i++; continue; }
         if (!strcmp(a, "--invert")) { o->invert = 1; continue; }
         if (!strcmp(a, "--no-invert")) { o->invert = 0; continue; }
         if (!strcmp(a, "--help") || !strcmp(a, "-h")) { usage(stdout); exit(0); }
@@ -352,9 +366,9 @@ static void layout_compute(struct layout *L, const struct gfx *g, const struct c
     float s = (float)g->h / 768.0f;
     memset(L, 0, sizeof *L);
     L->s = s;
-    L->n = c->n;
-    L->carousel = c->n > MAX_VISIBLE;
-    L->vis = L->carousel ? 3 : c->n;
+    L->n = c->ncards;
+    L->carousel = c->ncards > MAX_VISIBLE;
+    L->vis = L->carousel ? 3 : c->ncards;
     L->margin = (int)(60 * s);
     L->gap = (int)(36 * s);
     L->top = (int)(140 * s);
@@ -407,22 +421,32 @@ struct clip_cache {
     struct audio_clip *clip;
 };
 
-/* Every per-image array here, and media_tick's moved[] flags, are sized off
- * CONF_MAX_IMAGES and live on the stack or in one struct; raising the cap is
- * free up to the point where that stops being true. */
-_Static_assert(CONF_MAX_IMAGES >= 1 && CONF_MAX_IMAGES <= 256,
-               "CONF_MAX_IMAGES sizes every per-image array in this file");
+/* EVERYTHING BELOW COUNTS CARDS, NOT IMAGES (item 106).  A group card draws
+ * one picture, plays one clip and has one confirm sound however many images
+ * it can boot, so every per-card array here, and media_tick's moved[] flags,
+ * are sized off CONF_MAX_CARDS and live on the stack or in one struct;
+ * raising that cap is free up to the point where that stops being true.  The
+ * image cap is a different and much larger number that does not reach here:
+ * only the boot decision and the two index files still speak in images. */
+_Static_assert(CONF_MAX_CARDS >= 1 && CONF_MAX_CARDS <= 256,
+               "CONF_MAX_CARDS sizes every per-card array in this file");
 
+/* EVERY `image N` IN THIS FILE'S LOG IS A CARD INDEX from item 106 on.  The
+ * wording is kept because the Multi-boot tab parses `anim: image N F frames`
+ * and headless.sh greps `anim: cache on image N`; both of those already think
+ * in rows, which are cards, so the number they read is the right one.  The
+ * conf's own group lines are logged as `card K` and the boot decision as
+ * `group: card K boots image N`, where `image` does mean an image. */
 struct media {
-    struct art_image *art[CONF_MAX_IMAGES];
-    struct art_anim *anim[CONF_MAX_IMAGES];
-    struct audio_clip *music[CONF_MAX_IMAGES];
+    struct art_image *art[CONF_MAX_CARDS];
+    struct art_anim *anim[CONF_MAX_CARDS];
+    struct audio_clip *music[CONF_MAX_CARDS];
     /* an image's OWN confirm sound (conf field 7); NULL = use ->confirm */
-    struct audio_clip *own_confirm[CONF_MAX_IMAGES];
+    struct audio_clip *own_confirm[CONF_MAX_CARDS];
     struct audio_clip *move, *confirm;
     /* every WAV is decoded once and shared by name: at most one music and one
      * confirm per image, plus the two menu-wide sounds */
-    struct clip_cache cache[CONF_MAX_IMAGES * 2 + 2];
+    struct clip_cache cache[CONF_MAX_CARDS * 2 + 2];
     int ncache;
     int n_art, n_anim, n_music, n_own_confirm, logged;
     /* EVERY animation plays, all the time (David, 2026-09-03: "all boot
@@ -430,8 +454,8 @@ struct media {
      * just when hovered)"): each keeps its own frame and the moment its
      * next one is due (sel_now_ms() values; 0 = not ticking: pinned, or
      * a still) */
-    int frame[CONF_MAX_IMAGES];
-    double due[CONF_MAX_IMAGES];
+    int frame[CONF_MAX_CARDS];
+    double due[CONF_MAX_CARDS];
     /* ticks[i]: how many times clip i has advanced since media_start.
      * paints[i]: how many of those advances reached the repaint step.  TWO
      * counters, not one, because the past-32 bug moved the frame and then
@@ -439,8 +463,8 @@ struct media {
      * right through it.  With a correct tick the two are EQUAL; a clip whose
      * ticks climb while its paints stay at 0 is animating into a panel
      * nobody is drawing, which is the bug seen from the log. */
-    int ticks[CONF_MAX_IMAGES];
-    int paints[CONF_MAX_IMAGES];
+    int ticks[CONF_MAX_CARDS];
+    int paints[CONF_MAX_CARDS];
     char dir[CONF_STR];
 };
 
@@ -476,8 +500,8 @@ static void media_load(struct media *m, const struct conf *c, const struct layou
 {
     int i;
     char path[CONF_STR * 2 + 2], err[300];
-    for (i = 0; i < c->n; i++) {
-        const struct conf_image *im = &c->img[i];
+    for (i = 0; i < c->ncards; i++) {
+        const struct conf_image *im = conf_card_face(c, i);
         if (im->art[0]) {
             media_path(m, im->art, path, sizeof path);
             m->art[i] = art_load_png(path, L->inner, L->art_h, err, sizeof err);
@@ -535,7 +559,7 @@ static void media_check(const struct media *m, int i)
 static void media_stats(const struct media *m)
 {
     int i;
-    for (i = 0; i < CONF_MAX_IMAGES; i++) {
+    for (i = 0; i < CONF_MAX_CARDS; i++) {
         const struct art_anim *a = m->anim[i];
         if (!a || !a->decodes) continue;
         if (a->caching)
@@ -631,7 +655,7 @@ static void media_log(struct media *m)
 {
     int i, frames = 0;
     if (m->logged) return;
-    for (i = 0; i < CONF_MAX_IMAGES; i++)
+    for (i = 0; i < CONF_MAX_CARDS; i++)
         if (m->anim[i]) frames += m->anim[i]->n;
     sel_log("media: %d art, %d anim (%d frames), %d music, %d card confirm, move=%s confirm=%s",
             m->n_art, m->n_anim, frames, m->n_music, m->n_own_confirm,
@@ -642,7 +666,7 @@ static void media_log(struct media *m)
 static void media_free(struct media *m)
 {
     int i;
-    for (i = 0; i < CONF_MAX_IMAGES; i++) {
+    for (i = 0; i < CONF_MAX_CARDS; i++) {
         art_image_free(m->art[i]);
         art_anim_free(m->anim[i]);
     }
@@ -739,7 +763,7 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
                       const struct conf *c, const struct media *m,
                       int i, int slot, int on)
 {
-    const struct conf_image *im = &c->img[i];
+    const struct conf_image *im = conf_card_face(c, i);
     float s = L->s;
     int x = card_x(L, slot), top = L->top, cw = L->cw, ch = L->ch, inner = L->inner;
     float tpx, spx;
@@ -827,6 +851,93 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     }
 }
 
+/* ", card K/M" for a plain card, and what the group is for a group card.  One
+ * clause, used by both the snapshot line and the live menu's opening line.
+ *
+ * NOTHING IS ADDED TO A CONF WITH NO GROUPS, and that is deliberate: there the
+ * card index and the image index are the same number, so the clause would say
+ * nothing while changing a line the Multi-boot tab and eleven tests already
+ * match on.  A card that reached this menu before item 106 gets byte-identical
+ * output from it after. */
+static void card_note(const struct conf *c, int hl, int ncards, char *out, int outlen)
+{
+    int nm = conf_card_nmembers(c, hl);
+    if (!c->ngroups)
+        out[0] = 0;
+    else if (conf_card_boots(c, hl) >= 0)
+        snprintf(out, (size_t)outlen, ", card %d/%d", hl + 1, ncards);
+    else
+        snprintf(out, (size_t)outlen, ", card %d/%d (group %s, %d member%s)",
+                 hl + 1, ncards, conf_card_face(c, hl)->title, nm, nm == 1 ? "" : "s");
+}
+
+/* WHICH MEMBER a group card boots (item 106).
+ *
+ * The member the last-choice file names is excluded, so a group of two or
+ * more never repeats itself across two power-ups - the whole point of the
+ * card is that it changes, and a fair coin would show the same set twice in a
+ * row a quarter of the time.
+ *
+ * FOUR SOURCES ARE STIRRED because not one of them is good enough alone on
+ * this machine: /dev/urandom is the real entropy but the card's 3.14 kernel
+ * is asked best-effort and the read may not answer, CLOCK_MONOTONIC counts
+ * only from power-up and a machine that boots cold reaches this menu at very
+ * nearly the same nanosecond every time, time() is one value for a whole run,
+ * and the pid barely moves in an init that starts the same processes in the
+ * same order.  Taken at the CONFIRM moment rather than at start-up, so a
+ * player who reads the menu for a while stirs it further.
+ *
+ * `seed` >= 0 (--seed, tests only) replaces the lot and makes the roll
+ * reproducible.  `why` gets the clause the log prints. */
+static int roll_member(const struct conf *c, int card, int last, int seed,
+                       char *why, int whylen)
+{
+    int cand[CONF_MAX_IMAGES], nc = 0, k, n = conf_card_nmembers(c, card);
+    const char *src = "urandom+clock";
+    unsigned s = 0;
+
+    for (k = 0; k < n; k++) {
+        int m = conf_card_member(c, card, k);
+        if (m != last) cand[nc++] = m;
+    }
+    /* a one-member group, or a last choice that is the only member: the
+     * exclusion has to give way, it never leaves the menu with nothing */
+    if (nc == 0)
+        for (k = 0; k < n; k++) cand[nc++] = conf_card_member(c, card, k);
+    if (nc == 1) {
+        snprintf(why, (size_t)whylen, "rolled from %s: 1 candidate",
+                 conf_card_face(c, card)->title);
+        return cand[0];
+    }
+    if (seed >= 0) {
+        s = (unsigned)seed;
+        src = "--seed";
+    } else {
+        /* open/read, not stdio: this is a character device, and a FILE* here
+         * would put a 4 KB buffered read between the menu and four bytes it
+         * actually needs. */
+        struct timespec ts;
+        unsigned char b[4];
+        int fd = open("/dev/urandom", O_RDONLY);
+        ssize_t got = fd >= 0 ? read(fd, b, sizeof b) : -1;
+        if (fd >= 0) close(fd);
+        if (got == (ssize_t)sizeof b)
+            s = (unsigned)b[0] | ((unsigned)b[1] << 8) | ((unsigned)b[2] << 16) | ((unsigned)b[3] << 24);
+        else {
+            src = "clock";
+            sel_log("group: /dev/urandom gave %ld byte(s) (%s): the clock seeds the roll",
+                    (long)got, fd < 0 ? strerror(errno) : "short read");
+        }
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+            s ^= (unsigned)ts.tv_nsec ^ ((unsigned)ts.tv_sec << 16);
+        s ^= (unsigned)time(NULL);
+        s ^= (unsigned)getpid() << 7;
+    }
+    snprintf(why, (size_t)whylen, "rolled from %s: %d candidate%s, %s",
+             conf_card_face(c, card)->title, nc, nc == 1 ? "" : "s", src);
+    return cand[s % (unsigned)nc];
+}
+
 /* action = this title has a lockdown-bar ACTION button the menu can read; 0
  * means the footer must not promise one */
 static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
@@ -875,9 +986,9 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         gfx_ellipsize(f, fpx, foot, wmax, cut, sizeof cut);
         gfx_text_center(g, f, fpx, W / 2, (int)(662 * s), cut, TH(L, FOOTER));
         snprintf(widest, sizeof widest, "%s%s", action ? PRESS_ACTION : PRESS_START,
-                 c->img[hl].title);
+                 conf_card_face(c, hl)->title);
         if (remain >= 0)
-            snprintf(buf, sizeof buf, "booting %s in %d s", c->img[hl].title, remain);
+            snprintf(buf, sizeof buf, "booting %s in %d s", conf_card_face(c, hl)->title, remain);
         else
             snprintf(buf, sizeof buf, "%s", widest);
         cpx = gfx_fit_px(f, widest, wmax, 38 * s, 24 * s);
@@ -942,13 +1053,13 @@ static const char *media_dir(const struct opts *o, const struct conf *c)
  *
  * Returns the exit status: 0 = written, 2 = could not. */
 static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx *g,
-                          struct gfx_font *font, const struct layout *L, int hl,
+                          struct gfx_font *font, const struct layout *L, int hl, int hlimg,
                           const char *how, int timeout, int invert, const char *fontpath,
                           int action)
 {
     struct media media;
-    char path[600];
-    int n = c->n, first = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
+    char path[600], cardinfo[CONF_STR + 64];
+    int n = c->ncards, first = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
     /* K == 1 is the old path to the byte: the --snapshot value is a file NAME,
      * never a pattern, so a name that happens to hold a '%' still works */
     int pattern = o->frames > 1, want = o->frames, k;
@@ -985,7 +1096,7 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
             media_free(&media);
             return 2;
         }
-        char where[CONF_MAX_IMAGES * 24 + 8];
+        char where[CONF_MAX_CARDS * 24 + 8];
         int wn = 0, i;
         media_pin(&media, n, pin);
         draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, action);
@@ -1016,8 +1127,17 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
                            wn ? ";" : "", i, rx, ry, pic->w, pic->h);
             if (wn >= (int)sizeof where - 1) break;
         }
-        sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\", pictures %s",
-                path, g->w, g->h, hl, c->img[hl].title, how, frame, frames, timeout, invert,
+        /* WHICH CARD the highlighted image landed on.  `highlight` echoes the
+         * IMAGE the caller asked for, because that is what --highlight,
+         * default= and the choice file all speak; `card K/M` is where it
+         * landed, which is a different number the moment a group card
+         * swallows several images.  The tab's _SNAP_RE absorbs between the
+         * two with .*?, and _SNAP_PICTURES_RE anchors on the tail: this sits
+         * between them and touches neither. */
+        card_note(c, hl, n, cardinfo, sizeof cardinfo);
+        sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s%s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\", pictures %s",
+                path, g->w, g->h, hlimg, conf_card_face(c, hl)->title, how, cardinfo,
+                frame, frames, timeout, invert,
                 fontpath, media.dir, action ? FOOT_ACTION : FOOT_START, wn ? where : "none");
     }
     media_stats(&media);
@@ -1050,7 +1170,13 @@ int main(int argc, char **argv)
     struct media media;
     struct audio *au = NULL;
     char err[300], fontpath[300], tables[400], padsw[400];
-    int headless, snapshot, invert, timeout, n, hl, chosen = -1, w, h, volume, pinned;
+    /* `n` COUNTS CARDS from item 106 on, because that is what the menu draws
+     * and what the highlight walks; `nimg` is the image lines behind them.
+     * `hl` and `chosen` are CARD indexes, `hlimg`, `lastimg` and `boot` are
+     * IMAGE indexes - the choice file, the last-choice file, default= and
+     * select.sh have always spoken images and still do. */
+    int headless, snapshot, invert, timeout, n, nimg, hl, hlimg, lastimg;
+    int chosen = -1, boot = -1, w, h, volume, pinned;
     int machine_v = -1;       /* volume=machine: the machine's own 0-63, else -1 */
     int audio_up = 0;         /* the bridge brought the audio section up (hw only) */
     int action;                       /* this title has a lockdown-bar ACTION button */
@@ -1078,31 +1204,51 @@ int main(int argc, char **argv)
         sel_say("error: %s", err);
         return 2;
     }
-    n = c.n;
+    nimg = c.n;
+    n = c.ncards;
+    /* everything a group got wrong: dropped, never fatal, and said here so a
+     * run log explains a card the builder expected and cannot see */
+    {
+        int wi;
+        for (wi = 0; wi < c.nwarn && wi < CONF_MAX_WARN; wi++) sel_log("conf: %s", c.warn[wi]);
+        if (c.nwarn > CONF_MAX_WARN)
+            sel_log("conf: %d more problem(s) not listed", c.nwarn - CONF_MAX_WARN);
+    }
+    if (c.ngroups)
+        sel_log("conf: %d image line(s) in %d card(s), %d group(s)", nimg, n, c.ngroups);
     timeout = o.timeout >= 0 ? o.timeout : c.timeout >= 0 ? c.timeout : DEF_TIMEOUT;
     volume = o.volume >= 0 ? o.volume : c.volume >= 0 ? c.volume : DEF_VOLUME;
     snapshot = o.snapshot != NULL;
+    /* --highlight, --default, default= and the last-choice file all name an
+     * IMAGE; the menu highlights the CARD that image belongs to.  That one
+     * mapping is what lets a remembered member light its jukebox card up
+     * again, and it is why a group needs no state file of its own: the next
+     * countdown rolls from that card afresh (item 106). */
+    lastimg = -1;
     if (snapshot) {
-        /* the preview never reads the last-choice file: the card asked for,
+        /* the preview never reads the last-choice file: the image asked for,
          * else the conf's default, is what it shows */
         if (o.highlight >= 0) {
-            if (o.highlight >= n) {
-                sel_say("error: --highlight %d out of range (%d image%s)", o.highlight, n, n == 1 ? "" : "s");
+            if (o.highlight >= nimg) {
+                sel_say("error: --highlight %d out of range (%d image%s)", o.highlight, nimg, nimg == 1 ? "" : "s");
                 return 2;
             }
-            hl = o.highlight;
+            hlimg = o.highlight;
             how = "--highlight";
         }
-        else if (o.def >= 0 && o.def < n) { hl = o.def; how = "--default"; }
-        else if (c.def >= 0 && c.def < n) { hl = c.def; how = "conf default"; }
-        else { hl = 0; how = "first"; }
+        else if (o.def >= 0 && o.def < nimg) { hlimg = o.def; how = "--default"; }
+        else if (c.def >= 0 && c.def < nimg) { hlimg = c.def; how = "conf default"; }
+        else { hlimg = 0; how = "first"; }
     } else {
-        hl = conf_read_last(o.last);
-        if (hl >= 0 && hl < n) how = "last choice";
-        else if (o.def >= 0 && o.def < n) { hl = o.def; how = "--default"; }
-        else if (c.def >= 0 && c.def < n) { hl = c.def; how = "conf default"; }
-        else { hl = 0; how = "first"; }
+        lastimg = conf_read_last(o.last);
+        hlimg = lastimg;
+        if (hlimg >= 0 && hlimg < nimg) how = "last choice";
+        else if (o.def >= 0 && o.def < nimg) { hlimg = o.def; how = "--default"; }
+        else if (c.def >= 0 && c.def < nimg) { hlimg = c.def; how = "conf default"; }
+        else { hlimg = 0; how = "first"; }
     }
+    hl = conf_card_of_image(&c, hlimg);
+    if (hl < 0) hl = 0;
     headless = o.headless != NULL;
     pinned = o.anim_frame >= 0;
     /* the switch list, resolved here because --snapshot needs it too: it runs
@@ -1149,7 +1295,7 @@ int main(int argc, char **argv)
         sel_log("theme: %s (%d of %d colours set by the conf%s)", L.th.name, L.th_set, TH_N, bad);
     }
     if (snapshot) {
-        rc = snapshot_frame(&o, &c, &g, font, &L, hl, how, timeout, invert, fontpath, action);
+        rc = snapshot_frame(&o, &c, &g, font, &L, hl, hlimg, how, timeout, invert, fontpath, action);
         gfx_free(&g);
         gfx_font_free(font);
         sel_log("exit %d", rc);
@@ -1238,7 +1384,7 @@ int main(int argc, char **argv)
      * NEAREST THE HIGHLIGHT and follows it from here (item 109).  Not when the
      * frames are pinned: those modes need frame k exactly. */
     if (!pinned) {
-        struct art_anim *rank[CONF_MAX_IMAGES];
+        struct art_anim *rank[CONF_MAX_CARDS];
         char why[240];
         int k, ai;
         for (ai = 0; ai < n; ai++) if (media.anim[ai]) media.anim[ai]->idx = ai;
@@ -1256,9 +1402,14 @@ int main(int argc, char **argv)
     if (audio_up) input_hw_bridge(in, 0x0b, 0x06);
     input_hw_amp_mute(in, 0);
 
-    sel_say("menu: %d image%s, highlight %d (%s) from %s, timeout %d s, input %s, invert %d, %dx%d, font %s, audio %s, media %s, footer \"%s\"",
-            n, n == 1 ? "" : "s", hl, c.img[hl].title, how, timeout, o.input, invert, w, h, fontpath,
-            audio_sink_name(au), media.dir, action ? FOOT_ACTION : FOOT_START);
+    {
+        char cardinfo[CONF_STR + 64];
+        card_note(&c, hl, n, cardinfo, sizeof cardinfo);
+        sel_say("menu: %d image%s, highlight %d (%s) from %s%s, timeout %d s, input %s, invert %d, %dx%d, font %s, audio %s, media %s, footer \"%s\"",
+                nimg, nimg == 1 ? "" : "s", hlimg, conf_card_face(&c, hl)->title, how, cardinfo,
+                timeout, o.input, invert, w, h, fontpath,
+                audio_sink_name(au), media.dir, action ? FOOT_ACTION : FOOT_START);
+    }
     if (L.carousel) sel_log("layout: carousel of %d (3 visible, %d px cards)", n, L.cw);
 
     start = sel_now_ms();
@@ -1321,7 +1472,7 @@ int main(int argc, char **argv)
              * under the panels, 1-based like the display, and `wrap` marks
              * the step that crossed the end. */
             sel_log("menu: highlight %d -> %d (%s), card %d/%d%s", old_hl, hl,
-                    c.img[hl].title, hl + 1, n,
+                    conf_card_face(&c, hl)->title, hl + 1, n,
                     (old_hl == 0 && hl == n - 1) || (old_hl == n - 1 && hl == 0) ? " - wrap" : "");
             /* the cache follows, once the scrolling stops (item 109) */
             if (!pinned) reaim_due = now + cache_settle_ms();
@@ -1340,7 +1491,7 @@ int main(int argc, char **argv)
          * only the highlighted one, and a card you scroll to has to be
          * mid-loop rather than starting over. Only the FRAMES move. */
         if (reaim_due && now >= reaim_due) {
-            struct art_anim *rank[CONF_MAX_IMAGES];
+            struct art_anim *rank[CONF_MAX_CARDS];
             char why[240];
             int k = rank_by_distance(rank, media.anim, n, hl);
             art_cache_set(rank, k, anim_cache_budget(), why, sizeof why);
@@ -1351,7 +1502,7 @@ int main(int argc, char **argv)
             /* a key restarts the countdown so a reader is not cut off */
             if (last_key > start) { deadline = last_key + (long long)timeout * 1000LL; start = last_key; }
             if (now >= deadline) {
-                sel_log("countdown expired: booting image %d", hl);
+                sel_log("countdown expired: booting card %d", hl + 1);
                 chosen = hl;
                 break;
             }
@@ -1374,7 +1525,7 @@ int main(int argc, char **argv)
          * the panels that moved are repainted - or none, when the whole
          * menu is about to be */
         {
-            unsigned char moved[CONF_MAX_IMAGES];
+            unsigned char moved[CONF_MAX_CARDS];
             int nmoved = pinned ? 0 : media_tick(&media, n, (double)now, moved);
             int i;
             for (i = 0; nmoved && i < n; i++) {
@@ -1417,13 +1568,43 @@ int main(int argc, char **argv)
     }
 
     if (chosen >= 0) {
+        /* WHAT THE CARD ACTUALLY BOOTS.  A plain card boots its own image; a
+         * group rolls one of its members HERE, at the confirm, so the seed
+         * has the whole time the player spent in the menu in it.  --pick
+         * names a member outright (tests and proof runs) and is honoured only
+         * when it really is one of this card's members: a --pick that misses
+         * would otherwise boot something the menu never offered. */
+        char rolled[CONF_STR + 80] = "";
+        boot = conf_card_boots(&c, chosen);
+        if (boot < 0) {
+            if (o.pick >= 0) {
+                int k, nm = conf_card_nmembers(&c, chosen), ok = 0;
+                for (k = 0; k < nm; k++) if (conf_card_member(&c, chosen, k) == o.pick) ok = 1;
+                if (ok) {
+                    boot = o.pick;
+                    snprintf(rolled, sizeof rolled, " (--pick from %s)", conf_card_face(&c, chosen)->title);
+                } else {
+                    sel_log("--pick %d is not a member of %s: rolling instead",
+                            o.pick, conf_card_face(&c, chosen)->title);
+                }
+            }
+            if (boot < 0) {
+                char why[CONF_STR + 64];
+                boot = roll_member(&c, chosen, lastimg, o.seed, why, sizeof why);
+                snprintf(rolled, sizeof rolled, " (%s)", why);
+            }
+            sel_log("group: card %d boots image %d%s", chosen + 1, boot, rolled);
+        }
         if (headless) {
             if (gfx_write_ppm(&g, o.headless, invert) < 0)
                 sel_log("cannot write %s: %s", o.headless, strerror(errno));
             else
                 sel_log("wrote %s (%dx%d)", o.headless, w, h);
         }
-        draw_loading(&g, font, &L.th, c.img[chosen].title,
+        /* the LOADING frame names the MEMBER under the GROUP's picture: the
+         * card said "a different song set every power-up", so this is the one
+         * moment the player is told which set they got */
+        draw_loading(&g, font, &L.th, c.img[boot].title,
                      card_picture(&media, chosen));
         if (headless) {
             char lp[400];
@@ -1440,7 +1621,10 @@ int main(int argc, char **argv)
             const struct audio_clip *cc = media.own_confirm[chosen];
             char cwhich[CONF_STR + 40];
             int cv = -1;
-            if (cc) snprintf(cwhich, sizeof cwhich, "image %d sound %s", chosen, c.img[chosen].confirm);
+            /* `image %d` here is a CARD index, like every other one in this
+             * file's log: padsw_test.py pins the wording (see the note on
+             * struct media), and the number was always the card's anyway */
+            if (cc) snprintf(cwhich, sizeof cwhich, "image %d sound %s", chosen, conf_card_face(&c, chosen)->confirm);
             else if ((cc = media.confirm) != NULL) snprintf(cwhich, sizeof cwhich, "menu sound %s", c.sound_confirm);
             else snprintf(cwhich, sizeof cwhich, "no sound");
             if (music_voice >= 0) audio_stop(au, music_voice);
@@ -1457,12 +1641,16 @@ int main(int argc, char **argv)
         }
         audio_close(au);
         au = NULL;
-        if (conf_write_last(o.last, chosen) < 0)
+        /* BOTH FILES GET THE IMAGE, never the card: select.sh's awk counts
+         * image= lines and run_game.sh translates an image index, and neither
+         * has any idea groups exist.  That is the whole reason the grammar
+         * put members in the image array. */
+        if (conf_write_last(o.last, boot) < 0)
             sel_log("cannot write %s: %s (continuing)", o.last, strerror(errno));
-        if (conf_write_choice(o.out, chosen) < 0) {
+        if (conf_write_choice(o.out, boot) < 0) {
             sel_say("error: cannot write %s: %s", o.out, strerror(errno));
         } else {
-            sel_say("chose %d %s", chosen, c.img[chosen].title);
+            sel_say("chose %d %s%s", boot, c.img[boot].title, rolled);
             rc = 0;
         }
     } else {

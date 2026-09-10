@@ -3,6 +3,17 @@
  * images.conf v2 (one image per line, index = order, 0-based):
  *   # comment
  *   image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
+ *   group=<members>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
+ *                            several images shown as ONE card; confirming it
+ *                            boots one member at random (item 106).  <members>
+ *                            is 0-based image indexes as a range and/or a list
+ *                            ('3-5', '3,5,7-9'); the rest of the line is a
+ *                            card's display fields, exactly as an image line
+ *                            carries them.  The line is written immediately
+ *                            before its first member and the card sits in the
+ *                            menu where the line sits.  Members are ordinary
+ *                            image= lines and keep their image indexes, so
+ *                            select.sh and the choice file are untouched.
  *   default=<index>          highlight when there is no usable last-choice file
  *   timeout=<seconds>        0 = wait for ever
  *   font=<path>              optional TrueType font
@@ -24,6 +35,13 @@
  *   color_<role>=RRGGBB      one colour on top of the theme (the roles are in
  *                            themes.json); a bad value is counted and ignored
  *
+ * A GROUP IS NEVER FATAL.  A member index naming no image line is dropped, a
+ * group left with no member is dropped, an image named by two groups belongs
+ * to the first, and image 0 is never a member (it is the primary, which must
+ * stay bootable on its own).  Each of those is recorded in conf.warn[] for
+ * the caller to log.  Only the LIMITS below refuse a file, exactly as too
+ * many image lines always has.
+ *
  * <device> is the block device on hardware ('/dev/mmcblk0p3', '/dev/mmcblk0p7',
  * or '/dev/mmcblk0p7:img2' = a partition plus a subdirectory holding a whole
  * games tree) and an opaque token in the emulator (p3, p7, p7:img2). Titles
@@ -37,14 +55,35 @@
 
 #include "theme.h"
 
-/* The most images one card can offer.  Overridable from the command line
- * ONLY so `make check` can build a second binary past 32 and prove the
- * animation tick has no width limit any more (item 105); a card is built
- * against the default and mkmulticard.py's MAX_IMAGES must match it. */
+/* THREE limits, because a group card makes images and cards different things.
+ *
+ *   CONF_MAX_IMAGES  image= lines, which are the trees on the card.  A group
+ *                    of 40 song-set variants is 40 of these behind ONE card,
+ *                    so this is the number item 106 raised.
+ *   CONF_MAX_CARDS   what the menu draws and what the player scrolls through:
+ *                    ungrouped images plus groups.  Every per-card array in
+ *                    codeselect.c is sized off this one.
+ *   CONF_MAX_GROUPS  group= lines.
+ *
+ * CONF_MAX_CARDS is overridable from the command line ONLY so `make check`
+ * can build a second binary past 32 and prove the animation tick has no width
+ * limit any more (item 105); a card is built against the defaults and
+ * mkmulticard.py's MAX_IMAGES / MAX_CARDS / MAX_GROUPS must match them. */
 #ifndef CONF_MAX_IMAGES
-#define CONF_MAX_IMAGES 16
+#define CONF_MAX_IMAGES 64
+#endif
+#ifndef CONF_MAX_CARDS
+#define CONF_MAX_CARDS 16
+#endif
+#ifndef CONF_MAX_GROUPS
+#define CONF_MAX_GROUPS 8
 #endif
 #define CONF_STR 200
+
+/* dropped members, dropped groups and the like: never fatal, so they are
+ * collected here and the caller logs them */
+#define CONF_MAX_WARN 16
+#define CONF_WARN_STR 200
 
 struct conf_image {
     char device[CONF_STR];
@@ -57,9 +96,33 @@ struct conf_image {
                                * "" = use the menu-wide sound_confirm */
 };
 
+/* A GROUP CARD.  `card` is what the menu draws - the same seven display
+ * fields an image line carries, so every drawing path takes one of these and
+ * neither knows nor cares which kind of card it came from; `card.device` is
+ * unused, because a group boots whichever member the roll picks. */
+struct conf_group {
+    struct conf_image card;
+    int member[CONF_MAX_IMAGES];
+    int nmember;
+};
+
+/* ONE ENTRY PER THING THE MENU DRAWS, in conf-file line order.  Exactly one
+ * of the two is >= 0. */
+struct conf_card {
+    int image;    /* a plain card: the image it boots */
+    int group;    /* a group card: the group it draws and rolls from */
+};
+
 struct conf {
     struct conf_image img[CONF_MAX_IMAGES];
     int n;
+    struct conf_group grp[CONF_MAX_GROUPS];
+    int ngroups;
+    struct conf_card cards[CONF_MAX_CARDS];
+    int ncards;
+    short card_of[CONF_MAX_IMAGES];  /* the card each image belongs to */
+    char warn[CONF_MAX_WARN][CONF_WARN_STR];
+    int nwarn;                       /* may exceed CONF_MAX_WARN: the count is honest, the text is capped */
     int def;          /* default=  (-1 when absent) */
     int timeout;      /* timeout=  (-1 when absent) */
     char font[CONF_STR];
@@ -82,8 +145,28 @@ struct conf {
 /* 0 ok (c->n >= 1), -1 error with a message in err. */
 int conf_load(struct conf *c, const char *path, char *err, int errlen);
 
-/* 1 when any image names art or an animation (the art layout is used) */
+/* 1 when any CARD names art or an animation (the art layout is used) */
 int conf_has_art(const struct conf *c);
+
+/* THE CARD ACCESSORS.  Everything visual walks cards through these; only the
+ * boot decision and the two index files still speak in images. */
+
+/* what card `k` draws: its own fields for a plain card, the group's for a
+ * group card.  Never NULL for 0 <= k < c->ncards. */
+const struct conf_image *conf_card_face(const struct conf *c, int k);
+
+/* the card image `i` belongs to, or -1 when the index names no image.  A
+ * member's card is its GROUP's, which is how a remembered member re-highlights
+ * the jukebox card. */
+int conf_card_of_image(const struct conf *c, int i);
+
+/* the image card `k` boots, or -1 when it is a group and the caller must roll */
+int conf_card_boots(const struct conf *c, int k);
+
+/* how many images card `k` can boot (1 for a plain card), and the m'th of
+ * them (-1 when out of range) */
+int conf_card_nmembers(const struct conf *c, int k);
+int conf_card_member(const struct conf *c, int k, int m);
 
 /* The last-choice file holds one line "<index>\n". -1 when missing/invalid. */
 int conf_read_last(const char *path);

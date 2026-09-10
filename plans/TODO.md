@@ -7884,7 +7884,7 @@ These have each been violated at least once and each cost a run or a window:
       booted all three images. `--layout store` is proven on hardware, so a
       group may force the compact tick and the tab's "experimental" wording
       comes off (still to do, in the tab commit).
-      **Established (45%, commits 1-4 of 9 done, 8f93f7a + fbd521b):** the SELECTOR half
+      **Established (70%, commits 1-6 of 9 done, 8f93f7a fbd521b 9a92e6c 44f8536):** the SELECTOR half
       is built and its whole suite is green. `group=<members>|<title>|...`
       parses; images and cards are now different numbers (`CONF_MAX_IMAGES` 64,
       `CONF_MAX_CARDS` 16, `CONF_MAX_GROUPS` 8) and everything visual walks
@@ -7917,6 +7917,45 @@ These have each been violated at least once and each cost a run or a window:
       input under both awks, and three new cases in
       `tests/test_spike2_codeselect_rig.py` were checked against a broken tree
       before being trusted.
+      **Uncommitted:** nothing. The branch is pushed.
+      Commits 5-6 are done too: `mkmulticard.py` writes and reads the grammar
+      (the group line goes before its first member), refuses what the selector
+      merely drops (< 2 members, a gap in the run, overlapping groups, image 0,
+      a member naming no image line, a '|' in a title, a line past 1000 chars),
+      has the ordered `--group` / `--member` / `--members-list` CLI, both gates
+      (a group forces `store` and `parts`/`multi` is refused naming the cost; a
+      `group=` conf is never staged beside a codeselect below 3.0), and the
+      report rows (build.json per-image `group` plus a `groups` block, inspect
+      prints the cards before the images, plan prints `image-group`). Selftest
+      part 8 builds a real group card end to end; all 8 parts PASS under
+      `wsl -u root` with HOME redirected to a temp dir.
+      **TWO BUGS THIS PASS FOUND AND FIXED, both worth knowing:**
+      (1) `check_groups` returned early when there were no groups, so NOTHING
+      counted the cards and 17 plain images sailed through to be refused by the
+      selector on the machine instead.
+      (2) `ok &= <check>, <diagnostic>` in mkmulticard's selftest is a TUPLE and
+      always truthy: ELEVEN checks in that file could never fail.
+      `Checks.__iand__` honours the form now; all eleven are live and all pass.
+      That second one is why the selftest passed over a group card built on the
+      MULTI layout - the groups reached the conf but never `make_plan`, so the
+      layout gate was dead code. Both call sites pass them now.
+      **Resume:** commits 7-8 of 9, THE TAB. `ImageRow.members`, `is_group`;
+      `validate_form` (>= 2 members each an existing file, no tree twice
+      anywhere, row 0 never a group, <= 16 cards, <= 64 trees); `_image_args`
+      emitting `--group` / `--member` in row order with `--layout store`, the
+      Compact tick forced ON - and the "experimental" wording COMES OFF now the
+      gate is cleared (`multiboot_tab.py:5514`, the rule note at `:5817`).
+      Preview: one card per row through `--snapshot`; load from `inspect`
+      rebuilds group rows; `diff_forms` keys a group on its members so a member
+      change is a rebuild. Table cell `JUKEBOX (random, 3 sets)`, an
+      "Add group..." toolbar row, a Members section in the Edit dialog (Add
+      files / Add folder / Remove), a merged size band. Then commit 9, the
+      emulator proof run.
+      **ONE OPEN QUESTION for the tab:** it passes ROW numbers to `--highlight`,
+      which names an IMAGE. Reconcile it there, not in the selector - the
+      snapshot line already echoes the image asked for and says `card K/M` for
+      where it landed.
+      Full ordered list and every trap: handoff REMAINING item 106.
       **Uncommitted:** nothing. The branch is pushed.
       **Resume:** commit 5 of 9 - `mkmulticard.py`: `render_images_conf` /
       `parse_images_conf` carry groups, the refusals (< 2 members, overlapping

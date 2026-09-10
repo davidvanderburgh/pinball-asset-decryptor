@@ -1582,7 +1582,9 @@ HELP_CONTENT = {
          "build (or two builds) live on the same machine without swapping "
          "cards. The first image in the list is the primary — its boot "
          "files are the card's, and the machine falls back to it if the "
-         "menu ever fails."),
+         "menu ever fails. Up to 16 images fit one card, and from five "
+         "the menu scrolls three at a time with a counter under them, so "
+         "a card is not limited to what fits on the screen at once."),
         ("The tab, top to bottom",
          "One column, and it never rearranges itself under the window: the "
          "card path first, with From SD card…, Browse… and New card beside "

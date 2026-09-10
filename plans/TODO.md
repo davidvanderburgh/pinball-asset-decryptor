@@ -8031,7 +8031,7 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **109. The boot menu decides which animations to keep in RAM ONCE, before
       the menu opens, in image order — so on a card with more than about five
       animated images the cards you are LOOKING at can be the ones decoding
-      frame by frame.** `S2 D3` ← WORKING ON *(David, 2026-09-10, reading item
+      frame by frame.** `S2 D3` ← IN PROGRESS **85%** *(David, 2026-09-10, reading item
       105's cap answer: "we should probably make it that the animations are
       only loaded into RAM lazily and not all at once. For example, as you are
       scrolling, they drop off screen ones from RAM and pull close neighbors
@@ -8096,6 +8096,63 @@ These have each been violated at least once and each cost a run or a window:
       106 cannot honestly raise the cap until it is fixed. D3: contained to
       art.c/art.h plus one call site, the fault reproduces on demand, but the
       re-aim sits on the boot path and wants a run to trust.
+
+      **Established, 2026-09-10 (`05b081d` on `item/109`, branched from
+      `item/105` for its raised-cap build machinery, so it merges after 105).**
+      `art_cache_set` replaces the one-shot fill and is idempotent: it takes
+      the clips IN THE ORDER THE CALLER GIVES until the budget is gone, and
+      the menu ranks them by distance from the highlight, so the cached set is
+      a window around the card being looked at, sized by what fits. A clip in
+      both sets keeps its frames and carries on filling, one falling out is
+      released, one coming in starts at frame 0. Re-aimed on a SETTLE, 200 ms
+      after the last move, because a re-aim frees and allocates and one per
+      keypress would thrash on a scroll. **Every clip keeps ticking whether or
+      not its frames are cached** — `media_tick` is untouched, per David's
+      2026-09-03 rule that all the cards animate together — so only the FRAMES
+      move and a card you scroll to is mid-loop, not restarting.
+      **The severity argument got sharper, from art.h's own measurement:** a
+      298x168 GIF frame costs **13 ms to decode on the machine** against 1 ms
+      on a PC. A frame at 30 fps is 33 ms and the carousel draws three cards,
+      so three uncached panels cannot be decoded inside one frame period. The
+      old behaviour did not merely cost CPU, it could not keep up.
+      **Two hazards found and closed while writing it:** the decoder thread
+      restarts at frame 1 on every re-aim and would have overwritten a kept
+      clip's live pixels, so it skips slots that are already filled (the skip
+      walks k up to where that clip's decoder sits, which lines up exactly
+      because `a->cur` only advanced on the frames that clip decoded); and the
+      line naming the cached clips now builds through a cursor that cannot
+      leave its buffer, because `k += snprintf(...)` walks past the end on
+      truncation and hands the next call a negative length as a `size_t`. That
+      code runs on the way to a boot.
+      **Proof, both halves with an instrument that can see the fault.**
+      Headless at the cap-40 binary with `PAD_ANIM_CACHE_MB=2`: highlight 33
+      gives `[33 34 32 35 31 36 30]` and image 0 is asserted ABSENT. padsw with
+      nine animated images and `PAD_ANIM_CACHE_MB=1`: `[0 1 8]` -> `[3 4 2]` in
+      ONE re-aim after three keys, with the six uncached clips still playing.
+      **Rig run on the item 105 five-image card:** that card's single clip fits
+      the budget outright, and every re-aim reported `1 kept 0 new 0 dropped` —
+      nothing freed, nothing re-decoded when the set does not change, which is
+      the no-regression case. The wrap still logged `highlight 4 -> 0, card 1/5
+      - wrap`.
+      **Two test-only env overrides, and why they had to exist.**
+      `PAD_ANIM_CACHE_MB` because no machine a test runs on has little enough
+      memory for a synthetic clip set to reach the budget, so the eviction path
+      is otherwise unreachable. `PAD_ANIM_SETTLE_MS` because the switch block
+      cannot be driven faster than ~320 ms a move, wider than the shipped
+      200 ms — so at the real value every press rightly gets its own re-aim and
+      the collapsing could never be observed. **The test widens the window
+      rather than the shipped constant being picked to suit the test.**
+      **Ruled out:** raising `CONF_MAX_IMAGES` as a fix for any of this. RAM
+      was never the risk — the cache has always been bounded and an unfitting
+      clip has always fallen back to one frame plus frame 0. The cap and this
+      item are independent.
+      **Green:** `make check` OK (check_elf, headless incl. the new aim case,
+      padsw_test 14 cases incl. the new re-aim case, select_sh_test 11).
+      **Uncommitted:** nothing.
+      **Resume:** the confirming rig run is done and clean; what is left is a
+      pass over the tab and docs if the cached-set line should surface anywhere
+      a user looks, and David's hardware run. Item 106 should now raise the cap
+      knowing the RAM question is answered.
 
 
 ## Reference material that is NOT in this repo

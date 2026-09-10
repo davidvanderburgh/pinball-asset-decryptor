@@ -7884,7 +7884,7 @@ These have each been violated at least once and each cost a run or a window:
       booted all three images. `--layout store` is proven on hardware, so a
       group may force the compact tick and the tab's "experimental" wording
       comes off (still to do, in the tab commit).
-      **Established (80%, commits 1-7 of 9 done, 8f93f7a fbd521b 9a92e6c 44f8536 d0c51cf):** the SELECTOR half
+      **Established (90%, commits 1-8 of 9 done, 8f93f7a fbd521b 9a92e6c 44f8536 d0c51cf 8942de7):** the SELECTOR half
       is built and its whole suite is green. `group=<members>|<title>|...`
       parses; images and cards are now different numbers (`CONF_MAX_IMAGES` 64,
       `CONF_MAX_CARDS` 16, `CONF_MAX_GROUPS` 8) and everything visual walks
@@ -7917,6 +7917,80 @@ These have each been violated at least once and each cost a run or a window:
       input under both awks, and three new cases in
       `tests/test_spike2_codeselect_rig.py` were checked against a broken tree
       before being trusted.
+      **Uncommitted:** nothing. The branch is pushed.
+      Commits 5-6 are done too: `mkmulticard.py` writes and reads the grammar
+      (the group line goes before its first member), refuses what the selector
+      merely drops (< 2 members, a gap in the run, overlapping groups, image 0,
+      a member naming no image line, a '|' in a title, a line past 1000 chars),
+      has the ordered `--group` / `--member` / `--members-list` CLI, both gates
+      (a group forces `store` and `parts`/`multi` is refused naming the cost; a
+      `group=` conf is never staged beside a codeselect below 3.0), and the
+      report rows (build.json per-image `group` plus a `groups` block, inspect
+      prints the cards before the images, plan prints `image-group`). Selftest
+      part 8 builds a real group card end to end; all 8 parts PASS under
+      `wsl -u root` with HOME redirected to a temp dir.
+      **TWO BUGS THIS PASS FOUND AND FIXED, both worth knowing:**
+      (1) `check_groups` returned early when there were no groups, so NOTHING
+      counted the cards and 17 plain images sailed through to be refused by the
+      selector on the machine instead.
+      (2) `ok &= <check>, <diagnostic>` in mkmulticard's selftest is a TUPLE and
+      always truthy: ELEVEN checks in that file could never fail.
+      `Checks.__iand__` honours the form now; all eleven are live and all pass.
+      That second one is why the selftest passed over a group card built on the
+      MULTI layout - the groups reached the conf but never `make_plan`, so the
+      layout gate was dead code. Both call sites pass them now.
+      Commit 7 is done too, THE TAB'S PURE LAYER. A table row is a CARD now:
+      `MemberRow`, `ImageRow.members`, `is_group`, `row_paths`, `form_trees`
+      (the ONE place the row/game index spaces meet) and `row_first_image`.
+      `_image_args` emits `--group` / `--member` in row order; `validate_form`
+      covers >= 2 members, row 0 never a group, no tree twice anywhere,
+      <= 16 cards / 64 trees / 8 groups; `form_compact` makes a group force the
+      compact build; `write_preview_conf` draws one card per row; `_row_key`
+      keys a group on its members so a member change is a REBUILD; and the
+      "experimental" wording is OFF the Compact tick now the gate is cleared.
+      **FOUR PLACES WERE USING A ROW WHERE THEY MEANT A GAME** and each is
+      fixed and pinned: `--default`, the `--art/--anim/--music N=` indexes in
+      prepare, `--highlight` in the preview, and `--titles`.
+      **A THIRD BUG, older than this item:** saved state put every non-bool row
+      field through `str()`, and `str([])` is the truthy STRING `"[]"` - so an
+      ordinary row restored from a state file read as a group with one member
+      called `"["`. `rows_from_state` rebuilds member rows properly now and
+      `is_group` asks for a list rather than for truthiness.
+      **AND A BUG IN MY OWN TEST, found by the negative control:** the
+      `--default` case first put the group at row 2, where the row index and the
+      image index happen to agree, so reverting the fix left it green. The group
+      goes first among the extras now. Every new behaviour with a wrong-index
+      failure mode was checked against a deliberately broken tree before being
+      trusted.
+      Commit 8 is done too, THE TAB'S WIDGETS - the part a person can reach.
+      "Add group..." (several images as one row) and "Add group from folder..."
+      (every `*.raw` in a folder, sorted, the folder's name as the title - the
+      case that FILED this item); the Title cell `JUKEBOX (random, 3 sets)` with
+      a count of the games missing from this machine; the Code cell showing the
+      version the members agree on or `mixed` (a version not yet READ is blank
+      and is NOT a disagreement); both wired into `_values`, which is not
+      automatic - the Code cell read `row.version` straight for a while, and
+      that is always blank on a group row. The Compact tick locks ON with
+      `COMPACT_TIP_GROUP` while a group is in the list and follows the LIST, not
+      only the Add, so a remove / load / restore / undo hands it back. A group
+      cannot be the primary. And `rows_from_inspect` folds a loaded card's
+      `groups` block back into rows (`group_rows`), so a loaded jukebox does not
+      come up as N ordinary rows that an Apply would flatten; a block this tool
+      cannot make sense of is left alone rather than half-folded.
+      **STILL OPEN in the tab:** a Members section in the Edit-image dialog, so
+      a group's games can be changed without removing the row and adding it
+      again. That IS the workaround meanwhile and it is a real one - the row
+      carries no state a rebuild would miss.
+      **Resume:** commit 9 of 9, THE EMULATOR PROOF RUN (rig lock; `alive.sh`
+      0 after). A store card from David's TMNT trio as stock plus
+      `--group '1987 RANDOM|pro or LE, rolled at boot' --member <1987 pro>
+      --member <1987 LE>`; boot 1: RIGHT, START -> `chose 1 ... rolled` ->
+      `p3:img1` bound, attract; boot 2: no keys, the countdown -> `chose 2`
+      (a 2-member group alternates by the exclusion rule) -> `p3:img2`,
+      attract; `glshot.sh` shows the two builds' different art. Recorded as a
+      proof row in `codeselect/DESIGN.md`. Then the Edit-dialog Members
+      section, and David's own hardware proof (two power-ups of his TMNT).
+      Full ordered list and every trap: handoff REMAINING item 106.
       **Uncommitted:** nothing. The branch is pushed.
       Commits 5-6 are done too: `mkmulticard.py` writes and reads the grammar
       (the group line goes before its first member), refuses what the selector

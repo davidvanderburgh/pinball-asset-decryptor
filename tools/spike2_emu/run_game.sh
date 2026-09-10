@@ -185,6 +185,25 @@ if [ -n "${PAD_CARD:-}" ]; then
             SEL_DIRS=""; SEL_GIVEUP=1
         fi
         if [ -z "$SEL_GIVEUP" ]; then
+        # ★ THE CARD'S GROUP LINES, CARRIED ONLY WHEN THE INDEXES LINE UP
+        # (item 106). A `group=` line names its members by IMAGE INDEX, and
+        # the indexes here are positions in what `parts.py --list-games`
+        # RESOLVED, not positions in the card's own images.conf. They coincide
+        # exactly when the two counts agree; when they do not - an images.conf
+        # naming a tree this image no longer carries - a carried group line
+        # would name the wrong builds, which is worse than not offering the
+        # card at all. So it is dropped, out loud.
+        SEL_GROUPS=""
+        if printf '%s\n' "$SEL_CARDCONF" | grep -qE '^[[:space:]]*group[[:space:]]*='; then
+            SEL_CARDN=$(printf '%s\n' "$SEL_CARDCONF" | grep -cE '^[[:space:]]*image[[:space:]]*=')
+            if [ "${SEL_CARDN:-0}" = "$SEL_N" ]; then
+                SEL_GROUPS=$(printf '%s\n' "$SEL_CARDCONF" | sed -n 's/^[[:space:]]*group[[:space:]]*=[[:space:]]*/group=/p')
+                echo "[select] menu: $(printf '%s\n' "$SEL_GROUPS" | grep -c .) group line(s) carried from the card"
+            else
+                echo "[select] the card names $SEL_CARDN image(s) but $SEL_N resolved here, so its" >&2
+                echo "[select]   group line(s) are DROPPED: the member indexes would not line up." >&2
+            fi
+        fi
         # The card's own default highlight, when it has one and it is in
         # range; /data/codeselect.last (the selector's own memory, and
         # $R/data persists across runs here) wins over it inside codeselect.
@@ -207,7 +226,23 @@ if [ -n "${PAD_CARD:-}" ]; then
         {
             echo "# written by run_game.sh for the boot selector (item 90)"
             echo "# device tokens are p<N>[:imgK] = partition N [tree imgK] of $PAD_CARD"
-            printf '%s' "$SEL_IMAGES"
+            # A GROUP CARD SITS WHERE ITS LINE SITS, so each one goes back
+            # immediately before its first member rather than at the end -
+            # conf.c would accept the end and put the card there, and the menu
+            # would then be in a different order from the card's own.
+            printf '%s' "$SEL_IMAGES" | awk -v groups="$SEL_GROUPS" '
+                BEGIN {
+                    n = split(groups, g, "\n")
+                    for (k = 1; k <= n; k++) {
+                        if (g[k] == "") continue
+                        spec = g[k]
+                        sub(/^group=[ \t]*/, "", spec)
+                        if (match(spec, /^[0-9]+/))
+                            before[substr(spec, RSTART, RLENGTH) + 0] = \
+                                before[substr(spec, RSTART, RLENGTH) + 0] g[k] "\n"
+                    }
+                }
+                { if ((NR - 1) in before) printf "%s", before[NR - 1]; print }'
             echo "default=$SEL_DEFAULT"
             echo "timeout=$SEL_TIMEOUT"
             # the card's sound and volume keys, verbatim (media= is NOT
@@ -651,12 +686,22 @@ if [ -n "$SEL_DIRS" ]; then
     rm -f "$R$PAD_SELECT_CHOICE"
     SEL_INV="--no-invert"
     [ "${PAD_DISPLAY_INVERT:-0}" = "1" ] && SEL_INV=""
+    # PAD_SELECT_PICK=<image> pins which member a group card boots, FOR PROOF
+    # RUNS: a two-boot test has to be able to say which build it expected on
+    # the glass. Never written to a card, and the selector refuses it when it
+    # is not a member of the card that was confirmed.
+    SEL_PICK=""
+    case "${PAD_SELECT_PICK:-}" in
+        ''|*[!0-9]*) ;;
+        *) SEL_PICK="--pick $PAD_SELECT_PICK"
+           echo "[select] PAD_SELECT_PICK=$PAD_SELECT_PICK: a group card will boot image $PAD_SELECT_PICK, not a rolled one" ;;
+    esac
     # The banner says what the GLASS says. The selector confirms on START and
     # on the ACTION / lockdown-bar button (node 1 bit 2), which is Space at
     # this keyboard, and its own on-screen footer names both - a log that
     # named only "1" sent the person at the PC looking for the wrong key.
     echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) or ACTION (Space) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
-    chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_INV </dev/null
+    chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_INV $SEL_PICK </dev/null
     SEL_RC=$?
     # ★ A KILLED SELECTOR IS A STOP, NOT A CHOICE (item 90, 2026-09-02).
     #

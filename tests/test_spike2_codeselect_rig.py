@@ -596,6 +596,51 @@ def test_the_selector_runs_without_the_shim_and_with_stdin_closed():
     assert "--audio" not in line, "audio is inherited (PAD_AUDIO_PLAY / PAD_AUDIO_FMT), not a rig flag"
 
 
+# ---- item 106: image groups reach the rig conf, or are dropped out loud ----
+
+def test_a_group_line_is_carried_only_when_the_indexes_line_up():
+    """A ``group=`` line names its members by IMAGE INDEX, and the rig conf's
+    indexes are positions in what ``parts.py --list-games`` RESOLVED - not
+    positions in the card's own images.conf.  They coincide exactly when the
+    two counts agree, and a carried group line that did not line up would name
+    the wrong builds, which is worse than not offering the card."""
+    text = _read("run_game.sh")
+    body = text[text.index("SEL_GROUPS=\"\""):text.index("# \u2605 THE CARD'S OWN COUNTDOWN")]
+    assert 'grep -qE \'^[[:space:]]*group[[:space:]]*=\'' in body, \
+        "the card's conf is read the way conf.c reads it: spacing tolerated"
+    assert '[ "${SEL_CARDN:-0}" = "$SEL_N" ]' in body, \
+        "the gate is the card's image count against what resolved here"
+    assert "DROPPED" in body, "a dropped group must be said out loud, not silently"
+
+
+def test_a_group_card_sits_where_its_line_sat():
+    """conf.c would accept a group= line written after every image= line and
+    put its card at the end of the menu - so the order on the glass woulddiffer from
+    the order on the card.  Each line goes back immediately before its first
+    member instead."""
+    text = _read("run_game.sh")
+    assert 'awk -v groups="$SEL_GROUPS"' in text
+    interleave = text[text.index('awk -v groups="$SEL_GROUPS"'):]
+    interleave = interleave[:interleave.index("default=$SEL_DEFAULT")]
+    assert "match(spec, /^[0-9]+/)" in interleave, "the first member index places the card"
+    assert "(NR - 1) in before" in interleave, "image lines are 0-based, like every other index"
+
+
+def test_pad_select_pick_reaches_the_selector_and_nothing_else_does():
+    """PAD_SELECT_PICK=<image> pins which member a group card boots, so a
+    two-boot proof run can say which build it expected on the glass.  It is a
+    rig knob: it never reaches a card, and --seed deliberately has no rig
+    knob at all - a run seeded the same way twice would prove nothing about
+    the roll."""
+    text = _read("run_game.sh")
+    line = next(ln for ln in text.splitlines()
+                if 'chroot "$R" /usr/local/codeselect/codeselect' in ln)
+    assert "$SEL_PICK" in line
+    assert "--seed" not in text, "there is no rig knob for the seed, on purpose"
+    guard = text[text.index('SEL_PICK=""'):text.index("$SEL_PICK", text.index('SEL_PICK=""') + 20)]
+    assert "*[!0-9]*" in guard, "anything that is not a number must not become a flag"
+
+
 # ---- item 90 v2: N images (the multi layout's tokens) and the media --------
 
 #: The guard every item-90 block sits under, in both scripts. `= 1` and not

@@ -8287,3 +8287,177 @@ def test_the_card_pick_dialog_offers_the_menu_or_the_whole_card(monkeypatch):
         assert got == [(d.device_path, True)]
     finally:
         root.destroy()
+# ---- item 106: a GROUP row - several games behind one card -----------------
+
+def _group_form(tmp_path, n_members=3):
+    """A form of: the primary, one plain extra, and a group of `n_members`."""
+    mb = multiboot_tab
+    paths = []
+    for name in ["stock", "custom"] + ["set%d" % i for i in range(1, n_members + 1)]:
+        f = tmp_path / (name + ".raw")
+        f.write_bytes(b"x")
+        paths.append(str(f))
+    rows = [ImageRow(path=paths[0], title="STERN STOCK"),
+            ImageRow(path=paths[1], title="CUSTOM A"),
+            ImageRow(path="", title="JUKEBOX",
+                     subtitle="a different set every power-up",
+                     members=[mb.MemberRow(path=q, title="SET %d" % (k + 1))
+                              for k, q in enumerate(paths[2:])])]
+    return MultibootForm(images=rows, out=str(tmp_path / "card.raw")), paths
+
+
+def test_rows_are_cards_and_trees_are_games(tmp_path):
+    """The two index spaces meet in form_trees and nowhere else. images.conf,
+    the choice file, --titles and --art N= count IMAGES; the table, the preview
+    and --highlight count CARDS. They are the same number until a group row
+    makes them differ, and every bug this feature can have is a place that used
+    one where it meant the other."""
+    mb = multiboot_tab
+    form, paths = _group_form(tmp_path)
+    assert len(form.images) == 3, "three cards"
+    trees = mb.form_trees(form)
+    assert [t[0] for t in trees] == [0, 1, 2, 3, 4], "five games"
+    assert [t[1] for t in trees] == paths
+    assert [t[2] for t in trees] == [0, 1, 2, 2, 2], "the row each game sits in"
+    assert [t[3] for t in trees] == [None, None, 0, 1, 2]
+    assert [mb.row_first_image(form, i) for i in range(3)] == [0, 1, 2]
+    assert mb.is_group(form.images[2]) and not mb.is_group(form.images[0])
+
+
+def test_a_group_row_becomes_group_and_member_flags_in_row_order(tmp_path):
+    mb = multiboot_tab
+    form, paths = _group_form(tmp_path)
+    args = mb._image_args(form)
+    assert args[:2] == ["--primary", mb.wsl(paths[0])]
+    assert args[2:4] == ["--extra", mb.wsl(paths[1])]
+    assert args[4:6] == ["--group", "JUKEBOX|a different set every power-up"]
+    assert args[6:] == ["--member", mb.wsl(paths[2]),
+                        "--member", mb.wsl(paths[3]),
+                        "--member", mb.wsl(paths[4])]
+
+
+def test_a_group_forces_the_compact_build(tmp_path):
+    """David, 2026-09-09. mkmulticard refuses parts/multi with a group outright;
+    the tab ticks the box so the reason is visible before the press."""
+    mb = multiboot_tab
+    form, _paths = _group_form(tmp_path)
+    assert form.compact is False, "the tick itself is still off by default"
+    assert mb.form_compact(form) is True
+    pa = mb.plan_args(form)
+    assert pa[pa.index("--layout") + 1] == "store"
+    ba = build_args(form)
+    assert ba[ba.index("--layout") + 1] == "store"
+    # ...and a form with no group is left exactly as it was
+    plain = MultibootForm(images=form.images[:2], out=form.out)
+    assert mb.form_compact(plain) is False
+    pb = build_args(plain)
+    assert pb[pb.index("--layout") + 1] == "auto"
+
+
+def test_titles_and_the_default_are_per_game_not_per_row(tmp_path):
+    """images.conf's image= lines are one per GAME, so --titles is too; a group
+    card's own title rides on its --group flag. --default names an image as
+    well, and a group row is named by its first member."""
+    form, _paths = _group_form(tmp_path)
+    # THE GROUP GOES FIRST among the extras, so a row index and an image index
+    # can never agree by luck: the plain row is row 2 and image 4.
+    form.images = [form.images[0], form.images[2], form.images[1]]
+    args = build_args(form)
+    titles = args[args.index("--titles") + 1].split(";")
+    assert titles == ["STERN STOCK", "SET 1", "SET 2", "SET 3", "CUSTOM A"]
+    assert "JUKEBOX" not in titles, "the card's title goes on --group"
+    form.default = 1                                  # the group ROW
+    da = build_args(form)
+    assert da[da.index("--default") + 1] == "1", "a group row is named by its first member"
+    form.default = 2                                  # the PLAIN row after it
+    db = build_args(form)
+    assert db[db.index("--default") + 1] == "4", "row 2 is image 4 under a 3-member group"
+
+
+def test_the_media_indexes_are_games(tmp_path):
+    """media.json carries one row per games tree, which is what plan_media
+    expects, and a group card takes its first member's. Using the row number
+    here would shift every media row after the first group."""
+    args = multiboot_tab.prepare_args(_group_form(tmp_path)[0],
+                                      str(tmp_path / "media"))
+    arts = [args[i + 1] for i, a in enumerate(args) if a == "--art"]
+    assert [x.split("=")[0] for x in arts] == ["0", "1", "2", "3", "4"]
+
+
+def test_the_preview_highlights_a_card_by_naming_one_of_its_games(tmp_path):
+    """--highlight names an IMAGE and the selector lights up the CARD that image
+    belongs to. Sending the row number would highlight the wrong card on any
+    list with a group above the row being previewed."""
+    mb = multiboot_tab
+    form, _paths = _group_form(tmp_path)
+    assert mb.preview_highlight(form, 2) == 2
+    # put the group first among the extras: row 2 is then image 4
+    form.images = [form.images[0], form.images[2], form.images[1]]
+    assert mb.preview_highlight(form, 1) == 1
+    assert mb.preview_highlight(form, 2) == 4
+
+
+def test_the_preview_conf_draws_one_card_per_row(tmp_path):
+    form, _paths = _group_form(tmp_path)
+    form.default = 2
+    text = write_preview_conf(form)
+    kinds = [l.split("=")[0] for l in text.splitlines()
+             if l[:6] in ("image=", "group=")]
+    assert kinds == ["image", "image", "group", "image", "image", "image"]
+    assert "group=2-4|JUKEBOX|a different set every power-up" in text
+    assert "default=2" in text, "the group row's first member, not the row"
+
+
+def test_a_member_change_is_a_rebuild_not_a_menu_edit(tmp_path):
+    """Adding, removing or swapping a member changes which games are on the
+    card, which only a build can do. If the key did not move with them, a
+    member change would look like a menu edit and an inject would leave the
+    card's games as they were."""
+    before, _paths = _group_form(tmp_path)
+    after, _ = _group_form(tmp_path)
+    assert diff_forms(before, after)[1] == []
+    after.images[2].members = after.images[2].members[:2]
+    _menu, rebuild = diff_forms(before, after)
+    assert rebuild, "dropping a member must ask for a build"
+    # ...and a title change on the same row is still only a menu edit
+    same, _ = _group_form(tmp_path)
+    same.images[2].title = "JUKEBOX 2"
+    menu, rebuild = diff_forms(before, same)
+    assert rebuild == [] and menu
+
+
+def test_the_form_refuses_a_group_that_cannot_be_built(tmp_path):
+    form, _paths = _group_form(tmp_path)
+    assert validate_form(form) == []
+    one = _group_form(tmp_path)[0]
+    one.images[2].members = one.images[2].members[:1]
+    assert any("at least 2" in e for e in validate_form(one))
+    # the machine boots image 0 when the menu is not honoured, so it cannot roll
+    first = _group_form(tmp_path)[0]
+    first.images = [first.images[2], first.images[0], first.images[1]]
+    assert any("primary and cannot be a random group" in e
+               for e in validate_form(first))
+    # the same .raw twice, once plain and once as a member
+    dup = _group_form(tmp_path)[0]
+    dup.images[1].path = dup.images[2].members[0].path
+    assert any("listed twice" in e for e in validate_form(dup))
+    # a member file that is not there
+    gone = _group_form(tmp_path)[0]
+    gone.images[2].members[1].path = str(tmp_path / "nope.raw")
+    assert any("no such file" in e for e in validate_form(gone))
+
+
+def test_a_saved_state_brings_a_group_back_as_rows_not_as_a_string(tmp_path):
+    """str([]) is "[]", a truthy STRING - so an ordinary row restored from a
+    state file used to read as a group with one member called "[". Every
+    non-bool row field went through str(); this one is a list of rows."""
+    mb = multiboot_tab
+    form, paths = _group_form(tmp_path)
+    doc = [mb.asdict(r) for r in form.images]
+    back = rows_from_state(doc)
+    assert len(back) == 3
+    assert not mb.is_group(back[0]) and not mb.is_group(back[1])
+    assert mb.is_group(back[2])
+    assert [m.path for m in back[2].members] == paths[2:]
+    assert [m.title for m in back[2].members] == ["SET 1", "SET 2", "SET 3"]
+    assert mb._image_args(MultibootForm(images=back, out="x")) == mb._image_args(form)

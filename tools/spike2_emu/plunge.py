@@ -194,8 +194,18 @@ def do_start(m):
     _set(m, START, 0)
     print("Start pressed")
     if not _held(m, COIN):
-        print("  NOTE: a game needs CREDITS. If the game stays in attract, run"
-              " `plunge.py coin` first - see do_coin().")
+        # NAMES THE BUTTON, not only the command (PAD-128): the playfield
+        # window now shows this line in its status bar, and "run `plunge.py
+        # coin`" is advice a mouse-only user cannot act on. Both surfaces,
+        # because both read it - see do_coin() for what the coin is worth.
+        #
+        # THE COMMAND GOES LAST, and that is measured rather than tidy: the
+        # window's status bar is as wide as the ARTWORK (559 px on a 1440p
+        # desk, less on a laptop), so this line is clipped on screen - and
+        # whatever is at the end is what gets clipped. The button is the part
+        # a reader needs.
+        print("  NOTE: a game needs CREDITS - press Insert coin first, then"
+              " Start (plunge.py coin).")
 
 
 def _model():
@@ -267,9 +277,10 @@ def do_serve(m):
     if plan.refused:
         print(plan.refused)
         if "empty" in plan.refused:
-            print("  `plunge.py reset` puts six balls back")
+            print("  Reset balls (plunge.py reset) puts six balls back")
         else:
-            print("  `plunge.py plunge` launches the one already there")
+            print("  Plunge (plunge.py plunge) launches the one already"
+                  " there")
         return 1
     for step in plan.steps:
         if step[0] == "wait":

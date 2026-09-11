@@ -4040,10 +4040,14 @@ class MainWindow:
         # one; the values tuple still follows this `columns` order (vals[3]=
         # loop, vals[4]=keep, vals[6]=lvl) regardless of display order, which
         # is why "lvl" is appended rather than inserted.
+        # ``extended``, not ``browse``: a range of rows has to be selectable
+        # for the right-click bulk clear (PAD-128).  Everything that reads one
+        # row still reads selection()[0], which is the first row in TREE
+        # order — see _audio_selected_rel.
         self._audio_tree = ttk.Treeview(
             list_frame,
             columns=("len", "fmt", "rep", "loop", "keep", "type", "lvl"),
-            height=12, selectmode="browse")
+            height=12, selectmode="extended")
         self._audio_tree.heading("#0", text="Original Track", anchor=tk.W)
         self._audio_tree.heading("len", text="Length", anchor=tk.W)
         self._audio_tree.heading("fmt", text="Format", anchor=tk.W)
@@ -5317,6 +5321,7 @@ class MainWindow:
                 self._audio_empty.place_forget()
         # Fit-to-content column widths (the toggle columns stay fixed).
         self._autosize_tree_columns(tree, "audio", ("#0", "len", "fmt", "rep"))
+        self._update_clear_all_btn("audio")
         # Keep the per-clip dB box in step with what the list now holds (it is
         # live as soon as there is anything to level, selection or not — "Apply
         # to all shown" needs no row picked).
@@ -5733,7 +5738,6 @@ class MainWindow:
             return
         if row not in self._audio_slots_by_rel:
             return  # "Group duplicates" parent row — no per-slot actions
-        tree.selection_set(row)
         menu = tk.Menu(tree, tearoff=0)
         c = THEMES.get(self._current_theme, {})
         try:
@@ -5743,6 +5747,8 @@ class MainWindow:
                 activeforeground="#ffffff")
         except tk.TclError:
             pass
+        if self._popup_multi_row_menu(menu, tree, "audio", row, event):
+            return
         menu.add_command(label="▶  Play original",
                          command=self._audio_play_original)
         menu.add_command(label="Choose replacement…",
@@ -5805,19 +5811,11 @@ class MainWindow:
             command=lambda k=kind, r=rel: self._asset_find_in_partition(k, r))
 
     def _audio_clear_selected(self):
-        rel = self._audio_selected_rel()
-        if rel is not None and rel in self._audio_assignments:
-            del self._audio_assignments[rel]
-            self._save_staged_changes()
-            self.append_log("Replace Audio: cleared replacement for %s" % rel,
-                            "info")
-            self._refresh_audio_list()
-            if rel == self._audio_current_rel:
-                self._audio_load_rep_pane(rel)  # back to "no replacement"
-            try:
-                self._audio_tree.selection_set(rel)
-            except tk.TclError:
-                pass
+        """One row's "Remove replacement" — the shared bulk path with a
+        selection of one, so a single clear and a range clear cannot drift
+        (PAD-128)."""
+        self._clear_replacement_picks("audio", self._selected_replace_rels(
+            "audio")[:1])
 
     def _load_sound_test_suggestions(self):
         """The game's own Sound-Test menu names from the assets folder's
@@ -6809,9 +6807,10 @@ class MainWindow:
         # Slot list.
         list_frame = ttk.Frame(f)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+        # ``extended`` for the right-click bulk clear — see the Audio tree.
         self._video_tree = ttk.Treeview(
             list_frame, columns=("len", "res", "fmt", "aud", "rep", "conv"),
-            height=9, selectmode="browse")
+            height=9, selectmode="extended")
         self._video_tree.heading("#0", text="Original Video", anchor=tk.W)
         self._video_tree.heading("len", text="Length", anchor=tk.W)
         self._video_tree.heading("res", text="Resolution", anchor=tk.W)
@@ -7690,6 +7689,7 @@ class MainWindow:
             self._video_empty.place_forget()
         self._autosize_tree_columns(
             tree, "video", ("#0", "len", "res", "fmt", "aud", "rep", "conv"))
+        self._update_clear_all_btn("video")
         # Fill in any "…" Convert cells the rebuild just drew.
         self._video_probe_conv_async()
         # Option toggles funnel through here and can flip a cached verdict
@@ -7854,6 +7854,216 @@ class MainWindow:
         self._video_assignments = {}
         self._image_assignments = {}
         staged_changes.save(assets_dir, {})
+
+    # ---- Clearing replacement picks in bulk (Audio / Video / Images) ----
+    #
+    # ★ DragonRR, 2026-09-11: *"We could do with a 'clear all' replacements
+    # button - or an ability to select a series/group by highlighting and
+    # right click - clear replacement. I currently have 48 replacements - I
+    # can order by replacements which is good but I would have to clear each
+    # one individually."*  Both halves of that are here: the tree's
+    # ``selectmode`` is ``extended`` so a Shift-click range is a thing the
+    # user can hold, its right-click menu clears the whole selection, and the
+    # project-folder row carries a Clear replacements… button for the lot.
+    #
+    # ONE IMPLEMENTATION FOR FOUR ENTRY POINTS — one row's menu, a selected
+    # range, a scene group, the whole tab — and for all three tabs, because
+    # each of them has to do the same five things after dropping a pick: save
+    # the sidecar, log it, rebuild the list, re-render the preview pane that
+    # was showing the cleared slot, and re-state the button.  The three
+    # per-row versions each did their own four-fifths of that.
+    #
+    # A PICK IS ALL THIS TOUCHES, which is what the confirm says out loud: no
+    # file of the user's is deleted, and a slot already built into the project
+    # folder keeps the bytes it has — "Revert all changes…" on the Write tab
+    # is the tool for those, and it is a different question.
+    #
+    # ONE LOG LINE FOR A BULK CLEAR, not 48.  Every pick dropped is already
+    # recorded individually in the folder's own .history.log by
+    # _save_staged_changes (batch 24's diff), so the app log — the thing that
+    # gets pasted into a report — gets the count and the detail stays where it
+    # can be read months later.
+
+    _REPLACE_LABELS = {"audio": "Replace Audio", "video": "Replace Video",
+                       "image": "Replace Images"}
+
+    def _replace_assignments(self, kind):
+        """The live ``{rel: replacement path}`` map for one Replace tab."""
+        return getattr(self, "_%s_assignments" % kind, None)
+
+    def _selected_replace_rels(self, kind):
+        """The slot rows selected on one Replace tab.
+
+        Group headers and "Group duplicates" parents are dropped — they are
+        not slots, and the group menu has its own bulk actions."""
+        tree = getattr(self, "_%s_tree" % kind, None)
+        slots = getattr(self, "_%s_slots_by_rel" % kind, None) or {}
+        if tree is None:
+            return []
+        try:
+            return [iid for iid in tree.selection() if iid in slots]
+        except tk.TclError:
+            return []
+
+    def _rerender_cleared_preview(self, kind, gone):
+        """Re-render the preview pane if it was showing one of *gone*."""
+        cur = getattr(self, "_%s_current_rel" % kind, None)
+        if cur is None or cur not in gone:
+            return
+        try:
+            if kind == "audio":
+                self._audio_load_rep_pane(cur)      # back to "no replacement"
+            elif kind == "video":
+                self._video_load_rep_pane(cur)
+                self._video_update_preview_note(cur)
+            else:
+                self._image_render_preview(cur)
+        except tk.TclError:
+            pass
+
+    def _clear_replacement_picks(self, kind, rels, reselect=True):
+        """Drop the pending replacement picks for *rels*.  Returns how many
+        actually went (a row with no pick is not an error — a range selection
+        normally spans some)."""
+        assigns = self._replace_assignments(kind)
+        if assigns is None:
+            return 0
+        gone = [rel for rel in dict.fromkeys(rels) if rel in assigns]
+        if not gone:
+            return 0
+        for rel in gone:
+            del assigns[rel]
+        self._save_staged_changes()
+        label = self._REPLACE_LABELS.get(kind, kind)
+        self.append_log(
+            "%s: cleared replacement for %s" % (label, gone[0])
+            if len(gone) == 1 else
+            "%s: cleared %d replacements (the folder's history log names "
+            "each one)" % (label, len(gone)), "info")
+        refresh = getattr(self, "_refresh_%s_list" % kind, None)
+        if refresh is not None:
+            try:
+                refresh()
+            except tk.TclError:
+                pass
+        self._rerender_cleared_preview(kind, set(gone))
+        # Re-select what was cleared: the refresh rebuilds the tree, and a
+        # cleared row that keeps the highlight is how the user sees WHICH
+        # rows the menu acted on.  A "Show: Changed" filter can drop them
+        # from the list entirely, hence exists().
+        tree = getattr(self, "_%s_tree" % kind, None)
+        if reselect and tree is not None:
+            try:
+                alive = [rel for rel in gone if tree.exists(rel)]
+                if alive:
+                    tree.selection_set(alive)
+                    tree.see(alive[0])
+            except tk.TclError:
+                pass
+        self._update_clear_all_btn(kind)
+        return len(gone)
+
+    @staticmethod
+    def _right_click_selection(tree, row):
+        """What a right-click on *row* leaves selected.
+
+        A right-click INSIDE an existing multi-row selection KEEPS it — which
+        is the whole reason a range can be acted on at all, and what every
+        file manager does.  A click anywhere else selects just that row, which
+        is what the single-row menus have always assumed."""
+        try:
+            sel = tree.selection()
+        except tk.TclError:
+            sel = ()
+        if row not in sel or len(sel) < 2:
+            tree.selection_set(row)
+            return (row,)
+        return tuple(sel)
+
+    def _add_multi_row_clear(self, menu, kind, sel):
+        """The right-click menu for a MULTI-ROW selection on a Replace tab.
+
+        Deliberately short: the per-row entries (play, choose a replacement,
+        properties) each act on ONE slot, and offering them over a selection
+        of forty would leave which one they meant up to the user to guess."""
+        slots = getattr(self, "_%s_slots_by_rel" % kind, None) or {}
+        assigns = self._replace_assignments(kind) or {}
+        rows = [rel for rel in sel if rel in slots]
+        picked = [rel for rel in rows if assigns.get(rel)]
+        menu.add_command(label="%d slot%s selected"
+                               % (len(rows), "" if len(rows) == 1 else "s"),
+                         state=tk.DISABLED)
+        menu.add_separator()
+        if picked:
+            menu.add_command(
+                label="Clear %d replacement%s in this selection"
+                      % (len(picked), "" if len(picked) == 1 else "s"),
+                command=lambda k=kind: self._clear_selected_replacements(k))
+        else:
+            menu.add_command(label="No replacements in this selection",
+                             state=tk.DISABLED)
+
+    def _popup_multi_row_menu(self, menu, tree, kind, row, event):
+        """True when the right-click landed on a multi-row selection, in which
+        case *menu* has been filled and shown and the caller is done."""
+        sel = self._right_click_selection(tree, row)
+        if len(sel) < 2:
+            return False
+        self._add_multi_row_clear(menu, kind, sel)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return True
+
+    def _clear_selected_replacements(self, kind):
+        """The row menu's "Clear replacement(s)": the whole selection."""
+        rels = self._selected_replace_rels(kind)
+        picked = [rel for rel in rels
+                  if (self._replace_assignments(kind) or {}).get(rel)]
+        if len(picked) > 1 and not messagebox.askyesno(
+                "Clear replacements",
+                "Clear the replacements picked for these %d slots?\n\n"
+                "This only drops the picks — your own files are untouched."
+                % len(picked)):
+            return
+        self._clear_replacement_picks(kind, rels)
+
+    def _clear_all_replacements(self, kind):
+        """The Clear replacements… button: every pick on this tab."""
+        if self._is_running():
+            return
+        assigns = self._replace_assignments(kind) or {}
+        n = len(assigns)
+        if not n:
+            messagebox.showinfo(
+                "Clear replacements",
+                "Nothing is picked on this tab, so there is nothing to "
+                "clear.")
+            return
+        if not messagebox.askyesno(
+                "Clear replacements",
+                "Clear all %d replacement%s picked on this tab?\n\n"
+                "This only drops the picks: none of your own files are "
+                "touched, and any slot already built into the project folder "
+                "keeps the bytes it has — “Revert all changes…” "
+                "on the Write tab is what restores those."
+                % (n, "" if n == 1 else "s")):
+            return
+        self._clear_replacement_picks(kind, list(assigns), reselect=False)
+
+    def _update_clear_all_btn(self, kind):
+        """Grey the Clear replacements… button when there is nothing to clear
+        (the same "tell the user it isn't relevant" rule as Revert all
+        changes…), and keep it out of reach while a pipeline runs."""
+        btn = getattr(self, "_clear_all_btns", {}).get(kind)
+        if btn is None:
+            return
+        live = bool(self._replace_assignments(kind)) and not self._is_running()
+        try:
+            btn.configure(state=tk.NORMAL if live else tk.DISABLED)
+        except tk.TclError:
+            pass
 
     def refresh_after_revert(self):
         """Re-sync the Replace tabs + Write preview after a revert changed the
@@ -8075,7 +8285,6 @@ class MainWindow:
         row = tree.identify_row(event.y)
         if not row:
             return
-        tree.selection_set(row)
         menu = tk.Menu(tree, tearoff=0)
         c = THEMES.get(self._current_theme, {})
         try:
@@ -8085,6 +8294,8 @@ class MainWindow:
                 activeforeground="#ffffff")
         except tk.TclError:
             pass
+        if self._popup_multi_row_menu(menu, tree, "video", row, event):
+            return
         menu.add_command(label="▶  Play original",
                          command=self._video_play_original)
         menu.add_command(label="Choose replacement…",
@@ -8235,20 +8446,10 @@ class MainWindow:
         dlg.resizable(False, False)
 
     def _video_clear_selected(self):
-        rel = self._video_selected_rel()
-        if rel is not None and rel in self._video_assignments:
-            del self._video_assignments[rel]
-            self._save_staged_changes()
-            self.append_log("Replace Video: cleared replacement for %s" % rel,
-                            "info")
-            self._refresh_video_list()
-            if rel == self._video_current_rel:
-                self._video_load_rep_pane(rel)  # back to "no replacement"
-                self._video_update_preview_note(rel)
-            try:
-                self._video_tree.selection_set(rel)
-            except tk.TclError:
-                pass
+        """One row's "Clear replacement" — the shared bulk path with a
+        selection of one (PAD-128)."""
+        self._clear_replacement_picks("video", self._selected_replace_rels(
+            "video")[:1])
 
     def _video_play_original(self):
         rel = self._video_selected_rel()
@@ -8619,9 +8820,14 @@ class MainWindow:
         # "n" (Images) is grouped-mode only: the per-group member count as its
         # own sortable column (a tester: the count baked into the header text
         # couldn't be sorted on) — _refresh_image_list toggles displaycolumns.
+        # ``extended``, and this is the tab that asked for it (PAD-128): "an
+        # ability to select a series/group by highlighting and right click -
+        # clear replacement… I currently have 48 replacements".  Sorting by
+        # Replacement already puts them together; a range selection is what
+        # makes that useful.
         self._image_tree = ttk.Treeview(
             list_frame, columns=("n", "res", "fmt", "src", "rep"),
-            height=9, selectmode="browse")
+            height=9, selectmode="extended")
         self._image_tree.heading("#0", text="Original Image", anchor=tk.W)
         self._image_tree.heading("n", text="Images", anchor=tk.W)
         self._image_tree.heading("res", text="Resolution", anchor=tk.W)
@@ -9338,6 +9544,7 @@ class MainWindow:
             self._image_empty.place_forget()
         self._autosize_tree_columns(
             tree, "image", ("#0", "res", "fmt", "src", "rep"))
+        self._update_clear_all_btn("image")
 
     def _maybe_rescan_image(self):
         """Auto-scan when the Replace Image tab becomes visible and the folder
@@ -9437,7 +9644,6 @@ class MainWindow:
         row = tree.identify_row(event.y)
         if not row:
             return
-        tree.selection_set(row)
         menu = tk.Menu(tree, tearoff=0)
         c = THEMES.get(self._current_theme, {})
         try:
@@ -9447,6 +9653,8 @@ class MainWindow:
                 activeforeground="#ffffff")
         except tk.TclError:
             pass
+        if self._popup_multi_row_menu(menu, tree, "image", row, event):
+            return
         if row.startswith(_IMG_GROUP_IID):
             # Group header: bulk actions over the children currently shown
             # (the search / Show filters have already been applied).
@@ -9824,19 +10032,10 @@ class MainWindow:
         return path
 
     def _image_clear_selected(self):
-        rel = self._image_selected_rel()
-        if rel is not None and rel in self._image_assignments:
-            del self._image_assignments[rel]
-            self._save_staged_changes()
-            self.append_log("Replace Images: cleared replacement for %s" % rel,
-                            "info")
-            self._refresh_image_list()
-            if rel == self._image_current_rel:
-                self._image_render_preview(rel)
-            try:
-                self._image_tree.selection_set(rel)
-            except tk.TclError:
-                pass
+        """One row's "Clear replacement" — the shared bulk path with a
+        selection of one (PAD-128)."""
+        self._clear_replacement_picks("image", self._selected_replace_rels(
+            "image")[:1])
 
     # ---- Replace Image: static preview -------------------------------
 
@@ -19716,6 +19915,34 @@ class MainWindow:
         scan.pack(side=tk.LEFT, padx=(8, 0))
         self._scan_buttons[tab_key] = scan
         self._scan_cmds[tab_key] = scan_cmd   # restore after a Cancel
+        # "Clear replacements…" lives HERE, on the one row the three Replace
+        # tabs share, rather than three times on three search toolbars — those
+        # are full (the Images one already carries a search box, two filters,
+        # a grouping box and the Fonts / Scenes buttons at an 820 px default
+        # width), and this row's folder mirror expands, so a button on it
+        # costs nothing but label width.  It is also the honest place: the
+        # picks it drops belong to the folder named beside it, not to the
+        # filtered view above.  The Text tab is not a Replace tab — its edits
+        # go straight to the manifest and it has its own "Clear all edits".
+        if tab_key in ("audio", "video", "image"):
+            if not hasattr(self, "_clear_all_btns"):
+                self._clear_all_btns = {}
+            btn = ttk.Button(
+                row, text="Clear replacements…", state=tk.DISABLED,
+                command=lambda k=tab_key: self._clear_all_replacements(k))
+            btn.pack(side=tk.LEFT, padx=(8, 0))
+            self._clear_all_btns[tab_key] = btn
+            _Tooltip(
+                btn,
+                "Drop every replacement picked on this tab in one go — for "
+                "starting a project over without clearing 48 rows one at a "
+                "time. It only drops the picks: your own files are untouched, "
+                "and a slot already built into the project folder keeps the "
+                "bytes it has (use “Revert all changes…” on the Write tab "
+                "for those). To clear only some, select the rows — click, "
+                "then Shift-click or Ctrl-click — and right-click the "
+                "selection.",
+                lambda: self._current_theme)
 
     def _project_mirror_label(self, parent):
         """The read-only project-folder mirror the Replace tabs show: a link
@@ -22305,6 +22532,11 @@ class MainWindow:
             self._set_write_button_running(True, active=(mode == "write"))
             if hasattr(self, "_revert_all_btn"):
                 self._revert_all_btn.configure(state=tk.DISABLED)
+            # Same rule for the Replace tabs' Clear replacements… buttons: a
+            # pick dropped while the build that was about to apply it is
+            # mid-flight is a race with nothing good at the end of it.
+            for kind in ("audio", "video", "image"):
+                self._update_clear_all_btn(kind)
             # One live Cancel at a time: kill any in-flight Modified Files
             # scan (its "Cancel scan" would sit next to the run's "Cancel" —
             # feedback batch 10) and grey Refresh for the run's duration.
@@ -22359,6 +22591,10 @@ class MainWindow:
             # Revert button tracks the change count, not a blanket re-enable —
             # disabled when there's nothing to revert (see _update_revert_btn_state).
             self._update_revert_btn_state()
+            # The Clear replacements… buttons track their own pick counts the
+            # same way (a finished Write leaves the picks in place).
+            for kind in ("audio", "video", "image"):
+                self._update_clear_all_btn(kind)
             # Restore the Modified Files Refresh button and re-fire any scan
             # the run pre-empted (or that was requested mid-run).
             scan_btn = self._scan_buttons.get("write_preview")

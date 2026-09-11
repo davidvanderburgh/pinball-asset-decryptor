@@ -99,6 +99,10 @@ struct opts {
      * is ever written to a card: a jukebox that always picked the same member
      * would look exactly like one that was working. */
     int highlight_card; /* --highlight-card: a CARD index, for a keeping group's card */
+    const char *loading; /* --loading-out: with --snapshot, ALSO write the
+                          * LOADING frame - the one the machine draws once the
+                          * card is confirmed, which for a random card is the
+                          * one moment the player is told what they got. */
     int pick;         /* boot this image instead of rolling; -1 = roll */
     int seed;         /* make the roll reproducible; -1 = stir it for real */
 };
@@ -246,6 +250,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
         if (!strcmp(a, "--highlight")) { if (!v) goto missing; o->highlight = atoi(v); i++; continue; }
         if (!strcmp(a, "--frames")) { if (!v) goto missing; o->frames = atoi(v); i++; continue; }
         if (!strcmp(a, "--highlight-card")) { if (!v) goto missing; o->highlight_card = atoi(v); i++; continue; }
+        if (!strcmp(a, "--loading-out")) { if (!v) goto missing; o->loading = v; i++; continue; }
         if (!strcmp(a, "--pick")) { if (!v) goto missing; o->pick = atoi(v); i++; continue; }
         if (!strcmp(a, "--seed")) { if (!v) goto missing; o->seed = atoi(v); i++; continue; }
         if (!strcmp(a, "--invert")) { o->invert = 1; continue; }
@@ -1021,10 +1026,31 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
     }
 }
 
+/* WHAT THE LOADING FRAME SHOWS: the BUILD's own picture when the card knows
+ * what that build looks like, else the card's.
+ *
+ * They are the same thing on an ordinary card.  On a RANDOM card they are not,
+ * and the build's is the one worth showing: this frame is the one moment the
+ * player is told which of them they got, so it should look like that one
+ * (David, 2026-09-11: "on this loading screen, I want to see the random image
+ * that was selected").  A member that keeps a card of its own has a picture
+ * here; a member a consuming group swallowed has none, and the card's own
+ * picture is then the only true answer. */
+static const struct art_image *loading_picture(const struct conf *c,
+                                               const struct media *m,
+                                               int card, int boot)
+{
+    int own = conf_card_of_image(c, boot);
+    if (own >= 0 && own != card && card_picture(m, own))
+        return card_picture(m, own);
+    return card_picture(m, card);
+}
+
 /* the LOADING frame: the chosen card's picture (when it has one) above the
  * line; this frame stays on the LCD until the game's first frame */
 static void draw_loading(struct gfx *g, struct gfx_font *f, const struct theme *th,
-                         const char *title, const struct art_image *pic)
+                         const char *title, const char *subtitle,
+                         const struct art_image *pic)
 {
     float s = (float)g->h / 768.0f;
     char buf[300], cut[300];
@@ -1039,6 +1065,16 @@ static void draw_loading(struct gfx *g, struct gfx_font *f, const struct theme *
     px = gfx_fit_px(f, buf, wmax, 64 * s, 30 * s);
     gfx_ellipsize(f, px, buf, wmax, cut, sizeof cut);
     gfx_text_center(g, f, px, g->w / 2, y, cut, th->rgb[TH_TITLE_HL]);
+    /* AND THE SUBTITLE, which is where a jukebox keeps the difference.  Its
+     * members are one title with different song sets, so the title alone says
+     * "LOADING Godzilla Premium 1..." whichever one the roll landed on - and
+     * this frame exists to tell the player which one they got. */
+    if (subtitle && *subtitle) {
+        float spx = gfx_fit_px(f, subtitle, wmax, 34 * s, 22 * s);
+        gfx_ellipsize(f, spx, subtitle, wmax, cut, sizeof cut);
+        gfx_text_center(g, f, spx, g->w / 2, y + (int)(px * 1.25f), cut,
+                        th->rgb[TH_SUBTITLE_HL]);
+    }
 }
 
 /* the slot image i is drawn in, or -1 when it is not on screen */
@@ -1163,6 +1199,30 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
                 path, g->w, g->h, hlimg, conf_card_face(c, hl)->title, how, cardinfo,
                 frame, frames, timeout, invert,
                 fontpath, media.dir, action ? FOOT_ACTION : FOOT_START, wn ? where : "none");
+    }
+    /* THE LOADING FRAME, when it is asked for: what the machine draws the
+     * moment the card is confirmed.  A RANDOM card ROLLS for it, because that
+     * frame is the one place the player is told which build they got, and a
+     * preview that showed a fixed member would be showing a lie.  Nothing else
+     * of the confirm happens - no choice file, no last file, no sound, no
+     * boot - so this stays what --snapshot is: a picture, and no side effect. */
+    if (o->loading && *o->loading) {
+        int boot = conf_card_boots(c, hl);
+        char why[CONF_STR + 64], rolled[CONF_STR + 80];
+        rolled[0] = 0;
+        if (conf_card_group(c, hl) >= 0) {
+            boot = o->pick >= 0 ? o->pick
+                                : roll_member(c, hl, -1, o->seed, why, sizeof why);
+            if (o->pick < 0) snprintf(rolled, sizeof rolled, " (%s)", why);
+        }
+        if (boot < 0) boot = 0;
+        draw_loading(g, font, &L->th, c->img[boot].title, c->img[boot].subtitle,
+                     loading_picture(c, &media, hl, boot));
+        if (gfx_write_ppm(g, o->loading, invert) < 0)
+            sel_log("cannot write %s: %s", o->loading, strerror(errno));
+        else
+            sel_say("loading: %s %dx%d, card %d boots image %d (%s)%s",
+                    o->loading, g->w, g->h, hl + 1, boot, c->img[boot].title, rolled);
     }
     media_stats(&media);
     media_free(&media);
@@ -1680,8 +1740,8 @@ int main(int argc, char **argv)
         /* the LOADING frame names the MEMBER under the GROUP's picture: the
          * card said "a different song set every power-up", so this is the one
          * moment the player is told which set they got */
-        draw_loading(&g, font, &L.th, c.img[boot].title,
-                     card_picture(&media, chosen));
+        draw_loading(&g, font, &L.th, c.img[boot].title, c.img[boot].subtitle,
+                     loading_picture(&c, &media, chosen, boot));
         if (headless) {
             char lp[400];
             snprintf(lp, sizeof lp, "%s.loading.ppm", o.headless);

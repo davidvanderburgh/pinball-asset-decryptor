@@ -8592,6 +8592,27 @@ rewriting it.**
          pick is refused by name. A keeping group's games must also be next to
          each other on the card, which the builder has always required and the
          list now says before a build finds out.
+      **AND THE PREVIEW GREW THE MOMENT AFTER THE PRESS (David, 2026-09-11:
+      "the left right flippers can't highlight the random one", then "I want to
+      see this especially for how it looks with the random one").** Three more
+      things, all in the same branch:
+      1. **The preview highlighted an IMAGE.** `--highlight`, `default=` and the
+         choice file all name one, which is right for them - they say which GAME
+         boots - but a random card over images that keep their own is not any
+         image. The flippers sent its first member, that member's own card lit
+         up, and the third press drew the first card twice. A row IS a card, so
+         the row goes to `--highlight-card` now.
+      2. **The caption said "(no source recorded)" about it.** A random card has
+         no source of its own and never will; it says what it rolls between.
+      3. **The LOADING frame is in the preview.** `--loading-out PATH` draws it
+         out of a `--snapshot` load - no choice file, no last file, no boot -
+         and the Select button shows it where a black beat used to stand in.
+         **It shows the BUILD, not the card:** the picture of the image the roll
+         landed on when the card knows what that build looks like, and the
+         member's SUBTITLE under the title, because a jukebox's members are one
+         title with different song sets and the title alone says the same thing
+         whichever one it landed on. Headless 16g pins all of it, including that
+         a snapshot without the flag still writes no loading frame.
       **Resume:** nothing is owed on the card or the tools. What is left is
       polish and it can close: (a) the eight styles are drawn from the members'
       logos, so two builds that share a logo (the TMNT pair) make every style

@@ -779,6 +779,11 @@ def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
     assert words[words.index("--media") + 1] == multiboot_tab.wsl(media)
     assert words[words.index("--highlight-card") + 1] == "1"
     assert "--highlight" not in words, "the preview names a CARD, not an image"
+    assert "--loading-out" not in words, "asked for, never assumed"
+    with_loading = preview_snapshot_args("/bin/cs", conf, media, ppm, 1, 3,
+                                         loading="/x/loading_ab_1.ppm")
+    assert with_loading[with_loading.index("--loading-out") + 1] == \
+        multiboot_tab.wsl("/x/loading_ab_1.ppm")
     assert words[words.index("--anim-frame") + 1] == "3"
     assert words[words.index("--input") + 1] == "none"
     for flag in ("--out", "--last", "--timeout", "--headless"):
@@ -2518,8 +2523,9 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
         return [(multiboot_tab.AUDIO_LABEL, [py, "-c", code])]
 
     def snapshot(binary, conf, media_dir, ppm, hl, n, rootfs="~/r", cwd=None,
-                 frames=1):
+                 frames=1, loading=None):
         seen["snapshot"].append((binary, conf, media_dir, ppm, hl, n, frames))
+        seen.setdefault("loading", []).append(loading)
         label = (multiboot_tab.ANIM_LABEL if frames > 1 else "frame %d" % n)
         if fail == "frame":
             code = "print('[select] error: bad conf'); raise SystemExit(2)"
@@ -2537,10 +2543,18 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
             "    open(p, 'wb').write(b'P6\\n136 77\\n255\\n' + "
             "bytes([40, 60, 90]) * (136 * 77))\n"
             "    print('[select] snapshot: %s 136x77, highlight %d (T) from "
-            "--highlight, frame %d of %d, timeout 15 s, invert 0, font f, "
-            "media m, footer \"x\", pictures 1:10,10,32,8' % (w, hl, f, total))\n")
+            "--highlight-card, card %d/9, frame %d of %d, timeout 15 s, invert "
+            "0, font f, media m, footer \"x\", pictures 1:10,10,32,8'"
+            " % (w, hl, hl + 1, f, total))\n"
+            # ...and the LOADING frame beside them, which is what the Select
+            # button shows (item 106)
+            "if len(sys.argv) > 7 and sys.argv[7]:\n"
+            "    open(sys.argv[7], 'wb').write(b'P6\\n136 77\\n255\\n' + "
+            "bytes([90, 20, 20]) * (136 * 77))\n"
+            "    print('[select] loading: %s 136x77, card %d boots image 0 (T)'"
+            " % (sys.argv[7], hl + 1))\n")
         return [(label, [py, "-c", code, ppm, _tool_path(ppm), str(hl),
-                         str(n), str(frames), str(length)])]
+                         str(n), str(frames), str(length), loading or ""])]
     monkeypatch.setattr(multiboot_tab, "ensure_selector_commands", ensure)
     monkeypatch.setattr(multiboot_tab, "preview_prepare_commands", prepare)
     monkeypatch.setattr(multiboot_tab, "audio_prepare_commands", audio)
@@ -3403,6 +3417,54 @@ def test_which_frames_a_run_wrote_is_read_off_the_selectors_own_lines():
     assert parse_snapshot_frames(still) == [("/my cards/f_0.ppm", 0, 0)]
     assert parse_snapshot_frames("") == []
     assert parse_snapshot_frames("codeselect: anim: image 1 4 frames") == []
+
+
+def test_the_loading_frame_is_rendered_beside_the_menu_frame(tmp_path, monkeypatch):
+    """What pressing START does, drawn by the selector out of the load that has
+    already happened: the picture the machine shows while the card boots. It is
+    the one moment a RANDOM card says which build it rolled, which is the whole
+    reason to be able to see it (David, 2026-09-11)."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path)
+    try:
+        for q in _images(tmp_path, 2):
+            panel.add_image(q)
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        # the render asked for one, beside the frame and named for the card
+        assert seen["loading"] and seen["loading"][0], seen["loading"]
+        want = mb.loading_path(mb.preview_dir_for(panel.form().out),
+                               panel._pv_fp, 0)
+        assert seen["loading"][0] == want, seen["loading"]
+        assert os.path.isfile(want), "the selector wrote no LOADING frame"
+        # ...and Select shows it instead of the black beat
+        assert panel._loading_frame() == want
+        before = panel._pv_src
+        assert panel.press_select() is True
+        assert panel._black_still == want
+        assert panel._pv_src == before, "the beat must not lose the menu frame"
+        # with no file there is still a beat, black as it always was
+        os.remove(want)
+        assert panel._loading_frame() is None
+        assert panel.press_select() is True
+        assert panel._black_still is None
+    finally:
+        root.destroy()
+
+
+def test_the_loading_frame_is_swept_with_its_form(tmp_path):
+    """One per card rather than per frame, and cleared by the same sweep - or
+    preview/ grows a file per form for as long as the tab is open."""
+    mb = multiboot_tab
+    pv = str(tmp_path)
+    keep, gone = "abc123", "def456"
+    for fp in (keep, gone):
+        for name in (mb.loading_path(pv, fp, 0), mb.frame_path(pv, fp, 0, 0)):
+            with open(name, "wb") as f:
+                f.write(b"x")
+    stale = [os.path.basename(x) for x in mb.stale_frames(pv, keep)]
+    assert sorted(stale) == ["frame_def456_0_0.ppm", "loading_def456_0.ppm"]
 
 
 def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):

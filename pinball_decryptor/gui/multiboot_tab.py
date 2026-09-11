@@ -1028,6 +1028,8 @@ def preview_dir_for(out):
 #: wrote to the same file name the newer form had already written, either
 #: form could be shown the other's picture.  Two forms, two names.
 _FRAME_RE = re.compile(r"^frame_([0-9a-f]+)_(\d+)_(\d+)\.ppm$")
+#: ...and the LOADING frame beside them, one per card rather than per frame.
+_LOADING_RE = re.compile(r"^loading_([0-9a-f]+)_(\d+)\.ppm$")
 
 
 def frame_path(preview_dir, fingerprint, highlight, frame):
@@ -1035,6 +1037,19 @@ def frame_path(preview_dir, fingerprint, highlight, frame):
     ``frame_<fingerprint>_<highlight>_<frame>.ppm``."""
     return os.path.join(preview_dir, "frame_%s_%d_%d.ppm"
                         % (fingerprint, highlight, frame))
+
+
+def loading_path(preview_dir, fingerprint, highlight):
+    """The LOADING frame a snapshot writes beside its menu frame:
+    ``loading_<fingerprint>_<highlight>.ppm``.
+
+    ONE PER CARD, not per frame: it is what the machine draws AFTER the card is
+    confirmed, and nothing is animating by then.  A RANDOM card rolls for it,
+    so the file holds the member THIS render landed on - which is the whole
+    reason to be able to see it (David, 2026-09-11: "I want to see this
+    especially for how it looks with the random one")."""
+    return os.path.join(preview_dir, "loading_%s_%d.ppm"
+                        % (fingerprint, highlight))
 
 
 def frame_pattern(preview_dir, fingerprint, highlight):
@@ -1069,7 +1084,7 @@ def stale_frames(preview_dir, keep):
         return []
     out = []
     for name in names:
-        m = _FRAME_RE.match(name)
+        m = _FRAME_RE.match(name) or _LOADING_RE.match(name)
         if m and m.group(1) != keep:
             out.append(os.path.join(preview_dir, name))
     return out
@@ -1943,7 +1958,7 @@ def preview_highlight(form, row_index):
 
 
 def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
-                          rootfs=DEFAULT_ROOTFS, frames=1):
+                          rootfs=DEFAULT_ROOTFS, frames=1, loading=None):
     """``qemu-arm-static -L <rootfs> <codeselect> --snapshot <ppm> ...``:
     ONE menu frame as the machine would show it - the conf, the media,
     the CARD highlighted, the animation at frame N, the countdown as if just
@@ -1965,6 +1980,11 @@ def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
             "--anim-frame", str(int(frame))]
     if int(frames) > 1:
         args += ["--frames", str(int(frames))]
+    if loading:
+        # ...and the frame the machine draws once this card is confirmed.  It
+        # costs one more PPM out of a load that has already happened, and it is
+        # the only way to see what a RANDOM card says it rolled.
+        args += ["--loading-out", wsl(loading)]
     return args + ["--input", "none"]
 
 
@@ -2534,7 +2554,7 @@ def ensure_selector_commands(form, cwd=None, card=""):
 
 
 def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
-                      rootfs=DEFAULT_ROOTFS, cwd=None, frames=1):
+                      rootfs=DEFAULT_ROOTFS, cwd=None, frames=1, loading=None):
     """One snapshot step.  A run of frames is ONE step and is labelled
     :data:`ANIM_LABEL` - what a failure of it is named after, and what the
     finished step's own output is read back through."""
@@ -2542,7 +2562,7 @@ def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
     return [(label,
              wsl_command(preview_snapshot_args(binary, conf, media_dir, ppm,
                                                highlight, frame, rootfs,
-                                               frames),
+                                               frames, loading),
                          cwd, exe=None))]
 
 
@@ -5492,6 +5512,8 @@ class MultibootPanel:
         self._pv_error = False          # ...whether it is saying it in red
         self._pv_logged = ""            # ...and the last line it sent to the Log
         self._pv_loading = False        # a programmatic write, not a typed one
+        self._black_still = None        # the LOADING frame the beat is holding
+        self._pv_load_frame = None      # ...and the one the last render wrote
         self._hl_touched = False        # Highlight typed by hand: stop following Default
         self._play_job = None
         self._play_fp = None
@@ -10430,20 +10452,32 @@ class MultibootPanel:
     LOADING_MS = 1000
 
     def press_select(self):
-        """START, on the picture: the chosen image's confirm sound, and the
-        screen black while it plays.
+        """START, on the picture: the chosen card's confirm sound, and the
+        LOADING frame the machine draws while it plays.
 
-        The machine draws a LOADING frame, plays that card's confirm sound
-        to completion and boots - so the black is not decoration, it is the
-        moment the menu hands over.  Hearing the sound against the picture
-        it belongs to is the whole point of being able to press this before
-        a card exists."""
+        THE LOADING FRAME IS WHERE A RANDOM CARD SAYS WHAT IT ROLLED - the one
+        moment the player is told which build they got (David, 2026-09-11: "I
+        want to see this especially for how it looks with the random one") - so
+        the preview shows the real one the selector drew.  A black beat stood in
+        for it before, and still does when there is no frame to show: an older
+        selector, or a render that has not finished."""
         self.play_confirm()
-        self._blackout()
+        self._blackout(self._loading_frame())
         return True
 
-    def _blackout(self):
-        """Black the canvas for :data:`LOADING_MS`, then put the frame back.
+    def _loading_frame(self):
+        """The LOADING frame the last render asked for, or None.
+
+        The file THAT render named (`_pv_load_frame`), not one derived from the
+        form afterwards - a form edited since has no frame rendered for it,
+        which is exactly the case where there is nothing to show and the black
+        beat is the honest answer."""
+        path = getattr(self, "_pv_load_frame", None)
+        return path if path and os.path.isfile(path) else None
+
+    def _blackout(self, still=None):
+        """Hold *still* (the LOADING frame) for :data:`LOADING_MS`, or black
+        when there is none, then put the frame back.
 
         The picture on screen is not thrown away - it is re-shown from the
         file it was drawn from - so this costs no render and cannot leave
@@ -10452,10 +10486,22 @@ class MultibootPanel:
         if canvas is None:                              # pragma: no cover
             return False
         self._cancel_blackout()
+        self._black_still = still or None
         try:
             canvas.delete("all")
         except tk.TclError:                             # pragma: no cover
             return False
+        if still:
+            # drawn WITHOUT touching _pv_src: the beat ends by putting back
+            # whatever was on screen, which is the menu frame
+            photo = self._scaled_photo(still)
+            if photo is not None:
+                self._pv_photo = photo
+                try:
+                    canvas.create_image(self._pv_w // 2 + 1, self._pv_h // 2 + 1,
+                                        image=photo, anchor=tk.CENTER)
+                except tk.TclError:                     # pragma: no cover
+                    pass
         try:
             self._black_job = self._timer().after(self.LOADING_MS,
                                                   self._blackout_over)
@@ -11124,6 +11170,11 @@ class MultibootPanel:
         first = wanted[0]
         ppm = (frame_pattern(pv, fp, hl) if run > 1
                else frame_path(pv, fp, hl, first))
+        # THE LOADING FRAME IS REMEMBERED, not derived again later: it is the
+        # file THIS render asked the selector for, and what the Select button
+        # shows.  Deriving it from the form afterwards means guessing which
+        # highlight the render used, and the answer is here.
+        self._pv_load_frame = loading_path(pv, fp, hl)
 
         def argv(texts):
             binary = parse_selector_path(texts.get("selector", "")) \
@@ -11134,7 +11185,8 @@ class MultibootPanel:
             # which is what the cache key above keeps too.
             return snapshot_commands(binary, conf, media, ppm,
                                      preview_highlight(form, hl), first,
-                                     rootfs, frames=run)[0][1]
+                                     rootfs, frames=run,
+                                     loading=loading_path(pv, fp, hl))[0][1]
         draw = ANIM_LABEL if run > 1 else "frame %d" % first
         cmds.append((draw, argv))
 

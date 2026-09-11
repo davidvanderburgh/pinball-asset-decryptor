@@ -820,6 +820,48 @@ grep -q "highlight 0 (STERN STOCK) from conf default, card 1/4" "$T/dcard3.log" 
     grep "menu:" "$T/dcard3.log"; exit 1; }
 expect "$T/choice" 0
 
+# 16g. --loading-out: the LOADING frame out of a SNAPSHOT, which is how the
+#      app's preview shows what pressing START does.  It is the one moment a
+#      random card tells the player which build they got, so it shows THAT
+#      BUILD's picture and subtitle - not the card's own.  Nothing else of the
+#      confirm happens: no choice file, no last file, no boot.
+cat > "$T/ldg.conf" <<'EOF'
+image=p3|STERN STOCK|the primary|art0.png||
+image=p7|CUSTOM 1|orchestral|art1.png||
+group=+0-1|RANDOM|surprise me|art0.png||
+default=0
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/ldg.loading.ppm" "$T/ldg.log"
+snap "$T/ldg.ppm" "$T/ldg.conf" --media "$T/media" --highlight-card 2      --loading-out "$T/ldg.loading.ppm" --pick 1 --log "$T/ldg.log" || {
+    echo "headless: FAIL --loading-out exit $?"; cat "$T/snap.out"; exit 1; }
+[ -f "$T/ldg.loading.ppm" ] || { echo "headless: FAIL no LOADING frame written"; exit 1; }
+[ ! -f "$T/choice" ] && [ ! -f "$T/last" ] || {
+    echo "headless: FAIL --loading-out wrote a choice/last file"; exit 1; }
+grep -qF "loading: $T/ldg.loading.ppm 1360x768, card 3 boots image 1 (CUSTOM 1)" "$T/snap.out" || {
+    echo "headless: FAIL the loading line"; cat "$T/snap.out"; exit 1; }
+# THE PICKED BUILD'S OWN PICTURE, not the card's: image 1's art is 2060C0 and
+# the group's is art0.png (C03040), so the two are told apart by colour alone
+band "$T/ldg.loading.ppm" 400 200 960 380 2060C0
+if band "$T/ldg.loading.ppm" 400 200 960 380 C03040 2>/dev/null; then
+    echo "headless: FAIL the loading frame showed the CARD's picture"; exit 1; fi
+# ...and the SUBTITLE, which is where a jukebox keeps the difference: its
+# members are one title with different song sets, so the title alone says the
+# same thing whichever one the roll landed on.  The same frame with the
+# subtitle taken out of the conf must not come out the same picture.
+sed 's/^image=p7|CUSTOM 1|orchestral|/image=p7|CUSTOM 1||/' "$T/ldg.conf" > "$T/ldg3.conf"
+rm -f "$T/choice" "$T/last"
+snap "$T/ldg3.ppm" "$T/ldg3.conf" --media "$T/media" --highlight-card 2 \
+     --loading-out "$T/ldg3.loading.ppm" --pick 1
+cmp -s "$T/ldg.loading.ppm" "$T/ldg3.loading.ppm" && {
+    echo "headless: FAIL the member's subtitle is not on the LOADING frame"; exit 1; }
+python3 "$HERE/ppm2png.py" "$T/ldg.loading.ppm" "$T/codeselect_loading_group.png"
+rm -f "$T/choice" "$T/last"
+snap "$T/ldg2.ppm" "$T/ldg.conf" --media "$T/media" --highlight-card 0      --loading-out "$T/ldg2.loading.ppm"
+grep -qF "card 1 boots image 0 (STERN STOCK)" "$T/snap.out" || {
+    echo "headless: FAIL an ordinary card's loading frame"; cat "$T/snap.out"; exit 1; }
+band "$T/ldg2.loading.ppm" 400 200 960 380 C03040
+
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"
 python3 "$HERE/ppm2png.py" "$T/menu_invert.ppm" "$T/codeselect_menu_invert.png" --rot180-of "$T/menu.ppm"

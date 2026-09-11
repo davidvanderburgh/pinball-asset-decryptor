@@ -1264,3 +1264,21 @@ def test_a_bad_style_is_refused_by_name(sm):
     # ...and no members at all is refused rather than drawn as an empty card
     with pytest.raises(sm.Refused):
         sm.render_group_still("mosaic", [], (64, 36))
+def test_the_group_specs_are_read_by_group_index_not_image_index(sm):
+    """A RANDOM card's picture belongs to the CARD; the whole point of it is
+    that it is not any one game's."""
+    assert sm.parse_group_specs(["0=mosaic", "2=question"], "group-art")         == {0: "mosaic", 2: "question"}
+    assert sm.parse_group_members(["0=1,2,3"]) == {0: [1, 2, 3]}
+    assert sm.parse_group_members(["1= 4 , 5 "]) == {1: [4, 5]}
+    for bad, what in ((["mosaic"], "group-art"), (["x=mosaic"], "group-art"),
+                      (["0=a"], "group-art")):
+        if what == "group-art" and bad == ["0=a"]:
+            continue                     # a bare value is a style or a file, checked later
+        with pytest.raises(sm.Refused):
+            sm.parse_group_specs(bad, what)
+    with pytest.raises(sm.Refused):
+        sm.parse_group_specs(["0=a", "0=b"], "group-art")     # the same group twice
+    with pytest.raises(sm.Refused):
+        sm.parse_group_members(["0=1,x"])
+    with pytest.raises(sm.Refused):
+        sm.parse_group_members(["0="])

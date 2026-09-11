@@ -1931,6 +1931,41 @@ GROUP_CYCLE_MS = 1000
 GROUP_REEL_FRAMES = 24
 
 
+def parse_group_specs(specs, what):
+    """``["0=mosaic", "1=cycling"]`` -> ``{0: "mosaic", 1: "cycling"}``.
+
+    A group index, not an image index: a RANDOM card's picture belongs to the
+    CARD, and the whole point of it is that it is not any one game's."""
+    out = {}
+    for spec in specs or []:
+        idx, sep, val = str(spec).partition("=")
+        if not sep or not idx.strip().isdigit():
+            raise Refused("--%s %r: expected G=VALUE, where G is a group index"
+                          % (what, spec))
+        g = int(idx.strip())
+        if g in out:
+            raise Refused("--%s: group %d is given twice" % (what, g))
+        out[g] = val.strip()
+    return out
+
+
+def parse_group_members(specs):
+    """``["0=1,2,3"]`` -> ``{0: [1, 2, 3]}`` - which IMAGES each group covers."""
+    out = {}
+    for g, val in parse_group_specs(specs, "group-members").items():
+        members = []
+        for tok in val.split(","):
+            tok = tok.strip()
+            if not tok.isdigit():
+                raise Refused("--group-members %d=%r: %r is not an image index"
+                              % (g, val, tok))
+            members.append(int(tok))
+        if not members:
+            raise Refused("--group-members %d: no images" % g)
+        out[g] = members
+    return out
+
+
 def _pil():
     try:
         from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -2122,6 +2157,74 @@ def write_group_gif(frames, delay_ms, out):
     return out
 
 
+def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
+                   card, log=say):
+    """gart<g>.png / ganim<g>.gif for one RANDOM card, from its members' logos.
+
+    Cached on the member CARDS' stamps and the style, so re-running with the
+    same list and the same style costs nothing - the logos are pulled out of
+    the card images, which is the slow part."""
+    Image = _pil()[0]
+    names = {}
+    if not members:
+        raise Refused("group %d has no members to draw from" % g)
+    stamp = "|".join(source_stamp(images[m]) for m in members
+                     if 0 <= m < len(images))
+
+    def logos():
+        out_logos = []
+        for m in members:
+            if not (0 <= m < len(images)):
+                raise Refused("group %d names image %d, which is not one of the %d"
+                              % (g, m, len(images)))
+            ci, part, title = card(images[m])
+            data, _path = logo_bytes(ci, part, title)
+            tmp = os.path.join(work, "glogo%d_%d.png" % (g, m))
+            with open(tmp, "wb") as f:
+                f.write(data)
+            out_logos.append(Image.open(tmp).convert("RGB"))
+        return out_logos
+
+    if art_style and art_style != "none":
+        target = os.path.join(out, "gart%d.png" % g)
+        name = os.path.basename(target)
+        params = {"style": art_style, "size": list(size), "members": list(members)}
+        if is_cached(target, stamp, params):
+            log("  %s: cached (%s)" % (name, art_style))
+        elif art_style in GROUP_ART_STYLES:
+            render_group_still(art_style, logos(), size).save(target, "PNG", optimize=True)
+            write_sidecar(target, stamp, params)
+            log("  %s: %s of %d member(s)" % (name, art_style, len(members)))
+        else:
+            # a file, exactly as an image's own art may be
+            if not os.path.isfile(art_style):
+                raise Refused("group %d art %r is neither a style (%s) nor a file"
+                              % (g, art_style, ", ".join(group_style_names())))
+            scale_png(art_style, target, size)
+            write_sidecar(target, source_stamp(art_style), params)
+            log("  %s: %s" % (name, art_style))
+        names["art"] = name
+
+    if anim_style and anim_style != "none":
+        target = os.path.join(out, "ganim%d.gif" % g)
+        name = os.path.basename(target)
+        params = {"style": anim_style, "size": list(size), "members": list(members)}
+        if is_cached(target, stamp, params):
+            log("  %s: cached (%s)" % (name, anim_style))
+        else:
+            frames, delay = render_group_frames(anim_style, logos(), size)
+            write_group_gif(frames, delay, target)
+            info = gif_info(open(target, "rb").read())
+            if not info or not gif_fits(info):
+                raise Refused("group %d's %s animation does not fit the selector's "
+                              "limits (%s)" % (g, anim_style, fmt_bytes(os.path.getsize(target))))
+            write_sidecar(target, stamp, params)
+            log("  %s: %s, %d frames (%s)"
+                % (name, anim_style, len(frames), fmt_bytes(os.path.getsize(target))))
+        names["anim"] = name
+    return names
+
+
 def cmd_prepare(a):
     images = [a.primary] + list(a.extra or [])
     n = len(images)
@@ -2136,6 +2239,12 @@ def cmd_prepare(a):
     for spec in confirm_each:
         if spec is not None:
             parse_sound_spec(spec, CONFIRM_IDX)          # refuse a bad one before any work
+    group_members = parse_group_members(getattr(a, "group_members", None))
+    group_art = parse_group_specs(getattr(a, "group_art", None), "group-art")
+    group_anim = parse_group_specs(getattr(a, "group_anim", None), "group-anim")
+    for g in sorted(set(group_art) | set(group_anim)):
+        if g not in group_members:
+            raise Refused("--group-art/--group-anim %d: no --group-members %d=... to draw from" % (g, g))
     visual_only = bool(getattr(a, "visual_only", False))
     say("prepare: %d image%s, panel %dx%d, out %s%s"
         % (n, "" if n == 1 else "s", size[0], size[1], out, " (visual only)" if visual_only else ""))
@@ -2152,7 +2261,12 @@ def cmd_prepare(a):
             cards[path] = (ci, part, title_dir(ci, part))
         return cards[path]
 
+    groups_out = {}
     try:
+        for g in sorted(group_members):
+            groups_out[g] = _prepare_group(
+                g, group_members[g], group_art.get(g), group_anim.get(g),
+                images, size, out, work, card)
         for i, img in enumerate(images):
             art = _prepare_art(i, img, arts[i], size, out, work, card)
             anim = _prepare_anim(i, img, anims[i], size, out, work)
@@ -2277,6 +2391,15 @@ def main(argv=None):
                    help="the menu-wide confirm sound (a bare value, the default 'auto'); "
                         "'N=...' gives image N its own confirm<N>.wav ('auto' = that image's "
                         "own card, 'none' = it falls back to the menu-wide one)")
+    s.add_argument("--group-members", action="append", default=[], metavar="G=A,B,C",
+                   help="which IMAGES random card G rolls between - its picture is drawn from "
+                        "their logos (repeatable, one per group)")
+    s.add_argument("--group-art", action="append", default=[], metavar="G=STYLE|PATH|none",
+                   help="random card G's still: a style (%s), a picture file, or none"
+                        % "/".join(sorted(GROUP_ART_STYLES)))
+    s.add_argument("--group-anim", action="append", default=[], metavar="G=STYLE|none",
+                   help="random card G's animation: %s, or none"
+                        % " / ".join(sorted(GROUP_ANIM_STYLES)))
     s.add_argument("--visual-only", action="store_true",
                    help="art/anim (+music) only: no move/confirm sounds, none pulled off a card (the GUI preview)")
     s.add_argument("--volume", type=int, default=DEFAULT_VOLUME)

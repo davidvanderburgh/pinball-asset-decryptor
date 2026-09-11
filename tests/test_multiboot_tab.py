@@ -8893,3 +8893,30 @@ def test_the_add_rows_words_fit_the_column_they_sit_in():
         assert "random" in panel.LIST_TIP.lower()
     finally:
         root.destroy()
+def test_selectmedia_is_never_shown_a_group_flag(tmp_path):
+    """selectmedia.py renders pictures for the GAMES on the card and has never
+    heard of a group. Handing it the card builder's arguments made it exit 2 on
+    --group-over and took the whole preview down with it (David's log)."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        form = panel.form()
+        args = mb.prepare_args(form, str(tmp_path / "media"))
+        assert "--group-over" not in args and "--group" not in args
+        assert "--member" not in args
+        assert args[args.index("--primary") + 1] == mb.wsl(paths[0])
+        assert [args[i + 1] for i, a in enumerate(args) if a == "--extra"]             == [mb.wsl(paths[1])]
+        # ...and a CONSUMING group's games are extras, because they ARE games
+        panel._rows.pop()
+        panel.add_group(_images(tmp_path, 4)[2:], title="JUKEBOX")
+        args = mb.prepare_args(panel.form(), str(tmp_path / "media"))
+        assert "--group" not in args and "--member" not in args
+        assert len([a for a in args if a == "--extra"]) == 3
+        # the card builder, which DOES know the flags, still gets them
+        assert "--group" in mb._image_args(panel.form())
+    finally:
+        root.destroy()

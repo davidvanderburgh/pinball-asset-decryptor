@@ -1553,6 +1553,23 @@ def form_compact(form):
     return bool(form.compact) or any(is_group(r) for r in form.images)
 
 
+def _media_image_args(form):
+    """--primary and --extra for every GAME, and nothing else.
+
+    selectmedia.py renders pictures and sounds for the games on the card; it
+    has never heard of a group and does not need to, because a group card's
+    media is one of theirs.  It shares no vocabulary with mkmulticard beyond
+    these two flags, so handing it `_image_args` made it exit 2 on
+    `--group-over` and took the whole preview down with it (David's log,
+    2026-09-10: "selectmedia.py: error: unrecognized arguments: --group-over").
+    """
+    trees = [t[1] for t in form_trees(form)]
+    args = ["--primary", wsl(trees[0] if trees else "")]
+    for path in trees[1:]:
+        args += ["--extra", wsl(path)]
+    return args
+
+
 def _image_args(form):
     """--primary, then each row IN TABLE ORDER as either an --extra or a
     --group with its --member games.  The order matters: mkmulticard reads
@@ -1591,7 +1608,7 @@ def prepare_args(form, media_dir, visual_only=False):
     which then holds media.json.  ``visual_only`` is the preview's half: the
     art and animations with the same specs, no move / confirm sound work
     (music entries are still named, so the manifest rows match)."""
-    args = [SELECTMEDIA, "prepare"] + _image_args(form) + [
+    args = [SELECTMEDIA, "prepare"] + _media_image_args(form) + [
         "--out", wsl(media_dir)]
     if visual_only:
         args.append("--visual-only")

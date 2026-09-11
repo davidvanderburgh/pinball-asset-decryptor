@@ -943,8 +943,11 @@ These have each been violated at least once and each cost a run or a window:
         WAVs (24000/12000 Hz mono s16, 128-frame stereo blocks); measure the
         DAC handler's real block cadence and confirm before trusting the
         pitch.
-      - S3: it plays; these are polish. D2: each is a contained rule with
-      the instrumentation already in place (`S1_NB_LOG`, `s1alpha.py` as a
+      — S2: the ball is never counted in play, so the display cycles
+      PLAYER 1 BALL 1 / PLUNGE BALL and a game cannot properly start; the
+      other three are polish beside it. **Regraded 2026-09-11 from a closing
+      line that read S3 against the S2 on the title line.** D2: each is a
+      contained rule with the instrumentation already in place (`S1_NB_LOG`, `s1alpha.py` as a
       display reader).
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
@@ -1003,96 +1006,6 @@ These have each been violated at least once and each cost a run or a window:
       — S2: john_wick plays, this is loud rather than blocking. D3: the probe
       run plus a small state machine, on a rig that has done this once before
       for the trough.
-
-- [ ] **84. Capture the batman VILLAIN VISION board image set + id map from the
-      `UPDATE TV IMAGES` service upload — the byte-exact, card-only source.**
-      `S2 D5` *(Spawned from item 83 on 2026-08-26 — David's architecture
-      call: the board has its own image store, written from the card by the
-      service menu; the wire sends only an id. Item 83 ships a CARD-ONLY
-      approximation, 5 stills mapped from card store frames; this item is the
-      complete, exact set + every id binding.)*
-      **WHY THE EASY PATHS ARE RULED OUT (static RE done this pass, no run):**
-      the board images for the 2 game-rendered cards + 5 signs/portraits are
-      in NO card store that unpacks to disk — exhaustive: all 245,828 frames
-      of all 3,069 `137.asset` clips, all 752 lcd scene textures >=100x60,
-      both `2.asset` stores, the app's whole extraction (`~/Desktop/bm`,
-      7,795 pngs), and `image.bin`'s only 4 decodable embedded JPEGs. The one
-      image blob on the card is `image.bin` (2 GB, the app's master
-      container); the board set is a packed/rendered section of it the normal
-      extractor skips. The service routine can't be located statically: the
-      menu is INDEX-driven — its strings (`UPDATE TV IMAGES` rodata 0x55cb0c,
-      `NO UPDATE AVAILABLE`, `UPDATE STATUS...`, `ELAPSED TIME`, `UPDATE
-      COMPLETE/FAILED`, all confirmed present) are referenced through
-      localization pointer-tables (file 0x6f74a0+), NOT by literal-pool or
-      MOVW/MOVT from `.text` (all scanned, zero hits) and NOT by a stored
-      callback pointer (0x6ff580 is referenced nowhere). No existing capture
-      has the flow — it only appears when the service menu is driven.
-      **THE KEY INSIGHT that makes it feasible: WE EMULATE THE BOARD.**
-      "NO UPDATE AVAILABLE" is a version/checksum gate — the emulated node 24
-      reports its image version, the game compares to `image.bin`'s, they
-      match, upload skipped. Since nodebus.py/hwshim IS node 24, make it
-      report a STALE/zero image version and the game will perform the upload.
-      **THE PLAN (turnkey, needs the rig free + service-menu nav):**
-      (1) find which node-24 query/reply carries the board image version —
-      it reveals itself in the live exchange around the menu (the non-f2
-      node-24 cmds are 11/f0/f1/f9/fc/fe = LCD sub-control, none is obviously
-      it, so watch the service-menu handshake); (2) hook nodebus.py to answer
-      that query stale; (3) drive the service menu to Diagnostics > UPDATE TV
-      IMAGES > PRESS ENTER TO BEGIN via service-button switch inputs
-      (`SERVICE MENU`/`EXIT SERVICE MENU`/`FG_DIAGNOSTICS_DISPLAY` strings
-      confirm the path); (4) log ALL channels during the upload — node bus
-      AND SPI (the ELF has real SpiVideoStreamDecoder classes and
-      `/dev/spidev`; the images may stream over SPI, not the 200-byte node
-      bus); (5) the payload IS the board set + id bindings, byte-exact, from
-      the card. Then lcdstills maps every id from that capture and the panel
-      shows the real board set with zero footage and nothing distributed.
-      **Acceptance:** every attract + game board still on David's videos is
-      reproduced from a card-derived image the rig extracted itself (no
-      footage, no committed asset), each keyed by its wire id.
-      — S2: the display already works (item 83, card-only approximation); this
-      upgrades approximate/absent stills to exact and completes the map, but
-      nobody loses a run without it. D5: live capture, service-menu
-      navigation, an undecoded update protocol possibly spanning node bus +
-      SPI, and a board-version hook across nodebus/shim — budget more than one
-      pass.
-
-      **PROGRESS (2026-08-26, live capture on David's guidance — he drove
-      the service menu to trigger the update while I logged; rig now free,
-      card unmounted, lock released):**
-      **(1) The routine was reached and triggered.** Service menu (coin
-      door open, Service Select/Plus/Minus/Back = padsw ids 28/29/30/31)
-      -> Diagnostics -> Game-Specific Tests -> UPDATE TV IMAGES. It reports
-      "NO UPDATE AVAILABLE" and — measured — sends NOTHING to node 24 (no
-      [nb] TX, no image.bin write). The gate is PURELY LOCAL: the game
-      renders/checks the card's scenes vs a stored version and decides no
-      update, without ever querying the board. So forcing it needs the
-      local "last-uploaded" version marker cleared, not a board-version
-      hook (the plan above assumed a board query; corrected).
-      **(2) The trigger loads the demand_loaded scene trees bc0792d8 (9
-      scenes) and f1b332a3 (11), ALL 1360x768 (backbox res, NOT the
-      villain TV's 240x180).** I rendered them CARD-ONLY with the app's
-      own compositor (scene_render.render_scene + fontrender.load_fonts
-      off David's extraction manifests — 75 fonts, 45 layouts, 20 scenes
-      rendered clean). They are the SERVICE/SYSTEM UI cards: "VERIFYING
-      IMAGE", "Player 1 Enter Initials", "CLOCK NOT SET", "Learn More About
-      Stern Pinball"+QR, the Stern logo — the menu's own screens, NOT the
-      villain board image set.
-      **(3) CONCLUSION — the villain board's rendered CARDS are not
-      standalone-extractable card-only.** The video clips (137.asset, the
-      MAJORITY of villain content) I already have and show. The logo I have
-      (scene texture). But the rendered cards as they appear ON THE 240x180
-      VILLAIN TV (Game Over on green, IN COLOR) are produced by the game's
-      DISABLED secondary-render path (item 83's proven finding) —
-      composited at runtime, stored nowhere, and in no standalone 240x180
-      scene. So the only card-only routes to those two cards are: (a) force
-      the local update gate so the game renders + uploads and capture the
-      wire, or (b) enable the disabled second render target (item 83 ruled
-      out of scope). Neither is a quick win.
-      **NET:** the panel's current card-only set (logo + 4 clip-frame
-      stills + video-clip fallbacks, zero footage) is the honest best
-      available without (a) or (b). The render pipeline is proven and
-      reusable (scene_render works off an extraction) if a 240x180 villain
-      scene is ever located. Scenes preserved at /home/david/tvscenes.
 
 - [x] **61. godzilla_le draws the switch list, and it has a complete playfield
       layout the whole time.** `S2 D1` DONE 2026-08-21.
@@ -2373,6 +2286,9 @@ These have each been violated at least once and each cost a run or a window:
       else can work around. D4: it needs several runs, it needs a game played
       into a multiball, and its first dependency (the eject coil index) is
       itself an unfinished item.
+      *(That D is superseded — see the D4 → D3 note on the title line,
+      which is the current grading: the eject coil index is now known. Annotated
+      2026-09-11, the way item 82 already annotates its own.)*
 
 - [x] **46. On turtles_pro the ACTION BUTTON is FINICKY, not dead: it works
       occasionally in attract and never selects a character during a game.**
@@ -2829,168 +2745,6 @@ These have each been violated at least once and each cost a run or a window:
       `coilread.py` (run on WINDOWS) diffs nonzero `(node,index,count,lvl)`
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
-
-- [ ] **1d. The a2 / b4 / b5 payload — WIRE DECODE SHIPPED; the item stays
-      open for the NODE-BOARD FIRMWARE RE.** `S3 D5` *(**D3 → D5, 2026-08-07
-      evening:** the wire half is done and released, and what David kept the
-      item open FOR is a different and much harder job — decrypting LPC node
-      firmware. Budget more than one pass and say so up front.)*
-      **★★ DAVID'S VERDICT ON THE SHIPPED BUILD, 2026-08-07, after watching a
-      live run: "i mean it's much better than it was. we can ship it for now,
-      but the RE work on the firmware should keep this item open."** His eyes
-      were the acceptance oracle for the rendering half and they passed it.
-      **SHIPPED IN v0.117.0** (the tag landed on top of this work; the release
-      notes credit it). Three decodes in one day, all live-verified: the a2
-      pulse envelopes (`2520d44`), the b4/b5 bank fades (`d145083`), the form A
-      multi-lamp steps (`c950da3`/`4a3eda1`).
-      **SO THE REMAINING SCOPE IS EXACTLY TWO THINGS**, and neither is the
-      payload census this item was originally about:
-      **(a) THE NODE-BOARD FIRMWARE, which is the reason the item is open.**
-      The true fade CURVES and the rate UNIT live in the boards, not on the
-      wire — David's own diagnosis, and it is correct. Everything known about
-      the attack surface is in the assessment below; it is a fresh Stern
-      firmware-crypto crack.
-      **(b) The header-prefixed long forms**, still skipped — 51 unique bodies
-      in 25 (cmd, blen) groups across the whole capture, so smaller than it
-      looks and independent of (a). `ledcensus.py` (committed with this) scores
-      any capture against all six known forms and prints exactly these.
-      **★ LEAD, noticed 2026-08-07 while validating that tool, NOT established:
-      the long a2 bodies it cannot claim carry FORM A's OWN SIGNATURE.** e.g.
-      `…0f0f00000f0f0f00000f | faf1f1f1a6aea0a0a0e9` — a `0f/00` FROM region
-      followed by a TO region with value TRIPLES (`f1f1f1`, `a0a0a0`,
-      `676767`, `e3e3e3`), which is the RGB-fixture tell that identified form A
-      in the first place. **The value triples are real; the layout is not yet
-      known, and the two obvious readings are now both DEAD.**
-      **Ruled out (i): a fixed 3-byte header + form A.** `8f 19 f8 …` (the same
-      opener `a6` uses) makes blen 27/30/33/36 land on 3N — but 29, 37 and 43
-      do not.
-      **Ruled out (ii), WITH A CONTROL, 2026-08-07: `[3 header][mask][FROM ×
-      popcount][TO × popcount]`** — the a6 bitmap layout carrying two value
-      regions, i.e. a bitmap FADE. Every qualitative sign was right (the first
-      frame fitted exactly at 3+6+10+10=29, FROM came out of the 0f/00 level
-      alphabet, TO carried the triples) **and it is still wrong: 38 of 152 real
-      bodies fit (25%) against 20 of 152 for RANDOM bodies of the same lengths
-      (13%), and the RGB tell scored 62% where form A scored ~100%.** Scanning
-      the mask length is a free parameter, and a free parameter buys 13% of
-      noise before explaining anything. The numbers and the reasoning are in
-      `ledcensus.py`'s header as the worked example of why a control is
-      mandatory here. **Whatever is tried next must beat that 13% floor.**
-      **What is NOT left: the rendering.** The window already animates
-      envelopes per channel, expires them onto the base, and reports its own
-      picture rate honestly. When the curves are known they replace a linear
-      ramp and a constant; no new plumbing.
-      **★★ THE blen=6 SLICE IS DECODED AND SHIPPED, 2026-08-07, `2520d44` —
-      NOT yet live-verified; the shim is unbuilt (a run was live all session)
-      and ensurebuild rebuilds it at the next start.**
-      **Established, from 93 captured frames across every c:/tmp capture:**
-      `[start][0x80|end][FROM][TO][RISE][FALL]` — a ONE-SHOT PULSE ENVELOPE
-      over the range: FROM→TO at the rate slot for the direction, back to
-      FROM on the other slot, 0 = instant. 93/93 fit (86 fit the naive
-      directional split; all 7 exceptions are one frame, `00ff0002` = flash
-      with a decay tail). **Ruled out: chaining** (0 of 23 successive fades on
-      a range join end-to-start — each command restarts its sweep, ×8 repeats
-      = re-triggered blinks). **Ruled out: the pulses move the base level**
-      (later base writes agree with TO only 57/651 — they are an OVERLAY, so
-      the shim does not touch `val[]`). **The semantic confirmation:** joined
-      against `led_io.txt`, the mid-level payloads land on the BUILDING FIRE
-      banks — 72..86 -R gets `11→0f fall 6d` (ember) and `0f→ee rise 92`
-      (flare), the -G bank fades out. The fire got fire commands.
-      **Shipped:** padled version 3 fade ring (head @2076, 96×12B entries);
-      `playfield.py` runs the envelopes per channel on top of the base
-      picture; envelope frames do not count as picture updates so `LED Hz`
-      stays honest; base-step smoothing dropped 200→80 ms (the "laggy" half
-      of David's report). Offline: `ledratetest.py` ENVELOPE case — one
-      12-byte command sweeps a fixture up and back and lands at base, 31
-      distinct paints. **Also ruled out this pass, with numbers: David's
-      throughput theory.** The bus idles at 150-200 transfers/s; the lamp
-      slice is 2-39 writes/s by phase. Bandwidth was never the fault.
-      **★★★ SECOND DECODE SAME DAY, `d145083`, LIVE-VERIFIED: b4/b5 blen=3/4
-      are RANGE FADES (b4 up, b5 down, `[start][0x80|end][rate]`) and the
-      indexed decoder had been eating them as ONE DIM DOT per bank sweep —
-      rate bytes written as brightness.** Census 44/44 + 22/22, zero with the
-      0x0f gap byte genuine single writes carry (97: 71/80); the 2N+1 shape
-      now REQUIRES that gap byte at cnt=1, which also stops the a4/a5 pair
-      frames (`3637bb`) becoming garbage lamp values. b4/b5 move the BASE:
-      the shim writes the target into val[] and the ring envelope expires
-      onto it — zero new window code. **Live, two runs, alive 0 after both:
-      skip log shows ZERO a2-6/b4/b5-3/4 escaping; the window read LED
-      4-6.7 Hz, worst gaps ≤0.91 s, 200-390 repaints/s of fade animation**
-      (morning baseline: 2.6/s with 2.83 s freezes). David's 13:54 recording
-      predates b4/b5 — a2 pulses visibly animate in it (runs of 9-11
-      consecutive changed frames), freezes 1.2-3.6 s between.
-      **Trace preserved: `/var/tmp/led_trace_1d.log`** — 44581 lines, full
-      `PAD_NB_TRACE` with timestamps, plus 656 ledskip bodies. **Two
-      instrument traps recorded in `d145083`'s message so nobody repays
-      them: the guest log is `$LOG` = `gzwatch.log` NOT `gzpad.log`, and a
-      UNC path quadruple-backslashed through bash reaches Python with ONE
-      backslash — both ring-watchers polled a ghost file and read as "the
-      ring never fills" while the window was animating the whole time.**
-      **WHAT IS LEFT:** **(a) The rate UNIT is a guess** —
-      `PAD_PF_FADE_UNIT_MS` (default 12, reader-side, tunes live). Ruled
-      out: calibrating it from re-trigger periods (they cluster on the
-      SHOW's schedule — 7.5 s and 115 s = the attract cycle — not the fade).
-      Oracle: `Diagnostics → LED Tests`, or David's eyes vs the real
-      machine. **(b) The longer a2/b4/b5 bodies** — still skipped, now
-      CAPTURED with timestamps in the preserved trace; tails carry
-      value-triple runs (`c7c7c7`) and index runs (`4c 4d 4e`) = multi-lamp
-      fade programs. **Ruled out: the a6 bitmap layout at payload width
-      1-4** (a2 fits at best 7 of 40). Note the strip boards (nodes 12/14)
-      also carry b4/b5 in a DIFFERENT layout (`c00b000a`, bit7 on byte 0) —
-      the insert-node gate keeps them out of the decoder, correctly.
-      **★★★ THIRD DECODE, `c950da3`, live-verified: FORM A — the long a2
-      bodies are `[refs…, last|0x80][FROM×N][TO×N]`, blen==3N**, a multi-lamp
-      fade step. It signs itself: three CONSECUTIVE refs ⇒ an identical value
-      TRIPLE in the TO region (an RGB fixture fading to one colour). Moves the
-      base like b4/b5. **After a 4-min run: ZERO long a2 bodies left in the
-      skip log.** What still skips: 389 a4/a5 blen=2 (lamp REFERENCES, no
-      lamp data by construction), 26 blen=3 the gap-byte gate correctly
-      pushed out, ~7 header-prefixed b4/b5 long forms.
-      **★ RULED OUT, and it was the best remaining suspect: `cmd 0x70`.** It
-      is the most common command on the insert boards (3483 node 8, 1935 node
-      9, 1161 node 1) and is not in the decoder's gate, so it read as a whole
-      missing lamp stream. It is not: body is ALWAYS `(index, 00, 00)` in
-      6579/6579 frames, rlen 0, and it runs at a dead-constant 243 frames per
-      20 s bucket from boot to teardown regardless of the light show. A
-      brightness stream varies with the show; a 12.15 Hz metronome carrying no
-      value is a refresh or keepalive. Do not decode it as lamp data.
-      **★ DAVID's NODE-BOARD RE PROPOSAL, 2026-08-07, assessed not dismissed:
-      "maybe if the fade curve logic lives in the node boards (and there's
-      sparse data fed to them), we just need to look into the node board logic
-      to RE what the curves are."** The premise is CORRECT and the firmware
-      ships on the card — `games/<title>/*.hex`, and the LED ones are
-      `coil4_lednode-LPC1313`, `ws2812node-LPC1313`, `ws2812pinnode-LPC1313`,
-      `hdmi_ws2812node-LPC1313`. **But they are ENCRYPTED, measured:** valid
-      Intel HEX (400/400 checksums) wrapping ciphertext — **entropy 7.992
-      bits/byte, 0.4% zero bytes, all 256 values present, no plausible
-      Cortex-M vector table** (word 0 = 0x7ce94728, not an LPC1313 stack
-      pointer). **Ruled out: repeating-key XOR** — index of coincidence is
-      0.0039 (= random) at every period 1…1024 — and **a shared-plaintext
-      crib between siblings**: `ws2812node` vs `hdmi_ws2812node` are the same
-      length and share only 0.4% of bytes, i.e. no aligned common code. Note
-      the four non-data records at the top (types 06/07, 58 bytes total) are
-      unexplained and are the obvious place a header/IV would live. **So this
-      is a real project (a new Stern firmware-crypto crack), not an
-      afternoon** — worth its own queue item if David wants the true curves;
-      until then the curve is linear and the unit is a knob.
-      **Resume — and it is the FIRMWARE now, not the wire.** Start at the four
-      non-data Intel HEX records (types 06/07, 58 bytes total) at the top of
-      each `.hex`: they are the only unexplained structure in the file and are
-      where a header, key id or IV would live. Compare them ACROSS the four LED
-      node files and across titles — `~/spike2root/games/*/`, and every title's
-      card carries the same `1_35_0` firmware set, so a repeated block is a
-      constant and a varying one is per-image. Then, before any crypto: check
-      whether a plaintext LPC image of the same part exists anywhere (NXP
-      bootloader stubs, an unencrypted older Spike release) to give a known
-      pair. **Already ruled out, do not repeat: repeating-key XOR** (IC 0.0039
-      at every period 1…1024) **and a sibling crib** (`ws2812node` vs
-      `hdmi_ws2812node`: same length, 0.4% shared bytes).
-      **The cheap fallback if the crypto holds:** the curve is only two
-      unknowns — shape and unit — and both are visible from OUTSIDE the board.
-      `Diagnostics → LED Tests` drives one fixture at a time by name; filming
-      a real machine, or David's eye against ours, calibrates
-      `PAD_PF_FADE_UNIT_MS` and says whether the ramp is linear or gamma'd,
-      with no firmware at all. Do that first if a pass has to produce
-      something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
 - [ ] **29. Switch names come back as `?` on most titles, so the schematic
       playfield is a list of numbers and switch positions cannot be joined.**
@@ -3897,8 +3651,9 @@ These have each been violated at least once and each cost a run or a window:
       D was always defined as, with the instrument (the loopback capture)
       already existing and validated (item 10 built and trusted it).
 
-- [ ] **54. FOLDED BACK INTO ITEM 50 on 2026-08-16 at David's ask — do not
-      take this as a separate item.** It was split out when item 50 looked
+- **54 — NOT AN ITEM, and no longer a box. Folded back into item 50 on
+      2026-08-16 at David's ask; de-boxed 2026-09-11 so it stops counting as
+      open work and can never be offered.** It was split out when item 50 looked
       closeable without it; David's "does it work for TMNT" made clear that
       item 50 is not done until this is, so item 50 now carries the acceptance
       and this entry is kept ONLY for the evidence below, which is expensive
@@ -5454,33 +5209,6 @@ These have each been violated at least once and each cost a run or a window:
       yet known and may reach into the node-identity RE of items 51/55 (which
       would make it D5), and the CRUX may turn the whole approach from
       “clear alerts” into “make the game skip the screen”.
-- [ ] **64. First-boot “Guided Setup” wizard appears after attract, because the
-      machine is unconfigured / Insider-unregistered.** `S3 D3` ← DEFERRED
-      *(Filed 2026-08-21, revealed by item 63's fix; David declined to chase
-      it — “no this is perfect” — so this is a PARKED record, not active work.)*
-      Once item 63 stopped the phantom service-button press, godzilla boots
-      Stern-splash → ATTRACT (proven), runs attract for ~40 s (with the node-4
-      banner, item 55), then drops into the game's own **Guided Setup** wizard:
-      Language English / Country U.S.A. / Free Play No / Pricing / Volume, and
-      **“Stern Insider Connected: this machine has an invalid [key] — contact
-      your distributor.”** This is the real machine's first-boot operator
-      config; a registered, configured cabinet completes it once (Save & Exit)
-      and it persists. autoattract used to walk past BOTH Tech Alerts and this
-      wizard with its two Service Back presses, which is why item-59-era
-      godzilla runs reached a clean attract; with the phantom press gone, the
-      wizard is what is left on a hands-off boot.
-      **The open question when/if reopened:** does our config/NVRAM persist a
-      completed Guided Setup so a second boot skips it, or does the invalid
-      Insider key force it every boot? If it persists, the fix is “complete it
-      once” (or seed the config). If the invalid-Insider state forces it, that
-      ties to the QrOffline / Insider-registration layer (item 63's RE named
-      `QrOfflineListener` and the “re-scan to register game” strings). Do NOT
-      spoof a registration blindly — same wrong-table caution as items 55/57.
-      — S3: nothing is blocked (the machine reaches attract; a real operator
-      would do this setup once), it is friction on a hands-off boot. D3:
-      reproduces every boot, one run to test persistence; deeper if it turns
-      out the Insider state forces it.
-
 - [ ] **65. The second-display window is sized from the BACKBOX, so four
       **2026-09-05, from item 67: THE SIZE HALF HAS ITS SOURCE.** The game
       carries both display sizes as the static FB_SetTiming records for
@@ -6342,49 +6070,6 @@ These have each been violated at least once and each cost a run or a window:
       renderer up) — a full 7.3 GB copy is ~60-70 s uncontended, so David's
       3-4 minute copying boots were mostly the copy COMPETING with the
       boot's 9p reads, which strengthens the pre-copy option above.
-
-- [ ] **75. aerosmith_le's GUEST exits silently ~1-2 min into a scripted
-      watch.sh boot — and MAIN'S CODE does it identically, control-proven.**
-      `S3 D3`
-      **2026-09-11, from item 111 - RETEST BEFORE ANYTHING ELSE:** its `~/spike2root/data/nv/aerosmith_le`
-      and `nvram-aerosmith_le.bin` were owned by ROOT (an August elevated run), exactly what
-      made Beatles exit with FATAL error 256; both are david's again, and watch.sh now REFUSES
-      a run whose title's NVRAM is not the user's. The shim's new `[exit]` line and watch.sh's
-      FATAL tail of /dump/debug_log.txt will name the reason if it still dies.
-      *(Filed 2026-08-23 out of item 73's live verification, which hit it
-      three times and bisected it off that branch with a fourth run.)*
-      **Measured, four runs, one evening, same card
-      (images/Stern/spike2/aerosmith_le-1_15_0.Release.8G.sdcard.raw, the
-      cached copy):** item/73 code with defaults; with PAD_GL_RAISE=0; with
-      autoattract AND ballfeed disabled; and MAIN's checkout with the
-      identical env — every run: video bring-up completes ([gst] 3
-      factories), the scene enumeration walks ~103 scene.radium paths, then
-      the guest is GONE — no SEGV, no qemu signal report, no exit line;
-      the log's last line is the [sleep] #1500 cap so the death is not even
-      timestamped. watch.sh reports "the game exited" and tears down.
-      **What makes it strange:** batman and avengers_infinity_le boot fine
-      in the SAME session with the SAME flow (batman confirmed up 5+ min,
-      table loaded, keys pressed); item 57 live-verified aerosmith via
-      watch.sh ~2026-08-18; and David's own GUI runs of this exact card
-      earlier on 2026-08-23 reached a state where key presses drew switch
-      names. So it is aerosmith-specific AND recent AND possibly
-      script-flow-specific (env: PAD_SW_CHANGES=1 PAD_GL_RAISE=0 set in
-      all four runs — both were also absent from David's GUI flow, so they
-      are NOT excluded as the trigger; a run without them is the first
-      thing to try).
-      **Also on the suspect list:** whatever state David's session wrote
-      today (his Enter presses on this title landed on DIP 8 pre-item-73,
-      i.e. REAL dip toggles on the setup screen — if the game persisted a
-      half-applied config, every boot since may be tripping on it; the
-      title's writable state vs the card's read-only mount is where to
-      look).
-      **Acceptance:** aerosmith_le boots to attract under plain scripted
-      watch.sh again, the cause is named, and whichever of the suspects
-      above was innocent is written down as ruled out with its run.
-      — S3: one title, and the GUI flow may still work (unverified today);
-      nothing else is blocked. D3: needs runs, reproduces on demand (4/4),
-      instruments exist — the missing piece is an exit-reason hook on the
-      guest (item 23's) wired into this flow.
 
 - [x] **77. The card cache is unmanaged: 125 GB real across 25 entries on a
       251 GB WSL disk at 89%, nothing prunes it, and version updates orphan
@@ -8130,7 +7815,8 @@ with **19** going too, because its only route was 16's replay engine and it
 cannot be started without one. `/next` does not offer anything in this
 section, and nothing here counts toward the done percentage.
 
-**The numbers stay retired: 16, 19, 23 and 76 are never reused**, and
+**The numbers stay retired: 1d, 16, 19, 23, 64, 75, 76 and 84 are never
+reused**, and
 `plans/spike2_pc_emulation_handoff.md` still keys its `REMAINING item N`
 headings on them.
 
@@ -8460,6 +8146,349 @@ rewriting it.**
       second key plays one back on a fresh run; the replayed run's `[sw]` stream
       matches the saved one within item 16's stated tolerance. Both keys appear
       in the Controls legend.
+
+**Removed 2026-09-11 at David’s ask**, on a prune of the whole open list: **1d, 64,
+75 and 84** go, each for the reason stated on its own entry below. Two
+bookkeeping entries that were open boxes but could never be taken — item 54
+(folded into item 50) and the item 50 record in Done — were de-boxed in the
+same pass rather than moved here, because they sit beside the work they
+document. Nothing here was disproven; every entry is kept whole.
+
+- **DROPPED 2026-09-11 at David’s ask** — the display already works from
+      item 83's card-only set, so this only upgrades approximate stills to
+      exact, and it was the most expensive item left in the queue. **The
+      number 84 is retired and never reused.** **84. Capture the batman
+      VILLAIN VISION board image set + id map from the
+      `UPDATE TV IMAGES` service upload — the byte-exact, card-only source.**
+      `S2 D5` *(Spawned from item 83 on 2026-08-26 — David's architecture
+      call: the board has its own image store, written from the card by the
+      service menu; the wire sends only an id. Item 83 ships a CARD-ONLY
+      approximation, 5 stills mapped from card store frames; this item is the
+      complete, exact set + every id binding.)*
+      **WHY THE EASY PATHS ARE RULED OUT (static RE done this pass, no run):**
+      the board images for the 2 game-rendered cards + 5 signs/portraits are
+      in NO card store that unpacks to disk — exhaustive: all 245,828 frames
+      of all 3,069 `137.asset` clips, all 752 lcd scene textures >=100x60,
+      both `2.asset` stores, the app's whole extraction (`~/Desktop/bm`,
+      7,795 pngs), and `image.bin`'s only 4 decodable embedded JPEGs. The one
+      image blob on the card is `image.bin` (2 GB, the app's master
+      container); the board set is a packed/rendered section of it the normal
+      extractor skips. The service routine can't be located statically: the
+      menu is INDEX-driven — its strings (`UPDATE TV IMAGES` rodata 0x55cb0c,
+      `NO UPDATE AVAILABLE`, `UPDATE STATUS...`, `ELAPSED TIME`, `UPDATE
+      COMPLETE/FAILED`, all confirmed present) are referenced through
+      localization pointer-tables (file 0x6f74a0+), NOT by literal-pool or
+      MOVW/MOVT from `.text` (all scanned, zero hits) and NOT by a stored
+      callback pointer (0x6ff580 is referenced nowhere). No existing capture
+      has the flow — it only appears when the service menu is driven.
+      **THE KEY INSIGHT that makes it feasible: WE EMULATE THE BOARD.**
+      "NO UPDATE AVAILABLE" is a version/checksum gate — the emulated node 24
+      reports its image version, the game compares to `image.bin`'s, they
+      match, upload skipped. Since nodebus.py/hwshim IS node 24, make it
+      report a STALE/zero image version and the game will perform the upload.
+      **THE PLAN (turnkey, needs the rig free + service-menu nav):**
+      (1) find which node-24 query/reply carries the board image version —
+      it reveals itself in the live exchange around the menu (the non-f2
+      node-24 cmds are 11/f0/f1/f9/fc/fe = LCD sub-control, none is obviously
+      it, so watch the service-menu handshake); (2) hook nodebus.py to answer
+      that query stale; (3) drive the service menu to Diagnostics > UPDATE TV
+      IMAGES > PRESS ENTER TO BEGIN via service-button switch inputs
+      (`SERVICE MENU`/`EXIT SERVICE MENU`/`FG_DIAGNOSTICS_DISPLAY` strings
+      confirm the path); (4) log ALL channels during the upload — node bus
+      AND SPI (the ELF has real SpiVideoStreamDecoder classes and
+      `/dev/spidev`; the images may stream over SPI, not the 200-byte node
+      bus); (5) the payload IS the board set + id bindings, byte-exact, from
+      the card. Then lcdstills maps every id from that capture and the panel
+      shows the real board set with zero footage and nothing distributed.
+      **Acceptance:** every attract + game board still on David's videos is
+      reproduced from a card-derived image the rig extracted itself (no
+      footage, no committed asset), each keyed by its wire id.
+      — S2: the display already works (item 83, card-only approximation); this
+      upgrades approximate/absent stills to exact and completes the map, but
+      nobody loses a run without it. D5: live capture, service-menu
+      navigation, an undecoded update protocol possibly spanning node bus +
+      SPI, and a board-version hook across nodebus/shim — budget more than one
+      pass.
+
+      **PROGRESS (2026-08-26, live capture on David's guidance — he drove
+      the service menu to trigger the update while I logged; rig now free,
+      card unmounted, lock released):**
+      **(1) The routine was reached and triggered.** Service menu (coin
+      door open, Service Select/Plus/Minus/Back = padsw ids 28/29/30/31)
+      -> Diagnostics -> Game-Specific Tests -> UPDATE TV IMAGES. It reports
+      "NO UPDATE AVAILABLE" and — measured — sends NOTHING to node 24 (no
+      [nb] TX, no image.bin write). The gate is PURELY LOCAL: the game
+      renders/checks the card's scenes vs a stored version and decides no
+      update, without ever querying the board. So forcing it needs the
+      local "last-uploaded" version marker cleared, not a board-version
+      hook (the plan above assumed a board query; corrected).
+      **(2) The trigger loads the demand_loaded scene trees bc0792d8 (9
+      scenes) and f1b332a3 (11), ALL 1360x768 (backbox res, NOT the
+      villain TV's 240x180).** I rendered them CARD-ONLY with the app's
+      own compositor (scene_render.render_scene + fontrender.load_fonts
+      off David's extraction manifests — 75 fonts, 45 layouts, 20 scenes
+      rendered clean). They are the SERVICE/SYSTEM UI cards: "VERIFYING
+      IMAGE", "Player 1 Enter Initials", "CLOCK NOT SET", "Learn More About
+      Stern Pinball"+QR, the Stern logo — the menu's own screens, NOT the
+      villain board image set.
+      **(3) CONCLUSION — the villain board's rendered CARDS are not
+      standalone-extractable card-only.** The video clips (137.asset, the
+      MAJORITY of villain content) I already have and show. The logo I have
+      (scene texture). But the rendered cards as they appear ON THE 240x180
+      VILLAIN TV (Game Over on green, IN COLOR) are produced by the game's
+      DISABLED secondary-render path (item 83's proven finding) —
+      composited at runtime, stored nowhere, and in no standalone 240x180
+      scene. So the only card-only routes to those two cards are: (a) force
+      the local update gate so the game renders + uploads and capture the
+      wire, or (b) enable the disabled second render target (item 83 ruled
+      out of scope). Neither is a quick win.
+      **NET:** the panel's current card-only set (logo + 4 clip-frame
+      stills + video-clip fallbacks, zero footage) is the honest best
+      available without (a) or (b). The render pipeline is proven and
+      reusable (scene_render works off an extraction) if a 240x180 villain
+      scene is ever located. Scenes preserved at /home/david/tvscenes.
+
+- **DROPPED 2026-09-11 at David’s ask** — the wire decode shipped and
+      released; what remained was node-board firmware reverse engineering
+      with no user-facing payoff named anywhere in the entry. **The number
+      1d is retired and never reused.** **1d. The a2 / b4 / b5 payload —
+      WIRE DECODE SHIPPED; the item stays
+      open for the NODE-BOARD FIRMWARE RE.** `S3 D5` *(**D3 → D5, 2026-08-07
+      evening:** the wire half is done and released, and what David kept the
+      item open FOR is a different and much harder job — decrypting LPC node
+      firmware. Budget more than one pass and say so up front.)*
+      **★★ DAVID'S VERDICT ON THE SHIPPED BUILD, 2026-08-07, after watching a
+      live run: "i mean it's much better than it was. we can ship it for now,
+      but the RE work on the firmware should keep this item open."** His eyes
+      were the acceptance oracle for the rendering half and they passed it.
+      **SHIPPED IN v0.117.0** (the tag landed on top of this work; the release
+      notes credit it). Three decodes in one day, all live-verified: the a2
+      pulse envelopes (`2520d44`), the b4/b5 bank fades (`d145083`), the form A
+      multi-lamp steps (`c950da3`/`4a3eda1`).
+      **SO THE REMAINING SCOPE IS EXACTLY TWO THINGS**, and neither is the
+      payload census this item was originally about:
+      **(a) THE NODE-BOARD FIRMWARE, which is the reason the item is open.**
+      The true fade CURVES and the rate UNIT live in the boards, not on the
+      wire — David's own diagnosis, and it is correct. Everything known about
+      the attack surface is in the assessment below; it is a fresh Stern
+      firmware-crypto crack.
+      **(b) The header-prefixed long forms**, still skipped — 51 unique bodies
+      in 25 (cmd, blen) groups across the whole capture, so smaller than it
+      looks and independent of (a). `ledcensus.py` (committed with this) scores
+      any capture against all six known forms and prints exactly these.
+      **★ LEAD, noticed 2026-08-07 while validating that tool, NOT established:
+      the long a2 bodies it cannot claim carry FORM A's OWN SIGNATURE.** e.g.
+      `…0f0f00000f0f0f00000f | faf1f1f1a6aea0a0a0e9` — a `0f/00` FROM region
+      followed by a TO region with value TRIPLES (`f1f1f1`, `a0a0a0`,
+      `676767`, `e3e3e3`), which is the RGB-fixture tell that identified form A
+      in the first place. **The value triples are real; the layout is not yet
+      known, and the two obvious readings are now both DEAD.**
+      **Ruled out (i): a fixed 3-byte header + form A.** `8f 19 f8 …` (the same
+      opener `a6` uses) makes blen 27/30/33/36 land on 3N — but 29, 37 and 43
+      do not.
+      **Ruled out (ii), WITH A CONTROL, 2026-08-07: `[3 header][mask][FROM ×
+      popcount][TO × popcount]`** — the a6 bitmap layout carrying two value
+      regions, i.e. a bitmap FADE. Every qualitative sign was right (the first
+      frame fitted exactly at 3+6+10+10=29, FROM came out of the 0f/00 level
+      alphabet, TO carried the triples) **and it is still wrong: 38 of 152 real
+      bodies fit (25%) against 20 of 152 for RANDOM bodies of the same lengths
+      (13%), and the RGB tell scored 62% where form A scored ~100%.** Scanning
+      the mask length is a free parameter, and a free parameter buys 13% of
+      noise before explaining anything. The numbers and the reasoning are in
+      `ledcensus.py`'s header as the worked example of why a control is
+      mandatory here. **Whatever is tried next must beat that 13% floor.**
+      **What is NOT left: the rendering.** The window already animates
+      envelopes per channel, expires them onto the base, and reports its own
+      picture rate honestly. When the curves are known they replace a linear
+      ramp and a constant; no new plumbing.
+      **★★ THE blen=6 SLICE IS DECODED AND SHIPPED, 2026-08-07, `2520d44` —
+      NOT yet live-verified; the shim is unbuilt (a run was live all session)
+      and ensurebuild rebuilds it at the next start.**
+      **Established, from 93 captured frames across every c:/tmp capture:**
+      `[start][0x80|end][FROM][TO][RISE][FALL]` — a ONE-SHOT PULSE ENVELOPE
+      over the range: FROM→TO at the rate slot for the direction, back to
+      FROM on the other slot, 0 = instant. 93/93 fit (86 fit the naive
+      directional split; all 7 exceptions are one frame, `00ff0002` = flash
+      with a decay tail). **Ruled out: chaining** (0 of 23 successive fades on
+      a range join end-to-start — each command restarts its sweep, ×8 repeats
+      = re-triggered blinks). **Ruled out: the pulses move the base level**
+      (later base writes agree with TO only 57/651 — they are an OVERLAY, so
+      the shim does not touch `val[]`). **The semantic confirmation:** joined
+      against `led_io.txt`, the mid-level payloads land on the BUILDING FIRE
+      banks — 72..86 -R gets `11→0f fall 6d` (ember) and `0f→ee rise 92`
+      (flare), the -G bank fades out. The fire got fire commands.
+      **Shipped:** padled version 3 fade ring (head @2076, 96×12B entries);
+      `playfield.py` runs the envelopes per channel on top of the base
+      picture; envelope frames do not count as picture updates so `LED Hz`
+      stays honest; base-step smoothing dropped 200→80 ms (the "laggy" half
+      of David's report). Offline: `ledratetest.py` ENVELOPE case — one
+      12-byte command sweeps a fixture up and back and lands at base, 31
+      distinct paints. **Also ruled out this pass, with numbers: David's
+      throughput theory.** The bus idles at 150-200 transfers/s; the lamp
+      slice is 2-39 writes/s by phase. Bandwidth was never the fault.
+      **★★★ SECOND DECODE SAME DAY, `d145083`, LIVE-VERIFIED: b4/b5 blen=3/4
+      are RANGE FADES (b4 up, b5 down, `[start][0x80|end][rate]`) and the
+      indexed decoder had been eating them as ONE DIM DOT per bank sweep —
+      rate bytes written as brightness.** Census 44/44 + 22/22, zero with the
+      0x0f gap byte genuine single writes carry (97: 71/80); the 2N+1 shape
+      now REQUIRES that gap byte at cnt=1, which also stops the a4/a5 pair
+      frames (`3637bb`) becoming garbage lamp values. b4/b5 move the BASE:
+      the shim writes the target into val[] and the ring envelope expires
+      onto it — zero new window code. **Live, two runs, alive 0 after both:
+      skip log shows ZERO a2-6/b4/b5-3/4 escaping; the window read LED
+      4-6.7 Hz, worst gaps ≤0.91 s, 200-390 repaints/s of fade animation**
+      (morning baseline: 2.6/s with 2.83 s freezes). David's 13:54 recording
+      predates b4/b5 — a2 pulses visibly animate in it (runs of 9-11
+      consecutive changed frames), freezes 1.2-3.6 s between.
+      **Trace preserved: `/var/tmp/led_trace_1d.log`** — 44581 lines, full
+      `PAD_NB_TRACE` with timestamps, plus 656 ledskip bodies. **Two
+      instrument traps recorded in `d145083`'s message so nobody repays
+      them: the guest log is `$LOG` = `gzwatch.log` NOT `gzpad.log`, and a
+      UNC path quadruple-backslashed through bash reaches Python with ONE
+      backslash — both ring-watchers polled a ghost file and read as "the
+      ring never fills" while the window was animating the whole time.**
+      **WHAT IS LEFT:** **(a) The rate UNIT is a guess** —
+      `PAD_PF_FADE_UNIT_MS` (default 12, reader-side, tunes live). Ruled
+      out: calibrating it from re-trigger periods (they cluster on the
+      SHOW's schedule — 7.5 s and 115 s = the attract cycle — not the fade).
+      Oracle: `Diagnostics → LED Tests`, or David's eyes vs the real
+      machine. **(b) The longer a2/b4/b5 bodies** — still skipped, now
+      CAPTURED with timestamps in the preserved trace; tails carry
+      value-triple runs (`c7c7c7`) and index runs (`4c 4d 4e`) = multi-lamp
+      fade programs. **Ruled out: the a6 bitmap layout at payload width
+      1-4** (a2 fits at best 7 of 40). Note the strip boards (nodes 12/14)
+      also carry b4/b5 in a DIFFERENT layout (`c00b000a`, bit7 on byte 0) —
+      the insert-node gate keeps them out of the decoder, correctly.
+      **★★★ THIRD DECODE, `c950da3`, live-verified: FORM A — the long a2
+      bodies are `[refs…, last|0x80][FROM×N][TO×N]`, blen==3N**, a multi-lamp
+      fade step. It signs itself: three CONSECUTIVE refs ⇒ an identical value
+      TRIPLE in the TO region (an RGB fixture fading to one colour). Moves the
+      base like b4/b5. **After a 4-min run: ZERO long a2 bodies left in the
+      skip log.** What still skips: 389 a4/a5 blen=2 (lamp REFERENCES, no
+      lamp data by construction), 26 blen=3 the gap-byte gate correctly
+      pushed out, ~7 header-prefixed b4/b5 long forms.
+      **★ RULED OUT, and it was the best remaining suspect: `cmd 0x70`.** It
+      is the most common command on the insert boards (3483 node 8, 1935 node
+      9, 1161 node 1) and is not in the decoder's gate, so it read as a whole
+      missing lamp stream. It is not: body is ALWAYS `(index, 00, 00)` in
+      6579/6579 frames, rlen 0, and it runs at a dead-constant 243 frames per
+      20 s bucket from boot to teardown regardless of the light show. A
+      brightness stream varies with the show; a 12.15 Hz metronome carrying no
+      value is a refresh or keepalive. Do not decode it as lamp data.
+      **★ DAVID's NODE-BOARD RE PROPOSAL, 2026-08-07, assessed not dismissed:
+      "maybe if the fade curve logic lives in the node boards (and there's
+      sparse data fed to them), we just need to look into the node board logic
+      to RE what the curves are."** The premise is CORRECT and the firmware
+      ships on the card — `games/<title>/*.hex`, and the LED ones are
+      `coil4_lednode-LPC1313`, `ws2812node-LPC1313`, `ws2812pinnode-LPC1313`,
+      `hdmi_ws2812node-LPC1313`. **But they are ENCRYPTED, measured:** valid
+      Intel HEX (400/400 checksums) wrapping ciphertext — **entropy 7.992
+      bits/byte, 0.4% zero bytes, all 256 values present, no plausible
+      Cortex-M vector table** (word 0 = 0x7ce94728, not an LPC1313 stack
+      pointer). **Ruled out: repeating-key XOR** — index of coincidence is
+      0.0039 (= random) at every period 1…1024 — and **a shared-plaintext
+      crib between siblings**: `ws2812node` vs `hdmi_ws2812node` are the same
+      length and share only 0.4% of bytes, i.e. no aligned common code. Note
+      the four non-data records at the top (types 06/07, 58 bytes total) are
+      unexplained and are the obvious place a header/IV would live. **So this
+      is a real project (a new Stern firmware-crypto crack), not an
+      afternoon** — worth its own queue item if David wants the true curves;
+      until then the curve is linear and the unit is a knob.
+      **Resume — and it is the FIRMWARE now, not the wire.** Start at the four
+      non-data Intel HEX records (types 06/07, 58 bytes total) at the top of
+      each `.hex`: they are the only unexplained structure in the file and are
+      where a header, key id or IV would live. Compare them ACROSS the four LED
+      node files and across titles — `~/spike2root/games/*/`, and every title's
+      card carries the same `1_35_0` firmware set, so a repeated block is a
+      constant and a varying one is per-image. Then, before any crypto: check
+      whether a plaintext LPC image of the same part exists anywhere (NXP
+      bootloader stubs, an unencrypted older Spike release) to give a known
+      pair. **Already ruled out, do not repeat: repeating-key XOR** (IC 0.0039
+      at every period 1…1024) **and a sibling crib** (`ws2812node` vs
+      `hdmi_ws2812node`: same length, 0.4% shared bytes).
+      **The cheap fallback if the crypto holds:** the curve is only two
+      unknowns — shape and unit — and both are visible from OUTSIDE the board.
+      `Diagnostics → LED Tests` drives one fixture at a time by name; filming
+      a real machine, or David's eye against ours, calibrates
+      `PAD_PF_FADE_UNIT_MS` and says whether the ramp is linear or gamma'd,
+      with no firmware at all. Do that first if a pass has to produce
+      something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
+
+- **DROPPED 2026-09-11 at David’s ask** — already deferred at filing; a real
+      operator does this setup once and nothing is blocked by it. **The
+      number 64 is retired and never reused.** **64. First-boot “Guided
+      Setup” wizard appears after attract, because the
+      machine is unconfigured / Insider-unregistered.** `S3 D3` ← DEFERRED
+      *(Filed 2026-08-21, revealed by item 63's fix; David declined to chase
+      it — “no this is perfect” — so this is a PARKED record, not active work.)*
+      Once item 63 stopped the phantom service-button press, godzilla boots
+      Stern-splash → ATTRACT (proven), runs attract for ~40 s (with the node-4
+      banner, item 55), then drops into the game's own **Guided Setup** wizard:
+      Language English / Country U.S.A. / Free Play No / Pricing / Volume, and
+      **“Stern Insider Connected: this machine has an invalid [key] — contact
+      your distributor.”** This is the real machine's first-boot operator
+      config; a registered, configured cabinet completes it once (Save & Exit)
+      and it persists. autoattract used to walk past BOTH Tech Alerts and this
+      wizard with its two Service Back presses, which is why item-59-era
+      godzilla runs reached a clean attract; with the phantom press gone, the
+      wizard is what is left on a hands-off boot.
+      **The open question when/if reopened:** does our config/NVRAM persist a
+      completed Guided Setup so a second boot skips it, or does the invalid
+      Insider key force it every boot? If it persists, the fix is “complete it
+      once” (or seed the config). If the invalid-Insider state forces it, that
+      ties to the QrOffline / Insider-registration layer (item 63's RE named
+      `QrOfflineListener` and the “re-scan to register game” strings). Do NOT
+      spoof a registration blindly — same wrong-table caution as items 55/57.
+      — S3: nothing is blocked (the machine reaches attract; a real operator
+      would do this setup once), it is friction on a hands-off boot. D3:
+      reproduces every boot, one run to test persistence; deeper if it turns
+      out the Insider state forces it.
+
+- **DROPPED 2026-09-11 at David’s ask** — one title, and it is blocked on
+      the exit-reason hook from item 23, which was itself dropped on
+      2026-08-11. **The number 75 is retired and never reused.** **75.
+      aerosmith_le's GUEST exits silently ~1-2 min into a scripted
+      watch.sh boot — and MAIN'S CODE does it identically, control-proven.**
+      `S3 D3`
+      **2026-09-11, from item 111 - RETEST BEFORE ANYTHING ELSE:** its `~/spike2root/data/nv/aerosmith_le`
+      and `nvram-aerosmith_le.bin` were owned by ROOT (an August elevated run), exactly what
+      made Beatles exit with FATAL error 256; both are david's again, and watch.sh now REFUSES
+      a run whose title's NVRAM is not the user's. The shim's new `[exit]` line and watch.sh's
+      FATAL tail of /dump/debug_log.txt will name the reason if it still dies.
+      *(Filed 2026-08-23 out of item 73's live verification, which hit it
+      three times and bisected it off that branch with a fourth run.)*
+      **Measured, four runs, one evening, same card
+      (images/Stern/spike2/aerosmith_le-1_15_0.Release.8G.sdcard.raw, the
+      cached copy):** item/73 code with defaults; with PAD_GL_RAISE=0; with
+      autoattract AND ballfeed disabled; and MAIN's checkout with the
+      identical env — every run: video bring-up completes ([gst] 3
+      factories), the scene enumeration walks ~103 scene.radium paths, then
+      the guest is GONE — no SEGV, no qemu signal report, no exit line;
+      the log's last line is the [sleep] #1500 cap so the death is not even
+      timestamped. watch.sh reports "the game exited" and tears down.
+      **What makes it strange:** batman and avengers_infinity_le boot fine
+      in the SAME session with the SAME flow (batman confirmed up 5+ min,
+      table loaded, keys pressed); item 57 live-verified aerosmith via
+      watch.sh ~2026-08-18; and David's own GUI runs of this exact card
+      earlier on 2026-08-23 reached a state where key presses drew switch
+      names. So it is aerosmith-specific AND recent AND possibly
+      script-flow-specific (env: PAD_SW_CHANGES=1 PAD_GL_RAISE=0 set in
+      all four runs — both were also absent from David's GUI flow, so they
+      are NOT excluded as the trigger; a run without them is the first
+      thing to try).
+      **Also on the suspect list:** whatever state David's session wrote
+      today (his Enter presses on this title landed on DIP 8 pre-item-73,
+      i.e. REAL dip toggles on the setup screen — if the game persisted a
+      half-applied config, every boot since may be tripping on it; the
+      title's writable state vs the card's read-only mount is where to
+      look).
+      **Acceptance:** aerosmith_le boots to attract under plain scripted
+      watch.sh again, the cause is named, and whichever of the suspects
+      above was innocent is written down as ruled out with its run.
+      — S3: one title, and the GUI flow may still work (unverified today);
+      nothing else is blocked. D3: needs runs, reproduces on demand (4/4),
+      instruments exist — the missing piece is an exit-reason hook on the
+      guest (item 23's) wired into this flow.
 
 ## Done
 
@@ -11352,9 +11381,9 @@ rewriting it.**
       one title. D4: the instrument that can judge it does not exist for this
       title and has to be built and validated against godzilla first.
 
-- [ ] **50 — THIS ENTRY IS NOT DONE. It was moved here on 2026-08-16 and moved
-      back out the same day**, when David asked "does it work for TMNT" and the
-      answer was no. It is kept in place because everything it records is true
+- **50 — A RECORD, NOT AN ITEM, and no longer a box (de-boxed 2026-09-11).**
+      It was moved here on 2026-08-16 and moved back out the same day,
+      when David asked "does it work for TMNT" and the answer was no. It is kept in place because everything it records is true
       and was verified; what it got wrong was calling that finished. **The open
       item above is authoritative.** Read this for what is BUILT.
       Branch `item/50`. Two halves, both live-checked.

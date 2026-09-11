@@ -7884,7 +7884,11 @@ These have each been violated at least once and each cost a run or a window:
       model that is already proven, plus its tests.
 
 - [ ] **111. Beatles dies in the rig within seconds of starting, on the STOCK
-      raw with no menu and no store.** `S3 D3` *(Found 2026-09-11 while proving
+      raw with no menu and no store.** `S3 D3` ← WORKING ON *(Taken 2026-09-11 at
+      David's call, on item/111 cut FROM item/107: "it is unacceptable that Beatles
+      dies within seconds with this change; the game must load and work before 107
+      is finished" - so 107's proof with a PLAYING game is this item's exit test too.)*
+      *(Found 2026-09-11 while proving
       item 107: three delta-card runs and a control run of
       `beatles-1_29_0.Release.8G.sdcard.raw` (PAD_SELECT=0, PAD_CARD_CACHE=0)
       all end the same way - `game up at 7 s, GONE at 9 s`; the shim's last

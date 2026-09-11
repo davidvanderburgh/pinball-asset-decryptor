@@ -6346,6 +6346,11 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **75. aerosmith_le's GUEST exits silently ~1-2 min into a scripted
       watch.sh boot — and MAIN'S CODE does it identically, control-proven.**
       `S3 D3`
+      **2026-09-11, from item 111 - RETEST BEFORE ANYTHING ELSE:** its `~/spike2root/data/nv/aerosmith_le`
+      and `nvram-aerosmith_le.bin` were owned by ROOT (an August elevated run), exactly what
+      made Beatles exit with FATAL error 256; both are david's again, and watch.sh now REFUSES
+      a run whose title's NVRAM is not the user's. The shim's new `[exit]` line and watch.sh's
+      FATAL tail of /dump/debug_log.txt will name the reason if it still dies.
       *(Filed 2026-08-23 out of item 73's live verification, which hit it
       three times and bisected it off that branch with a fourth run.)*
       **Measured, four runs, one evening, same card
@@ -7883,22 +7888,6 @@ These have each been violated at least once and each cost a run or a window:
       — S3: friction with a real workaround. D2: one dialog section over a
       model that is already proven, plus its tests.
 
-- [ ] **111. Beatles dies in the rig within seconds of starting, on the STOCK
-      raw with no menu and no store.** `S3 D3` *(Found 2026-09-11 while proving
-      item 107: three delta-card runs and a control run of
-      `beatles-1_29_0.Release.8G.sdcard.raw` (PAD_SELECT=0, PAD_CARD_CACHE=0)
-      all end the same way - `game up at 7 s, GONE at 9 s`; the shim's last
-      lines are the `[maps] --- guest memory map ---` dump, the scene opener
-      (`[sceneopen] ... scene.radium` x4) and `[ERR] Error in opening firmware
-      binary file / Please put bin file to /lib/firmware/vpu folder`, which is
-      the VPU library's own line and appears on titles that run. Not item 107's:
-      run 1 there bound nothing and died the same. Instrument: `pgrep -x game`
-      lifetime + `~/gzwatch.log`; sample the threads before reading game code
-      (memory). Acceptance: Beatles reaches attract in the rig (`ch0 serving`
-      or a glshot with the Beatles attract art). Logs from the runs:
-      `~/item107_control.gzwatch.log`, `~/item107_b3.gzwatch.log`.)*
-      — S3: one title; every other title plays. D3: reproduces on demand.
-
 - [ ] **112. `extract` of a delta'd image writes the BASE's `image.bin` - the
       wrong songs - and only warns.** `S3 D2` *(The loose end item 107 filed
       and did not build. A delta'd tree's file IS the base blob on the card; the
@@ -8447,6 +8436,31 @@ rewriting it.**
 
 ## Done
 
+- [x] **111. Beatles dies in the rig within seconds of starting, on the STOCK
+      raw with no menu and no store.** `S3 D3` ← CLOSED 2026-09-11, emulator-proven
+      *(Taken at David's call before 107 could finish. Not a code fault: an elevated
+      rig run in August left `~/spike2root/data/nv/beatles` (and `nvram-beatles.bin`,
+      and aerosmith_le's, and 836 files under data/ and dump/) owned by ROOT; the guest
+      runs as david, NVMigration could not create its map file, and the game's own
+      FATAL routine wrote `** FATAL: error 256 (NVMigration: create_current_map_file
+      created an invalid or mismatched file?!?).` to /dump/debug_log.txt and exit(4)ed
+      - nothing in the rig's log, which showed only the VPU firmware line that TMNT
+      prints too. Found with a new `exit()` interposer in the shim (`[exit] status=N
+      from 0x... tid=N` + the stack words in game and library text): the wrapper at
+      0x17b530, its caller the FATAL routine at 0x1186ac, error table entry 256. The
+      first `[exit] status=1` was a red herring - `sh -c` children of system() exit
+      through the shim too. Fixes: the chown (done in the rig); watch.sh REFUSES a run
+      whose `data/nv/<title>` or `nvram-<title>.bin` is not the user's, naming the chown;
+      on a game exit watch.sh prints the debug log's last FATAL lines and the `[exit]`
+      line; the shim logs every `system()`/`popen()` and, with PAD_FAKE_MOUNT (default
+      on), reports a mount/umount as succeeded instead of running it (the remount of
+      /data fails outside the machine on every title). Proof, on the item 107 delta
+      card: Beatles reaches attract (BEATLEMANIA PINBALL high-score screen on the glass),
+      START feeds a ball (trough 63 opened, shooter lane 59 closed, `trough 5/6 after
+      the feed`), the game is in play with a clip running, still up at 196 s. The
+      exec-safe child detection (PAD_SHIM_GAME_PID in the environment) was built after
+      that run and is checked by the closing control run. Closing commit on item/111.)*
+
 - [x] **107. A variant that changes a few songs costs a whole `image.bin` per
       copy on a compact card; store only the changed byte ranges and rebuild the
       file at boot.** `S3 D4` ← CLOSED 2026-09-11, emulator-proven; the hardware
@@ -8470,9 +8484,12 @@ rewriting it.**
       in the emulator the hook copied the base once + 1 range (12.8 s), the next
       boot of the same image hit the stamp, the other variant's boot RESTORED
       the first's ranges from the base, and each time the work file hashed to
-      the chosen source's own image.bin. Beatles itself dies in this rig within
-      seconds on the STOCK raw too (item 111), so "what the game sees" is the
-      plan's own cmp oracle, not a playing game. Left: hardware (David: the
+      the chosen source's own image.bin. **Then, once item 111 let Beatles live in
+      the rig (a root-owned NVRAM directory, nothing to do with the card): through
+      the GAME'S OWN VIEW, `/proc/<game>/root/games/beatles/image.bin` hashes to
+      the chosen variant's image.bin for BOTH variants, the game reaches attract,
+      START feeds a ball, a clip plays, still up at 196 s** (shots in the item 107
+      session's scratchpad `shots/live_b_*.png`). Left: hardware (David: the
       card above on a machine, two boots, two song sets), item 112 (recover
       writes the base's file). Closing code commit ab0dbb1; the full record is
       in the handoff under REMAINING item 107.)*

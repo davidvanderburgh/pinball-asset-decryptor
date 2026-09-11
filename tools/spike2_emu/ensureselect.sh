@@ -92,4 +92,17 @@ if [ -n "$missing" ]; then
     echo "$ERR $SEL_DIR has no$missing in it, so a card built now would carry no menu" >&2
     exit 1
 fi
+# THE DELTA REBUILDER NEEDS NO COMPILER (item 107). materialize.py is a python
+# file `make install` copies beside select.sh, so a menu installed before it
+# existed - or rebuilt on a machine whose cross compiler has gone missing,
+# which the gate above lets through by design - has none, and the first
+# compact build that plans a delta is refused after the plan, naming
+# buildselect.sh at a person who has never run it. Put the file there here.
+if [ ! -e "$SEL_DIR/materialize.py" ] && [ -f "$RIG/codeselect/materialize.py" ]; then
+    if install -m 755 "$RIG/codeselect/materialize.py" "$SEL_DIR/materialize.py" 2>/dev/null; then
+        echo "[selector] materialize.py installed beside the menu (rebuilds a compact card's deltas at boot)"
+    else
+        echo "[selector] WARNING: could not install materialize.py into $SEL_DIR; a compact build that stores deltas will refuse" >&2
+    fi
+fi
 echo "[selector] menu program: $SEL_DIR"

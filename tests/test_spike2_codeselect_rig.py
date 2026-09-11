@@ -789,7 +789,9 @@ def test_everything_new_in_run_game_is_gated_on_pad_select():
     inner = inner[:inner.index('BDC="$R/games/data/boot_display_cmd"')]
     assert "codeselect" in inner and "mount --bind" in inner
     assert "[select] chose" in inner and "[select] fallback" in inner
-    assert '"${SEL_DIRS:-}" <<\'INNER\'' in code, "the list rides into the namespace as one argument"
+    # ...followed by the rig directory (item 107: the inner script runs codeselect/materialize.py
+    # from it, and a plain variable does not cross into `bash -s`), then the heredoc
+    assert '"${SEL_DIRS:-}" "$S" <<\'INNER\'' in code, "the list rides into the namespace as one argument"
 
 
 def test_a_pad_select_run_refuses_rather_than_silently_booting_the_primary():

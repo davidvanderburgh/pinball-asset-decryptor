@@ -58,7 +58,9 @@ one card**; from five the menu scrolls three at a time, with a counter under
 them, so a card is not limited to what fits on the screen at once. From
 v0.204.0 a card in that menu can stand for SEVERAL games and boot one of them
 at random, so forty song-set variants of one title become one card that looks
-standard and plays a different set every power-up:
+standard and plays a different set every power-up; and from v0.205.0 a compact
+card stores such a variant as only its changed songs, so those forty variants
+cost a few GB rather than forty copies of the sound library:
 
 ![The Multi-boot tab: two TMNT images on one card, the boot menu previewed with art and a countdown, and the SD card size the images need](docs/screenshots/multi-boot.png)
 
@@ -1581,7 +1583,9 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    the primary, and the machine falls back to it if the menu ever fails.
    The tab previews the menu as the machine will draw it, says which SD
    card size the images need, and a **Compact build** tick stores what
-   the images share only once (off by default). Point the path box at a
+   the images share only once (off by default) — and a variant that
+   changes a few songs costs only those songs, because the machine
+   rebuilds its sound file at boot from the base image's copy. Point the path box at a
    card you already built and it reads back for editing: a changed title
    or picture, or one changed file inside one image, is written into the
    card in place in about a minute — no rebuild — and **From SD card…**

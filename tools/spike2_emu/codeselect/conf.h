@@ -117,12 +117,39 @@ struct conf_image {
  * fields an image line carries, so every drawing path takes one of these and
  * neither knows nor cares which kind of card it came from; `card.device` is
  * unused, because a group boots whichever member the roll picks. */
+/* HOW A RANDOM CARD PICKS (item 106).  The word sits in the member spec,
+ * before the range and after the optional '+': `group=+shuffle:1-2|...`.
+ *
+ *   any       every member every time - dice, with no memory.  Two members
+ *             means it can hand you the same one twice, because that is what
+ *             random does.
+ *   not-last  never the one it booted last.  With two members this alternates
+ *             for ever, which is why it is not the default any more.
+ *   shuffle   every member once before any of them comes round again - a deck,
+ *             dealt and reshuffled.  What "shuffle" means on a music player,
+ *             and what a forty-set jukebox wants.
+ */
+/* NOT_LAST IS ZERO, so a conf with no word behaves as every card built
+ * before there was a choice did.  What the tab writes on a NEW card is its own
+ * decision and it writes the word out, so the menu says what it does. */
+enum conf_roll { CONF_ROLL_NOT_LAST = 0, CONF_ROLL_ANY, CONF_ROLL_SHUFFLE };
+const char *conf_roll_name(int roll);
+int conf_roll_from_name(const char *word);      /* -1: not one of them */
+
+/* WHAT A SHUFFLE HAS ALREADY DEALT, per group, kept across power-ups in the
+ * last-choice file.  A deck with every card dealt is reshuffled. */
+struct conf_bags {
+    int n[CONF_MAX_GROUPS];
+    int m[CONF_MAX_GROUPS][CONF_MAX_IMAGES];
+};
+
 struct conf_group {
     struct conf_image card;
     int member[CONF_MAX_IMAGES];
     int nmember;
     /* the members keep their own cards too ('+' on the member spec) */
     int keep;
+    int roll;                /* enum conf_roll */
 };
 
 /* ONE ENTRY PER THING THE MENU DRAWS, in conf-file line order.  Exactly one
@@ -197,8 +224,10 @@ int conf_card_member(const struct conf *c, int k, int m);
  * from (-1 when the file predates the second number, or does not say).  THE
  * CARD IS THE HONEST MEMORY for a random card whose members keep cards of
  * their own: the player chose "roll one", not the build the roll landed on. */
-int conf_read_last(const char *path, int *card);
-int conf_write_last(const char *path, int idx, int card);    /* card < 0: image alone */
+int conf_read_last(const char *path, int *card, struct conf_bags *bags);
+int conf_write_last(const char *path, int idx, int card, const struct conf_bags *bags);
+/* which group a card is, and how that group picks */
+int conf_card_roll(const struct conf *c, int k);
 
 /* The choice file: "<index>\n", written atomically (tmp + rename). 0 ok. */
 int conf_write_choice(const char *path, int idx);

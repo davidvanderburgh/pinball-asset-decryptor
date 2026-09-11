@@ -780,10 +780,11 @@ def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
     assert words[words.index("--highlight-card") + 1] == "1"
     assert "--highlight" not in words, "the preview names a CARD, not an image"
     assert "--loading-out" not in words, "asked for, never assumed"
-    assert "--last-image" not in words, "nothing was booted before"
+    assert "--roll-state" not in words, "asked for, never assumed"
     rolled = preview_snapshot_args("/bin/cs", conf, media, ppm, 1, 3,
-                                   last_image=2)
-    assert rolled[rolled.index("--last-image") + 1] == "2"
+                                   roll_state="/x/roll.state")
+    assert rolled[rolled.index("--roll-state") + 1] == \
+        multiboot_tab.wsl("/x/roll.state")
     with_loading = preview_snapshot_args("/bin/cs", conf, media, ppm, 1, 3,
                                          loading="/x/loading_ab_1.ppm")
     assert with_loading[with_loading.index("--loading-out") + 1] == \
@@ -2527,10 +2528,10 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
         return [(multiboot_tab.AUDIO_LABEL, [py, "-c", code])]
 
     def snapshot(binary, conf, media_dir, ppm, hl, n, rootfs="~/r", cwd=None,
-                 frames=1, loading=None, last_image=None):
+                 frames=1, loading=None, roll_state=None):
         seen["snapshot"].append((binary, conf, media_dir, ppm, hl, n, frames))
         seen.setdefault("loading", []).append(loading)
-        seen.setdefault("last_image", []).append(last_image)
+        seen.setdefault("roll_state", []).append(roll_state)
         label = (multiboot_tab.ANIM_LABEL if frames > 1 else "frame %d" % n)
         if fail == "frame":
             code = "print('[select] error: bad conf'); raise SystemExit(2)"
@@ -3499,8 +3500,7 @@ def test_selecting_a_random_card_rolls_again(tmp_path, monkeypatch):
         # so the preview passes what IT last rolled - and the roll here is then
         # the roll there (David, 2026-09-11: "the preview needs to show the same
         # random logic as the machine").
-        assert seen["last_image"][-1] == 0, seen["last_image"]
-        assert panel._pv_rolls == {2: 0}, panel._pv_rolls
+        assert seen["roll_state"][-1] == panel._roll_state_path(), seen["roll_state"]
         # an ORDINARY card cannot roll, so its frame is not rendered again
         panel._table.select(0)
         root.update()
@@ -9121,7 +9121,11 @@ def test_the_editor_offers_a_random_card_its_own_pictures(tmp_path):
         dlg = panel.edit_image()
         root.update()
         values = [w.cget("value") for w in _radios(dlg.body)]
-        assert values == list(mb.GROUP_MEDIA_NAMES), values
+        n = len(mb.GROUP_MEDIA_NAMES)
+        assert values[:n] == list(mb.GROUP_MEDIA_NAMES), values
+        # ...and HOW IT PICKS, which is the only other question a random card
+        # has that an image does not
+        assert values[n:] == list(mb.ROLL_NAMES), values
         assert "logo" not in values and "attract" not in values
         assert "random card" in dlg.top.title().lower()
         # no video row: a random card's picture is drawn, not clipped
@@ -9377,5 +9381,69 @@ def test_a_random_cards_games_must_be_next_to_each_other(tmp_path):
         assert mb.is_group(form.images[3]) and form.images[3].keep
         errs = validate_form(form)
         assert any("next to each other" in e for e in errs), errs
+    finally:
+        root.destroy()
+
+
+def test_a_new_random_card_is_truly_random_and_can_be_changed(tmp_path):
+    """David, 2026-09-11: "so is it truly random if it is remembering the last
+    choice? If there's only two images, it will end up just alternating forever
+    ... We should make it truly random instead i think. and make it an option
+    ... to change it to a 'shuffle' type (like perceived random like ipod)."
+
+    A NEW card is the dice. A card LOADED from one built before there was a
+    choice keeps doing what it did - a card already in the world must not change
+    under its owner."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        row = panel._rows[1]            # the panel's own row, not a copy
+        assert row.roll == "any" == mb.ROLL_DEFAULT
+        assert mb.row_roll(row) == "any"
+        # the builder is TOLD, every time: what the dialog says is what the card
+        # does, whatever the conf's own default is
+        args = mb.build_args(panel.form())
+        assert args[args.index("--group-roll") + 1] == "0=any"
+        # ...and a card that says nothing reads as what such a card has always
+        # done, which is not the same answer
+        row.roll = ""
+        assert mb.row_roll(row) == "not-last" == mb.ROLL_FALLBACK
+        row.roll = "shuffle"
+        args = mb.build_args(panel.form())
+        assert args[args.index("--group-roll") + 1] == "0=shuffle"
+    finally:
+        root.destroy()
+
+
+def test_the_dialog_changes_how_a_random_card_picks(tmp_path):
+    """It is its own section, because it is not what the card SHOWS - it is
+    what the card DOES."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        panel._table.select(1)
+        root.update()
+        dlg = panel.edit_image()
+        root.update()
+        assert [w.cget("value") for w in _radios(dlg.body)][-len(mb.ROLL_NAMES):]             == list(mb.ROLL_NAMES), "the choices are on screen, not just in a var"
+        assert panel._ed_roll.get() == "any"
+        panel._ed_roll.set("shuffle")
+        root.update()
+        assert panel.form().images[1].roll == "shuffle"
+        dlg.ok()
+        root.update()
+        # an ordinary row has no such question and is not given one
+        panel._table.select(0)
+        root.update()
+        dlg = panel.edit_image()
+        root.update()
+        assert [w.cget("value") for w in _radios(dlg.body)] == \
+            ["logo", "picture", "attract", "video", "none"]
     finally:
         root.destroy()

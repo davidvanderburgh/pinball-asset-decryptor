@@ -8613,6 +8613,35 @@ rewriting it.**
          title with different song sets and the title alone says the same thing
          whichever one it landed on. Headless 16g pins all of it, including that
          a snapshot without the flag still writes no loading frame.
+      **HOW A RANDOM CARD PICKS IS A CHOICE NOW (David, 2026-09-11: "so is it
+      truly random if it is remembering the last choice? If there's only two
+      images, it will end up just alternating forever... We should make it
+      truly random instead i think. and make it an option in the random menu ui
+      to change it to a 'shuffle' type (like perceived random like ipod)").**
+      He was right: never-the-last-one is not random, it is alternation, and
+      with two members it is a metronome. Three rules, in the member spec as a
+      word before the range (`group=+shuffle:1-2|...`), so one card is still one
+      line:
+      * `any` - the dice, repeats and all. What a NEW random card does.
+      * `shuffle` - every member once before any of them comes round again, the
+        deck dealt and reshuffled, which is what the word means on a music
+        player and what a forty-set jukebox wants. The deck is kept across
+        power-ups in the last-choice file (`bag<G>=...`), so the machine picks
+        up where it left off.
+      * `not-last` - never the one it booted last. The DEFAULT a conf with no
+        word reads as, because a card already in the world must not change
+        behaviour under its owner; the tab writes the word out either way, so
+        what the dialog says is what the card does.
+      Measured on David's own card in the app's runtime, twenty presses each:
+      `any` gave `00110111011101010010`, `not-last` and `shuffle` both gave
+      `01010101...` - which is right, since a two-member deck has nowhere else
+      to go. Headless 16h covers all three plus an unknown word; the builder
+      writes and reads the spec and takes `--group-roll G=MODE`; build.json and
+      inspect carry it, so a load brings the rule back.
+      **The preview rolls the same way**, because `--roll-state <file>` gives a
+      snapshot the memory the machine keeps on the card - what was booted last,
+      and what each shuffle has dealt - in a file the preview owns. It reads and
+      writes only that one, so a snapshot still never touches the machine's.
       **Resume:** nothing is owed on the card or the tools. What is left is
       polish and it can close: (a) the eight styles are drawn from the members'
       logos, so two builds that share a logo (the TMNT pair) make every style

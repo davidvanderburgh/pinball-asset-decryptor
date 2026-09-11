@@ -1389,6 +1389,32 @@ def check_machine_volume(mv):
     return out
 
 
+#: HOW A RANDOM CARD PICKS (item 106), written into the member spec as a word
+#: and a colon: `group=+shuffle:1-2|...`.  `not-last` is what every card built
+#: before there was a choice does, so it is the default a conf with no word
+#: reads as - the tab writes the word out either way, so the menu says what it
+#: does.
+ROLL_MODES = ("not-last", "any", "shuffle")
+ROLL_DEFAULT = "not-last"
+
+
+def check_roll(word):
+    """One of ROLL_MODES, or the default for '' / None."""
+    w = (word or "").strip().lower() or ROLL_DEFAULT
+    if w not in ROLL_MODES:
+        raise Refused("images.conf: a random card picks %s, not %r"
+                      % (" / ".join(ROLL_MODES), word))
+    return w
+
+
+def split_roll_spec(spec):
+    """`shuffle:1-2` -> ('shuffle', '1-2'); `1-2` -> (ROLL_DEFAULT, '1-2')."""
+    word, sep, rest = (spec or "").partition(":")
+    if not sep:
+        return ROLL_DEFAULT, spec or ""
+    return check_roll(word), rest
+
+
 def parse_member_spec(spec):
     """'3-5' or '3,5,7-9' -> [3, 4, 5] / [3, 5, 7, 8, 9].  Range ends are inclusive.
 
@@ -1441,6 +1467,7 @@ def check_groups(groups, nimages):
         if len(media) != len(MEDIA_ROW):
             raise Refused("images.conf: a group media row is (art, anim, music, confirm), got %r" % (media,))
         media = tuple(_media_name_ok(x or "", what) for x, what in zip(media, MEDIA_FIELDS))
+        roll = check_roll(g.get("roll"))
         for t in (title, subtitle):
             if "|" in t or "\n" in t or "\r" in t:
                 raise Refused("images.conf: group title/subtitle %r may not contain '|' or a newline" % t)
@@ -1475,7 +1502,7 @@ def check_groups(groups, nimages):
             raise Refused("images.conf: group %r hides its members, so its card belongs where "
                           "they were (image %d), not before image %d" % (title, run[0], pos))
         out.append({"title": title, "subtitle": subtitle, "media": media, "members": run,
-                    "keep": keep, "pos": pos})
+                    "keep": keep, "pos": pos, "roll": roll})
     out.sort(key=lambda g: (g["pos"], g["members"][0]))
     # NOT UNDER `if groups`: a card with no group at all still has a card cap, and
     # this is the only place that counts them. An early return here let 17 plain
@@ -1561,17 +1588,23 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
            "# when no last choice; timeout = seconds before the highlighted image boots by itself (0 = for ever)"]
     if groups:
         out.append("# group=<first>-<last>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]   several")
-        out.append("# images shown as ONE card, which boots a member at random on every power-up and never")
-        out.append("# the one it booted last.  The card sits in the menu where the line sits.  Members stay")
-        out.append("# ordinary image= lines; a leading '+' keeps THEIR cards too, so one card can offer")
-        out.append("# \"surprise me\" beside the very builds it rolls between.")
+        out.append("# images shown as ONE card, which boots one of them at every power-up.  The card sits")
+        out.append("# in the menu where the line sits.  Members stay ordinary image= lines; a leading '+'")
+        out.append("# keeps THEIR cards too, so one card can offer \"surprise me\" beside the very builds")
+        out.append("# it rolls between.  How it picks is a word before the range: not-last (never the one")
+        out.append("# it booted last - the default), any (the dice, repeats and all), shuffle (every member")
+        out.append("# once before any of them comes round again).")
     # A GROUP LINE GOES BEFORE ITS FIRST MEMBER, which is what puts its card where the
     # builder meant it: conf.c lays the cards out in line order, so a line written after
     # every image would put the card at the END of the menu instead.
     def group_line(g):
-        return ("group=%s%d-%d|%s|%s"
-                % ("+" if g["keep"] else "", g["members"][0], g["members"][-1],
-                   g["title"], g["subtitle"])
+        # HOW IT PICKS goes in the spec, after the '+' and before the range, so
+        # one card is still one line.  The default is left out, which keeps a
+        # card that does not care byte for byte what it always was.
+        roll = "" if g.get("roll", ROLL_DEFAULT) == ROLL_DEFAULT else g["roll"] + ":"
+        return ("group=%s%s%d-%d|%s|%s"
+                % ("+" if g["keep"] else "", roll,
+                   g["members"][0], g["members"][-1], g["title"], g["subtitle"])
                 + "".join("|" + x for x in g["media"][:width]))
 
     at = {}
@@ -1672,7 +1705,9 @@ def parse_images_conf(text):
             keep = spec.startswith("+")
             if keep:
                 spec = spec[1:]
+            roll, spec = split_roll_spec(spec)
             conf["groups"].append({"members": parse_member_spec(spec), "keep": keep,
+                                   "roll": roll,
                                    "pos": len(conf["images"]), "title": f[1], "subtitle": f[2],
                                    "media": tuple(_media_name_ok(x, what) for x, what
                                                   in zip(f[3:3 + len(MEDIA_ROW)], MEDIA_FIELDS))})
@@ -2849,6 +2884,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
             ("title", g["title"]), ("subtitle", g["subtitle"]), ("members", list(g["members"])),
             # whether its games keep cards of their own, and where its own card sits
             ("keep", bool(g.get("keep"))), ("pos", g.get("pos")),
+            ("roll", g.get("roll", ROLL_DEFAULT)),
             ("art", g["media"][0] or None), ("anim", g["media"][1] or None),
             ("music", g["media"][2] or None), ("confirm", g["media"][3] or None)])
             for g in (conf.get("groups") or [])])])
@@ -6196,6 +6232,7 @@ def inspect_card(card, media_out=None):
             ("index", gi), ("title", g["title"]), ("subtitle", g["subtitle"]),
             ("members", list(g["members"])),
             ("keep", bool(g.get("keep"))), ("pos", g.get("pos")),
+            ("roll", g.get("roll", ROLL_DEFAULT)),
             ("art", g["media"][0] or None), ("anim", g["media"][1] or None),
             ("music", g["media"][2] or None), ("confirm", g["media"][3] or None)])
             for gi, g in enumerate(conf.get("groups") or [])]),
@@ -7465,6 +7502,18 @@ def resolve_image_args(args):
                 open_group["members"].append(len(extras))     # image 0 is the primary
     args.extra = extras
     args.groups = [g for g in groups]
+    # ...and HOW EACH ONE PICKS, by group index: a card's rule is not ordered
+    # against the images the way its members are, so it is named rather than
+    # positioned.
+    for spec in getattr(args, "group_roll", None) or []:
+        idx, sep, mode = str(spec).partition("=")
+        if not sep or not idx.strip().isdigit():
+            raise Refused("--group-roll %r: expected G=MODE, where G is a group index" % (spec,))
+        g = int(idx.strip())
+        if not (0 <= g < len(args.groups)):
+            raise Refused("--group-roll %d: there is no group %d (%d given)"
+                          % (g, g, len(args.groups)))
+        args.groups[g]["roll"] = check_roll(mode)
     return args
 
 
@@ -7504,6 +7553,10 @@ def _add_group_flags(s):
                         "one or let it roll'): it adds no games and those images KEEP their own cards, "
                         "so the menu offers the builds and a 'surprise me' beside them. Its place in "
                         "the menu is where this flag sits among the --extra ones")
+    s.add_argument("--group-roll", action="append", default=[], metavar="G=MODE",
+                   help="how random card G picks: not-last (never the one it booted last - "
+                        "the default), any (the dice, repeats and all), or shuffle (every "
+                        "member once before any of them comes round again)")
     s.add_argument("--default-card", type=int, metavar="N",
                    help="highlight CARD N (menu order) rather than an image - the only way to name a "
                         "--group-over card, whose members all keep cards of their own")

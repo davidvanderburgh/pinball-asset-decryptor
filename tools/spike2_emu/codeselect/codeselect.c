@@ -103,12 +103,12 @@ struct opts {
                           * LOADING frame - the one the machine draws once the
                           * card is confirmed, which for a random card is the
                           * one moment the player is told what they got. */
-    int last_image;   /* --last-image: what the roll must treat as the last
-                       * one booted.  A snapshot reads no last-choice file (it
-                       * writes nothing and must not depend on the machine's
-                       * memory), so a preview that wants the machine's OWN
-                       * behaviour - never the build you just had - says so
-                       * here. -1 = nothing was booted before. */
+    const char *roll_state; /* --roll-state: the roll's memory for a SNAPSHOT -
+                       * what was booted last, and what each shuffle has dealt.
+                       * A snapshot reads no last-choice file (it writes nothing
+                       * and must not depend on the machine's memory), so a
+                       * preview that wants the machine's OWN behaviour names a
+                       * file of its own and this reads AND writes that one. */
     int pick;         /* boot this image instead of rolling; -1 = roll */
     int seed;         /* make the roll reproducible; -1 = stir it for real */
 };
@@ -225,7 +225,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
     o->frames = 1;
     o->highlight_card = -1;
     o->pick = -1;
-    o->last_image = -1;
+    o->roll_state = NULL;
     o->seed = -1;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -258,7 +258,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
         if (!strcmp(a, "--frames")) { if (!v) goto missing; o->frames = atoi(v); i++; continue; }
         if (!strcmp(a, "--highlight-card")) { if (!v) goto missing; o->highlight_card = atoi(v); i++; continue; }
         if (!strcmp(a, "--loading-out")) { if (!v) goto missing; o->loading = v; i++; continue; }
-        if (!strcmp(a, "--last-image")) { if (!v) goto missing; o->last_image = atoi(v); i++; continue; }
+        if (!strcmp(a, "--roll-state")) { if (!v) goto missing; o->roll_state = v; i++; continue; }
         if (!strcmp(a, "--pick")) { if (!v) goto missing; o->pick = atoi(v); i++; continue; }
         if (!strcmp(a, "--seed")) { if (!v) goto missing; o->seed = atoi(v); i++; continue; }
         if (!strcmp(a, "--invert")) { o->invert = 1; continue; }
@@ -916,25 +916,57 @@ static int card_has_member(const struct conf *c, int card, int img)
     return 0;
 }
 
+/* whether image `img` is in group `g`'s bag - what a shuffle has already dealt */
+static int in_bag(const struct conf_bags *bags, int g, int img)
+{
+    int k;
+    if (!bags || g < 0 || g >= CONF_MAX_GROUPS) return 0;
+    for (k = 0; k < bags->n[g]; k++)
+        if (bags->m[g][k] == img) return 1;
+    return 0;
+}
+
 static int roll_member(const struct conf *c, int card, int last, int seed,
-                       char *why, int whylen)
+                       struct conf_bags *bags, char *why, int whylen)
 {
     int cand[CONF_MAX_IMAGES], nc = 0, k, n = conf_card_nmembers(c, card);
+    int roll = conf_card_roll(c, card), g = conf_card_group(c, card), dealt = 0;
     const char *src = "urandom+clock";
     unsigned s = 0;
 
     /* EXCLUDED BY DEVICE, not merely by index.  A KEEPING group's members also
      * have cards of their own, so the same build can be reached two ways - and
      * a player who has just booted it from its own card would otherwise have
-     * the group hand it straight back, which is the one thing this card
+     * the group hand it straight back, which is the one thing `not-last`
      * promises not to do. */
     {
         const char *lastdev = (last >= 0 && last < c->n) ? c->img[last].device : NULL;
         for (k = 0; k < n; k++) {
             int m = conf_card_member(c, card, k);
+            if (roll == CONF_ROLL_SHUFFLE) {
+                /* THE DECK: what has not been dealt since the last reshuffle.
+                 * Every member comes up once before any of them comes round
+                 * again, which is what "shuffle" means on a music player. */
+                if (in_bag(bags, g, m)) { dealt++; continue; }
+                cand[nc++] = m;
+                continue;
+            }
+            if (roll == CONF_ROLL_ANY) { cand[nc++] = m; continue; }
             if (m == last) continue;
             if (lastdev && *lastdev && !strcmp(c->img[m].device, lastdev)) continue;
             cand[nc++] = m;
+        }
+        /* THE DECK IS OUT: reshuffle, and deal anything but the one just had -
+         * so the join between two decks does not repeat a member either. */
+        if (roll == CONF_ROLL_SHUFFLE && nc == 0) {
+            if (bags && g >= 0) bags->n[g] = 0;
+            dealt = 0;
+            for (k = 0; k < n; k++) {
+                int m = conf_card_member(c, card, k);
+                if (m == last) continue;
+                if (lastdev && *lastdev && !strcmp(c->img[m].device, lastdev)) continue;
+                cand[nc++] = m;
+            }
         }
     }
     /* a one-member group, or a last choice that is the only member: the
@@ -942,8 +974,10 @@ static int roll_member(const struct conf *c, int card, int last, int seed,
     if (nc == 0)
         for (k = 0; k < n; k++) cand[nc++] = conf_card_member(c, card, k);
     if (nc == 1) {
-        snprintf(why, (size_t)whylen, "rolled from %s: 1 candidate",
-                 conf_card_face(c, card)->title);
+        snprintf(why, (size_t)whylen, "rolled from %s (%s): 1 candidate",
+                 conf_card_face(c, card)->title, conf_roll_name(roll));
+        if (roll == CONF_ROLL_SHUFFLE && bags && g >= 0 && bags->n[g] < CONF_MAX_IMAGES)
+            bags->m[g][bags->n[g]++] = cand[0];
         return cand[0];
     }
     if (seed >= 0) {
@@ -970,9 +1004,14 @@ static int roll_member(const struct conf *c, int card, int last, int seed,
         s ^= (unsigned)time(NULL);
         s ^= (unsigned)getpid() << 7;
     }
-    snprintf(why, (size_t)whylen, "rolled from %s: %d candidate%s, %s",
-             conf_card_face(c, card)->title, nc, nc == 1 ? "" : "s", src);
-    return cand[s % (unsigned)nc];
+    snprintf(why, (size_t)whylen, "rolled from %s (%s): %d candidate%s%s, %s",
+             conf_card_face(c, card)->title, conf_roll_name(roll), nc,
+             nc == 1 ? "" : "s",
+             roll == CONF_ROLL_SHUFFLE && dealt ? " left in the deck" : "", src);
+    k = cand[s % (unsigned)nc];
+    if (roll == CONF_ROLL_SHUFFLE && bags && g >= 0 && bags->n[g] < CONF_MAX_IMAGES)
+        bags->m[g][bags->n[g]++] = k;
+    return k;
 }
 
 /* action = this title has a lockdown-bar ACTION button the menu can read; 0
@@ -1217,14 +1256,26 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
     if (o->loading && *o->loading) {
         int boot = conf_card_boots(c, hl);
         char why[CONF_STR + 64], rolled[CONF_STR + 80];
+        struct conf_bags bags;
+        int lastimg = -1;
         rolled[0] = 0;
+        memset(&bags, 0, sizeof bags);
+        /* THE ROLL'S MEMORY, when the caller named a file for it.  Read before
+         * and written after, so a preview rolls exactly as the machine does -
+         * the same exclusion and the same deck - without ever touching the
+         * machine's own file. */
+        if (o->roll_state && *o->roll_state)
+            lastimg = conf_read_last(o->roll_state, NULL, &bags);
         if (conf_card_group(c, hl) >= 0) {
             boot = o->pick >= 0 ? o->pick
-                                : roll_member(c, hl, o->last_image, o->seed,
+                                : roll_member(c, hl, lastimg, o->seed, &bags,
                                               why, sizeof why);
             if (o->pick < 0) snprintf(rolled, sizeof rolled, " (%s)", why);
         }
         if (boot < 0) boot = 0;
+        if (o->roll_state && *o->roll_state
+            && conf_write_last(o->roll_state, boot, hl, &bags) < 0)
+            sel_log("cannot write %s: %s", o->roll_state, strerror(errno));
         draw_loading(g, font, &L->th, c->img[boot].title, c->img[boot].subtitle,
                      loading_picture(c, &media, hl, boot));
         if (gfx_write_ppm(g, o->loading, invert) < 0)
@@ -1269,6 +1320,7 @@ int main(int argc, char **argv)
      * IMAGE indexes - the choice file, the last-choice file, default= and
      * select.sh have always spoken images and still do. */
     int headless, snapshot, invert, timeout, n, nimg, hl, hlimg, lastimg, lastcard;
+    struct conf_bags bags;
     int chosen = -1, boot = -1, w, h, volume, pinned;
     int machine_v = -1;       /* volume=machine: the machine's own 0-63, else -1 */
     int audio_up = 0;         /* the bridge brought the audio section up (hw only) */
@@ -1328,7 +1380,8 @@ int main(int argc, char **argv)
      * entirely, so a group could hand back the very build the player had just
      * booted from its own card.  The file is the machine's memory either way. */
     lastcard = -1;
-    lastimg = snapshot ? -1 : conf_read_last(o.last, &lastcard);
+    memset(&bags, 0, sizeof bags);
+    lastimg = snapshot ? -1 : conf_read_last(o.last, &lastcard, &bags);
     hl = -1;
     hlimg = -1;
     if (o.highlight_card >= 0) {
@@ -1735,7 +1788,7 @@ int main(int argc, char **argv)
             }
             if (boot < 0) {
                 char why[CONF_STR + 64];
-                boot = roll_member(&c, chosen, lastimg, o.seed, why, sizeof why);
+                boot = roll_member(&c, chosen, lastimg, o.seed, &bags, why, sizeof why);
                 snprintf(rolled, sizeof rolled, " (%s)", why);
             }
             sel_log("group: card %d boots image %d%s", chosen + 1, boot, rolled);
@@ -1797,7 +1850,8 @@ int main(int argc, char **argv)
          * this file for every menu - a group-free card's behaviour is
          * byte-identical to 2.9's on purpose. */
         if (conf_write_last(o.last, boot,
-                            conf_card_of_image(&c, boot) != chosen ? chosen : -1) < 0)
+                            conf_card_of_image(&c, boot) != chosen ? chosen : -1,
+                            &bags) < 0)
             sel_log("cannot write %s: %s (continuing)", o.last, strerror(errno));
         if (conf_write_choice(o.out, boot) < 0) {
             sel_say("error: cannot write %s: %s", o.out, strerror(errno));

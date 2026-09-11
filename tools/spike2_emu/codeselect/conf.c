@@ -76,6 +76,30 @@ static void copy_card_fields(struct conf_image *im, char *fld[7])
  * warning rather than refusing the file; so is a range written backwards.
  * Bounds are NOT checked here - the image lines may not all be read yet - so
  * resolve_groups does that once the file is done. */
+static const char *const ROLL_NAMES[] = { "not-last", "any", "shuffle" };
+
+const char *conf_roll_name(int roll)
+{
+    if (roll < 0 || roll >= (int)(sizeof ROLL_NAMES / sizeof ROLL_NAMES[0]))
+        return ROLL_NAMES[CONF_ROLL_NOT_LAST];
+    return ROLL_NAMES[roll];
+}
+
+int conf_roll_from_name(const char *word)
+{
+    int k;
+    if (!word) return -1;
+    for (k = 0; k < (int)(sizeof ROLL_NAMES / sizeof ROLL_NAMES[0]); k++)
+        if (!strcmp(word, ROLL_NAMES[k])) return k;
+    return -1;
+}
+
+int conf_card_roll(const struct conf *c, int k)
+{
+    int g = conf_card_group(c, k);
+    return g >= 0 ? c->grp[g].roll : CONF_ROLL_NOT_LAST;
+}
+
 static void parse_members(struct conf *c, struct conf_group *g, const char *spec,
                           const char *path, int lineno)
 {
@@ -312,7 +336,27 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 /* a leading '+' means the members KEEP their own cards as well
                  * as appearing behind this one */
                 const char *spec = fld[0] ? fld[0] : "";
+                const char *colon;
                 if (*spec == '+') { g->keep = 1; spec++; }
+                /* ...and an optional HOW IT PICKS, before the range: a word
+                 * and a colon.  An unknown word is dropped out loud and the
+                 * card still works, the way a bad member is. */
+                colon = strchr(spec, ':');
+                if (colon) {
+                    char word[32];
+                    int n = (int)(colon - spec), roll;
+                    if (n < 0 || n >= (int)sizeof word) n = (int)sizeof word - 1;
+                    memcpy(word, spec, (size_t)n);
+                    word[n] = 0;
+                    roll = conf_roll_from_name(word);
+                    if (roll < 0)
+                        conf_warn(c, "%s:%d: group picks '%s', which is not any / "
+                                  "not-last / shuffle: %s is used", path, lineno,
+                                  word, conf_roll_name(g->roll));
+                    else
+                        g->roll = roll;
+                    spec = colon + 1;
+                }
                 parse_members(c, g, spec, path, lineno);
             }
             gpos[c->ngroups] = c->n;
@@ -429,12 +473,13 @@ int conf_card_member(const struct conf *c, int k, int m)
     return c->cards[k].image;
 }
 
-int conf_read_last(const char *path, int *card)
+int conf_read_last(const char *path, int *card, struct conf_bags *bags)
 {
     FILE *f = fopen(path, "r");
-    char line[64];
+    char line[CONF_STR];
     int v = -1;
     if (card) *card = -1;
+    if (bags) memset(bags, 0, sizeof *bags);
     if (!f) return -1;
     if (fgets(line, sizeof line, f)) {
         /* "<image>" from every selector up to 3.0, "<image> <card>" from this
@@ -449,11 +494,31 @@ int conf_read_last(const char *path, int *card)
         if (v >= 0 && card && sp && *sp && strspn(sp, "0123456789") == strlen(sp))
             *card = atoi(sp);
     }
+    /* ...and what each SHUFFLE has already dealt, one line per group:
+     * `bag<G>=<i>,<j>,...`.  A file from an older selector has none, which
+     * reads as a fresh deck - the right answer either way. */
+    while (bags && fgets(line, sizeof line, f)) {
+        char *eq, *tok, *s2 = trim(line);
+        long g;
+        if (strncmp(s2, "bag", 3)) continue;
+        eq = strchr(s2, '=');
+        if (!eq) continue;
+        *eq++ = 0;
+        g = strtol(s2 + 3, NULL, 10);
+        if (g < 0 || g >= CONF_MAX_GROUPS) continue;
+        for (tok = strtok(eq, ","); tok; tok = strtok(NULL, ",")) {
+            char *e2;
+            long v2 = strtol(trim(tok), &e2, 10);
+            if (e2 == tok || v2 < 0 || v2 >= CONF_MAX_IMAGES) continue;
+            if (bags->n[g] < CONF_MAX_IMAGES) bags->m[g][bags->n[g]++] = (int)v2;
+        }
+    }
     fclose(f);
     return v;
 }
 
-static int write_index(const char *path, int idx, int atomic, int card)
+static int write_index(const char *path, int idx, int atomic, int card,
+                       const struct conf_bags *bags)
 {
     char tmp[512];
     FILE *f;
@@ -463,15 +528,26 @@ static int write_index(const char *path, int idx, int atomic, int card)
     if (!f) return -1;
     if (card >= 0) fprintf(f, "%d %d\n", idx, card);
     else fprintf(f, "%d\n", idx);
+    if (bags) {
+        int g, k;
+        for (g = 0; g < CONF_MAX_GROUPS; g++) {
+            if (bags->n[g] <= 0) continue;
+            fprintf(f, "bag%d=", g);
+            for (k = 0; k < bags->n[g]; k++)
+                fprintf(f, "%s%d", k ? "," : "", bags->m[g][k]);
+            fprintf(f, "\n");
+        }
+    }
     if (fflush(f) != 0 || fsync(fileno(f)) != 0) { /* fsync may fail on odd fs: tolerate */ }
     if (fclose(f) != 0) return -1;
     if (atomic && rename(tmp, path) != 0) { unlink(tmp); return -1; }
     return 0;
 }
 
-int conf_write_last(const char *path, int idx, int card)
+int conf_write_last(const char *path, int idx, int card,
+                    const struct conf_bags *bags)
 {
-    return write_index(path, idx, 1, card);
+    return write_index(path, idx, 1, card, bags);
 }
 
 int conf_write_choice(const char *path, int idx)
@@ -480,5 +556,5 @@ int conf_write_choice(const char *path, int idx)
      * run_game.sh both read it as an image index and neither has any idea
      * groups exist. The card goes in the last-choice file, which only this
      * program reads. */
-    return write_index(path, idx, 1, -1);
+    return write_index(path, idx, 1, -1, NULL);
 }

@@ -2451,6 +2451,8 @@ def test_build_json_says_which_card_each_image_belongs_to(mk):
                               # whether its games keep cards of their own, and
                               # where its own card sits (item 106, reopened)
                               "keep": False, "pos": 3,
+                              # ...and HOW it picks, so a load brings the rule back
+                              "roll": "not-last",
                               "art": "art3.png", "anim": "anim3.gif",
                               "music": None, "confirm": None}]
     # and it is still JSON with no surprises in it
@@ -2640,3 +2642,47 @@ def test_conf_for_plan_gives_the_group_its_own_picture_and_the_members_sounds(mk
     args.groups = []
     with pytest.raises(mk.Refused, match="random card"):
         mk.conf_for_plan(plan, args, media=ms)
+
+
+# ---- item 106: how a random card picks -------------------------------------
+def test_a_random_cards_picking_rule_is_written_and_read_back(mk):
+    """The word sits in the member spec, before the range: one card is still
+    one line. The DEFAULT is left out, so a card that does not care is byte for
+    byte what it always was - and that default is what every card built before
+    there was a choice does, because a card already in the world must not change
+    under its owner."""
+    devs = ["/dev/mmcblk0p3", "/dev/mmcblk0p7", "/dev/mmcblk0p7:img2"]
+    for mode, spec in (("not-last", "1-2"), ("any", "any:1-2"),
+                       ("shuffle", "shuffle:1-2")):
+        text = mk.render_images_conf(devs, titles=["A", "B", "C"], groups=[
+            {"title": "JUKEBOX", "subtitle": "", "members": [1, 2], "roll": mode}])
+        line = [l for l in text.splitlines() if l.startswith("group=")][0]
+        assert line == "group=%s|JUKEBOX|" % spec, line
+        back = mk.parse_images_conf(text)["groups"][0]
+        assert back["roll"] == mode, back
+    # ...and a keeping group keeps both marks, in that order
+    text = mk.render_images_conf(devs, titles=["A", "B", "C"], groups=[
+        {"title": "R", "subtitle": "", "members": [1, 2], "keep": True,
+         "roll": "shuffle"}])
+    assert "group=+shuffle:1-2|R|" in text, text
+    assert mk.parse_images_conf(text)["groups"][0]["keep"] is True
+    # a rule nobody knows is refused by name, because this tool is being ASKED
+    # to write the file
+    with pytest.raises(mk.Refused, match="not-last / any / shuffle"):
+        mk.render_images_conf(devs, titles=["A", "B", "C"], groups=[
+            {"title": "J", "subtitle": "", "members": [1, 2], "roll": "sideways"}])
+
+
+def test_group_roll_names_the_card_rather_than_its_place(mk):
+    """--group-roll is keyed by GROUP INDEX, not ordered against the images the
+    way --member is: a card's rule is not a position."""
+    a = argparse.Namespace(image_order=[("group", "JUKEBOX|sets"),
+                                        ("member", "b.raw"), ("member", "c.raw")],
+                           extra=[], group_roll=["0=shuffle"])
+    mk.resolve_image_args(a)
+    assert a.groups[0]["roll"] == "shuffle"
+    a2 = argparse.Namespace(image_order=[("group", "J|s"), ("member", "b.raw"),
+                                         ("member", "c.raw")],
+                            extra=[], group_roll=["1=any"])
+    with pytest.raises(mk.Refused, match="there is no group 1"):
+        mk.resolve_image_args(a2)

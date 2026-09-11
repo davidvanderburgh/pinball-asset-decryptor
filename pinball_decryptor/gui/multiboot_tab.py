@@ -492,6 +492,42 @@ class ImageRow:
     #: RANDOM|CUSTOM1|CUSTOM2?").  False = the group swallows them, which is
     #: the forty-variant jukebox and stays the default.
     keep: bool = False
+    #: HOW IT PICKS: one of ROLL_MODES.  "" reads as the card's own default,
+    #: which is what a card built before there was a choice does.
+    roll: str = ""
+
+
+#: HOW A RANDOM CARD PICKS (David, 2026-09-11: "so is it truly random if it is
+#: remembering the last choice? ... We should make it truly random instead i
+#: think. and make it an option ... to change it to a 'shuffle' type (like
+#: perceived random like ipod)").  ``(mode, label)`` in the order the dialog
+#: offers them.
+ROLL_MODES = (
+    ("any", "Truly random - it can give you the same one twice"),
+    ("shuffle", "Shuffle - every game once before any repeats"),
+    ("not-last", "Never the one it booted last"),
+)
+#: What a NEW random card does, which is what the word says on the tin.
+ROLL_DEFAULT = "any"
+#: ...and what a card with no rule on it does, which is what every card built
+#: before there was a choice did.  The two differ on purpose: a card already in
+#: the world must not change under its owner, and a new one should do the
+#: obvious thing.
+ROLL_FALLBACK = "not-last"
+ROLL_NAMES = tuple(m for m, _label in ROLL_MODES)
+
+
+def row_roll(row):
+    """How a random card picks, as one of :data:`ROLL_NAMES`."""
+    v = (getattr(row, "roll", "") or "").strip().lower()
+    return v if v in ROLL_NAMES else ROLL_FALLBACK
+
+
+def roll_label(mode):
+    for m, label in ROLL_MODES:
+        if m == mode:
+            return label
+    return mode
 
 
 def is_group(row):
@@ -1717,6 +1753,15 @@ def _media_image_args(form):
     return args
 
 
+def group_roll_args(form):
+    """``--group-roll G=MODE`` for every random card, spelled out - so what the
+    dialog says is what the card does, whatever the conf's own default is."""
+    args = []
+    for gi, _ri, row, _imgs in form_groups(form):
+        args += ["--group-roll", "%d=%s" % (gi, row_roll(row))]
+    return args
+
+
 def _image_args(form):
     """--primary, then each row IN TABLE ORDER as either an --extra or a
     --group with its --member games.  The order matters: mkmulticard reads
@@ -1822,7 +1867,7 @@ def preview_prepare_args(form, media_dir):
 def plan_args(form):
     """``mkmulticard.py plan``: the layout and whether it fits 16G / 32G.
     Writes nothing."""
-    return ([MKMULTICARD, "plan"] + _image_args(form)
+    return ([MKMULTICARD, "plan"] + _image_args(form) + group_roll_args(form)
             + ["--layout", "store" if form_compact(form) else "auto"] + cache_dir_args())
 
 
@@ -1843,7 +1888,7 @@ def build_args(form):
             m = row.members[mi]
             titles.append((m.title or "").strip() or suggest_title(path)[0])
             subtitles.append("")
-    args = [MKMULTICARD, "build"] + _image_args(form) + [
+    args = [MKMULTICARD, "build"] + _image_args(form) + group_roll_args(form) + [
         "--out", wsl(form.out.strip().strip('"')),
         "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
         "--layout", "store" if form_compact(form) else "auto",
@@ -1936,7 +1981,8 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
               for r in form.images]
     subtitles = [(r.subtitle or "").strip() for r in form.images]
     args = [MKMULTICARD, "update",
-            "--card", wsl(card.strip().strip('"'))] + _image_args(form) + [
+            "--card", wsl(card.strip().strip('"'))] + _image_args(form)
+    args += group_roll_args(form) + [
             "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
             "--titles", ";".join(titles),
             "--subtitles", ";".join(subtitles),
@@ -1985,7 +2031,7 @@ def preview_highlight(form, row_index):
 
 def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
                           rootfs=DEFAULT_ROOTFS, frames=1, loading=None,
-                          last_image=None):
+                          roll_state=None):
     """``qemu-arm-static -L <rootfs> <codeselect> --snapshot <ppm> ...``:
     ONE menu frame as the machine would show it - the conf, the media,
     the CARD highlighted, the animation at frame N, the countdown as if just
@@ -2012,14 +2058,15 @@ def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
         # costs one more PPM out of a load that has already happened, and it is
         # the only way to see what a RANDOM card says it rolled.
         args += ["--loading-out", wsl(loading)]
-    if last_image is not None and int(last_image) >= 0:
-        # THE MACHINE NEVER HANDS BACK THE BUILD YOU JUST HAD, and it knows
-        # which that was from its own memory on the card.  A snapshot reads no
-        # such file - it writes nothing and must not depend on the machine's
-        # memory - so the preview passes what IT last rolled, and the roll here
-        # is then the roll there (David, 2026-09-11: "the preview needs to show
-        # the same random logic as the machine").
-        args += ["--last-image", str(int(last_image))]
+    if roll_state:
+        # THE ROLL'S MEMORY, which is what makes the preview's roll the
+        # machine's roll: what was booted last, and what each shuffle has
+        # already dealt.  A snapshot reads no last-choice file - it writes
+        # nothing and must not depend on the machine's memory - so the preview
+        # names a file of its own and the selector reads and writes THAT one
+        # (David, 2026-09-11: "the preview needs to show the same random logic
+        # as the machine").
+        args += ["--roll-state", wsl(roll_state)]
     return args + ["--input", "none"]
 
 
@@ -2590,7 +2637,7 @@ def ensure_selector_commands(form, cwd=None, card=""):
 
 def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
                       rootfs=DEFAULT_ROOTFS, cwd=None, frames=1, loading=None,
-                      last_image=None):
+                      roll_state=None):
     """One snapshot step.  A run of frames is ONE step and is labelled
     :data:`ANIM_LABEL` - what a failure of it is named after, and what the
     finished step's own output is read back through."""
@@ -2598,7 +2645,7 @@ def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
     return [(label,
              wsl_command(preview_snapshot_args(binary, conf, media_dir, ppm,
                                                highlight, frame, rootfs,
-                                               frames, loading, last_image),
+                                               frames, loading, roll_state),
                          cwd, exe=None))]
 
 
@@ -3083,7 +3130,11 @@ def group_rows(rows, groups):
                    for m in (g.get("members") or [])]
         card = ImageRow(path="", title=g.get("title") or "RANDOM",
                         subtitle=g.get("subtitle") or "", members=members,
-                        keep=bool(g.get("keep")))
+                        keep=bool(g.get("keep")),
+                        # HOW IT PICKS comes back with it: a card built before
+                        # there was a choice reports none, and that reads as
+                        # what such a card does (see row_roll).
+                        roll=(g.get("roll") or ""))
         # the card's own media is the group's, not its first member's row
         for key in ("art", "anim", "music", "confirm"):
             val = (g.get(key) or "")
@@ -4735,6 +4786,25 @@ class ImageEditorDialog(_Modal):
                        "shows while the image is not highlighted.").pack(
             anchor=tk.W, padx=8, pady=(0, 6))
 
+        if self._group:
+            # HOW IT PICKS.  Its own box, because it is not what the card
+            # SHOWS - it is what the card DOES, and it is the only question a
+            # random card has that an image does not (David, 2026-09-11).
+            rollbox = ttk.LabelFrame(b, text="How it picks")
+            rollbox.pack(fill=tk.X, pady=(10, 0))
+            rg = ttk.Frame(rollbox)
+            rg.pack(fill=tk.X, padx=8, pady=6)
+            for r, (mode, label) in enumerate(ROLL_MODES):
+                ttk.Radiobutton(rg, text=label, value=mode,
+                                variable=panel._ed_roll).grid(
+                    row=r, column=0, sticky=tk.W, pady=3)
+            ttk.Label(rollbox, foreground=th["gray"], wraplength=500,
+                      justify=tk.LEFT,
+                      text="The machine remembers across power-ups: a shuffle "
+                           "deals every game once before any of them comes "
+                           "round again, and picks up where it left off.").pack(
+                anchor=tk.W, padx=8, pady=(0, 6))
+
         soundbox = ttk.LabelFrame(b, text="Sounds")
         soundbox.pack(fill=tk.X, pady=(10, 0))
         snd = ttk.Frame(soundbox)
@@ -5441,6 +5511,7 @@ class MultibootPanel:
         #: keeps its own, so switching back and forth loses nothing), and
         #: the clip fields either video kind uses.
         self._ed_media = tk.StringVar(value="logo")
+        self._ed_roll = tk.StringVar(value=ROLL_DEFAULT)
         self._ed_picture = tk.StringVar()
         self._ed_video = tk.StringVar()
         self._ed_music = tk.StringVar(value="none")
@@ -5449,7 +5520,7 @@ class MultibootPanel:
         self._ed_media_vars = (self._ed_media, self._ed_picture,
                                self._ed_video, self._ed_anim_start)
         for var in (self._ed_title, self._ed_sub, self._ed_music,
-                    self._ed_confirm):
+                    self._ed_confirm, self._ed_roll):
             var.trace_add("write", lambda *_a: self._editor_changed())
         # ...and a write to what the image SHOWS is the one time the row's
         # art and animation are derived again from the dialog's choice.
@@ -5550,9 +5621,6 @@ class MultibootPanel:
         self._pv_loading = False        # a programmatic write, not a typed one
         self._black_still = None        # the LOADING frame the beat is holding
         self._pv_load_frame = None      # ...and the one the last render wrote
-        #: What each random card rolled last, by CARD - the exclusion the
-        #: machine keeps on the card, kept here for the preview instead.
-        self._pv_rolls = {}
         self._hl_touched = False        # Highlight typed by hand: stop following Default
         self._play_job = None
         self._play_fp = None
@@ -5648,7 +5716,7 @@ class MultibootPanel:
                                   lambda *_a: self._frame_changed(typed=True))
         # ...and everything that changes the picture asks for a re-render.
         for var in (self._ed_title, self._ed_sub, self._ed_music,
-                    self._ed_confirm) + self._ed_media_vars + (
+                    self._ed_confirm, self._ed_roll) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._default_var,
                     self._out_var, self._selector_var,
@@ -7528,6 +7596,7 @@ class MultibootPanel:
             self._ed_video.set(path if kind == "video" else "")
             self._ed_music.set(row.music)
             self._ed_confirm.set(row.confirm or "menu")
+            self._ed_roll.set(row_roll(row))
             # A still taken off a video with no clip yet (an older form)
             # keeps its second as the clip's start.
             self._ed_anim_start.set(row.anim_start or (
@@ -7558,6 +7627,9 @@ class MultibootPanel:
                 setattr(row, flag, False)
         row.title = self._ed_title.get()
         row.subtitle = self._ed_sub.get()
+        if is_group(row):
+            v = self._ed_roll.get().strip()
+            row.roll = v if v in ROLL_NAMES else ROLL_DEFAULT
         was = (row.music, row.confirm)
         row.music = self._ed_music.get()
         # "menu" is what the box says and "" is what the row keeps, so a row
@@ -7752,7 +7824,8 @@ class MultibootPanel:
         members = [MemberRow(path=q, title=suggest_title(q)[0]) for q in paths]
         self._rows.append(set_group_media(
             ImageRow(path="", title=title or "RANDOM", subtitle=subtitle,
-                     members=members, keep=keep), GROUP_MEDIA_DEFAULT))
+                     members=members, keep=keep, roll=ROLL_DEFAULT),
+            GROUP_MEDIA_DEFAULT))
         self._refresh_tree(select=len(self._rows) - 1)
         # a group forces the compact build; show that in the tick straight away
         self._sync_compact_lock()
@@ -7786,7 +7859,7 @@ class MultibootPanel:
                    for r in plain]
         self._rows.append(set_group_media(
             ImageRow(path="", title=title, subtitle=subtitle, members=members,
-                     keep=True), GROUP_MEDIA_DEFAULT))
+                     keep=True, roll=ROLL_DEFAULT), GROUP_MEDIA_DEFAULT))
         self._refresh_tree(select=len(self._rows) - 1)
         self._ok("")
 
@@ -10536,15 +10609,11 @@ class MultibootPanel:
                                  preview_highlight(form, hl), 0,
                                  rootfs_for(form.selector_dir),
                                  loading=path,
-                                 last_image=self._pv_rolls.get(hl))
+                                 roll_state=self._roll_state_path())
 
         def done(rc, failed, texts):
             img = rolled_image(texts.get(cmds[0][0], "")) if rc == 0 else None
             if img is not None:
-                # ...and it is the last one for the NEXT press, so the preview
-                # never hands the same build back twice running - which is the
-                # machine's own rule
-                self._pv_rolls[hl] = img
                 # SAY WHICH ONE, where a person can see it: the two builds of a
                 # jukebox share a title, so the frame alone can leave you
                 # guessing whether it rolled at all.
@@ -10561,6 +10630,16 @@ class MultibootPanel:
 
         return bool(self._run_commands(cmds, on_done=done, preview=True,
                                        quiet=[c[0] for c in cmds]))
+
+    def _roll_state_path(self):
+        """The preview's OWN copy of the roll's memory - what was booted last
+        and what each shuffle has dealt.
+
+        The machine keeps this on the card, beside its last choice; the preview
+        keeps one in its own directory, so pressing Select walks the same deck
+        the machine would without ever reading or writing the machine's."""
+        pv = preview_dir_for(self.form().out)
+        return os.path.join(pv, "roll.state") if pv else ""
 
     def _loading_frame(self):
         """The LOADING frame the last render asked for, or None.

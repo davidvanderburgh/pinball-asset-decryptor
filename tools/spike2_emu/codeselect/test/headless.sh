@@ -564,10 +564,10 @@ grep -q "highlight 4 (JUKEBOX) from conf default, card 4/4 (group JUKEBOX, 3 mem
 chose=$(cat "$T/choice")
 case "$chose" in 3|4|5) ;; *) echo "headless: FAIL the group booted image '$chose', not one of 3-5"; exit 1;; esac
 expect "$T/last" "$chose"
-grep -q "group: card 4 boots image $chose (rolled from JUKEBOX: 3 candidates" "$T/grp.log" || {
+grep -q "group: card 4 boots image $chose (rolled from JUKEBOX (not-last): 3 candidates" "$T/grp.log" || {
     echo "headless: FAIL no roll line"; grep "group:" "$T/grp.log"; exit 1; }
 # `chose N` keeps its prefix - padsw_test.py greps it - and gains the clause
-grep -qE "chose $chose JUKEBOX - set [123] \(rolled from JUKEBOX: 3 candidates" "$T/grp.log" || {
+grep -qE "chose $chose JUKEBOX - set [123] \(rolled from JUKEBOX \(not-last\): 3 candidates" "$T/grp.log" || {
     echo "headless: FAIL the chose line lost its shape"; grep "chose " "$T/grp.log"; exit 1; }
 
 # 15b. --pick boots a named member without rolling; a --pick that is not a
@@ -862,30 +862,62 @@ grep -qF "card 1 boots image 0 (STERN STOCK)" "$T/snap.out" || {
     echo "headless: FAIL an ordinary card's loading frame"; cat "$T/snap.out"; exit 1; }
 band "$T/ldg2.loading.ppm" 400 200 960 380 C03040
 
-# 16h. --last-image: THE PREVIEW'S ROLL IS THE MACHINE'S ROLL.  The machine
-#      never hands back the build you just had, and it knows which that was from
-#      its own memory on the card.  A snapshot reads no such file - it writes
-#      nothing and must not depend on the machine's memory - so the caller says
-#      what was booted last, and the exclusion is then the same one.
-for k in 1 2 3 4 5 6 7 8 9 10; do
+# 16h. HOW A RANDOM CARD PICKS, and the preview picking the same way.  The
+#      word sits in the member spec: `any` (dice, repeats and all), `not-last`
+#      (never the one it booted last - the default, and with two members that
+#      alternates for ever) and `shuffle` (every member once before any of them
+#      comes round again).  --roll-state is the roll's memory for a SNAPSHOT:
+#      read before and written after, so a preview rolls exactly as the machine
+#      does without touching the machine's own file.
+mkroll() {  # mkroll WORD - the 3-member JUKEBOX conf, picking that way
+    sed "s#^group=3-5|#group=$1:3-5|#" "$T/group.conf" > "$T/roll.conf"
+}
+rollonce() {  # rollonce STATE -> the image it rolled
     rm -f "$T/choice" "$T/last"
-    snap "$T/lx.ppm" "$T/ldg.conf" --media "$T/media" --highlight-card 2 \
-         --loading-out "$T/lx.loading.ppm" --last-image 0
-    grep -oE 'boots image [0-9]+' "$T/snap.out" | head -1
-done | sort -u > "$T/lx.out"
-[ "$(cat "$T/lx.out")" = "boots image 1" ] || {
-    echo "headless: FAIL --last-image 0 did not exclude image 0 every time"
-    cat "$T/lx.out"; exit 1; }
+    snap "$T/rl.ppm" "$T/roll.conf" --media "$T/media" --highlight-card 3 \
+         --loading-out "$T/rl.loading.ppm" --roll-state "$1"
+    grep -oE 'boots image [0-9]+' "$T/snap.out" | head -1 | awk '{print $3}'
+}
+# SHUFFLE deals all three before any of them comes round again
+mkroll shuffle
+rm -f "$T/roll.state"
+got=$( { rollonce "$T/roll.state"; rollonce "$T/roll.state"; rollonce "$T/roll.state"; } | sort | tr '\n' ' ')
+[ "$got" = "3 4 5 " ] || {
+    echo "headless: FAIL shuffle dealt '$got', not each of 3 4 5 once"; exit 1; }
+grep -q "^bag0=" "$T/roll.state" || {
+    echo "headless: FAIL the deck was not written to the roll state"
+    cat "$T/roll.state"; exit 1; }
+# ...and the fourth reshuffles rather than coming out empty
+fourth=$(rollonce "$T/roll.state")
+case "$fourth" in 3|4|5) ;; *) echo "headless: FAIL the reshuffle gave '$fourth'"; exit 1;; esac
+# NOT-LAST never repeats the one before it
+mkroll not-last
+rm -f "$T/roll.state3"
+prev=""
+for k in 1 2 3 4 5 6; do
+    now=$(rollonce "$T/roll.state3")
+    [ "$now" != "$prev" ] || { echo "headless: FAIL not-last repeated image $now"; exit 1; }
+    grep -q "(not-last)" "$T/snap.out" || {
+        echo "headless: FAIL the log does not say how it picked"; exit 1; }
+    prev=$now
+done
+# ANY may repeat - it is the dice - and considers every member every time
+mkroll any
+rm -f "$T/roll.state4"
+rollonce "$T/roll.state4" > /dev/null
+grep -q "rolled from JUKEBOX (any): 3 candidates" "$T/snap.out" || {
+    echo "headless: FAIL 'any' did not consider every member"; cat "$T/snap.out"; exit 1; }
+
+# a word nobody knows is dropped out loud, and the card still works
+sed 's#^group=any:3-5|#group=sideways:3-5|#' "$T/roll.conf" > "$T/roll5.conf"
 rm -f "$T/choice" "$T/last"
-snap "$T/lx2.ppm" "$T/ldg.conf" --media "$T/media" --highlight-card 2 \
-     --loading-out "$T/lx2.loading.ppm" --last-image 1
-grep -q "boots image 0" "$T/snap.out" || {
-    echo "headless: FAIL --last-image 1 did not exclude image 1"
-    cat "$T/snap.out"; exit 1; }
-# a group of two with one excluded has ONE candidate, which is what the machine
-# says of the same roll
-grep -q "1 candidate" "$T/snap.out" || {
-    echo "headless: FAIL the exclusion did not reach the roll"; cat "$T/snap.out"; exit 1; }
+rm -f "$T/choice" "$T/last"
+snap "$T/rl.ppm" "$T/roll5.conf" --media "$T/media" --highlight-card 3 \
+     --loading-out "$T/rl.loading.ppm" --log "$T/roll5.log"
+grep -q "is not any / not-last / shuffle" "$T/roll5.log" || {
+    echo "headless: FAIL an unknown picking rule was silent"; grep conf: "$T/roll5.log"; exit 1; }
+grep -q "rolled from JUKEBOX (not-last)" "$T/snap.out" || {
+    echo "headless: FAIL the default did not stand in"; cat "$T/snap.out"; exit 1; }
 
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"

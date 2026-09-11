@@ -6261,7 +6261,7 @@ class MultibootPanel:
     #: the strip less room and cuts a caption that used to fit.  So the
     #: table stays at least as wide as the one before it.
     TABLE_COLUMNS = (
-        ("title", "Title", 160, True),
+        ("title", "Title", 175, True),
         ("sub", "Subtitle", 170, True),
         ("media", "Picture", 220, True),
         ("music", "Music", 95, True),
@@ -7444,12 +7444,20 @@ class MultibootPanel:
     #: shows only this, which is both the way in and the lesson.
     #: THE TEMPLATE ROW'S WORDS, and they have to FIT: the row sits in the
     #: same grid as every other one (see image_table._Row) and says its
-    #: words in the Title column, which is about 30 characters wide - so a
-    #: longer label is simply cut off, and cut off sooner on a narrow
-    #: window (David, 2026-09-10: "narrow app window widths, the label for
-    #: 'add a game image or random group' is getting cut off").  The full
-    #: sentence lives in LIST_TIP, which has no width to fit.
-    ADD_ROW_TEXT = "Add image or random group…"
+    #: words in the Title column, so a longer label is simply cut off, and
+    #: cut off sooner on a narrow window (David, 2026-09-10: "narrow app
+    #: window widths, the label for 'add a game image or random group' is
+    #: getting cut off").  The full sentence lives in LIST_TIP, which has
+    #: no width to fit.
+    #:
+    #: HOW MANY CHARACTERS THAT IS depends on the FONT, which is why this
+    #: label is as short as it is: the column is a pixel minsize divided by
+    #: the width of a "0" in TkDefaultFont, so Windows holds 28 of them and
+    #: the Linux and macOS CI runners hold 22.  A caption written to the
+    #: Windows number ships a cut-off label to everyone else - which is how
+    #: the 26-character version got through a green local suite and was
+    #: caught by test_the_add_rows_words_fit_the_column_they_sit_in on CI.
+    ADD_ROW_TEXT = "Add image or random…"
 
     def _values(self, i, row):
         """ONE ROW OF THE TABLE, as a dict keyed by column id: the title

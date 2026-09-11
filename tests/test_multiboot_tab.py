@@ -28,7 +28,8 @@ import pytest
 from tests.conftest import HAS_DISPLAY
 from tests.test_gui_smoke import app  # noqa: F401  (fixture)
 
-from pinball_decryptor.gui import emulate_tab, multiboot_tab
+from pinball_decryptor.gui import (emulate_tab, image_table,
+                                  multiboot_tab)
 from pinball_decryptor.gui.multiboot_tab import (
     ANIM_LABEL, DEFAULT_SELECTOR_DIR, FRAME_H, FRAME_W, INSPECT_JSON,
     PREVIEW_BUILD_DIR, PREVIEW_MAX_FRAMES,
@@ -8894,8 +8895,14 @@ def test_the_add_row_is_the_way_into_a_group(tmp_path):
         # every one of them names a method that exists and is callable
         for _lbl, attr, _live, _why in panel.add_row_choices():
             assert callable(getattr(panel, attr))
-        # and the row itself says a group is on offer, not just an image
-        assert "random group" in panel.ADD_ROW_TEXT.lower()
+        # and the row itself says a RANDOM card is on offer, not just an
+        # image.  It cannot ALSO say "group" and still fit the Title column
+        # where TkDefaultFont is wider than Windows' - that is what
+        # test_the_add_rows_words_fit_the_column_they_sit_in caught on CI
+        # (26 characters into a column holding 20).  So the word lives in
+        # the choices the row opens, and in the tip.
+        assert "random" in panel.ADD_ROW_TEXT.lower()
+        assert any("group" in c[0].lower() for c in panel.add_row_choices())
     finally:
         root.destroy()
 _OK_PATH = ("missing", "Build & verify will write a new card at x.", "gray", False)
@@ -9075,6 +9082,19 @@ def test_the_add_rows_words_fit_the_column_they_sit_in():
         assert len(panel.ADD_ROW_TEXT) <= chars, (
             "%r is %d characters and the Title column holds %d"
             % (panel.ADD_ROW_TEXT, len(panel.ADD_ROW_TEXT), chars))
+        # ...AND IT HAS TO FIT SOMEBODY ELSE'S FONT.  cell_chars is a pixel
+        # minsize divided by the width of a "0" in TkDefaultFont, so the line
+        # above only judges the machine it runs on: Windows draws a 7 px digit
+        # and holds 28 characters, while the Linux and macOS runners draw 9 px
+        # and hold 22.  A caption written to the Windows number is cut off for
+        # everyone else - v0.203.0 was tagged with a 26-character one and
+        # yanked when CI said so.  9 px is the widest digit measured.
+        narrow = max(3, int(panel.TABLE_COLUMNS[0][2]
+                            * image_table.CELL_FUDGE) // 9)
+        assert len(panel.ADD_ROW_TEXT) <= narrow, (
+            "%r is %d characters; the Title column holds %d of them where a "
+            "digit is 9 px wide (Linux and macOS)"
+            % (panel.ADD_ROW_TEXT, len(panel.ADD_ROW_TEXT), narrow))
         # it still says both things it is for
         low = panel.ADD_ROW_TEXT.lower()
         assert "image" in low and "random" in low

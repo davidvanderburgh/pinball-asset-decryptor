@@ -1593,7 +1593,7 @@ HELP_CONTENT = {
          "card in the menu can also stand for SEVERAL games and boot one "
          "of them at random - see \u201cA card that picks for you\u201d below."),
         ("A card that picks for you",
-         "Add image or random group\u2026 at the foot of the list offers three "
+         "Add image or random\u2026 at the foot of the list offers three "
          "more things beside a plain image: a random card over the images "
          "already on the card, a random card with games of its own, and "
          "the same from a whole folder of them. Either way it is ONE card "

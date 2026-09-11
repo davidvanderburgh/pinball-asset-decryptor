@@ -1424,6 +1424,7 @@ def _stub_group_card(sm, tmp_path, monkeypatch, n=2):
     return paths, (lambda p: (None, None, "title"))
 
 
+@pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
 def test_a_random_cards_picture_is_rendered_cached_and_checked(sm, tmp_path, monkeypatch):
     """_prepare_group end to end. TWO BUGS LIVED HERE and neither unit test saw
     them, because both were in the plumbing around the renderers: the cache
@@ -1469,6 +1470,7 @@ def test_a_random_cards_picture_is_rendered_cached_and_checked(sm, tmp_path, mon
     assert not any("cached" in line for line in said), said
 
 
+@pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
 def test_an_oversized_random_card_animation_is_refused_with_the_reason(sm, tmp_path,
                                                                       monkeypatch):
     images, card = _stub_group_card(sm, tmp_path, monkeypatch)

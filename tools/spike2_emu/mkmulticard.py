@@ -8451,12 +8451,16 @@ def main(argv=None):
         elif a.cmd == "verify":
             subs = multi_subdirs_on(a.card, 7)
             subs3 = store_subdirs_on(a.card)
-            if subs3 and len(Geometry.from_file(a.card).logical) == 2:
+            logicals = Geometry.from_file(a.card).logical
+            if subs3 and len(logicals) in (2, 3):
+                # a store card: p5/p6 after the grown p3, and (item 107) a third logical is
+                # the deltas' work partition - the plan is taken off the card, as plan_from_card
+                # reads it, so the verify holds the table the build wrote
                 if a.extra and len(a.extra) != len(subs3):
                     raise Refused("%s holds %d trees in its store (%s) but %d --extra were given"
                                   % (a.card, len(subs3), "/".join(subs3), len(a.extra)))
                 plan = make_plan(a.primary, a.extra, "store", store_sectors=Geometry.from_file(a.card).part(3)[2],
-                                 multi_subdirs=subs3)
+                                 multi_subdirs=subs3, work_sectors=logicals[2][3] if len(logicals) == 3 else None)
             elif subs:
                 # the multi layout: p7's size and subdirectories as the build chose them, off the card
                 if a.extra and len(a.extra) != len(subs):

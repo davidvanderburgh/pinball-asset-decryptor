@@ -999,10 +999,14 @@ def apply_changes(ops, prefix, changes, new, source, progress=None, store=False,
                         dtmp = BLOBS_DIR + "/" + TMP_MARK + dname + "." + str(os.getpid())
                         if ops.exists(dtmp):
                             ops.unlink(dtmp)
-                        # the meter counts the SOURCE read (the whole file goes by), not the delta out
+                        # the meter counts the SOURCE read (the whole file goes by), not the delta out.
+                        # WORLD-READABLE, deliberately: on the machine root reads it, but the
+                        # emulator rig reads the card through a user's fuse2fs mount, which honours
+                        # the inode - a 0600 root delta was "Permission denied" there while every
+                        # base blob (the game's own 0664) read fine (2026-09-11, the first real run)
                         ops.write_stream(dtmp, mz.delta_chunks(dplan["base"], r.sha256, r.size, ranges,
                                                                _metered(source.chunks(c.rel), p)),
-                                         0o600, 0, 0, r.mtime)
+                                         0o644, 0, 0, r.mtime)
                         ops.rename(dtmp, dblob)
                         stats["deltas"] += 1
                         stats["delta_bytes"] += mz.payload_bytes(ranges)

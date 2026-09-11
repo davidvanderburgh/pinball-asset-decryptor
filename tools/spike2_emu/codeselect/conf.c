@@ -143,11 +143,16 @@ static int add_card(struct conf *c, int image, int group, const char *path, char
     cd->image = image;
     cd->group = group;
     if (image >= 0) {
+        /* AN IMAGE'S OWN CARD ALWAYS WINS the highlight.  A kept member has two
+         * cards, and the one a player means when they pick that build is its
+         * own - so this overwrites the group's claim, and it runs later because
+         * the group line sits before its members. */
         c->card_of[image] = (short)c->ncards;
     } else {
         int k;
         for (k = 0; k < c->grp[group].nmember; k++)
-            c->card_of[c->grp[group].member[k]] = (short)c->ncards;
+            if (c->card_of[c->grp[group].member[k]] < 0)
+                c->card_of[c->grp[group].member[k]] = (short)c->ncards;
     }
     c->ncards++;
     return 0;
@@ -162,14 +167,14 @@ static int resolve_groups(struct conf *c, const int *gpos, const int *gline,
 {
     int owner[CONF_MAX_IMAGES];
     int dropped[CONF_MAX_GROUPS], placed[CONF_MAX_GROUPS];
-    int i, gi, k, keep;
+    int i, gi, k, nkeep;
 
     for (i = 0; i < CONF_MAX_IMAGES; i++) { owner[i] = -1; c->card_of[i] = -1; }
     for (gi = 0; gi < CONF_MAX_GROUPS; gi++) { dropped[gi] = 0; placed[gi] = 0; }
 
     for (gi = 0; gi < c->ngroups; gi++) {
         struct conf_group *g = &c->grp[gi];
-        keep = 0;
+        nkeep = 0;
         for (k = 0; k < g->nmember; k++) {
             int m = g->member[k];
             if (m < 0 || m >= c->n) {
@@ -177,9 +182,12 @@ static int resolve_groups(struct conf *c, const int *gpos, const int *gline,
                           path, gline[gi], m);
                 continue;
             }
-            if (m == 0) {
-                conf_warn(c, "%s:%d: image 0 is the primary and cannot be a group member: dropped",
-                          path, gline[gi]);
+            if (m == 0 && !g->keep) {
+                /* a CONSUMING group would take the primary's own card away, and
+                 * the primary is what the machine boots when the menu is not
+                 * honoured.  A KEEPING group leaves that card where it is. */
+                conf_warn(c, "%s:%d: image 0 is the primary and cannot be a member of a "
+                          "consuming group: dropped", path, gline[gi]);
                 continue;
             }
             if (owner[m] >= 0) {
@@ -188,16 +196,16 @@ static int resolve_groups(struct conf *c, const int *gpos, const int *gline,
                 continue;
             }
             owner[m] = gi;
-            g->member[keep++] = m;
+            g->member[nkeep++] = m;
         }
-        g->nmember = keep;
-        if (keep == 0) {
+        g->nmember = nkeep;
+        if (nkeep == 0) {
             conf_warn(c, "%s:%d: group '%s' has no usable member: dropped",
                       path, gline[gi], g->card.title);
             dropped[gi] = 1;
             continue;
         }
-        if (keep == 1)
+        if (nkeep == 1)
             conf_warn(c, "%s:%d: group '%s' has one member: it behaves as a plain card",
                       path, gline[gi], g->card.title);
         if (!*g->card.title) copy_field(g->card.title, c->img[g->member[0]].title);
@@ -211,7 +219,10 @@ static int resolve_groups(struct conf *c, const int *gpos, const int *gline,
             if (add_card(c, -1, gi, path, err, errlen) < 0) return -1;
             placed[gi] = 1;
         }
-        if (owner[i] >= 0) continue;
+        /* a member of a CONSUMING group has no card of its own; a member of a
+         * KEEPING group has both, and its own is the one the highlight prefers
+         * (see conf_card_of_image) */
+        if (owner[i] >= 0 && !c->grp[owner[i]].keep) continue;
         if (add_card(c, i, -1, path, err, errlen) < 0) return -1;
     }
     /* a group= line written past the last image line still gets its card */
@@ -235,6 +246,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     memset(gpos, 0, sizeof gpos);
     memset(gline, 0, sizeof gline);
     c->def = -1;
+    c->def_card = -1;
     c->timeout = -1;
     c->volume = -1;
     c->volume_machine = 0;
@@ -296,12 +308,20 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             g = &c->grp[c->ngroups];
             split_fields(val, fld);
             copy_card_fields(&g->card, fld);
-            parse_members(c, g, fld[0] ? fld[0] : "", path, lineno);
+            {
+                /* a leading '+' means the members KEEP their own cards as well
+                 * as appearing behind this one */
+                const char *spec = fld[0] ? fld[0] : "";
+                if (*spec == '+') { g->keep = 1; spec++; }
+                parse_members(c, g, spec, path, lineno);
+            }
             gpos[c->ngroups] = c->n;
             gline[c->ngroups] = lineno;
             c->ngroups++;
         } else if (!strcmp(key, "default")) {
             c->def = atoi(val);
+        } else if (!strcmp(key, "default_card")) {
+            c->def_card = atoi(val);
         } else if (!strcmp(key, "timeout")) {
             c->timeout = atoi(val);
         } else if (!strcmp(key, "font")) {
@@ -356,6 +376,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     }
     if (resolve_groups(c, gpos, gline, path, err, errlen) < 0) return -1;
     if (c->def >= c->n) c->def = -1;
+    if (c->def_card >= c->ncards) c->def_card = -1;
     return 0;
 }
 

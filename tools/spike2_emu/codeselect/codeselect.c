@@ -98,6 +98,7 @@ struct opts {
     /* THE TWO GROUP KNOBS, FOR TESTS AND PROOF RUNS ONLY (item 106).  Neither
      * is ever written to a card: a jukebox that always picked the same member
      * would look exactly like one that was working. */
+    int highlight_card; /* --highlight-card: a CARD index, for a keeping group's card */
     int pick;         /* boot this image instead of rolling; -1 = roll */
     int seed;         /* make the roll reproducible; -1 = stir it for real */
 };
@@ -131,6 +132,8 @@ static void usage(FILE *f)
         "                     audio, choice or last file (the preview)\n"
         "  --highlight N      --snapshot only: the highlighted card (default conf default=, else 0;\n"
         "                     the last-choice file is never read)\n"
+        "  --highlight-card N highlight CARD N (menu order) rather than an image; the only way\n"
+        "                     to name a keeping group's card\n"
         "  --pick N           boot image N instead of rolling a group card's member (tests)\n"
         "  --seed N           make a group card's roll reproducible (tests)\n"
         "  --frames K         --snapshot only: write K frames (1-%d) from one load, starting at\n"
@@ -210,6 +213,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
     o->anim_frame = -1;
     o->highlight = -1;
     o->frames = 1;
+    o->highlight_card = -1;
     o->pick = -1;
     o->seed = -1;
     for (i = 1; i < argc; i++) {
@@ -241,6 +245,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
         if (!strcmp(a, "--anim-frame")) { if (!v) goto missing; o->anim_frame = atoi(v); i++; continue; }
         if (!strcmp(a, "--highlight")) { if (!v) goto missing; o->highlight = atoi(v); i++; continue; }
         if (!strcmp(a, "--frames")) { if (!v) goto missing; o->frames = atoi(v); i++; continue; }
+        if (!strcmp(a, "--highlight-card")) { if (!v) goto missing; o->highlight_card = atoi(v); i++; continue; }
         if (!strcmp(a, "--pick")) { if (!v) goto missing; o->pick = atoi(v); i++; continue; }
         if (!strcmp(a, "--seed")) { if (!v) goto missing; o->seed = atoi(v); i++; continue; }
         if (!strcmp(a, "--invert")) { o->invert = 1; continue; }
@@ -896,9 +901,19 @@ static int roll_member(const struct conf *c, int card, int last, int seed,
     const char *src = "urandom+clock";
     unsigned s = 0;
 
-    for (k = 0; k < n; k++) {
-        int m = conf_card_member(c, card, k);
-        if (m != last) cand[nc++] = m;
+    /* EXCLUDED BY DEVICE, not merely by index.  A KEEPING group's members also
+     * have cards of their own, so the same build can be reached two ways - and
+     * a player who has just booted it from its own card would otherwise have
+     * the group hand it straight back, which is the one thing this card
+     * promises not to do. */
+    {
+        const char *lastdev = (last >= 0 && last < c->n) ? c->img[last].device : NULL;
+        for (k = 0; k < n; k++) {
+            int m = conf_card_member(c, card, k);
+            if (m == last) continue;
+            if (lastdev && *lastdev && !strcmp(c->img[m].device, lastdev)) continue;
+            cand[nc++] = m;
+        }
     }
     /* a one-member group, or a last choice that is the only member: the
      * exclusion has to give way, it never leaves the menu with nothing */
@@ -1224,8 +1239,28 @@ int main(int argc, char **argv)
      * mapping is what lets a remembered member light its jukebox card up
      * again, and it is why a group needs no state file of its own: the next
      * countdown rolls from that card afresh (item 106). */
-    lastimg = -1;
-    if (snapshot) {
+    /* ONE LADDER, most specific first.  Two of the rungs name a CARD and the
+     * rest name an IMAGE, which is the whole subtlety: `default=` and the
+     * last-choice file have always spoken images, and a card named outright is
+     * the only way to reach a KEEPING group's card, because once its members
+     * keep cards of their own no image index resolves to the group. */
+    /* THE LAST CHOICE IS READ BEFORE THE LADDER, not inside one of its rungs.
+     * It is TWO things: the highlight's strongest rung, and the roll's
+     * exclusion - and a rung that named a card outright used to skip the read
+     * entirely, so a group could hand back the very build the player had just
+     * booted from its own card.  The file is the machine's memory either way. */
+    lastimg = snapshot ? -1 : conf_read_last(o.last);
+    hl = -1;
+    hlimg = -1;
+    if (o.highlight_card >= 0) {
+        if (o.highlight_card >= c.ncards) {
+            sel_say("error: --highlight-card %d out of range (%d card%s)",
+                    o.highlight_card, c.ncards, c.ncards == 1 ? "" : "s");
+            return 2;
+        }
+        hl = o.highlight_card;
+        how = "--highlight-card";
+    } else if (snapshot) {
         /* the preview never reads the last-choice file: the image asked for,
          * else the conf's default, is what it shows */
         if (o.highlight >= 0) {
@@ -1238,17 +1273,29 @@ int main(int argc, char **argv)
         }
         else if (o.def >= 0 && o.def < nimg) { hlimg = o.def; how = "--default"; }
         else if (c.def >= 0 && c.def < nimg) { hlimg = c.def; how = "conf default"; }
+        else if (c.def_card >= 0) { hl = c.def_card; how = "conf default_card"; }
         else { hlimg = 0; how = "first"; }
     } else {
-        lastimg = conf_read_last(o.last);
         hlimg = lastimg;
         if (hlimg >= 0 && hlimg < nimg) how = "last choice";
         else if (o.def >= 0 && o.def < nimg) { hlimg = o.def; how = "--default"; }
         else if (c.def >= 0 && c.def < nimg) { hlimg = c.def; how = "conf default"; }
+        else if (c.def_card >= 0) { hl = c.def_card; how = "conf default_card"; }
         else { hlimg = 0; how = "first"; }
     }
-    hl = conf_card_of_image(&c, hlimg);
-    if (hl < 0) hl = 0;
+    if (hl < 0) {
+        hl = conf_card_of_image(&c, hlimg);
+        if (hl < 0) hl = 0;
+    }
+    /* A CARD-NAMED RUNG LEAVES NO IMAGE BEHIND IT, so one is derived for the
+     * log alone.  The other way round it must NOT be: `highlight` echoes the
+     * image the caller asked for, and overwriting it with the card's first
+     * member would quietly rename what somebody typed. */
+    if (hlimg < 0) {
+        hlimg = conf_card_boots(&c, hl);
+        if (hlimg < 0) hlimg = conf_card_member(&c, hl, 0);
+        if (hlimg < 0) hlimg = 0;
+    }
     headless = o.headless != NULL;
     pinned = o.anim_frame >= 0;
     /* the switch list, resolved here because --snapshot needs it too: it runs

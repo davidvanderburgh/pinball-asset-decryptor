@@ -650,7 +650,7 @@ rm -f "$T/choice" "$T/last" "$T/bad.log"
 run "$T/menu_badgroup.ppm" "$T/badgroup.conf" --no-invert --log "$T/bad.log"
 expect "$T/choice" 0
 for want in "group member 99 names no image line: dropped" \
-            "image 0 is the primary and cannot be a group member: dropped" \
+            "image 0 is the primary and cannot be a member of a consuming group: dropped" \
             "image 2 is already in the group on line 4: dropped" \
             "group member 'x' is not a number: dropped" \
             "group 'SECOND' has no usable member: dropped"; do
@@ -671,6 +671,88 @@ grep -q ", pictures " "$T/snap.out" || {
 [ -f "$T/snap_group.ppm" ] || { echo "headless: FAIL no group snapshot written"; exit 1; }
 python3 "$HERE/ppm2png.py" "$T/snap_group.ppm" "$T/codeselect_group.png"
 python3 "$HERE/ppm2png.py" "$T/menu_group.ppm" "$T/codeselect_menu_group.png"
+
+# 16. A GROUP THAT KEEPS ITS MEMBERS, and a group that is the FIRST card
+#     (item 106, reopened 2026-09-10).  David, looking at the tab refusing his
+#     list: "why can't the first one be a random group? what if i want
+#     RANDOM|CUSTOM1|CUSTOM2? I should be able to add a random at any point."
+#     A '+' on the member spec keeps the members' own cards, so one card can
+#     offer "surprise me" beside the very builds it rolls between.
+cat > "$T/keep.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|the primary
+image=/dev/mmcblk0p3:img1|CUSTOM 1|orchestral
+image=/dev/mmcblk0p3:img2|CUSTOM 2|standard
+group=+1-2|RANDOM|surprise me
+default=0
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/keep.log"
+run "$T/menu_keep.ppm" "$T/keep.conf" --no-invert --log "$T/keep.log"
+# THREE image lines, FOUR cards: the two customs keep their own AND the group
+grep -q "conf: 3 image line(s) in 4 card(s), 1 group(s)" "$T/keep.log" || {
+    echo "headless: FAIL a keeping group did not leave its members their cards"
+    grep "^ *[0-9.]* conf:" "$T/keep.log"; exit 1; }
+expect "$T/choice" 0
+
+# 16a. AN IMAGE'S OWN CARD WINS THE HIGHLIGHT.  A kept member has two cards,
+#      and the one a player means when they pick that build is its own.
+rm -f "$T/choice"; echo 1 > "$T/last"
+run "$T/menu_keep2.ppm" "$T/keep.conf" --no-invert --log "$T/keep2.log"
+grep -q "highlight 1 (CUSTOM 1) from last choice, card 2/4" "$T/keep2.log" || {
+    echo "headless: FAIL a kept member did not highlight its OWN card"
+    grep "menu:" "$T/keep2.log"; exit 1; }
+expect "$T/choice" 1
+
+# 16b. THE GROUP CARD CAN BE FIRST.  Its line sits above image 0's, and the
+#      primary is still image 0 - the two were conflated, and they are not the
+#      same thing.  Measured before this was built: the selector already did it.
+cat > "$T/first.conf" <<'EOF'
+group=+1-2|RANDOM|surprise me
+image=/dev/mmcblk0p3|STERN STOCK|the primary
+image=/dev/mmcblk0p3:img1|CUSTOM 1|orchestral
+image=/dev/mmcblk0p3:img2|CUSTOM 2|standard
+default=0
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/first.log"
+run "$T/menu_first.ppm" "$T/first.conf" --no-invert --log "$T/first.log"
+grep -q "highlight 0 (STERN STOCK) from conf default, card 2/4" "$T/first.log" || {
+    echo "headless: FAIL the group card is not first"; grep "menu:" "$T/first.log"; exit 1; }
+expect "$T/choice" 0
+
+# 16c. IMAGE 0 MAY BE A MEMBER OF A KEEPING GROUP - the primary still has a
+#      card of its own, which is the whole reason the rule existed - and may
+#      NOT be one of a consuming group.
+cat > "$T/prim.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|the primary
+image=/dev/mmcblk0p3:img1|CUSTOM 1|orchestral
+group=+0-1|RANDOM|stock or custom
+default=0
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/prim.log"
+run "$T/menu_prim.ppm" "$T/prim.conf" --no-invert --log "$T/prim.log"
+grep -q "conf: 2 image line(s) in 3 card(s), 1 group(s)" "$T/prim.log" || {
+    echo "headless: FAIL image 0 was refused by a KEEPING group"
+    grep "^ *[0-9.]* conf:" "$T/prim.log"; exit 1; }
+sed 's/^group=+0-1/group=0-1/' "$T/prim.conf" > "$T/prim2.conf"
+rm -f "$T/choice" "$T/last" "$T/prim2.log"
+run "$T/menu_prim2.ppm" "$T/prim2.conf" --no-invert --log "$T/prim2.log"
+grep -q "image 0 is the primary and cannot be a member of a consuming group" "$T/prim2.log" || {
+    echo "headless: FAIL a CONSUMING group was allowed image 0"
+    grep "^conf:" "$T/prim2.log"; exit 1; }
+
+# 16d. THE ROLL EXCLUDES BY DEVICE.  A kept member reached from its OWN card
+#      must not be handed straight back by the group a moment later - which an
+#      index-only exclusion would do the moment the same build had two indexes.
+#      Here image 1 is the last choice, so ten seeds must all give image 2.
+for s in 0 1 2 3 4 5 6 7 8 9; do
+    rm -f "$T/choice"
+    echo 1 > "$T/last"
+    run "$T/menu_excl2.ppm" "$T/keep.conf" --no-invert --highlight-card 3 --seed $s
+    got=$(cat "$T/choice")
+    [ "$got" = "2" ] || { echo "headless: FAIL seed $s rolled '$got', not 2 (the exclusion)"; exit 1; }
+done
 
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"

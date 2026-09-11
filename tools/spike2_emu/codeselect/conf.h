@@ -3,7 +3,7 @@
  * images.conf v2 (one image per line, index = order, 0-based):
  *   # comment
  *   image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
- *   group=<members>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
+ *   group=[+]<members>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
  *                            several images shown as ONE card; confirming it
  *                            boots one member at random (item 106).  <members>
  *                            is 0-based image indexes as a range and/or a list
@@ -14,7 +14,23 @@
  *                            menu where the line sits.  Members are ordinary
  *                            image= lines and keep their image indexes, so
  *                            select.sh and the choice file are untouched.
+ *                            A LEADING '+' KEEPS THE MEMBERS VISIBLE: they get
+ *                            their own cards as well as the group's, so one
+ *                            card can offer "surprise me" beside the very
+ *                            builds it rolls between (David, 2026-09-10:
+ *                            "what if i want RANDOM|CUSTOM1|CUSTOM2?").
+ *                            Without it a group CONSUMES its members, which is
+ *                            the forty-variant jukebox and stays the default.
  *   default=<index>          highlight when there is no usable last-choice file
+ *                            (an IMAGE index; a member highlights its group's
+ *                            card, unless that member keeps a card of its own)
+ *   default_card=<index>     highlight this CARD instead, 0-based in menu
+ *                            order.  THE ONLY WAY TO NAME A KEEPING GROUP'S
+ *                            CARD: once its members keep cards of their own,
+ *                            no image index resolves to the group, and a
+ *                            random card the countdown cannot land on is
+ *                            useless for an unattended power-up - which is the
+ *                            whole point of the card.  Wins over default=.
  *   timeout=<seconds>        0 = wait for ever
  *   font=<path>              optional TrueType font
  *   media=<dir>              where the media names resolve (default
@@ -37,8 +53,9 @@
  *
  * A GROUP IS NEVER FATAL.  A member index naming no image line is dropped, a
  * group left with no member is dropped, an image named by two groups belongs
- * to the first, and image 0 is never a member (it is the primary, which must
- * stay bootable on its own).  Each of those is recorded in conf.warn[] for
+ * to the first, and image 0 is a member only in a KEEPING group - in a
+ * consuming one the primary would lose its card, and the primary is what the
+ * machine boots when the menu is not honoured.  Each of those is recorded in conf.warn[] for
  * the caller to log.  Only the LIMITS below refuse a file, exactly as too
  * many image lines always has.
  *
@@ -104,6 +121,8 @@ struct conf_group {
     struct conf_image card;
     int member[CONF_MAX_IMAGES];
     int nmember;
+    /* the members keep their own cards too ('+' on the member spec) */
+    int keep;
 };
 
 /* ONE ENTRY PER THING THE MENU DRAWS, in conf-file line order.  Exactly one
@@ -124,6 +143,7 @@ struct conf {
     char warn[CONF_MAX_WARN][CONF_WARN_STR];
     int nwarn;                       /* may exceed CONF_MAX_WARN: the count is honest, the text is capped */
     int def;          /* default=  (-1 when absent) */
+    int def_card;     /* default_card=  (-1 when absent); wins over def */
     int timeout;      /* timeout=  (-1 when absent) */
     char font[CONF_STR];
     char media[CONF_STR];          /* media= ("" when absent) */

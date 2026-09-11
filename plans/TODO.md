@@ -7828,6 +7828,53 @@ These have each been violated at least once and each cost a run or a window:
       — S3: a workaround exists (a 32 GB card). D4: a new on-card layout
       whose hardware proof is one flash away.
 
+- [ ] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
+      and choosing it boots one member at random, a different one every
+      power-up.** `S3 D2` ← REOPENED 2026-09-10 *(The roll itself is DONE and
+      emulator-proven - three unattended power-ups, two different games; the
+      full record is the Done entry this was lifted from, and the closing
+      commit is 8f98809. What is NOT done is WHERE a group may sit and what it
+      may share, which David found within minutes of looking at it.)*
+      **DAVID, 2026-09-10, with a screenshot of the tab refusing his card:**
+      "why can't the first one be a random group? what if i want
+      RANDOM|CUSTOM1|CUSTOM2? I should be able to add a random at any point."
+      His list was two Godzilla builds plus a RANDOM over the same two, and the
+      tab refused it with `Image 2, game 1 is listed twice`.
+      **BOTH ASKS ARE ALREADY LEGAL ON THE CARD - measured, not assumed:**
+      a conf with the `group=` line ABOVE image 0's line loads as "3 image
+      line(s) in 2 card(s)" with the primary reported as `card 2/2`, so a group
+      can be the FIRST card today; and a conf listing the same device on two
+      image lines loads as "5 image line(s) in 4 card(s)" with `select.sh`
+      resolving index 3 to the same tree as index 1, so showing a game twice
+      costs ZERO bytes. The refusals are all above the card: the tab's
+      one-card-per-tree rule, `render_images_conf`'s image-0 rule, and
+      `conf_for_plan` building its device list 1:1 from the plan.
+      **THE DESIGN, decided after weighing both:** a group gains a KEEP flag -
+      `group=+<members>|...` - meaning its members ALSO keep their own cards.
+      Without it a group consumes its members, which is the 40-variant jukebox
+      and stays the default. With it David gets `C1 | C2 | RANDOM(C1,C2)` over
+      TWO trees, and image 0 becomes a legal member because the primary still
+      has a card of its own.
+      **REJECTED: duplicate image lines.** They work on the card (proven above)
+      and need no selector change at all, but mkmulticard threads "image index
+      == tree index" through trees.json, verify, update and extract, and
+      breaking that to buy a menu layout is far more dangerous than a small
+      selector change.
+      **Also in scope:** the roll's exclusion should compare the last choice by
+      DEVICE, not by image index, so a group cannot repeat a build the player
+      picked from its own card a moment ago.
+      **Resume:** (1) conf.c: the `+` flag, members keeping their cards, image 0
+      legal when kept, exclusion by device; headless cases for each. (2)
+      mkmulticard: `keep` on a group, the render/parse, the image-0 rule
+      relaxed, a `--group-over '<a>-<b>|TITLE|SUBTITLE'` naming existing
+      images. (3) the tab: a group row whose members are paths that are also
+      plain rows, `form_trees` deduping by path, the "listed twice" refusal
+      dropped for that case, a group allowed at any row, and the tick that sets
+      keep. (4) an emulator run of David's exact layout.
+      — S3: the jukebox works; this is where it may sit. D2: the card already
+      does all of it, so this is three layers of builder above a proven format.
+
+
 - [ ] **110. A random group's games cannot be CHANGED once the row exists: the
       Edit-image dialog has no Members section.** `S3 D2` *(Split out of item
       106 on 2026-09-10, when everything else about a group card closed. The
@@ -8415,43 +8462,6 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
-
-- [x] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
-      and choosing it (by hand or by the countdown) boots one member at random,
-      a different one every power-up.** EMULATOR-PROVEN 2026-09-10, closing
-      commit 8f98809 on `item/106`. One new conf key,
-      `group=<members>|<title>|<subtitle>[|media…]`, whose members stay ordinary
-      `image=` lines - which is why `select.sh` and the choice file never
-      learned that groups exist, proven by byte-identical lookups either side of
-      a group line under both awks. Images and cards became different numbers
-      (64 / 16 / 8). The roll happens at the confirm, excludes the member the
-      last-choice file names, and is seeded from urandom ^ CLOCK_MONOTONIC ^
-      time ^ pid. mkmulticard writes and reads the grammar, refuses what the
-      selector merely drops, has the ordered `--group`/`--member`/
-      `--members-list` CLI, forces the compact layout for a group and refuses to
-      stage a group conf beside a selector below 3.0. The Multi-boot tab's rows
-      are CARDS now, and a loaded card's groups fold back into them.
-      **Proof:** David's TMNT store card, menu-only re-inject, three unattended
-      power-ups - the stock card unchanged, then image 1 (51 fps), then image 2
-      (45 fps) by the exclusion rule. Two power-ups, two different games. The
-      full table is in `codeselect/DESIGN.md`. Hardware proof is David's and the
-      card is left as a group card for it.
-      **Found and fixed on the way:** a card-count check that never ran without
-      a group; four places in the tab using a row index where they meant a game
-      index; `str([])` making an ordinary restored row read as a group; and
-      eleven `ok &= check, diagnostic` lines in mkmulticard's selftest that were
-      always-truthy tuples and could never fail.
-      **Two things a SCREENSHOT found after the close, both fixed on the
-      branch:** the only way into a group was the right-click menu, while the
-      add row at the foot of the list still said "Add an image..." and offered
-      nothing else (5105bee); and `status_checks` read each row's own `path`,
-      which a group row does not have, so a good jukebox card showed a red
-      cross against its image count (a99156a). Both share the root of the four
-      index sites and the saved-state bug: the tab used to be a list of GAMES
-      and is a list of CARDS now, and every place that assumed one row meant
-      one .raw had to be found. No test caught either, because none was asking
-      what the add row or the status row SAID about a group.
-      **Split out:** item 110, the Edit-image dialog's Members section.
 
 - [x] **109. The boot menu decided which animations to keep in RAM ONCE, before
       the menu opened, in image order — so on a card with more than about five

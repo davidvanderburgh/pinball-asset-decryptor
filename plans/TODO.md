@@ -7885,7 +7885,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **107. A variant that changes a few songs costs a whole `image.bin` per
       copy on a compact card; store only the changed byte ranges and rebuild the
-      file at boot.** `S3 D4` **PARKED** - not to be taken until the numbers
+      file at boot.** `S3 D4` ← WORKING ON **PARKED** - not to be taken until the numbers
       demand it: whole-file dedup already puts 40 Beatles variants on a 32 GB
       card (~450 MB each). It pays only for 40+ variants on a 16 GB card, 80+
       variants, or a title whose `image.bin` is 1.4-1.6 GB (TMNT, Godzilla).

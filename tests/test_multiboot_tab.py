@@ -8686,3 +8686,35 @@ def test_the_add_row_is_the_way_into_a_group(tmp_path):
         assert "random group" in panel.ADD_ROW_TEXT.lower()
     finally:
         root.destroy()
+_OK_PATH = ("missing", "Build & verify will write a new card at x.", "gray", False)
+
+
+def test_the_status_row_counts_a_groups_games_not_its_empty_path(tmp_path):
+    """A GROUP row has no path of its own - its games are its members - so
+    reading row.path here reported a perfectly good jukebox card as "Image 1
+    has no file" and put a red cross on the status row. Caught on the first
+    screenshot of the finished tab."""
+    mb = multiboot_tab
+    form, paths = _group_form(tmp_path)
+    checks = dict((k, (state, detail))
+                  for k, _lbl, state, detail in
+                  status_checks(form.images, _OK_PATH, "", card="none"))
+    state, detail = checks["images"]
+    assert state == "ok", detail
+    assert "3 cards over 5 games" in detail
+    # a group whose games are not on this machine still says which game
+    gone = _group_form(tmp_path)[0]
+    gone.images[2].members[1].path = str(tmp_path / "nope.raw")
+    checks = dict((k, (state, detail))
+                  for k, _lbl, state, detail in
+                  status_checks(gone.images, _OK_PATH, "", card="none"))
+    state, detail = checks["images"]
+    assert state == "bad"
+    assert "Image 2, game 2 is not on this machine" in detail, detail
+    # and a plain list is worded exactly as it always was
+    plain = mb.MultibootForm(images=form.images[:2], out="x")
+    checks = dict((k, (state, detail))
+                  for k, _lbl, state, detail in
+                  status_checks(plain.images, _OK_PATH, "", card="none"))
+    assert checks["images"][0] == "ok"
+    assert checks["images"][1] == "2 images, in the order the menu offers them."

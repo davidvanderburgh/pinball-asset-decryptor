@@ -3158,21 +3158,38 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
     else:
         why = ""
         seen = set()
+        # EVERY GAME BEHIND EVERY ROW, not every row's own file.  A GROUP row
+        # has no path of its own - its games are its members - so reading
+        # row.path here reported a perfectly good jukebox card as "Image 1 has
+        # no file" and put a red cross on the status row (David, 2026-09-10,
+        # looking at the first screenshot of it).
         for i, row in enumerate(rows):
-            p = (getattr(row, "path", "") or "").strip().strip('"')
-            if not p:
-                why = "Image %d has no file." % i
-            elif not loaded_card and not os.path.isfile(p):
-                why = "Image %d is not on this machine: %s" % (i, p)
-            elif _norm(p) in seen:
-                why = "Image %d is listed twice: %s" % (i, p)
-            else:
-                seen.add(_norm(p))
-                continue
-            break
-        out.append(("images", label, "bad" if why else "ok",
-                    why or "%d images, in the order the menu offers them."
-                    % n))
+            paths = row_paths(row)
+            if is_group(row) and len(paths) < 2:
+                why = ("Image %d is a random group with %d game(s); a group "
+                       "needs at least 2." % (i, len(paths)))
+                break
+            for k, q in enumerate(paths):
+                where = ("Image %d, game %d" % (i, k + 1) if is_group(row)
+                         else "Image %d" % i)
+                if not q:
+                    why = "%s has no file." % where
+                elif not loaded_card and not os.path.isfile(q):
+                    why = "%s is not on this machine: %s" % (where, q)
+                elif _norm(q) in seen:
+                    why = "%s is listed twice: %s" % (where, q)
+                else:
+                    seen.add(_norm(q))
+                    continue
+                break
+            if why:
+                break
+        ngames = sum(len(row_paths(r)) for r in rows)
+        detail = "%d images, in the order the menu offers them." % n
+        if ngames != n:
+            detail = ("%d cards over %d games, in the order the menu offers "
+                      "them." % (n, ngames))
+        out.append(("images", label, "bad" if why else "ok", why or detail))
 
     # 3. WHETHER THE CARD EXISTS - a CARD, not a file with the right name.
     name = os.path.basename(loaded_card) or "the card"

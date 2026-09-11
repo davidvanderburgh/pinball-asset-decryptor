@@ -7863,14 +7863,38 @@ These have each been violated at least once and each cost a run or a window:
       **Also in scope:** the roll's exclusion should compare the last choice by
       DEVICE, not by image index, so a group cannot repeat a build the player
       picked from its own card a moment ago.
-      **Resume:** (1) conf.c: the `+` flag, members keeping their cards, image 0
-      legal when kept, exclusion by device; headless cases for each. (2)
-      mkmulticard: `keep` on a group, the render/parse, the image-0 rule
-      relaxed, a `--group-over '<a>-<b>|TITLE|SUBTITLE'` naming existing
-      images. (3) the tab: a group row whose members are paths that are also
-      plain rows, `form_trees` deduping by path, the "listed twice" refusal
-      dropped for that case, a group allowed at any row, and the tick that sets
-      keep. (4) an emulator run of David's exact layout.
+      **DONE (1)-(3), pushed:** the selector (497e76d), the builder and the tab
+      (ce7ed9c), and the status row (9ac37a1). `group=+<members>|...` keeps the
+      members' own cards; image 0 is a legal member of a KEEPING group only;
+      the roll excludes by DEVICE so a build reached from its own card is not
+      handed straight back; `default_card=` and `--highlight-card` name a card
+      outright, which is the ONLY way to reach a keeping group's card once its
+      games all keep their own - and a random card the countdown cannot land on
+      is useless for the unattended power-up that is the point of the feature.
+      mkmulticard carries `keep` and `pos` (the image its line sits before,
+      which is where its card sits) with `--group-over '<a>-<b>|TITLE|SUB'`.
+      The tab has "Add random over the images above...", `form_trees` skips a
+      keeping group entirely (it adds no games), and the first-row rule now
+      bites only a CONSUMING group.
+      **FOUR PLACES ASSUMED ONE ROW MEANT ONE .raw**, and this is worth stating
+      as a pattern rather than four bugs: the argument builders, the saved-state
+      round trip, and the status row TWICE - once for a group having no path of
+      its own, once for a keeping group's games being other rows'. Two were
+      found only by looking at a SCREENSHOT. Anything that walks `form.images`
+      and reasons about files has to ask whether the row carries games of its
+      own.
+      **Resume:** (4) the emulator run of David's layout - a store card of two
+      builds plus `--group-over '0-1|RANDOM|pick one or let it roll'`, booted
+      twice, which should alternate by the exclusion rule and let either build
+      be picked directly. The TMNT store card at `D:/Pinball/TMNT 1987/multi/`
+      is the obvious subject and is already a group card; a menu-only inject
+      re-shapes it in seconds. Then this closes again.
+      **Not in this item:** item 110, the Edit-image dialog's Members section.
+      Also left conservative on purpose: changing a KEEPING group's membership
+      asks for a rebuild when an inject would do, because `diff_forms` keys the
+      rebuild bucket on rows rather than on games. Over-asking is the safe
+      direction; correcting it needs the menu bucket to be able to name a card
+      change, which is more than this item needs.
       — S3: the jukebox works; this is where it may sit. D2: the card already
       does all of it, so this is three layers of builder above a proven format.
 

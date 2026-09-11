@@ -4807,11 +4807,14 @@ class MultibootPanel:
                 "it off the card, ▲ / ▼ move it in the menu's order (the "
                 "outlined arrow means that row cannot go further). The last "
                 "row adds one. A double-click or Enter opens a row, and a "
-                "right-click - or the menu key - offers the same five "
-                "commands. The first image is the PRIMARY: its boot files "
+                "right-click - or the menu key - offers the same "
+                "commands. The last row also adds a RANDOM card: one card "
+                "that boots a different game every power-up, either over "
+                "images already in this list or over games of its own. The "
+                "first image is the PRIMARY: its boot files "
                 "are the card's, and the machine falls back to it. Up to %d "
                 "images fit one card; from five the menu scrolls three at a "
-                "time, with a counter under them." % MAX_IMAGES)
+                "time, with a counter under them." % MAX_CARDS)
 
     PREVIEW_TIP = ("The boot menu as the machine will draw it. It redraws "
                    "itself about a third of a second after you stop typing; "
@@ -6935,7 +6938,14 @@ class MultibootPanel:
 
     #: What the template row says.  Dim, with a green '+': an empty card
     #: shows only this, which is both the way in and the lesson.
-    ADD_ROW_TEXT = "Add an image or a random group…"
+    #: THE TEMPLATE ROW'S WORDS, and they have to FIT: the row sits in the
+    #: same grid as every other one (see image_table._Row) and says its
+    #: words in the Title column, which is about 30 characters wide - so a
+    #: longer label is simply cut off, and cut off sooner on a narrow
+    #: window (David, 2026-09-10: "narrow app window widths, the label for
+    #: 'add a game image or random group' is getting cut off").  The full
+    #: sentence lives in LIST_TIP, which has no width to fit.
+    ADD_ROW_TEXT = "Add image or random group…"
 
     def _values(self, i, row):
         """ONE ROW OF THE TABLE, as a dict keyed by column id: the title

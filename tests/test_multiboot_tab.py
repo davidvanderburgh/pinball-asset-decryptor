@@ -8853,3 +8853,22 @@ def test_the_status_row_does_not_call_a_keeping_groups_games_duplicates(tmp_path
                   status_checks(rows, _OK_PATH, "", card="none"))
     assert checks["images"][0] == "ok"
     assert "3 cards over 4 games" in checks["images"][1]
+def test_the_add_rows_words_fit_the_column_they_sit_in():
+    """The template row is a row like any other and says its words in the Title
+    column (image_table._Row explains why it is not a wide spanning label). So
+    the label has to FIT that column, or it is cut off - and cut off sooner on
+    a narrow window, which is how David found it. The full sentence is in the
+    tooltip, which has no width to fit."""
+    root, panel = _panel()
+    try:
+        chars = panel._table.cell_chars[0]
+        assert len(panel.ADD_ROW_TEXT) <= chars, (
+            "%r is %d characters and the Title column holds %d"
+            % (panel.ADD_ROW_TEXT, len(panel.ADD_ROW_TEXT), chars))
+        # it still says both things it is for
+        low = panel.ADD_ROW_TEXT.lower()
+        assert "image" in low and "random" in low
+        # ...and the tooltip, which has the room, says what the row offers
+        assert "random" in panel.LIST_TIP.lower()
+    finally:
+        root.destroy()

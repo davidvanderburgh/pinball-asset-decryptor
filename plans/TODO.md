@@ -7901,6 +7901,33 @@ These have each been violated at least once and each cost a run or a window:
       — S3: a warning says so today; a rebuild from the sources is the
       workaround. D2: desk work, the selftest is the run.
 
+- [ ] **113. A multi-boot member should be a BASE CARD PLUS THE EDITS, not a
+      full card image of its own: forty song sets today mean forty 8 GB images on
+      the tester's PC to feed a card that stores them in a few GB.** `S3 D3` *(Filed
+      2026-09-11 after v0.205.0 shipped item 107; the plan that filed items 105-108
+      named it as the follow-up and it was never given a number.)* The card side is
+      solved: a compact card stores a variant as its changed byte ranges. The INPUT
+      side is not: `mkmulticard build --extra` and the tab's image rows take whole
+      card images, so each song set is built with the app, written out as a full
+      8 GB `.raw`, and kept. The app already has the lighter form: an OVERRIDE SET
+      (`engine.write_overrides`, `plugins/stern/engine.py:5107`, `overrides.json` v2)
+      is exactly the touched files, whole, beside a manifest naming the card they
+      were edited from - what the Emulate tab binds over a card to run the current
+      edits (PAD-103). Design: a member source of the form `<base.raw>+<override dir>`
+      (CLI `--member`, and a tab row kind "base card + edits folder"); its manifest is
+      the base's cached manifest with the override files' digests substituted (hash
+      only the overrides); the store writer reads those files from the directory and
+      everything else from the base through the existing reader; `treesync.find_deltas`
+      needs nothing - it sees a manifest like any other, and the delta compare reads
+      the override file against the base. Verify takes the same composite as `--extra`.
+      Refusals: an override set whose manifest names a different card than the base
+      given; a set from a newer OVERRIDE_VERSION. Acceptance: a two-set Beatles card
+      built from ONE stock raw plus two override folders is byte-identical (trees.json
+      digests, verify PASS) to the same card built from two full variant images, and
+      boots one set in the emulator with the game reading that set's image.bin.
+      — S3: the workaround is disk space. D3: desk work in mkmulticard and the tab,
+      one emulator run to confirm; the card format does not change.
+
 - [ ] **108. A multi-boot card can boot its remembered choice without showing
       the menu, unless a flipper is held at power-up.** `S3 D3` *(Follow-up to
       item 106: this is what makes a jukebox card look completely standard.)*

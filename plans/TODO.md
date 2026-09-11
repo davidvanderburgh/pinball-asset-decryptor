@@ -7927,14 +7927,38 @@ These have each been violated at least once and each cost a run or a window:
       (`CODESELECT_PYTHON/WORKDEV/WORKMNT`; select_sh_test 15 cases incl. a real run);
       `run_game.sh` runs it with the host python3 and `$R/dump/work` after the chosen
       tree's bind (`--games-title $GAME`); Makefile installs it; PAD_SELECT_SRCS lists it.
-      **Not yet:** the selftest's real-ext4 delta part (under WSL as root), the p7 WORK
-      PARTITION in the store layout (today a delta card would have nothing to mount at
-      boot: select.sh's mount of /dev/mmcblk0p7 fails and the base's songs play), an
-      emulator run of a real Beatles delta card, hardware.
-      **Resume:** extend selftest part 6 with a delta case (MKMULTICARD_DELTA_MIN=4096 on the
-      synthetic cards), run `mkmulticard.py selftest` as root under WSL in /tmp (never under
-      ~), then add p7 (size = largest delta'd file + 10%, mke2fs at build) and prove a
-      two-variant Beatles card in the emulator.
+      **Proven since (2026-09-11, ~80%):** `mkmulticard.py selftest` PASSES as root (parts
+      1-8 with the new 6d: a real-ext4 store card with one delta, verify full, materialize
+      over the card's blobs, update to another variant costed at 4096 bytes with the old
+      delta gc'd, no-op update, extract's warning). The store layout now carries a p7 WORK
+      PARTITION when a delta is planned (largest delta'd file + 10% + 32 MiB, mke2fs at
+      build, verify holds it to e2fsck; plan_from_card and the verify CLI read it back).
+      A REAL card: stock Beatles + two 64 KiB byte-edited variants (`i107-variant-a/b` in
+      `D:/Pinball/images/Stern/spike2/`, edits at 100/200 MiB of image.bin) built as
+      `D:/Pinball/multi/beatles-1_29_0.store-stock+i107a+i107b.content.sdcard.raw`: 2
+      deltas, 0.76 GB saved, each variant costs 65536 bytes, p7 0.45 GB, build 2 min,
+      VERIFY PASS in full. EMULATOR (worktree rig, PAD_SELECT menu, image 1): run_game.sh's
+      hook ran materialize.py - `copied base 14af57690336 + 1 range(s) 65536 bytes in
+      12.8 s`, `bound over /home/david/spike2root/games/beatles/image.bin` - and the work
+      file hashes to variant A's own image.bin (edab0b31...); the next boot of the same
+      image HIT the stamp (no copy). Driver: this session's scratchpad `drive107.sh`.
+      **Traps paid:** delta blobs were 0600 root and the rig's user fuse2fs mount refused
+      them (0644 now); the verify CLI's store detection wanted exactly 2 logicals; a verify
+      seconds after a build on /mnt/d read a STALE p3 through 9p (rerun it); WSL shuts the
+      distro down ~60 s after the last wsl.exe session and Ubuntu clears /tmp at boot, so a
+      detached selftest dies (hold a session, log on /mnt/c); Git Bash rewrites `/tmp/...`
+      inside a wsl.exe command string (MSYS_NO_PATHCONV=1); the Beatles selector ids are
+      right 55 / start 34, not TMNT's 64 / 36.
+      **Beatles itself dies in the rig ~10 s after start** (a [maps]/[scenebt] dump in the
+      scene loader, `[ERR] ... firmware ... vpu` beside it) - seen on run 1 where the hook
+      FAILED and the base file was bound, so it is not the delta's doing; a stock-Beatles
+      control run is the next check and, if it dies the same way, its own queue item.
+      **Not yet:** variant B's boot (the 'restored' path on the real card - proven in the
+      selftest and under the card's python; the first two tries pressed TMNT's switch ids),
+      hardware (a delta card on the TMNT: two boots, two song sets), and the recover loose
+      end.
+      **Resume:** run `drive107.sh 2 b` (ids fixed), then the stock-Beatles control run,
+      then close the emulator half; hardware is David's.
       **PARKED** (before this pass) - not to be taken until the numbers
       demand it: whole-file dedup already puts 40 Beatles variants on a 32 GB
       card (~450 MB each). It pays only for 40+ variants on a 16 GB card, 80+

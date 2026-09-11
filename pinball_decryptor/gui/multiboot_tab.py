@@ -10463,7 +10463,47 @@ class MultibootPanel:
         selector, or a render that has not finished."""
         self.play_confirm()
         self._blackout(self._loading_frame())
+        # ...AND ROLL AGAIN.  The roll happens inside the selector, so a frame
+        # rendered earlier holds the roll THAT render made - and a preview that
+        # was not edited never rendered again, so the same member came up every
+        # time (David, 2026-09-11: "whenever i select random, the loaded one is
+        # always the first image").  One press, one run, one roll.
+        self._roll_loading()
         return True
+
+    def _roll_loading(self):
+        """Ask the selector for the LOADING frame again, so a random card rolls
+        again - and show it when it lands.
+
+        It is one snapshot out of a load that is already cheap (the same step
+        the preview runs on a keystroke), and only on a deliberate press.  It
+        asks for nothing when there is no pipeline yet, when the card on screen
+        is not a random one (an ordinary card's frame cannot change), or when
+        the worker is busy: the beat then holds whatever the last render drew,
+        which is what it always showed."""
+        path = getattr(self, "_pv_load_frame", None)
+        if not path or not self._pv_bin or self._stopped:
+            return False
+        form = self.form()
+        hl = _int(self._hl_var, 0)
+        if not (0 <= hl < len(form.images) and is_group(form.images[hl])):
+            return False
+        pv = preview_dir_for(form.out)
+        conf = os.path.join(pv, "images.conf")
+        if not os.path.isfile(conf):
+            return False
+        ppm = os.path.join(pv, "roll_%d.ppm" % hl)
+        cmds = snapshot_commands(self._pv_bin, conf, self.media_dir(), ppm,
+                                 preview_highlight(form, hl), 0,
+                                 rootfs_for(form.selector_dir),
+                                 loading=path)
+
+        def done(rc, failed, texts):
+            if rc == 0 and os.path.isfile(path) and not self._stopped:
+                self._blackout(path)        # the new roll, and a fresh beat
+
+        return bool(self._run_commands(cmds, on_done=done, preview=True,
+                                       quiet=[c[0] for c in cmds]))
 
     def _loading_frame(self):
         """The LOADING frame the last render asked for, or None.

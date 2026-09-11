@@ -3453,6 +3453,41 @@ def test_the_loading_frame_is_rendered_beside_the_menu_frame(tmp_path, monkeypat
         root.destroy()
 
 
+def test_selecting_a_random_card_rolls_again(tmp_path, monkeypatch):
+    """The roll happens inside the selector, so a frame rendered earlier holds
+    the roll THAT render made. A preview nobody edited never rendered again, so
+    the same member came up every time (David, 2026-09-11: "whenever i select
+    random, the loaded one is always the first image"). One press, one run."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path)
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        panel._table.select(2)
+        root.update()
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        runs = len(seen["snapshot"])
+        # the random card is selected: a press asks the selector for one more
+        assert panel.press_select() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert len(seen["snapshot"]) == runs + 1, "the press rendered nothing"
+        assert seen["loading"][-1] == panel._pv_load_frame
+        assert seen["snapshot"][-1][4] == 2, "...for the card on screen"
+        # an ORDINARY card cannot roll, so its frame is not rendered again
+        panel._table.select(0)
+        root.update()
+        runs = len(seen["snapshot"])
+        assert panel.press_select() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert len(seen["snapshot"]) == runs, "an ordinary card has nothing to roll"
+    finally:
+        root.destroy()
+
+
 def test_the_loading_frame_is_swept_with_its_form(tmp_path):
     """One per card rather than per frame, and cleared by the same sweep - or
     preview/ grows a file per form for as long as the tab is open."""

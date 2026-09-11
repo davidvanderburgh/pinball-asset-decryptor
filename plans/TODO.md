@@ -8441,6 +8441,16 @@ rewriting it.**
       index; `str([])` making an ordinary restored row read as a group; and
       eleven `ok &= check, diagnostic` lines in mkmulticard's selftest that were
       always-truthy tuples and could never fail.
+      **Two things a SCREENSHOT found after the close, both fixed on the
+      branch:** the only way into a group was the right-click menu, while the
+      add row at the foot of the list still said "Add an image..." and offered
+      nothing else (5105bee); and `status_checks` read each row's own `path`,
+      which a group row does not have, so a good jukebox card showed a red
+      cross against its image count (a99156a). Both share the root of the four
+      index sites and the saved-state bug: the tab used to be a list of GAMES
+      and is a list of CARDS now, and every place that assumed one row meant
+      one .raw had to be found. No test caught either, because none was asking
+      what the add row or the status row SAID about a group.
       **Split out:** item 110, the Edit-image dialog's Members section.
 
 - [x] **109. The boot menu decided which animations to keep in RAM ONCE, before

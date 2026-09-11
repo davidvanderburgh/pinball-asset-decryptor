@@ -1030,6 +1030,32 @@ def preview_dir_for(out):
 _FRAME_RE = re.compile(r"^frame_([0-9a-f]+)_(\d+)_(\d+)\.ppm$")
 #: ...and the LOADING frame beside them, one per card rather than per frame.
 _LOADING_RE = re.compile(r"^loading_([0-9a-f]+)_(\d+)\.ppm$")
+#: What the selector says it rolled, on its own `loading:` line.
+_ROLL_RE = re.compile(r"card \d+ boots image (\d+)")
+
+
+def rolled_image(text):
+    """The IMAGE a `loading:` line says the card boots, or None."""
+    m = _ROLL_RE.search(text or "")
+    return int(m.group(1)) if m else None
+
+
+def game_name(form, image):
+    """What to call image *image* of *form* - "title - subtitle" when it has
+    one, because a jukebox's members are one title with different song sets and
+    the title alone does not tell them apart."""
+    for i, path, ri, mi in form_trees(form):
+        if i != image:
+            continue
+        row = form.images[ri]
+        if mi is None:
+            bits = [(row.title or "").strip() or suggest_title(path)[0],
+                    (row.subtitle or "").strip()]
+        else:
+            bits = [(row.members[mi].title or "").strip()
+                    or suggest_title(path)[0], ""]
+        return " - ".join(b for b in bits if b)
+    return "image %d" % image
 
 
 def frame_path(preview_dir, fingerprint, highlight, frame):
@@ -1958,7 +1984,8 @@ def preview_highlight(form, row_index):
 
 
 def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
-                          rootfs=DEFAULT_ROOTFS, frames=1, loading=None):
+                          rootfs=DEFAULT_ROOTFS, frames=1, loading=None,
+                          last_image=None):
     """``qemu-arm-static -L <rootfs> <codeselect> --snapshot <ppm> ...``:
     ONE menu frame as the machine would show it - the conf, the media,
     the CARD highlighted, the animation at frame N, the countdown as if just
@@ -1985,6 +2012,14 @@ def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
         # costs one more PPM out of a load that has already happened, and it is
         # the only way to see what a RANDOM card says it rolled.
         args += ["--loading-out", wsl(loading)]
+    if last_image is not None and int(last_image) >= 0:
+        # THE MACHINE NEVER HANDS BACK THE BUILD YOU JUST HAD, and it knows
+        # which that was from its own memory on the card.  A snapshot reads no
+        # such file - it writes nothing and must not depend on the machine's
+        # memory - so the preview passes what IT last rolled, and the roll here
+        # is then the roll there (David, 2026-09-11: "the preview needs to show
+        # the same random logic as the machine").
+        args += ["--last-image", str(int(last_image))]
     return args + ["--input", "none"]
 
 
@@ -2554,7 +2589,8 @@ def ensure_selector_commands(form, cwd=None, card=""):
 
 
 def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
-                      rootfs=DEFAULT_ROOTFS, cwd=None, frames=1, loading=None):
+                      rootfs=DEFAULT_ROOTFS, cwd=None, frames=1, loading=None,
+                      last_image=None):
     """One snapshot step.  A run of frames is ONE step and is labelled
     :data:`ANIM_LABEL` - what a failure of it is named after, and what the
     finished step's own output is read back through."""
@@ -2562,7 +2598,7 @@ def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
     return [(label,
              wsl_command(preview_snapshot_args(binary, conf, media_dir, ppm,
                                                highlight, frame, rootfs,
-                                               frames, loading),
+                                               frames, loading, last_image),
                          cwd, exe=None))]
 
 
@@ -5514,6 +5550,9 @@ class MultibootPanel:
         self._pv_loading = False        # a programmatic write, not a typed one
         self._black_still = None        # the LOADING frame the beat is holding
         self._pv_load_frame = None      # ...and the one the last render wrote
+        #: What each random card rolled last, by CARD - the exclusion the
+        #: machine keeps on the card, kept here for the preview instead.
+        self._pv_rolls = {}
         self._hl_touched = False        # Highlight typed by hand: stop following Default
         self._play_job = None
         self._play_fp = None
@@ -10496,10 +10535,28 @@ class MultibootPanel:
         cmds = snapshot_commands(self._pv_bin, conf, self.media_dir(), ppm,
                                  preview_highlight(form, hl), 0,
                                  rootfs_for(form.selector_dir),
-                                 loading=path)
+                                 loading=path,
+                                 last_image=self._pv_rolls.get(hl))
 
         def done(rc, failed, texts):
+            img = rolled_image(texts.get(cmds[0][0], "")) if rc == 0 else None
+            if img is not None:
+                # ...and it is the last one for the NEXT press, so the preview
+                # never hands the same build back twice running - which is the
+                # machine's own rule
+                self._pv_rolls[hl] = img
+                # SAY WHICH ONE, where a person can see it: the two builds of a
+                # jukebox share a title, so the frame alone can leave you
+                # guessing whether it rolled at all.
+                self._pv_say("The random card rolled %s."
+                             % game_name(form, img))
             if rc == 0 and os.path.isfile(path) and not self._stopped:
+                # THE DECODED FRAME IS CACHED BY PATH, and the reroll writes the
+                # same path: without this the file changed and the picture did
+                # not, so ten presses showed one roll ten times (David,
+                # 2026-09-11: "i just pressed the random button 10 times in a
+                # row and each time the result was the same").
+                self._drop_photo(path)
                 self._blackout(path)        # the new roll, and a fresh beat
 
         return bool(self._run_commands(cmds, on_done=done, preview=True,

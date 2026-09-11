@@ -103,6 +103,12 @@ struct opts {
                           * LOADING frame - the one the machine draws once the
                           * card is confirmed, which for a random card is the
                           * one moment the player is told what they got. */
+    int last_image;   /* --last-image: what the roll must treat as the last
+                       * one booted.  A snapshot reads no last-choice file (it
+                       * writes nothing and must not depend on the machine's
+                       * memory), so a preview that wants the machine's OWN
+                       * behaviour - never the build you just had - says so
+                       * here. -1 = nothing was booted before. */
     int pick;         /* boot this image instead of rolling; -1 = roll */
     int seed;         /* make the roll reproducible; -1 = stir it for real */
 };
@@ -219,6 +225,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
     o->frames = 1;
     o->highlight_card = -1;
     o->pick = -1;
+    o->last_image = -1;
     o->seed = -1;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -251,6 +258,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
         if (!strcmp(a, "--frames")) { if (!v) goto missing; o->frames = atoi(v); i++; continue; }
         if (!strcmp(a, "--highlight-card")) { if (!v) goto missing; o->highlight_card = atoi(v); i++; continue; }
         if (!strcmp(a, "--loading-out")) { if (!v) goto missing; o->loading = v; i++; continue; }
+        if (!strcmp(a, "--last-image")) { if (!v) goto missing; o->last_image = atoi(v); i++; continue; }
         if (!strcmp(a, "--pick")) { if (!v) goto missing; o->pick = atoi(v); i++; continue; }
         if (!strcmp(a, "--seed")) { if (!v) goto missing; o->seed = atoi(v); i++; continue; }
         if (!strcmp(a, "--invert")) { o->invert = 1; continue; }
@@ -1212,7 +1220,8 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
         rolled[0] = 0;
         if (conf_card_group(c, hl) >= 0) {
             boot = o->pick >= 0 ? o->pick
-                                : roll_member(c, hl, -1, o->seed, why, sizeof why);
+                                : roll_member(c, hl, o->last_image, o->seed,
+                                              why, sizeof why);
             if (o->pick < 0) snprintf(rolled, sizeof rolled, " (%s)", why);
         }
         if (boot < 0) boot = 0;

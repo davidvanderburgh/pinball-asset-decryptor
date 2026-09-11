@@ -780,6 +780,10 @@ def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
     assert words[words.index("--highlight-card") + 1] == "1"
     assert "--highlight" not in words, "the preview names a CARD, not an image"
     assert "--loading-out" not in words, "asked for, never assumed"
+    assert "--last-image" not in words, "nothing was booted before"
+    rolled = preview_snapshot_args("/bin/cs", conf, media, ppm, 1, 3,
+                                   last_image=2)
+    assert rolled[rolled.index("--last-image") + 1] == "2"
     with_loading = preview_snapshot_args("/bin/cs", conf, media, ppm, 1, 3,
                                          loading="/x/loading_ab_1.ppm")
     assert with_loading[with_loading.index("--loading-out") + 1] == \
@@ -2523,9 +2527,10 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
         return [(multiboot_tab.AUDIO_LABEL, [py, "-c", code])]
 
     def snapshot(binary, conf, media_dir, ppm, hl, n, rootfs="~/r", cwd=None,
-                 frames=1, loading=None):
+                 frames=1, loading=None, last_image=None):
         seen["snapshot"].append((binary, conf, media_dir, ppm, hl, n, frames))
         seen.setdefault("loading", []).append(loading)
+        seen.setdefault("last_image", []).append(last_image)
         label = (multiboot_tab.ANIM_LABEL if frames > 1 else "frame %d" % n)
         if fail == "frame":
             code = "print('[select] error: bad conf'); raise SystemExit(2)"
@@ -3477,6 +3482,25 @@ def test_selecting_a_random_card_rolls_again(tmp_path, monkeypatch):
         assert len(seen["snapshot"]) == runs + 1, "the press rendered nothing"
         assert seen["loading"][-1] == panel._pv_load_frame
         assert seen["snapshot"][-1][4] == 2, "...for the card on screen"
+        # ...and it SAYS which build it landed on, because a jukebox's members
+        # share a title and the frame alone can leave you guessing
+        assert "rolled" in panel._pv_caption.lower(), panel._pv_caption
+        # THE DECODED FRAME IS CACHED BY PATH and the reroll rewrites that same
+        # path: without dropping it the file changed and the picture did not,
+        # so ten presses showed one roll ten times (David, 2026-09-11)
+        key = os.path.abspath(panel._pv_load_frame)
+        panel._pv_photos[key] = "stale"
+        panel._pv_photo_order.append(key)
+        assert panel.press_select() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert panel._pv_photos.get(key) != "stale", "the old picture was kept"
+        # THE MACHINE NEVER HANDS BACK THE BUILD YOU JUST HAD, and it knows
+        # which from its own memory on the card. A snapshot reads no such file,
+        # so the preview passes what IT last rolled - and the roll here is then
+        # the roll there (David, 2026-09-11: "the preview needs to show the same
+        # random logic as the machine").
+        assert seen["last_image"][-1] == 0, seen["last_image"]
+        assert panel._pv_rolls == {2: 0}, panel._pv_rolls
         # an ORDINARY card cannot roll, so its frame is not rendered again
         panel._table.select(0)
         root.update()

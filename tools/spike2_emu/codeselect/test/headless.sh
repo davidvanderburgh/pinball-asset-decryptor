@@ -862,6 +862,31 @@ grep -qF "card 1 boots image 0 (STERN STOCK)" "$T/snap.out" || {
     echo "headless: FAIL an ordinary card's loading frame"; cat "$T/snap.out"; exit 1; }
 band "$T/ldg2.loading.ppm" 400 200 960 380 C03040
 
+# 16h. --last-image: THE PREVIEW'S ROLL IS THE MACHINE'S ROLL.  The machine
+#      never hands back the build you just had, and it knows which that was from
+#      its own memory on the card.  A snapshot reads no such file - it writes
+#      nothing and must not depend on the machine's memory - so the caller says
+#      what was booted last, and the exclusion is then the same one.
+for k in 1 2 3 4 5 6 7 8 9 10; do
+    rm -f "$T/choice" "$T/last"
+    snap "$T/lx.ppm" "$T/ldg.conf" --media "$T/media" --highlight-card 2 \
+         --loading-out "$T/lx.loading.ppm" --last-image 0
+    grep -oE 'boots image [0-9]+' "$T/snap.out" | head -1
+done | sort -u > "$T/lx.out"
+[ "$(cat "$T/lx.out")" = "boots image 1" ] || {
+    echo "headless: FAIL --last-image 0 did not exclude image 0 every time"
+    cat "$T/lx.out"; exit 1; }
+rm -f "$T/choice" "$T/last"
+snap "$T/lx2.ppm" "$T/ldg.conf" --media "$T/media" --highlight-card 2 \
+     --loading-out "$T/lx2.loading.ppm" --last-image 1
+grep -q "boots image 0" "$T/snap.out" || {
+    echo "headless: FAIL --last-image 1 did not exclude image 1"
+    cat "$T/snap.out"; exit 1; }
+# a group of two with one excluded has ONE candidate, which is what the machine
+# says of the same roll
+grep -q "1 candidate" "$T/snap.out" || {
+    echo "headless: FAIL the exclusion did not reach the roll"; cat "$T/snap.out"; exit 1; }
+
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"
 python3 "$HERE/ppm2png.py" "$T/menu_invert.ppm" "$T/codeselect_menu_invert.png" --rot180-of "$T/menu.ppm"

@@ -1264,12 +1264,14 @@ def test_a_bad_style_is_refused_by_name(sm):
     # ...and no members at all is refused rather than drawn as an empty card
     with pytest.raises(sm.Refused):
         sm.render_group_still("mosaic", [], (64, 36))
+
+
 def test_the_group_specs_are_read_by_group_index_not_image_index(sm):
     """A RANDOM card's picture belongs to the CARD; the whole point of it is
     that it is not any one game's."""
     assert sm.parse_group_specs(["0=mosaic", "2=question"], "group-art")         == {0: "mosaic", 2: "question"}
     assert sm.parse_group_members(["0=1,2,3"]) == {0: [1, 2, 3]}
-    assert sm.parse_group_members(["1= 4 , 5 "]) == {1: [4, 5]}
+    assert sm.parse_group_members(["0= 4 , 5 "]) == {0: [4, 5]}
     for bad, what in ((["mosaic"], "group-art"), (["x=mosaic"], "group-art"),
                       (["0=a"], "group-art")):
         if what == "group-art" and bad == ["0=a"]:
@@ -1282,3 +1284,64 @@ def test_the_group_specs_are_read_by_group_index_not_image_index(sm):
         sm.parse_group_members(["0=1,x"])
     with pytest.raises(sm.Refused):
         sm.parse_group_members(["0="])
+
+
+def test_media_json_carries_a_random_cards_own_picture(sm, tmp_path):
+    """A RANDOM card's picture belongs to no image, so nothing in the images
+    list references it - and the manifest is what decides which files are
+    staged onto the card and which are swept as stale. Without a place for it,
+    a picture that was rendered would then be deleted and never copied."""
+    plain = sm.build_manifest([("art0.png", None, None, None)])
+    assert "groups" not in plain, "a card with no group is what it always was"
+    m = sm.build_manifest([("art0.png", None, None, None),
+                           ("art1.png", None, None, None)],
+                          groups=[{"members": [0, 1], "art": "gart0.png",
+                                   "anim": "ganim0.gif",
+                                   "art_source": "stack",
+                                   "anim_source": "cycling"}])
+    assert sm.validate_manifest(m) is m
+    assert m["groups"] == [{"members": [0, 1], "art": "gart0.png",
+                            "anim": "ganim0.gif", "art_source": "stack",
+                            "anim_source": "cycling"}]
+    assert sm.manifest_files(m) == ["art0.png", "art1.png",
+                                    "gart0.png", "ganim0.gif"]
+
+
+@pytest.mark.parametrize("bad", [
+    {"members": [], "art": "gart0.png"},                      # no members
+    {"members": ["1"], "art": "gart0.png"},                   # not indexes
+    {"members": [0, 1], "art": "../gart0.png"},               # not a flat name
+    {"members": [0, 1], "art": "gart0.png", "style": "fan"},  # a key nobody writes
+])
+def test_a_malformed_group_row_is_refused(sm, bad):
+    m = sm.build_manifest([("art0.png", None, None, None)])
+    m["groups"] = [bad]
+    with pytest.raises(sm.Refused):
+        sm.validate_manifest(m)
+
+
+def test_the_stale_sweep_keeps_the_picture_it_just_drew(sm, tmp_path):
+    """...and takes away the one a deleted random card left behind, which is
+    the whole reason the sweep exists: an orphan rides along in the budget."""
+    d = str(tmp_path)
+    for name in ("gart0.png", "ganim0.gif", "gart1.png", "ganim1.gif"):
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(b"x")
+    m = sm.build_manifest([("art0.png", None, None, None)],
+                          groups=[{"members": [0, 1], "art": "gart0.png",
+                                   "anim": "ganim0.gif"}])
+    removed = sm.sweep_stale(d, m, log=lambda *a: None)
+    assert sorted(removed) == ["ganim1.gif", "gart1.png"]
+    assert os.path.isfile(os.path.join(d, "gart0.png"))
+    assert not os.path.isfile(os.path.join(d, "gart1.png"))
+
+
+def test_the_groups_must_be_numbered_without_a_gap(sm):
+    """media.json lists them in order and mkmulticard matches its own group
+    flags to that list BY POSITION, so a gap would hand group 2's picture to
+    group 1 - silently, and only on the machine."""
+    assert sm.parse_group_members(["0=0,1", "1=2,3"]) == {0: [0, 1], 1: [2, 3]}
+    with pytest.raises(sm.Refused, match="numbered 0"):
+        sm.parse_group_members(["0=0,1", "2=2,3"])
+    with pytest.raises(sm.Refused, match="numbered 0"):
+        sm.parse_group_members(["1=0,1"])

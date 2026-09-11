@@ -2582,3 +2582,61 @@ def test_group_over_names_images_already_on_the_card(mk, tmp_path):
         "build", "--primary", "P", "--out", "O",
         "--group-over", "1-2|RANDOM|", "--extra", "A", "--extra", "B"])
     assert groups[0]["pos"] == 1
+
+
+# ---- item 106: a random card's picture is its own, not its first member's ---
+def _group_media_dir(mk, d, n_images=3):
+    """synth_media_dir plus one group's own picture, and the manifest row that
+    says so."""
+    mk.synth_media_dir(d, n_images)
+    mk.synth_png(os.path.join(d, "gart0.png"))
+    mk.synth_gif(os.path.join(d, "ganim0.gif"))
+    path = os.path.join(d, mk.MEDIA_MANIFEST)
+    with open(path, encoding="utf-8") as f:
+        man = json.load(f)
+    man["groups"] = [{"members": [1, 2], "art": "gart0.png", "anim": "ganim0.gif",
+                      "art_source": "stack", "anim_source": "cycling"}]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(man, f)
+    return d
+
+
+def test_a_random_cards_picture_is_staged_and_written_into_its_own_line(mk, tmp_path):
+    """It is referenced by no image, so it reaches the card only if plan_media
+    stages it - and the group= line has to name it instead of borrowing the
+    picture of whichever member happens to be first, which is a game's logo on
+    a card that stands for several."""
+    d = _group_media_dir(mk, str(tmp_path / "media"))
+    ms = mk.plan_media(d, 3)
+    assert ms["group_rows"] == [("gart0.png", "ganim0.gif")]
+    assert "gart0.png" in ms["files"] and "ganim0.gif" in ms["files"]
+    text = mk.render_images_conf(
+        ["/dev/mmcblk0p3", "/dev/mmcblk0p7", "/dev/mmcblk0p7:img2"],
+        titles=["A", "B", "C"], media=ms["rows"],
+        groups=[{"title": "JUKEBOX", "subtitle": "", "members": [1, 2],
+                 "media": ms["group_rows"][0] + ("music1.wav", "confirm1.wav")}])
+    line = [l for l in text.splitlines() if l.startswith("group=")][0]
+    assert line == "group=1-2|JUKEBOX||gart0.png|ganim0.gif|music1.wav|confirm1.wav"
+    # ...and the member's own art is NOT what the card shows
+    assert "art1.png" not in line
+
+
+def test_conf_for_plan_gives_the_group_its_own_picture_and_the_members_sounds(mk, tmp_path):
+    d = _group_media_dir(mk, str(tmp_path / "media"))
+    ms = mk.plan_media(d, 3)
+    plan = argparse.Namespace(trees=[("p3", ""), ("p7", ""), ("p7", "img2")],
+                           devices=lambda: ["/dev/mmcblk0p3", "/dev/mmcblk0p7",
+                                            "/dev/mmcblk0p7:img2"])
+    args = argparse.Namespace(titles="A;B;C", groups=[{"title": "JUKEBOX", "subtitle": "",
+                                                    "members": [1, 2]}],
+                           default=0, timeout=15, selector_dir=None)
+    text = mk.conf_for_plan(plan, args, media=ms)
+    line = [l for l in text.splitlines() if l.startswith("group=")][0]
+    # its PICTURE is its own; its SOUNDS are still the first member's row, so a
+    # jukebox costs one card's worth however many members it has
+    assert line.startswith("group=1-2|JUKEBOX||gart0.png|ganim0.gif|music1.wav")
+    # a manifest that disagrees with the card about how many random cards there
+    # are is refused rather than matched up by position
+    args.groups = []
+    with pytest.raises(mk.Refused, match="random card"):
+        mk.conf_for_plan(plan, args, media=ms)

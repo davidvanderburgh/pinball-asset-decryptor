@@ -190,8 +190,9 @@ ANIM_PARAMS_RE = re.compile(r"^(%s)(?::(%s)(?::(\d+))?)?$" % (_NUM_RE, _NUM_RE))
 ART_AT_RE = re.compile(r"^%s$" % _NUM_RE)                                             # T
 SOUND_AT_RE = re.compile(r"^\d+$")                                                    # auto@IDX
 STALE_FULL_RE = re.compile(r"^(?:(?:art|anim|music)\d+\.(?:png|gif|wav)"
-                           r"|confirm\d+\.wav|(?:move|confirm)\.wav)$")
-STALE_VISUAL_RE = re.compile(r"^(art|anim)\d+\.(png|gif)$")
+                           r"|confirm\d+\.wav|(?:move|confirm)\.wav"
+                           r"|gart\d+\.png|ganim\d+\.gif)$")
+STALE_VISUAL_RE = re.compile(r"^(?:g?art\d+\.png|g?anim\d+\.gif)$")
 
 
 class Refused(Exception):
@@ -572,13 +573,20 @@ def check_output_dir(path):
 
 # ---- the manifest ---------------------------------------------------------------------------
 def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_VOLUME,
-                   sources=None, sound_move_source=None, sound_confirm_source=None):
+                   sources=None, sound_move_source=None, sound_confirm_source=None,
+                   groups=None):
     """images = [(art|None, anim|None, music|None[, confirm|None]), ...] -> the media.json
     dict.  A row's fourth field is the image's OWN confirm sound; null (or a 3-field row)
     means it falls back to the menu-wide sound_confirm.
     sources = [(art_spec, anim_spec[, confirm_spec[, music_spec]]), ...] (one per image)
     adds 'art_source' / 'anim_source' / 'confirm_source' / 'music_source' - the spec
     strings the GUI round-trips; a shorter row leaves the rest null.
+    groups = [{"members": [i, ...], "art": name|None, "anim": name|None,
+    "art_source": spec|None, "anim_source": spec|None}, ...] is a RANDOM card's own
+    picture (item 106) - one entry per group, in group order.  It is a CARD's media,
+    not an image's, which is why it cannot live in the rows: a group card has no
+    image of its own.  The key is left OUT of the manifest when there are no groups,
+    so a card without one is byte for byte what this tool has always written.
     sound_move_source / sound_confirm_source are the specs the two MENU sounds were
     rendered from, so a set whose sound was CHANGED (its file is still there, but from
     a different source) reads as stale rather than ready - see the GUI's
@@ -606,6 +614,18 @@ def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_V
             row["confirm_source"] = src[2] if len(src) > 2 else None
             row["music_source"] = src[3] if len(src) > 3 else None
         out["images"].append(row)
+    for gi, g in enumerate(groups or []):
+        members = [int(m) for m in (g.get("members") or [])]
+        if not members:
+            raise Refused("build_manifest: group %d has no members" % gi)
+        for nm in (g.get("art"), g.get("anim")):
+            if nm:
+                check_media_name(nm)
+        out.setdefault("groups", []).append(
+            {"members": members, "art": g.get("art") or None,
+             "anim": g.get("anim") or None,
+             "art_source": g.get("art_source") or None,
+             "anim_source": g.get("anim_source") or None})
     return out
 
 
@@ -633,6 +653,35 @@ def validate_manifest(m):
                            "music_source"}
         if extra:
             raise Refused("media.json: images[%d] has unknown keys %s" % (i, sorted(extra)))
+    groups = m.get("groups")
+    if groups is not None:
+        if not isinstance(groups, list):
+            raise Refused("media.json: 'groups' must be a list")
+        for gi, g in enumerate(groups):
+            if not isinstance(g, dict):
+                raise Refused("media.json: groups[%d] is not an object" % gi)
+            members = g.get("members")
+            if not isinstance(members, list) or not members or \
+                    not all(isinstance(x, int) and not isinstance(x, bool) and x >= 0
+                            for x in members):
+                raise Refused("media.json: groups[%d].members must be a list of image "
+                              "indexes" % gi)
+            for k in ("art", "anim"):
+                v = g.get(k)
+                if v is not None:
+                    if not isinstance(v, str):
+                        raise Refused("media.json: groups[%d].%s must be a name or null"
+                                      % (gi, k))
+                    check_media_name(v)
+            for k in ("art_source", "anim_source"):
+                v = g.get(k)
+                if v is not None and not isinstance(v, str):
+                    raise Refused("media.json: groups[%d].%s must be a spec string or null"
+                                  % (gi, k))
+            extra = set(g) - {"members", "art", "anim", "art_source", "anim_source"}
+            if extra:
+                raise Refused("media.json: groups[%d] has unknown keys %s"
+                              % (gi, sorted(extra)))
     for k in ("sound_move", "sound_confirm"):
         v = m.get(k)
         if v is not None:
@@ -656,6 +705,13 @@ def manifest_files(m):
         for k in ("art", "anim", "music", "confirm"):
             if im.get(k) and im[k] not in names:
                 names.append(im[k])
+    # a RANDOM card's own picture is referenced by nothing else: it is not any
+    # image's, so without this it is neither staged onto the card nor kept by
+    # the stale sweep
+    for g in (m.get("groups") or []):
+        for k in ("art", "anim"):
+            if g.get(k) and g[k] not in names:
+                names.append(g[k])
     for k in ("sound_move", "sound_confirm"):
         if m.get(k) and m[k] not in names:
             names.append(m[k])
@@ -1963,6 +2019,13 @@ def parse_group_members(specs):
         if not members:
             raise Refused("--group-members %d: no images" % g)
         out[g] = members
+    # THE GROUPS ARE 0..N-1, WITH NO HOLES: media.json lists them in order and
+    # mkmulticard matches its own group flags to that list BY POSITION, so a gap
+    # here would hand group 2's picture to group 1 - silently, and only on the
+    # machine.
+    if sorted(out) != list(range(len(out))):
+        raise Refused("--group-members: the groups must be numbered 0..%d with no "
+                      "gaps (got %s)" % (len(out) - 1, sorted(out)))
     return out
 
 
@@ -2305,9 +2368,16 @@ def cmd_prepare(a):
     # The two menu sounds' own sources, so a set whose sound was CHANGED (the
     # file is still there, from a different source) reads as stale.  None on a
     # --visual-only run, which renders no menu sound at all.
+    man_groups = [{"members": group_members[g],
+                   "art": groups_out[g].get("art"),
+                   "anim": groups_out[g].get("anim"),
+                   "art_source": group_art.get(g),
+                   "anim_source": group_anim.get(g)}
+                  for g in sorted(group_members)]
     m = build_manifest(rows, move, confirm, a.volume, sources=specs,
                        sound_move_source=(None if visual_only else a.sound_move),
-                       sound_confirm_source=(None if visual_only else confirm_wide))
+                       sound_confirm_source=(None if visual_only else confirm_wide),
+                       groups=man_groups)
     with open(os.path.join(out, "media.json"), "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
         f.write("\n")

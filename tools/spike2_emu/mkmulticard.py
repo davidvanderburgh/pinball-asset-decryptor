@@ -1855,7 +1855,8 @@ def read_media_manifest(media_dir):
 
 def plan_media(media_dir, n_images):
     """Validate DIR/media.json against a card with `n_images` images and check every referenced
-    file -> {'rows': [(art, anim, music, confirm)], 'sound_move', 'sound_confirm', 'volume', 'mixer_volume',
+    file -> {'rows': [(art, anim, music, confirm)], 'group_rows': [(art, anim)],
+    'sound_move', 'sound_confirm', 'volume', 'mixer_volume',
     'files': OrderedDict name -> source path, 'total': bytes, 'kinds': {name: kind word}}.
     Only referenced files are staged; a missing, misnamed, malformed or over-budget one refuses."""
     man = read_media_manifest(media_dir)
@@ -1891,7 +1892,21 @@ def plan_media(media_dir, n_images):
                      take(e.get("anim"), "anim", "images[%d].anim" % i),
                      take(e.get("music"), "wav", "images[%d].music" % i),
                      take(e.get("confirm"), "wav", "images[%d].confirm" % i)))
-    out = {"rows": rows,
+    # A RANDOM CARD'S OWN PICTURE (item 106).  It belongs to the CARD, so it is
+    # not in the image rows and nothing else references it - which is exactly
+    # why it has to be staged from here, or the card's menu would look for a
+    # file the build never copied.  An older manifest has no 'groups' key and
+    # the card's groups fall back to borrowing their first member's row.
+    gsrc = man.get("groups")
+    if gsrc is not None and not isinstance(gsrc, list):
+        raise Refused("%s: 'groups' must be a list" % MEDIA_MANIFEST)
+    group_rows = []
+    for gi, e in enumerate(gsrc or []):
+        if not isinstance(e, dict):
+            raise Refused("%s: groups[%d] must be an object" % (MEDIA_MANIFEST, gi))
+        group_rows.append((take(e.get("art"), "art", "groups[%d].art" % gi),
+                           take(e.get("anim"), "anim", "groups[%d].anim" % gi)))
+    out = {"rows": rows, "group_rows": group_rows,
            "sound_move": take(man.get("sound_move"), "wav", "sound_move") or None,
            "sound_confirm": take(man.get("sound_confirm"), "wav", "sound_confirm") or None,
            "volume": None, "mixer_volume": None, "files": files, "total": total, "kinds": kinds,
@@ -1953,6 +1968,11 @@ def media_budget_refusal(media):
         if over:
             why.append("  over the share: %s" % ", ".join("image %d" % i for i in over))
         why.append("  a file two images share is counted for both")
+    gnames = [n for row in media.get("group_rows") or [] for n in row if n]
+    gbytes = sum(media["sizes"].get(n, 0) for n in set(gnames))
+    if gbytes:
+        why.append("  ...plus %s of random-card pictures, which those rows do not show "
+                   "(a random card is not an image)" % _mb(gbytes))
     return "\n".join(why)
 
 
@@ -2732,15 +2752,29 @@ def conf_for_plan(plan, args, existing=None, media=None):
         if not colors:
             colors = dict(ex.get("colors") or {})
     # THE GROUPS: the flags when they were given, else whatever the card already carries.
-    # A group card's own media row is its FIRST MEMBER'S, so a jukebox costs one card's
-    # worth of art and sound however many members it has - selectmedia.py and its 96 MB
-    # budget are untouched by this.
+    grows = list((media or {}).get("group_rows") or [])
     groups = [dict(g) for g in (getattr(args, "groups", None) or ex.get("groups") or [])]
-    for g in groups:
-        if not g.get("media") and rows and g.get("members"):
+    if grows and len(grows) != len(groups):
+        raise Refused("%s lists %d random-card picture(s); the card has %d random card(s)"
+                      % (MEDIA_MANIFEST, len(grows), len(groups)))
+    for gi, g in enumerate(groups):
+        if g.get("media"):
+            continue
+        # A GROUP CARD'S SOUNDS ARE STILL ITS FIRST MEMBER'S ROW, so a jukebox costs
+        # one card's worth however many members it has.  Its PICTURE is its own when
+        # the media set carries one (item 106): "the game's own logo" means nothing
+        # on a card that stands for forty of them.  A null there is a picture the
+        # owner turned OFF, which is why an empty group row still wins over the
+        # borrow - only a media set with no groups at all falls back.
+        borrowed = ("", "", "", "")
+        if rows and g.get("members"):
             first = g["members"][0]
             if 0 <= first < len(rows):
-                g["media"] = rows[first]
+                borrowed = rows[first]
+        if gi < len(grows):
+            g["media"] = (grows[gi][0], grows[gi][1], borrowed[2], borrowed[3])
+        elif rows and g.get("members"):
+            g["media"] = borrowed
     default_card = getattr(args, "default_card", None)
     if default_card is None:
         default_card = ex.get("default_card")

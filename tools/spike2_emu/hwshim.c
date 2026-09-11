@@ -1862,6 +1862,101 @@ static void map_null_page(void)
     logmsg("[nullpage] guest address 0 mapped; null virtual calls are no-ops\n");
 }
 
+/* ---------------- exit reporter (item 111) ----------------------------- *
+ * Beatles ends within seconds of starting, CLEANLY: no fault, no signal, no
+ * qemu "uncaught target signal" - the game's own exit(), and nothing said
+ * from where. The fault reporter below only sees deaths that are faults, so
+ * a decision to exit had no signature at all. This logs the status, the
+ * caller and the stack words that lie in the game's text (the scene_backtrace
+ * trick: the return address is usually in libstdc++ or libc, the game
+ * function that decided is the word further up), then calls the real exit -
+ * libc's exit, not _exit: the atexit chain and the stdio flush are what the
+ * game asked for. The text bounds are wide (0x8000..0x600000) because every
+ * title's game is linked at 0x8000 and none has reached 6 MB of text. */
+extern void _exit(int);
+void shim_exit(int status) __asm__("exit");
+void shim_exit(int status)
+{
+    static void (*real_exit)(int);
+    unsigned long *w = (unsigned long *)__builtin_frame_address(0);
+    char b[200];
+    int i, shown = 0;
+    if (!real_exit) real_exit = dlsym(RTLD_NEXT, "exit");
+    snprintf(b, sizeof b, "[exit] status=%d from 0x%lx tid=%ld\n", status,
+             (unsigned long)__builtin_return_address(0), (long)syscall(224));
+    logmsg(b);
+    /* the game's text AND the libraries' (0x40xxxxxx under qemu-user): the exit
+     * wrapper at 0x17b530 is called from a callback whose frame is in a library */
+    for (i = 0; i < 640 && shown < 40; i++) {
+        unsigned long v = w[i];
+        if (((v >= 0x8000 && v < 0x600000) || (v >= 0x40000000 && v < 0x42000000)) && (v & 3) == 0) {
+            snprintf(b, sizeof b, "[exit]   stack[%3d] = 0x%lx\n", i, v);
+            logmsg(b);
+            shown++;
+        }
+    }
+    if (real_exit) real_exit(status);
+    _exit(status);
+}
+
+/* ---------------- system()/popen() (item 111) --------------------------- *
+ * The game runs shell commands - `/bin/mount -oremount,async /data` on every
+ * title, and Beatles a personality bind under /mnt/microsd - and in the rig
+ * they fail: the guest is not root outside its user namespace and there is no
+ * MicroSD. Every command and its status is logged. With PAD_FAKE_MOUNT (on by
+ * default) a mount/umount is NOT run and reports success: on the machine
+ * those succeed, and Beatles takes a failed one as a reason to exit(4) a
+ * moment later. fdisk/mkfs/reboot are never faked: a failure there is the
+ * right answer in a rig with no card to format. */
+extern int strncmp(const char *, const char *, unsigned long);
+
+static int fake_mount_on(void)
+{
+    static int on = -1;
+    if (on == -1) { char *q = getenv("PAD_FAKE_MOUNT"); on = !(q && *q == '0'); }
+    return on;
+}
+
+static int is_mount_cmd(const char *cmd)
+{
+    const char *p = cmd;
+    while (*p == ' ') p++;
+    if (!strncmp(p, "/bin/mount", 10) || !strncmp(p, "mount ", 6) || !strncmp(p, "mount\0", 6)) return 1;
+    if (!strncmp(p, "/bin/umount", 11) || !strncmp(p, "umount ", 7)) return 1;
+    return 0;
+}
+
+int shim_system(const char *cmd) __asm__("system");
+int shim_system(const char *cmd)
+{
+    static int (*real_system)(const char *);
+    char b[320];
+    int rc;
+    if (!real_system) real_system = dlsym(RTLD_NEXT, "system");
+    if (cmd && fake_mount_on() && is_mount_cmd(cmd)) {
+        snprintf(b, sizeof b, "[system] \"%.240s\" -> 0 (faked: PAD_FAKE_MOUNT)\n", cmd);
+        logmsg(b);
+        return 0;
+    }
+    rc = real_system ? real_system(cmd) : -1;
+    snprintf(b, sizeof b, "[system] \"%.240s\" -> %d\n", cmd ? cmd : "(null)", rc);
+    logmsg(b);
+    return rc;
+}
+
+void *shim_popen(const char *cmd, const char *mode) __asm__("popen");
+void *shim_popen(const char *cmd, const char *mode)
+{
+    static void *(*real_popen)(const char *, const char *);
+    char b[320];
+    void *f;
+    if (!real_popen) real_popen = dlsym(RTLD_NEXT, "popen");
+    f = real_popen ? real_popen(cmd, mode) : 0;
+    snprintf(b, sizeof b, "[popen] \"%.240s\" (%s) -> %s\n", cmd ? cmd : "(null)", mode ? mode : "?", f ? "ok" : "NULL");
+    logmsg(b);
+    return f;
+}
+
 /* ---------------- fault reporter -------------------------------------- *
  * The game installs its own SIGSEGV handler that returns, so a null deref
  * turns into an endless fault loop with nothing to show for it. Taking the

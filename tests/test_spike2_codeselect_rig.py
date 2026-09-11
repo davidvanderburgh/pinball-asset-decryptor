@@ -614,16 +614,39 @@ def test_a_group_line_is_carried_only_when_the_indexes_line_up():
 
 
 def test_a_group_card_sits_where_its_line_sat():
-    """conf.c would accept a group= line written after every image= line and
-    put its card at the end of the menu - so the order on the glass woulddiffer from
-    the order on the card.  Each line goes back immediately before its first
-    member instead."""
+    """conf.c lays the cards out in line order, so a group= line put anywhere
+    else shows the menu in a different order from the card's own.
+
+    THE PLACE TRAVELS WITH THE LINE, as the count of image lines above it on
+    the card.  Deriving it from the first member is right only for a group that
+    HIDES its members; a keeping group adds a card over images that stay and
+    can sit anywhere, and its `+1-2` does not even start with a digit - so the
+    old rule dropped the line without a word (seen in a rig conf, not here)."""
     text = _read("run_game.sh")
     assert 'awk -v groups="$SEL_GROUPS"' in text
+    carry = text[text.index('SEL_GROUPS=$('):text.index("[select] menu: $(")]
+    assert '\\tgroup=%s' in carry or "\\tgroup=" in carry, \
+        "each line is carried with the place it sat"
     interleave = text[text.index('awk -v groups="$SEL_GROUPS"'):]
     interleave = interleave[:interleave.index("default=$SEL_DEFAULT")]
-    assert "match(spec, /^[0-9]+/)" in interleave, "the first member index places the card"
+    assert 'index(g[k], "\\t")' in interleave, "the place is the part before the tab"
     assert "(NR - 1) in before" in interleave, "image lines are 0-based, like every other index"
+    assert "END { if (NR in before)" in interleave, \
+        "a card that sat after every image has no line to go in front of"
+
+
+def test_the_card_the_countdown_lands_on_is_carried_too():
+    """A RANDOM card over images that keep their own cards is not an image, so
+    `default=` cannot name it and `default_card=` does.  Without this the rig
+    dropped it and an unattended power-up booted whichever image `default=`
+    named instead - which is exactly the card the owner did NOT ask for."""
+    text = _read("run_game.sh")
+    body = text[text.index("echo \"default=$SEL_DEFAULT\""):
+                text.index("echo \"timeout=$SEL_TIMEOUT\"")]
+    assert "default_card=" in body, "the card's own default_card= must reach the rig conf"
+    assert '[ -n "$SEL_GROUPS" ]' in body, \
+        "it is carried on the same gate as the group lines: a card index means " \
+        "nothing without them"
 
 
 def test_pad_select_pick_reaches_the_selector_and_nothing_else_does():

@@ -1682,7 +1682,12 @@ def prepare_args(form, media_dir, visual_only=False):
     art and animations with the same specs, no move / confirm sound work
     (music entries are still named, so the manifest rows match)."""
     args = [SELECTMEDIA, "prepare"] + _media_image_args(form) + [
-        "--out", wsl(media_dir)] + group_media_args(form)
+        "--out", wsl(media_dir),
+        # THE PANEL IS SIZED BY THE CARDS: a row is a card, and a random card
+        # stands for several images.  Without this a jukebox of forty song sets
+        # would have its pictures cut for a forty-panel menu and drawn in a
+        # two-panel one.
+        "--cards", str(max(1, len(form.images)))] + group_media_args(form)
     if visual_only:
         args.append("--visual-only")
     # THE N= INDEXES ARE IMAGES.  media.json carries one row per games tree,

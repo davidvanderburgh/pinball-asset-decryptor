@@ -197,7 +197,18 @@ if [ -n "${PAD_CARD:-}" ]; then
         if printf '%s\n' "$SEL_CARDCONF" | grep -qE '^[[:space:]]*group[[:space:]]*='; then
             SEL_CARDN=$(printf '%s\n' "$SEL_CARDCONF" | grep -cE '^[[:space:]]*image[[:space:]]*=')
             if [ "${SEL_CARDN:-0}" = "$SEL_N" ]; then
-                SEL_GROUPS=$(printf '%s\n' "$SEL_CARDCONF" | sed -n 's/^[[:space:]]*group[[:space:]]*=[[:space:]]*/group=/p')
+                # EACH LINE WITH THE PLACE IT SAT, as "<images before it>\t<line>".
+                # A group card sits in the menu where its line sits, and that is
+                # not always in front of its first member: a KEEPING group adds a
+                # card over images that stay, so it can sit anywhere - David's own
+                # layout has it LAST.
+                SEL_GROUPS=$(printf '%s\n' "$SEL_CARDCONF" | awk '
+                    /^[[:space:]]*image[[:space:]]*=/ { n++; next }
+                    /^[[:space:]]*group[[:space:]]*=/ {
+                        line = $0
+                        sub(/^[[:space:]]*group[[:space:]]*=[[:space:]]*/, "", line)
+                        printf "%d\tgroup=%s\n", n, line
+                    }')
                 echo "[select] menu: $(printf '%s\n' "$SEL_GROUPS" | grep -c .) group line(s) carried from the card"
             else
                 echo "[select] the card names $SEL_CARDN image(s) but $SEL_N resolved here, so its" >&2
@@ -226,24 +237,41 @@ if [ -n "${PAD_CARD:-}" ]; then
         {
             echo "# written by run_game.sh for the boot selector (item 90)"
             echo "# device tokens are p<N>[:imgK] = partition N [tree imgK] of $PAD_CARD"
-            # A GROUP CARD SITS WHERE ITS LINE SITS, so each one goes back
-            # immediately before its first member rather than at the end -
-            # conf.c would accept the end and put the card there, and the menu
-            # would then be in a different order from the card's own.
+            # A GROUP CARD SITS WHERE ITS LINE SAT ON THE CARD, so each one
+            # goes back at the same count of image lines - conf.c lays the
+            # cards out in line order, and a line put anywhere else would show
+            # the menu in a different order from the card's own.  The place
+            # travels with the line (see SEL_GROUPS): deriving it from the
+            # first member is right only for a group that hides its members,
+            # and a KEEPING group's `+1-2` does not even start with a digit,
+            # so the line was being dropped without a word.
             printf '%s' "$SEL_IMAGES" | awk -v groups="$SEL_GROUPS" '
                 BEGIN {
                     n = split(groups, g, "\n")
                     for (k = 1; k <= n; k++) {
-                        if (g[k] == "") continue
-                        spec = g[k]
-                        sub(/^group=[ \t]*/, "", spec)
-                        if (match(spec, /^[0-9]+/))
-                            before[substr(spec, RSTART, RLENGTH) + 0] = \
-                                before[substr(spec, RSTART, RLENGTH) + 0] g[k] "\n"
+                        tab = index(g[k], "\t")
+                        if (g[k] == "" || tab == 0) continue
+                        pos = substr(g[k], 1, tab - 1) + 0
+                        before[pos] = before[pos] substr(g[k], tab + 1) "\n"
                     }
                 }
-                { if ((NR - 1) in before) printf "%s", before[NR - 1]; print }'
+                { if ((NR - 1) in before) printf "%s", before[NR - 1]; print }
+                # ...and one that sat after every image has no line to go in
+                # front of, which is where a RANDOM card over the whole list sits
+                END { if (NR in before) printf "%s", before[NR] }'
             echo "default=$SEL_DEFAULT"
+            # ★ AND THE CARD THE COUNTDOWN LANDS ON, when the card names one
+            # (item 106). `default=` names an IMAGE, and a RANDOM card whose
+            # members keep their own cards is not one - no image index resolves
+            # to it - so a card meant to power up on "surprise me" says which
+            # CARD with default_card=. Carried on the SAME gate as the group
+            # lines above: without them there is no such card here, and the
+            # number would name a different one.
+            if [ -n "$SEL_GROUPS" ]; then
+                printf '%s\n' "$SEL_CARDCONF" \
+                    | sed -n 's/^[[:space:]]*default_card[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/default_card=\1/p' \
+                    | head -1
+            fi
             echo "timeout=$SEL_TIMEOUT"
             # the card's sound and volume keys, verbatim (media= is NOT
             # copied: the media directory is handed over with --media below).

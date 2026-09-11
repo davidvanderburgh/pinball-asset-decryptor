@@ -2055,6 +2055,18 @@ def _fit(im, w, h):
     return out
 
 
+def _paste(dst, im, pos):
+    """Paste *im* at *pos* HONOURING ITS OWN TRANSPARENCY.
+
+    A LOGO PULLED OFF A CARD IS A PNG WITH A TRANSPARENT BACKGROUND, and
+    dropping the alpha paints whatever RGB is stored under it - which on the
+    1987 card's logo is a flat magenta.  The first real random card came out as
+    a coloured box with a logo in it, and every unit test passed, because a
+    test logo is a flat colour with no alpha to lose.  Seen in the emulator.
+    """
+    dst.paste(im, pos, im if im.mode in ("RGBA", "LA") else None)
+
+
 def group_style_names(animated=False):
     return sorted(GROUP_ANIM_STYLES if animated else GROUP_ART_STYLES)
 
@@ -2076,9 +2088,8 @@ def render_group_still(style, logos, size, colors=None):
         cw, ch = w // cols, h // rows
         for i in range(cols * rows):
             src = logos[i % len(logos)]
-            im.paste(src.convert("RGB").resize((max(1, cw - 3), max(1, ch - 3)),
-                                               Image.LANCZOS),
-                     ((i % cols) * cw + 1, (i // cols) * ch + 1))
+            _paste(im, src.resize((max(1, cw - 3), max(1, ch - 3)), Image.LANCZOS),
+                   ((i % cols) * cw + 1, (i // cols) * ch + 1))
         return im
 
     if style == "mosaic":
@@ -2113,7 +2124,7 @@ def render_group_still(style, logos, size, colors=None):
         # into slivers, which is exactly what the first try did.
         im = Image.new("RGBA", (w, h), tuple(card) + (255,))
         show = logos[:5]
-        base = _fit(show[0], int(w * 0.52), int(h * 0.52))
+        base = _fit(show[0], int(w * 0.60), int(h * 0.60))
         n = len(show)
         # A HAND OF CARDS SPLAYS BOTH WAYS around the one in front, turning on a
         # pivot BELOW the panel so they pivot from their corner the way real
@@ -2122,8 +2133,13 @@ def render_group_still(style, logos, size, colors=None):
         spread = 17.0
         for k in range(n - 1, -1, -1):
             t = _fit(show[k], base.width, base.height)
-            face = Image.new("RGBA", (t.width + 10, t.height + 10), tuple(frame) + (255,))
-            face.paste(t.convert("RGBA"), (5, 5))
+            face = Image.new("RGBA", (t.width + 12, t.height + 12), tuple(frame) + (255,))
+            # AN EDGE, or a face is just a lighter rectangle: with the logos'
+            # own transparency honoured (see _paste) there is nothing else to
+            # tell one card in the pile from the panel behind it.
+            ImageDraw.Draw(face).rectangle(
+                [0, 0, face.width - 1, face.height - 1], outline=tuple(dim) + (255,), width=2)
+            _paste(face, t, (6, 6))
             layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
             if style == "stack":
                 off = k * max(6, int(h * 0.045))
@@ -2160,8 +2176,8 @@ def render_group_frames(style, logos, size, colors=None):
         frames = []
         for l in logos[:GIF_MAX_FRAMES]:
             im = Image.new("RGB", (w, h), card)
-            t = _fit(l.convert("RGB"), w, h)
-            im.paste(t, ((w - t.width) // 2, (h - t.height) // 2))
+            t = _fit(l, w, h)
+            _paste(im, t, ((w - t.width) // 2, (h - t.height) // 2))
             frames.append(im)
         return frames, GROUP_CYCLE_MS
     if style == "reel":
@@ -2173,13 +2189,13 @@ def render_group_frames(style, logos, size, colors=None):
         for i in range(max(2, len(logos))):
             # FULL WIDTH: a narrower strip leaves the card colour down both
             # edges and reads as a picture with margins rather than as a reel
-            t = _fit(logos[i % len(logos)].convert("RGB"), w, cell - 6)
+            t = _fit(logos[i % len(logos)], w, cell - 6)
             if t.width < w:
                 t = t.resize((w, max(1, int(t.height * w / float(t.width)))), Image.LANCZOS)
                 if t.height > cell - 6:
                     top = (t.height - (cell - 6)) // 2
                     t = t.crop((0, top, w, top + cell - 6))
-            strip.paste(t, ((w - t.width) // 2, i * cell + (cell - t.height) // 2))
+            _paste(strip, t, ((w - t.width) // 2, i * cell + (cell - t.height) // 2))
         frames = []
         n = GROUP_REEL_FRAMES
         spins = 2.0
@@ -2231,56 +2247,76 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
     names = {}
     if not members:
         raise Refused("group %d has no members to draw from" % g)
-    stamp = "|".join(source_stamp(images[m]) for m in members
-                     if 0 <= m < len(images))
+    for m in members:
+        if not (0 <= m < len(images)):
+            raise Refused("group %d names image %d, which is not one of the %d"
+                          % (g, m, len(images)))
+    # A SIDECAR RECORDS ONE SOURCE and this picture is drawn from several, so the
+    # first member's stamp is the sidecar's and EVERY member's goes in the
+    # params: a change to any of them, or to the list, misses the cache.
+    stamps = [source_stamp(images[m]) for m in members]
+    stamp = stamps[0]
+    sources = [[x["source"], x["mtime"], x["size"]] for x in stamps]
 
     def logos():
         out_logos = []
         for m in members:
-            if not (0 <= m < len(images)):
-                raise Refused("group %d names image %d, which is not one of the %d"
-                              % (g, m, len(images)))
             ci, part, title = card(images[m])
             data, _path = logo_bytes(ci, part, title)
             tmp = os.path.join(work, "glogo%d_%d.png" % (g, m))
             with open(tmp, "wb") as f:
                 f.write(data)
-            out_logos.append(Image.open(tmp).convert("RGB"))
+            # RGBA, not RGB: see _paste - the alpha is the whole picture
+            out_logos.append(Image.open(tmp).convert("RGBA"))
         return out_logos
 
     if art_style and art_style != "none":
         target = os.path.join(out, "gart%d.png" % g)
         name = os.path.basename(target)
-        params = {"style": art_style, "size": list(size), "members": list(members)}
-        if is_cached(target, stamp, params):
+        own_file = art_style not in GROUP_ART_STYLES      # a picture of their own
+        if own_file and not os.path.isfile(art_style):
+            raise Refused("group %d art %r is neither a style (%s) nor a file"
+                          % (g, art_style, ", ".join(group_style_names())))
+        # THE SIDECAR'S SOURCE IS WHAT THE PICTURE IS MADE OF: the file when there
+        # is one, else the members.  Writing one and checking the other is how a
+        # cache never hits.
+        art_stamp = source_stamp(art_style) if own_file else stamp
+        params = {"style": art_style, "size": list(size),
+                  "members": list(members), "sources": sources}
+        if is_cached(target, art_stamp, params):
             log("  %s: cached (%s)" % (name, art_style))
-        elif art_style in GROUP_ART_STYLES:
-            render_group_still(art_style, logos(), size).save(target, "PNG", optimize=True)
-            write_sidecar(target, stamp, params)
-            log("  %s: %s of %d member(s)" % (name, art_style, len(members)))
-        else:
-            # a file, exactly as an image's own art may be
-            if not os.path.isfile(art_style):
-                raise Refused("group %d art %r is neither a style (%s) nor a file"
-                              % (g, art_style, ", ".join(group_style_names())))
+        elif own_file:
             scale_png(art_style, target, size)
-            write_sidecar(target, source_stamp(art_style), params)
+            write_sidecar(target, art_stamp, params)
             log("  %s: %s" % (name, art_style))
+        else:
+            render_group_still(art_style, logos(), size).save(target, "PNG", optimize=True)
+            write_sidecar(target, art_stamp, params)
+            log("  %s: %s of %d member(s)" % (name, art_style, len(members)))
         names["art"] = name
 
     if anim_style and anim_style != "none":
         target = os.path.join(out, "ganim%d.gif" % g)
         name = os.path.basename(target)
-        params = {"style": anim_style, "size": list(size), "members": list(members)}
+        params = {"style": anim_style, "size": list(size),
+                  "members": list(members), "sources": sources}
         if is_cached(target, stamp, params):
             log("  %s: cached (%s)" % (name, anim_style))
         else:
             frames, delay = render_group_frames(anim_style, logos(), size)
             write_group_gif(frames, delay, target)
-            info = gif_info(open(target, "rb").read())
-            if not info or not gif_fits(info):
+            with open(target, "rb") as f:
+                info = gif_info(f.read())
+            if not info:
+                raise Refused("group %d's %s animation did not come out as a GIF"
+                              % (g, anim_style))
+            # gif_fits() answers with the REASON and None when it fits, so this
+            # reads as it does everywhere else in this file - and the reason is
+            # what the owner needs ("40 members > 150 frames", not "too big")
+            why = gif_fits(info)
+            if why:
                 raise Refused("group %d's %s animation does not fit the selector's "
-                              "limits (%s)" % (g, anim_style, fmt_bytes(os.path.getsize(target))))
+                              "limits (%s)" % (g, anim_style, why))
             write_sidecar(target, stamp, params)
             log("  %s: %s, %d frames (%s)"
                 % (name, anim_style, len(frames), fmt_bytes(os.path.getsize(target))))
@@ -2293,7 +2329,13 @@ def cmd_prepare(a):
     n = len(images)
     out = check_output_dir(a.out)
     os.makedirs(out, exist_ok=True)
-    size = parse_size(a.size) if a.size else panel_size_for(n)
+    # THE PANEL IS SIZED BY THE CARDS, NOT THE IMAGES.  A random card stands for
+    # several images and the menu draws one panel for it, so a jukebox of forty
+    # song sets is a TWO card menu - sizing its pictures for forty would hand
+    # the selector a thumbnail to blow up.  --cards is how the caller says so;
+    # without it every image has a card of its own, which is the old rule.
+    ncards = int(getattr(a, "cards", 0) or 0) or n
+    size = parse_size(a.size) if a.size else panel_size_for(ncards)
     arts = [parse_art_spec(s) for s in parse_index_spec(a.art, n, "auto")]
     anims = [parse_anim_spec(s, a.start, a.seconds, a.fps) for s in parse_index_spec(a.anim, n, "none")]
     musics = parse_index_spec(a.music, n, "none")
@@ -2461,6 +2503,10 @@ def main(argv=None):
                    help="the menu-wide confirm sound (a bare value, the default 'auto'); "
                         "'N=...' gives image N its own confirm<N>.wav ('auto' = that image's "
                         "own card, 'none' = it falls back to the menu-wide one)")
+    s.add_argument("--cards", type=int, default=0, metavar="N",
+                   help="how many CARDS the menu draws (default: one per image) - a random "
+                        "card stands for several images, and the pictures are sized for the "
+                        "panel the menu actually draws")
     s.add_argument("--group-members", action="append", default=[], metavar="G=A,B,C",
                    help="which IMAGES random card G rolls between - its picture is drawn from "
                         "their logos (repeatable, one per group)")

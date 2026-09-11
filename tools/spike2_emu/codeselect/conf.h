@@ -185,12 +185,20 @@ int conf_card_boots(const struct conf *c, int k);
 
 /* how many images card `k` can boot (1 for a plain card), and the m'th of
  * them (-1 when out of range) */
+/* which GROUP a card is, or -1 for an ordinary one.  conf_card_nmembers()
+ * answers 1 for an ordinary card - it has one image - so it cannot be asked
+ * this question. */
+int conf_card_group(const struct conf *c, int k);
 int conf_card_nmembers(const struct conf *c, int k);
 int conf_card_member(const struct conf *c, int k, int m);
 
 /* The last-choice file holds one line "<index>\n". -1 when missing/invalid. */
-int conf_read_last(const char *path);
-int conf_write_last(const char *path, int idx);      /* 0 ok */
+/* The menu's own memory: the IMAGE that booted, and the CARD it was chosen
+ * from (-1 when the file predates the second number, or does not say).  THE
+ * CARD IS THE HONEST MEMORY for a random card whose members keep cards of
+ * their own: the player chose "roll one", not the build the roll landed on. */
+int conf_read_last(const char *path, int *card);
+int conf_write_last(const char *path, int idx, int card);    /* card < 0: image alone */
 
 /* The choice file: "<index>\n", written atomically (tmp + rename). 0 ok. */
 int conf_write_choice(const char *path, int idx);

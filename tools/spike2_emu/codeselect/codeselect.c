@@ -894,6 +894,15 @@ static void card_note(const struct conf *c, int hl, int ncards, char *out, int o
  *
  * `seed` >= 0 (--seed, tests only) replaces the lot and makes the roll
  * reproducible.  `why` gets the clause the log prints. */
+/* whether card `card` has image `img` among its members */
+static int card_has_member(const struct conf *c, int card, int img)
+{
+    int k, n = conf_card_nmembers(c, card);
+    for (k = 0; k < n; k++)
+        if (conf_card_member(c, card, k) == img) return 1;
+    return 0;
+}
+
 static int roll_member(const struct conf *c, int card, int last, int seed,
                        char *why, int whylen)
 {
@@ -1190,7 +1199,7 @@ int main(int argc, char **argv)
      * `hl` and `chosen` are CARD indexes, `hlimg`, `lastimg` and `boot` are
      * IMAGE indexes - the choice file, the last-choice file, default= and
      * select.sh have always spoken images and still do. */
-    int headless, snapshot, invert, timeout, n, nimg, hl, hlimg, lastimg;
+    int headless, snapshot, invert, timeout, n, nimg, hl, hlimg, lastimg, lastcard;
     int chosen = -1, boot = -1, w, h, volume, pinned;
     int machine_v = -1;       /* volume=machine: the machine's own 0-63, else -1 */
     int audio_up = 0;         /* the bridge brought the audio section up (hw only) */
@@ -1249,7 +1258,8 @@ int main(int argc, char **argv)
      * exclusion - and a rung that named a card outright used to skip the read
      * entirely, so a group could hand back the very build the player had just
      * booted from its own card.  The file is the machine's memory either way. */
-    lastimg = snapshot ? -1 : conf_read_last(o.last);
+    lastcard = -1;
+    lastimg = snapshot ? -1 : conf_read_last(o.last, &lastcard);
     hl = -1;
     hlimg = -1;
     if (o.highlight_card >= 0) {
@@ -1272,15 +1282,34 @@ int main(int argc, char **argv)
             how = "--highlight";
         }
         else if (o.def >= 0 && o.def < nimg) { hlimg = o.def; how = "--default"; }
-        else if (c.def >= 0 && c.def < nimg) { hlimg = c.def; how = "conf default"; }
         else if (c.def_card >= 0) { hl = c.def_card; how = "conf default_card"; }
+        else if (c.def >= 0 && c.def < nimg) { hlimg = c.def; how = "conf default"; }
         else { hlimg = 0; how = "first"; }
     } else {
+        /* THE CARD IS REMEMBERED, NOT ONLY THE BUILD.  A random card's whole
+         * point is that the player did not pick what it booted, so coming back
+         * to that build's own card (a keeping group leaves it one) would turn
+         * "surprise me" into "that one, from now on" after a single power-up.
+         * Only a GROUP card is taken from the file: for any other the image
+         * below resolves to the same card, and the image is the older, better
+         * tested road. */
         hlimg = lastimg;
-        if (hlimg >= 0 && hlimg < nimg) how = "last choice";
+        if (lastcard >= 0 && lastcard < c.ncards && conf_card_group(&c, lastcard) >= 0
+            && card_has_member(&c, lastcard, lastimg)) {
+            hl = lastcard;
+            hlimg = -1;
+            how = "last choice";
+        }
+        else if (hlimg >= 0 && hlimg < nimg) how = "last choice";
         else if (o.def >= 0 && o.def < nimg) { hlimg = o.def; how = "--default"; }
-        else if (c.def >= 0 && c.def < nimg) { hlimg = c.def; how = "conf default"; }
+        /* DEFAULT_CARD OUTRANKS DEFAULT, because a conf carries both and only
+         * one of them can be a deliberate answer: every conf this builder has
+         * ever written has a `default=`, and `default_card=` is written only
+         * when somebody named a card that no image can name.  The other way
+         * round, a menu meant to power up on "surprise me" powered up on
+         * whichever build `default=` happened to hold (seen on the rig). */
         else if (c.def_card >= 0) { hl = c.def_card; how = "conf default_card"; }
+        else if (c.def >= 0 && c.def < nimg) { hlimg = c.def; how = "conf default"; }
         else { hlimg = 0; how = "first"; }
     }
     if (hl < 0) {
@@ -1692,7 +1721,14 @@ int main(int argc, char **argv)
          * image= lines and run_game.sh translates an image index, and neither
          * has any idea groups exist.  That is the whole reason the grammar
          * put members in the image array. */
-        if (conf_write_last(o.last, boot) < 0)
+        /* THE CARD IS RECORDED ONLY WHEN THE IMAGE DOES NOT FIND IT AGAIN,
+         * which is exactly a random card whose members keep cards of their own.
+         * Everywhere else the image resolves straight back to the card it was
+         * chosen from, so a second number would say nothing and would change
+         * this file for every menu - a group-free card's behaviour is
+         * byte-identical to 2.9's on purpose. */
+        if (conf_write_last(o.last, boot,
+                            conf_card_of_image(&c, boot) != chosen ? chosen : -1) < 0)
             sel_log("cannot write %s: %s (continuing)", o.last, strerror(errno));
         if (conf_write_choice(o.out, boot) < 0) {
             sel_say("error: cannot write %s: %s", o.out, strerror(errno));

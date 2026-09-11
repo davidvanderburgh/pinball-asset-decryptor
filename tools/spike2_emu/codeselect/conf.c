@@ -409,6 +409,12 @@ int conf_card_boots(const struct conf *c, int k)
     return c->cards[k].image;
 }
 
+int conf_card_group(const struct conf *c, int k)
+{
+    if (k < 0 || k >= c->ncards) return -1;
+    return c->cards[k].group;
+}
+
 int conf_card_nmembers(const struct conf *c, int k)
 {
     if (k < 0 || k >= c->ncards) return 0;
@@ -423,21 +429,31 @@ int conf_card_member(const struct conf *c, int k, int m)
     return c->cards[k].image;
 }
 
-int conf_read_last(const char *path)
+int conf_read_last(const char *path, int *card)
 {
     FILE *f = fopen(path, "r");
     char line[64];
     int v = -1;
+    if (card) *card = -1;
     if (!f) return -1;
     if (fgets(line, sizeof line, f)) {
-        char *s = trim(line);
+        /* "<image>" from every selector up to 3.0, "<image> <card>" from this
+         * one. A file with one number still reads, which is what a card
+         * carried over from an older build has in it. */
+        char *s = trim(line), *sp = strchr(s, ' ');
+        if (sp) {
+            *sp++ = 0;
+            sp = trim(sp);
+        }
         if (*s && strspn(s, "0123456789") == strlen(s)) v = atoi(s);
+        if (v >= 0 && card && sp && *sp && strspn(sp, "0123456789") == strlen(sp))
+            *card = atoi(sp);
     }
     fclose(f);
     return v;
 }
 
-static int write_index(const char *path, int idx, int atomic)
+static int write_index(const char *path, int idx, int atomic, int card)
 {
     char tmp[512];
     FILE *f;
@@ -445,19 +461,24 @@ static int write_index(const char *path, int idx, int atomic)
     else snprintf(tmp, sizeof tmp, "%s", path);
     f = fopen(tmp, "w");
     if (!f) return -1;
-    fprintf(f, "%d\n", idx);
+    if (card >= 0) fprintf(f, "%d %d\n", idx, card);
+    else fprintf(f, "%d\n", idx);
     if (fflush(f) != 0 || fsync(fileno(f)) != 0) { /* fsync may fail on odd fs: tolerate */ }
     if (fclose(f) != 0) return -1;
     if (atomic && rename(tmp, path) != 0) { unlink(tmp); return -1; }
     return 0;
 }
 
-int conf_write_last(const char *path, int idx)
+int conf_write_last(const char *path, int idx, int card)
 {
-    return write_index(path, idx, 1);
+    return write_index(path, idx, 1, card);
 }
 
 int conf_write_choice(const char *path, int idx)
 {
-    return write_index(path, idx, 1);
+    /* THE CHOICE FILE IS ONE NUMBER, FOR EVER: select.sh's awk and
+     * run_game.sh both read it as an image index and neither has any idea
+     * groups exist. The card goes in the last-choice file, which only this
+     * program reads. */
+    return write_index(path, idx, 1, -1);
 }

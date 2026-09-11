@@ -9118,3 +9118,20 @@ def test_adding_a_song_set_re_renders_the_random_cards_picture(tmp_path):
         assert media_fingerprint(panel.form()) != after
     finally:
         root.destroy()
+
+
+def test_the_pictures_are_cut_for_the_menu_the_cards_make(tmp_path):
+    """A jukebox of song sets is a TWO card menu however many games it holds,
+    and selectmedia sizes a picture for the panel it will be drawn in. Handing
+    it the image count would cut every picture for a forty-panel menu."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        args = mb.prepare_args(panel.form(), str(tmp_path / "media"))
+        assert args[args.index("--cards") + 1] == "2", "one card, plus the random one"
+        assert len([a for a in args if a == "--extra"]) == 3, "...over three games"
+    finally:
+        root.destroy()

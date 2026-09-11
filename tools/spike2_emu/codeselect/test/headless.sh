@@ -754,6 +754,72 @@ for s in 0 1 2 3 4 5 6 7 8 9; do
     [ "$got" = "2" ] || { echo "headless: FAIL seed $s rolled '$got', not 2 (the exclusion)"; exit 1; }
 done
 
+# 16e. THE CARD THE PLAYER CHOSE IS WHAT COMES BACK, not the build the roll
+#      landed on.  A kept member has a card of its own, so remembering only the
+#      IMAGE turned "surprise me" into "that one, from now on" after a single
+#      power-up: the next boot highlighted the build's own card and the
+#      countdown booted it.  The last-choice file carries the card as well now.
+rm -f "$T/choice"
+printf '1 3\n' > "$T/last"
+run "$T/menu_keep3.ppm" "$T/keep.conf" --no-invert --log "$T/keep3.log"
+grep -q "card 4/4 (group RANDOM, 2 members)" "$T/keep3.log" || {
+    echo "headless: FAIL the random card was not what came back"
+    grep "menu:" "$T/keep3.log"; exit 1; }
+# ...and it rolled again rather than handing back the build it booted last
+expect "$T/choice" 2
+[ "$(cat "$T/last")" = "1 3" ] && { echo "headless: FAIL the last file was not rewritten"; exit 1; }
+grep -q "^2 3$" "$T/last" || {
+    echo "headless: FAIL the last file did not record the CARD it was chosen from"
+    cat "$T/last"; exit 1; }
+# a file from an older selector is ONE number and still reads: the image alone,
+# which resolves to that build's own card (16a)
+rm -f "$T/choice"; printf '1\n' > "$T/last"
+run "$T/menu_keep4.ppm" "$T/keep.conf" --no-invert --log "$T/keep4.log"
+grep -q "highlight 1 (CUSTOM 1) from last choice, card 2/4" "$T/keep4.log" || {
+    echo "headless: FAIL a one-number last file did not read as the image"
+    grep "menu:" "$T/keep4.log"; exit 1; }
+
+# 16f. default_card= OUTRANKS default=, because a conf carries both and only
+#      one of them can be a deliberate answer: every conf the builder writes has
+#      a `default=`, and `default_card=` is written only when somebody named a
+#      card no image can name.  This is David's own layout: three builds and a
+#      RANDOM card over the last two, powering up unattended on the random one.
+cat > "$T/dcard.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|the primary
+image=/dev/mmcblk0p3:img1|CUSTOM 1|orchestral
+image=/dev/mmcblk0p3:img2|CUSTOM 2|standard
+group=+1-2|RANDOM|pick one or let it roll
+default=0
+default_card=3
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/dcard.log"
+run "$T/menu_dcard.ppm" "$T/dcard.conf" --no-invert --log "$T/dcard.log"
+grep -q "from conf default_card, card 4/4 (group RANDOM, 2 members)" "$T/dcard.log" || {
+    echo "headless: FAIL default_card did not outrank default"
+    grep "menu:" "$T/dcard.log"; exit 1; }
+got=$(cat "$T/choice")
+[ "$got" = "1" ] || [ "$got" = "2" ] || {
+    echo "headless: FAIL an unattended power-up on the random card chose '$got'"; exit 1; }
+# ...and the SECOND power-up comes back to the random card and rolls the other
+# one, which is the whole point of the layout
+rm -f "$T/choice"
+run "$T/menu_dcard2.ppm" "$T/dcard.conf" --no-invert --log "$T/dcard2.log"
+grep -q "from last choice, card 4/4 (group RANDOM, 2 members)" "$T/dcard2.log" || {
+    echo "headless: FAIL the second power-up left the random card"
+    grep "menu:" "$T/dcard2.log"; exit 1; }
+second=$(cat "$T/choice")
+[ "$second" != "$got" ] || {
+    echo "headless: FAIL two power-ups in a row booted image $got twice"; exit 1; }
+# without default_card the same conf powers up on the image default= names
+sed '/^default_card=/d' "$T/dcard.conf" > "$T/dcard3.conf"
+rm -f "$T/choice" "$T/last"
+run "$T/menu_dcard3.ppm" "$T/dcard3.conf" --no-invert --log "$T/dcard3.log"
+grep -q "highlight 0 (STERN STOCK) from conf default, card 1/4" "$T/dcard3.log" || {
+    echo "headless: FAIL default= stopped working without default_card="
+    grep "menu:" "$T/dcard3.log"; exit 1; }
+expect "$T/choice" 0
+
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"
 python3 "$HERE/ppm2png.py" "$T/menu_invert.ppm" "$T/codeselect_menu_invert.png" --rot180-of "$T/menu.ppm"

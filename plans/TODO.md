@@ -7828,102 +7828,6 @@ These have each been violated at least once and each cost a run or a window:
       — S3: a workaround exists (a 32 GB card). D4: a new on-card layout
       whose hardware proof is one flash away.
 
-- [ ] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
-      and choosing it boots one member at random, a different one every
-      power-up.** `S3 D2` ← REOPENED 2026-09-10 *(The roll itself is DONE and
-      emulator-proven - three unattended power-ups, two different games; the
-      full record is the Done entry this was lifted from, and the closing
-      commit is 8f98809. What is NOT done is WHERE a group may sit and what it
-      may share, which David found within minutes of looking at it.)*
-      **DAVID, 2026-09-10, with a screenshot of the tab refusing his card:**
-      "why can't the first one be a random group? what if i want
-      RANDOM|CUSTOM1|CUSTOM2? I should be able to add a random at any point."
-      His list was two Godzilla builds plus a RANDOM over the same two, and the
-      tab refused it with `Image 2, game 1 is listed twice`.
-      **BOTH ASKS ARE ALREADY LEGAL ON THE CARD - measured, not assumed:**
-      a conf with the `group=` line ABOVE image 0's line loads as "3 image
-      line(s) in 2 card(s)" with the primary reported as `card 2/2`, so a group
-      can be the FIRST card today; and a conf listing the same device on two
-      image lines loads as "5 image line(s) in 4 card(s)" with `select.sh`
-      resolving index 3 to the same tree as index 1, so showing a game twice
-      costs ZERO bytes. The refusals are all above the card: the tab's
-      one-card-per-tree rule, `render_images_conf`'s image-0 rule, and
-      `conf_for_plan` building its device list 1:1 from the plan.
-      **THE DESIGN, decided after weighing both:** a group gains a KEEP flag -
-      `group=+<members>|...` - meaning its members ALSO keep their own cards.
-      Without it a group consumes its members, which is the 40-variant jukebox
-      and stays the default. With it David gets `C1 | C2 | RANDOM(C1,C2)` over
-      TWO trees, and image 0 becomes a legal member because the primary still
-      has a card of its own.
-      **REJECTED: duplicate image lines.** They work on the card (proven above)
-      and need no selector change at all, but mkmulticard threads "image index
-      == tree index" through trees.json, verify, update and extract, and
-      breaking that to buy a menu layout is far more dangerous than a small
-      selector change.
-      **Also in scope:** the roll's exclusion should compare the last choice by
-      DEVICE, not by image index, so a group cannot repeat a build the player
-      picked from its own card a moment ago.
-      **DONE (1)-(3), pushed:** the selector (497e76d), the builder and the tab
-      (ce7ed9c), and the status row (9ac37a1). `group=+<members>|...` keeps the
-      members' own cards; image 0 is a legal member of a KEEPING group only;
-      the roll excludes by DEVICE so a build reached from its own card is not
-      handed straight back; `default_card=` and `--highlight-card` name a card
-      outright, which is the ONLY way to reach a keeping group's card once its
-      games all keep their own - and a random card the countdown cannot land on
-      is useless for the unattended power-up that is the point of the feature.
-      mkmulticard carries `keep` and `pos` (the image its line sits before,
-      which is where its card sits) with `--group-over '<a>-<b>|TITLE|SUB'`.
-      The tab has "Add random over the images above...", `form_trees` skips a
-      keeping group entirely (it adds no games), and the first-row rule now
-      bites only a CONSUMING group.
-      **FOUR PLACES ASSUMED ONE ROW MEANT ONE .raw**, and this is worth stating
-      as a pattern rather than four bugs: the argument builders, the saved-state
-      round trip, and the status row TWICE - once for a group having no path of
-      its own, once for a keeping group's games being other rows'. Two were
-      found only by looking at a SCREENSHOT. Anything that walks `form.images`
-      and reasons about files has to ask whether the row carries games of its
-      own.
-      **A RANDOM CARD'S OWN PICTURE (David, 2026-09-10, looking at the Edit
-      dialog: "the options for a Random group need to be bespoke to a random
-      group. we should have options like 'stack of logos', 'big ?', etc. come
-      up with some sweet looking ideas for it" - then picked ALL EIGHT of the
-      mock-ups).** The game-specific options are meaningless on a random row:
-      "the game's own logo" has no single game to refer to.
-      **DONE (8b4b65a, 4ea7b3a):** eight styles in `selectmedia.py`, every one
-      drawn from the MEMBERS' own logos so the card shows the builds it can
-      boot. Stills `fan` / `stack` / `mosaic` / `question` / `shuffle`,
-      animated `cycling` (each member a second) and `reel` (spins and eases
-      onto one). PIL rather than ffmpeg, and the code says why. CLI:
-      `--group-members G=A,B,C` with `--group-art` / `--group-anim`, writing
-      `gart<G>.png` / `ganim<G>.gif`, cached on the member cards' stamps plus
-      the style, and the animation held to the selector's own gif limits after
-      it is written.
-      **Two mistakes fixed by LOOKING at the output, not by reasoning:** the fan
-      splayed one way only (it pivots below the panel now and alternates either
-      side of the front card), and the reel left the card colour down both edges
-      (it fills the width and crops). Each card is composed on its own
-      full-panel layer before rotation, because pasting rotated bitmaps by their
-      top-left turns the ones behind into slivers - which the first attempt did,
-      visibly.
-      **Resume:** (a) THE TAB'S EDIT DIALOG for a group row - the Picture
-      section should offer the eight styles instead of "the game's own logo" /
-      "the game's own attract video", with `cycling` the default for a new
-      random row; (b) `prepare_args` emitting `--group-members` /
-      `--group-art` / `--group-anim` for each group row; (c) `conf_for_plan`
-      putting `gart<G>.png` into the group's own media row instead of borrowing
-      its first member's, and `plan_media` carrying the group rows back.
-      (d) then the emulator run of David's layout - a store card of two builds
-      plus `--group-over '0-1|RANDOM|pick one or let it roll'`, booted twice,
-      alternating by the exclusion rule with either build pickable directly.
-      **Not in this item:** item 110, the Edit dialog's Members section. Also
-      left conservative on purpose: changing a KEEPING group's membership asks
-      for a rebuild when an inject would do, because `diff_forms` keys the
-      rebuild bucket on rows rather than on games. Over-asking is the safe
-      direction.
-      — S3: the jukebox works; this is where it may sit. D2: the card already
-      does all of it, so this is three layers of builder above a proven format.
-
-
 - [ ] **110. A random group's games cannot be CHANGED once the row exists: the
       Edit-image dialog has no Members section.** `S3 D2` *(Split out of item
       106 on 2026-09-10, when everything else about a group card closed. The
@@ -8511,6 +8415,165 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
+      and choosing it boots one member at random, a different one every
+      power-up.** `S3 D2` ← REOPENED 2026-09-10 and CLOSED THE SAME DAY,
+      emulator-proven *(The roll itself was DONE and emulator-proven before the
+      reopen - three unattended power-ups, two different games; the
+      full record is below and the first closing commit is 8f98809. What the
+      reopen added is WHERE a group may sit, what it may share, and what a
+      random card LOOKS like - all of which David found within minutes of
+      looking at it.)*
+      **DAVID, 2026-09-10, with a screenshot of the tab refusing his card:**
+      "why can't the first one be a random group? what if i want
+      RANDOM|CUSTOM1|CUSTOM2? I should be able to add a random at any point."
+      His list was two Godzilla builds plus a RANDOM over the same two, and the
+      tab refused it with `Image 2, game 1 is listed twice`.
+      **BOTH ASKS ARE ALREADY LEGAL ON THE CARD - measured, not assumed:**
+      a conf with the `group=` line ABOVE image 0's line loads as "3 image
+      line(s) in 2 card(s)" with the primary reported as `card 2/2`, so a group
+      can be the FIRST card today; and a conf listing the same device on two
+      image lines loads as "5 image line(s) in 4 card(s)" with `select.sh`
+      resolving index 3 to the same tree as index 1, so showing a game twice
+      costs ZERO bytes. The refusals are all above the card: the tab's
+      one-card-per-tree rule, `render_images_conf`'s image-0 rule, and
+      `conf_for_plan` building its device list 1:1 from the plan.
+      **THE DESIGN, decided after weighing both:** a group gains a KEEP flag -
+      `group=+<members>|...` - meaning its members ALSO keep their own cards.
+      Without it a group consumes its members, which is the 40-variant jukebox
+      and stays the default. With it David gets `C1 | C2 | RANDOM(C1,C2)` over
+      TWO trees, and image 0 becomes a legal member because the primary still
+      has a card of its own.
+      **REJECTED: duplicate image lines.** They work on the card (proven above)
+      and need no selector change at all, but mkmulticard threads "image index
+      == tree index" through trees.json, verify, update and extract, and
+      breaking that to buy a menu layout is far more dangerous than a small
+      selector change.
+      **Also in scope:** the roll's exclusion should compare the last choice by
+      DEVICE, not by image index, so a group cannot repeat a build the player
+      picked from its own card a moment ago.
+      **DONE (1)-(3), pushed:** the selector (497e76d), the builder and the tab
+      (ce7ed9c), and the status row (9ac37a1). `group=+<members>|...` keeps the
+      members' own cards; image 0 is a legal member of a KEEPING group only;
+      the roll excludes by DEVICE so a build reached from its own card is not
+      handed straight back; `default_card=` and `--highlight-card` name a card
+      outright, which is the ONLY way to reach a keeping group's card once its
+      games all keep their own - and a random card the countdown cannot land on
+      is useless for the unattended power-up that is the point of the feature.
+      mkmulticard carries `keep` and `pos` (the image its line sits before,
+      which is where its card sits) with `--group-over '<a>-<b>|TITLE|SUB'`.
+      The tab has "Add random over the images above...", `form_trees` skips a
+      keeping group entirely (it adds no games), and the first-row rule now
+      bites only a CONSUMING group.
+      **FOUR PLACES ASSUMED ONE ROW MEANT ONE .raw**, and this is worth stating
+      as a pattern rather than four bugs: the argument builders, the saved-state
+      round trip, and the status row TWICE - once for a group having no path of
+      its own, once for a keeping group's games being other rows'. Two were
+      found only by looking at a SCREENSHOT. Anything that walks `form.images`
+      and reasons about files has to ask whether the row carries games of its
+      own.
+      **A RANDOM CARD'S OWN PICTURE (David, 2026-09-10, looking at the Edit
+      dialog: "the options for a Random group need to be bespoke to a random
+      group. we should have options like 'stack of logos', 'big ?', etc. come
+      up with some sweet looking ideas for it" - then picked ALL EIGHT of the
+      mock-ups).** The game-specific options are meaningless on a random row:
+      "the game's own logo" has no single game to refer to.
+      **DONE (8b4b65a, 4ea7b3a):** eight styles in `selectmedia.py`, every one
+      drawn from the MEMBERS' own logos so the card shows the builds it can
+      boot. Stills `fan` / `stack` / `mosaic` / `question` / `shuffle`,
+      animated `cycling` (each member a second) and `reel` (spins and eases
+      onto one). PIL rather than ffmpeg, and the code says why. CLI:
+      `--group-members G=A,B,C` with `--group-art` / `--group-anim`, writing
+      `gart<G>.png` / `ganim<G>.gif`, cached on the member cards' stamps plus
+      the style, and the animation held to the selector's own gif limits after
+      it is written.
+      **Two mistakes fixed by LOOKING at the output, not by reasoning:** the fan
+      splayed one way only (it pivots below the panel now and alternates either
+      side of the front card), and the reel left the card colour down both edges
+      (it fills the width and crops). Each card is composed on its own
+      full-panel layer before rotation, because pasting rotated bitmaps by their
+      top-left turns the ones behind into slivers - which the first attempt did,
+      visibly.
+      **DONE (3e525f8 and the commit this line is in): THE DIALOG, THE CARD AND
+      THE EMULATOR RUN.** The Edit dialog offers a random row the eight styles
+      instead of "the game's own logo" and "the game's own attract video", with
+      `cycling` the default for a new one; `prepare_args` sends
+      `--group-members` / `--group-art` / `--group-anim`; media.json carries a
+      `groups` list beside `images` (left out entirely when a card has none, so
+      a group-free set is byte for byte what the tool always wrote); plan_media
+      stages what it names and `conf_for_plan` writes it into the `group=` line
+      instead of borrowing the first member's. A group card's SOUNDS are still
+      the first member's row, so a jukebox costs one card's worth however many
+      members it has, and a member game is now prepared with no picture of its
+      own at all - nothing in the menu ever draws one, the LOADING frame
+      included, and forty song sets would otherwise render forty logos and
+      forty copies of one music bed into a 96 MB budget.
+      **THE EMULATOR RUN, ON DAVID'S OWN TMNT STORE CARD** (its menu alone
+      re-injected; the previous conf is saved at
+      `/tmp/i106proof/images.conf.before`). Four cards - STERN 1.59.0, TMNT
+      1987 PRO, TMNT 1987 LE, and RANDOM over the last two with `gart0.png` /
+      `ganim0.gif` of its own. Two UNATTENDED power-ups, no key pressed:
+
+      | boot | highlight | it booted | the menu's memory after |
+      |---|---|---|---|
+      | 1 | `RANDOM` from conf default_card, card 4/4 | image 2, TMNT 1987 LE, `2 candidates, urandom+clock` | `2 3` |
+      | 2 | `RANDOM` from last choice, card 4/4 | image 1, TMNT 1987 PRO, `1 candidate` | `1 3` |
+
+      Both reached the game at ~59.7 fps. That is the item's headline for this
+      layout: a different one every power-up, with either build still pickable
+      by hand from its own card.
+      **SIX BUGS THE RUN FOUND THAT NO TEST HAD, and five of them could not
+      have been found any other way:**
+      1. `_prepare_group` joined `source_stamp()` DICTS as if they were
+         strings - a TypeError on the first real card. The sidecar records ONE
+         source, so the first member's is the stamp and every member's goes in
+         the params.
+      2. **The animation check was INVERTED.** `gif_fits()` answers with the
+         REASON and None when it fits, so every animation that fitted was
+         refused and any that did not would have been written.
+      3. **A logo's transparent background was PAINTED.** A logo pulled off a
+         card is a PNG with anything at all stored under its alpha - flat
+         magenta, on the 1987 card - so the first real random card came out as
+         a coloured box with a logo in it. Every unit test passed, because a
+         test logo is a flat opaque colour with no alpha to lose.
+      4. The panel was sized by the IMAGE count. A jukebox of forty song sets
+         is a TWO card menu, so its pictures were being cut for a forty-panel
+         one; `--cards N` is how the caller says how many cards the menu draws.
+      5. **run_game.sh dropped a keeping group's line without a word.** It
+         placed each group in front of its first member, derived by matching
+         `^[0-9]+` against the spec - and `+1-2` does not start with a digit.
+         The place travels with the line now (the count of image lines above it
+         on the card), which is also the only rule that can put a card AFTER
+         every image, where David's sits.
+      6. `default_card=` never reached the rig conf, and `default=` outranked
+         it in the selector's own ladder, so an unattended power-up booted
+         whichever build `default=` held. Both fixed; `default_card` outranks
+         `default` because every conf has a `default=` and only the card one is
+         ever a deliberate answer.
+      **AND ONE DESIGN HOLE THE RUN EXPOSED:** the menu remembered the IMAGE it
+      booted, and a KEEPING group's member has a card of its own - so the
+      second power-up highlighted that build's own card and booted it. One roll,
+      then stuck for ever. **The card is remembered now, not only the build**
+      (`conf_write_last` writes `<image> <card>`, and only when the image cannot
+      find the card again, so a group-free card's file is unchanged). The
+      player chose "roll one", not the build the roll landed on.
+      **Everything above is pinned:** headless 16e (the card comes back and
+      rolls again; a one-number file from an older selector still reads) and 16f
+      (default_card outranks default, two power-ups alternate, and without
+      default_card the image default still works), `make check` green; 19
+      negative controls, each fix backed out in turn and watched to go red.
+      **Resume:** nothing is owed on the card or the tools. What is left is
+      polish and it can close: (a) the eight styles are drawn from the members'
+      logos, so two builds that share a logo (the TMNT pair) make every style
+      look alike - a card whose members differ shows them off, and there is
+      nothing to fix; (b) item 110, the Edit dialog's Members section, is still
+      split out. Also left conservative on purpose: changing a KEEPING group's
+      membership asks for a rebuild when an inject would do, because
+      `diff_forms` keys the rebuild bucket on rows rather than on games.
+      — S3: the jukebox works; this is where it may sit. D2: the card already
+      does all of it, so this is three layers of builder above a proven format.
+
 
 - [x] **109. The boot menu decided which animations to keep in RAM ONCE, before
       the menu opened, in image order — so on a card with more than about five

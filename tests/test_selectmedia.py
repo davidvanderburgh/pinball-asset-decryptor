@@ -1345,3 +1345,121 @@ def test_the_groups_must_be_numbered_without_a_gap(sm):
         sm.parse_group_members(["0=0,1", "2=2,3"])
     with pytest.raises(sm.Refused, match="numbered 0"):
         sm.parse_group_members(["1=0,1"])
+
+
+#: what a transparent logo hides under its alpha, and must never paint
+HIDDEN = (255, 0, 255)
+
+
+def _stub_group_card(sm, tmp_path, monkeypatch, n=2):
+    """Two 'card images' whose logos are flat colours, so _prepare_group can be
+    driven without a 4 GB .raw."""
+    Image = pytest.importorskip("PIL.Image")
+    paths = []
+    for i in range(n):
+        raw = tmp_path / ("card%d.raw" % i)
+        raw.write_bytes(bytes(8 + i))
+        paths.append(str(raw))
+    png = tmp_path / "logo.png"
+    # A REAL LOGO IS TRANSPARENT, with anything at all stored under the alpha -
+    # magenta, on the 1987 card.  An opaque stub cannot show the bug that made.
+    logo = Image.new("RGBA", (64, 36), HIDDEN + (0,))
+    logo.paste((20, 200, 20, 255), (20, 10, 44, 26))
+    logo.save(str(png))
+    data = png.read_bytes()
+    monkeypatch.setattr(sm, "logo_bytes", lambda ci, part, title: (data, "/x/GameLogo.png"))
+    return paths, (lambda p: (None, None, "title"))
+
+
+def test_a_random_cards_picture_is_rendered_cached_and_checked(sm, tmp_path, monkeypatch):
+    """_prepare_group end to end. TWO BUGS LIVED HERE and neither unit test saw
+    them, because both were in the plumbing around the renderers: the cache
+    stamp joined source_stamp DICTS as if they were strings (TypeError on the
+    first real card), and the animation check was inverted - gif_fits answers
+    with the REASON and None when it fits, so every animation that fitted was
+    refused and every one that did not was written."""
+    Image = pytest.importorskip("PIL.Image")
+    images, card = _stub_group_card(sm, tmp_path, monkeypatch)
+    out = str(tmp_path / "out")
+    work = str(tmp_path / "work")
+    os.makedirs(out)
+    os.makedirs(work)
+    said = []
+    names = sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72),
+                              out, work, card, log=said.append)
+    assert names == {"art": "gart0.png", "anim": "ganim0.gif"}
+    for n in names.values():
+        assert os.path.getsize(os.path.join(out, n)) > 0, n
+    # ...and the logo reached the renderers WITH its alpha
+    with Image.open(os.path.join(out, "gart0.png")) as im:
+        counts = im.convert("RGB").getcolors(1 << 16) or []
+    assert not [c for c, col in counts if col == HIDDEN], \
+        "the hidden background was painted onto the card"
+    assert sm.gif_fits(sm.gif_info(open(os.path.join(out, "ganim0.gif"), "rb").read())) is None
+    # the second run costs nothing...
+    said[:] = []
+    sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72),
+                      out, work, card, log=said.append)
+    assert all("cached" in line for line in said), said
+    # ...until a member changes, which is the whole reason the members are in
+    # the sidecar's params: it can record only ONE source
+    open(images[1], "wb").write(bytes(99))
+    said[:] = []
+    sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72),
+                      out, work, card, log=said.append)
+    assert not any("cached" in line for line in said), said
+
+
+def test_an_oversized_random_card_animation_is_refused_with_the_reason(sm, tmp_path,
+                                                                      monkeypatch):
+    images, card = _stub_group_card(sm, tmp_path, monkeypatch)
+    out, work = str(tmp_path / "out"), str(tmp_path / "work")
+    os.makedirs(out)
+    os.makedirs(work)
+    monkeypatch.setattr(sm, "GIF_MAX_BYTES", 8)
+    with pytest.raises(sm.Refused) as e:
+        sm._prepare_group(0, [0, 1], None, "cycling", images, (128, 72),
+                          out, work, card, log=lambda *a: None)
+    assert "does not fit" in str(e.value) and ">" in str(e.value)
+
+
+def test_the_panel_is_sized_by_the_cards_not_the_images(sm, tmp_path, capsys):
+    """A jukebox of forty song sets is a TWO card menu. Sizing its pictures for
+    forty images hands the selector a thumbnail to blow up."""
+    Image = pytest.importorskip("PIL.Image")
+    src = tmp_path / "own.png"
+    Image.new("RGB", (600, 400), (30, 30, 30)).save(str(src))
+
+    def run(out, *extra):
+        os.makedirs(out)
+        rc = sm.main(["prepare", "--primary", "a.raw", "--extra", "b.raw",
+                      "--out", out, "--art", str(src), "--sound-move", "none",
+                      "--sound-confirm", "none"] + list(extra))
+        assert rc == 0, capsys.readouterr().out
+        with Image.open(os.path.join(out, "art0.png")) as im:
+            return im.size
+
+    assert run(str(tmp_path / "two")) == sm.panel_size_for(2)
+    assert run(str(tmp_path / "four"), "--cards", "4") == sm.panel_size_for(4)
+    assert sm.panel_size_for(2) != sm.panel_size_for(4), "the sizes really differ"
+
+
+def test_a_logos_transparent_background_is_never_painted(sm):
+    """A logo pulled off a card is a PNG with a transparent background, and the
+    RGB stored under that alpha is anything at all - on the 1987 card it is a
+    flat magenta. The first real random card came out as a magenta box, and
+    every test here passed, because a test logo is a flat opaque colour with no
+    alpha to lose. This one has some."""
+    Image = pytest.importorskip("PIL.Image")
+    hidden = HIDDEN
+    logo = Image.new("RGBA", (80, 45), hidden + (0,))       # every pixel hidden
+    logo.paste((20, 200, 20, 255), (30, 15, 50, 30))        # ...but one block
+    size = (128, 72)
+    panels = [sm.render_group_still(st, [logo, logo], size)
+              for st in sm.group_style_names()]
+    for st in sm.group_style_names(animated=True):
+        panels += sm.render_group_frames(st, [logo, logo], size)[0]
+    for im in panels:
+        counts = im.convert("RGB").getcolors(1 << 16) or []
+        n = sum(c for c, col in counts if col == hidden)
+        assert n == 0, "%d pixels of the hidden background were painted" % n

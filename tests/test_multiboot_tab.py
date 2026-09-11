@@ -8677,7 +8677,9 @@ def test_the_add_row_is_the_way_into_a_group(tmp_path):
         assert panel.add_row_choices() == ()
         panel.add_image(_images(tmp_path, 1)[0])
         labels = [lbl for lbl, _attr in panel.add_row_choices()]
-        assert labels == ["Add image…", "Add random group…",
+        assert labels == ["Add image…",
+                          "Add random over the images above…",
+                          "Add random group…",
                           "Add random group from folder…"]
         # every one of them names a method that exists and is callable
         for _lbl, attr in panel.add_row_choices():
@@ -8718,3 +8720,112 @@ def test_the_status_row_counts_a_groups_games_not_its_empty_path(tmp_path):
                   status_checks(plain.images, _OK_PATH, "", card="none"))
     assert checks["images"][0] == "ok"
     assert checks["images"][1] == "2 images, in the order the menu offers them."
+# ---- item 106 reopened: RANDOM beside the builds it rolls between ----------
+
+def test_davids_layout_two_builds_and_a_random_over_them(tmp_path):
+    """David, with a screenshot of the tab refusing it: "what if i want
+    RANDOM|CUSTOM1|CUSTOM2? I should be able to add a random at any point."
+    Two builds, plus one card that rolls between them. It adds no games."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM",
+                                       subtitle="pick one or let it roll")
+        form = panel.form()
+        assert len(form.images) == 3, "three cards"
+        # ...over TWO games: a keeping group puts nothing new on the card
+        trees = mb.form_trees(form)
+        assert [t[1] for t in trees] == paths, "two games, and only two"
+        assert mb.is_group(form.images[2]) and form.images[2].keep is True
+        assert validate_form(form) == [], validate_form(form)
+        # the flags say it: no --member, no new --extra, just a card over 0-1
+        args = mb._image_args(form)
+        assert args == ["--primary", mb.wsl(paths[0]),
+                        "--extra", mb.wsl(paths[1]),
+                        "--group-over", "0-1|RANDOM|pick one or let it roll"]
+    finally:
+        root.destroy()
+
+
+def test_a_random_over_existing_needs_two_images_first(tmp_path):
+    root, panel = _panel()
+    try:
+        panel.add_image(_images(tmp_path, 1)[0])
+        panel.add_random_over_existing()
+        assert len(panel.form().images) == 1, "nothing was added"
+        panel.add_image(_images(tmp_path, 2)[1])
+        panel.add_random_over_existing()
+        assert len(panel.form().images) == 3
+    finally:
+        root.destroy()
+
+
+def test_a_keeping_group_may_be_the_first_card(tmp_path):
+    """The primary is the first PLAIN row, not the first row. A keeping group
+    adds no games, so putting one at the top takes nothing away."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        panel._rows.insert(0, panel._rows.pop())          # RANDOM to the top
+        panel._refresh_tree()
+        form = panel.form()
+        assert mb.is_group(form.images[0])
+        assert validate_form(form) == [], validate_form(form)
+        args = mb._image_args(form)
+        assert args[0] == "--primary" and args[1] == mb.wsl(paths[0])
+        assert args[2] == "--group-over", "its card comes before the images"
+        # ...but a CONSUMING group at the top still takes the primary away
+        panel._rows[0].keep = False
+        errs = validate_form(panel.form())
+        assert any("cannot be a random group that hides its games" in e for e in errs)
+    finally:
+        root.destroy()
+
+
+def test_the_countdown_can_land_on_a_random_card(tmp_path):
+    """Once its games keep cards of their own, no image index resolves to the
+    group - and a random card the countdown cannot land on is useless for an
+    unattended power-up, which is the whole point of the card."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        form = panel.form()
+        form.default = 2                                  # the RANDOM row
+        args = build_args(form)
+        assert args[args.index("--default-card") + 1] == "2"
+        # a plain row still names an image and asks for no card
+        form.default = 1
+        args = build_args(form)
+        assert "--default-card" not in args
+        assert args[args.index("--default") + 1] == "1"
+    finally:
+        root.destroy()
+
+
+def test_loading_a_card_keeps_a_keeping_groups_member_rows(tmp_path):
+    """A consuming group takes its members' rows away; a keeping one adds a
+    card in front of rows that stay exactly where they are."""
+    mb = multiboot_tab
+    info, paths = _grouped_inspect(tmp_path)
+    info["groups"][0].update(keep=True, members=[1, 2], pos=4)
+    rows, _w = mb.rows_from_inspect(info)
+    # 4 images, and the group card LAST because that is where its line sat
+    assert len(rows) == 5
+    assert [mb.is_group(r) for r in rows] == [False, False, False, False, True]
+    assert rows[4].keep is True
+    assert [m.path for m in rows[4].members] == [host_path(q) for q in paths[1:3]]
+    # ...and with pos 0 its card is first
+    info["groups"][0]["pos"] = 0
+    rows, _w = mb.rows_from_inspect(info)
+    assert mb.is_group(rows[0]) and len(rows) == 5

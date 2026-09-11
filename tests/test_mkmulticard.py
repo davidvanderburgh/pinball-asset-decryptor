@@ -2301,7 +2301,7 @@ def test_a_builder_refuses_every_group_the_selector_merely_drops(mk):
 
     refuse("at least 2", members=[3])
     refuse("must be consecutive", members=[3, 5])
-    refuse("primary must stay bootable", members=[0, 1])
+    refuse("primary must keep a card of its own", members=[0, 1])
     refuse("not one of the 6 image lines", members=[3, 4, 9])
     refuse("may not contain", title="a|b")
     refuse("the selector reads at most", subtitle="x" * 1200)
@@ -2447,7 +2447,11 @@ def test_build_json_says_which_card_each_image_belongs_to(mk):
     man = mk.build_manifest(None, mk.parse_images_conf(text), None, written="2026-09-10T00:00:00Z")
     assert [im["group"] for im in man["images"]] == [None, None, None, 0, 0, 0]
     assert man["groups"] == [{"title": "JUKEBOX", "subtitle": "a different set every power-up",
-                              "members": [3, 4, 5], "art": "art3.png", "anim": "anim3.gif",
+                              "members": [3, 4, 5],
+                              # whether its games keep cards of their own, and
+                              # where its own card sits (item 106, reopened)
+                              "keep": False, "pos": 3,
+                              "art": "art3.png", "anim": "anim3.gif",
                               "music": None, "confirm": None}]
     # and it is still JSON with no surprises in it
     assert json.loads(json.dumps(man))["groups"][0]["members"] == [3, 4, 5]
@@ -2496,3 +2500,85 @@ def test_inspect_prints_the_cards_before_the_images(mk, capsys):
     assert "group 0    'JUKEBOX' / 'a set every power-up'  members 3-5" in out
     assert "one card; it boots a different member every power-up" in out
     assert "(in group 0)" in out, "an image must say which card it hides behind"
+# ---- item 106 reopened: a group that KEEPS its members' own cards ----------
+
+def test_a_keeping_group_leaves_its_members_their_own_cards(mk):
+    """David: "what if i want RANDOM|CUSTOM1|CUSTOM2?" A '+' on the member spec
+    means the group does not swallow them, so one card offers "surprise me"
+    beside the very builds it rolls between."""
+    dev = ["/dev/mmcblk0p3", "/dev/mmcblk0p3:img1", "/dev/mmcblk0p3:img2"]
+    g = [{"title": "RANDOM", "subtitle": "pick one or let it roll",
+          "members": [1, 2], "keep": True, "pos": 3}]
+    text = mk.render_images_conf(dev, ["STOCK", "C1", "C2"], groups=g, default_card=3)
+    lines = [l for l in text.splitlines() if l and not l.startswith("#")]
+    # the group's line sits LAST, so its card is last: C1 | C2 | RANDOM
+    assert lines[:4] == ["image=/dev/mmcblk0p3|STOCK|",
+                         "image=/dev/mmcblk0p3:img1|C1|",
+                         "image=/dev/mmcblk0p3:img2|C2|",
+                         "group=+1-2|RANDOM|pick one or let it roll"]
+    assert "default_card=3" in lines
+    back = mk.parse_images_conf(text)
+    assert back["groups"][0]["keep"] is True
+    assert back["groups"][0]["members"] == [1, 2]
+    assert back["groups"][0]["pos"] == 3
+    assert back["default_card"] == 3
+    assert mk.render_images_conf_text(back) == text
+
+
+def test_a_keeping_group_may_hold_the_primary_and_a_consuming_one_may_not(mk):
+    """The rule existed because a consuming group takes the primary's own card
+    away, and the primary is what the machine boots when the menu is not
+    honoured. A keeping group leaves that card where it is."""
+    dev = ["/dev/mmcblk0p3", "/dev/mmcblk0p3:img1"]
+    keep = [{"title": "RANDOM", "subtitle": "", "members": [0, 1], "keep": True, "pos": 2}]
+    text = mk.render_images_conf(dev, ["STOCK", "C1"], groups=keep)
+    assert "group=+0-1|RANDOM|" in text
+    assert mk.parse_images_conf(text)["groups"][0]["members"] == [0, 1]
+    with pytest.raises(mk.Refused) as e:
+        mk.render_images_conf(dev, ["STOCK", "C1"],
+                              groups=[dict(keep[0], keep=False, pos=0)])
+    assert "primary must keep a card of its own" in str(e.value)
+
+
+def test_a_consuming_groups_card_belongs_where_its_members_were(mk):
+    """It stands IN THEIR PLACE, so it cannot stand anywhere else - the menu
+    order would stop matching what the builder laid out."""
+    dev = ["/dev/mmcblk0p3", "/dev/mmcblk0p3:img1", "/dev/mmcblk0p3:img2"]
+    with pytest.raises(mk.Refused) as e:
+        mk.render_images_conf(dev, groups=[{"title": "J", "subtitle": "",
+                                            "members": [1, 2], "pos": 3}])
+    assert "belongs where they were" in str(e.value)
+
+
+def test_keeping_and_consuming_groups_count_cards_differently(mk):
+    """Only a consuming group takes cards away, which is the whole difference
+    and the thing the 16-card cap has to get right."""
+    dev = ["/dev/mmcblk0p3"] + ["/dev/mmcblk0p3:img%d" % i for i in range(1, 16)]
+    # 16 images, a KEEPING group over two of them: 17 cards, one too many
+    with pytest.raises(mk.Refused) as e:
+        mk.render_images_conf(dev, groups=[{"title": "R", "subtitle": "",
+                                            "members": [1, 2], "keep": True, "pos": 16}])
+    assert "17 cards" in str(e.value)
+    # the same list with a CONSUMING group is 15 cards and fits
+    ok = mk.render_images_conf(dev, groups=[{"title": "J", "subtitle": "",
+                                             "members": [1, 2]}])
+    assert mk.parse_images_conf(ok)["groups"][0]["keep"] is False
+
+
+def test_group_over_names_images_already_on_the_card(mk, tmp_path):
+    """It adds no games. Its place in the menu is where the flag sat, which is
+    why --extra / --group / --group-over share one ordered action."""
+    extras, groups = _resolved(mk, [
+        "build", "--primary", "P", "--out", "O",
+        "--extra", "A", "--extra", "B",
+        "--group-over", "1-2|RANDOM|pick one or let it roll"])
+    assert extras == ["A", "B"], "a group-over adds no games"
+    assert len(groups) == 1
+    assert groups[0]["members"] == [1, 2]
+    assert groups[0]["keep"] is True
+    assert groups[0]["pos"] == 3, "after both extras, so its card is last"
+    # ...and put first, its card is first
+    _extras, groups = _resolved(mk, [
+        "build", "--primary", "P", "--out", "O",
+        "--group-over", "1-2|RANDOM|", "--extra", "A", "--extra", "B"])
+    assert groups[0]["pos"] == 1

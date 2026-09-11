@@ -487,6 +487,11 @@ class ImageRow:
     #: every row that existed before this field did.  default_factory, not
     #: [], because a mutable default is shared by every instance.
     members: list = field(default_factory=list)
+    #: ...and whether those games ALSO keep cards of their own, so the menu
+    #: offers them beside the random one (David, 2026-09-10: "what if i want
+    #: RANDOM|CUSTOM1|CUSTOM2?").  False = the group swallows them, which is
+    #: the forty-variant jukebox and stays the default.
+    keep: bool = False
 
 
 def is_group(row):
@@ -519,13 +524,32 @@ def form_trees(form):
     group row makes them differ, and every bug this feature can have is a place
     that used one where it meant the other."""
     out = []
+    seen = {}
     for ri, row in enumerate(form.images):
+        if is_group(row) and row.keep:
+            # A KEEPING GROUP ADDS NO GAMES.  Its members are games other rows
+            # already put on the card, so they must not be counted twice - the
+            # whole point is one card in front of trees that are already there.
+            continue
         if is_group(row):
-            for mi, _m in enumerate(row.members):
-                out.append((len(out), row_paths(row)[mi], ri, mi))
+            for mi, path in enumerate(row_paths(row)):
+                seen.setdefault(_norm(path), len(out))
+                out.append((len(out), path, ri, mi))
         else:
-            out.append((len(out), row_paths(row)[0], ri, None))
+            path = row_paths(row)[0]
+            seen.setdefault(_norm(path), len(out))
+            out.append((len(out), path, ri, None))
     return out
+
+
+def group_member_images(form, row):
+    """The IMAGE indexes a keeping group's members resolve to - the games other
+    rows put on the card.  -1 for a member no row carries, which validate_form
+    is what refuses."""
+    where = {}
+    for img, path, _ri, _mi in form_trees(form):
+        where.setdefault(_norm(path), img)
+    return [where.get(_norm(q), -1) for q in row_paths(row)]
 
 
 def row_first_image(form, row_index):
@@ -534,7 +558,27 @@ def row_first_image(form, row_index):
     for img, _p, ri, _mi in form_trees(form):
         if ri == row_index:
             return img
+    # a KEEPING group puts no game on the card, so it has no image of its own;
+    # its first member's is what names it
+    rows = getattr(form, "images", None) or []
+    if 0 <= row_index < len(rows) and is_group(rows[row_index]):
+        imgs = [i for i in group_member_images(form, rows[row_index]) if i >= 0]
+        if imgs:
+            return imgs[0]
     return 0
+
+
+def form_cards(form):
+    """The menu's cards in order, as ``[(row_index, is_group)]`` - which is just
+    the rows, because a row IS a card.  Here so the card-index arithmetic the
+    conf needs has one home."""
+    return [(ri, is_group(r)) for ri, r in enumerate(form.images)]
+
+
+def row_card_index(form, row_index):
+    """A row's CARD index, which is its row number - the two are the same thing
+    and this says so where the conf's `default_card=` needs it."""
+    return int(row_index)
 
 
 def on_card_fields(row):
@@ -1055,11 +1099,23 @@ def validate_form(form, sources=True):
     if ntrees > MAX_TREES:
         errs.append("That is %d games in %d rows; at most %d fit one card."
                     % (ntrees, n, MAX_TREES))
-    if form.images and is_group(form.images[0]):
-        # the machine boots image 0 when the menu is not honoured, so it has to
-        # be one known game rather than a roll
+    if form.images and is_group(form.images[0]) and not form.images[0].keep:
+        # A CONSUMING group here would leave the card with no primary at all:
+        # the machine boots image 0 when the menu is not honoured, and that has
+        # to be one known game rather than a roll.  A KEEPING group adds no
+        # games, so the primary is still whichever plain row is first.
         errs.append("The first image is the primary and cannot be a random "
-                    "group.")
+                    "group that hides its games. Tick 'also show each game on "
+                    "its own card', or move it down.")
+    if form.images and not any(not is_group(r) or not r.keep for r in form.images):
+        errs.append("Add at least one plain image: a card made only of random "
+                    "groups has no primary to boot.")
+    # what the card will actually carry, so a KEEPING group's members can be
+    # checked against it rather than counted as games of their own
+    games_on_card = set()
+    for _img, _path, _ri, _mi in form_trees(form):
+        if _path:
+            games_on_card.add(_norm(_path))
     seen = set()
     for i, row in enumerate(form.images):
         if is_group(row):
@@ -1075,12 +1131,21 @@ def validate_form(form, sources=True):
                 elif not os.path.isfile(mp):
                     errs.append("Image %d, game %d: no such file: %s"
                                 % (i, mi + 1, mp))
+                elif row.keep:
+                    # ITS GAMES ARE OTHER ROWS'.  Being listed elsewhere is the
+                    # POINT of a keeping group, so the only thing to check is
+                    # that the game really is on the card.
+                    if _norm(mp) not in games_on_card:
+                        errs.append("Image %d, game %d is not one of the images "
+                                    "on this card: %s" % (i, mi + 1, mp))
                 else:
                     key = _norm(mp)
                     if key in seen:
                         errs.append("Image %d, game %d is listed twice: %s"
                                     % (i, mi + 1, mp))
                     seen.add(key)
+            if row.keep and len(set(_norm(q) for q in row_paths(row))) != len(row.members):
+                errs.append("Image %d names the same game twice." % i)
             for what, text in (("title", row.title), ("subtitle", row.subtitle)):
                 if _BAD_TEXT.search(text or ""):
                     errs.append("Image %d: the %s must not contain | ; $ or `."
@@ -1493,15 +1558,28 @@ def _image_args(form):
     --group with its --member games.  The order matters: mkmulticard reads
     these flags as one ordered sequence, because the only thing that fixes a
     member's image index is where its flag sat (item 106)."""
-    args = ["--primary", wsl(row_paths(form.images[0])[0])]
-    for row in form.images[1:]:
+    trees = form_trees(form)
+    primary = next((t[1] for t in trees), "")
+    args = ["--primary", wsl(primary)]
+    for ri, row in enumerate(form.images):
+        if is_group(row) and row.keep:
+            # IT ADDS NO GAMES: it names images other rows already put there,
+            # and its place among these flags is where its card sits.
+            imgs = [i for i in group_member_images(form, row) if i >= 0]
+            if len(imgs) >= 2:
+                args += ["--group-over", "%d-%d|%s|%s"
+                         % (min(imgs), max(imgs), (row.title or "").strip(),
+                            (row.subtitle or "").strip())]
+            continue
         if is_group(row):
             args += ["--group", "%s|%s" % ((row.title or "").strip(),
                                            (row.subtitle or "").strip())]
             for path in row_paths(row):
                 args += ["--member", wsl(path)]
-        else:
-            args += ["--extra", wsl(row_paths(row)[0])]
+            continue
+        if ri == 0:
+            continue                      # already given as --primary
+        args += ["--extra", wsl(row_paths(row)[0])]
     return args
 
 
@@ -1577,14 +1655,21 @@ def build_args(form):
         "--timeout", str(int(form.timeout)),
         # --default names an IMAGE (so does the choice file, and so does the
         # menu's own memory); the tab's number is the highlighted ROW.  A row
-        # that is a group is named by its first member, and the selector
-        # highlights that member's card - which is the group's.
+        # that is a consuming group is named by its first member, and the
+        # selector highlights that member's card - which is the group's.
         "--default", str(row_first_image(form, int(form.default))),
         # The tab's knob is the volume of record: the same number goes into
         # media.json (prepare) and into images.conf here, so a text-only card
         # with no prepared media still carries it.
         "--volume", str(int(form.volume)),
     ] + theme_args(form)
+    # A KEEPING GROUP'S CARD CANNOT BE NAMED BY AN IMAGE: its games all keep
+    # cards of their own, so no image index resolves to it.  A random card the
+    # countdown cannot land on is useless for an unattended power-up, which is
+    # the whole point - so the card index goes too.
+    d = int(form.default)
+    if 0 <= d < len(form.images) and is_group(form.images[d]) and form.images[d].keep:
+        args += ["--default-card", str(row_card_index(form, d))]
     if form.machine_volume:
         # ...and on the machine the menu plays at ITS setting, not that number
         args.append("--machine-volume")
@@ -2747,34 +2832,54 @@ def group_rows(rows, groups):
     this tool cannot make sense of must not silently change the card."""
     if not groups:
         return rows
-    owned, out = {}, []
+    good, owned = [], {}
     for gi, g in enumerate(groups or []):
         members = [m for m in (g.get("members") or [])
                    if isinstance(m, int) and 0 <= m < len(rows)]
         if len(members) != len(g.get("members") or []) or len(members) < 2:
-            continue
-        for m in members:
-            owned[m] = gi
-    for i, row in enumerate(rows):
-        gi = owned.get(i)
-        if gi is None:
-            out.append(row)
-            continue
-        if i != min(m for m, g in owned.items() if g == gi):
-            continue                       # a later member: its card is made
+            continue                       # not one this tool can make sense of
+        good.append(gi)
+        if not g.get("keep"):
+            # only a CONSUMING group takes its members' rows away; a keeping
+            # one adds a card in front of rows that stay exactly where they are
+            for m in members:
+                owned[m] = gi
+
+    def card_for(gi):
         g = groups[gi]
         members = [MemberRow(path=rows[m].path, title=rows[m].title,
                              version=rows[m].version)
-                   for m in sorted(k for k, v in owned.items() if v == gi)]
+                   for m in (g.get("members") or [])]
         card = ImageRow(path="", title=g.get("title") or "RANDOM",
-                        subtitle=g.get("subtitle") or "", members=members)
+                        subtitle=g.get("subtitle") or "", members=members,
+                        keep=bool(g.get("keep")))
         # the card's own media is the group's, not its first member's row
         for key in ("art", "anim", "music", "confirm"):
             val = (g.get(key) or "")
             if val:
                 setattr(card, key, val)
                 setattr(card, key + "_on_card", True)
-        out.append(card)
+        return card
+
+    # a group's card sits where the card says it does: `pos` is the image its
+    # line came before, and a group with no pos recorded stands where its
+    # members were (which is what a consuming one always did)
+    at = {}
+    for gi in good:
+        g = groups[gi]
+        pos = g.get("pos")
+        if pos is None:
+            pos = min(g.get("members") or [0])
+        at.setdefault(int(pos), []).append(gi)
+    out = []
+    for i, row in enumerate(rows):
+        for gi in at.get(i, ()):
+            out.append(card_for(gi))
+        if i in owned:
+            continue                       # a consumed member has no row left
+        out.append(row)
+    for gi in at.get(len(rows), ()):
+        out.append(card_for(gi))
     return out
 
 
@@ -5717,6 +5822,7 @@ class MultibootPanel:
     #: entries are greyed when the click missed every image row, so a
     #: right-click on the template row or on empty space offers Add… alone.
     LIST_ACTIONS = (("Add image…", "_add_image", False),
+                    ("Add random over the images above…", "_add_random_over_existing", False),
                     ("Add random group…", "_add_group", False),
                     ("Add random group from folder…", "_add_group_folder", False),
                     ("Edit image…", "edit_image", True),
@@ -7113,6 +7219,7 @@ class MultibootPanel:
     #: ``(label, method name)``.  Pure, so a test can ask what the row would
     #: show without popping a menu.
     ADD_ROW_CHOICES = (("Add image…", "_add_image"),
+                       ("Add random over the images above…", "_add_random_over_existing"),
                        ("Add random group…", "_add_group"),
                        ("Add random group from folder…", "_add_group_folder"))
 
@@ -7194,6 +7301,33 @@ class MultibootPanel:
             filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
         if paths:
             self.add_group(list(paths))
+
+    def add_random_over_existing(self, title="RANDOM", subtitle=""):
+        """A random card over the images ALREADY in the list, which keep their
+        own cards (item 106, reopened).  This is David's `C1 | C2 | RANDOM`: the
+        menu offers the builds AND a "surprise me" beside them, and it adds not
+        one byte to the card because it puts no new game on it."""
+        plain = [r for r in self._rows if not is_group(r)]
+        if len(plain) < 2:
+            self._error("Add at least two images first: a random card chooses "
+                        "between images that are already on the card.")
+            return
+        if len(self._rows) >= MAX_CARDS:
+            self._error("At most %d images fit one card." % MAX_CARDS)
+            return
+        if sum(1 for r in self._rows if is_group(r)) >= MAX_GROUPS:
+            self._error("At most %d random groups fit one card." % MAX_GROUPS)
+            return
+        members = [MemberRow(path=(r.path or "").strip().strip(chr(34)),
+                             title=(r.title or "").strip(), version=r.version)
+                   for r in plain]
+        self._rows.append(ImageRow(path="", title=title, subtitle=subtitle,
+                                   members=members, keep=True))
+        self._refresh_tree(select=len(self._rows) - 1)
+        self._ok("")
+
+    def _add_random_over_existing(self):
+        self.add_random_over_existing()
 
     def add_group_from_folder(self, folder):
         """Every ``*.raw`` in *folder*, sorted, as one group card.  Forty

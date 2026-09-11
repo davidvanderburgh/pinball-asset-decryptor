@@ -745,6 +745,42 @@ pad_window_line() {
     printf '%s\n' "$head"
 }
 
+# ★ WHY THERE IS NO WINDOW (PAD-127). padglhost's two headless lines are two
+# different problems, and only one of them is worth a second attempt:
+#
+#   surface   "eglCreateWindowSurface failed 0x...; falling back to headless"
+#             The X window was created and mapped; the GRAPHICS DRIVER would
+#             not give a surface for it. Another driver might, so watch.sh
+#             retries the whole renderer in software - the same trade PAD-117
+#             made for a renderer that DIED on that driver.
+#   display   "PAD_GL_WINDOW=1 but XOpenDisplay failed (...); staying headless"
+#             There is no X server to put a window on. No renderer of any kind
+#             can cure that, so the retry must NOT fire - it would cost a
+#             second launch and print a second identical failure.
+#             pad_display_state above is the function with something useful to
+#             say about this one.
+#
+# MATCHED ON THE TAIL OF EACH LINE, never on the call that failed: item 44's
+# second display prints "display N: eglCreateWindowSurface failed ...; its feed
+# decodes but is not presented", and a run that says that still HAS its main
+# window. "falling back to headless" and "staying headless" are the main
+# window's alone.
+#
+# Prints nothing and returns 1 when the log holds neither - which is every
+# healthy run. The caller asks this only after pad_window_line has already said
+# the word headless; one that asks anyway gets no answer rather than a guess.
+pad_headless_reason() {
+    local log=${1:-}
+    [ -n "$log" ] && [ -r "$log" ] || return 1
+    if grep -aq 'falling back to headless' "$log" 2>/dev/null; then
+        echo surface; return 0
+    fi
+    if grep -aq 'staying headless' "$log" 2>/dev/null; then
+        echo display; return 0
+    fi
+    return 1
+}
+
 # ★ WHY THE RENDERER DIED, out of the renderer's own log (PAD-117).
 #
 # THE FAULT, reported 2026-09-08 against v0.194.0: a Beatles run on a WSL

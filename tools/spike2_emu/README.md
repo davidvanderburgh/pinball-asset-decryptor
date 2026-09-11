@@ -959,9 +959,17 @@ output, so read that line first:
 - `[watch] game window opened 1445x827 on DISPLAY=:0` — the window EXISTS.
   Nothing inside Linux can see the Windows desktop, so if none is showing there,
   what is missing is WSLg's mirror of it and not the window: **Restart WSL…**.
-- `[watch] THE RENDERER HAS NO WINDOW` — padglhost went headless and its own
-  line says why. The run continues (the guest boots, the sound plays, the
-  playfield answers) and shows no picture at all.
+- `[watch] the renderer is UP BUT HAS NO WINDOW` — the graphics driver refused
+  a surface for a window that had already opened, so the renderer is stopped
+  and tried again on the software rasteriser (PAD-127). That is where the
+  picture usually comes back: `d3d12` is the path that goes stale under a
+  long-lived WSL session, and llvmpipe asks it for nothing. A software renderer
+  that will not start hands the GPU one back rather than ending the run.
+- `[watch] THE RENDERER HAS NO WINDOW` — padglhost is headless and its own line
+  says why; after the retry above, that is the final answer. The run continues
+  (the guest boots, the sound plays, the playfield answers) and shows no
+  picture at all. The window it had already mapped comes back DOWN, so this
+  state no longer leaves an empty window with the game's name on the taskbar.
 
 `DISPLAY` being SET is not the same as an X server being reachable: WSLg sets it
 when the distro starts and never takes it back. `pad_display_state` (padpath.sh)

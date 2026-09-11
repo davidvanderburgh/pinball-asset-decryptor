@@ -5325,6 +5325,33 @@ int main(int argc, char **argv)
             fprintf(stderr, "[padglhost] eglCreateWindowSurface failed 0x%x; "
                             "falling back to headless\n", eglGetError());
             win_on = 0;
+            /* ★ PAD-127: TAKE THE WINDOW BACK DOWN. It is the same rule the
+             * second display has followed since item 44, and the main window
+             * was the one place that did not follow it.
+             *
+             * win_open() created and MAPPED this window before eglInitialize,
+             * so by the time we get here it is on the desktop and in the
+             * taskbar carrying the game's name, and under WSLg it has a RAIL
+             * mirror that msrdc is painting. Nothing will ever draw into it:
+             * every path that touches it from here on is gated on win_on,
+             * which just went to 0. Left mapped it can only mislead - the
+             * reporter of this ticket sent a screenshot of its taskbar
+             * preview, blank, and rebooted the machine - and it makes
+             * watch.sh's own "THE RENDERER HAS NO WINDOW" verdict false on
+             * the one screen the user is actually looking at.
+             *
+             * UNMAP AND DO NOT DESTROY, for the reason display 2 records: the
+             * id stays valid, so every guard that asks "is this our window"
+             * keeps matching, and the teardown at the end of main() destroys
+             * it with the others while the X connection is still healthy,
+             * which is what WSLg's mirror needs to see.
+             *
+             * XSync AND NOT XFlush, for the same reason as that teardown: the
+             * point is the ROUND TRIP. It returns once the server has
+             * processed the unmap, so the compositor has seen it before this
+             * process goes on to spend the next half second in Mesa. */
+            XUnmapWindow(xdpy, xwin);
+            XSync(xdpy, 0);
             surf = eglCreatePbufferSurface(dpy, cfg, pbattr);
         }
     } else {

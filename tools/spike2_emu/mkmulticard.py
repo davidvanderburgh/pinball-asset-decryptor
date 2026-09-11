@@ -1156,6 +1156,12 @@ def find_source_deltas(paths, mans, cache_dir=None, progress=None):
     treesync.find_deltas over the sources' own bytes.  Every compare is cached by the pair of
     digests, so a plan of sources seen before reads nothing.  -> one {rel: ...} per source."""
     ts = _treesync()
+    # MKMULTICARD_NO_DELTAS=1 is the off switch: every file stored whole, as before item 107,
+    # no work partition - the compact layout is still experimental, and a card built without
+    # deltas is one an older tool can read
+    if os.environ.get("MKMULTICARD_NO_DELTAS", "").strip() not in ("", "0"):
+        say("deltas: off (MKMULTICARD_NO_DELTAS); every file is stored whole")
+        return [{} for _m in mans]
     src = SourceChunks(paths, mans)
     # MKMULTICARD_DELTA_MIN=<bytes> lowers the size a file must have to be a delta (1 MiB):
     # the selftest's synthetic cards have a 1 MiB games partition, so nothing on them could

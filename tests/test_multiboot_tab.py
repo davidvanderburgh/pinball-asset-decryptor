@@ -8829,3 +8829,27 @@ def test_loading_a_card_keeps_a_keeping_groups_member_rows(tmp_path):
     info["groups"][0]["pos"] = 0
     rows, _w = mb.rows_from_inspect(info)
     assert mb.is_group(rows[0]) and len(rows) == 5
+def test_the_status_row_does_not_call_a_keeping_groups_games_duplicates(tmp_path):
+    """A keeping group's games ARE other rows' - being listed elsewhere is the
+    point of it. Counting that as a duplicate is what put a red cross on
+    David's perfectly good two-builds-plus-RANDOM card."""
+    mb = multiboot_tab
+    paths = _images(tmp_path, 2)
+    rows = [ImageRow(path=paths[0], title="A"), ImageRow(path=paths[1], title="B"),
+            ImageRow(path="", title="RANDOM", keep=True,
+                     members=[mb.MemberRow(path=paths[0]), mb.MemberRow(path=paths[1])])]
+    checks = dict((k, (st, d)) for k, _l, st, d in
+                  status_checks(rows, _OK_PATH, "", card="none"))
+    state, detail = checks["images"]
+    assert state == "ok", detail
+    assert "3 cards over 2 games" in detail, detail
+    # a CONSUMING group still counts its games, because they are its own
+    rows[2].keep = False
+    rows[2].members = [mb.MemberRow(path=str(tmp_path / "c.raw")),
+                       mb.MemberRow(path=str(tmp_path / "d.raw"))]
+    for n in ("c.raw", "d.raw"):
+        (tmp_path / n).write_bytes(bytes(16))
+    checks = dict((k, (st, d)) for k, _l, st, d in
+                  status_checks(rows, _OK_PATH, "", card="none"))
+    assert checks["images"][0] == "ok"
+    assert "3 cards over 4 games" in checks["images"][1]

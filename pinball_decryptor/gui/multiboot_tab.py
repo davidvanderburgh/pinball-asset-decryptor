@@ -3274,6 +3274,10 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
                 why = ("Image %d is a random group with %d game(s); a group "
                        "needs at least 2." % (i, len(paths)))
                 break
+            # A KEEPING GROUP'S GAMES ARE OTHER ROWS'.  Being listed elsewhere
+            # is the POINT of it, so it must not be counted as a duplicate -
+            # which is what put a red cross on David's perfectly good card.
+            keeping = is_group(row) and getattr(row, "keep", False)
             for k, q in enumerate(paths):
                 where = ("Image %d, game %d" % (i, k + 1) if is_group(row)
                          else "Image %d" % i)
@@ -3281,6 +3285,8 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
                     why = "%s has no file." % where
                 elif not loaded_card and not os.path.isfile(q):
                     why = "%s is not on this machine: %s" % (where, q)
+                elif keeping:
+                    continue
                 elif _norm(q) in seen:
                     why = "%s is listed twice: %s" % (where, q)
                 else:
@@ -3289,7 +3295,8 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
                 break
             if why:
                 break
-        ngames = sum(len(row_paths(r)) for r in rows)
+        ngames = sum(len(row_paths(r)) for r in rows
+                     if not (is_group(r) and getattr(r, "keep", False)))
         detail = "%d images, in the order the menu offers them." % n
         if ngames != n:
             detail = ("%d cards over %d games, in the order the menu offers "

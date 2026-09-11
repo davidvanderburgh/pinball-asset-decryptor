@@ -7241,14 +7241,28 @@ class MultibootPanel:
                        ("Add random group from folder…", "_add_group_folder"))
 
     def add_row_choices(self):
-        """The add row's choices for the list as it stands.
+        """The add row's choices, as ``(label, method, enabled, why)``.
 
-        AN EMPTY LIST OFFERS NOTHING TO CHOOSE FROM: the first image is the
-        primary, the machine boots it when the menu is not honoured, and it
-        can never be a random group - so the first click goes straight to the
-        file dialog with no menu in the way.
+        EVERY CHOICE IS ALWAYS SHOWN, and the ones that cannot apply yet are
+        greyed with the reason in their label.  The first version offered
+        nothing at all on an empty list and went straight to the file dialog,
+        which is the right OUTCOME - the first image is the primary and can
+        never be a roll - but it means a row promising "image or random group"
+        silently does one of them and teaches nobody that the other is there
+        (David, 2026-09-10: "left clicking either of these when the selections
+        are blank only lets me add a single image first").
         """
-        return () if not self._rows else self.ADD_ROW_CHOICES
+        plain = sum(1 for r in self._rows if not is_group(r))
+        out = []
+        for label, attr in self.ADD_ROW_CHOICES:
+            why = ""
+            if attr == "_add_random_over_existing" and plain < 2:
+                why = "add two images first"
+            elif attr != "_add_image" and not self._rows:
+                why = "add the primary image first"
+            out.append(((label if not why else "%s  (%s)" % (label, why)),
+                        attr, not why, why))
+        return tuple(out)
 
     def _add_row_clicked(self):
         """The add row at the foot of the list.
@@ -7258,13 +7272,19 @@ class MultibootPanel:
         list still added a plain image - so somebody looking for the feature
         would not find it (David, 2026-09-10, on the built branch: "I don't see
         any interface in the GUI for a user to do so").  The row asks now."""
-        choices = self.add_row_choices()
-        if not choices:
-            self._add_image()
-            return
+        self._popup_add_menu(self.add_row_choices())
+
+    def _popup_add_menu(self, choices):
+        """Put the add row's choices under the pointer.
+
+        A SEAM, not ceremony: `tk_popup` takes a grab and does not return until
+        the menu is dismissed, so a test that clicks the row would hang on it
+        for ever.  The decision is `add_row_choices`, which is pure; this is
+        only the showing of it, and a test replaces this."""
         menu = tk.Menu(self._table, tearoff=0)
-        for label, attr in choices:
+        for label, attr, live, _why in choices:
             menu.add_command(label=label,
+                             state=tk.NORMAL if live else tk.DISABLED,
                              command=lambda a=attr: getattr(self, a)())
         try:
             x, y = self._table.winfo_pointerxy()

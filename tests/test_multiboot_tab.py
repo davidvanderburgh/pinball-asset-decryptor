@@ -1649,19 +1649,26 @@ def test_the_row_icons_act_on_the_row_they_are_in(tmp_path):
         root.destroy()
 
 
-def test_the_template_row_adds_an_image(tmp_path):
+def test_the_template_row_offers_the_ways_in(tmp_path):
     """The last row of the table is the '+': an empty card shows only that
-    row, which is both the way in and the lesson."""
+    row, which is both the way in and the lesson.
+
+    It ASKS now rather than going straight to the file dialog. The row says
+    "image or random group", and doing one of them silently taught nobody the
+    other was there (David, 2026-09-10)."""
     root, panel = _panel()
-    asked = []
-    panel._add_image = lambda: asked.append(len(panel._rows))
-    # the table's on_add is late-bound through the panel, so the stub above
-    # is what a '+' click reaches
+    shown = []
+    panel._popup_add_menu = lambda choices: shown.append(choices)
     try:
         root.update()
         assert panel._table.count() == 0
         _click_cell(root, panel, "add", "title")
-        assert asked == [0]
+        assert len(shown) == 1, "a click on the row opens the menu"
+        assert [c[1] for c in shown[0]] == [
+            "_add_image", "_add_random_over_existing", "_add_group",
+            "_add_group_folder"]
+        # ...with only the one an empty card can actually do left live
+        assert [c[2] for c in shown[0]] == [True, False, False, False]
     finally:
         root.destroy()
 
@@ -8672,17 +8679,31 @@ def test_the_add_row_is_the_way_into_a_group(tmp_path):
     branch: "I don't see any interface in the GUI for a user to do so")."""
     root, panel = _panel()
     try:
-        # an EMPTY list offers nothing to choose from: the first image is the
-        # primary and can never be a group, so that click is not worth a menu
-        assert panel.add_row_choices() == ()
-        panel.add_image(_images(tmp_path, 1)[0])
-        labels = [lbl for lbl, _attr in panel.add_row_choices()]
+        # AN EMPTY LIST STILL SHOWS THEM ALL, greyed with the reason: the row
+        # promises "image or random group", so silently doing one of them
+        # teaches nobody that the other is there.
+        choices = panel.add_row_choices()
+        assert [c[1] for c in choices] == [
+            "_add_image", "_add_random_over_existing", "_add_group",
+            "_add_group_folder"]
+        assert [c[2] for c in choices] == [True, False, False, False]
+        assert "add the primary image first" in choices[2][0]
+        assert "add two images first" in choices[1][0]
+        panel.add_image(_images(tmp_path, 2)[0])
+        # one image: a group that brings its OWN games is live, one over the
+        # list is not - it needs two to choose between
+        live = dict((c[1], c[2]) for c in panel.add_row_choices())
+        assert live == {"_add_image": True, "_add_random_over_existing": False,
+                        "_add_group": True, "_add_group_folder": True}
+        panel.add_image(_images(tmp_path, 2)[1])
+        assert all(c[2] for c in panel.add_row_choices())
+        labels = [c[0] for c in panel.add_row_choices()]
         assert labels == ["Add image…",
                           "Add random over the images above…",
                           "Add random group…",
                           "Add random group from folder…"]
         # every one of them names a method that exists and is callable
-        for _lbl, attr in panel.add_row_choices():
+        for _lbl, attr, _live, _why in panel.add_row_choices():
             assert callable(getattr(panel, attr))
         # and the row itself says a group is on offer, not just an image
         assert "random group" in panel.ADD_ROW_TEXT.lower()

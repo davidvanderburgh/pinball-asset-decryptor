@@ -1334,8 +1334,27 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    without a window instead, a block says so loudly and quotes the
    renderer's own reason, and the run carries on rather than dying — the
    guest boots, the sound plays, the playfield answers, and only the
-   picture is missing. The commonest cause is checked for before the
-   renderer starts, because `DISPLAY` being *set* is not the same as an X
+   picture is missing. From v0.205.1 that is no longer where it ends,
+   because there are two reasons for no window and one of them is worth
+   a second attempt. When the window opened and the graphics driver then
+   refused to give it a drawing surface, the renderer is stopped and
+   started again on the software rasteriser, which asks that driver for
+   nothing — the same cure a renderer that *died* on the same driver
+   already had, for the same reason: the graphics libraries Windows
+   injects into a running WSL go stale under a session left up for days,
+   which is why a reboot has always seemed to fix this. Nothing else
+   about the run changes; this game measures 59.9 fps in software, so
+   what that refused surface was buying was a few percent and what it
+   cost was the whole picture. A software renderer that will not start
+   hands the GPU one back rather than ending the run, because a run with
+   no picture is still a run. The other reason — no X server to put a
+   window on — is deliberately not retried, because no renderer can cure
+   it. And the window that did open comes back down when it is given up
+   on: nothing can ever paint it, so leaving it there put the game's
+   name in the taskbar over a preview that stays blank, which is what
+   the report behind this looked like from the desktop. The commonest
+   cause of all is checked for before the renderer even starts, because
+   `DISPLAY` being *set* is not the same as an X
    server being reachable: WSLg sets it when the distro starts and never
    takes it back, so anything that mounts a fresh `/tmp` over WSL's own
    bind mount — systemd's `tmp.mount` does exactly this — hides the

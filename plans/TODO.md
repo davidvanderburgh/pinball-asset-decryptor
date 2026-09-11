@@ -7883,108 +7883,34 @@ These have each been violated at least once and each cost a run or a window:
       — S3: friction with a real workaround. D2: one dialog section over a
       model that is already proven, plus its tests.
 
-- [ ] **107. A variant that changes a few songs costs a whole `image.bin` per
-      copy on a compact card; store only the changed byte ranges and rebuild the
-      file at boot.** `S3 D4` ← WORKING ON ← IN PROGRESS *(taken by name, `/next 107`,
-      2026-09-11 - David un-parked it.)*
-      **Established (2026-09-11, pass 1):** the card's own `python2.7` (ARM, under
-      qemu-arm-static from `~/spike2root`) has `os sys hashlib struct errno time stat io re
-      collections` and NO `json subprocess fcntl shutil zlib` (`tempfile` dies on
-      `/dev/urandom` under qemu). So the on-card index is a TAB-SEPARATED text file, not
-      JSON, and mounts go through `os.system`. There is no handoff section for this item -
-      the design lives in this entry and in the approved plan file
-      `~/.claude/plans/re-read-what-he-said-replicated-candle.md` ("Item 107").
-      **Design pinned this pass (do not re-open):** ONE delta level, always against a FULL
-      blob at the same path in an earlier tree with the SAME size (in-place sound replacement
-      never changes the size; a size change = a full blob). Delta discovery happens at PLAN
-      time (so the store is SIZED with the saving) by a 4 KiB-block compare of the two sources,
-      cached by (base sha, variant sha); the build reads the variant once more to write the
-      payload. Delta blob `.blobs/<blob_key>.delta` = ASCII header (`PADDELTA 1`, `base`,
-      `size`, `sha256`, `ranges N`, N `off len` lines, blank line) + the ranges' bytes; the
-      tree's file hardlinks the BASE blob (the game always has a file; the record's `deltas`
-      field + `tree_as_on_card` give verify the base's sha); `imgK/.multiboot/deltas` (tab
-      lines `rel base delta size`) is what the card reads. `gc_blobs` keeps `.delta` names by
-      a `keep` set, never by nlink (a delta is never linked). `trees.json` is written as
-      format 2 only when a delta exists, so an older tool REFUSES the card instead of gc'ing
-      every delta and verify-failing image.bin. Materialize: stamp cleared BEFORE any write,
-      written AFTER fsync; a missing stamp = copy the base whole and re-apply. Ranges merge
-      within 64 KiB (one seek+write each on the card); a delta over 25% of the file is a full
-      blob; files under 1 MiB are never deltas.
-      **Loose end filed here, not built:** `recover` of a delta'd image writes the BASE's
-      image.bin (the wrong songs) unless it materializes first - the record makes it
-      detectable (`im.deltas`), so recover must at least warn.
-      **Built and desk-proven (2026-09-11, ~55%):** `codeselect/materialize.py` (the format,
-      the on-card rebuild, the stamp protocol; 11 tests + the same protocol run under the
-      card's python 2.7.9 through qemu); treesync's record field (`ImageTrees.deltas`,
-      format 2 only when a delta exists), `dedup_costs` with deltas, `apply_changes(deltas=)`
-      writing the blob and linking the base, `gc_blobs(keep_deltas=)`, `write_delta_index`,
-      `find_deltas` + its pair cache (6 tests); mkmulticard: plan-time discovery in
-      `make_store_plan` (the store is SIZED with the saving), `build_store` writes the
-      index + record, `verify_store`/`verify_deltas` (base+delta rebuilds to the name),
-      `verify_trees` + `tree_as_on_card` hold a delta'd file to the BASE's sha, `update`
-      costs/writes/carries/gc's deltas, `inspect` reports them, `extract` WARNS, a build
-      refuses a selector dir without materialize.py; `select.sh` runs it after the bind
-      (`CODESELECT_PYTHON/WORKDEV/WORKMNT`; select_sh_test 15 cases incl. a real run);
-      `run_game.sh` runs it with the host python3 and `$R/dump/work` after the chosen
-      tree's bind (`--games-title $GAME`); Makefile installs it; PAD_SELECT_SRCS lists it.
-      **Proven since (2026-09-11, ~80%):** `mkmulticard.py selftest` PASSES as root (parts
-      1-8 with the new 6d: a real-ext4 store card with one delta, verify full, materialize
-      over the card's blobs, update to another variant costed at 4096 bytes with the old
-      delta gc'd, no-op update, extract's warning). The store layout now carries a p7 WORK
-      PARTITION when a delta is planned (largest delta'd file + 10% + 32 MiB, mke2fs at
-      build, verify holds it to e2fsck; plan_from_card and the verify CLI read it back).
-      A REAL card: stock Beatles + two 64 KiB byte-edited variants (`i107-variant-a/b` in
-      `D:/Pinball/images/Stern/spike2/`, edits at 100/200 MiB of image.bin) built as
-      `D:/Pinball/multi/beatles-1_29_0.store-stock+i107a+i107b.content.sdcard.raw`: 2
-      deltas, 0.76 GB saved, each variant costs 65536 bytes, p7 0.45 GB, build 2 min,
-      VERIFY PASS in full. EMULATOR (worktree rig, PAD_SELECT menu, image 1): run_game.sh's
-      hook ran materialize.py - `copied base 14af57690336 + 1 range(s) 65536 bytes in
-      12.8 s`, `bound over /home/david/spike2root/games/beatles/image.bin` - and the work
-      file hashes to variant A's own image.bin (edab0b31...); the next boot of the same
-      image HIT the stamp (no copy). Driver: this session's scratchpad `drive107.sh`.
-      **Traps paid:** delta blobs were 0600 root and the rig's user fuse2fs mount refused
-      them (0644 now); the verify CLI's store detection wanted exactly 2 logicals; a verify
-      seconds after a build on /mnt/d read a STALE p3 through 9p (rerun it); WSL shuts the
-      distro down ~60 s after the last wsl.exe session and Ubuntu clears /tmp at boot, so a
-      detached selftest dies (hold a session, log on /mnt/c); Git Bash rewrites `/tmp/...`
-      inside a wsl.exe command string (MSYS_NO_PATHCONV=1); the Beatles selector ids are
-      right 55 / start 34, not TMNT's 64 / 36.
-      **Beatles itself dies in the rig ~10 s after start** (a [maps]/[scenebt] dump in the
-      scene loader, `[ERR] ... firmware ... vpu` beside it) - seen on run 1 where the hook
-      FAILED and the base file was bound, so it is not the delta's doing; a stock-Beatles
-      control run is the next check and, if it dies the same way, its own queue item.
-      **Not yet:** variant B's boot (the 'restored' path on the real card - proven in the
-      selftest and under the card's python; the first two tries pressed TMNT's switch ids),
-      hardware (a delta card on the TMNT: two boots, two song sets), and the recover loose
-      end.
-      **Resume:** run `drive107.sh 2 b` (ids fixed), then the stock-Beatles control run,
-      then close the emulator half; hardware is David's.
-      **PARKED** (before this pass) - not to be taken until the numbers
-      demand it: whole-file dedup already puts 40 Beatles variants on a 32 GB
-      card (~450 MB each). It pays only for 40+ variants on a 16 GB card, 80+
-      variants, or a title whose `image.bin` is 1.4-1.6 GB (TMNT, Godzilla).
-      WHY IT IS POSSIBLE: the app replaces a sound IN PLACE, size-neutral
-      (`manufacturer.py:485`, `engine.write_image`), so a one-song variant's
-      `image.bin` differs from the base only in that body's byte range; the
-      store's identity is the whole-file sha256 (`treesync.hash_tree`), and the
-      only range-delta code is the emulator's override set
-      (`engine._writes_by_file`, `overrides.delta`, `overrides.sh`). DESIGN
-      (recorded, not built): a `.delta` blob = base blob key + ranges + bytes;
-      the tree's `image.bin` links the BASE blob so the game always has a file;
-      at boot a `materialize.py` run by the card's OWN python2.7 rebuilds the
-      variant into a p7 work partition (the store leaves p7 free), stamps it,
-      and `mount --bind`s the file over the tree's; any failure = boot with the
-      base songs. RUNTIME FACTS (read off the zImage's embedded config): kernel
-      3.14.28, loop built in, NO device-mapper, NO overlayfs; busybox 1.23.1
-      `dd` has NO `conv=notrunc` (`seek=` truncates) - python2.7, `rsync
-      --inplace` and `debugfs` are the in-place writers; p5 72 MiB, p6 532 MiB
-      (496 free), `/var/volatile` = 512 MiB of RAM: none holds a general
-      title's `image.bin`, so it is p7 or nothing. The rig never runs
-      `select.sh`, so `run_game.sh` must call the same script. Acceptance: two
-      boots of a delta card on the TMNT play two song sets; `verify` hashes
-      base+delta to the tree's sha256. Details: handoff REMAINING item 107.
-      — S3: a bigger card is the workaround. D4: a new on-card file format plus
-      a machine-side writer only hardware proves.
+- [ ] **111. Beatles dies in the rig within seconds of starting, on the STOCK
+      raw with no menu and no store.** `S3 D3` *(Found 2026-09-11 while proving
+      item 107: three delta-card runs and a control run of
+      `beatles-1_29_0.Release.8G.sdcard.raw` (PAD_SELECT=0, PAD_CARD_CACHE=0)
+      all end the same way - `game up at 7 s, GONE at 9 s`; the shim's last
+      lines are the `[maps] --- guest memory map ---` dump, the scene opener
+      (`[sceneopen] ... scene.radium` x4) and `[ERR] Error in opening firmware
+      binary file / Please put bin file to /lib/firmware/vpu folder`, which is
+      the VPU library's own line and appears on titles that run. Not item 107's:
+      run 1 there bound nothing and died the same. Instrument: `pgrep -x game`
+      lifetime + `~/gzwatch.log`; sample the threads before reading game code
+      (memory). Acceptance: Beatles reaches attract in the rig (`ch0 serving`
+      or a glshot with the Beatles attract art). Logs from the runs:
+      `~/item107_control.gzwatch.log`, `~/item107_b3.gzwatch.log`.)*
+      — S3: one title; every other title plays. D3: reproduces on demand.
+
+- [ ] **112. `extract` of a delta'd image writes the BASE's `image.bin` - the
+      wrong songs - and only warns.** `S3 D2` *(The loose end item 107 filed
+      and did not build. A delta'd tree's file IS the base blob on the card; the
+      record's `ImageTrees.deltas` says which files and names the delta blob, so
+      `extract_image` can rebuild the variant into the extracted p3 the way
+      materialize.py does at boot (`materialize.materialize_one` over the card's
+      blobs, or `hash_with_delta`'s streaming substitute while rdump'ing).
+      Acceptance: extract of a delta'd image -> its `image.bin` hashes to the
+      record's source digest, not the base's; the selftest's part 6d already has
+      the card and the assert to flip.)*
+      — S3: a warning says so today; a rebuild from the sources is the
+      workaround. D2: desk work, the selftest is the run.
 
 - [ ] **108. A multi-boot card can boot its remembered choice without showing
       the menu, unless a flipper is held at power-up.** `S3 D3` *(Follow-up to
@@ -8520,6 +8446,36 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **107. A variant that changes a few songs costs a whole `image.bin` per
+      copy on a compact card; store only the changed byte ranges and rebuild the
+      file at boot.** `S3 D4` ← CLOSED 2026-09-11, emulator-proven; the hardware
+      boot is owed *(Un-parked by name, `/next 107`. A file that matches an
+      earlier tree's blob at the same path in size and differs in <= 25% of its
+      4 KiB blocks is stored as `.blobs/<key>.delta` (an ASCII header + the
+      ranges' bytes) and the tree's own file hardlinks the BASE blob;
+      `codeselect/materialize.py` - the format's one definition, in the card
+      python's 2/3 subset - rebuilds the variant into the store layout's new p7
+      work partition under a stamp (removed before any write, written after
+      fsync) and binds it over the tree's file; select.sh runs it after the
+      bind, run_game.sh the same with the host python3. Discovery at PLAN time,
+      cached per digest pair, so the store is sized with the saving; trees.json
+      is format 2 only when a delta exists, so an older tool refuses the card
+      instead of gc'ing every delta. Proof: 23 desk tests + the protocol under
+      the card's python 2.7.9 via qemu; select_sh_test 15 cases; the root
+      selftest's new part 6d on real ext4; a real Beatles card (stock + two
+      64 KiB-edited variants: 2 deltas, 0.76 GB saved, 65536 bytes per variant,
+      p7 0.45 GB, verify PASS in full,
+      `D:/Pinball/multi/beatles-1_29_0.store-stock+i107a+i107b.content.sdcard.raw`);
+      in the emulator the hook copied the base once + 1 range (12.8 s), the next
+      boot of the same image hit the stamp, the other variant's boot RESTORED
+      the first's ranges from the base, and each time the work file hashed to
+      the chosen source's own image.bin. Beatles itself dies in this rig within
+      seconds on the STOCK raw too (item 111), so "what the game sees" is the
+      plan's own cmp oracle, not a playing game. Left: hardware (David: the
+      card above on a machine, two boots, two song sets), item 112 (recover
+      writes the base's file). Closing code commit ab0dbb1; the full record is
+      in the handoff under REMAINING item 107.)*
 
 - [x] **106. A multi-boot card can carry a GROUP of images shown as ONE card,
       and choosing it boots one member at random, a different one every

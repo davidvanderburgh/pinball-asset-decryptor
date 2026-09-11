@@ -7883,18 +7883,43 @@ These have each been violated at least once and each cost a run or a window:
       found only by looking at a SCREENSHOT. Anything that walks `form.images`
       and reasons about files has to ask whether the row carries games of its
       own.
-      **Resume:** (4) the emulator run of David's layout - a store card of two
-      builds plus `--group-over '0-1|RANDOM|pick one or let it roll'`, booted
-      twice, which should alternate by the exclusion rule and let either build
-      be picked directly. The TMNT store card at `D:/Pinball/TMNT 1987/multi/`
-      is the obvious subject and is already a group card; a menu-only inject
-      re-shapes it in seconds. Then this closes again.
-      **Not in this item:** item 110, the Edit-image dialog's Members section.
-      Also left conservative on purpose: changing a KEEPING group's membership
-      asks for a rebuild when an inject would do, because `diff_forms` keys the
+      **A RANDOM CARD'S OWN PICTURE (David, 2026-09-10, looking at the Edit
+      dialog: "the options for a Random group need to be bespoke to a random
+      group. we should have options like 'stack of logos', 'big ?', etc. come
+      up with some sweet looking ideas for it" - then picked ALL EIGHT of the
+      mock-ups).** The game-specific options are meaningless on a random row:
+      "the game's own logo" has no single game to refer to.
+      **DONE (8b4b65a, 4ea7b3a):** eight styles in `selectmedia.py`, every one
+      drawn from the MEMBERS' own logos so the card shows the builds it can
+      boot. Stills `fan` / `stack` / `mosaic` / `question` / `shuffle`,
+      animated `cycling` (each member a second) and `reel` (spins and eases
+      onto one). PIL rather than ffmpeg, and the code says why. CLI:
+      `--group-members G=A,B,C` with `--group-art` / `--group-anim`, writing
+      `gart<G>.png` / `ganim<G>.gif`, cached on the member cards' stamps plus
+      the style, and the animation held to the selector's own gif limits after
+      it is written.
+      **Two mistakes fixed by LOOKING at the output, not by reasoning:** the fan
+      splayed one way only (it pivots below the panel now and alternates either
+      side of the front card), and the reel left the card colour down both edges
+      (it fills the width and crops). Each card is composed on its own
+      full-panel layer before rotation, because pasting rotated bitmaps by their
+      top-left turns the ones behind into slivers - which the first attempt did,
+      visibly.
+      **Resume:** (a) THE TAB'S EDIT DIALOG for a group row - the Picture
+      section should offer the eight styles instead of "the game's own logo" /
+      "the game's own attract video", with `cycling` the default for a new
+      random row; (b) `prepare_args` emitting `--group-members` /
+      `--group-art` / `--group-anim` for each group row; (c) `conf_for_plan`
+      putting `gart<G>.png` into the group's own media row instead of borrowing
+      its first member's, and `plan_media` carrying the group rows back.
+      (d) then the emulator run of David's layout - a store card of two builds
+      plus `--group-over '0-1|RANDOM|pick one or let it roll'`, booted twice,
+      alternating by the exclusion rule with either build pickable directly.
+      **Not in this item:** item 110, the Edit dialog's Members section. Also
+      left conservative on purpose: changing a KEEPING group's membership asks
+      for a rebuild when an inject would do, because `diff_forms` keys the
       rebuild bucket on rows rather than on games. Over-asking is the safe
-      direction; correcting it needs the menu bucket to be able to name a card
-      change, which is more than this item needs.
+      direction.
       — S3: the jukebox works; this is where it may sit. D2: the card already
       does all of it, so this is three layers of builder above a proven format.
 

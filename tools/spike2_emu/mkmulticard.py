@@ -7680,7 +7680,7 @@ def selftest(d, selector_file=None):
         pl = buf.getvalue()
         print(pl)
         ok &= "1 file(s) stored as byte-range DELTAS" in pl, pl
-        rows_d = {int(ln.split()[2]): int(ln.split()[3]) for ln in pl.splitlines()
+        rows_d = {int(ln.split()[1]): int(ln.split()[3]) for ln in pl.splitlines()
                   if ln.startswith("image-size ") and ln.split()[1].isdigit()}
         ok &= 4096 <= rows_d[1] < 16384 + 4096, rows_d         # the extra costs one block's delta + its own small files, not 300 KB
         print("== a build that plans a delta refuses a selector dir without materialize.py, before the copy")
@@ -7740,7 +7740,13 @@ def selftest(d, selector_file=None):
             ok &= f.read() == big_v1
         ok &= mz.read_stamp(os.path.join(workd, "V_title", "image.bin.stamp")) == (ts.blob_key(base_rec), dnames[0])
         print("== update: the variant becomes another one - costed at its ranges; the old delta goes, the new is written, the base stays")
-        put(E, "/V_title/image.bin", stage_big["v2"])
+
+        def replace(src, rel, stage):                       # put() writes a NEW file; debugfs refuses an existing one
+            _t, st_, _c = Geometry.from_file(src).part(3)
+            debugfs_write_script(fs_ref(src, st_ * SECTOR), ["rm %s" % rel, "write %s %s" % (dq(stage), rel),
+                                                             "set_inode_field %s mode 0100644" % rel])
+            os.utime(src)
+        replace(E, "/V_title/image.bin", stage_big["v2"])
         v2_rec = source_tree(E)[0].tree.files["V_title/image.bin"]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):

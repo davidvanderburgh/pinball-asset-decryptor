@@ -1893,6 +1893,235 @@ def sweep_stale(out, manifest, visual_only=False, log=say):
     return removed
 
 
+# ============================================================ a GROUP card's picture
+#
+# A RANDOM card has no single game, so "the game's own logo" means nothing for
+# it: its picture has to say "several games, one of them at random".  These draw
+# that from the MEMBERS' own logos, so the card shows the very builds it rolls
+# between (David, 2026-09-10: "the options for a Random group need to be bespoke
+# to a random group... 'stack of logos', 'big ?'").
+#
+# PIL, NOT ffmpeg.  Everywhere else here prefers ffmpeg and falls back to PIL;
+# these are the other way round and say so, because a fanned deck needs rotation
+# with alpha, the question mark needs a glyph, and an ffmpeg filtergraph for
+# either would be write-only.
+
+#: The still styles, and what each says.
+GROUP_ART_STYLES = {
+    "fan": "the members' logos fanned out like a hand of cards",
+    "stack": "the members' logos in a pile, slightly offset",
+    "mosaic": "every member at once, as a grid",
+    "question": "a big '?' over a dimmed mosaic of the members",
+    "shuffle": "the shuffle glyph every music player uses",
+}
+#: ...and the animated ones.
+GROUP_ANIM_STYLES = {
+    "cycling": "each member's logo in turn, a second each",
+    "reel": "a slot reel that spins and eases onto one",
+}
+#: The menu's own 'midnight' colours, which is what a card gets unless its
+#: theme says otherwise.  --group-colors overrides them.
+GROUP_CARD_RGB = (26, 31, 41)
+GROUP_FRAME_RGB = (60, 70, 88)
+GROUP_HL_RGB = (255, 196, 45)
+GROUP_DIM_RGB = (150, 162, 180)
+#: How long each member holds the panel in the cycling style.
+GROUP_CYCLE_MS = 1000
+#: ...and how many frames the reel spends easing to a stop.
+GROUP_REEL_FRAMES = 24
+
+
+def _pil():
+    try:
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont
+    except ImportError:
+        raise Refused("a random card's picture needs PIL (pip install pillow); "
+                      "ffmpeg alone cannot compose one")
+    return Image, ImageDraw, ImageFilter, ImageFont
+
+
+def _group_font(size):
+    _Image, _Draw, _Filter, ImageFont = _pil()
+    for name in ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf", "Vera.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _fit(im, w, h):
+    Image, _d, _f, _ft = _pil()
+    out = im.copy()
+    out.thumbnail((max(1, w), max(1, h)), Image.LANCZOS)
+    return out
+
+
+def group_style_names(animated=False):
+    return sorted(GROUP_ANIM_STYLES if animated else GROUP_ART_STYLES)
+
+
+def render_group_still(style, logos, size, colors=None):
+    """One PNG-able PIL image for a group card, from its members' logos."""
+    Image, ImageDraw, _Filter, _Font = _pil()
+    card, frame, hl, dim = colors or (GROUP_CARD_RGB, GROUP_FRAME_RGB,
+                                      GROUP_HL_RGB, GROUP_DIM_RGB)
+    w, h = size
+    if not logos:
+        raise Refused("a random card's picture needs at least one member logo")
+
+    def mosaic(n):
+        im = Image.new("RGB", (w, h), card)
+        cols = 3 if n <= 9 else int(math.ceil(math.sqrt(n * w / float(h))))
+        cols = max(1, min(cols, n))
+        rows = int(math.ceil(n / float(cols)))
+        cw, ch = w // cols, h // rows
+        for i in range(cols * rows):
+            src = logos[i % len(logos)]
+            im.paste(src.convert("RGB").resize((max(1, cw - 3), max(1, ch - 3)),
+                                               Image.LANCZOS),
+                     ((i % cols) * cw + 1, (i // cols) * ch + 1))
+        return im
+
+    if style == "mosaic":
+        return mosaic(len(logos))
+    if style == "question":
+        im = Image.blend(mosaic(min(len(logos), 9)),
+                         Image.new("RGB", (w, h), (0, 0, 0)), 0.74)
+        d = ImageDraw.Draw(im)
+        # anchor='mm' centres on the glyph's own ink; halving a text bbox puts
+        # the left bearing into the offset and lands it visibly off-centre
+        d.text((w // 2, h // 2), "?", font=_group_font(int(h * 0.7)),
+               fill=hl, anchor="mm")
+        return im
+    if style == "shuffle":
+        im = Image.new("RGB", (w, h), card)
+        d = ImageDraw.Draw(im)
+        cx, cy = w // 2, int(h * 0.46)
+        arm, rise, thick = int(w * 0.29), int(h * 0.15), max(4, int(h * 0.052))
+        for dy in (-rise, rise):
+            d.line([(cx - arm, cy + dy), (cx - int(arm * 0.3), cy + dy),
+                    (cx + int(arm * 0.3), cy - dy), (cx + int(arm * 0.72), cy - dy)],
+                   fill=hl, width=thick, joint="curve")
+            ax, ay = cx + int(arm * 0.72), cy - dy
+            head = max(6, int(h * 0.09))
+            d.polygon([(ax + head * 1.6, ay), (ax, ay - head), (ax, ay + head)], fill=hl)
+        d.text((w // 2, h - int(h * 0.14)), "RANDOM", font=_group_font(max(10, int(h * 0.085))),
+               fill=dim, anchor="mm")
+        return im
+    if style in ("fan", "stack"):
+        # EACH CARD ON ITS OWN FULL-PANEL LAYER, so rotate() cannot shift it:
+        # pasting rotated bitmaps by their top-left corner turns the ones behind
+        # into slivers, which is exactly what the first try did.
+        im = Image.new("RGBA", (w, h), tuple(card) + (255,))
+        show = logos[:5]
+        base = _fit(show[0], int(w * 0.52), int(h * 0.52))
+        n = len(show)
+        # A HAND OF CARDS SPLAYS BOTH WAYS around the one in front, turning on a
+        # pivot BELOW the panel so they pivot from their corner the way real
+        # cards do.  Fanning one way only looked like a mistake rather than a
+        # deck (the first version did that).
+        spread = 17.0
+        for k in range(n - 1, -1, -1):
+            t = _fit(show[k], base.width, base.height)
+            face = Image.new("RGBA", (t.width + 10, t.height + 10), tuple(frame) + (255,))
+            face.paste(t.convert("RGBA"), (5, 5))
+            layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            if style == "stack":
+                off = k * max(6, int(h * 0.045))
+                layer.paste(face, ((w - face.width) // 2 + off - int(w * 0.04),
+                                   (h - face.height) // 2 + off - int(h * 0.07)))
+            else:
+                layer.paste(face, ((w - face.width) // 2,
+                                   (h - face.height) // 2 - int(h * 0.04)))
+                # k == 0 is the front card and stays upright; the rest alternate
+                # out to either side of it
+                step = (k + 1) // 2
+                ang = spread * step * (1 if k % 2 else -1)
+                layer = layer.rotate(ang, resample=Image.BICUBIC,
+                                     center=(w // 2, h + int(h * 0.30)))
+            im = Image.alpha_composite(im, layer)
+        return im.convert("RGB")
+    raise Refused("a random card's picture style %r is not one of %s"
+                  % (style, ", ".join(group_style_names())))
+
+
+def render_group_frames(style, logos, size, colors=None):
+    """(frames, delay_ms) for an animated group card."""
+    Image, _Draw, ImageFilter, _Font = _pil()
+    card, _frame, hl, _dim = colors or (GROUP_CARD_RGB, GROUP_FRAME_RGB,
+                                        GROUP_HL_RGB, GROUP_DIM_RGB)
+    w, h = size
+    if not logos:
+        raise Refused("a random card's picture needs at least one member logo")
+    if style == "cycling":
+        # ONE FRAME PER MEMBER, held a second each.  The panel is what a member
+        # would show on its own card, so the random card is a slideshow of the
+        # very things it can boot - and the selector's own animation path plays
+        # it with no new code at all.
+        frames = []
+        for l in logos[:GIF_MAX_FRAMES]:
+            im = Image.new("RGB", (w, h), card)
+            t = _fit(l.convert("RGB"), w, h)
+            im.paste(t, ((w - t.width) // 2, (h - t.height) // 2))
+            frames.append(im)
+        return frames, GROUP_CYCLE_MS
+    if style == "reel":
+        # A STRIP OF MEMBERS SCROLLING BY, easing to a stop with the winner
+        # between two rails.  Blur falls off as it slows, which is what sells it.
+        cell = max(8, h // 2)
+        strip_h = cell * max(2, len(logos))
+        strip = Image.new("RGB", (w, strip_h), card)
+        for i in range(max(2, len(logos))):
+            # FULL WIDTH: a narrower strip leaves the card colour down both
+            # edges and reads as a picture with margins rather than as a reel
+            t = _fit(logos[i % len(logos)].convert("RGB"), w, cell - 6)
+            if t.width < w:
+                t = t.resize((w, max(1, int(t.height * w / float(t.width)))), Image.LANCZOS)
+                if t.height > cell - 6:
+                    top = (t.height - (cell - 6)) // 2
+                    t = t.crop((0, top, w, top + cell - 6))
+            strip.paste(t, ((w - t.width) // 2, i * cell + (cell - t.height) // 2))
+        frames = []
+        n = GROUP_REEL_FRAMES
+        spins = 2.0
+        for k in range(n):
+            # ease-out cubic: fast, then crawling onto the stop
+            p = 1.0 - (1.0 - (k + 1) / float(n)) ** 3
+            y = int((spins * strip_h + cell * 0.5) * p) % strip_h
+            im = Image.new("RGB", (w, h), card)
+            src = strip.crop((0, 0, w, strip_h))
+            tall = Image.new("RGB", (w, strip_h * 2), card)
+            tall.paste(src, (0, 0))
+            tall.paste(src, (0, strip_h))
+            im.paste(tall.crop((0, y, w, y + h)), (0, 0))
+            speed = (1.0 - p)
+            if speed > 0.02:
+                im = im.filter(ImageFilter.GaussianBlur(0.4 + 5.0 * speed))
+            d = _pil()[1].Draw(im)
+            rail = max(2, int(h * 0.012))
+            d.rectangle([0, int(h * 0.33), w, int(h * 0.33) + rail], fill=hl)
+            d.rectangle([0, int(h * 0.64), w, int(h * 0.64) + rail], fill=hl)
+            frames.append(im)
+        # hold the result a beat before it goes again
+        frames += [frames[-1]] * 8
+        return frames, 60
+    raise Refused("a random card's animation style %r is not one of %s"
+                  % (style, ", ".join(group_style_names(animated=True))))
+
+
+def write_group_gif(frames, delay_ms, out):
+    """Save frames as a looping GIF the selector can read."""
+    Image, _d, _f, _ft = _pil()
+    if not frames:
+        raise Refused("a random card's animation came out with no frames")
+    first = frames[0].convert("P", palette=Image.ADAPTIVE, colors=255)
+    rest = [f.convert("P", palette=Image.ADAPTIVE, colors=255) for f in frames[1:]]
+    first.save(out, "GIF", save_all=True, append_images=rest, loop=0,
+               duration=int(delay_ms), optimize=True, disposal=1)
+    return out
+
+
 def cmd_prepare(a):
     images = [a.primary] + list(a.extra or [])
     n = len(images)

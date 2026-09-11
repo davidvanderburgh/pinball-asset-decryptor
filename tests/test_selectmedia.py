@@ -1187,3 +1187,80 @@ def test_a_long_bed_is_cut_and_faded(sm, tmp_path, monkeypatch):
     src, secs, fade = seen["args"]
     assert src == str(track)
     assert secs == sm.MUSIC_MAX_SECONDS and fade == sm.MUSIC_FADE_MS
+# ---- item 106: a RANDOM card's own picture ---------------------------------
+
+def _member_logos(n, size=(400, 225)):
+    """n distinct member logos, each a flat colour so a renderer that drops or
+    repeats one is visible rather than plausible."""
+    Image = pytest.importorskip("PIL.Image")
+    hues = [(200, 40, 40), (40, 90, 200), (40, 170, 80), (200, 150, 30),
+            (150, 60, 200), (220, 110, 40)]
+    return [Image.new("RGB", size, hues[i % len(hues)]) for i in range(n)]
+
+
+def test_every_still_style_fills_the_panel(sm):
+    """A RANDOM card has no single game, so its picture is drawn from the
+    members' own logos. Whatever the style, it must come out exactly panel
+    sized - the menu blits it into a fixed box."""
+    pytest.importorskip("PIL.Image")
+    size = (512, 288)
+    logos = _member_logos(4)
+    for style in sm.group_style_names():
+        im = sm.render_group_still(style, logos, size)
+        assert im.size == size, style
+        assert im.mode == "RGB", style
+        # and it is not a blank card: something was drawn
+        assert len(im.convert("RGB").getcolors(maxcolors=1 << 16) or [1] * 2) > 1, style
+
+
+def test_a_still_style_survives_one_member_and_forty(sm):
+    """One member is a degenerate group the selector still accepts, and forty is
+    the jukebox this item was filed for. Neither may raise."""
+    pytest.importorskip("PIL.Image")
+    for n in (1, 2, 40):
+        for style in sm.group_style_names():
+            assert sm.render_group_still(style, _member_logos(n), (512, 288)).size \
+                == (512, 288), (style, n)
+
+
+def test_the_animated_styles_make_a_gif_the_selector_can_read(sm, tmp_path):
+    pytest.importorskip("PIL.Image")
+    size = (512, 288)
+    for style in sm.group_style_names(animated=True):
+        frames, delay = sm.render_group_frames(style, _member_logos(4), size)
+        assert frames and all(f.size == size for f in frames), style
+        assert 0 < delay <= 1000, style
+        out = str(tmp_path / ("g_%s.gif" % style))
+        sm.write_group_gif(frames, delay, out)
+        info = sm.gif_info(open(out, "rb").read())
+        assert info, "%s did not come out as a GIF this tool can read" % style
+        # the selector's own caps, which a card has to stay inside
+        assert info["frames"] <= sm.GIF_MAX_FRAMES, (style, info["frames"])
+        assert (info["w"], info["h"]) == size, style
+        assert os.path.getsize(out) <= sm.GIF_MAX_BYTES, style
+
+
+def test_cycling_shows_each_member_once(sm):
+    """It is a slideshow of the very things the card can boot, so a member
+    missing from it is the whole point missed."""
+    pytest.importorskip("PIL.Image")
+    logos = _member_logos(5)
+    frames, delay = sm.render_group_frames("cycling", logos, (128, 72))
+    assert len(frames) == 5
+    assert delay == sm.GROUP_CYCLE_MS
+    # each frame carries its own member's colour, so none was repeated
+    seen = [max(f.convert("RGB").getcolors(1 << 16))[1] for f in frames]
+    assert len(set(seen)) == 5, seen
+
+
+def test_a_bad_style_is_refused_by_name(sm):
+    pytest.importorskip("PIL.Image")
+    with pytest.raises(sm.Refused) as e:
+        sm.render_group_still("sparkles", _member_logos(2), (64, 36))
+    assert "sparkles" in str(e.value) and "mosaic" in str(e.value)
+    with pytest.raises(sm.Refused) as e:
+        sm.render_group_frames("sparkles", _member_logos(2), (64, 36))
+    assert "cycling" in str(e.value)
+    # ...and no members at all is refused rather than drawn as an empty card
+    with pytest.raises(sm.Refused):
+        sm.render_group_still("mosaic", [], (64, 36))

@@ -1956,145 +1956,6 @@ These have each been violated at least once and each cost a run or a window:
       change itself (once one exists) is small and has already been
       drafted once.
 
-- [ ] **38. A run can strand its windows, and then EVERY later run is
-      INVISIBLE — the game plays perfectly with no window, and every
-      instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
-      the strand was reproduced on a second occasion — item 21a's run, torn
-      down with `killgame.sh` — and the WINDOW half now has a cheap, verified
-      cure that does not shut the VM. See (4).)*
-      **Found 2026-08-10 during item 22's pass, with `zorder.py`, `shotwin.py`
-      and `alive.sh`. Established, in order:**
-      **(1) A run left two windows behind after a clean teardown.** The run was
-      `watch.sh` on a title with no extracted game ELF, so the guest never
-      started; teardown printed `TOTAL STILL RUNNING : 0  (clean)` and
-      `star_wars_le - Stern Spike 2 emulator (Ubuntu)` plus `Controls - Spike 2
-      emulator (Ubuntu)` stayed on the desktop as msrdc RAIL proxies. They are
-      REAL windows, not leaked handles: `shotwin.py` grabbed one — PrintWindow
-      1, 4.1% non-black — an empty black window with a working title bar and
-      close button. **They ignore `WM_CLOSE`**, which makes sense: there is no
-      X client left to receive `WM_DELETE_WINDOW`.
-      **(2) The NEXT run then had no game window at all.** `padglhost` logged
-      `window opened 1445x827 on DISPLAY=:0` and rendered **13997 frames in
-      239.6 s (58.4 fps avg), swap 3.83 ms/f** — a flawless render loop — while
-      `zorder.py --all` showed that no such window existed anywhere on the
-      desktop. The guest played, video was handed over at 30.0/s, audio ran,
-      `alive.sh` counted a full healthy run. The picture simply was not there
-      and **nothing anywhere said so**.
-      **(3) `wsl --shutdown` cleared it completely** and the next run's windows
-      appeared normally, above the app, first time.
-      **★★ (4) THE WINDOW HALF HAS A MUCH CHEAPER CURE, established 2026-08-10
-      on a live strand (David: "these windows are frozen open and i can't close
-      them"). KILL msrdc.exe.** Both stranded windows were owned by ONE
-      `msrdc.exe` — `zorder.py --all` named it, pid and all — which is WSLg's
-      RDP client and not a Linux process at all. `Stop-Process` on it dropped
-      both windows in about three seconds, WSLg restarted itself as a fresh
-      msrdc pid on its own, **no Linux process died** (two idle `-bash`
-      sessions survived) and `zorder.py` then printed `VERDICT: no emulator
-      window found`. So `wsl --shutdown` is NOT required to unstick the
-      windows; it is required only to reap the interop zombie, which is a
-      different fault with a different cost. **Which means the cure this item
-      should build is: detect (below), then offer the msrdc kill first and the
-      VM shutdown only for the zombie.** Anything that shuts the whole VM to
-      clear a window is charging a user their entire WSL session for a repaint.
-      **NOT ESTABLISHED — do not build on it: WHICH run wedged it, and whether
-      the zombie is cause or symptom.** After run (2), `alive.sh` reported
-      `zombies (cannot be killed, only reaped): 1` for the guest, held by a WSL
-      interop Relay, and named `wsl --shutdown` as the only cure — but the
-      windows were ALREADY stranded before that, at a moment when `alive.sh`
-      had printed a clean 0. So the zombie is a second symptom at best.
-      **Why this is worth more than it looks:** every oracle this rig owns
-      reports healthy. Renderer fps, guest video rate, `alive.sh`, the run log
-      — all normal. The one thing wrong is that there is no picture, and the
-      rig cannot currently tell.
-      **The cheapest first job is DETECTION, not a cure**, and the rig is
-      already on the right side of the boundary to do it: `watch.sh` starts the
-      playfield through Windows interop, so it can run `zorder.py` a few
-      seconds after `window opened` and say "the game window never appeared on
-      the desktop — `wsl --shutdown`" instead of leaving it to be discovered.
-      **Second, unexplained and possibly the same wedge:** while stranded, an X
-      client printed `your 131072x1 screen size is bogus. expect trouble`, and
-      that line landed INSIDE `alive.sh`'s output, eating the
-      `guest (comm=game)` label off its first line. `alive.sh` is the rig's only
-      definition of clean, so a stray writer corrupting its first row is its own
-      small bug.
-      **★ NARROWED FOR FREE, 2026-08-10 during item 21b's pass, and it is NOT
-      the wedge: that line comes from the LOGIN SHELL.** It printed on a bare
-      `wsl -e bash -lc 'ls ~'` with no run up at all, no emulator, no stranded
-      window — so something in the WSL profile emits it and any helper invoked
-      through a LOGIN shell (`bash -lc`) wears it. That makes it a
-      one-character fix in how alive.sh is invoked rather than a symptom of
-      the strand, and it means the corrupted first row is reproducible on
-      demand with no run at all. Do not spend a run on it.
-      **★ AND A CHEAP WAY TO AVOID THE INTEROP ZOMBIE, same pass, one
-      observation so treat it as a lead:** item 21a's run left the guest as a
-      `Zl` zombie held by a WSL interop Relay, and its handoff blames
-      `Start-Process wsl … watch.sh` from PowerShell for putting the relay in
-      the parent chain. This pass started its run with
-      `wsl -e setsid --fork bash -c "exec … watch.sh"` — setsid as the FIRST
-      process, so the run is a session leader and not the relay's child — and
-      after `killgame.sh` it printed `killed 19; still running: 0` with no
-      zombie and no `wsl --shutdown`. Also worth knowing: backgrounding inside
-      the shell (`… watch.sh & echo started`) does NOT survive `wsl -e`
-      returning, which looks exactly like the run silently never starting.
-      **Acceptance:** force the repro (a run on a title with no game ELF, then a
-      normal run) and have the rig SAY the picture is missing rather than let it
-      be discovered; then state whether the strand still happens once teardown
-      is fixed, and on how many repeats.
-      — S2: play itself is not broken and one command cures it, so it is not
-      S1; what it costs is that the emulator can be silently unusable and every
-      other item's runs are measured through it. Arguable as S1 for anyone who
-      does not know the trick. D3: it needs a run, it reproduces on demand, and
-      all three instruments already exist.
-
-- [ ] **36b. Saving a state on star_wars killed the donor run ~10 s later.**
-      `S1 D4` *(**Split on 2026-08-10**: the LOAD half is fixed, verified and
-      merged as 36a. This is the save-side death, which is a different fault
-      with a different instrument — item 23's exit-reason hook — and it is
-      the only part still open.)*
-      **★ DAVID, 2026-08-10 ~13:00: "i tried to save and load on star wars
-      and it crashed."** The evidence, mined the same minute
-      (`c:/tmp/item27/gzwatch_sw_savecrash.log`): **THE SAVE SUCCEEDED** —
-      slot3 `star_wars_le "sw game play"` packed, 63 MB, stamped at the
-      checkpoint freeze (every channel's `worst gap` ~900 ms at 13:00:08 is
-      the criu dump). What David called the crash of "save and load" was two
-      faults at once: the load half (now 36a, and slot3 has since been
-      restored successfully) and **the GUEST EXITING BY ITSELF ~10 s after
-      the dump resumed, CLEANLY** — gzwatch ends at a healthy 49.9 fps with
-      no segv block, no signal, no exit path. That is item 23's first shape
-      (the clean exit), with its strongest correlate yet: a leave-running
-      criu dump 10 s earlier, on the title with four video channels and two
-      EGL surfaces mid-clip-churn at the freeze.
-      **★★ ONE COUNTER-OBSERVATION, 2026-08-10 ~18:40, and it is why this
-      needs repeats rather than a theory: a star_wars save did NOT kill its
-      donor.** On the 36a verification run — a game RESTORED from slot3, then
-      saved to a fresh slot with `savegame.sh` — the pack completed (61 MB)
-      and the guest was still alive and rendering 15 s later. One survival is
-      not a refutation of one death; what it says is that the fault is not
-      "every star_wars save", so the next pass must state HOW MANY repeats it
-      ran and what the game was doing during each.
-      Godzilla survives the identical dump (item 13 verified end-to-end, plus
-      David's own sessions). Suspect space: the game's own watchdog tripping
-      on the ~0.9 s world-stop (SW may time boards/audio tighter), or a
-      frozen-mid-flight video/EGL thread resuming into an invariant SW
-      exercises and Godzilla does not.
-      **BLOCKED ON AN INSTRUMENT THAT IS NOW THIS ITEM'S OWN FIRST JOB.** The
-      guest goes down with nothing anywhere recording WHY; until an exit hook
-      names the path, a repeat sighting teaches nothing, which is exactly the D4
-      line. **This used to be item 23's job. ITEM 23 WAS DROPPED 2026-08-11 at
-      David's ask, so nothing else will build it** — see the Dropped section
-      below, which still carries the three measured exit signatures and is worth
-      reading before starting here. What it needs: an `atexit` hook in the shim
-      that says whether `main` returned and what signal it took, and `watch.sh`
-      grepping the `[segv] pc=` header on exit so the app pane keeps the
-      signature instead of the VPU noise.
-      **Acceptance:** a star_wars save leaves the donor run alive, stated over
-      a number of repeats (both during play and from a restored game, since
-      those differ today), or the exit reproduces and the new reason line names
-      it.
-      — S1: the feature's whole point is saving mid-play, and a save that
-      ends the session costs the ball you were playing. D4: the instrument
-      does not exist yet and the fault has already failed to reproduce once.
-
 - [ ] **21b. Ball HANDLING: a ball model, so multiball works.** `S2 D3`
       ← IN PROGRESS *(**Split out of item 21 on 2026-08-10**, when the
       FEEDBACK half closed as 21a. The item always said the two halves were
@@ -2745,240 +2606,6 @@ These have each been violated at least once and each cost a run or a window:
       `coilread.py` (run on WINDOWS) diffs nonzero `(node,index,count,lvl)`
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
-
-- [ ] **29. Switch names come back as `?` on most titles, so the schematic
-      playfield is a list of numbers and switch positions cannot be joined.**
-      `S2 D3` **← 75%, and the USER-FACING half is DONE.** *(**S2 → S1 → back to
-      S2 within one day, 2026-08-10, and both moves were on evidence.** Up: the
-      Jaws run showed `?` names BLOCK PLAY, because nothing could find the
-      trough and the game sat on LOCATING PINBALLS. Down: item 27's `6d19946`
-      then supplied the names from the title's own device table, so nothing is
-      blocked any more. D4 → D3: the instrument this item said had to be built
-      first is no longer on the critical path.)*
-      **★★ WHAT IS ALREADY SOLVED, in item 27, do not redo it: `swnames.py`
-      fills the names WITHOUT fixing the reader** — the device table carries a
-      name for every playfield switch, and the join is on ORDER within a node
-      (not the number, which this item correctly ruled out). Validated by
-      blanking and refilling the two titles that have real names: **godzilla_pro
-      86/0 wrong, john_wick_le 102/0 wrong; jaws_le fills 105 of 108.** The
-      schematic therefore shows real names, and because `switch_xy` joins on the
-      NAME, the positions this item's part (b) asked for should now join too —
-      **unverified, and it is the cheapest thing left to check.**
-      **WHAT REMAINS IS THE READER ITSELF**, which is still wrong and is why 3
-      switches per title stay `?`: they are the virtual/extra switches with no
-      device record (Jaws's bits 61-63 on node 9). Fixing `msg_row`/`MSG_LANG`
-      would name those and anything else that goes through the message table.
-      **Corrected by item 27's runs: star_wars_le is NOT in the failing set — it
-      has 104 real names and NO device table**, the mirror image of Jaws. So the
-      two name sources are independent, and this item's title census should be
-      re-read with that in mind.
-      **MEASURED 2026-08-06 across four card runs, and the split is clean:**
-      Led Zeppelin LE 1.22.0 **96 of 96 rows `?`**, Elvira's HoH 1.13.0 **109 of
-      109 `?`**, Jaws LE 1.02.0 **108 of 108 `?`** — and **John Wick LE 1.01.0
-      0 of 105**, real names (`QR SCANNER STATUS READY`, …). Godzilla is also
-      fine. So this is per title, not universal, and at least two titles prove
-      the reader itself works.
-      **WHAT IT COSTS, and it is two separate things.** (a) The schematic view
-      draws 96 rows that all say `?`, so you cannot tell which switch you are
-      about to close — see the screenshot behaviour in item 27's sense of "see a
-      switch layout". (b) `switch_xy` is joined on the NAME, so a title with a
-      perfectly good device table gets **no clickable positions at all**: Jaws
-      has 78 switch records with names and coordinates in its binary and scored
-      `NONE of the 108 switches matched a device-table name`.
-      **ESTABLISHED AT THE DESK, from `hwshim.c`:** the name is
-      `msg_row(*(nameobj + 16))` at `hwshim.c:3574`, and `msg_row` (`:3219`)
-      opens with `if (!MSG_LANG) return 0;`. `MSG_LANG` is
-      `TITLE_ADDR(a_msg_lang, "PAD_MSG_LANG", 0x708330u)` — a **Godzilla Pro
-      1.15.0** address (`:2960`).
-      **BUT THE OBVIOUS ONE-LINE FIX IS PROBABLY NOT IT, and this is the trap
-      worth writing down before someone spends a pass on it.** `title_addr()`
-      (`:1267`) returns the default whenever it is merely READABLE, and this
-      file already records that trap for the switch table: *"EHOH's binary is
-      big enough to cover Godzilla Pro's 0x7a958c, so a_sw_struct() returned an
-      address … and the shim read a switch table out of somebody else's data."*
-      So on these titles `MSG_LANG` is most likely non-zero-but-wrong, the
-      early-out never fires, and `msg_row` is instead failing one of its two
-      range checks on `row` or `row[0]`. **Making `!MSG_LANG` fall back to
-      language slot 0 is therefore a guess, not a fix** — and note `msg_row`
-      ALREADY tolerates a garbage `lang` (it validates `lang < 5` and the
-      resulting pointer, falling back to slot 0), which is more evidence the
-      early-out is not where this dies.
-      **FIRST JOB IS AN INSTRUMENT, WHICH IS THE D4.** Print `nameobj`, `row`,
-      `row[0]` and `MSG_LANG`'s value for the first few switches on a title that
-      fails and on John Wick, which does not. That says in one run whether the
-      name object is absent, at a different offset, or pointing at a message
-      table this shim cannot resolve. Only then choose between a per-title
-      `PAD_MSG_LANG`, a shape-based finder like `sw_find_table`, and reading the
-      names some other way.
-      **RULED OUT — joining on the NUMBER instead.** `switchxy.py`'s own header
-      says why: the device table's `index` is a sequential position within its
-      board and not the hardware bit (node 8 runs bits 9,10,11… against index
-      8,9,10…, then the hardware skips 21-23 and the index does not), so a
-      numeric join "produces a map that looks right and presses the wrong
-      switch". Do not reach for it as a workaround.
-      **Acceptance:** on a title that fails today, the schematic shows real
-      switch names, and a title that also ships a device table gets its switches
-      placed on the artwork. State which titles you checked and include one that
-      already worked (John Wick or Godzilla) as a regression control.
-      — S2: the playfield opens, is clickable and the keyboard works, so nobody
-      is blocked from playing; what it costs is that the switch layout is
-      unreadable on three of the four titles tried and that positions are
-      unavailable on a title whose binary has them. Arguable as S1 against item
-      27's wording, which asked to "see a switch layout". D4: the mechanism is
-      NOT established, the leading theory is explicitly marked above as probably
-      wrong, and it needs a guest-side instrument and a run before anything can
-      be chosen.
-
-- [ ] **30. In the container, a run ends by itself after about 60 seconds.**
-      `S2 D3`
-      **MEASURED 2026-08-07, Docker Desktop on WINDOWS (not the target - see
-      below). Everything about the run is healthy until it stops.** Guest
-      producing **57.1 fps** (`[eglshim] 3460 frames in 60559 ms`), renderer
-      59.9/59.6 fps and 56.5 avg, card mounted, tables built from the card,
-      playfield window open, teardown clean and `alive.sh` 0 after. Then at
-      ~62 s: `[watch] stopping...` and nothing else.
-      **ESTABLISHED, and it rules out the obvious causes.** `watch.sh`'s poll
-      loop has exactly three exits and **NONE of their messages printed** —
-      not `renderer exited (window closed)`, not `the game exited`, not
-      `N min backstop reached` — and the script never reached the
-      `grep -aE 'fps|stopped' "$HOSTLOG"` line that sits between the loop and
-      the end of the script. So the loop did not break: the script took a
-      SIGNAL, and one whose trap could still run (`[watch] stopping...` is
-      printed BY teardown), so SIGINT or SIGTERM and not SIGKILL. `cfg MINS=3`
-      is in the log, so the backstop was 180 s and not 60.
-      **RULED OUT:** the test harness (it happens with the PowerShell pipeline
-      removed and output going to a file); anything the rig starts (grepped
-      `autoattract.sh`, `gamestate.sh`, `status.sh` — no `kill` anywhere); the
-      guest exiting on its own (teardown had to SIGKILL it, so it was alive);
-      the wall-clock backstop; and the OOM killer, which sends SIGKILL and
-      would not have let the trap run.
-      **THE TEST PLATFORM IS NOT THE TARGET, and that has to be settled first.**
-      This was Docker Desktop on **Windows**, which runs containers inside a
-      WSL2 VM. macOS uses a completely different VM layer. The container is
-      identical; the thing around it is not. So the FIRST job is to find out
-      whether this reproduces on a Mac at all — it may be an artefact of the
-      Windows host and no macOS user would ever see it.
-      **Second, cheaper job if it does reproduce:** put a signal trap in
-      `watch.sh` that names what it received (`trap 'echo "[watch] got SIG$s"'`
-      for INT/TERM/HUP), which turns one run into an answer. HUP is the
-      candidate worth suspecting given a container's session semantics.
-      **Related and unexplained: NO VIDEO in the container.** `padvidhost.py`
-      came up (`ready: /pad/rootfs/dump/padvid (95 MB, 8 channels x 4 slots)`)
-      but zero clips streamed in either run, where a WSL run of the same card
-      streams continuously. Not investigated at all.
-      **Acceptance:** a container run reaches its wall-clock backstop and says
-      so, on the platform it is for. State which host you tested on, because
-      this item exists because that distinction was not controlled for.
-      — S2: the emulator runs at full speed in the container, so nothing is
-      broken outright and this is not S1; what it costs is that no macOS
-      session lasts longer than a minute, which is most of the value. D3: it
-      needs a run, it reproduces every time, and the instrument is a one-line
-      trap - the unknown is which host it belongs to, not how to see it.
-
-- [ ] **32. Stretching the game window brings the emulation to a crawl.**
-      `S2 D3`
-      **★ DAVID, 2026-08-07: "stretching the display size for the stern spike 2
-      emulator window brings the emulation to a crawl (like when I make it 3 or
-      four times larger)."** The desktop is 3840x2160 at 120 Hz, so "3 or four
-      times" the default 1360x768 is at or past maximised.
-      **ESTABLISHED AT THE DESK, FROM THE SOURCE, AND IT NARROWS THE SEARCH
-      BEFORE ANY RUN: the guest's own drawing does NOT grow with the window.**
-      `fb_w`/`fb_h` are set once from `PAD_GL_W`/`PAD_GL_H` (`padglhost.c:2079`)
-      and the guest renders into `tex_screen` at that size whatever the window
-      does. The only thing that scales is `win_present()` (`padglhost.c:1367`):
-      one textured quad letterboxed into `win_w x win_h`, then `eglSwapBuffers`.
-      **ARITHMETIC, NOT A MEASUREMENT, so treat it as a reason to look further
-      rather than as a result — and it says the GPU fill is NOT enough on its
-      own.** `gpuprobe` measured the default adapter (the AMD iGPU, item 18) at
-      **1.096 ms/frame for 4 full-screen 1080p quads = 8.29 Mpixel**. The blit is
-      1.04 Mpixel at 1360x768 and ~8.3 Mpixel maximised, i.e. **~0.14 ms →
-      ~1.1 ms against a 16.7 ms budget**. That is real but it is not a crawl, so
-      do not stop at "it is the integrated GPU". The untested suspects are
-      downstream of the quad: the per-frame **cross-adapter copy** to a display
-      the NVIDIA card owns, the **msrdc RAIL present** of a much larger surface,
-      and whether either back-pressures the guest through the swap.
-      **RELATED MEASUREMENT, so nobody re-derives it: item 18 found msrdc CPU is
-      not pixel-proportional** — a quarter of the pixels moved it 72.1 → 70.3.
-      **But that was tested DOWNWARD from the default and never above it**, which
-      is the whole range this item is about.
-      **EVERY INSTRUMENT NEEDED ALREADY EXISTS AND THE THREE SEPARATE THE TWO
-      HALVES:** `[eglshim] N frames in M ms = X fps` is the GUEST's own rate,
-      `padglhost`'s `fps` line is the HOST's, and item 11's `swap_us` says how
-      long `eglSwapBuffers` blocks. Guest fps falling with host fps while
-      `swap_us` balloons is back-pressure; host fps falling alone is a display
-      cost only. **A free fourth oracle needs no instrument at all: audio does
-      not go through the renderer** (`padplay.py`, Windows side), so if the sound
-      crawls too, the guest genuinely slowed.
-      **REPRO WITHOUT TOUCHING A WINDOW, which matters because `SetWindowPos` on
-      an emulator window is a standing non-negotiable:** item 5 (`19e1b85`) made
-      `.pad_windows` lines `key x y [w h]` and padglhost CREATES at the saved
-      size — so write a big size in and start the run. If a resize DURING a run
-      is wanted, item 5's verified technique is a SendInput corner drag from a
-      DPI-aware process, not a programmatic move.
-      **Two levers exist but are knobs awaiting an A/B, not fixes:**
-      `PAD_GL_ADAPTER` (built for item 18, **unset by default**) points Mesa at
-      the NVIDIA card, and `PAD_GL_WIN_EVERY` presents every Nth frame.
-      **Acceptance:** state the window size in pixels and all three rates (guest
-      `[eglshim]`, host `fps`, `swap_us`) at the default size and at ~4x, on the
-      same run recipe — that pair alone is the finding, and it is worth a commit
-      even if no fix follows. A FIX means the guest's own fps holds at ~4x within
-      a stated margin of its default-size figure, with the picture still correct
-      and letterboxed, and dragging plus the item 5 size restore still working
-      afterwards — that is exactly what the banned fix broke.
-      — S2: play works at the default size so nobody is blocked outright, which
-      is why it is not S1; what it costs is playing at a viewable size on a 4K
-      desktop, and it makes every item whose oracle is David's eyes (1d's fade
-      curves, 21's trough markers) dearer by pinning the window small. Arguable
-      as S1 if you read "the game visibly misbehaves while you are playing it" as
-      covering a size the user chose. D3: needs a run, it shows up the moment you
-      look, and all three instruments exist and are validated — the unknown is
-      which stage of the present path pays, not how to see it.
-
-- [ ] **33. Save-state slots are invisible: nothing shows what exists or what
-      it costs.** `S3 D2` **★ DAVID, 2026-08-09: "maybe our save states are not
-      being pruned?... we should have clear visibility of what kind of space
-      they're taking up."** Asked while chasing that day's startup freeze, which
-      turned out to be unrelated (v0.120.3, a poisoned log line) — but the
-      visibility gap he tripped over is real: the only way to see slots today
-      is `du -sh` inside WSL.
-      **Measured 2026-08-09:** slots live in `<rootfs>/saves/<slot>` (criu
-      dumps, `savegame.sh:48`); on this machine `/home/david/spike2root/saves`
-      = quicksave 511 MB + wtest 475 MB = 985 MB. **Pruning is NOT broken and
-      is not the job** — `savegame.sh` `rm -rf`s a slot before each re-dump, so
-      growth is bounded per slot name; what is missing is the LIST. The GUI
-      half rides on item 13's StateOps mixin (both playfield views' Save/Load
-      buttons), and any slot browser must respect restorestate.sh's pre-flight
-      rules (a dead-tty or gone-card slot is refusable, and saying WHY in the
-      list would save a failed load).
-      **Related cleanup found the same day, David to confirm before anyone
-      deletes:** `/home/david/wtest.log` is 13 GB of watch.sh test debris;
-      `~/cardcache` is 43 GB and is EXPECTED (per-title tables), keep it.
-      **★ THE CORE ASK SHIPPED 2026-08-10 with item 13's GUI batch (~90%):
-      the Emulate tab's Save states manager lists every slot with name,
-      game, size and date, totals them against the WSL disk's free space,
-      and Renames/Deletes** (slots.sh, root, guarded). David can now
-      delete `wtest` himself from the tab. REMAINING here: the list does
-      not yet flag a REFUSABLE slot with the reason a load would fail -
-      the polish this item's text asked for beyond the list itself. The
-      refusable classes are restorestate.sh's pre-flight's three: dead
-      tty, gone card, and STALE BUILD - savestate.sh records a sha1 per
-      mapped library (36a (3)), and any shim/bridge rebuild breaks the
-      match, which `ensurebuild.sh` does by itself on any source change,
-      so this is the class a user actually hits.
-      **★ DAVID, 2026-08-16: "why do save states break between builds?"**
-      Answered at the desk (criu restores file-backed pages from the
-      files as they are NOW and validates size + build-ID, so a slot is
-      welded to the exact binaries it was dumped under - 36a (3) is the
-      full record) - but that the question needed asking is this item's
-      case in one line: the slots list should SAY a stale slot is stale
-      and which library moved, not leave the refusal to load time.
-      **Acceptance:** wherever Save/Load already lives (playfield bar and/or
-      Emulate tab), the user can see every slot with its size and save time
-      plus a total, and can delete a slot from there; the numbers match `du`
-      on the same moment. — S3: a `du` in WSL answers it today, nothing is
-      broken. D2: the mechanism is fully known (list a directory, stat, rm),
-      but the UI half wants a windowed session to verify, which is what keeps
-      it off D1.
 
 - [x] **34. Booting the same card from a different path re-copies the whole
       image, so "first run only" slowness comes back.** `S2 D2` DONE
@@ -5209,439 +4836,6 @@ These have each been violated at least once and each cost a run or a window:
       yet known and may reach into the node-identity RE of items 51/55 (which
       would make it D5), and the CRUX may turn the whole approach from
       “clear alerts” into “make the game skip the screen”.
-- [ ] **65. The second-display window is sized from the BACKBOX, so four
-      **2026-09-05, from item 67: THE SIZE HALF HAS ITS SOURCE.** The game
-      carries both display sizes as the static FB_SetTiming records for
-      `/dev/fb0` and `/dev/fb2` (mando_le: 1360x768 and 1280x800);
-      `display2.py` reads them out of the ELF.
-      **2026-09-07, item 101 — THAT NOTE WAS ALREADY STALE WHEN IT WAS
-      WRITTEN, and the SIZE HALF IS NOW DONE.** watch.sh did export
-      PAD_GL2_W/H from the record for one run, and the same day item 67
-      withdrew it: exported as the geometry the GAME is told, it cropped
-      mando_le's topper by 80 columns and 32 rows, because the game presents
-      display 2 through display 0's viewport. The record is the PANEL, and
-      the panel is the WINDOW - a different question this rig was answering
-      with the same number. So `padglhost` grew `win2_want_w/h` and the
-      host-only pair `PAD_GL2_WIN_W/H`, watch.sh derives them per title, and
-      `display2.py --shell` prints them under those names so the two can
-      never be confused again. The game is told exactly what it was told
-      before; win2_present() already letterboxed, so the guest cannot see
-      this. Measured off the titles' own binaries, against what was
-      reported:
-          mando_le         record 1280x800   reported 1280x800   AGREES
-          star_wars_le     record  480x272   reported  480x272   AGREES
-          venom_le         record  800x480   reported  800x480   AGREES
-          stranger_things  record  848x480   reported  368x214   DIFFERS
-      stranger_things is why this is derived and not a table: 368x214 is its
-      projector CLIP's resolution, not its panel's, and the black borders in
-      that report are the clip inside the panel - a smaller window would crop
-      the panel instead of fixing anything.
-      **Still open: (a) the ROTATION half.** venom_le's topper is a portrait
-      panel whose timing record is its native landscape 800x480, so its
-      window is now the right size and still on its side. The direction is in
-      the report above - "90 degrees clockwise" - but rotation is not in any
-      record, so it needs the direction confirmed off a frame the way item 67
-      confirmed the mirror, plus transposed letterbox maths in win2_present().
-      **(b) DISPLAY 0 on the small cabinets.** james_bond_60th_le and
-      jurassic_park_the_pin (peanuts' "Jurassic Park Home Edition", 1.05) are
-      both reported as 800x480 single-screen, and BOTH yield `no framebuffer
-      timing records found` - their binaries do not reference /dev/fb0 the way
-      display2.py's reader expects, so there is nothing to derive from yet.
-      Note PAD_GL_W/H is not the same shape of change as PAD_GL2_WIN_W/H: it
-      is the guest's render target as well as the window.
-      **2026-09-08, PAD-115 - (b) IS DONE, AND THE LAST SENTENCE ABOVE IS THE
-      WHOLE REASON IT TOOK TWICE.** Item 102 gave the three one-screen
-      cabinets an 800x480 WINDOW over an unchanged 1360x768 render, reasoning
-      from display 2, where item 67 had proved the game must keep being told
-      the backbox's size. peanuts tested it and reported all three still
-      wrong. His own screenshots say why, and they had been on the disk since
-      2026-08-30: **these games do not scale their scene to the size they are
-      handed.** star_wars_elg draws the Cycling Coil Test at its authored
-      800x480 in the TOP-LEFT of a 1360x768 window with the rest black, and
-      jurassic_park_the_pin's Insider Connected badge - a bottom-right corner
-      element - sits at (0.57, 0.59) of the client area, which is the corner
-      of an 800x480 screen inside a 1360x768 one. Scaling that frame into a
-      smaller window shrinks the same wrong picture. Display 2 is the
-      opposite case only because the game presents it through display 0's
-      viewport; a one-screen cabinet has no such indirection, so here the
-      panel IS the render target. watch.sh now takes PAD_GL_W/H from
-      `display2.reported_exports()`, a caller that names them by hand still
-      wins, and two consequences of a per-title render size are handled with
-      it: a window size remembered in `~/.pad_windows` records the render it
-      framed (a size saved around 1360x768 is not replayed over an 800x480
-      one), and a save slot records its render size so `restorestate.sh`
-      refuses a pre-change checkpoint in the pre-flight instead of letting
-      criu discover it after the live guest has been killed.
-      titles come up stretched or ringed in black — and Venom's is on its
-      side.** `S3 D2`
-      *(Filed 2026-08-23 from PAD-81, the tester who asked for the Compare
-      tab. Four separate reports, one cause plus one gap: Venom — "the
-      secondary screen needs to be set to portrait mode (90 degrees clockwise
-      rotation)" and "should match the native content size (800x480) to avoid
-      stretching"; Stranger Things — "much larger than its asset resolution
-      (368x214), causing large black borders"; The Mandalorian — "needs to be
-      set to 1280x800"; Star Wars — "needs to be set to 480x272".)*
-      **THE CAUSE IS ALREADY WRITTEN DOWN IN THE SHIM'S OWN COMMENT.**
-      `eglshim.c`'s `fbGetDisplayGeometry()` (item 44) answers per display,
-      but its ONLY per-display answer is the pair of env vars `PAD_GL2_W` /
-      `PAD_GL2_H`; with neither set it falls through to `pad_fb_width()` /
-      `pad_fb_height()` — the backbox LCD's size — for every display. The host
-      copies the same default on purpose (`padglhost.c`'s `PADGL_TARGET`:
-      `fb2_w = fb_w; fb2_h = fb_h;` then the same two env vars), so the two
-      sides cannot disagree. Nothing on the machine ever sets them, so **every
-      title's second display is opened at the FIRST display's size**, and
-      `win2_present()` then letterboxes the real content inside it — which is
-      exactly "large black borders" on a 368x214 asset and a stretch on
-      anything whose aspect differs.
-      **So the size half is a MISSING TABLE, not a broken renderer**, and the
-      four numbers above are four of its rows. Where they come FROM is the
-      open question and the reason this is not a five-minute change: a
-      hand-typed per-title list is the "a wrong table is worse than none" trap
-      items 55, 57 and 61 each fell into once. Look first for the geometry on
-      the CARD — the game must know it, it drives the panel — and only fall
-      back to a table if it genuinely is not there.
-      **The rotation half has no mechanism at all.** Item 51's note is the
-      standing warning: "a mirror is not a rotation — `PAD_GL_FLIP` is
-      `uv.y -> 1-uv.y` and could never have fixed this". A portrait second
-      display needs a real 90° step in the `blit_prog` shader `win2_present()`
-      uses, plus a swapped window aspect, and the same "where does the value
-      come from" question as the size.
-      **Acceptance:** venom_le's second window opens 800x480, portrait, with
-      readable (not mirrored) text; stranger_things_le's opens 368x214 with no
-      border; mando_le 1280x800; star_wars_le 480x272 — screenshots of all
-      four, judged ON THE TEXT.
-      — S3: cosmetic, nothing is blocked. D2: the size half is a table plus
-      two env vars that already work end to end; the rotation half is a shader
-      change plus one live run per title to photograph.
-      **★ 2026-08-23, Sam's report (emailed to David) ADDS A FIFTH ROW AND
-      WIDENS THIS ITEM TO THE MAIN WINDOW: james_bond_60th_le — "content is
-      scaled for 800x480 pixels, making the window too large" — and Bond's is
-      DISPLAY 0.** Bond has never targeted a second display (item 44:
-      single-display titles emit zero PADGL_TARGETs; the two-display list is
-      star_wars_le / stranger_things_le / venom_le / mando_le), so this is
-      the SAME missing table one branch earlier in the same function: display
-      0's answer is the fall-through `pad_fb_width()`/`pad_fb_height()`
-      (eglshim.c:346-347) = `PAD_GL_W`/`PAD_GL_H` (glbridge.c:173-174), which
-      watch.sh:98-99 hardcodes to 1360x768 for EVERY title; `win_open()`
-      sizes the main window from the same numbers (padglhost.c:1644; Bond's
-      item-45 run log: "window opened 1445x827" — a remembered winpos size
-      over a 1360x768 fb, oracle frame 1044480 px = 1360x768). The guest
-      scales its scene to whatever it is told, so Bond's 800x480-authored art
-      comes up ~1.7x and ~6% aspect-stretched.
-      **And the first concrete answer to "where do the numbers come FROM":
-      the CARD carries the main-display size as the title's own art.**
-      `assets/lcd/GameLogo.png` IHDR, read off three cardcache images with
-      debugfs: james_bond_60th_le = **800x480**; star_wars_le AND
-      stranger_things_le = **1360x768** — Stern authors standard backbox
-      content at exactly the rig default, which is why nothing else ever
-      looked wrong on display 0. The u-boot env is NOT the table: `videoargs`
-      is byte-identical on every card checked (a generic hardware probe — the
-      real machine asks its panel), so it says nothing per-title. A second
-      candidate source, unmeasured: `fbCreateWindow` (eglshim.c:350-356)
-      DISCARDS the w/h the game asks for — log them on one Bond run before
-      hand-building any table row. No card source is known yet for the
-      SECOND-display rows above.
-      **Added acceptance row:** james_bond_60th_le's MAIN window opens
-      800x480 with the art 1:1, judged on the text. Two cautions for the fix:
-      `PAD_GL_W/H` sizes the guest's whole pipeline before it starts (screen
-      texture padglhost.c:4537, ring header padglhost.c:4738), so a per-title
-      value may orphan Bond's existing save slots (item 36a's class); and a
-      remembered winpos size survives the fix (padglhost.c:1654-1655) — the
-      letterbox keeps the aspect honest but the window stays big until Reset
-      windows.
-      **★ 2026-08-24, Sam again (PAD-84) — THREE CORRECTIONS TO THE ROWS
-      ABOVE, one of which invalidates a shipped census row.**
-      1. **His resolutions are INFERRED, not measured panel specs**: "Regarding
-         the resolutions for the different screens I gave you yesterday, I
-         based them on the size of the videos displayed on them." So
-         368x214 / 1280x800 / 480x272 / 800x480 are the sizes of the CONTENT
-         Stern authored, not necessarily the panel's mode. They are still the
-         right target for "no stretch, no borders" (the guest scales its scene
-         to whatever it is told), but they must NOT be presented as hardware
-         facts, and a title whose art is authored smaller than its panel would
-         break the equivalence. This is the "a wrong table is worse than none"
-         warning above, now with a named mechanism.
-      2. **james_bond_60th_le HAS EXACTLY ONE SCREEN**: "there is only one
-         screen: it's under the playfield and is very small. The backbox
-         doesn't have an LCD screen." That confirms the 800x480 GameLogo.png
-         read and the item-44 observation that Bond emits zero PADGL_TARGETs —
-         Bond is a genuine single-display title, and the small under-playfield
-         panel IS display 0. **CAUTION FOR `ticket/PAD-83` (not yet merged):**
-         `tools/spike2_emu/gl2geom.py`'s census assigns Bond a SECONDARY at
-         800x480, because Bond is the one title carrying `SternLogo` at two
-         sizes and the "smallest other sane size" rule then invents a second
-         display it does not have. Bond must come back with a primary of
-         800x480 and NO secondary. Re-check that row before or right after
-         that branch merges.
-      3. **batman DOES have a second screen, "on the carousel"** — so the
-         240x180 `VideoClipPlayerDisplayElement_240x180` row is real hardware,
-         and PAD-83's finding stands as the open question: our two full runs
-         logged only `fbGetDisplayByIndex(0)`, i.e. the GUEST never asked. Both
-         runs stalled in the service menu (item 64) and never reached attract,
-         so "the TV is only asked for in attract" is still untested — reaching
-         attract on batman is the next measurement, not a shim change.
-
-- [ ] **67. The Mandalorian's second display stays blank through attract.**
-      `S3 D3`
-      *(Filed 2026-08-23 from PAD-81: "The Mandalorian: the secondary screen
-      remains blank during attract mode, which is unexpected behaviour.")*
-      **This is item 58's case, with an owner at last.** That item was closed
-      as NOT DEMONSTRATED because nobody could show a title whose
-      second-display window stays dark for a whole run; mando_le was its
-      candidate and was ruled out when a rerun showed real content from frame
-      2. A second person now reports the same title dark, which is the
-      reproduction case item 58's acceptance asked for — with the OPPOSITE
-      conclusion to draw from it: mando has a real (accessory) second display,
-      so the answer is to make it draw, not to hide the window.
-      **The instrument is still there and still read by nobody**:
-      `pic2_check()` (`padglhost.c`, around line 3595) already logs "d2 STILL
-      BLACK after N presented frames" and "d2 FIRST at frame N". Run mando_le
-      to attract and read that line before touching anything — item 58's whole
-      history is two fixes written against a premise no measurement supported.
-      **Ask first whether it is intermittent**: the same title gave both
-      answers on two runs in one session (2026-08-19), which points at
-      attract-cycle timing rather than a dead feed. Bound the run long enough
-      to cover a full attract cycle before calling it blank.
-      **Acceptance:** mando_le's second window shows its content during
-      attract on three consecutive runs, with the `pic2_check` line quoted for
-      each.
-      — S3: cosmetic, does not block play. D3: mostly measurement, and this is
-      the third pass at the same window; the fix cannot be designed until a
-      run says which of "never fed" or "fed late" it is.
-      **★ 2026-09-05, David's sweep, mando_le 1.44.0 live: MEASURED, it is
-      "never fed", and the cause is a node board.** `pic2_check` said
-      `d2 STILL BLACK after 417 presented frames - the game is composing this
-      display's scene and the scene is empty` (padglhost.log, the 13:52 run;
-      the guest asked `fbGetDisplayByIndex(2)`, mapped a 1360x768 texture
-      to it and swapped it every frame). The same run's glass looped
-      `UPDATING NODE BOARD RUNTIME / UPDATE FAILED / 12`, and **node 12 on
-      this title is `hdmi_ws2812node` — the topper's OWN board** ("HDMI SPI
-      WS2812": the holographic display's control plus the TOPPER 1..32 RGB
-      LEDs). `node_ident.txt` carried `variant=0x01 variant_guess=1`;
-      `hexreg.py` off the live process read **variant 0x0c** (class 5,
-      1.19.0) with pinnode 0x01 / ws2812node 0x05 / node4 0x03 reconfirmed
-      in the same pass — item 55's trust rule, fourth title. So the game
-      graded the topper board status 7 and walked the update forever, and
-      the topper scene stayed empty while it did.
-      **Shipped, uncommitted on main:** `nbdir.VARIANT_PRIOR["hdmi_ws2812node"]
-      = 0x0c` + `CLASS_PREF (5,)`; hwshim `nb_hexreg_answer()` RESCANS on a
-      miss and the scan de-duplicates by (type, class) — its single scan ran
-      at node 1's fe when the game had decrypted only 2 images, 7 exist ten
-      minutes later, and it never looked again. **That is why the safety net
-      was silent here AND on turtles' node 12, the gap item 55 flagged.**
-      New `tests/test_spike2_nbdir_variants.py` pins every measured row;
-      mando's table regenerated (diff = node 12 only); shim rebuilt.
-      **Open:** whether a cleanly graded node 12 makes the game compose the
-      topper scene — the next mando run's `picture: d2` line answers it;
-      acceptance above unchanged (three runs).
-      **The 2026-08-19 "content from frame 2" run is now DOUBTED:** its
-      `d2 FIRST at frame 2 (98511 of 1044480 pixels)` is the SAME count as
-      this run's PRIMARY `picture: FIRST at frame 4 (98511 of 1044480)` —
-      the boot frame — so that reading most likely saw display 0's frame
-      through the display-2 texture (item 51's Map aliasing), not topper
-      content. Treat this item as never yet having seen the topper draw.
-      **★ 2026-09-05, SECOND RUN (David, 14:11): node 12 grades clean, no
-      update overlay, and display 2 is STILL EMPTY** (`d2 STILL BLACK after
-      427 presented frames`, no `d2 FIRST` in 20 min). So the node was a
-      real fault and not the gate. What the run proves instead:
-      1. **The topper scene RUNS.** Video channel 1 decodes 1280x800 clips
-         out of scene `ed4ec8f0...`, whose radium names
-         `Topper_RazorCrestHologram` and `Topper_VideoTest`, and hands the
-         game 30 frames/s while a clip plays (short clips, long idle gaps).
-      2. **Those frames never reach a texture.** The host's TEXDIRECT rate
-         stayed at the backbox channel's 30/s with channel 1 (and 2)
-         streaming; the bridge registered no 1280x800 Map or alloc, ever;
-         `swap content d2` is mask 0 on every swap (draws, no video). The
-         game runs the topper's clip and does not upload it.
-      3. **Ruled out**: `/dev/mxc_hdmi` (0x3ddf24 opens it, ioctl 0x4803
-         forces a hot-plug event, sleeps 500 ms, and carries on identically
-         when the open fails - fire-and-forget); `/dev/fb2` (only FB_SetTiming
-         opens it - a mode set, no pixels); the IPU (`libipu.so.0` in the
-         rootfs is a 1.6 KB stub nothing in the game imports); a second
-         render thread (the shim caps `target ->` at 4 lines; the game
-         alternates displays from one thread); node 3 (the game probes it
-         fe/fe/fa at 20 s - the directory has no node 3, and its OWN
-         directory names node 12 `TOPPER`); the fiber `do_stack_unwind`
-         throws at clip start (ordinary screen unwinds).
-      4. **Where the topper clips travel in the engine**:
-         `Radium::Video::ExtraVideoPlayer` (an ARRAY, `extraVideoPlayer[i]`,
-         `PresetClipInternal`/`SetClipInternal`) and
-         `Radium::VideoClipFrameCallbackData` - the extra-display player is
-         its own class beside `SpiVideoStreamDecoder`; its upload path is
-         the open question.
-      **Instrument shipped (padglhost.c, always on, bounded, on the pane):**
-      `[padglhost] display 2 draw: prog P tex T (WxH, filled
-      img/sub/direct a/b/c) guest_fbo F` once per (program, texture, fbo),
-      a `display 2 draw census` re-report six times ~15 s apart, and
-      `display N upload: teximage|texsubimage tex T WxH ...` for the first
-      twelve plain uploads 1000 px wide or more. A fill counter that GROWS
-      names the live upload path; one that stays put names a texture nothing
-      feeds. **Next: David restarts mando and reads those lines.**
-      **★ THIRD RUN (David, 14:34-15:10), the census answered:** display 2
-      draws exactly ONE thing for the whole run - `prog 6 tex 2 (0x0,
-      filled img/sub/direct 0/0/0) guest_fbo 0` - and no `display N
-      upload:` line ever printed. Texture 2 is the 1360x768 RGBA buffer
-      `glTexDirectVIV` handed out at boot (item 51's render-target name,
-      Mapped again as texture 3 and aliased back); the presenter samples it
-      every frame and NOTHING ever fills it on the host: no TEXIMAGE, no
-      TEXSUBIMAGE, no TEXDIRECT. The game gets its topper frame into that
-      buffer some way the bridge does not carry. The one clue is the single
-      `glTexDirectInvalidateVIV on a texture that never registered` at boot
-      (~14 s, before any video, right when display 2's textures were set
-      up), after which the bridge silenced that moan for good - so every
-      later Invalidate on an unrecognised bind was dropped in silence.
-      **Instrument shipped in glbridge.c (guest, rebuilt + stamped):**
-      binds on any target other than GL_TEXTURE_2D are logged (`[bridge]
-      item67: bind target 0x.. tex N`); every Invalidate miss is named and
-      counted (`item67: Invalidate #n on unregistered tex ..; last bind
-      target ..; registered: ..`) and FALLS BACK to a registration under
-      the last-bound name of any target - the likely fix if the topper
-      texture is bound through GL_TEXTURE_EXTERNAL_OES or another target
-      the 2D shadow never followed; and every glTexDirectVIV buffer is
-      hashed every 30 frames (`item67: texture 0002 own buffer CHANGED`)
-      so a CPU-written frame the game never announces (the Vivante driver
-      samples that memory live, so on the machine no Invalidate is needed)
-      becomes visible. **Next: restart mando, grep gzwatch.log for
-      `item67`.** If the buffer CHANGES with no Invalidate, the fix is a
-      bridge-side upload of the buffer on every display-2 present; if the
-      Invalidate fell back to the last-bound name, the fix is already in
-      and `d2 FIRST` should print.
-      **★ FOURTH RUN (15:10): neither.** The buffers never change (`texture
-      0002 own buffer ... all zero`, no CHANGED line in minutes) and the
-      Invalidate misses are boot-time noise (one on tex 32, seven on tex 0
-      = unbound). Then the LIVE OP DUMP (`touch /tmp/padgl_dumpseq`, armed
-      three times during a topper clip) showed the whole topper pass:
-      `BINDFBO 1 / VIEWPORT / CLEARCOLOR 0,0,0,1 / CLEAR / BINDFBO 0 /
-      TARGET 2 / USEPROGRAM 6 / BINDTEX 2 / DRAWARRAYS 6 / SWAP` - the game
-      CLEARS the topper's FBO and presents it, and draws NOTHING into it,
-      clip streaming or not. Zero draws into any guest FBO but 0 in three
-      dumped frames. The topper scene is composed EMPTY.
-      **The one thing this rig tells the game differently from the machine:
-      display 2 is 1360x768** (eglshim's fbGetDisplayGeometry falls through
-      to the backbox size when PAD_GL2_W/H are unset - item 65's exact
-      complaint for this title). The topper panel and every topper clip are
-      1280x800. **And the game carries both sizes itself**: its display
-      setup (0x3ddf24) calls FB_SetTiming (0x52e030) with a static 44-byte
-      timing record per framebuffer - `/dev/fb0` -> 1360x768 @16bpp,
-      `/dev/fb2` -> 1280x800 @16bpp (xres at +16, yres at +32, read off
-      how FB_SetTiming fills fb_var_screeninfo). **Shipped:**
-      `tools/spike2_emu/display2.py` reads those records out of any title's
-      ELF by resolving the movw/movt pairs beside the `/dev/fbN` string
-      references (nearest r1 pair to the r0 site - the two call sites are
-      back to back and "last in window" picked the neighbour, caught by the
-      test), and watch.sh exports PAD_GL2_W/H from it when the caller left
-      them unset; no fb2 record = no export = old behaviour. This is the
-      card-derived size item 65 asked for, not the table it forbade.
-      `tests/test_spike2_display2.py` covers the resolver on synthetic A32
-      code. **Next: David restarts mando; the pane should say `display 2:
-      1280x800, read from the game's own framebuffer timing`, the
-      [display 2] window should open 1280x800, and `picture: d2 FIRST`
-      decides whether the geometry was the gate.**
-      **★ FIFTH RUN (16:14, size right, node clean): STILL BLACK - and the
-      gate is now READ, not guessed.** Two register hooks (PAD_REG_HOOK /
-      PAD_REG_HOOK2, new in the shim: pad_hook with a logger that reads the
-      pushed r0..r3 off the entry sp) on the render thread's two per-display
-      draw loops: the display-0 site (0x452164) fired once all run (a
-      `NuklearScene`), the display-2 site (0x45278c) fired ZERO times while
-      the bridge saw the display-2 clear from 0x452744 every frame. Read
-      again, the clear runs BEFORE the emptiness check (my "the list is
-      non-empty every frame" was wrong), and the display-2 pass has TWO
-      paths on renderer byte +0x104 (0x451ed0): set = clear to the first
-      element's colour, then per element the full Render virtual (vtable
-      +0x24) and RenderForDisplay(1) (+0x14); clear = a constant clear
-      (0x452740) and RenderForDisplay(1) ONLY, which is the base no-op
-      0x31a960 for every class the topper scene posts. 0x452744 is the
-      clear path. The constructor sets +0x104 = 1; the setter 0x3dd0f0 is
-      called from four sites in the game's `topper` class (RTTI, vtable
-      0x5a9e68), each with the result of 0x4172dc(12): `node_table[12].+0x3c
-      / 100 == 5208530` - "does node 12 report Stern part 520-8530". Live
-      (a root /proc read of the 152-byte-a-node table at 0x765c38): every
-      node's part string read `000-0000-00`, integer 0. That string is the
-      f9 00 runtime-info reply (parser 0x5239a0: bytes 8..11 as LE32,
-      sprintf "%09d", split "ddd-dddd-dd" at record +8, integer at +20 -
-      the 48-byte block at node object +40 hwshim's own notes describe),
-      and the shim had answered f9 with zeros since it learned the command.
-      **And the number is the game's own:** its board catalog (nbdir.py's)
-      gives node 12's type `hdmi_ws2812node` part `520-8530-XX` = 520853000
-      once the record is framed right - it starts at the PART word, not the
-      type name (the game's per-node record pointer lands on it; the first
-      row is {520-5319-XX, pinnode}; the CPU row {520-7031-XX, NULL, "SPIKE2
-      CPU"}), so nbdir had credited every type with the NEXT row's part for
-      its whole life, unnoticed because nothing read the part until this
-      check. **Shipped:** nbdir.py reframed (`catalog_part()`, docstring,
-      `--dump` prints `value=`) and `node_ident.txt` gains `partno=<value>`
-      per node; hwshim parses it and answers f9 00 bytes 8..11 with it for
-      every node that has one, logging `[nbid] node N reports part
-      ddd-dddd-dd` once per node (PAD_NB_RT's pattern fill still wins for a
-      sweep). `tests/test_spike2_nbdir_catalog.py` pins the framing and the
-      field on a synthetic table; the variants test passes unchanged. Shim
-      rebuilt 16:41; the identity file regenerates on every start. The
-      register-hook knob (`~/.pad_env`) is removed; watch.sh keeps the
-      extra-environment hook, named on the pane whenever it fires. **Next:
-      David restarts mando; the pane should show `[nbid] node 12 reports
-      part 520-8530-00` and, on the first topper clip, `picture: d2 FIRST`.**
-      If it stays black with the part answered, the four `topper` call sites
-      (0x1b8590, 0x1b86e0, 0x1ba654, 0x1ba670) are the next read - they run
-      at moments the class chooses, and +0x104 could be re-cleared later.
-      **★ SIXTH RUN (16:14 restart): THE TOPPER DRAWS.** `[nbid] node 12
-      reports part 520-8530-00` on the pane, `picture: d2 FIRST at frame
-      277`, and the window shows the hologram scene - mirrored, and with its
-      right edge cut. Both read off the game's PRESENT step (op dump): the
-      display-2 pass itself is right (FBO 1280x800, ortho 2/1280); then the
-      present draws the FBO texture through a unit-square quad whose builder
-      (0x52eaac, template 0x602b18) is handed two constant flags (1, 1) at
-      0x451b84 - the first rewrites u to 1-x, the second v to 1-y. The
-      second is the usual FBO orientation correction (the pass renders with
-      a y-down ortho into the texture); the FIRST mirrors the whole picture:
-      the topper is a Pepper's-ghost panel and must carry the mirror image.
-      The window is a viewer, not the panel, so padglhost now reads that
-      quad (a 96-byte array-buffer upload matching the template with u
-      reversed -> `d2_mirror`, logged once) and un-mirrors the [display 2]
-      blit (`u_mirror` beside `u_flip`; PAD_GL2_MIRROR=0/1 overrides). The
-      CROP is the game's own: the present viewport is DISPLAY 0's size
-      (0x4519f4: `[r7+4]->+16/+20` -> glViewport 1360x768) while the quad
-      and its ortho are display 2's 1280x800, so the texture is stretched to
-      1360x768 and a 1280x800 window loses 80 columns and 32 rows. Stern
-      shipped that, so on the machine the two geometries must be EQUAL: the
-      topper's HDMI runs at the backbox's 1360x768, and `FB_SetTiming
-      /dev/fb2` (which the game's own log shows failing in the rig) is a
-      panel-timing request, not the geometry the EGL side reports. So
-      display2.py's export was the wrong oracle for the GL geometry. Being
-      tested on the next run with `~/.pad_env` = `PAD_GL2_W=1360
-      PAD_GL2_H=768` (display2.py's export defers to a set PAD_GL2_W).
-      **If the HUD is complete and un-squashed: drop the export from
-      watch.sh (display2.py stays as the timing-record reader + its test),
-      and the display-2 geometry rule becomes "display 0's, because the
-      game presents display 2 through display 0's viewport" - read off the
-      game's code, item 65 kept.**
-      **★ SEVENTH RUN (19:47): geometry SETTLED, mirror read off the wrong
-      buffer.** At 1360x768 nothing is cut - so the display-2 geometry IS
-      the backbox's, the fb2 FB_SetTiming record is the panel's timing
-      request, and watch.sh's export is retired (display2.py stays as the
-      timing reader, named on the pane; its docstring says what it is not).
-      The picture was still mirrored: the host's probe had answered "u = x"
-      on the FIRST unit quad it saw - the engine's builder makes those for
-      other sprites too, and one arrived before display 2 was targeted.
-      Rewritten: every 96-byte upload is classified by buffer name, each
-      VAO remembers the array buffer its attributes point at, and the
-      answer is read from the buffer the display-2 PRESENT draw (target 2,
-      guest FBO 0, six vertices) actually uses. Host rebuilt 19:52; 551
-      launch/rig tests pass. **Next: restart; the pane should say
-      `display 2 is presented through a quad that maps u to 1-x ... the
-      game MIRRORS this display`, and the text should read the right way.**
-      **★ EIGHTH RUN (David, 2026-09-05 evening): VERIFIED.** `display 2 is
-      presented through a quad that maps u to 1-x (buffer 2): the game
-      MIRRORS this display`, `picture: d2 FIRST at frame 277`, `[nbid] node
-      12 reports part 520-8530-00`, and David: "text reads correctly now".
-      The holographic topper draws, complete, the right way round. Three
-      layers, all read off the game and none typed per title: node 12's
-      variant (0x0c, measured), its board part number (the catalog's, in
-      the f9 00 reply), and the presenter's mirror (its own quad). The
-      display-2 geometry is the backbox's, as the game's present assumes.
-      Still open from this thread, not blockers: item 65's rotation half
-      and Bond's display-0 size; the 30/s `Invalidate on tex 0` is unbound
-      boot noise and stays silent after eight per run.
-
 - [ ] **68. Neither playfield window says how many switches and lights the
       title actually has.** `S3 D1`
       *(Filed 2026-08-23 from PAD-81: "displaying the total count of switches
@@ -5671,67 +4865,6 @@ These have each been violated at least once and each cost a run or a window:
       — S3: friction, nothing is blocked. D1: the tables are already parsed and
       both windows already build a bar; `Field` needs one packed above its
       canvas (mind `pick_scale`'s chrome budget).
-
-- [ ] **70. Tester report (Sam, 2026-08-23): "Node board 10 not found" on
-      Iron Maiden, "Node board 7 not found" on James Bond 60th.** `S2 D3`
-      *(Emailed to David 2026-08-23, on "the latest game code versions". His
-      build is unknown — ask for a run log; its `[nbid]` line says in one
-      grep whether his identities came from the derived table or the
-      built-in godzilla one. But do not close this as item 55 by proxy: NOT
-      FOUND is the DISCOVERY family — a graded board was already found — and
-      no commit between 22e5823 and v0.156.0 touches nb_nodes_init /
-      nb_nodes_add_boards / nb_next_node, so the hole below is in current
-      main.)*
-      **The tell: both reported nodes are SWITCHLESS boards of their
-      titles.** iron_maiden_le's switches sit on nodes [0,1,4,8,9]; its node
-      10 is a ws2812node. james_bond_60th_le's sit on [0,1,4,6,8,9]; its
-      node 7 is a pinnode (code 18). Both carry full measured rows in their
-      own derived node_ident.txt, hexes shipped on card — the roster FILES
-      are fine. (The switchless sets are larger — maiden also 2/12/13, bond
-      also 2/12/14 — and why exactly ONE per title is reported is
-      unexplained: required-board flags? PAD_NB_SILENT census? The boot
-      below answers it.)
-      **The mechanism: the game can only discover what the shim's `00`-poll
-      schedule names** (nb_next_node, hwshim.c:6391-6414), and nb_nodes_init
-      (6305-6388) seeds that schedule from the SWITCH table, so a switchless
-      board enters only by conditional routes, each with holes: the
-      node-directory merge (6335-6343) runs ONLY on a FILE-installed switch
-      table and only for loaded nb_fident_have ids; a MEMORY-found table —
-      bond, on record: `[swfind] found the switch table: entry[] at
-      0x007d2680` — skips the merge BY DESIGN on the godzilla-measured
-      assumption that nb_nodes_add_boards() (6278-6293) covers it, which
-      needs the by-shape board array to resolve AND the game to have already
-      registered the board: the chicken-and-egg the stranger_things comment
-      records at 6350-6364 ("no board object is ever created ... NODES NOT
-      FOUND"). Even godzilla's switchless boards registered by "some slower
-      path" (6262) nobody has explained. Which route each REPORTED title
-      actually dies on is for the boot to say, not this entry.
-      **Instrument, one card boot per title, GUI path, no overrides — the
-      log already names every link:** `[nbsched] playfield nodes: ... (from
-      <source>)`, `[nbid] N node identities from ...` vs per-node
-      `(built-in)`, `[watch] node identity: N boards derived` vs `derivation
-      failed` (Sam runs LATEST game code; our tables derive from
-      1.19.0/1.30.0-era cards), `[nbobj] board objects found by shape` vs
-      `no self-labelling board array after 3 scans`. Then the glass.
-      **Likely fix, to be confirmed by the boot, not assumed:** seed the
-      schedule from the title's own node directory on EVERY route — merge
-      nb_fident_have into the memory-table branch too — instead of only when
-      sw_ftab_installed. On godzilla the added ids are boards add_boards
-      already names, so the change is a no-op where the assumption held.
-      **Cross-link:** bond's not-found node 7 is plausibly the board its
-      GROUP-8 devices live on (the trough-coil loose end below; item 53's
-      groups 8/9) — the PAD_COIL_PROBE capture that closes that loose end
-      and this item's bond half may be the same run.
-      **Acceptance:** iron_maiden_le and james_bond_60th_le each boot from
-      card with the reported node in the `[nbsched]` roster (or registered
-      via add_boards), no NOT FOUND on the glass, the log stating which
-      route seeded it; godzilla_pro and turtles_pro unchanged.
-      — S2: the titles play, but a real board's devices are dead, the fault
-      is on the glass for every tester, and item 53's bond work may sit
-      behind it; on game code that gates bring-up on a required board it
-      would be a wedge. D3: two instrumented boots, a one-branch schedule
-      change, regression boots on two known-good titles — graded from the
-      desk; neither title's failure has been reproduced on this rig yet.
 
 - [ ] **71. dungeons_and_dragons_le draws its 255-device map on a BLANK
       field while the card ships the exact drawing the map names.** `S3 D2`
@@ -5813,57 +4946,6 @@ These have each been violated at least once and each cost a run or a window:
       `Test/beatles_playfield.png` found by the CURRENT filter — art:yes
       with no change. Also noted: JP's card is NOT in the WSL cardcache;
       it lives in the repo library `images/Stern/spike2/`.
-
-- [ ] **72. "0 device records" is the PARSER on at least three titles, not
-      the card — the Godzilla-family 0x30 struct is one generation's shape,
-      and nobody owns the RE for the others.** `S3 D3`
-      *(Filed 2026-08-23 at David's ask, after Sam's batman dark-inserts
-      report put a tester's face on the class and the X-Men/JP recheck
-      proved its signature twice more. Item 57's sweep named it and closed
-      without filing it; items 53 and 71 both lean on it.)*
-      **The proven tell is the funnel, reproducible at the desk:**
-      devicexy.seeds() resolves hundreds of candidate record pointers on
-      these binaries — the string/pointer machinery works — then _one()'s
-      0x30-byte validator keeps a handful of GARBAGE rows (service text as
-      'image names') and the >=4-run filter keeps zero. Measured members:
-      aerosmith_le (1104 seeds → 2 garbage, the first sighting, item 57
-      notes ~line 261-269), uncanny_xmen_le 0.97.0 (810 → 17),
-      jurassic_park_le 1.15.0 (1164 → 17, image strings like
-      `/spine/src/Slot.cpp`). batman reads `0 records` but its funnel has
-      NOT been run — the census below says which side it falls on, and it
-      is the payoff title if positions exist (Sam reported its inserts).
-      **The standing misread this item exists to end:** "0 records" has
-      been read as "ships no device table" twice — item 57's close said it
-      of dungeons_and_dragons_le (falsified: 255 records, its fault was
-      item 71's art FILENAME) and the 2026-08-23 census said it of X-Men/
-      JP until the funnel was run. Absence of a PARSE is not absence of a
-      TABLE. (DnD is NOT this class — it parses clean and is a positive
-      control, with beatles-1_29_0: 180 records, self-checks 48/48 sides
-      correct, 0/8 RGB stems misaligned.)
-      **First move is a census, not RE:** run the funnel over every ELF in
-      the card library and split README's "0 records" rows into parser-gap
-      (many seeds, garbage validations) vs genuinely-empty (few/no seeds)
-      — that names the generations and picks the RE target. Then crack ONE
-      title's layout. The oracles already exist: devicexy's own
-      self-checks (left/right switch names on the correct side, RGB stem
-      alignment) and XY plausibility against the layout image the records
-      name. With positions, a title gets item 50's positional view and
-      item 53's map can light its inserts on a blank field even where no
-      artwork ships.
-      **Acceptance:** batman's device table parses with sane rows
-      (self-checks pass, funnel numbers stated before/after) and its
-      playfield window shows positioned devices — OR the census proves its
-      build genuinely ships none, stated with the funnel numbers, and the
-      RE target becomes the largest parser-gap title instead. Either way:
-      cardaudit over the whole library changes only rows the RE claims,
-      beatles / DnD / godzilla rows unchanged, and every genuinely
-      table-less title is recorded per-BUILD with its numbers, so the next
-      reader inherits a measurement instead of a guess.
-      — S3: friction — affected titles play fine and fall back to the
-      schematic/grid view; nothing is blocked. D3: the census is desk work
-      with the instrument in hand, but the RE itself is an unknown struct
-      across possibly several generations — grade is from the armchair
-      until the census sizes it.
 
 - [x] **73. The FIXED cabinet keys are compiled to GODZILLA's switch ids, so
       on the swelf-generation titles Enter lands on a DIP switch instead of
@@ -6251,237 +5333,6 @@ These have each been violated at least once and each cost a run or a window:
       voice restarts to 3 at no cost in boot time. Now sits at 5, at the bar.
       **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat
       3 vs 5 as noise, not a trend. Do not reopen without a reason.
-
-- [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
-      and identified; node 4 polled forever while we silence it; board 24
-      RUNTIME INFO from no table we derive; and the carousel's overlay
-      screen never appears.** `S3 D2` 90% *(S2 → S3 and D4 →
-      D2 at pass end, 2026-08-24: everything that broke the BOOT is fixed
-      and regression-proven — what remains is a cosmetic menu row plus one
-      instrumented dump with a known method, and the mechanism is fully
-      established.)*
-      *(Filed 2026-08-24 from David's live item-80 sweep run — glass
-      screenshots on record: red `LOCATING NODE BOARDS / NODE NOT FOUND`
-      over the batman logo, then Tech Alerts `CHECK NODE BOARD 2 : NOT
-      REGISTERED` (red) + `CHECK NODE BOARD 24 : RUNTIME INFO` (white),
-      plus "we are not seeing the second screen that appears over the
-      carousel". All evidence below is READ-ONLY off his run's own logs.)*
-      **★★★★ 2026-08-24 PASS (4-agent desk workflow + instrumented boot,
-      rig handed over by David). ESTABLISHED, each with the receipt:**
-      **(1) THE SECOND SCREEN IS NAMED BY THE ELF: node 24 = "VILLAIN
-      VISION", an lcdnode (code 16, part 520-6976-XX, "LCD 320X240" /
-      "3 LCD INSERT"), declared REQUIRED (flags 0x0) in batman's OWN
-      10-record node directory** (file 0x707268; the directory is nodes
-      0,1,2,4,8,9,10,12,13,24 — names CABINET, CABINET LIGHTS, QR
-      SCANNER, PLAYFIELD 1/2, TURNTABLE, two OPTIONAL TOPPERs, VILLAIN
-      VISION). nbdir DROPPED it (lcdnode ships only LPC1113_302 = class
-      3, absent from PART_BY_CLASS), so the shim answered its identity
-      poll with the DEFAULT pinnode claim (`[nbid] node 24 claims
-      part=0x00020023 fw=0.1.0 (default)`) — the white RUNTIME INFO
-      grade is MANUFACTURED BY OUR DEFAULT ANSWER. Board 24 and the
-      missing overlay are ONE fault. Note: even registered, the rig has
-      NO lcdnode renderer — drawing Villain Vision content is follow-on
-      work; registration + alert-clearing comes first.
-      **(2) NODE 4 IS GENUINELY OPTIONAL (flags 0x4 at 0x7071e8 — and
-      batman corroborates the bit-2 decode: its OPTIONAL-named toppers
-      12/13 carry 0x4, required boards 0x0), so the ST census rule fired
-      as designed — and it is STILL the wedge on this generation:**
-      silenced nodes short-read NOTHING, and the game re-asks forever
-      (the `[nbsilent] node=4 want=13/3/12` lines are READ LENGTHS —
-      13=fe, 3=fa, 12=0x11 — NOT the 0x0d variant walk; the item's
-      original "want=13 = 0x0d" reading is CORRECTED). Instrumented boot
-      with `PAD_NB_SILENT=62` (nothing silenced): the shim answered node
-      4's identity from the derived row (`claims part=0x00140040
-      variant=0x03 fw=1.19.0 (derived)`), ZERO nbsilent lines all run,
-      attract light show by t=35.7s, glass shot clean attract
-      (`/home/david/item82/run2_glass.png`). The durable census rule
-      (silence an optional node4 only when its hex header cannot be
-      derived — ST keeps silence, batman answers) is DESIGNED but NOT
-      yet written; boot #3 must confirm the alert state first.
-      **(3) ▼ THE f0 THEORY IS DEAD — RULED OUT BY DISASSEMBLY + 14,988
-      FRAMES, do not build an f0 handler, ever:** cmd f0 is a
-      FIRE-AND-FORGET WRITE. The game reads NO reply (zero RX with an f0
-      last-tx across two full runs; the sender `nb_exchange` 0x515f8c
-      skips its read loop at reply_len==0). The "6,824× hammer" is the
-      normal per-node service-cadence broadcast (f0 goes to EVERY node:
-      pinnodes get sub 0x11, ws2812-class 0x20/0x10; optional boards 36×
-      then give up, required boards forever). Zeros are already the
-      correct answer.
-      **(3b) THE REAL REGISTRATION MECHANISM, disassembled (batman VAs —
-      the shim's 0x59xxxx notes are godzilla's and do NOT map):**
-      registered = `board[+0x14] != 0`, per-node table at 0x6e9808
-      stride 4, gate code 0x517390-0x5173b4 — and every command ≤0xef
-      is GATED on it (the game refuses to send application commands to
-      an unregistered board; >0xef system cmds bypass). Set by the
-      fe-identity + hex-image-grading + runtime-info path. The grade
-      table (file 0x701fc0, 9 cells) decodes: 0 NO ERRORS, 1 NOT
-      RESPONDING, 2 NOT REGISTERED, 3 COLLISION, 4 NOT INITIALIZED,
-      5 VERSION MISMATCH, 6 HEX IMAGE VERSION NOT FOUND, 7 CHECKSUM,
-      8 RUNTIME INFO *(corrects the earlier "RUNTIME INFO = status 4"
-      desk note)*. Node 2's fe identity is answered CORRECTLY and it
-      still never registers — and the whole bus sits in fe re-probe
-      bursts (~301/node per 8 min) while any required board is
-      unregistered, which is also why attract takes ~72 s.
-      **▼ The runtime-info-contents theory is ALSO dead: PAD_NB_RT=1
-      changed nothing** (fe re-probe bursts identical, flags unchanged).
-      **★★★ THE COMPLETE REGISTRATION MECHANISM, disassembled (second
-      RE pass) — TWO separate concepts, do not conflate:**
-      **(A) the app-command GATE `board[+0x14]`** — sole writer
-      0x51b65c in nb_register_identity 0x51b558: the fe reply's PART ID
-      bytes [4..7] linear-scanned against the 27-entry descriptor
-      table; a match stores that descriptor (its static [+0x14]≠0 =
-      gate OPEN for all ≤0xef app commands). **Node 2 PASSES this** —
-      our fe claim 0x2c40102b matches — so the game DOES send it LED
-      frames. **THEREFORE: NEVER nodecensus-silence node 2 on batman**
-      — silence kills the cabinet-lights traffic that is already
-      flowing; the star_wars silence was right because ITS node 2 is
-      absent. **(B) the Tech-Alerts GRADE `node_record[+0x18]`** —
-      written only by the grading state machine 0x261548-0x261750:
-      registry image missing → 4 RUNTIME INFO (board 24's old white
-      row, i.e. OUR default-identity claim caused it); version/variant
-      MISMATCH → 7 CHECKSUM + the update walk (board 24 under the
-      variant 0x01 guess); version AND variant MATCH → **grade 2 "NOT
-      REGISTERED" = known, correctly-versioned board that has not
-      completed RUNTIME REGISTRATION**. Only grades {1,2} alert red.
-      **Node 2's variant claim 0x05 MATCHES batman's decrypted image
-      (hexreg, live)** — so node 2 sits in matched-but-runtime-
-      unregistered, and the ONE remaining unknown is what moves grade
-      2 → 0 (the runtime-registration completion step). Third RE pass
-      is tracing the grade-0 writer now.
-      **Why only node 2 shows on the boot screen: directory flags bit
-      3 = screen-inclusion** (node 2 is batman's only bit-3 board; the
-      optional toppers grade invisibly). No install adjustment exists —
-      both writers are driven purely by bus evidence.
-      **★★ VERIFIED SO FAR (boots 6-7 + two regressions, all with the
-      fixes live and the census deciding):** batman boot #7 with
-      AUTOATTRACT OFF reaches full attract at t=32 with NOBODY pressing
-      anything — no LOCATING screen, no Tech Alerts parking, no
-      failed-update dialog (glass shots run6_t40/run7_t32); fe
-      re-probe bursts 301→6 per node (the bus settles); attract 72s →
-      20s. The census line reads "silencing nothing on batman ... node
-      4 ... answered rather than silenced (item 82)". REGRESSIONS:
-      godzilla_pro — 8 boards derived, node 2 still silenced by the
-      strong-evidence branch, roster unchanged, light show at 9.7s;
-      stranger_things_le — derivation fails (bare symlink) → not fresh
-      → node 4 STAYS silenced with the original reason, ff-answering
-      intact. Both green.
-      **★★★ THE FINAL RE ANSWER (third pass), AND IT IS AN EXPENSIVE
-      NEGATIVE — do not hunt a bus-side fix for the alert rows again:
-      THERE IS NO GRADE-0 WRITER IN THE BINARY.** A whole-RX-segment
-      scan finds zero stores of 0 to `node_record[+0x18]`; grade 0 is
-      only the constructor default. Both graders (0x2614f8 via fe,
-      0x261754 via cmd 0x03) can only assign nonzero codes, and a
-      STABLE, VERSION-AND-VARIANT-MATCHED present board is assigned
-      grade 2 terminally. **No reply on any command clears it** — fe,
-      f9, fc, ff, gated app commands all traced; PAD_NB_RT confirmed
-      inert live. The row is suppressed only by a game-side
-      CONFIG-DERIVED registration field (godzilla's `board[+144]`
-      analogue — nodecensus's own header said this: "this title's own
-      config is what decides the board's registered bit; no bus reply
-      can change that"). **Corrected screen-inclusion rule:** a row
-      shows when graded-alerting AND `(flags & 0x0c) != 0x04` — node 2
-      (0x0c) and board 24 (0x00) show, nodes 4/12/13 (0x04) never do;
-      bit 3 means "force-check even though optional", reconciling
-      David's photo showing board 24. **Caveat: board 24, now
-      image-matched, lands in the same grade-2 state as node 2** — the
-      Tech Alerts page (unvisited since the fixes; the boot no longer
-      parks there) likely still lists both rows, as cosmetic,
-      non-blocking entries. The game already sends node 2 its
-      LED-layer traffic (gate open, 0x44/46/48/14/72 on the wire), so
-      the rows cost nothing functional.
-      **WHAT REMAINS (one measurement + one decision), the Resume:**
-      batman's board-object array has a DIFFERENT layout from
-      godzilla's (status +0x18, flags +0x04, fw +0x1c, desc +0x20 —
-      the [nbobj] self-labelling scan fails on it: "no self-labelling
-      board array after 3 scans"). Teach the scanner batman's shape,
-      dump node 2's config/registration field live, and decide:
-      config-EMPTY → the row is a fact of this build under emulation,
-      document it in README and close; config-populated-but-fill-
-      stalled → find the boot step that copies config→board and why it
-      stalls. EITHER WAY the boot/play experience is already clean.
-      **The VILLAIN VISION RENDERER is split out as item 83** — a new
-      capability (decode the LCD data path, draw the 320x240 panel),
-      not a fault fix; this item's screen half closes at "the board
-      registers and the game engages it".
-      **(4) The video-latency theory is DEAD: the 2.3-5.7 s first-frame
-      delays are the attract's double-buffered clip schedule (each delay
-      = the alternate channel's clip duration), healthy over 35 min.**
-      And the game NEVER asks for a GL display 2 (0 PADGL_TARGET; one
-      fbGetDisplayByIndex(0) + one surface all run) — the overlay is
-      node-bus hardware, not a second GL window, so item 44's family is
-      ruled out.
-      **(5) Item 72's batman half ANSWERED (true negative): funnel 2441
-      seeds → 6 garbage → 0 kept; the swelf dev array (308 records, 178
-      kind==4 LEDs) carries NO XY anywhere; no separate position struct
-      exists (ENT +38/+40 fails the left/right oracle). batman is
-      genuinely position-less on 1.13.0. Sam's dark inserts = CABINET
-      LIGHTS (node 2) unregistered + attract behavior, NOT a parser gap.**
-      **FIXES APPLIED (this branch, pending boot #3 verification):**
-      nbdir.py `PART_BY_CLASS[3]=0x00030030` — MEASURED off batman's own
-      28-byte MCU descriptor table (record at file 0x6736c4:
-      `part=0x00030030 class=3 name="LPC1113FBD48/303"`), plus
-      `CLASS_PREF["lcdnode"]=(3,)` + `VARIANT_PRIOR["lcdnode"]=0x02` (measured live, hexreg, mid-update-walk); hwshim.c `nb_hexreg_class` knows
-      class 3; hwshim.c `nb_nodes_init` skips swelf's node-0xff poison
-      rows (the roster's bogus 255). Desk-verified: nbdir on batman's
-      ELF+hexes now derives 9 nodes including
-      `node=24 type=lcdnode class=3 part=0x00030030 fw=1.19.0
-      (variant_guess)`.
-      **Preserved evidence:** /home/david/item82/ — David's full run
-      logs, game.elf, all 15 card hexes, run2 glass shot.
-      **Resume:** boot #3 with the fixes built (fresh node_ident gets 9
-      rows automatically): confirm roster carries 24 and not 255, node
-      24 claims the lcdnode identity, zero nbsilent; then the alert
-      state on the glass (service menu or David's eyes); then the f0
-      answer once the RE lands; then the census rule for node 4; then
-      godzilla_pro + stranger_things regression boots.
-      **Established, and it rules item 70's mechanism OUT for batman:** the
-      discovery schedule INCLUDES node 2 — `[nbsched] playfield nodes: 255
-      1 8 9 10 2 12 13 (from switch table + node directory)` — and
-      `[nbid] node 2 claims part=0x2c40102b variant=0x05 fw=1.19.0
-      (derived)` loads from the derived 8-node `node_ident.txt` (nodes
-      1,2,4,8,9,10,12,13; node 2 = ws2812node code 22). Scheduled AND
-      identified, yet the game refuses to REGISTER it — so the hole is
-      DOWNSTREAM of everything item 70 suspects: the registration/grading
-      exchange for the swelf-generation ws2812 dialect. (Do not conflate
-      with ST's item 52 — its LED boards registered fine once merged into
-      the schedule; batman's is merged and still refuses.)
-      **Lead suspect for the red NOT FOUND screen: our own silencing of
-      node 4.** `[nbsilent] node=4 want=13/3/12 ctr=0` repeats forever from
-      t≈18 s — the game asking silenced node 4 for the runtime-update walk
-      (13 = 0x0d, the tmc5041 variant command) and never being satisfied.
-      The silence comes from nodecensus's optional-node4 rule (built for
-      stranger_things: optional+ABSENT passes). **Check at the desk whether
-      batman's ELF actually flags node 4 optional** — if it is REQUIRED on
-      this generation, the ST rule misfires here and the wedge is ours.
-      **Board 24 is in NO derived table** (ELF node directory = 8 nodes,
-      no 24) — informational grade, lowest priority, unexplained.
-      **The overlay screen: the game never ASKED for a second display**
-      (0 `PADGL_TARGET` lines all run — consistent with item 44's census,
-      batman was never in the two-display list), while its video pipeline
-      is alive (ch0/ch6 streaming scene assets). One anomaly worth
-      chasing: the game consumes first frames **2.3–5.7 s after serve**
-      against a healthy 58 ms. AWAITING DAVID: what the second screen
-      shows on the real machine, and whether it is a separate physical
-      display or a window drawn on the main screen — that answer decides
-      whether this half is item 44's family, a video-channel fault, or
-      gated behind the unregistered boards.
-      **Instrument, first move once the rig is free:** one `PAD_NB_LOG`
-      boot (GUI/root PIVOT shape — a user-mode scripted run cannot rebuild
-      the root-owned shim, item 79's note) to capture what the game
-      actually sends node 2 and node 4; the wire says what registration
-      wants. No shim change before that capture.
-      **Acceptance:** a batman boot from card shows NO red node-board
-      alert on Tech Alerts (board 24's white RUNTIME INFO may stay,
-      stated); the node-4 poll loop is explained — answered, or proven
-      optional-and-ignorable with the ELF flag quoted; godzilla_pro and
-      stranger_things_le regression boots unchanged. The overlay-screen
-      half gets its own acceptance once David describes the real
-      machine's behaviour.
-      — S2: the title plays (item 79 verified attract + play) but a red
-      alert stands on every boot and a real board's devices are dead; not
-      S1 because play works. D4: mechanism unknown, needs instrumented
-      runs, and the second-screen half is not yet even characterised.
-      *(Both gradings superseded at pass end — see the title line.)*
 
 - [x] **83. VILLAIN VISION renderer: draw batman's 320x240 playfield LCD
       (node 24, lcdnode) the way the rig draws second displays.** `S3 D4`
@@ -8492,6 +7343,1196 @@ document. Nothing here was disproven; every entry is kept whole.
 
 ## Done
 
+**CLOSED IN ONE BATCH ON 2026-09-11 AT DAVID'S CALL, on the same prune that dropped
+1d, 64, 75 and 84: items 67, 29, 33, 82, 65, 70, 32, 30, 72, 38 and 36b.**
+He was told first that three of them (29, 33, 82) record a shipped core ask
+while the rest do not, and he asked for all eleven to be marked done anyway.
+**So read each entry's CLOSED line before trusting the box**: it says in one
+sentence what was actually built, and eight of the eleven say NOT FIXED. The
+entries are kept whole, so anything here can be refiled with its evidence
+intact. Their numbers are NOT retired, unlike the dropped ones.
+
+- [x] **67. The Mandalorian's second display stays blank through attract.**
+      `S3 D3`
+      *(Filed 2026-08-23 from PAD-81: "The Mandalorian: the secondary screen
+      remains blank during attract mode, which is unexpected behaviour.")*
+      **This is item 58's case, with an owner at last.** That item was closed
+      as NOT DEMONSTRATED because nobody could show a title whose
+      second-display window stays dark for a whole run; mando_le was its
+      candidate and was ruled out when a rerun showed real content from frame
+      2. A second person now reports the same title dark, which is the
+      reproduction case item 58's acceptance asked for — with the OPPOSITE
+      conclusion to draw from it: mando has a real (accessory) second display,
+      so the answer is to make it draw, not to hide the window.
+      **The instrument is still there and still read by nobody**:
+      `pic2_check()` (`padglhost.c`, around line 3595) already logs "d2 STILL
+      BLACK after N presented frames" and "d2 FIRST at frame N". Run mando_le
+      to attract and read that line before touching anything — item 58's whole
+      history is two fixes written against a premise no measurement supported.
+      **Ask first whether it is intermittent**: the same title gave both
+      answers on two runs in one session (2026-08-19), which points at
+      attract-cycle timing rather than a dead feed. Bound the run long enough
+      to cover a full attract cycle before calling it blank.
+      **Acceptance:** mando_le's second window shows its content during
+      attract on three consecutive runs, with the `pic2_check` line quoted for
+      each.
+      — S3: cosmetic, does not block play. D3: mostly measurement, and this is
+      the third pass at the same window; the fix cannot be designed until a
+      run says which of "never fed" or "fed late" it is.
+      **★ 2026-09-05, David's sweep, mando_le 1.44.0 live: MEASURED, it is
+      "never fed", and the cause is a node board.** `pic2_check` said
+      `d2 STILL BLACK after 417 presented frames - the game is composing this
+      display's scene and the scene is empty` (padglhost.log, the 13:52 run;
+      the guest asked `fbGetDisplayByIndex(2)`, mapped a 1360x768 texture
+      to it and swapped it every frame). The same run's glass looped
+      `UPDATING NODE BOARD RUNTIME / UPDATE FAILED / 12`, and **node 12 on
+      this title is `hdmi_ws2812node` — the topper's OWN board** ("HDMI SPI
+      WS2812": the holographic display's control plus the TOPPER 1..32 RGB
+      LEDs). `node_ident.txt` carried `variant=0x01 variant_guess=1`;
+      `hexreg.py` off the live process read **variant 0x0c** (class 5,
+      1.19.0) with pinnode 0x01 / ws2812node 0x05 / node4 0x03 reconfirmed
+      in the same pass — item 55's trust rule, fourth title. So the game
+      graded the topper board status 7 and walked the update forever, and
+      the topper scene stayed empty while it did.
+      **Shipped, uncommitted on main:** `nbdir.VARIANT_PRIOR["hdmi_ws2812node"]
+      = 0x0c` + `CLASS_PREF (5,)`; hwshim `nb_hexreg_answer()` RESCANS on a
+      miss and the scan de-duplicates by (type, class) — its single scan ran
+      at node 1's fe when the game had decrypted only 2 images, 7 exist ten
+      minutes later, and it never looked again. **That is why the safety net
+      was silent here AND on turtles' node 12, the gap item 55 flagged.**
+      New `tests/test_spike2_nbdir_variants.py` pins every measured row;
+      mando's table regenerated (diff = node 12 only); shim rebuilt.
+      **Open:** whether a cleanly graded node 12 makes the game compose the
+      topper scene — the next mando run's `picture: d2` line answers it;
+      acceptance above unchanged (three runs).
+      **The 2026-08-19 "content from frame 2" run is now DOUBTED:** its
+      `d2 FIRST at frame 2 (98511 of 1044480 pixels)` is the SAME count as
+      this run's PRIMARY `picture: FIRST at frame 4 (98511 of 1044480)` —
+      the boot frame — so that reading most likely saw display 0's frame
+      through the display-2 texture (item 51's Map aliasing), not topper
+      content. Treat this item as never yet having seen the topper draw.
+      **★ 2026-09-05, SECOND RUN (David, 14:11): node 12 grades clean, no
+      update overlay, and display 2 is STILL EMPTY** (`d2 STILL BLACK after
+      427 presented frames`, no `d2 FIRST` in 20 min). So the node was a
+      real fault and not the gate. What the run proves instead:
+      1. **The topper scene RUNS.** Video channel 1 decodes 1280x800 clips
+         out of scene `ed4ec8f0...`, whose radium names
+         `Topper_RazorCrestHologram` and `Topper_VideoTest`, and hands the
+         game 30 frames/s while a clip plays (short clips, long idle gaps).
+      2. **Those frames never reach a texture.** The host's TEXDIRECT rate
+         stayed at the backbox channel's 30/s with channel 1 (and 2)
+         streaming; the bridge registered no 1280x800 Map or alloc, ever;
+         `swap content d2` is mask 0 on every swap (draws, no video). The
+         game runs the topper's clip and does not upload it.
+      3. **Ruled out**: `/dev/mxc_hdmi` (0x3ddf24 opens it, ioctl 0x4803
+         forces a hot-plug event, sleeps 500 ms, and carries on identically
+         when the open fails - fire-and-forget); `/dev/fb2` (only FB_SetTiming
+         opens it - a mode set, no pixels); the IPU (`libipu.so.0` in the
+         rootfs is a 1.6 KB stub nothing in the game imports); a second
+         render thread (the shim caps `target ->` at 4 lines; the game
+         alternates displays from one thread); node 3 (the game probes it
+         fe/fe/fa at 20 s - the directory has no node 3, and its OWN
+         directory names node 12 `TOPPER`); the fiber `do_stack_unwind`
+         throws at clip start (ordinary screen unwinds).
+      4. **Where the topper clips travel in the engine**:
+         `Radium::Video::ExtraVideoPlayer` (an ARRAY, `extraVideoPlayer[i]`,
+         `PresetClipInternal`/`SetClipInternal`) and
+         `Radium::VideoClipFrameCallbackData` - the extra-display player is
+         its own class beside `SpiVideoStreamDecoder`; its upload path is
+         the open question.
+      **Instrument shipped (padglhost.c, always on, bounded, on the pane):**
+      `[padglhost] display 2 draw: prog P tex T (WxH, filled
+      img/sub/direct a/b/c) guest_fbo F` once per (program, texture, fbo),
+      a `display 2 draw census` re-report six times ~15 s apart, and
+      `display N upload: teximage|texsubimage tex T WxH ...` for the first
+      twelve plain uploads 1000 px wide or more. A fill counter that GROWS
+      names the live upload path; one that stays put names a texture nothing
+      feeds. **Next: David restarts mando and reads those lines.**
+      **★ THIRD RUN (David, 14:34-15:10), the census answered:** display 2
+      draws exactly ONE thing for the whole run - `prog 6 tex 2 (0x0,
+      filled img/sub/direct 0/0/0) guest_fbo 0` - and no `display N
+      upload:` line ever printed. Texture 2 is the 1360x768 RGBA buffer
+      `glTexDirectVIV` handed out at boot (item 51's render-target name,
+      Mapped again as texture 3 and aliased back); the presenter samples it
+      every frame and NOTHING ever fills it on the host: no TEXIMAGE, no
+      TEXSUBIMAGE, no TEXDIRECT. The game gets its topper frame into that
+      buffer some way the bridge does not carry. The one clue is the single
+      `glTexDirectInvalidateVIV on a texture that never registered` at boot
+      (~14 s, before any video, right when display 2's textures were set
+      up), after which the bridge silenced that moan for good - so every
+      later Invalidate on an unrecognised bind was dropped in silence.
+      **Instrument shipped in glbridge.c (guest, rebuilt + stamped):**
+      binds on any target other than GL_TEXTURE_2D are logged (`[bridge]
+      item67: bind target 0x.. tex N`); every Invalidate miss is named and
+      counted (`item67: Invalidate #n on unregistered tex ..; last bind
+      target ..; registered: ..`) and FALLS BACK to a registration under
+      the last-bound name of any target - the likely fix if the topper
+      texture is bound through GL_TEXTURE_EXTERNAL_OES or another target
+      the 2D shadow never followed; and every glTexDirectVIV buffer is
+      hashed every 30 frames (`item67: texture 0002 own buffer CHANGED`)
+      so a CPU-written frame the game never announces (the Vivante driver
+      samples that memory live, so on the machine no Invalidate is needed)
+      becomes visible. **Next: restart mando, grep gzwatch.log for
+      `item67`.** If the buffer CHANGES with no Invalidate, the fix is a
+      bridge-side upload of the buffer on every display-2 present; if the
+      Invalidate fell back to the last-bound name, the fix is already in
+      and `d2 FIRST` should print.
+      **★ FOURTH RUN (15:10): neither.** The buffers never change (`texture
+      0002 own buffer ... all zero`, no CHANGED line in minutes) and the
+      Invalidate misses are boot-time noise (one on tex 32, seven on tex 0
+      = unbound). Then the LIVE OP DUMP (`touch /tmp/padgl_dumpseq`, armed
+      three times during a topper clip) showed the whole topper pass:
+      `BINDFBO 1 / VIEWPORT / CLEARCOLOR 0,0,0,1 / CLEAR / BINDFBO 0 /
+      TARGET 2 / USEPROGRAM 6 / BINDTEX 2 / DRAWARRAYS 6 / SWAP` - the game
+      CLEARS the topper's FBO and presents it, and draws NOTHING into it,
+      clip streaming or not. Zero draws into any guest FBO but 0 in three
+      dumped frames. The topper scene is composed EMPTY.
+      **The one thing this rig tells the game differently from the machine:
+      display 2 is 1360x768** (eglshim's fbGetDisplayGeometry falls through
+      to the backbox size when PAD_GL2_W/H are unset - item 65's exact
+      complaint for this title). The topper panel and every topper clip are
+      1280x800. **And the game carries both sizes itself**: its display
+      setup (0x3ddf24) calls FB_SetTiming (0x52e030) with a static 44-byte
+      timing record per framebuffer - `/dev/fb0` -> 1360x768 @16bpp,
+      `/dev/fb2` -> 1280x800 @16bpp (xres at +16, yres at +32, read off
+      how FB_SetTiming fills fb_var_screeninfo). **Shipped:**
+      `tools/spike2_emu/display2.py` reads those records out of any title's
+      ELF by resolving the movw/movt pairs beside the `/dev/fbN` string
+      references (nearest r1 pair to the r0 site - the two call sites are
+      back to back and "last in window" picked the neighbour, caught by the
+      test), and watch.sh exports PAD_GL2_W/H from it when the caller left
+      them unset; no fb2 record = no export = old behaviour. This is the
+      card-derived size item 65 asked for, not the table it forbade.
+      `tests/test_spike2_display2.py` covers the resolver on synthetic A32
+      code. **Next: David restarts mando; the pane should say `display 2:
+      1280x800, read from the game's own framebuffer timing`, the
+      [display 2] window should open 1280x800, and `picture: d2 FIRST`
+      decides whether the geometry was the gate.**
+      **★ FIFTH RUN (16:14, size right, node clean): STILL BLACK - and the
+      gate is now READ, not guessed.** Two register hooks (PAD_REG_HOOK /
+      PAD_REG_HOOK2, new in the shim: pad_hook with a logger that reads the
+      pushed r0..r3 off the entry sp) on the render thread's two per-display
+      draw loops: the display-0 site (0x452164) fired once all run (a
+      `NuklearScene`), the display-2 site (0x45278c) fired ZERO times while
+      the bridge saw the display-2 clear from 0x452744 every frame. Read
+      again, the clear runs BEFORE the emptiness check (my "the list is
+      non-empty every frame" was wrong), and the display-2 pass has TWO
+      paths on renderer byte +0x104 (0x451ed0): set = clear to the first
+      element's colour, then per element the full Render virtual (vtable
+      +0x24) and RenderForDisplay(1) (+0x14); clear = a constant clear
+      (0x452740) and RenderForDisplay(1) ONLY, which is the base no-op
+      0x31a960 for every class the topper scene posts. 0x452744 is the
+      clear path. The constructor sets +0x104 = 1; the setter 0x3dd0f0 is
+      called from four sites in the game's `topper` class (RTTI, vtable
+      0x5a9e68), each with the result of 0x4172dc(12): `node_table[12].+0x3c
+      / 100 == 5208530` - "does node 12 report Stern part 520-8530". Live
+      (a root /proc read of the 152-byte-a-node table at 0x765c38): every
+      node's part string read `000-0000-00`, integer 0. That string is the
+      f9 00 runtime-info reply (parser 0x5239a0: bytes 8..11 as LE32,
+      sprintf "%09d", split "ddd-dddd-dd" at record +8, integer at +20 -
+      the 48-byte block at node object +40 hwshim's own notes describe),
+      and the shim had answered f9 with zeros since it learned the command.
+      **And the number is the game's own:** its board catalog (nbdir.py's)
+      gives node 12's type `hdmi_ws2812node` part `520-8530-XX` = 520853000
+      once the record is framed right - it starts at the PART word, not the
+      type name (the game's per-node record pointer lands on it; the first
+      row is {520-5319-XX, pinnode}; the CPU row {520-7031-XX, NULL, "SPIKE2
+      CPU"}), so nbdir had credited every type with the NEXT row's part for
+      its whole life, unnoticed because nothing read the part until this
+      check. **Shipped:** nbdir.py reframed (`catalog_part()`, docstring,
+      `--dump` prints `value=`) and `node_ident.txt` gains `partno=<value>`
+      per node; hwshim parses it and answers f9 00 bytes 8..11 with it for
+      every node that has one, logging `[nbid] node N reports part
+      ddd-dddd-dd` once per node (PAD_NB_RT's pattern fill still wins for a
+      sweep). `tests/test_spike2_nbdir_catalog.py` pins the framing and the
+      field on a synthetic table; the variants test passes unchanged. Shim
+      rebuilt 16:41; the identity file regenerates on every start. The
+      register-hook knob (`~/.pad_env`) is removed; watch.sh keeps the
+      extra-environment hook, named on the pane whenever it fires. **Next:
+      David restarts mando; the pane should show `[nbid] node 12 reports
+      part 520-8530-00` and, on the first topper clip, `picture: d2 FIRST`.**
+      If it stays black with the part answered, the four `topper` call sites
+      (0x1b8590, 0x1b86e0, 0x1ba654, 0x1ba670) are the next read - they run
+      at moments the class chooses, and +0x104 could be re-cleared later.
+      **★ SIXTH RUN (16:14 restart): THE TOPPER DRAWS.** `[nbid] node 12
+      reports part 520-8530-00` on the pane, `picture: d2 FIRST at frame
+      277`, and the window shows the hologram scene - mirrored, and with its
+      right edge cut. Both read off the game's PRESENT step (op dump): the
+      display-2 pass itself is right (FBO 1280x800, ortho 2/1280); then the
+      present draws the FBO texture through a unit-square quad whose builder
+      (0x52eaac, template 0x602b18) is handed two constant flags (1, 1) at
+      0x451b84 - the first rewrites u to 1-x, the second v to 1-y. The
+      second is the usual FBO orientation correction (the pass renders with
+      a y-down ortho into the texture); the FIRST mirrors the whole picture:
+      the topper is a Pepper's-ghost panel and must carry the mirror image.
+      The window is a viewer, not the panel, so padglhost now reads that
+      quad (a 96-byte array-buffer upload matching the template with u
+      reversed -> `d2_mirror`, logged once) and un-mirrors the [display 2]
+      blit (`u_mirror` beside `u_flip`; PAD_GL2_MIRROR=0/1 overrides). The
+      CROP is the game's own: the present viewport is DISPLAY 0's size
+      (0x4519f4: `[r7+4]->+16/+20` -> glViewport 1360x768) while the quad
+      and its ortho are display 2's 1280x800, so the texture is stretched to
+      1360x768 and a 1280x800 window loses 80 columns and 32 rows. Stern
+      shipped that, so on the machine the two geometries must be EQUAL: the
+      topper's HDMI runs at the backbox's 1360x768, and `FB_SetTiming
+      /dev/fb2` (which the game's own log shows failing in the rig) is a
+      panel-timing request, not the geometry the EGL side reports. So
+      display2.py's export was the wrong oracle for the GL geometry. Being
+      tested on the next run with `~/.pad_env` = `PAD_GL2_W=1360
+      PAD_GL2_H=768` (display2.py's export defers to a set PAD_GL2_W).
+      **If the HUD is complete and un-squashed: drop the export from
+      watch.sh (display2.py stays as the timing-record reader + its test),
+      and the display-2 geometry rule becomes "display 0's, because the
+      game presents display 2 through display 0's viewport" - read off the
+      game's code, item 65 kept.**
+      **★ SEVENTH RUN (19:47): geometry SETTLED, mirror read off the wrong
+      buffer.** At 1360x768 nothing is cut - so the display-2 geometry IS
+      the backbox's, the fb2 FB_SetTiming record is the panel's timing
+      request, and watch.sh's export is retired (display2.py stays as the
+      timing reader, named on the pane; its docstring says what it is not).
+      The picture was still mirrored: the host's probe had answered "u = x"
+      on the FIRST unit quad it saw - the engine's builder makes those for
+      other sprites too, and one arrived before display 2 was targeted.
+      Rewritten: every 96-byte upload is classified by buffer name, each
+      VAO remembers the array buffer its attributes point at, and the
+      answer is read from the buffer the display-2 PRESENT draw (target 2,
+      guest FBO 0, six vertices) actually uses. Host rebuilt 19:52; 551
+      launch/rig tests pass. **Next: restart; the pane should say
+      `display 2 is presented through a quad that maps u to 1-x ... the
+      game MIRRORS this display`, and the text should read the right way.**
+      **★ EIGHTH RUN (David, 2026-09-05 evening): VERIFIED.** `display 2 is
+      presented through a quad that maps u to 1-x (buffer 2): the game
+      MIRRORS this display`, `picture: d2 FIRST at frame 277`, `[nbid] node
+      12 reports part 520-8530-00`, and David: "text reads correctly now".
+      The holographic topper draws, complete, the right way round. Three
+      layers, all read off the game and none typed per title: node 12's
+      variant (0x0c, measured), its board part number (the catalog's, in
+      the f9 00 reply), and the presenter's mirror (its own quad). The
+      display-2 geometry is the backbox's, as the game's present assumes.
+      Still open from this thread, not blockers: item 65's rotation half
+      and Bond's display-0 size; the 30/s `Invalidate on tex 0` is unbound
+      boot noise and stays silent after eight per run.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. NOT FIXED. The
+      blank second display is measured and the cause narrowed over three
+      passes; no fix was built.
+
+- [x] **29. Switch names come back as `?` on most titles, so the schematic
+      playfield is a list of numbers and switch positions cannot be joined.**
+      `S2 D3` **← 75%, and the USER-FACING half is DONE.** *(**S2 → S1 → back to
+      S2 within one day, 2026-08-10, and both moves were on evidence.** Up: the
+      Jaws run showed `?` names BLOCK PLAY, because nothing could find the
+      trough and the game sat on LOCATING PINBALLS. Down: item 27's `6d19946`
+      then supplied the names from the title's own device table, so nothing is
+      blocked any more. D4 → D3: the instrument this item said had to be built
+      first is no longer on the critical path.)*
+      **★★ WHAT IS ALREADY SOLVED, in item 27, do not redo it: `swnames.py`
+      fills the names WITHOUT fixing the reader** — the device table carries a
+      name for every playfield switch, and the join is on ORDER within a node
+      (not the number, which this item correctly ruled out). Validated by
+      blanking and refilling the two titles that have real names: **godzilla_pro
+      86/0 wrong, john_wick_le 102/0 wrong; jaws_le fills 105 of 108.** The
+      schematic therefore shows real names, and because `switch_xy` joins on the
+      NAME, the positions this item's part (b) asked for should now join too —
+      **unverified, and it is the cheapest thing left to check.**
+      **WHAT REMAINS IS THE READER ITSELF**, which is still wrong and is why 3
+      switches per title stay `?`: they are the virtual/extra switches with no
+      device record (Jaws's bits 61-63 on node 9). Fixing `msg_row`/`MSG_LANG`
+      would name those and anything else that goes through the message table.
+      **Corrected by item 27's runs: star_wars_le is NOT in the failing set — it
+      has 104 real names and NO device table**, the mirror image of Jaws. So the
+      two name sources are independent, and this item's title census should be
+      re-read with that in mind.
+      **MEASURED 2026-08-06 across four card runs, and the split is clean:**
+      Led Zeppelin LE 1.22.0 **96 of 96 rows `?`**, Elvira's HoH 1.13.0 **109 of
+      109 `?`**, Jaws LE 1.02.0 **108 of 108 `?`** — and **John Wick LE 1.01.0
+      0 of 105**, real names (`QR SCANNER STATUS READY`, …). Godzilla is also
+      fine. So this is per title, not universal, and at least two titles prove
+      the reader itself works.
+      **WHAT IT COSTS, and it is two separate things.** (a) The schematic view
+      draws 96 rows that all say `?`, so you cannot tell which switch you are
+      about to close — see the screenshot behaviour in item 27's sense of "see a
+      switch layout". (b) `switch_xy` is joined on the NAME, so a title with a
+      perfectly good device table gets **no clickable positions at all**: Jaws
+      has 78 switch records with names and coordinates in its binary and scored
+      `NONE of the 108 switches matched a device-table name`.
+      **ESTABLISHED AT THE DESK, from `hwshim.c`:** the name is
+      `msg_row(*(nameobj + 16))` at `hwshim.c:3574`, and `msg_row` (`:3219`)
+      opens with `if (!MSG_LANG) return 0;`. `MSG_LANG` is
+      `TITLE_ADDR(a_msg_lang, "PAD_MSG_LANG", 0x708330u)` — a **Godzilla Pro
+      1.15.0** address (`:2960`).
+      **BUT THE OBVIOUS ONE-LINE FIX IS PROBABLY NOT IT, and this is the trap
+      worth writing down before someone spends a pass on it.** `title_addr()`
+      (`:1267`) returns the default whenever it is merely READABLE, and this
+      file already records that trap for the switch table: *"EHOH's binary is
+      big enough to cover Godzilla Pro's 0x7a958c, so a_sw_struct() returned an
+      address … and the shim read a switch table out of somebody else's data."*
+      So on these titles `MSG_LANG` is most likely non-zero-but-wrong, the
+      early-out never fires, and `msg_row` is instead failing one of its two
+      range checks on `row` or `row[0]`. **Making `!MSG_LANG` fall back to
+      language slot 0 is therefore a guess, not a fix** — and note `msg_row`
+      ALREADY tolerates a garbage `lang` (it validates `lang < 5` and the
+      resulting pointer, falling back to slot 0), which is more evidence the
+      early-out is not where this dies.
+      **FIRST JOB IS AN INSTRUMENT, WHICH IS THE D4.** Print `nameobj`, `row`,
+      `row[0]` and `MSG_LANG`'s value for the first few switches on a title that
+      fails and on John Wick, which does not. That says in one run whether the
+      name object is absent, at a different offset, or pointing at a message
+      table this shim cannot resolve. Only then choose between a per-title
+      `PAD_MSG_LANG`, a shape-based finder like `sw_find_table`, and reading the
+      names some other way.
+      **RULED OUT — joining on the NUMBER instead.** `switchxy.py`'s own header
+      says why: the device table's `index` is a sequential position within its
+      board and not the hardware bit (node 8 runs bits 9,10,11… against index
+      8,9,10…, then the hardware skips 21-23 and the index does not), so a
+      numeric join "produces a map that looks right and presses the wrong
+      switch". Do not reach for it as a workaround.
+      **Acceptance:** on a title that fails today, the schematic shows real
+      switch names, and a title that also ships a device table gets its switches
+      placed on the artwork. State which titles you checked and include one that
+      already worked (John Wick or Godzilla) as a regression control.
+      — S2: the playfield opens, is clickable and the keyboard works, so nobody
+      is blocked from playing; what it costs is that the switch layout is
+      unreadable on three of the four titles tried and that positions are
+      unavailable on a title whose binary has them. Arguable as S1 against item
+      27's wording, which asked to "see a switch layout". D4: the mechanism is
+      NOT established, the leading theory is explicitly marked above as probably
+      wrong, and it needs a guest-side instrument and a run before anything can
+      be chosen.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. The user-facing
+      half shipped. Switch names still come back as ? on most titles, and
+      the name source was never found.
+
+- [x] **33. Save-state slots are invisible: nothing shows what exists or what
+      it costs.** `S3 D2` **★ DAVID, 2026-08-09: "maybe our save states are not
+      being pruned?... we should have clear visibility of what kind of space
+      they're taking up."** Asked while chasing that day's startup freeze, which
+      turned out to be unrelated (v0.120.3, a poisoned log line) — but the
+      visibility gap he tripped over is real: the only way to see slots today
+      is `du -sh` inside WSL.
+      **Measured 2026-08-09:** slots live in `<rootfs>/saves/<slot>` (criu
+      dumps, `savegame.sh:48`); on this machine `/home/david/spike2root/saves`
+      = quicksave 511 MB + wtest 475 MB = 985 MB. **Pruning is NOT broken and
+      is not the job** — `savegame.sh` `rm -rf`s a slot before each re-dump, so
+      growth is bounded per slot name; what is missing is the LIST. The GUI
+      half rides on item 13's StateOps mixin (both playfield views' Save/Load
+      buttons), and any slot browser must respect restorestate.sh's pre-flight
+      rules (a dead-tty or gone-card slot is refusable, and saying WHY in the
+      list would save a failed load).
+      **Related cleanup found the same day, David to confirm before anyone
+      deletes:** `/home/david/wtest.log` is 13 GB of watch.sh test debris;
+      `~/cardcache` is 43 GB and is EXPECTED (per-title tables), keep it.
+      **★ THE CORE ASK SHIPPED 2026-08-10 with item 13's GUI batch (~90%):
+      the Emulate tab's Save states manager lists every slot with name,
+      game, size and date, totals them against the WSL disk's free space,
+      and Renames/Deletes** (slots.sh, root, guarded). David can now
+      delete `wtest` himself from the tab. REMAINING here: the list does
+      not yet flag a REFUSABLE slot with the reason a load would fail -
+      the polish this item's text asked for beyond the list itself. The
+      refusable classes are restorestate.sh's pre-flight's three: dead
+      tty, gone card, and STALE BUILD - savestate.sh records a sha1 per
+      mapped library (36a (3)), and any shim/bridge rebuild breaks the
+      match, which `ensurebuild.sh` does by itself on any source change,
+      so this is the class a user actually hits.
+      **★ DAVID, 2026-08-16: "why do save states break between builds?"**
+      Answered at the desk (criu restores file-backed pages from the
+      files as they are NOW and validates size + build-ID, so a slot is
+      welded to the exact binaries it was dumped under - 36a (3) is the
+      full record) - but that the question needed asking is this item's
+      case in one line: the slots list should SAY a stale slot is stale
+      and which library moved, not leave the refusal to load time.
+      **Acceptance:** wherever Save/Load already lives (playfield bar and/or
+      Emulate tab), the user can see every slot with its size and save time
+      plus a total, and can delete a slot from there; the numbers match `du`
+      on the same moment. — S3: a `du` in WSL answers it today, nothing is
+      broken. D2: the mechanism is fully known (list a directory, stat, rm),
+      but the UI half wants a windowed session to verify, which is what keeps
+      it off D1.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. The core ask
+      shipped 2026-08-10 with item 13's GUI batch. The space readout and the
+      pruning it asked for were never built.
+
+- [x] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
+      and identified; node 4 polled forever while we silence it; board 24
+      RUNTIME INFO from no table we derive; and the carousel's overlay
+      screen never appears.** `S3 D2` 90% *(S2 → S3 and D4 →
+      D2 at pass end, 2026-08-24: everything that broke the BOOT is fixed
+      and regression-proven — what remains is a cosmetic menu row plus one
+      instrumented dump with a known method, and the mechanism is fully
+      established.)*
+      *(Filed 2026-08-24 from David's live item-80 sweep run — glass
+      screenshots on record: red `LOCATING NODE BOARDS / NODE NOT FOUND`
+      over the batman logo, then Tech Alerts `CHECK NODE BOARD 2 : NOT
+      REGISTERED` (red) + `CHECK NODE BOARD 24 : RUNTIME INFO` (white),
+      plus "we are not seeing the second screen that appears over the
+      carousel". All evidence below is READ-ONLY off his run's own logs.)*
+      **★★★★ 2026-08-24 PASS (4-agent desk workflow + instrumented boot,
+      rig handed over by David). ESTABLISHED, each with the receipt:**
+      **(1) THE SECOND SCREEN IS NAMED BY THE ELF: node 24 = "VILLAIN
+      VISION", an lcdnode (code 16, part 520-6976-XX, "LCD 320X240" /
+      "3 LCD INSERT"), declared REQUIRED (flags 0x0) in batman's OWN
+      10-record node directory** (file 0x707268; the directory is nodes
+      0,1,2,4,8,9,10,12,13,24 — names CABINET, CABINET LIGHTS, QR
+      SCANNER, PLAYFIELD 1/2, TURNTABLE, two OPTIONAL TOPPERs, VILLAIN
+      VISION). nbdir DROPPED it (lcdnode ships only LPC1113_302 = class
+      3, absent from PART_BY_CLASS), so the shim answered its identity
+      poll with the DEFAULT pinnode claim (`[nbid] node 24 claims
+      part=0x00020023 fw=0.1.0 (default)`) — the white RUNTIME INFO
+      grade is MANUFACTURED BY OUR DEFAULT ANSWER. Board 24 and the
+      missing overlay are ONE fault. Note: even registered, the rig has
+      NO lcdnode renderer — drawing Villain Vision content is follow-on
+      work; registration + alert-clearing comes first.
+      **(2) NODE 4 IS GENUINELY OPTIONAL (flags 0x4 at 0x7071e8 — and
+      batman corroborates the bit-2 decode: its OPTIONAL-named toppers
+      12/13 carry 0x4, required boards 0x0), so the ST census rule fired
+      as designed — and it is STILL the wedge on this generation:**
+      silenced nodes short-read NOTHING, and the game re-asks forever
+      (the `[nbsilent] node=4 want=13/3/12` lines are READ LENGTHS —
+      13=fe, 3=fa, 12=0x11 — NOT the 0x0d variant walk; the item's
+      original "want=13 = 0x0d" reading is CORRECTED). Instrumented boot
+      with `PAD_NB_SILENT=62` (nothing silenced): the shim answered node
+      4's identity from the derived row (`claims part=0x00140040
+      variant=0x03 fw=1.19.0 (derived)`), ZERO nbsilent lines all run,
+      attract light show by t=35.7s, glass shot clean attract
+      (`/home/david/item82/run2_glass.png`). The durable census rule
+      (silence an optional node4 only when its hex header cannot be
+      derived — ST keeps silence, batman answers) is DESIGNED but NOT
+      yet written; boot #3 must confirm the alert state first.
+      **(3) ▼ THE f0 THEORY IS DEAD — RULED OUT BY DISASSEMBLY + 14,988
+      FRAMES, do not build an f0 handler, ever:** cmd f0 is a
+      FIRE-AND-FORGET WRITE. The game reads NO reply (zero RX with an f0
+      last-tx across two full runs; the sender `nb_exchange` 0x515f8c
+      skips its read loop at reply_len==0). The "6,824× hammer" is the
+      normal per-node service-cadence broadcast (f0 goes to EVERY node:
+      pinnodes get sub 0x11, ws2812-class 0x20/0x10; optional boards 36×
+      then give up, required boards forever). Zeros are already the
+      correct answer.
+      **(3b) THE REAL REGISTRATION MECHANISM, disassembled (batman VAs —
+      the shim's 0x59xxxx notes are godzilla's and do NOT map):**
+      registered = `board[+0x14] != 0`, per-node table at 0x6e9808
+      stride 4, gate code 0x517390-0x5173b4 — and every command ≤0xef
+      is GATED on it (the game refuses to send application commands to
+      an unregistered board; >0xef system cmds bypass). Set by the
+      fe-identity + hex-image-grading + runtime-info path. The grade
+      table (file 0x701fc0, 9 cells) decodes: 0 NO ERRORS, 1 NOT
+      RESPONDING, 2 NOT REGISTERED, 3 COLLISION, 4 NOT INITIALIZED,
+      5 VERSION MISMATCH, 6 HEX IMAGE VERSION NOT FOUND, 7 CHECKSUM,
+      8 RUNTIME INFO *(corrects the earlier "RUNTIME INFO = status 4"
+      desk note)*. Node 2's fe identity is answered CORRECTLY and it
+      still never registers — and the whole bus sits in fe re-probe
+      bursts (~301/node per 8 min) while any required board is
+      unregistered, which is also why attract takes ~72 s.
+      **▼ The runtime-info-contents theory is ALSO dead: PAD_NB_RT=1
+      changed nothing** (fe re-probe bursts identical, flags unchanged).
+      **★★★ THE COMPLETE REGISTRATION MECHANISM, disassembled (second
+      RE pass) — TWO separate concepts, do not conflate:**
+      **(A) the app-command GATE `board[+0x14]`** — sole writer
+      0x51b65c in nb_register_identity 0x51b558: the fe reply's PART ID
+      bytes [4..7] linear-scanned against the 27-entry descriptor
+      table; a match stores that descriptor (its static [+0x14]≠0 =
+      gate OPEN for all ≤0xef app commands). **Node 2 PASSES this** —
+      our fe claim 0x2c40102b matches — so the game DOES send it LED
+      frames. **THEREFORE: NEVER nodecensus-silence node 2 on batman**
+      — silence kills the cabinet-lights traffic that is already
+      flowing; the star_wars silence was right because ITS node 2 is
+      absent. **(B) the Tech-Alerts GRADE `node_record[+0x18]`** —
+      written only by the grading state machine 0x261548-0x261750:
+      registry image missing → 4 RUNTIME INFO (board 24's old white
+      row, i.e. OUR default-identity claim caused it); version/variant
+      MISMATCH → 7 CHECKSUM + the update walk (board 24 under the
+      variant 0x01 guess); version AND variant MATCH → **grade 2 "NOT
+      REGISTERED" = known, correctly-versioned board that has not
+      completed RUNTIME REGISTRATION**. Only grades {1,2} alert red.
+      **Node 2's variant claim 0x05 MATCHES batman's decrypted image
+      (hexreg, live)** — so node 2 sits in matched-but-runtime-
+      unregistered, and the ONE remaining unknown is what moves grade
+      2 → 0 (the runtime-registration completion step). Third RE pass
+      is tracing the grade-0 writer now.
+      **Why only node 2 shows on the boot screen: directory flags bit
+      3 = screen-inclusion** (node 2 is batman's only bit-3 board; the
+      optional toppers grade invisibly). No install adjustment exists —
+      both writers are driven purely by bus evidence.
+      **★★ VERIFIED SO FAR (boots 6-7 + two regressions, all with the
+      fixes live and the census deciding):** batman boot #7 with
+      AUTOATTRACT OFF reaches full attract at t=32 with NOBODY pressing
+      anything — no LOCATING screen, no Tech Alerts parking, no
+      failed-update dialog (glass shots run6_t40/run7_t32); fe
+      re-probe bursts 301→6 per node (the bus settles); attract 72s →
+      20s. The census line reads "silencing nothing on batman ... node
+      4 ... answered rather than silenced (item 82)". REGRESSIONS:
+      godzilla_pro — 8 boards derived, node 2 still silenced by the
+      strong-evidence branch, roster unchanged, light show at 9.7s;
+      stranger_things_le — derivation fails (bare symlink) → not fresh
+      → node 4 STAYS silenced with the original reason, ff-answering
+      intact. Both green.
+      **★★★ THE FINAL RE ANSWER (third pass), AND IT IS AN EXPENSIVE
+      NEGATIVE — do not hunt a bus-side fix for the alert rows again:
+      THERE IS NO GRADE-0 WRITER IN THE BINARY.** A whole-RX-segment
+      scan finds zero stores of 0 to `node_record[+0x18]`; grade 0 is
+      only the constructor default. Both graders (0x2614f8 via fe,
+      0x261754 via cmd 0x03) can only assign nonzero codes, and a
+      STABLE, VERSION-AND-VARIANT-MATCHED present board is assigned
+      grade 2 terminally. **No reply on any command clears it** — fe,
+      f9, fc, ff, gated app commands all traced; PAD_NB_RT confirmed
+      inert live. The row is suppressed only by a game-side
+      CONFIG-DERIVED registration field (godzilla's `board[+144]`
+      analogue — nodecensus's own header said this: "this title's own
+      config is what decides the board's registered bit; no bus reply
+      can change that"). **Corrected screen-inclusion rule:** a row
+      shows when graded-alerting AND `(flags & 0x0c) != 0x04` — node 2
+      (0x0c) and board 24 (0x00) show, nodes 4/12/13 (0x04) never do;
+      bit 3 means "force-check even though optional", reconciling
+      David's photo showing board 24. **Caveat: board 24, now
+      image-matched, lands in the same grade-2 state as node 2** — the
+      Tech Alerts page (unvisited since the fixes; the boot no longer
+      parks there) likely still lists both rows, as cosmetic,
+      non-blocking entries. The game already sends node 2 its
+      LED-layer traffic (gate open, 0x44/46/48/14/72 on the wire), so
+      the rows cost nothing functional.
+      **WHAT REMAINS (one measurement + one decision), the Resume:**
+      batman's board-object array has a DIFFERENT layout from
+      godzilla's (status +0x18, flags +0x04, fw +0x1c, desc +0x20 —
+      the [nbobj] self-labelling scan fails on it: "no self-labelling
+      board array after 3 scans"). Teach the scanner batman's shape,
+      dump node 2's config/registration field live, and decide:
+      config-EMPTY → the row is a fact of this build under emulation,
+      document it in README and close; config-populated-but-fill-
+      stalled → find the boot step that copies config→board and why it
+      stalls. EITHER WAY the boot/play experience is already clean.
+      **The VILLAIN VISION RENDERER is split out as item 83** — a new
+      capability (decode the LCD data path, draw the 320x240 panel),
+      not a fault fix; this item's screen half closes at "the board
+      registers and the game engages it".
+      **(4) The video-latency theory is DEAD: the 2.3-5.7 s first-frame
+      delays are the attract's double-buffered clip schedule (each delay
+      = the alternate channel's clip duration), healthy over 35 min.**
+      And the game NEVER asks for a GL display 2 (0 PADGL_TARGET; one
+      fbGetDisplayByIndex(0) + one surface all run) — the overlay is
+      node-bus hardware, not a second GL window, so item 44's family is
+      ruled out.
+      **(5) Item 72's batman half ANSWERED (true negative): funnel 2441
+      seeds → 6 garbage → 0 kept; the swelf dev array (308 records, 178
+      kind==4 LEDs) carries NO XY anywhere; no separate position struct
+      exists (ENT +38/+40 fails the left/right oracle). batman is
+      genuinely position-less on 1.13.0. Sam's dark inserts = CABINET
+      LIGHTS (node 2) unregistered + attract behavior, NOT a parser gap.**
+      **FIXES APPLIED (this branch, pending boot #3 verification):**
+      nbdir.py `PART_BY_CLASS[3]=0x00030030` — MEASURED off batman's own
+      28-byte MCU descriptor table (record at file 0x6736c4:
+      `part=0x00030030 class=3 name="LPC1113FBD48/303"`), plus
+      `CLASS_PREF["lcdnode"]=(3,)` + `VARIANT_PRIOR["lcdnode"]=0x02` (measured live, hexreg, mid-update-walk); hwshim.c `nb_hexreg_class` knows
+      class 3; hwshim.c `nb_nodes_init` skips swelf's node-0xff poison
+      rows (the roster's bogus 255). Desk-verified: nbdir on batman's
+      ELF+hexes now derives 9 nodes including
+      `node=24 type=lcdnode class=3 part=0x00030030 fw=1.19.0
+      (variant_guess)`.
+      **Preserved evidence:** /home/david/item82/ — David's full run
+      logs, game.elf, all 15 card hexes, run2 glass shot.
+      **Resume:** boot #3 with the fixes built (fresh node_ident gets 9
+      rows automatically): confirm roster carries 24 and not 255, node
+      24 claims the lcdnode identity, zero nbsilent; then the alert
+      state on the glass (service menu or David's eyes); then the f0
+      answer once the RE lands; then the census rule for node 4; then
+      godzilla_pro + stranger_things regression boots.
+      **Established, and it rules item 70's mechanism OUT for batman:** the
+      discovery schedule INCLUDES node 2 — `[nbsched] playfield nodes: 255
+      1 8 9 10 2 12 13 (from switch table + node directory)` — and
+      `[nbid] node 2 claims part=0x2c40102b variant=0x05 fw=1.19.0
+      (derived)` loads from the derived 8-node `node_ident.txt` (nodes
+      1,2,4,8,9,10,12,13; node 2 = ws2812node code 22). Scheduled AND
+      identified, yet the game refuses to REGISTER it — so the hole is
+      DOWNSTREAM of everything item 70 suspects: the registration/grading
+      exchange for the swelf-generation ws2812 dialect. (Do not conflate
+      with ST's item 52 — its LED boards registered fine once merged into
+      the schedule; batman's is merged and still refuses.)
+      **Lead suspect for the red NOT FOUND screen: our own silencing of
+      node 4.** `[nbsilent] node=4 want=13/3/12 ctr=0` repeats forever from
+      t≈18 s — the game asking silenced node 4 for the runtime-update walk
+      (13 = 0x0d, the tmc5041 variant command) and never being satisfied.
+      The silence comes from nodecensus's optional-node4 rule (built for
+      stranger_things: optional+ABSENT passes). **Check at the desk whether
+      batman's ELF actually flags node 4 optional** — if it is REQUIRED on
+      this generation, the ST rule misfires here and the wedge is ours.
+      **Board 24 is in NO derived table** (ELF node directory = 8 nodes,
+      no 24) — informational grade, lowest priority, unexplained.
+      **The overlay screen: the game never ASKED for a second display**
+      (0 `PADGL_TARGET` lines all run — consistent with item 44's census,
+      batman was never in the two-display list), while its video pipeline
+      is alive (ch0/ch6 streaming scene assets). One anomaly worth
+      chasing: the game consumes first frames **2.3–5.7 s after serve**
+      against a healthy 58 ms. AWAITING DAVID: what the second screen
+      shows on the real machine, and whether it is a separate physical
+      display or a window drawn on the main screen — that answer decides
+      whether this half is item 44's family, a video-channel fault, or
+      gated behind the unregistered boards.
+      **Instrument, first move once the rig is free:** one `PAD_NB_LOG`
+      boot (GUI/root PIVOT shape — a user-mode scripted run cannot rebuild
+      the root-owned shim, item 79's note) to capture what the game
+      actually sends node 2 and node 4; the wire says what registration
+      wants. No shim change before that capture.
+      **Acceptance:** a batman boot from card shows NO red node-board
+      alert on Tech Alerts (board 24's white RUNTIME INFO may stay,
+      stated); the node-4 poll loop is explained — answered, or proven
+      optional-and-ignorable with the ELF flag quoted; godzilla_pro and
+      stranger_things_le regression boots unchanged. The overlay-screen
+      half gets its own acceptance once David describes the real
+      machine's behaviour.
+      — S2: the title plays (item 79 verified attract + play) but a red
+      alert stands on every boot and a real board's devices are dead; not
+      S1 because play works. D4: mechanism unknown, needs instrumented
+      runs, and the second-screen half is not yet even characterised.
+      *(Both gradings superseded at pass end — see the title line.)*
+      ← CLOSED 2026-09-11 at David's call on a queue prune. Everything that
+      broke the BOOT is fixed and regression-proven. A cosmetic menu row and
+      one instrumented dump remain unbuilt.
+
+- [x] **65. The second-display window is sized from the BACKBOX, so four
+      **2026-09-05, from item 67: THE SIZE HALF HAS ITS SOURCE.** The game
+      carries both display sizes as the static FB_SetTiming records for
+      `/dev/fb0` and `/dev/fb2` (mando_le: 1360x768 and 1280x800);
+      `display2.py` reads them out of the ELF.
+      **2026-09-07, item 101 — THAT NOTE WAS ALREADY STALE WHEN IT WAS
+      WRITTEN, and the SIZE HALF IS NOW DONE.** watch.sh did export
+      PAD_GL2_W/H from the record for one run, and the same day item 67
+      withdrew it: exported as the geometry the GAME is told, it cropped
+      mando_le's topper by 80 columns and 32 rows, because the game presents
+      display 2 through display 0's viewport. The record is the PANEL, and
+      the panel is the WINDOW - a different question this rig was answering
+      with the same number. So `padglhost` grew `win2_want_w/h` and the
+      host-only pair `PAD_GL2_WIN_W/H`, watch.sh derives them per title, and
+      `display2.py --shell` prints them under those names so the two can
+      never be confused again. The game is told exactly what it was told
+      before; win2_present() already letterboxed, so the guest cannot see
+      this. Measured off the titles' own binaries, against what was
+      reported:
+          mando_le         record 1280x800   reported 1280x800   AGREES
+          star_wars_le     record  480x272   reported  480x272   AGREES
+          venom_le         record  800x480   reported  800x480   AGREES
+          stranger_things  record  848x480   reported  368x214   DIFFERS
+      stranger_things is why this is derived and not a table: 368x214 is its
+      projector CLIP's resolution, not its panel's, and the black borders in
+      that report are the clip inside the panel - a smaller window would crop
+      the panel instead of fixing anything.
+      **Still open: (a) the ROTATION half.** venom_le's topper is a portrait
+      panel whose timing record is its native landscape 800x480, so its
+      window is now the right size and still on its side. The direction is in
+      the report above - "90 degrees clockwise" - but rotation is not in any
+      record, so it needs the direction confirmed off a frame the way item 67
+      confirmed the mirror, plus transposed letterbox maths in win2_present().
+      **(b) DISPLAY 0 on the small cabinets.** james_bond_60th_le and
+      jurassic_park_the_pin (peanuts' "Jurassic Park Home Edition", 1.05) are
+      both reported as 800x480 single-screen, and BOTH yield `no framebuffer
+      timing records found` - their binaries do not reference /dev/fb0 the way
+      display2.py's reader expects, so there is nothing to derive from yet.
+      Note PAD_GL_W/H is not the same shape of change as PAD_GL2_WIN_W/H: it
+      is the guest's render target as well as the window.
+      **2026-09-08, PAD-115 - (b) IS DONE, AND THE LAST SENTENCE ABOVE IS THE
+      WHOLE REASON IT TOOK TWICE.** Item 102 gave the three one-screen
+      cabinets an 800x480 WINDOW over an unchanged 1360x768 render, reasoning
+      from display 2, where item 67 had proved the game must keep being told
+      the backbox's size. peanuts tested it and reported all three still
+      wrong. His own screenshots say why, and they had been on the disk since
+      2026-08-30: **these games do not scale their scene to the size they are
+      handed.** star_wars_elg draws the Cycling Coil Test at its authored
+      800x480 in the TOP-LEFT of a 1360x768 window with the rest black, and
+      jurassic_park_the_pin's Insider Connected badge - a bottom-right corner
+      element - sits at (0.57, 0.59) of the client area, which is the corner
+      of an 800x480 screen inside a 1360x768 one. Scaling that frame into a
+      smaller window shrinks the same wrong picture. Display 2 is the
+      opposite case only because the game presents it through display 0's
+      viewport; a one-screen cabinet has no such indirection, so here the
+      panel IS the render target. watch.sh now takes PAD_GL_W/H from
+      `display2.reported_exports()`, a caller that names them by hand still
+      wins, and two consequences of a per-title render size are handled with
+      it: a window size remembered in `~/.pad_windows` records the render it
+      framed (a size saved around 1360x768 is not replayed over an 800x480
+      one), and a save slot records its render size so `restorestate.sh`
+      refuses a pre-change checkpoint in the pre-flight instead of letting
+      criu discover it after the live guest has been killed.
+      titles come up stretched or ringed in black — and Venom's is on its
+      side.** `S3 D2`
+      *(Filed 2026-08-23 from PAD-81, the tester who asked for the Compare
+      tab. Four separate reports, one cause plus one gap: Venom — "the
+      secondary screen needs to be set to portrait mode (90 degrees clockwise
+      rotation)" and "should match the native content size (800x480) to avoid
+      stretching"; Stranger Things — "much larger than its asset resolution
+      (368x214), causing large black borders"; The Mandalorian — "needs to be
+      set to 1280x800"; Star Wars — "needs to be set to 480x272".)*
+      **THE CAUSE IS ALREADY WRITTEN DOWN IN THE SHIM'S OWN COMMENT.**
+      `eglshim.c`'s `fbGetDisplayGeometry()` (item 44) answers per display,
+      but its ONLY per-display answer is the pair of env vars `PAD_GL2_W` /
+      `PAD_GL2_H`; with neither set it falls through to `pad_fb_width()` /
+      `pad_fb_height()` — the backbox LCD's size — for every display. The host
+      copies the same default on purpose (`padglhost.c`'s `PADGL_TARGET`:
+      `fb2_w = fb_w; fb2_h = fb_h;` then the same two env vars), so the two
+      sides cannot disagree. Nothing on the machine ever sets them, so **every
+      title's second display is opened at the FIRST display's size**, and
+      `win2_present()` then letterboxes the real content inside it — which is
+      exactly "large black borders" on a 368x214 asset and a stretch on
+      anything whose aspect differs.
+      **So the size half is a MISSING TABLE, not a broken renderer**, and the
+      four numbers above are four of its rows. Where they come FROM is the
+      open question and the reason this is not a five-minute change: a
+      hand-typed per-title list is the "a wrong table is worse than none" trap
+      items 55, 57 and 61 each fell into once. Look first for the geometry on
+      the CARD — the game must know it, it drives the panel — and only fall
+      back to a table if it genuinely is not there.
+      **The rotation half has no mechanism at all.** Item 51's note is the
+      standing warning: "a mirror is not a rotation — `PAD_GL_FLIP` is
+      `uv.y -> 1-uv.y` and could never have fixed this". A portrait second
+      display needs a real 90° step in the `blit_prog` shader `win2_present()`
+      uses, plus a swapped window aspect, and the same "where does the value
+      come from" question as the size.
+      **Acceptance:** venom_le's second window opens 800x480, portrait, with
+      readable (not mirrored) text; stranger_things_le's opens 368x214 with no
+      border; mando_le 1280x800; star_wars_le 480x272 — screenshots of all
+      four, judged ON THE TEXT.
+      — S3: cosmetic, nothing is blocked. D2: the size half is a table plus
+      two env vars that already work end to end; the rotation half is a shader
+      change plus one live run per title to photograph.
+      **★ 2026-08-23, Sam's report (emailed to David) ADDS A FIFTH ROW AND
+      WIDENS THIS ITEM TO THE MAIN WINDOW: james_bond_60th_le — "content is
+      scaled for 800x480 pixels, making the window too large" — and Bond's is
+      DISPLAY 0.** Bond has never targeted a second display (item 44:
+      single-display titles emit zero PADGL_TARGETs; the two-display list is
+      star_wars_le / stranger_things_le / venom_le / mando_le), so this is
+      the SAME missing table one branch earlier in the same function: display
+      0's answer is the fall-through `pad_fb_width()`/`pad_fb_height()`
+      (eglshim.c:346-347) = `PAD_GL_W`/`PAD_GL_H` (glbridge.c:173-174), which
+      watch.sh:98-99 hardcodes to 1360x768 for EVERY title; `win_open()`
+      sizes the main window from the same numbers (padglhost.c:1644; Bond's
+      item-45 run log: "window opened 1445x827" — a remembered winpos size
+      over a 1360x768 fb, oracle frame 1044480 px = 1360x768). The guest
+      scales its scene to whatever it is told, so Bond's 800x480-authored art
+      comes up ~1.7x and ~6% aspect-stretched.
+      **And the first concrete answer to "where do the numbers come FROM":
+      the CARD carries the main-display size as the title's own art.**
+      `assets/lcd/GameLogo.png` IHDR, read off three cardcache images with
+      debugfs: james_bond_60th_le = **800x480**; star_wars_le AND
+      stranger_things_le = **1360x768** — Stern authors standard backbox
+      content at exactly the rig default, which is why nothing else ever
+      looked wrong on display 0. The u-boot env is NOT the table: `videoargs`
+      is byte-identical on every card checked (a generic hardware probe — the
+      real machine asks its panel), so it says nothing per-title. A second
+      candidate source, unmeasured: `fbCreateWindow` (eglshim.c:350-356)
+      DISCARDS the w/h the game asks for — log them on one Bond run before
+      hand-building any table row. No card source is known yet for the
+      SECOND-display rows above.
+      **Added acceptance row:** james_bond_60th_le's MAIN window opens
+      800x480 with the art 1:1, judged on the text. Two cautions for the fix:
+      `PAD_GL_W/H` sizes the guest's whole pipeline before it starts (screen
+      texture padglhost.c:4537, ring header padglhost.c:4738), so a per-title
+      value may orphan Bond's existing save slots (item 36a's class); and a
+      remembered winpos size survives the fix (padglhost.c:1654-1655) — the
+      letterbox keeps the aspect honest but the window stays big until Reset
+      windows.
+      **★ 2026-08-24, Sam again (PAD-84) — THREE CORRECTIONS TO THE ROWS
+      ABOVE, one of which invalidates a shipped census row.**
+      1. **His resolutions are INFERRED, not measured panel specs**: "Regarding
+         the resolutions for the different screens I gave you yesterday, I
+         based them on the size of the videos displayed on them." So
+         368x214 / 1280x800 / 480x272 / 800x480 are the sizes of the CONTENT
+         Stern authored, not necessarily the panel's mode. They are still the
+         right target for "no stretch, no borders" (the guest scales its scene
+         to whatever it is told), but they must NOT be presented as hardware
+         facts, and a title whose art is authored smaller than its panel would
+         break the equivalence. This is the "a wrong table is worse than none"
+         warning above, now with a named mechanism.
+      2. **james_bond_60th_le HAS EXACTLY ONE SCREEN**: "there is only one
+         screen: it's under the playfield and is very small. The backbox
+         doesn't have an LCD screen." That confirms the 800x480 GameLogo.png
+         read and the item-44 observation that Bond emits zero PADGL_TARGETs —
+         Bond is a genuine single-display title, and the small under-playfield
+         panel IS display 0. **CAUTION FOR `ticket/PAD-83` (not yet merged):**
+         `tools/spike2_emu/gl2geom.py`'s census assigns Bond a SECONDARY at
+         800x480, because Bond is the one title carrying `SternLogo` at two
+         sizes and the "smallest other sane size" rule then invents a second
+         display it does not have. Bond must come back with a primary of
+         800x480 and NO secondary. Re-check that row before or right after
+         that branch merges.
+      3. **batman DOES have a second screen, "on the carousel"** — so the
+         240x180 `VideoClipPlayerDisplayElement_240x180` row is real hardware,
+         and PAD-83's finding stands as the open question: our two full runs
+         logged only `fbGetDisplayByIndex(0)`, i.e. the GUEST never asked. Both
+         runs stalled in the service menu (item 64) and never reached attract,
+         so "the TV is only asked for in attract" is still untested — reaching
+         attract on batman is the next measurement, not a shim change.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. NOT FIXED. The
+      size half has its source and item 101 withdrew the one attempt at it;
+      the rotation half was never started.
+
+- [x] **70. Tester report (Sam, 2026-08-23): "Node board 10 not found" on
+      Iron Maiden, "Node board 7 not found" on James Bond 60th.** `S2 D3`
+      *(Emailed to David 2026-08-23, on "the latest game code versions". His
+      build is unknown — ask for a run log; its `[nbid]` line says in one
+      grep whether his identities came from the derived table or the
+      built-in godzilla one. But do not close this as item 55 by proxy: NOT
+      FOUND is the DISCOVERY family — a graded board was already found — and
+      no commit between 22e5823 and v0.156.0 touches nb_nodes_init /
+      nb_nodes_add_boards / nb_next_node, so the hole below is in current
+      main.)*
+      **The tell: both reported nodes are SWITCHLESS boards of their
+      titles.** iron_maiden_le's switches sit on nodes [0,1,4,8,9]; its node
+      10 is a ws2812node. james_bond_60th_le's sit on [0,1,4,6,8,9]; its
+      node 7 is a pinnode (code 18). Both carry full measured rows in their
+      own derived node_ident.txt, hexes shipped on card — the roster FILES
+      are fine. (The switchless sets are larger — maiden also 2/12/13, bond
+      also 2/12/14 — and why exactly ONE per title is reported is
+      unexplained: required-board flags? PAD_NB_SILENT census? The boot
+      below answers it.)
+      **The mechanism: the game can only discover what the shim's `00`-poll
+      schedule names** (nb_next_node, hwshim.c:6391-6414), and nb_nodes_init
+      (6305-6388) seeds that schedule from the SWITCH table, so a switchless
+      board enters only by conditional routes, each with holes: the
+      node-directory merge (6335-6343) runs ONLY on a FILE-installed switch
+      table and only for loaded nb_fident_have ids; a MEMORY-found table —
+      bond, on record: `[swfind] found the switch table: entry[] at
+      0x007d2680` — skips the merge BY DESIGN on the godzilla-measured
+      assumption that nb_nodes_add_boards() (6278-6293) covers it, which
+      needs the by-shape board array to resolve AND the game to have already
+      registered the board: the chicken-and-egg the stranger_things comment
+      records at 6350-6364 ("no board object is ever created ... NODES NOT
+      FOUND"). Even godzilla's switchless boards registered by "some slower
+      path" (6262) nobody has explained. Which route each REPORTED title
+      actually dies on is for the boot to say, not this entry.
+      **Instrument, one card boot per title, GUI path, no overrides — the
+      log already names every link:** `[nbsched] playfield nodes: ... (from
+      <source>)`, `[nbid] N node identities from ...` vs per-node
+      `(built-in)`, `[watch] node identity: N boards derived` vs `derivation
+      failed` (Sam runs LATEST game code; our tables derive from
+      1.19.0/1.30.0-era cards), `[nbobj] board objects found by shape` vs
+      `no self-labelling board array after 3 scans`. Then the glass.
+      **Likely fix, to be confirmed by the boot, not assumed:** seed the
+      schedule from the title's own node directory on EVERY route — merge
+      nb_fident_have into the memory-table branch too — instead of only when
+      sw_ftab_installed. On godzilla the added ids are boards add_boards
+      already names, so the change is a no-op where the assumption held.
+      **Cross-link:** bond's not-found node 7 is plausibly the board its
+      GROUP-8 devices live on (the trough-coil loose end below; item 53's
+      groups 8/9) — the PAD_COIL_PROBE capture that closes that loose end
+      and this item's bond half may be the same run.
+      **Acceptance:** iron_maiden_le and james_bond_60th_le each boot from
+      card with the reported node in the `[nbsched]` roster (or registered
+      via add_boards), no NOT FOUND on the glass, the log stating which
+      route seeded it; godzilla_pro and turtles_pro unchanged.
+      — S2: the titles play, but a real board's devices are dead, the fault
+      is on the glass for every tester, and item 53's bond work may sit
+      behind it; on game code that gates bring-up on a required board it
+      would be a wedge. D3: two instrumented boots, a one-branch schedule
+      change, regression boots on two known-good titles — graded from the
+      desk; neither title's failure has been reproduced on this rig yet.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. NOT FIXED. The
+      discovery hole is located in the shim's poll schedule; no instrumented
+      boot was ever run against it.
+
+- [x] **32. Stretching the game window brings the emulation to a crawl.**
+      `S2 D3`
+      **★ DAVID, 2026-08-07: "stretching the display size for the stern spike 2
+      emulator window brings the emulation to a crawl (like when I make it 3 or
+      four times larger)."** The desktop is 3840x2160 at 120 Hz, so "3 or four
+      times" the default 1360x768 is at or past maximised.
+      **ESTABLISHED AT THE DESK, FROM THE SOURCE, AND IT NARROWS THE SEARCH
+      BEFORE ANY RUN: the guest's own drawing does NOT grow with the window.**
+      `fb_w`/`fb_h` are set once from `PAD_GL_W`/`PAD_GL_H` (`padglhost.c:2079`)
+      and the guest renders into `tex_screen` at that size whatever the window
+      does. The only thing that scales is `win_present()` (`padglhost.c:1367`):
+      one textured quad letterboxed into `win_w x win_h`, then `eglSwapBuffers`.
+      **ARITHMETIC, NOT A MEASUREMENT, so treat it as a reason to look further
+      rather than as a result — and it says the GPU fill is NOT enough on its
+      own.** `gpuprobe` measured the default adapter (the AMD iGPU, item 18) at
+      **1.096 ms/frame for 4 full-screen 1080p quads = 8.29 Mpixel**. The blit is
+      1.04 Mpixel at 1360x768 and ~8.3 Mpixel maximised, i.e. **~0.14 ms →
+      ~1.1 ms against a 16.7 ms budget**. That is real but it is not a crawl, so
+      do not stop at "it is the integrated GPU". The untested suspects are
+      downstream of the quad: the per-frame **cross-adapter copy** to a display
+      the NVIDIA card owns, the **msrdc RAIL present** of a much larger surface,
+      and whether either back-pressures the guest through the swap.
+      **RELATED MEASUREMENT, so nobody re-derives it: item 18 found msrdc CPU is
+      not pixel-proportional** — a quarter of the pixels moved it 72.1 → 70.3.
+      **But that was tested DOWNWARD from the default and never above it**, which
+      is the whole range this item is about.
+      **EVERY INSTRUMENT NEEDED ALREADY EXISTS AND THE THREE SEPARATE THE TWO
+      HALVES:** `[eglshim] N frames in M ms = X fps` is the GUEST's own rate,
+      `padglhost`'s `fps` line is the HOST's, and item 11's `swap_us` says how
+      long `eglSwapBuffers` blocks. Guest fps falling with host fps while
+      `swap_us` balloons is back-pressure; host fps falling alone is a display
+      cost only. **A free fourth oracle needs no instrument at all: audio does
+      not go through the renderer** (`padplay.py`, Windows side), so if the sound
+      crawls too, the guest genuinely slowed.
+      **REPRO WITHOUT TOUCHING A WINDOW, which matters because `SetWindowPos` on
+      an emulator window is a standing non-negotiable:** item 5 (`19e1b85`) made
+      `.pad_windows` lines `key x y [w h]` and padglhost CREATES at the saved
+      size — so write a big size in and start the run. If a resize DURING a run
+      is wanted, item 5's verified technique is a SendInput corner drag from a
+      DPI-aware process, not a programmatic move.
+      **Two levers exist but are knobs awaiting an A/B, not fixes:**
+      `PAD_GL_ADAPTER` (built for item 18, **unset by default**) points Mesa at
+      the NVIDIA card, and `PAD_GL_WIN_EVERY` presents every Nth frame.
+      **Acceptance:** state the window size in pixels and all three rates (guest
+      `[eglshim]`, host `fps`, `swap_us`) at the default size and at ~4x, on the
+      same run recipe — that pair alone is the finding, and it is worth a commit
+      even if no fix follows. A FIX means the guest's own fps holds at ~4x within
+      a stated margin of its default-size figure, with the picture still correct
+      and letterboxed, and dragging plus the item 5 size restore still working
+      afterwards — that is exactly what the banned fix broke.
+      — S2: play works at the default size so nobody is blocked outright, which
+      is why it is not S1; what it costs is playing at a viewable size on a 4K
+      desktop, and it makes every item whose oracle is David's eyes (1d's fade
+      curves, 21's trough markers) dearer by pinning the window small. Arguable
+      as S1 if you read "the game visibly misbehaves while you are playing it" as
+      covering a size the user chose. D3: needs a run, it shows up the moment you
+      look, and all three instruments exist and are validated — the unknown is
+      which stage of the present path pays, not how to see it.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. NOT FIXED. Desk
+      work eliminated the guest's own drawing and narrowed the suspects past
+      the blit; no run was ever made.
+
+- [x] **30. In the container, a run ends by itself after about 60 seconds.**
+      `S2 D3`
+      **MEASURED 2026-08-07, Docker Desktop on WINDOWS (not the target - see
+      below). Everything about the run is healthy until it stops.** Guest
+      producing **57.1 fps** (`[eglshim] 3460 frames in 60559 ms`), renderer
+      59.9/59.6 fps and 56.5 avg, card mounted, tables built from the card,
+      playfield window open, teardown clean and `alive.sh` 0 after. Then at
+      ~62 s: `[watch] stopping...` and nothing else.
+      **ESTABLISHED, and it rules out the obvious causes.** `watch.sh`'s poll
+      loop has exactly three exits and **NONE of their messages printed** —
+      not `renderer exited (window closed)`, not `the game exited`, not
+      `N min backstop reached` — and the script never reached the
+      `grep -aE 'fps|stopped' "$HOSTLOG"` line that sits between the loop and
+      the end of the script. So the loop did not break: the script took a
+      SIGNAL, and one whose trap could still run (`[watch] stopping...` is
+      printed BY teardown), so SIGINT or SIGTERM and not SIGKILL. `cfg MINS=3`
+      is in the log, so the backstop was 180 s and not 60.
+      **RULED OUT:** the test harness (it happens with the PowerShell pipeline
+      removed and output going to a file); anything the rig starts (grepped
+      `autoattract.sh`, `gamestate.sh`, `status.sh` — no `kill` anywhere); the
+      guest exiting on its own (teardown had to SIGKILL it, so it was alive);
+      the wall-clock backstop; and the OOM killer, which sends SIGKILL and
+      would not have let the trap run.
+      **THE TEST PLATFORM IS NOT THE TARGET, and that has to be settled first.**
+      This was Docker Desktop on **Windows**, which runs containers inside a
+      WSL2 VM. macOS uses a completely different VM layer. The container is
+      identical; the thing around it is not. So the FIRST job is to find out
+      whether this reproduces on a Mac at all — it may be an artefact of the
+      Windows host and no macOS user would ever see it.
+      **Second, cheaper job if it does reproduce:** put a signal trap in
+      `watch.sh` that names what it received (`trap 'echo "[watch] got SIG$s"'`
+      for INT/TERM/HUP), which turns one run into an answer. HUP is the
+      candidate worth suspecting given a container's session semantics.
+      **Related and unexplained: NO VIDEO in the container.** `padvidhost.py`
+      came up (`ready: /pad/rootfs/dump/padvid (95 MB, 8 channels x 4 slots)`)
+      but zero clips streamed in either run, where a WSL run of the same card
+      streams continuously. Not investigated at all.
+      **Acceptance:** a container run reaches its wall-clock backstop and says
+      so, on the platform it is for. State which host you tested on, because
+      this item exists because that distinction was not controlled for.
+      — S2: the emulator runs at full speed in the container, so nothing is
+      broken outright and this is not S1; what it costs is that no macOS
+      session lasts longer than a minute, which is most of the value. D3: it
+      needs a run, it reproduces every time, and the instrument is a one-line
+      trap - the unknown is which host it belongs to, not how to see it.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. NOT FIXED.
+      Measured on Docker Desktop for Windows, which the entry itself says is
+      not the macOS target.
+
+- [x] **72. "0 device records" is the PARSER on at least three titles, not
+      the card — the Godzilla-family 0x30 struct is one generation's shape,
+      and nobody owns the RE for the others.** `S3 D3`
+      *(Filed 2026-08-23 at David's ask, after Sam's batman dark-inserts
+      report put a tester's face on the class and the X-Men/JP recheck
+      proved its signature twice more. Item 57's sweep named it and closed
+      without filing it; items 53 and 71 both lean on it.)*
+      **The proven tell is the funnel, reproducible at the desk:**
+      devicexy.seeds() resolves hundreds of candidate record pointers on
+      these binaries — the string/pointer machinery works — then _one()'s
+      0x30-byte validator keeps a handful of GARBAGE rows (service text as
+      'image names') and the >=4-run filter keeps zero. Measured members:
+      aerosmith_le (1104 seeds → 2 garbage, the first sighting, item 57
+      notes ~line 261-269), uncanny_xmen_le 0.97.0 (810 → 17),
+      jurassic_park_le 1.15.0 (1164 → 17, image strings like
+      `/spine/src/Slot.cpp`). batman reads `0 records` but its funnel has
+      NOT been run — the census below says which side it falls on, and it
+      is the payoff title if positions exist (Sam reported its inserts).
+      **The standing misread this item exists to end:** "0 records" has
+      been read as "ships no device table" twice — item 57's close said it
+      of dungeons_and_dragons_le (falsified: 255 records, its fault was
+      item 71's art FILENAME) and the 2026-08-23 census said it of X-Men/
+      JP until the funnel was run. Absence of a PARSE is not absence of a
+      TABLE. (DnD is NOT this class — it parses clean and is a positive
+      control, with beatles-1_29_0: 180 records, self-checks 48/48 sides
+      correct, 0/8 RGB stems misaligned.)
+      **First move is a census, not RE:** run the funnel over every ELF in
+      the card library and split README's "0 records" rows into parser-gap
+      (many seeds, garbage validations) vs genuinely-empty (few/no seeds)
+      — that names the generations and picks the RE target. Then crack ONE
+      title's layout. The oracles already exist: devicexy's own
+      self-checks (left/right switch names on the correct side, RGB stem
+      alignment) and XY plausibility against the layout image the records
+      name. With positions, a title gets item 50's positional view and
+      item 53's map can light its inserts on a blank field even where no
+      artwork ships.
+      **Acceptance:** batman's device table parses with sane rows
+      (self-checks pass, funnel numbers stated before/after) and its
+      playfield window shows positioned devices — OR the census proves its
+      build genuinely ships none, stated with the funnel numbers, and the
+      RE target becomes the largest parser-gap title instead. Either way:
+      cardaudit over the whole library changes only rows the RE claims,
+      beatles / DnD / godzilla rows unchanged, and every genuinely
+      table-less title is recorded per-BUILD with its numbers, so the next
+      reader inherits a measurement instead of a guess.
+      — S3: friction — affected titles play fine and fall back to the
+      schematic/grid view; nothing is blocked. D3: the census is desk work
+      with the instrument in hand, but the RE itself is an unknown struct
+      across possibly several generations — grade is from the armchair
+      until the census sizes it.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. NOT FIXED. The
+      census method is known; nobody owns the struct reverse engineering for
+      the non-Godzilla generations.
+
+- [x] **38. A run can strand its windows, and then EVERY later run is
+      INVISIBLE — the game plays perfectly with no window, and every
+      instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
+      the strand was reproduced on a second occasion — item 21a's run, torn
+      down with `killgame.sh` — and the WINDOW half now has a cheap, verified
+      cure that does not shut the VM. See (4).)*
+      **Found 2026-08-10 during item 22's pass, with `zorder.py`, `shotwin.py`
+      and `alive.sh`. Established, in order:**
+      **(1) A run left two windows behind after a clean teardown.** The run was
+      `watch.sh` on a title with no extracted game ELF, so the guest never
+      started; teardown printed `TOTAL STILL RUNNING : 0  (clean)` and
+      `star_wars_le - Stern Spike 2 emulator (Ubuntu)` plus `Controls - Spike 2
+      emulator (Ubuntu)` stayed on the desktop as msrdc RAIL proxies. They are
+      REAL windows, not leaked handles: `shotwin.py` grabbed one — PrintWindow
+      1, 4.1% non-black — an empty black window with a working title bar and
+      close button. **They ignore `WM_CLOSE`**, which makes sense: there is no
+      X client left to receive `WM_DELETE_WINDOW`.
+      **(2) The NEXT run then had no game window at all.** `padglhost` logged
+      `window opened 1445x827 on DISPLAY=:0` and rendered **13997 frames in
+      239.6 s (58.4 fps avg), swap 3.83 ms/f** — a flawless render loop — while
+      `zorder.py --all` showed that no such window existed anywhere on the
+      desktop. The guest played, video was handed over at 30.0/s, audio ran,
+      `alive.sh` counted a full healthy run. The picture simply was not there
+      and **nothing anywhere said so**.
+      **(3) `wsl --shutdown` cleared it completely** and the next run's windows
+      appeared normally, above the app, first time.
+      **★★ (4) THE WINDOW HALF HAS A MUCH CHEAPER CURE, established 2026-08-10
+      on a live strand (David: "these windows are frozen open and i can't close
+      them"). KILL msrdc.exe.** Both stranded windows were owned by ONE
+      `msrdc.exe` — `zorder.py --all` named it, pid and all — which is WSLg's
+      RDP client and not a Linux process at all. `Stop-Process` on it dropped
+      both windows in about three seconds, WSLg restarted itself as a fresh
+      msrdc pid on its own, **no Linux process died** (two idle `-bash`
+      sessions survived) and `zorder.py` then printed `VERDICT: no emulator
+      window found`. So `wsl --shutdown` is NOT required to unstick the
+      windows; it is required only to reap the interop zombie, which is a
+      different fault with a different cost. **Which means the cure this item
+      should build is: detect (below), then offer the msrdc kill first and the
+      VM shutdown only for the zombie.** Anything that shuts the whole VM to
+      clear a window is charging a user their entire WSL session for a repaint.
+      **NOT ESTABLISHED — do not build on it: WHICH run wedged it, and whether
+      the zombie is cause or symptom.** After run (2), `alive.sh` reported
+      `zombies (cannot be killed, only reaped): 1` for the guest, held by a WSL
+      interop Relay, and named `wsl --shutdown` as the only cure — but the
+      windows were ALREADY stranded before that, at a moment when `alive.sh`
+      had printed a clean 0. So the zombie is a second symptom at best.
+      **Why this is worth more than it looks:** every oracle this rig owns
+      reports healthy. Renderer fps, guest video rate, `alive.sh`, the run log
+      — all normal. The one thing wrong is that there is no picture, and the
+      rig cannot currently tell.
+      **The cheapest first job is DETECTION, not a cure**, and the rig is
+      already on the right side of the boundary to do it: `watch.sh` starts the
+      playfield through Windows interop, so it can run `zorder.py` a few
+      seconds after `window opened` and say "the game window never appeared on
+      the desktop — `wsl --shutdown`" instead of leaving it to be discovered.
+      **Second, unexplained and possibly the same wedge:** while stranded, an X
+      client printed `your 131072x1 screen size is bogus. expect trouble`, and
+      that line landed INSIDE `alive.sh`'s output, eating the
+      `guest (comm=game)` label off its first line. `alive.sh` is the rig's only
+      definition of clean, so a stray writer corrupting its first row is its own
+      small bug.
+      **★ NARROWED FOR FREE, 2026-08-10 during item 21b's pass, and it is NOT
+      the wedge: that line comes from the LOGIN SHELL.** It printed on a bare
+      `wsl -e bash -lc 'ls ~'` with no run up at all, no emulator, no stranded
+      window — so something in the WSL profile emits it and any helper invoked
+      through a LOGIN shell (`bash -lc`) wears it. That makes it a
+      one-character fix in how alive.sh is invoked rather than a symptom of
+      the strand, and it means the corrupted first row is reproducible on
+      demand with no run at all. Do not spend a run on it.
+      **★ AND A CHEAP WAY TO AVOID THE INTEROP ZOMBIE, same pass, one
+      observation so treat it as a lead:** item 21a's run left the guest as a
+      `Zl` zombie held by a WSL interop Relay, and its handoff blames
+      `Start-Process wsl … watch.sh` from PowerShell for putting the relay in
+      the parent chain. This pass started its run with
+      `wsl -e setsid --fork bash -c "exec … watch.sh"` — setsid as the FIRST
+      process, so the run is a session leader and not the relay's child — and
+      after `killgame.sh` it printed `killed 19; still running: 0` with no
+      zombie and no `wsl --shutdown`. Also worth knowing: backgrounding inside
+      the shell (`… watch.sh & echo started`) does NOT survive `wsl -e`
+      returning, which looks exactly like the run silently never starting.
+      **Acceptance:** force the repro (a run on a title with no game ELF, then a
+      normal run) and have the rig SAY the picture is missing rather than let it
+      be discovered; then state whether the strand still happens once teardown
+      is fixed, and on how many repeats.
+      — S2: play itself is not broken and one command cures it, so it is not
+      S1; what it costs is that the emulator can be silently unusable and every
+      other item's runs are measured through it. Arguable as S1 for anyone who
+      does not know the trick. D3: it needs a run, it reproduces on demand, and
+      all three instruments already exist.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. NOT FIXED. One
+      occurrence established with its recovery; never reproduced, and the
+      instrument was never built.
+
+- [x] **36b. Saving a state on star_wars killed the donor run ~10 s later.**
+      `S1 D4` *(**Split on 2026-08-10**: the LOAD half is fixed, verified and
+      merged as 36a. This is the save-side death, which is a different fault
+      with a different instrument — item 23's exit-reason hook — and it is
+      the only part still open.)*
+      **★ DAVID, 2026-08-10 ~13:00: "i tried to save and load on star wars
+      and it crashed."** The evidence, mined the same minute
+      (`c:/tmp/item27/gzwatch_sw_savecrash.log`): **THE SAVE SUCCEEDED** —
+      slot3 `star_wars_le "sw game play"` packed, 63 MB, stamped at the
+      checkpoint freeze (every channel's `worst gap` ~900 ms at 13:00:08 is
+      the criu dump). What David called the crash of "save and load" was two
+      faults at once: the load half (now 36a, and slot3 has since been
+      restored successfully) and **the GUEST EXITING BY ITSELF ~10 s after
+      the dump resumed, CLEANLY** — gzwatch ends at a healthy 49.9 fps with
+      no segv block, no signal, no exit path. That is item 23's first shape
+      (the clean exit), with its strongest correlate yet: a leave-running
+      criu dump 10 s earlier, on the title with four video channels and two
+      EGL surfaces mid-clip-churn at the freeze.
+      **★★ ONE COUNTER-OBSERVATION, 2026-08-10 ~18:40, and it is why this
+      needs repeats rather than a theory: a star_wars save did NOT kill its
+      donor.** On the 36a verification run — a game RESTORED from slot3, then
+      saved to a fresh slot with `savegame.sh` — the pack completed (61 MB)
+      and the guest was still alive and rendering 15 s later. One survival is
+      not a refutation of one death; what it says is that the fault is not
+      "every star_wars save", so the next pass must state HOW MANY repeats it
+      ran and what the game was doing during each.
+      Godzilla survives the identical dump (item 13 verified end-to-end, plus
+      David's own sessions). Suspect space: the game's own watchdog tripping
+      on the ~0.9 s world-stop (SW may time boards/audio tighter), or a
+      frozen-mid-flight video/EGL thread resuming into an invariant SW
+      exercises and Godzilla does not.
+      **BLOCKED ON AN INSTRUMENT THAT IS NOW THIS ITEM'S OWN FIRST JOB.** The
+      guest goes down with nothing anywhere recording WHY; until an exit hook
+      names the path, a repeat sighting teaches nothing, which is exactly the D4
+      line. **This used to be item 23's job. ITEM 23 WAS DROPPED 2026-08-11 at
+      David's ask, so nothing else will build it** — see the Dropped section
+      below, which still carries the three measured exit signatures and is worth
+      reading before starting here. What it needs: an `atexit` hook in the shim
+      that says whether `main` returned and what signal it took, and `watch.sh`
+      grepping the `[segv] pc=` header on exit so the app pane keeps the
+      signature instead of the VPU noise.
+      **Acceptance:** a star_wars save leaves the donor run alive, stated over
+      a number of repeats (both during play and from a restored game, since
+      those differ today), or the exit reproduces and the new reason line names
+      it.
+      — S1: the feature's whole point is saving mid-play, and a save that
+      ends the session costs the ball you were playing. D4: the instrument
+      does not exist yet and the fault has already failed to reproduce once.
+      ← CLOSED 2026-09-11 at David's call on a queue prune. NOT FIXED. One
+      death and one survival, and the exit-reason hook it is blocked on was
+      never built because item 23 was dropped.
 - [x] **111. Beatles dies in the rig within seconds of starting, on the STOCK
       raw with no menu and no store.** `S3 D3` ← CLOSED 2026-09-11, emulator-proven
       *(Taken at David's call before 107 could finish. Not a code fault: an elevated

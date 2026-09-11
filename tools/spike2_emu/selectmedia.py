@@ -191,7 +191,8 @@ ART_AT_RE = re.compile(r"^%s$" % _NUM_RE)                                       
 SOUND_AT_RE = re.compile(r"^\d+$")                                                    # auto@IDX
 STALE_FULL_RE = re.compile(r"^(?:(?:art|anim|music)\d+\.(?:png|gif|wav)"
                            r"|confirm\d+\.wav|(?:move|confirm)\.wav"
-                           r"|gart\d+\.png|ganim\d+\.gif)$")
+                           r"|gart\d+\.png|ganim\d+\.gif"
+                           r"|(?:gmusic|gconfirm)\d+\.wav)$")
 STALE_VISUAL_RE = re.compile(r"^(?:g?art\d+\.png|g?anim\d+\.gif)$")
 
 
@@ -624,8 +625,12 @@ def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_V
         out.setdefault("groups", []).append(
             {"members": members, "art": g.get("art") or None,
              "anim": g.get("anim") or None,
+             "music": g.get("music") or None,
+             "confirm": g.get("confirm") or None,
              "art_source": g.get("art_source") or None,
-             "anim_source": g.get("anim_source") or None})
+             "anim_source": g.get("anim_source") or None,
+             "music_source": g.get("music_source") or None,
+             "confirm_source": g.get("confirm_source") or None})
     return out
 
 
@@ -666,19 +671,21 @@ def validate_manifest(m):
                             for x in members):
                 raise Refused("media.json: groups[%d].members must be a list of image "
                               "indexes" % gi)
-            for k in ("art", "anim"):
+            for k in ("art", "anim", "music", "confirm"):
                 v = g.get(k)
                 if v is not None:
                     if not isinstance(v, str):
                         raise Refused("media.json: groups[%d].%s must be a name or null"
                                       % (gi, k))
                     check_media_name(v)
-            for k in ("art_source", "anim_source"):
+            for k in ("art_source", "anim_source", "music_source", "confirm_source"):
                 v = g.get(k)
                 if v is not None and not isinstance(v, str):
                     raise Refused("media.json: groups[%d].%s must be a spec string or null"
                                   % (gi, k))
-            extra = set(g) - {"members", "art", "anim", "art_source", "anim_source"}
+            extra = set(g) - {"members", "art", "anim", "music", "confirm",
+                              "art_source", "anim_source", "music_source",
+                              "confirm_source"}
             if extra:
                 raise Refused("media.json: groups[%d] has unknown keys %s"
                               % (gi, sorted(extra)))
@@ -709,7 +716,7 @@ def manifest_files(m):
     # image's, so without this it is neither staged onto the card nor kept by
     # the stale sweep
     for g in (m.get("groups") or []):
-        for k in ("art", "anim"):
+        for k in ("art", "anim", "music", "confirm"):
             if g.get(k) and g[k] not in names:
                 names.append(g[k])
     for k in ("sound_move", "sound_confirm"):
@@ -1749,7 +1756,26 @@ def _sound_default(spec, sources, primary, idx, max_seconds, fade_ms, synth_kind
     return name
 
 
-def _prepare_confirm(i, card, spec, out, sources, log=say):
+def _prepare_music(i, spec, out, log=say, prefix="music"):
+    """music<i>.wav for one card, or None when it has none.  The bed is
+    normalised and faded exactly as every other one is - a RANDOM card's own
+    music goes through this too, which is why it takes the name."""
+    if spec == "none" or not spec:
+        return None
+    src, seconds = split_music_spec(spec)
+    if not os.path.isfile(src):
+        raise Refused("music %d: %s is not a file" % (i, src))
+    target = os.path.join(out, "%s%d.wav" % (prefix, i))
+    normalise_wav(src, target, seconds, MUSIC_FADE_MS)
+    whole = _duration_of(src)
+    log("  %s: %s (%s)"
+        % (os.path.basename(target), src,
+           "the first %.4g s of %.4g s, faded out" % (seconds, whole)
+           if whole and whole > seconds + 0.05 else "%.4g s" % (whole or seconds)))
+    return os.path.basename(target)
+
+
+def _prepare_confirm(i, card, spec, out, sources, log=say, prefix="confirm"):
     """confirm<i>.wav for one image, or None when the image has no confirm sound of its
     own and falls back to the menu-wide confirm.wav ('none', or no 'N=' spec at all).
 
@@ -1765,7 +1791,7 @@ def _prepare_confirm(i, card, spec, out, sources, log=say):
     p = parse_sound_spec(spec, CONFIRM_IDX)
     if p["kind"] == "none":
         return None
-    target = os.path.join(out, "confirm%d.wav" % i)
+    target = os.path.join(out, "%s%d.wav" % (prefix, i))
     name = os.path.basename(target)
     if p["kind"] == "synth":
         drop_sidecar(target)
@@ -2501,7 +2527,7 @@ def render_group_frames(style, logos, size, colors=None):
 
 
 def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
-                   card, log=say):
+                   card, log=say, music=None, confirm=None, sources=None):
     """gart<g>.png / ganim<g>.gif for one RANDOM card, from its members' logos.
 
     Cached on the member CARDS' stamps and the style, so re-running with the
@@ -2586,6 +2612,19 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
             log("  %s: %s, %d frames (%s)"
                 % (name, anim_style, len(frames), fmt_bytes(os.path.getsize(target))))
         names["anim"] = name
+
+    # THE CARD'S OWN SOUNDS.  A random card is a card: it has a music bed and a
+    # confirm sound of its own, and borrowing its first member's was how the one
+    # the owner picked was dropped on the floor (David, 2026-09-11: "i'm not
+    # hearing music that i selected when hovering over the random card").  An
+    # 'auto' confirm is pulled off the FIRST member's card, because that is the
+    # only .raw a random card has any claim on.
+    if music and music != "none":
+        names["music"] = _prepare_music(g, music, out, log=log, prefix="gmusic")
+    if confirm and confirm != "none":
+        names["confirm"] = _prepare_confirm(g, images[members[0]], confirm, out,
+                                            sources if sources is not None else {},
+                                            log=log, prefix="gconfirm")
     return names
 
 
@@ -2612,7 +2651,10 @@ def cmd_prepare(a):
     group_members = parse_group_members(getattr(a, "group_members", None))
     group_art = parse_group_specs(getattr(a, "group_art", None), "group-art")
     group_anim = parse_group_specs(getattr(a, "group_anim", None), "group-anim")
-    for g in sorted(set(group_art) | set(group_anim)):
+    group_music = parse_group_specs(getattr(a, "group_music", None), "group-music")
+    group_confirm = parse_group_specs(getattr(a, "group_confirm", None), "group-confirm")
+    for g in sorted(set(group_art) | set(group_anim) | set(group_music)
+                    | set(group_confirm)):
         if g not in group_members:
             raise Refused("--group-art/--group-anim %d: no --group-members %d=... to draw from" % (g, g))
     visual_only = bool(getattr(a, "visual_only", False))
@@ -2636,25 +2678,14 @@ def cmd_prepare(a):
         for g in sorted(group_members):
             groups_out[g] = _prepare_group(
                 g, group_members[g], group_art.get(g), group_anim.get(g),
-                images, size, out, work, card)
+                images, size, out, work, card,
+                music=None if visual_only else group_music.get(g),
+                confirm=None if visual_only else group_confirm.get(g),
+                sources=sources)
         for i, img in enumerate(images):
             art = _prepare_art(i, img, arts[i], size, out, work, card)
             anim = _prepare_anim(i, img, anims[i], size, out, work)
-            music = None
-            spec = musics[i]
-            if spec != "none":
-                src, seconds = split_music_spec(spec)
-                if not os.path.isfile(src):
-                    raise Refused("music %d: %s is not a file" % (i, src))
-                music_out = os.path.join(out, "music%d.wav" % i)
-                normalise_wav(src, music_out, seconds, MUSIC_FADE_MS)
-                whole = _duration_of(src)
-                say("  music%d.wav: %s (%s)"
-                    % (i, src,
-                       "the first %.4g s of %.4g s, faded out"
-                       % (seconds, whole) if whole and whole > seconds + 0.05
-                       else "%.4g s" % (whole or seconds)))
-                music = os.path.basename(music_out)
+            music = _prepare_music(i, musics[i], out)
             rows.append([art, anim, music, None])
             specs.append((arts[i]["spec"], anims[i]["spec"], confirm_each[i],
                           musics[i]))
@@ -2678,8 +2709,12 @@ def cmd_prepare(a):
     man_groups = [{"members": group_members[g],
                    "art": groups_out[g].get("art"),
                    "anim": groups_out[g].get("anim"),
+                   "music": groups_out[g].get("music"),
+                   "confirm": groups_out[g].get("confirm"),
                    "art_source": group_art.get(g),
-                   "anim_source": group_anim.get(g)}
+                   "anim_source": group_anim.get(g),
+                   "music_source": None if visual_only else group_music.get(g),
+                   "confirm_source": None if visual_only else group_confirm.get(g)}
                   for g in sorted(group_members)]
     m = build_manifest(rows, move, confirm, a.volume, sources=specs,
                        sound_move_source=(None if visual_only else a.sound_move),
@@ -2781,6 +2816,12 @@ def main(argv=None):
     s.add_argument("--group-anim", action="append", default=[], metavar="G=STYLE|none",
                    help="random card G's animation: %s, or none"
                         % " / ".join(sorted(GROUP_ANIM_STYLES)))
+    s.add_argument("--group-music", action="append", default=[], metavar="G=WAV|none",
+                   help="random card G's own music bed - a card is a card, and its bed is "
+                        "not its first member's")
+    s.add_argument("--group-confirm", action="append", default=[], metavar="G=SPEC|none",
+                   help="random card G's own confirm sound: auto (off its first member's "
+                        "card), auto@IDX, synth, a WAV, or none for the menu's")
     s.add_argument("--visual-only", action="store_true",
                    help="art/anim (+music) only: no move/confirm sounds, none pulled off a card (the GUI preview)")
     s.add_argument("--volume", type=int, default=DEFAULT_VOLUME)

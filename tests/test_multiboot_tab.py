@@ -9188,12 +9188,12 @@ def test_a_member_game_asks_for_no_picture_of_its_own(tmp_path):
         anims = [args[i + 1] for i, a in enumerate(args) if a == "--anim"]
         assert arts == ["0=auto", "1=none", "2=none", "3=none"], arts
         assert anims == ["0=none", "1=none", "2=none", "3=none"], anims
-        # the card's own sounds ride on the FIRST member's row, which is where
-        # mkmulticard reads them from - and on no other member
+        # A RANDOM CARD IS A CARD: its bed is prepared against the CARD, so no
+        # member carries it and there is one copy of the wav, not two
         musics = [args[i + 1] for i, a in enumerate(args) if a == "--music"]
-        assert musics[0] == "0=none"
-        assert musics[1] == "1=" + mb.wsl(str(tmp_path / "bed.wav"))
-        assert musics[2:] == ["2=none", "3=none"], musics
+        assert musics == ["0=none", "1=none", "2=none", "3=none"], musics
+        assert args[args.index("--group-music") + 1] == \
+            "0=" + mb.wsl(str(tmp_path / "bed.wav"))
     finally:
         root.destroy()
 
@@ -9211,14 +9211,15 @@ def test_the_preview_draws_a_random_card_over_images_that_stay(tmp_path):
         panel.add_random_over_existing(title="RANDOM", subtitle="or roll")
         conf = mb.write_preview_conf(panel.form())
         lines = [l for l in conf.splitlines() if l.startswith("group=")]
-        assert lines == ["group=+0-1|RANDOM|or roll|gart0.png|ganim0.gif|"], conf
+        # the card's own rule rides in the spec, and its own sounds in the line
+        assert lines == ["group=+any:0-1|RANDOM|or roll|gart0.png|ganim0.gif|"], conf
         assert len([l for l in conf.splitlines() if l.startswith("image=")]) == 2
         # a CONSUMING group's line still sits in front of its first member
         panel._rows.pop()
         panel.add_group(_images(tmp_path, 4)[2:], title="JUKEBOX")
         conf = mb.write_preview_conf(panel.form())
         body = [l for l in conf.splitlines() if l[:1] != "#"]
-        assert body[2].startswith("group=2-3|JUKEBOX"), body
+        assert body[2].startswith("group=any:2-3|JUKEBOX"), body
         assert "|gart0.png|ganim0.gif|" in body[2]
     finally:
         root.destroy()
@@ -9236,10 +9237,10 @@ def test_the_card_after_a_random_one_plays_its_own_clip(tmp_path):
         panel.add_group(paths[1:3], title="JUKEBOX")
         panel.add_image(paths[3])
         names = mb.card_media_names(panel.form())
-        assert names[0] == ("art0.png", "")
-        assert names[1] == ("gart0.png", "ganim0.gif")
+        assert names[0] == ("art0.png", "", "", "")
+        assert names[1] == ("gart0.png", "ganim0.gif", "", "")
         # card 2 is IMAGE 3: the group above it took images 1 and 2
-        assert names[2] == ("art3.png", "")
+        assert names[2] == ("art3.png", "", "", "")
     finally:
         root.destroy()
 
@@ -9445,5 +9446,41 @@ def test_the_dialog_changes_how_a_random_card_picks(tmp_path):
         root.update()
         assert [w.cget("value") for w in _radios(dlg.body)] == \
             ["logo", "picture", "attract", "video", "none"]
+    finally:
+        root.destroy()
+
+
+def test_a_random_card_plays_its_own_music_when_it_is_highlighted(tmp_path):
+    """A RANDOM CARD IS A CARD: the bed that plays while it is highlighted is
+    its own. The manifest's image rows were read at the CARD index, which for a
+    random card is some other game's row or none at all - so the bed the owner
+    picked was never heard (David, 2026-09-11: "i'm not hearing music that i
+    selected when hovering over the random card")."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        bed = tmp_path / "bed.wav"
+        bed.write_bytes(b"RIFF....WAVEfmt ")
+        panel._rows[1].music = str(bed)
+        # what the prepare is asked for: the CARD's bed, against the card
+        args = mb.prepare_args(panel.form(), str(tmp_path / "media"))
+        assert args[args.index("--group-music") + 1] == "0=" + mb.wsl(str(bed))
+        # ...and what the preview plays for it comes out of the group's row
+        media = str(tmp_path / "media")
+        os.makedirs(media, exist_ok=True)
+        wav = os.path.join(media, "gmusic0.wav")
+        with open(wav, "wb") as f:
+            f.write(b"RIFF")
+        manifest = {"images": [{"music": "music0.wav"}],
+                    "groups": [{"music": "gmusic0.wav", "music_source": mb.wsl(str(bed))}],
+                    "sound_move": None, "sound_confirm": None}
+        got = mb.manifest_sounds(manifest, media, 1, group=0)
+        assert got["music"] == wav
+        # the image rows are what a PLAIN card reads, and they are a different
+        # answer at the same number
+        assert mb.manifest_sounds(manifest, media, 1)["music"] == ""
     finally:
         root.destroy()

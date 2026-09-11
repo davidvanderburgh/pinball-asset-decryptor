@@ -1354,8 +1354,11 @@ def test_media_json_carries_a_random_cards_own_picture(sm, tmp_path):
                                    "anim_source": "cycling"}])
     assert sm.validate_manifest(m) is m
     assert m["groups"] == [{"members": [0, 1], "art": "gart0.png",
-                            "anim": "ganim0.gif", "art_source": "stack",
-                            "anim_source": "cycling"}]
+                            "anim": "ganim0.gif",
+                            # a random card is a card: it has sounds of its own
+                            "music": None, "confirm": None,
+                            "art_source": "stack", "anim_source": "cycling",
+                            "music_source": None, "confirm_source": None}]
     assert sm.manifest_files(m) == ["art0.png", "art1.png",
                                     "gart0.png", "ganim0.gif"]
 
@@ -1434,9 +1437,17 @@ def test_a_random_cards_picture_is_rendered_cached_and_checked(sm, tmp_path, mon
     os.makedirs(out)
     os.makedirs(work)
     said = []
+    bed = str(tmp_path / "bed.wav")
+    write_wav(bed, seconds=0.2)
     names = sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72),
-                              out, work, card, log=said.append)
-    assert names == {"art": "gart0.png", "anim": "ganim0.gif"}
+                              out, work, card, log=said.append,
+                              music=bed, confirm="synth")
+    # A RANDOM CARD IS A CARD: the bed that plays while it is highlighted and
+    # the sound it makes when it is chosen are ITS OWN, not its first member's
+    # (David, 2026-09-11: "i'm not hearing music that i selected when hovering
+    # over the random card").
+    assert names == {"art": "gart0.png", "anim": "ganim0.gif",
+                     "music": "gmusic0.wav", "confirm": "gconfirm0.wav"}
     for n in names.values():
         assert os.path.getsize(os.path.join(out, n)) > 0, n
     # ...and the logo reached the renderers WITH its alpha

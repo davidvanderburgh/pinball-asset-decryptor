@@ -613,7 +613,7 @@ def form_groups(form):
 
 def card_media_names(form):
     """The media files each CARD's menu entry names, by row - a row IS a card.
-    ``[(art, anim), ...]``, '' where the card has none.
+    ``[(art, anim, music, confirm), ...]``, '' where the card has none.
 
     THE FILES ARE NUMBERED BY IMAGE AND THE CARDS ARE NOT.  `anim3.gif` belongs
     to the card in row 2 the moment a group above it swallows two images, which
@@ -633,11 +633,17 @@ def card_media_names(form):
                 "gart%d.png" % gi if group_art_spec(row) != "none" else "")
             anim = (row.anim or "").strip() if row.anim_on_card else (
                 "ganim%d.gif" % gi if group_anim_spec(row) != "none" else "")
+            music = (row.music or "").strip() if row.music_on_card else (
+                "gmusic%d.wav" % gi if _media_value(row.music) != "none" else "")
+            confirm = (row.confirm or "").strip() if row.confirm_on_card else (
+                "gconfirm%d.wav" % gi if confirm_spec(row) != "none" else "")
         else:
             i = first.get(ri, 0)
             art = "art%d.png" % i if art_spec(row) != "none" else ""
             anim = "anim%d.gif" % i if anim_spec(row) != "none" else ""
-        out.append((art, anim))
+            music = "music%d.wav" % i if _media_value(row.music) != "none" else ""
+            confirm = "confirm%d.wav" % i if confirm_spec(row) != "none" else ""
+        out.append((art, anim, music, confirm))
     return out
 
 
@@ -1193,10 +1199,17 @@ def read_manifest(media_dir):
     return m if isinstance(m, dict) else {}
 
 
-def manifest_sounds(manifest, media_dir, highlight):
+def manifest_sounds(manifest, media_dir, highlight, group=None):
     """``{"music", "move", "confirm"}`` - the WAV behind each of the menu's
-    three sounds for image *highlight*, as full paths under *media_dir*, and
+    three sounds for the highlighted CARD, as full paths under *media_dir*, and
     "" for one this media set has not got.
+
+    *group* is the card's GROUP INDEX when it is a random card, and then the
+    manifest's `groups` row is what answers - not `images[highlight]`, which is
+    some other game's row or none at all.  Reading the image rows for a card
+    index is how the bed an owner picked for a random card went unheard (David,
+    2026-09-11: "i'm not hearing music that i selected when hovering over the
+    random card").
 
     The fallbacks are the selector's, not ours: an image plays its OWN
     confirm sound when it has one (the seventh images.conf field) and the
@@ -1204,8 +1217,13 @@ def manifest_sounds(manifest, media_dir, highlight):
     A ``--visual-only`` prepare (the one the preview runs for itself) writes
     the music but no move or confirm sound at all, which is why "" here is
     ordinary and has to be said rather than treated as a fault."""
-    images = manifest.get("images") or []
-    row = images[highlight] if 0 <= highlight < len(images) else None
+    if group is None:
+        rows = manifest.get("images") or []
+        idx = highlight
+    else:
+        rows = manifest.get("groups") or []
+        idx = int(group)
+    row = rows[idx] if 0 <= idx < len(rows) else None
     row = row if isinstance(row, dict) else {}
 
     def full(name):
@@ -1802,7 +1820,14 @@ def group_media_args(form):
             continue
         args += ["--group-members", "%d=%s" % (gi, ",".join(str(i) for i in imgs)),
                  "--group-art", "%d=%s" % (gi, group_art_spec(row)),
-                 "--group-anim", "%d=%s" % (gi, group_anim_spec(row))]
+                 "--group-anim", "%d=%s" % (gi, group_anim_spec(row)),
+                 # A RANDOM CARD IS A CARD: the bed that plays while it is
+                 # highlighted and the sound it makes when it is chosen are its
+                 # own, not its first member's (David, 2026-09-11: "i'm not
+                 # hearing music that i selected when hovering over the random
+                 # card").
+                 "--group-music", "%d=%s" % (gi, _media_value(row.music)),
+                 "--group-confirm", "%d=%s" % (gi, confirm_spec(row))]
     return args
 
 
@@ -1842,9 +1867,11 @@ def prepare_args(form, media_dir, visual_only=False):
                      "--anim", "%d=%s" % (i, anim_spec(row)),
                      "--music", "%d=%s" % (i, _media_value(row.music))]
         else:
+            # ...and nothing to HEAR either: the card's own bed is prepared
+            # against the card (see group_media_args), so a member carrying one
+            # would be a second copy of the same wav.
             args += ["--art", "%d=none" % i, "--anim", "%d=none" % i,
-                     "--music", "%d=%s" % (i, _media_value(row.music)
-                                           if mi == 0 else "none")]
+                     "--music", "%d=none" % i]
     if not visual_only:
         args += ["--sound-move", _media_value(form.sound_move),
                  "--sound-confirm", _media_value(form.sound_confirm)]
@@ -1853,8 +1880,7 @@ def prepare_args(form, media_dir, visual_only=False):
         # them apart by the prefix, not by the order.
         for i, _path, ri, mi in form_trees(form):
             args += ["--sound-confirm", "%d=%s"
-                     % (i, confirm_spec(form.images[ri])
-                        if mi in (None, 0) else "none")]
+                     % (i, confirm_spec(form.images[ri]) if mi is None else "none")]
     args += ["--volume", str(int(form.volume))]
     return args
 
@@ -2441,6 +2467,7 @@ def write_preview_conf(form):
     trees = form_trees(form)
     names = card_media_names(form)
     per_row = {}
+    # the conf's own fields, in the selector's order
     for img, path, ri, mi in trees:
         per_row.setdefault(ri, []).append((img, path, mi))
     groups = {ri: imgs for _gi, ri, _row, imgs in form_groups(form)}
@@ -2448,22 +2475,24 @@ def write_preview_conf(form):
     # on the card at all, and a preview that only walked the games drew David's
     # `C1 | C2 | RANDOM` with no random card in it.
     for ri, row in enumerate(form.images):
-        art, anim = names[ri]
+        art, anim, music, _confirm = names[ri]
         if is_group(row):
             imgs = groups.get(ri) or []
             if len(imgs) >= 2:
-                lines.append("group=%s%d-%d|%s|%s|%s|%s|" % (
-                    "+" if row.keep else "", min(imgs), max(imgs),
+                lines.append("group=%s%s%d-%d|%s|%s|%s|%s|%s" % (
+                    "+" if row.keep else "",
+                    "" if row_roll(row) == ROLL_FALLBACK else row_roll(row) + ":",
+                    min(imgs), max(imgs),
                     (row.title or "").strip() or "GROUP",
-                    (row.subtitle or "").strip(), art, anim))
+                    (row.subtitle or "").strip(), art, anim, music))
             if row.keep:
                 continue                      # its games are other rows'
         for img, path, mi in per_row.get(ri, []):
             dev = "p3" if img == 0 else ("p7" if img == 1 else "p7:img%d" % img)
             if mi is None:
                 title = (row.title or "").strip() or suggest_title(path)[0]
-                lines.append("image=%s|%s|%s|%s|%s|" % (
-                    dev, title, (row.subtitle or "").strip(), art, anim))
+                lines.append("image=%s|%s|%s|%s|%s|%s" % (
+                    dev, title, (row.subtitle or "").strip(), art, anim, music))
             else:
                 m = row.members[mi]
                 title = (m.title or "").strip() or suggest_title(path)[0]
@@ -10257,7 +10286,10 @@ class MultibootPanel:
         hl = (_int(self._hl_var, _int(self._default_var, 0))
               if highlight is None else int(highlight))
         manifest = self._manifest(media)
-        sounds = manifest_sounds(manifest, media, hl)
+        # A RANDOM CARD'S SOUNDS ARE ITS OWN ROW's, and a card index is not an
+        # image index the moment one exists.
+        gi = {ri: g for g, ri, _row, _imgs in form_groups(self.form())}.get(hl)
+        sounds = manifest_sounds(manifest, media, hl, group=gi)
         # THE FORM SAYS WHETHER AN IMAGE HAS A SOUND; the manifest only says
         # which file.  A row set to 'none' since the last prepare still has
         # its old bed - and its old confirm - sitting in that directory, and
@@ -10284,8 +10316,10 @@ class MultibootPanel:
         # update to the new music selection") describes a card nobody is
         # going to build.  Silence until the new one is rendered - the
         # audio step follows a change by itself (see _auto_render).
-        rows = manifest.get("images") or []
-        entry = rows[hl] if 0 <= hl < len(rows) and isinstance(rows[hl], dict) else {}
+        rows = manifest.get("groups") if gi is not None else manifest.get("images")
+        rows = rows or []
+        key = gi if gi is not None else hl
+        entry = rows[key] if 0 <= key < len(rows) and isinstance(rows[key], dict) else {}
         if row is not None and sounds["music"]:
             was = entry.get("music_source")
             if was is not None and was != _media_value(row.music):

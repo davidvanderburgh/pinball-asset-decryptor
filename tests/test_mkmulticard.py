@@ -2596,8 +2596,11 @@ def _group_media_dir(mk, d, n_images=3):
     path = os.path.join(d, mk.MEDIA_MANIFEST)
     with open(path, encoding="utf-8") as f:
         man = json.load(f)
+    mk.synth_wav(os.path.join(d, "gmusic0.wav"))
     man["groups"] = [{"members": [1, 2], "art": "gart0.png", "anim": "ganim0.gif",
-                      "art_source": "stack", "anim_source": "cycling"}]
+                      "music": "gmusic0.wav", "confirm": None,
+                      "art_source": "stack", "anim_source": "cycling",
+                      "music_source": "/x/bed.wav", "confirm_source": None}]
     with open(path, "w", encoding="utf-8") as f:
         json.dump(man, f)
     return d
@@ -2610,17 +2613,20 @@ def test_a_random_cards_picture_is_staged_and_written_into_its_own_line(mk, tmp_
     a card that stands for several."""
     d = _group_media_dir(mk, str(tmp_path / "media"))
     ms = mk.plan_media(d, 3)
-    assert ms["group_rows"] == [("gart0.png", "ganim0.gif")]
-    assert "gart0.png" in ms["files"] and "ganim0.gif" in ms["files"]
+    assert ms["group_rows"] == [("gart0.png", "ganim0.gif", "gmusic0.wav", "")]
+    for name in ("gart0.png", "ganim0.gif", "gmusic0.wav"):
+        assert name in ms["files"], name
     text = mk.render_images_conf(
         ["/dev/mmcblk0p3", "/dev/mmcblk0p7", "/dev/mmcblk0p7:img2"],
         titles=["A", "B", "C"], media=ms["rows"],
         groups=[{"title": "JUKEBOX", "subtitle": "", "members": [1, 2],
-                 "media": ms["group_rows"][0] + ("music1.wav", "confirm1.wav")}])
+                 "media": ms["group_rows"][0]}])
     line = [l for l in text.splitlines() if l.startswith("group=")][0]
-    assert line == "group=1-2|JUKEBOX||gart0.png|ganim0.gif|music1.wav|confirm1.wav"
-    # ...and the member's own art is NOT what the card shows
-    assert "art1.png" not in line
+    # the seventh field is written because some IMAGE has a confirm of its own;
+    # this card has none, so it is empty and falls back to the menu's
+    assert line == "group=1-2|JUKEBOX||gart0.png|ganim0.gif|gmusic0.wav|"
+    # ...and NOTHING of the member's is what the card shows or plays
+    assert "art1.png" not in line and "music1.wav" not in line
 
 
 def test_conf_for_plan_gives_the_group_its_own_picture_and_the_members_sounds(mk, tmp_path):
@@ -2634,9 +2640,11 @@ def test_conf_for_plan_gives_the_group_its_own_picture_and_the_members_sounds(mk
                            default=0, timeout=15, selector_dir=None)
     text = mk.conf_for_plan(plan, args, media=ms)
     line = [l for l in text.splitlines() if l.startswith("group=")][0]
-    # its PICTURE is its own; its SOUNDS are still the first member's row, so a
-    # jukebox costs one card's worth however many members it has
-    assert line.startswith("group=1-2|JUKEBOX||gart0.png|ganim0.gif|music1.wav")
+    # A RANDOM CARD IS A CARD: the picture, the bed and the confirm sound on its
+    # line are ITS OWN.  Borrowing its first member's was how the bed the owner
+    # picked was dropped on the floor (David, 2026-09-11).
+    assert line.startswith("group=1-2|JUKEBOX||gart0.png|ganim0.gif|gmusic0.wav")
+    assert "music1.wav" not in line
     # a manifest that disagrees with the card about how many random cards there
     # are is refused rather than matched up by position
     args.groups = []

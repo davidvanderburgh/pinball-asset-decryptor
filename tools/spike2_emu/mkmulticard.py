@@ -1940,7 +1940,9 @@ def plan_media(media_dir, n_images):
         if not isinstance(e, dict):
             raise Refused("%s: groups[%d] must be an object" % (MEDIA_MANIFEST, gi))
         group_rows.append((take(e.get("art"), "art", "groups[%d].art" % gi),
-                           take(e.get("anim"), "anim", "groups[%d].anim" % gi)))
+                           take(e.get("anim"), "anim", "groups[%d].anim" % gi),
+                           take(e.get("music"), "wav", "groups[%d].music" % gi),
+                           take(e.get("confirm"), "wav", "groups[%d].confirm" % gi)))
     out = {"rows": rows, "group_rows": group_rows,
            "sound_move": take(man.get("sound_move"), "wav", "sound_move") or None,
            "sound_confirm": take(man.get("sound_confirm"), "wav", "sound_confirm") or None,
@@ -2795,19 +2797,20 @@ def conf_for_plan(plan, args, existing=None, media=None):
     for gi, g in enumerate(groups):
         if g.get("media"):
             continue
-        # A GROUP CARD'S SOUNDS ARE STILL ITS FIRST MEMBER'S ROW, so a jukebox costs
-        # one card's worth however many members it has.  Its PICTURE is its own when
-        # the media set carries one (item 106): "the game's own logo" means nothing
-        # on a card that stands for forty of them.  A null there is a picture the
-        # owner turned OFF, which is why an empty group row still wins over the
-        # borrow - only a media set with no groups at all falls back.
+        # A RANDOM CARD IS A CARD: its picture, its music bed and its confirm sound
+        # are its own when the media set carries them (item 106).  Borrowing its first
+        # member's was how the bed the owner picked was dropped on the floor (David,
+        # 2026-09-11), and "the game's own logo" means nothing on a card that stands
+        # for forty of them either.  A null is a field the owner turned OFF, which is
+        # why an empty group row still wins over the borrow - only a media set with no
+        # groups at all falls back, which is what a card built before this did.
         borrowed = ("", "", "", "")
         if rows and g.get("members"):
             first = g["members"][0]
             if 0 <= first < len(rows):
                 borrowed = rows[first]
         if gi < len(grows):
-            g["media"] = (grows[gi][0], grows[gi][1], borrowed[2], borrowed[3])
+            g["media"] = tuple(grows[gi])
         elif rows and g.get("members"):
             g["media"] = borrowed
     default_card = getattr(args, "default_card", None)

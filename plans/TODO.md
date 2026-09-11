@@ -8642,6 +8642,18 @@ rewriting it.**
       snapshot the memory the machine keeps on the card - what was booted last,
       and what each shuffle has dealt - in a file the preview owns. It reads and
       writes only that one, so a snapshot still never touches the machine's.
+      **A RANDOM CARD HAS SOUNDS OF ITS OWN (David, 2026-09-11: "i'm not
+      hearing music that i selected when hovering over the random card").** Its
+      music and its confirm were BORROWED from whichever member happened to be
+      first, which for a keeping group is another card's music entirely - so the
+      dialog and the card disagreed. They are the card's own now: `gmusic<G>.wav`
+      / `gconfirm<G>.wav`, asked for with `--group-music` / `--group-confirm`,
+      carried in the manifest's group row and written into its own group= line;
+      an `auto` confirm comes off its FIRST MEMBER's card, the only .raw a random
+      card has any claim on. Member games carry no sound at all now, so forty
+      song sets cost one copy of the bed rather than forty. The preview could
+      not have played it either: it read the manifest's IMAGE rows at the CARD
+      index, which for a random card is some other game's row or none.
       **Resume:** nothing is owed on the card or the tools. What is left is
       polish and it can close: (a) the eight styles are drawn from the members'
       logos, so two builds that share a logo (the TMNT pair) make every style

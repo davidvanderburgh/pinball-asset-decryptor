@@ -1472,6 +1472,50 @@ pad_gl_software() {
     echo "[watch] cfg GALLIUM_DRIVER=llvmpipe (software renderer)"
 }
 
+# ★ BACK TO THE GPU, the exact reverse of the function above (PAD-127).
+#
+# ONE CALLER AND IT IS THE UNHAPPY ONE: the software renderer would not start
+# on a machine whose GPU renderer had already come up, so the best run still
+# available is the GPU one, picture or no picture.
+#
+# d3d12 BY NAME rather than by remembering what was replaced: the top of this
+# script exports ${GALLIUM_DRIVER:-d3d12}, so a caller who chose a driver of
+# their own chose it there, and a caller who wanted software asked for it with
+# PAD_GL_SOFTWARE and never reaches this function.
+pad_gl_gpu() {
+    PAD_GL_MODE=gpu
+    export GALLIUM_DRIVER=d3d12
+    unset LIBGL_ALWAYS_SOFTWARE
+    echo "[watch] cfg GALLIUM_DRIVER=d3d12 (back on the GPU)"
+}
+
+# ★ STOP A RENDERER THAT IS STILL RUNNING, so another can take its place.
+#
+# The death path needs nothing like this - its renderer is already gone - but
+# the no-window retry below asks a LIVE padglhost to stand down, and two of
+# them would fight over one ring path.
+#
+# SIGINT FIRST, AND WAIT FOR IT. padglhost's shutdown destroys its X windows so
+# WSLg's RAIL mirror sees them go (the end of main() in padglhost.c says why
+# that matters); a SIGKILL here would strand on the desktop exactly the ghost
+# window this retry exists to remove. The escalation and its timing are
+# teardown's, followed deliberately rather than invented - one rule for how
+# this process is stopped.
+pad_gl_stop() {
+    [ -n "$HOSTPG" ] && kill -INT -"$HOSTPG" 2>/dev/null
+    pkill -INT -x padglhost 2>/dev/null
+    for _ in 1 2 3 4 5 6; do
+        pgrep -x padglhost >/dev/null || break
+        sleep 0.5
+    done
+    if pgrep -x padglhost >/dev/null; then
+        echo "[watch] the renderer did not stop on SIGINT; killing it" >&2
+        [ -n "$HOSTPG" ] && kill -9 -"$HOSTPG" 2>/dev/null
+        pkill -9 -x padglhost 2>/dev/null
+    fi
+    HOSTPG=""
+}
+
 # ONE ATTEMPT. The ring is removed first so the wait below times THIS launch
 # rather than finding the dead attempt's file and returning immediately.
 pad_gl_try() {
@@ -1528,6 +1572,84 @@ if ! pad_gl_try; then
         fi
     else
         exit 1
+    fi
+fi
+
+# ★ A RENDERER THAT CAME UP WITH NO WINDOW GETS THE SAME SECOND CHANCE
+# (PAD-127).
+#
+# PAD-117 gave the GPU path a retry in software, but only through a DEATH: the
+# gate above is `if ! pad_gl_try`. A renderer that starts, cannot get a window
+# surface out of the driver and carries on headless is ALIVE, so it walks
+# straight past that gate - and that run keeps its guest, its sound and its
+# playfield and loses its picture for the whole session. The only sign was one
+# line in a log the user had no reason to open.
+#
+# REPORTED 2026-09-11, with a photograph of the Windows taskbar preview of a
+# window that never painted: "whenever I do an update for PAD I get no video
+# screen after the update. I do get the table fine" - the table being the
+# virtual playfield, which under WSL is a Windows process and so is not
+# affected by any of this - "a reboot, so far, always resolves it". A reboot
+# restarts the VM, and restarting the VM is what re-lays the GPU libraries
+# Windows injects into /usr/lib/wsl/lib; pad_renderer_verdict's comment in
+# padpath.sh has the measured account of how those go stale underneath a VM
+# that keeps running.
+#
+# IT IS THE SAME FAULT AND IT TAKES THE SAME CURE, and the measurement that
+# justified the first retry justifies this one: llvmpipe measured 59.9 fps on
+# this game, which is the frame rate. What that failed surface was buying was
+# a few percent, and what it cost was the whole picture.
+#
+# ONLY FOR THE SURFACE CASE, which is what pad_headless_reason is for. A driver
+# that would not give a surface for a window that EXISTS is worth asking a
+# different driver about. An X display that could not be opened is not: no
+# renderer can put a window on a server that is not there, and a second
+# identical failure would cost the user another launch and another confusing
+# line.
+for _ in $(seq 1 30); do
+    [ -n "$(pad_window_line "$HOSTLOG")" ] && break
+    sleep 0.1
+done
+# THE SETTLE IS PART OF THE QUESTION, not politeness: the surface failure lands
+# a few milliseconds AFTER the window is mapped, so a log read the instant the
+# window line appears can still be reading the healthy half of the answer
+# (pad_window_line's own comment has the ordering).
+sleep 0.3
+if [ "$PAD_GL_MODE" = gpu ] && \
+        [ "$(pad_headless_reason "$HOSTLOG")" = surface ]; then
+    echo "[watch] the renderer is UP BUT HAS NO WINDOW:" >&2
+    pad_window_line "$HOSTLOG" | sed 's/^/[watch]   /' >&2
+    # KEEP THE GPU ATTEMPT'S LOG, for the reason the death path keeps it: the
+    # retry truncates $HOSTLOG and those lines are the only record of what the
+    # GPU path did.
+    cp -f "$HOSTLOG" "$HOSTLOG.gpu" 2>/dev/null
+    echo "[watch] TRYING THE RENDERER AGAIN IN SOFTWARE. The window surface" >&2
+    echo "[watch]   is the graphics driver's to give and this one would not" >&2
+    echo "[watch]   give it; the software rasteriser is not asking that driver" >&2
+    echo "[watch]   for anything. Nothing else about the run changes - this" >&2
+    echo "[watch]   game measures 59.9 fps in software - and the failed GPU" >&2
+    echo "[watch]   attempt's log is kept at $HOSTLOG.gpu." >&2
+    pad_gl_stop
+    pad_gl_software
+    if pad_gl_try; then
+        echo "[watch] the renderer is up in SOFTWARE (llvmpipe)."
+    else
+        # GOING BACK IS THE RIGHT TRADE HERE, and it is the opposite of the
+        # one the death path makes, because what is at stake is different.
+        # There the GPU renderer was already dead and there was nothing to go
+        # back to. Here it was alive and serving a run with a game, sound and
+        # a playfield in it, and a run with no picture beats no run at all.
+        echo "[watch] the software renderer did not start either; putting the" >&2
+        echo "[watch]   GPU one back - a run with no picture is still a run." >&2
+        tail -20 "$HOSTLOG" >&2
+        pad_gl_stop
+        pad_gl_gpu
+        if ! pad_gl_try; then
+            echo "[watch] and now neither of them will start; see $HOSTLOG" >&2
+            echo "[watch]   and $HOSTLOG.gpu." >&2
+            tail -20 "$HOSTLOG" >&2
+            exit 1
+        fi
     fi
 fi
 grep -aE 'window opened|GL |ring |ready' "$HOSTLOG" | head -4
@@ -1606,7 +1728,13 @@ case "$GLWIN" in
         echo "[watch]   like a black screen." >&2
         echo "[watch]   DISPLAY=${DISPLAY:-(unset)}, display state:" \
              "$(pad_display_state)" >&2
-        echo "[watch]   'wsl --shutdown' and start again is the usual cure." >&2 ;;
+        # THE BUTTON FIRST AND THE COMMAND SECOND, the order
+        # pad_renderer_advice already uses: this text is read in the app's log
+        # pane far more often than in a terminal, and the pane has the cure
+        # sitting two buttons away from it.
+        echo "[watch]   Stop, then 'Restart WSL...' on the Emulate tab - or" >&2
+        echo "[watch]   'wsl --shutdown' in a Windows terminal - and start" >&2
+        echo "[watch]   again is the usual cure." >&2 ;;
     *)
         echo "[watch] the renderer has not said whether its window opened;" \
              "see $HOSTLOG" >&2 ;;

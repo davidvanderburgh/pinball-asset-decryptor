@@ -123,7 +123,18 @@ TRIES=${PAD_AUTO_TRIES:-5}           # presses before giving up and saying so
 # retried, just later. (The failed run's log was overwritten by the next run
 # before it could be mined - copy gzwatch.log aside before relaunching after
 # a failure.)
-GAP=${PAD_AUTO_GAP:-45}              # s between presses if one does not take
+# ★ 75 s since PAD-129, and the number is now measured rather than argued.
+# `past` waits for the SHOW to move the picture, not merely for lamp commands
+# to arrive (hwshim.c's led_show_gate), and on a title whose show runs on
+# boards this rig cannot decode that signal lags the press that earned it.
+# Measured, press -> signal, on every capture here that holds both: godzilla
+# 0.7 s (x1_gz, the press at 116.6 s), batman 23.7 s (item82 run2) and batman
+# 57.8 s (item82 run3, whose show reaches the decodable boards rarely). 45 s
+# sat INSIDE that spread, so the run3 shape would have fired a retry into a
+# live attract - the one failure this gap exists to prevent. 75 is the slowest
+# lag seen plus a margin; a genuinely swallowed press is still retried, 30 s
+# later than before.
+GAP=${PAD_AUTO_GAP:-75}              # s between presses if one does not take
 WAIT_MAX=${PAD_AUTO_WAIT:-240}       # s to wait for the game to boot
 
 # `grep -c` PRINTS 0 and ALSO exits non-zero when it finds nothing, so the

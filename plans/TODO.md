@@ -3500,6 +3500,44 @@ These have each been violated at least once and each cost a run or a window:
       `led_insert_node()` still refuses everything outside 1/8/9, so the topper
       lamps stay dark; nobody has reported them and the artwork view does not
       draw them.
+      **★ 2026-09-11, TICKET PAD-129 — THE NINE LAMPS ARE RIGHT AND THE GAME
+      WAS NEVER IN ATTRACT.** Same reporter, next run: "I see the 9 LEDs in
+      attract mode on Jurassic Park Home Edition, but they are static and
+      don't cycle." They are static because the wire is static, and the wire
+      is static because **the machine is still on its Tech Alerts screen**.
+      Replayed off the PAD-125 captures: node 8 takes **4260 `cmd 70` writes,
+      20 indices, and not one value ever changes** after the first sweep at
+      12.6 s (`star_wars_elg`: 14241 writes, 44 indices, no change); node 12's
+      strip frames are 212 byte-identical copies; the LCD stops changing clip
+      at 12.1 s and loops one 11 s clip for the remaining 350 s; and **no
+      Service Back press happens in any of the six Home Edition runs on this
+      disk.** The clip it loops belongs to `auto_loaded/60ed7e50…`, a bundle
+      `turtles_pro` and `godzilla_pro` load too — a platform screen, not title
+      art.
+      **THE CAUSE IS OUR OWN "PAST TECH ALERTS" TEST.** `gs_past_alerts` reads
+      one line the shim prints at 30 lamp commands in 3 s, and item 79 added
+      `cmd 70` to that set for batman. A Home Edition's boot sweep and its
+      ~11/s refresh of the same twenty levels satisfy it **while the alerts
+      screen is up** — announced at 12.3 s (The Pin) and 15.2 s (SW HE) — so
+      `autoattract.sh` printed "already past Tech Alerts; nothing to do" and
+      never pressed. **It is not only the Home Editions**: replaying
+      `x1_gz.log` (godzilla_pro, three presses at 21.6/69.0/116.6 s, the third
+      one the one that took) the rate-only rule fires at **75.1 s**, 41 s
+      before the press that cleared the screen.
+      **Fixed on `ticket/PAD-129`:** the shim's announcer keeps the 30-in-3s
+      rate and adds "and a lamp changed value in the same 3 s"
+      (`led_show_gate`, `led_val`), judged against the version-4 `seen` plane
+      so a boot sweep's first write does not count as movement; a run whose
+      traffic never moves says `[led] lamp traffic with a STILL picture` once,
+      which is the Tech Alerts fingerprint. Replayed through the REAL C
+      function over every capture here that contains a boot: The Pin and SW HE
+      **never** announce (correct), batman 32.3/51.5/85.6 s across three
+      captures, godzilla 117.3 s against that run's own 118.2 s, turtles
+      182.4 s, DnD 31.6 s. `PAD_AUTO_GAP` 45 → 75 s because the surviving
+      signal can lag the press that earned it by 57.8 s (batman run3), and 45
+      sat inside that. **OWED: a live Home Edition run** — the press has never
+      been made on one of these titles, so "and then its attract show cycles"
+      is inference from every other title, not measurement.
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the

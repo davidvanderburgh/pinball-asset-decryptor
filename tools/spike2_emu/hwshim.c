@@ -9837,6 +9837,46 @@ static void led_seen(unsigned node, unsigned idx)
     if (node < 16 && idx < 96) led_shm->seen[node][idx] = 1;
 }
 
+/* ★ WHEN THE PICTURE LAST MOVED - one timestamp, written by every path that
+ * publishes a level and read only by the light-show announcer below.
+ *
+ * WHY IT HAD TO EXIST (PAD-129, 2026-09-11). The announcer counted lamp
+ * COMMANDS, and a Home Edition hands it thirty of them in a third of a second
+ * while still sitting on the Tech Alerts screen: `jurassic_park_the_pin` 1.05
+ * writes its whole board - twenty `cmd 70` levels - as a boot sweep and then
+ * REFRESHES those same twenty values about every 1.8 s for as long as the
+ * machine is up. Measured over a whole capture: 4260 writes, 20 indices, and
+ * the value of not one of them ever changes (star_wars_elg: 14241 writes, 44
+ * indices, no change). So gs_past_alerts() said "attract" at 12.3 s,
+ * autoattract.sh stood down without ever pressing Service Back, and the game
+ * sat on the alerts screen for six minutes with nine lamps held up - which is
+ * the ticket, word for word: the LEDs are lit and they never cycle.
+ *
+ * A REFRESH IS NOT A SHOW, and that is the whole discriminator. It is checked
+ * against `seen` rather than against zero on purpose: the boot sweep's first
+ * write of a lamp turns it ON, so "val changed" alone counts the sweep itself
+ * as movement and fixes nothing. `seen` says the lamp had already been
+ * addressed, so what is counted here is a lamp the game came BACK to and put
+ * somewhere else.
+ *
+ * On a 4096-byte mapping there is no `seen` plane to ask (an old watch.sh),
+ * so every value change counts - the pre-PAD-129 behaviour, which is the right
+ * thing to degrade to. */
+static unsigned long led_move_ms;
+static int led_move_any;
+
+static void led_val(unsigned node, unsigned idx, unsigned char v)
+{
+    if (!led_shm || node >= 16 || idx >= 96) return;
+    if (led_shm->val[node][idx] != v
+            && (led_shm_len < 8192 || led_shm->seen[node][idx])) {
+        led_move_ms = pad_ms();
+        led_move_any = 1;
+    }
+    led_shm->val[node][idx] = v;
+    led_seen(node, idx);
+}
+
 /* ---- COILS (padled.h, and the C twin of coildecode.py) ------------------
  *
  *     88 0b 40 <IDX> <PWR> 00 00 <B7> 00 00 00 00 <cksum> 00
@@ -10427,10 +10467,8 @@ static int led_wide_publish(unsigned node, unsigned cmd,
 
     led_map();
     if (!led_shm) return 0;
-    for (i = 0; i < cnt; i++) {
-        led_seen(node, idx[i]);
-        led_shm->val[node][idx[i]] = val[i];
-    }
+    for (i = 0; i < cnt; i++)
+        led_val(node, idx[i], val[i]);
     led_shm->decoded += cnt;
     led_shm->gen++;
     if (led_shm_len >= 8192) led_shm->wide_decoded++;
@@ -10497,6 +10535,74 @@ static unsigned char led_level70(unsigned lo, unsigned hi)
     return (unsigned char)(v * 255u / FULL);
 }
 
+/* THE SHOW GATE: 30 lamp commands inside 3 seconds AND a picture that has
+ * moved inside the same 3 seconds. Returns 1 on the one frame that proves a
+ * show is running, 2 on the one frame that proves the rate is there and the
+ * picture is NOT moving, and 0 otherwise. `window` takes the age of the
+ * 30th-oldest command, for the message.
+ *
+ * ITS OWN FUNCTION SO IT CAN BE TESTED. Everything it needs is an argument -
+ * the clock and whether the picture moved recently - so tests/test_spike2_
+ * led_show_gate.py compiles this exact text out of this file and drives it
+ * with a scripted timeline. The rate half went wrong twice before this
+ * detector settled (see the caller) and had no test either time.
+ *
+ * THE SECOND CONDITION IS PAD-129's. The rate alone says only that a board is
+ * being TALKED TO, and a Home Edition talks to its one board at 11 writes a
+ * second for ever, from boot, holding twenty unchanging levels - so the rate
+ * was met at 12.3 s on jurassic_park_the_pin and 15.2 s on star_wars_elg with
+ * the machine still on its Tech Alerts screen, autoattract.sh stood down, and
+ * neither title ever reached attract at all. Replayed over every capture on
+ * this disk that contains a boot:
+ *
+ *   title                    rate alone     this gate
+ *   jurassic_park_the_pin    12.3 s         NEVER     (both correct: neither
+ *   star_wars_elg            15.2 s         NEVER      ever left the alerts)
+ *   batman, 3 captures       20.7/35.7/     32.3/51.5/85.6 s
+ *                            71.9 s
+ *   godzilla_pro (x1_gz)     75.1 s         117.3 s
+ *   turtles_pro (i50 run1)  129.0 s         182.4 s
+ *   dungeons_and_dragons_le  16.2 s          31.6 s
+ *
+ * x1_gz is the one run with an independent answer, and it is the reason to
+ * believe this ordering rather than the old one: autoattract pressed Service
+ * Back three times (21.6 s, 69.0 s, 116.6 s), the third took, and that run's
+ * OWN announcement - made by the pre-item-79 detector, which did not count
+ * cmd 70 - landed at 118.2 s. This gate says 117.3 s. The rate alone says
+ * 75.1 s, 41 s before the press that actually cleared the screen, so it would
+ * have cancelled the press that worked. */
+static int led_show_gate(unsigned long now, int moving, unsigned long *window)
+{
+    static unsigned long t30[30];            /* time of the (n-30)th command */
+    static unsigned nlamps;
+    static int announced;
+    static int said_still;
+    unsigned slot;
+
+    if (announced) return 0;
+    slot = nlamps % 30;
+    if (nlamps >= 30 && now - t30[slot] <= 3000) {
+        *window = now - t30[slot];
+        if (moving) {
+            announced = 1;
+            return 1;
+        }
+        /* The window keeps sliding while the picture stays still, so the
+         * announcement lands on the first moving frame after it, not 30
+         * frames later. */
+        t30[slot] = now;
+        nlamps++;
+        if (!said_still) {
+            said_still = 1;
+            return 2;
+        }
+        return 0;
+    }
+    t30[slot] = now;
+    nlamps++;
+    return 0;
+}
+
 static void led_publish(const unsigned char *p, int n)
 {
     unsigned node, cmd, blen, i;
@@ -10551,24 +10657,34 @@ static void led_publish(const unsigned char *p, int n)
          * commands inside 3 seconds: attract crosses that inside the first
          * second, Godzilla's whole alerts wait had 2 commands total, and a
          * menu-entry blip would need to sustain 10/s for 3 s to fake it. */
-        static unsigned long t30[30];         /* time of the (n-30)th command */
-        static unsigned nlamps;
-        static int announced;
-        if (!announced) {
-            unsigned long now = pad_ms();
-            unsigned slot = nlamps % 30;
-            if (nlamps >= 30 && now - t30[slot] <= 3000) {
-                char m[112];
-                snprintf(m, sizeof m,
-                         "[led] light show running: 30 lamp commands in "
-                         "%lu ms (last node=%u cmd=%02x, %lu ms)\n",
-                         now - t30[slot], node, cmd, now);
-                logmsg(m);
-                announced = 1;
-            } else {
-                t30[slot] = now;
-                nlamps++;
-            }
+        /* ★ AND A RATE IS NOT ENOUGH EITHER - PAD-129. The rate says a board
+         * is being TALKED TO; it does not say the game is drawing anything.
+         * See led_show_gate() above for the measurement and for what it cost
+         * the two Home Editions. The second half of the test is that the
+         * published picture moved inside the same three seconds, which is
+         * `led_val` above keeping one timestamp. */
+        unsigned long now = pad_ms(), window = 0;
+        int moving = led_move_any && now - led_move_ms <= 3000;
+        int verdict = led_show_gate(now, moving, &window);
+        if (verdict == 1) {
+            char m[144];
+            snprintf(m, sizeof m,
+                     "[led] light show running: 30 lamp commands in %lu ms "
+                     "and the picture is moving (last node=%u cmd=%02x, "
+                     "%lu ms)\n", window, node, cmd, now);
+            logmsg(m);
+        } else if (verdict == 2) {
+            /* SAYS SO ONCE, because "the rate is there and nothing is
+             * changing" is the exact shape of a machine parked on Tech
+             * Alerts, and a run that ends that way should not be silent
+             * about it. */
+            char m[192];
+            snprintf(m, sizeof m,
+                     "[led] lamp traffic with a STILL picture: 30 commands "
+                     "in %lu ms and no lamp has changed value - a board "
+                     "refresh, not a show (node=%u cmd=%02x, %lu ms)\n",
+                     window, node, cmd, now);
+            logmsg(m);
         }
     }
 
@@ -10696,8 +10812,7 @@ static void led_publish(const unsigned char *p, int n)
         if (p[3] < 96) {
             led_map();
             if (!led_shm) return;
-            led_shm->val[node][p[3]] = led_level70(p[4], p[5]);
-            led_seen(node, p[3]);
+            led_val(node, p[3], led_level70(p[4], p[5]));
             led_shm->decoded++;
             led_shm->gen++;
         }
@@ -10741,10 +10856,8 @@ static void led_publish(const unsigned char *p, int n)
             unsigned char to = (cmd == 0xb4) ? 0xff : 0x00;
             unsigned slot = led_shm->fade_head % 96u;
             for (k = s0; k <= e0; k++)
-                if (led_known[node][k]) {
-                    led_shm->val[node][k] = to;
-                    led_seen(node, k);
-                }
+                if (led_known[node][k])
+                    led_val(node, k, (unsigned char)to);
             led_shm->decoded += (e0 - s0 + 1);
             led_shm->gen++;
             led_shm->fade[slot].ms    = (unsigned)pad_ms();
@@ -10778,10 +10891,8 @@ static void led_publish(const unsigned char *p, int n)
         for (i = 0; i < cnt; i++)
             if (body[i] >= 96 || !led_known[node][body[i]]) break;
         if (i != cnt) continue;              /* not all valid indices */
-        for (i = 0; i < cnt; i++) {
-            led_shm->val[node][body[i]] = body[cnt + gap + i];
-            led_seen(node, body[i]);
-        }
+        for (i = 0; i < cnt; i++)
+            led_val(node, body[i], body[cnt + gap + i]);
         led_shm->decoded += cnt;
         led_shm->gen++;
         /* The lamps the WORKING path addresses, under the same env var. The
@@ -10866,8 +10977,7 @@ static void led_publish(const unsigned char *p, int n)
                 for (k = 0; k < 8; k++)
                     if ((body[3 + j] >> k) & 1) {
                         unsigned e = led_order[node][j * 8 + k];
-                        led_shm->val[node][e] = body[3 + mlen + wrote++];
-                        led_seen(node, e);
+                        led_val(node, e, body[3 + mlen + wrote++]);
                     }
             led_shm->decoded += wrote;
             led_shm->gen++;
@@ -10965,8 +11075,7 @@ static void led_publish(const unsigned char *p, int n)
             for (k = 0; k < nref; k++) {
                 unsigned lamp = body[k] & 0x7f;
                 unsigned slot = led_shm->fade_head % 96u;
-                led_shm->val[node][lamp] = to[k];
-                led_seen(node, lamp);
+                led_val(node, lamp, to[k]);
                 led_shm->fade[slot].ms    = (unsigned)pad_ms();
                 led_shm->fade[slot].node  = (unsigned char)node;
                 led_shm->fade[slot].start = (unsigned char)lamp;

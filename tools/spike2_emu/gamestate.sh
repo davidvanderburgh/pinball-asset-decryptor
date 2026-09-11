@@ -63,6 +63,20 @@ gs_booted() { [ "$(gs_count 'gst\] factory_make' "$1")" -ge 3 ]; }
 # it is title-independent - no node numbering, no clip identity. This is the
 # test that agrees with a screenshot of the screen, on the title that killed
 # test 2. (Emitter: led_publish() in hwshim.c, before its insert-node gate.)
+#
+# ★ AND THE RATE IS ONLY HALF OF IT SINCE PAD-129: the line is printed when 30
+# lamp commands land inside 3 seconds AND the published picture has CHANGED
+# inside the same 3 seconds. A rate on its own says a board is being talked
+# to, which is not the same claim: a Home Edition rewrites its one board's
+# twenty levels, unchanged, about eleven times a second from boot, so this
+# said "attract" at 12.3 s over jurassic_park_the_pin sitting on its alerts
+# screen, autoattract.sh stood down without pressing anything, and the machine
+# stayed there. led_show_gate() in hwshim.c carries the measurements.
+#
+# A run whose lamp traffic never moves the picture now says so in its own log,
+# once - `[led] lamp traffic with a STILL picture` - which is deliberately not
+# this phrase: it is the shape of a machine parked on Tech Alerts, and reading
+# it as attract is the fault above.
 gs_past_alerts() { [ "$(gs_count '\[led\] light show running' "$1")" -ge 1 ]; }
 
 # One word for the whole state, for anything that just wants to print it.

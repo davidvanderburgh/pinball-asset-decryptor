@@ -1746,6 +1746,8 @@ disk. A **Manage disk space** dialog (⚙ settings menu) lets you see WSL disk u
 **resize the WSL disk** (grow or shrink, no admin needed) so a big
 Clonezilla extract doesn't wall on a too-small WSL volume.
 
+From v0.206.0 the same dialog also shows the **Spike 2 emulator's cached cards**, which are the largest thing the app keeps on disk — a cached card is several gigabytes and the emulator holds one per title it has booted. They sit on the emulator's own work disk, so they get their own usage bar beside the WSL and Windows temp ones, and any of them can be deleted from the same list. A deleted card is not lost: it re-copies the next time that card boots, which is why the dialog prices the cached cards separately from the leftover staging beside them.
+
 ## Auto-update
 
 The app polls the GitHub releases API on launch, and then keeps checking

@@ -1230,7 +1230,10 @@ HELP_CONTENT = {
          "done by the time you press Start. Cached copies add up — the "
          "Cache… button beside Browse lists every cached card with its real "
          "size on disk and when it last booted, and lets you delete any of "
-         "them. Deleting is always safe: the card just re-copies on its "
+         "them. The same cards also appear in Manage disk space (⚙ settings "
+         "menu), beside the other things the app keeps on disk, if you are "
+         "hunting for space rather than managing this one card. Deleting is "
+         "always safe: the card just re-copies on its "
          "next boot. When disk space runs low, the cache also cleans "
          "itself, dropping the cards you have not booted for the longest."),
         ("Tech Alerts handles itself",

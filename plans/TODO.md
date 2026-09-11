@@ -7885,7 +7885,38 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **107. A variant that changes a few songs costs a whole `image.bin` per
       copy on a compact card; store only the changed byte ranges and rebuild the
-      file at boot.** `S3 D4` ← WORKING ON **PARKED** - not to be taken until the numbers
+      file at boot.** `S3 D4` ← WORKING ON ← IN PROGRESS *(taken by name, `/next 107`,
+      2026-09-11 - David un-parked it.)*
+      **Established (2026-09-11, pass 1):** the card's own `python2.7` (ARM, under
+      qemu-arm-static from `~/spike2root`) has `os sys hashlib struct errno time stat io re
+      collections` and NO `json subprocess fcntl shutil zlib` (`tempfile` dies on
+      `/dev/urandom` under qemu). So the on-card index is a TAB-SEPARATED text file, not
+      JSON, and mounts go through `os.system`. There is no handoff section for this item -
+      the design lives in this entry and in the approved plan file
+      `~/.claude/plans/re-read-what-he-said-replicated-candle.md` ("Item 107").
+      **Design pinned this pass (do not re-open):** ONE delta level, always against a FULL
+      blob at the same path in an earlier tree with the SAME size (in-place sound replacement
+      never changes the size; a size change = a full blob). Delta discovery happens at PLAN
+      time (so the store is SIZED with the saving) by a 4 KiB-block compare of the two sources,
+      cached by (base sha, variant sha); the build reads the variant once more to write the
+      payload. Delta blob `.blobs/<blob_key>.delta` = ASCII header (`PADDELTA 1`, `base`,
+      `size`, `sha256`, `ranges N`, N `off len` lines, blank line) + the ranges' bytes; the
+      tree's file hardlinks the BASE blob (the game always has a file; the record's `deltas`
+      field + `tree_as_on_card` give verify the base's sha); `imgK/.multiboot/deltas` (tab
+      lines `rel base delta size`) is what the card reads. `gc_blobs` keeps `.delta` names by
+      a `keep` set, never by nlink (a delta is never linked). `trees.json` is written as
+      format 2 only when a delta exists, so an older tool REFUSES the card instead of gc'ing
+      every delta and verify-failing image.bin. Materialize: stamp cleared BEFORE any write,
+      written AFTER fsync; a missing stamp = copy the base whole and re-apply. Ranges merge
+      within 64 KiB (one seek+write each on the card); a delta over 25% of the file is a full
+      blob; files under 1 MiB are never deltas.
+      **Loose end filed here, not built:** `recover` of a delta'd image writes the BASE's
+      image.bin (the wrong songs) unless it materializes first - the record makes it
+      detectable (`im.deltas`), so recover must at least warn.
+      **Resume:** the work order is materialize.py + format, treesync (record, apply, costs,
+      gc), mkmulticard (plan-time discovery, build, verify, update), run_game.sh hook +
+      emulator proof, then p7 + select.sh + hardware; the closing summary says where it got.
+      **PARKED** (before this pass) - not to be taken until the numbers
       demand it: whole-file dedup already puts 40 Beatles variants on a 32 GB
       card (~450 MB each). It pays only for 40+ variants on a 16 GB card, 80+
       variants, or a title whose `image.bin` is 1.4-1.6 GB (TMNT, Godzilla).

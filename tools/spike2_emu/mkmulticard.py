@@ -102,12 +102,18 @@ the version record decoder) are tested on Windows.
   mkmulticard.py check-stock IMG
         regenerate IMG's own MBR entries + EBR chain with this writer and byte-compare them
   mkmulticard.py build       --primary P --extra E [...] --out OUT --selector-dir DIR
-                             [--layout auto|parts|multi] [--media-dir DIR] [--bypass-validation]
+                             [--group "TITLE|SUBTITLE" --member M --member M2 ...]
+                             [--members-list FILE]
+                             [--layout auto|parts|multi|store] [--media-dir DIR] [--bypass-validation]
                              [--allow-version-mismatch]
                              [--titles "T0;T1;..."] [--subtitles "S0;S1;..."] [--timeout N]
                              [--default N] [--volume V] [--machine-volume] [--mixer-volume M] [--conf FILE]
                              [--theme NAME] [--color ROLE=RRGGBB ...]
                              [--no-inject] [--dd] [--force] [--workdir DIR] [--allow-unreachable]
+        A --group shows its --member images as ONE card, which boots a different member on
+        every power-up and never the one it booted last (item 106); the flags are ordered
+        against --extra, and a group forces --layout store because its members would each
+        otherwise cost a full copy.
         write the sparse OUT (partition ranges copied, MBR entries + EBR chain regenerated; for
         the multi layout the p7 image is built first), then inject DIR/{codeselect,select.sh
         [,font.ttf]} + the media + a generated images.conf + the hooked /etc/init.d/game into
@@ -249,6 +255,11 @@ TREES_MANIFEST = "trees.json"
 SIDECAR_MANIFESTS = (BUILD_MANIFEST, MEDIA_MANIFEST, TREES_MANIFEST)
 #: 'codeselect 2.1 - Spike 2 boot-time code selector' lives in the binary's .rodata
 SELECTOR_VERSION_RE = re.compile(rb"codeselect (\d+(?:\.\d+)+)")
+#: the first selector that understands a `group=` line (item 106).  An older one IGNORES
+#: the key and then refuses the file for having more than 16 image lines, so it exits 2
+#: and the machine boots its primary - degraded, not bricked.  Degraded is still not what
+#: anybody asked for, so a group is never written onto a card whose menu cannot read it.
+SELECTOR_GROUP_VERSION = (3, 0)
 SELECTOR_VERSION_MAX = 8 << 20                # do not read a huge file just to sniff a version
 MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 #: The whole set on p2 (194 MB free on a stock rootfs; inject_p2 refuses against
@@ -262,9 +273,20 @@ GIF_MAX_FRAMES = 150
 GIF_MAX_BYTES = 10 << 20                      # 10 MiB
 WAV_RATE = 44100
 P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
-#: images.conf v2: up to 16 images; a device is '/dev/mmcblk0pN' (parts layout),
+#: images.conf v2: a device is '/dev/mmcblk0pN' (parts layout),
 #: '/dev/mmcblk0pN:<subdir>' (multi layout) or the emulator's 'pN' / 'pN:<subdir>' tokens.
-MAX_IMAGES = 16
+#:
+#: IMAGES AND CARDS ARE DIFFERENT NUMBERS since item 106.  An image line is a games
+#: TREE on the card; a card is what the menu draws and the player scrolls through, and
+#: a `group=` line turns several images into one of them.  A jukebox of forty song-set
+#: variants is forty images and one card.  These three must match conf.h's
+#: CONF_MAX_IMAGES / CONF_MAX_CARDS / CONF_MAX_GROUPS, and the tab's copies.
+MAX_IMAGES = 64
+MAX_CARDS = 16
+MAX_GROUPS = 8
+#: conf.c reads a line into `line[1024]`, so a line longer than this is refused HERE
+#: rather than silently truncated on the machine.
+CONF_LINE_MAX = 1000
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
 CONF_KEYS = ("default", "timeout", "font", "sound_move", "sound_confirm", "volume", "mixer_volume", "media",
              "theme", "machine_volume")
@@ -914,11 +936,26 @@ def multi_size_sectors(used_bytes):
     return size // SECTOR
 
 
-def resolve_layout(layout, n_extra):
-    """'auto' -> parts for one extra (or none), multi for two or more."""
+def resolve_layout(layout, n_extra, groups=None):
+    """'auto' -> parts for one extra (or none), multi for two or more, store when a
+    group exists.
+
+    A GROUP FORCES THE COMPACT LAYOUT, and `parts`/`multi` with one is refused rather
+    than quietly built (David, 2026-09-09).  The members of a jukebox card are the same
+    title with a few songs changed, so on `parts` or `multi` each one costs a full copy:
+    forty Beatles variants are about 18 GB of duplicate content that the store layout
+    holds once.  Someone who asked for a group and got a card that will not fit has been
+    failed silently, so the refusal says what it would have cost."""
     if layout not in LAYOUTS:
         raise Refused("--layout %r: choose one of %s" % (layout, "/".join(LAYOUTS)))
+    n_members = sum(len(g["members"]) for g in (groups or []))
+    if groups and layout in ("parts", "multi"):
+        raise Refused("--layout %s cannot hold a group: its %d member(s) would each cost a full copy "
+                      "of the image. The compact build (--layout store) stores what they share once."
+                      % (layout, n_members))
     if layout == "auto":
+        if groups:
+            return "store"
         return "multi" if n_extra >= 2 else "parts"
     return layout
 
@@ -1024,12 +1061,12 @@ def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdir
 
 
 def make_plan(primary, extras, layout="auto", multi_sectors=None, multi_src=None, multi_subdirs=None,
-              size_class=None, store_sectors=None, cache_dir=None, progress=None):
+              size_class=None, store_sectors=None, cache_dir=None, progress=None, groups=None):
     """The Plan for these images.  `size_class` ('8G'/'16G'/'32G', item 93's --size) fills the
     multi layout's p7 to the END of that Stern image size instead of its content-sized default,
     so later updates and added images have room without a re-layout; refused when the content
     does not fit the class.  The store layout (item 95) is sized by :func:`make_store_plan`."""
-    lay = resolve_layout(layout, len(extras))
+    lay = resolve_layout(layout, len(extras), groups)
     if lay == "store":
         return make_store_plan(primary, extras, size_class, store_sectors, multi_subdirs, cache_dir, progress)
     if size_class == "content":
@@ -1184,7 +1221,7 @@ def plan_room(plan):
     return room
 
 
-def print_plan(plan, media=None):
+def print_plan(plan, media=None, groups=None):
     print("primary %s (%d bytes)" % (plan.primary, plan.primary_geom.size))
     for x, g in zip(plan.extras, plan.extra_geoms):
         print("extra   %s (%d bytes)" % (x, g.size))
@@ -1242,6 +1279,12 @@ def print_plan(plan, media=None):
         # which is the point; a word where the index goes, like the free row
         print("image-size shared %d stored once, shared by content" % (plan.store_shared or 0))
     print("image-size overhead %d boot + rootfs + data + dump + metadata" % max(0, overhead))
+    # WHICH IMAGES ARE ONE CARD (item 106).  A word where the index goes, on the same rule
+    # as the free and shared rows, so a reader of the image-size rows cannot mistake one of
+    # these for an image.  The members already have their own per-tree size rows above;
+    # this says which of them the player will only ever see as a single card.
+    for gi, g in enumerate(groups or []):
+        print("image-group %d %d %d %s" % (gi, g["members"][0], g["members"][-1], g["title"]))
     # WHAT THE MENU COSTS, per card (item 105).  The games' bytes are the whole
     # story on a 4-image card; from 5 up the menu's own art and clips are the
     # thing that runs out first, and they come out of a flat 96 MB in p2 that
@@ -1346,9 +1389,138 @@ def check_machine_volume(mv):
     return out
 
 
+#: HOW A RANDOM CARD PICKS (item 106), written into the member spec as a word
+#: and a colon: `group=+shuffle:1-2|...`.  `not-last` is what every card built
+#: before there was a choice does, so it is the default a conf with no word
+#: reads as - the tab writes the word out either way, so the menu says what it
+#: does.
+ROLL_MODES = ("not-last", "any", "shuffle")
+ROLL_DEFAULT = "not-last"
+
+
+def check_roll(word):
+    """One of ROLL_MODES, or the default for '' / None."""
+    w = (word or "").strip().lower() or ROLL_DEFAULT
+    if w not in ROLL_MODES:
+        raise Refused("images.conf: a random card picks %s, not %r"
+                      % (" / ".join(ROLL_MODES), word))
+    return w
+
+
+def split_roll_spec(spec):
+    """`shuffle:1-2` -> ('shuffle', '1-2'); `1-2` -> (ROLL_DEFAULT, '1-2')."""
+    word, sep, rest = (spec or "").partition(":")
+    if not sep:
+        return ROLL_DEFAULT, spec or ""
+    return check_roll(word), rest
+
+
+def parse_member_spec(spec):
+    """'3-5' or '3,5,7-9' -> [3, 4, 5] / [3, 5, 7, 8, 9].  Range ends are inclusive.
+
+    STRICTER THAN THE SELECTOR ON PURPOSE.  conf.c drops a member it cannot read and
+    logs it, because a mistyped conf must never stop a pinball machine booting; a
+    BUILDER has no such excuse - it is being asked to write the file, and refusing is
+    the only way the person writing it finds out."""
+    out = []
+    for tok in spec.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        lo_s, dash, hi_s = tok.partition("-")
+        try:
+            lo = int(lo_s)
+            hi = int(hi_s) if dash else lo
+        except ValueError:
+            raise Refused("images.conf: group members %r: %r is not a number or a range" % (spec, tok))
+        if hi < lo:
+            raise Refused("images.conf: group range %r runs backwards" % tok)
+        out.extend(range(lo, hi + 1))
+    return out
+
+
+def check_groups(groups, nimages):
+    """Normalise and check the group rows of an images.conf, sorted by where they sit.
+
+    A group is ``{'title', 'subtitle', 'media': (art, anim, music, confirm), 'members': [int],
+    'keep': bool, 'pos': int}``.  The members must be a CONTIGUOUS run of two or more images -
+    the selector accepts a scattered list, but a builder lays the trees out itself and a run is
+    what it produces, so anything else here means the caller has miscounted rather than meant it.
+
+    ``keep`` means the members ALSO keep their own cards, which is what lets one card offer
+    "surprise me" beside the very builds it rolls between.  ``pos`` is the image index the
+    group's line sits before, and therefore where its card sits in the menu: it defaults to the
+    first member (a consuming group's card stands in their place) and is free for a keeping one,
+    whose card is a card of its own and can go anywhere - including before image 0."""
+    out = []
+    if len(groups or []) > MAX_GROUPS:
+        raise Refused("images.conf: %d groups; at most %d" % (len(groups), MAX_GROUPS))
+    owner = {}
+    for g in (groups or []):
+        members = list(g.get("members") or [])
+        keep = bool(g.get("keep"))
+        title = g.get("title") or ""
+        subtitle = g.get("subtitle") or ""
+        media = tuple(g.get("media") or MEDIA_ROW)
+        if len(media) < len(MEDIA_ROW):
+            media = media + ("",) * (len(MEDIA_ROW) - len(media))
+        if len(media) != len(MEDIA_ROW):
+            raise Refused("images.conf: a group media row is (art, anim, music, confirm), got %r" % (media,))
+        media = tuple(_media_name_ok(x or "", what) for x, what in zip(media, MEDIA_FIELDS))
+        roll = check_roll(g.get("roll"))
+        for t in (title, subtitle):
+            if "|" in t or "\n" in t or "\r" in t:
+                raise Refused("images.conf: group title/subtitle %r may not contain '|' or a newline" % t)
+        if len(members) < 2:
+            raise Refused("images.conf: group %r has %d member(s); a group needs at least 2 "
+                          "(one image is a plain card)" % (title, len(members)))
+        for m in members:
+            if not (0 <= m < nimages):
+                raise Refused("images.conf: group %r names image %d, which is not one of the %d "
+                              "image lines" % (title, m, nimages))
+            if m == 0 and not keep:
+                # a CONSUMING group would take the primary's own card away, and the
+                # primary is what the machine boots when the menu is not honoured
+                raise Refused("images.conf: group %r names image 0 and hides its members; the "
+                              "primary must keep a card of its own (a keeping group may "
+                              "include it)" % title)
+            if m in owner:
+                raise Refused("images.conf: image %d is in group %r and group %r; an image belongs "
+                              "to one card" % (m, owner[m], title))
+            owner[m] = title
+        run = list(range(min(members), max(members) + 1))
+        if sorted(members) != run:
+            raise Refused("images.conf: group %r names images %s, which is not one run; a group's "
+                          "members must be consecutive" % (title, ",".join(str(m) for m in members)))
+        pos = g.get("pos")
+        pos = run[0] if pos is None else int(pos)
+        if not (0 <= pos <= nimages):
+            raise Refused("images.conf: group %r sits before image %d, which is not a place in a "
+                          "menu of %d image(s)" % (title, pos, nimages))
+        if not keep and pos != run[0]:
+            # its card stands IN THEIR PLACE, so it cannot stand anywhere else
+            raise Refused("images.conf: group %r hides its members, so its card belongs where "
+                          "they were (image %d), not before image %d" % (title, run[0], pos))
+        out.append({"title": title, "subtitle": subtitle, "media": media, "members": run,
+                    "keep": keep, "pos": pos, "roll": roll})
+    out.sort(key=lambda g: (g["pos"], g["members"][0]))
+    # NOT UNDER `if groups`: a card with no group at all still has a card cap, and
+    # this is the only place that counts them. An early return here let 17 plain
+    # images through, which the selector would then refuse on the machine.
+    # a KEEPING group's members still have cards of their own, so only a consuming
+    # one takes any away
+    hidden = sum(len(g["members"]) for g in out if not g["keep"])
+    ncards = nimages - hidden + len(out)
+    if ncards > MAX_CARDS:
+        raise Refused("images.conf: %d cards (%d images in %d group(s)); the menu takes at most %d"
+                      % (ncards, nimages, len(out), MAX_CARDS))
+    return out
+
+
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None,
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
-                       media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False):
+                       media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
+                       groups=None, default_card=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1398,18 +1570,58 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         raise Refused("images.conf: media=%r may not contain '|' or a newline" % media_dir)
     theme = check_theme(theme)
     colors = check_colors(colors)
-    any_media = any(any(r) for r in rows)
+    groups = check_groups(groups, len(devices))
+    if default_card is not None:
+        ncards = len(devices) - sum(len(g["members"]) for g in groups if not g["keep"]) + len(groups)
+        if not (0 <= int(default_card) < ncards):
+            raise Refused("images.conf: default_card=%s is not a card index (0..%d)"
+                          % (default_card, ncards - 1))
+    any_media = any(any(r) for r in rows) or any(any(g["media"]) for g in groups)
     # the seventh field is written only when some image has a confirm sound of its own, so a menu
     # where every image uses the menu-wide sound reads exactly as it did before this existed
-    width = 4 if any(r[3] for r in rows) else (3 if any_media else 0)
+    width = 4 if (any(r[3] for r in rows) or any(g["media"][3] for g in groups)) \
+        else (3 if any_media else 0)
     out = ["# images.conf - codeselect, the boot-time code selector (item 90); written by mkmulticard.py",
            "# image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]   index = order (0-based);",
            "# media names are relative to media= (default /usr/local/codeselect/media); <confirm> is that",
            "# image's own confirm sound and an empty one falls back to sound_confirm=; default = highlight",
            "# when no last choice; timeout = seconds before the highlighted image boots by itself (0 = for ever)"]
-    for d, t, s, r in zip(devices, titles, subtitles, rows):
+    if groups:
+        out.append("# group=<first>-<last>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]   several")
+        out.append("# images shown as ONE card, which boots one of them at every power-up.  The card sits")
+        out.append("# in the menu where the line sits.  Members stay ordinary image= lines; a leading '+'")
+        out.append("# keeps THEIR cards too, so one card can offer \"surprise me\" beside the very builds")
+        out.append("# it rolls between.  How it picks is a word before the range: not-last (never the one")
+        out.append("# it booted last - the default), any (the dice, repeats and all), shuffle (every member")
+        out.append("# once before any of them comes round again).")
+    # A GROUP LINE GOES BEFORE ITS FIRST MEMBER, which is what puts its card where the
+    # builder meant it: conf.c lays the cards out in line order, so a line written after
+    # every image would put the card at the END of the menu instead.
+    def group_line(g):
+        # HOW IT PICKS goes in the spec, after the '+' and before the range, so
+        # one card is still one line.  The default is left out, which keeps a
+        # card that does not care byte for byte what it always was.
+        roll = "" if g.get("roll", ROLL_DEFAULT) == ROLL_DEFAULT else g["roll"] + ":"
+        return ("group=%s%s%d-%d|%s|%s"
+                % ("+" if g["keep"] else "", roll,
+                   g["members"][0], g["members"][-1], g["title"], g["subtitle"])
+                + "".join("|" + x for x in g["media"][:width]))
+
+    at = {}
+    for g in groups:
+        at.setdefault(g["pos"], []).append(g)
+    for i, (d, t, s, r) in enumerate(zip(devices, titles, subtitles, rows)):
+        for g in at.get(i, ()):
+            out.append(group_line(g))
         out.append("image=%s|%s|%s" % (d, t, s) + "".join("|" + x for x in r[:width]))
+    # a group whose place is past the last image: its card is the last one
+    for g in at.get(len(devices), ()):
+        out.append(group_line(g))
     out.append("default=%d" % int(default))
+    if default_card is not None:
+        # THE ONLY WAY TO NAME A KEEPING GROUP'S CARD: once its members keep cards of
+        # their own, no image index resolves to the group
+        out.append("default_card=%d" % int(default_card))
     out.append("timeout=%d" % int(timeout))
     if font:
         out.append("font=%s" % font)
@@ -1439,22 +1651,30 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append("# log: the selector's diagnostics ON THE CARD (a fresh file each boot, the previous")
         out.append("# boot's kept as .1, 1 MiB at most) - a development card; the app writes no log= line")
         out.append("log=%s" % CARD_LOG)
+    for line in out:
+        if len(line) > CONF_LINE_MAX:
+            raise Refused("images.conf: a line is %d characters; the selector reads at most %d: %r"
+                          % (len(line), CONF_LINE_MAX, line[:80] + "..."))
     return "\n".join(out) + "\n"
 
 
 def parse_images_conf(text):
-    """-> {'images': [(device, title, subtitle)], 'media': [(art, anim, music, confirm)] (aligned,
+    """-> {'images': [(device, title, subtitle)], 'groups': [{title, subtitle, media, members}],
+    'media': [(art, anim, music, confirm)] (aligned,
     '' = none), 'default': int, 'timeout': int, 'font': str|None, 'sound_move': str|None,
     'sound_confirm': str|None, 'volume': int|None, 'mixer_volume': int|None, 'media_dir': str|None,
     'theme': str|None, 'colors': {role: rrggbb}, 'debug_log': str|None (the log= path)}.
     3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
-    '|' ':' or '/', or more than 16 images is refused.  Unknown keys are ignored (the file may
+    '|' ':' or '/', more than MAX_IMAGES images, more than MAX_CARDS cards or more than MAX_GROUPS
+    groups is refused.  A `group=` line names several images as ONE card (item 106); its members
+    must be a contiguous run of two or more, never image 0, and never in two groups.  Unknown keys are ignored (the file may
     grow).  The theme name is kept as the card spells it (an unknown one is what `inspect` should
     show, and the selector falls back on its own); a color_ key with an unknown role or a value
     that is not RRGGBB is dropped, exactly as the selector drops it."""
     if isinstance(text, bytes):
         text = text.decode("utf-8", "replace")
-    conf = {"images": [], "media": [], "default": 0, "timeout": 15, "font": None,
+    conf = {"images": [], "media": [], "groups": [], "default": 0, "default_card": None,
+            "timeout": 15, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None}
     for raw in text.splitlines():
@@ -1475,6 +1695,27 @@ def parse_images_conf(text):
                                        for x, what in zip(f[3:3 + len(MEDIA_ROW)], MEDIA_FIELDS)))
             if len(conf["images"]) > MAX_IMAGES:
                 raise Refused("images.conf: more than %d images" % MAX_IMAGES)
+        elif key == "group":
+            f = [x.strip() for x in val.split("|")]
+            if len(f) > 3 + len(MEDIA_ROW):
+                raise Refused("images.conf: group line has %d fields (at most %d): %r"
+                              % (len(f), 3 + len(MEDIA_ROW), raw))
+            f += [""] * (3 + len(MEDIA_ROW) - len(f))
+            spec = f[0]
+            keep = spec.startswith("+")
+            if keep:
+                spec = spec[1:]
+            roll, spec = split_roll_spec(spec)
+            conf["groups"].append({"members": parse_member_spec(spec), "keep": keep,
+                                   "roll": roll,
+                                   "pos": len(conf["images"]), "title": f[1], "subtitle": f[2],
+                                   "media": tuple(_media_name_ok(x, what) for x, what
+                                                  in zip(f[3:3 + len(MEDIA_ROW)], MEDIA_FIELDS))})
+        elif key == "default_card":
+            try:
+                conf["default_card"] = int(val.strip())
+            except ValueError:
+                raise Refused("images.conf: bad default_card=%r" % val)
         elif key in ("default", "timeout"):
             try:
                 conf[key] = int(val.strip())
@@ -1504,6 +1745,8 @@ def parse_images_conf(text):
             m = COLOR_RE.match(val.strip())
             if key[6:] in boot_themes()["roles"] and m:
                 conf["colors"][key[6:]] = m.group(1).lower()
+    # the members can only be bound once every image line has been read
+    conf["groups"] = check_groups(conf["groups"], len(conf["images"]))
     return conf
 
 
@@ -1512,6 +1755,11 @@ def conf_media_names(conf):
     names = []
     for row in conf.get("media", []):
         names += [x for x in row if x]
+    # a group card has its own art, animation, music and confirm sound - one card's
+    # worth however many members it has, which is why a jukebox costs no more media
+    # than a plain image does
+    for g in conf.get("groups", []):
+        names += [x for x in g["media"] if x]
     names += [conf.get(k) for k in ("sound_move", "sound_confirm") if conf.get(k)]
     return sorted(set(names))
 
@@ -1642,7 +1890,8 @@ def read_media_manifest(media_dir):
 
 def plan_media(media_dir, n_images):
     """Validate DIR/media.json against a card with `n_images` images and check every referenced
-    file -> {'rows': [(art, anim, music, confirm)], 'sound_move', 'sound_confirm', 'volume', 'mixer_volume',
+    file -> {'rows': [(art, anim, music, confirm)], 'group_rows': [(art, anim)],
+    'sound_move', 'sound_confirm', 'volume', 'mixer_volume',
     'files': OrderedDict name -> source path, 'total': bytes, 'kinds': {name: kind word}}.
     Only referenced files are staged; a missing, misnamed, malformed or over-budget one refuses."""
     man = read_media_manifest(media_dir)
@@ -1678,7 +1927,23 @@ def plan_media(media_dir, n_images):
                      take(e.get("anim"), "anim", "images[%d].anim" % i),
                      take(e.get("music"), "wav", "images[%d].music" % i),
                      take(e.get("confirm"), "wav", "images[%d].confirm" % i)))
-    out = {"rows": rows,
+    # A RANDOM CARD'S OWN PICTURE (item 106).  It belongs to the CARD, so it is
+    # not in the image rows and nothing else references it - which is exactly
+    # why it has to be staged from here, or the card's menu would look for a
+    # file the build never copied.  An older manifest has no 'groups' key and
+    # the card's groups fall back to borrowing their first member's row.
+    gsrc = man.get("groups")
+    if gsrc is not None and not isinstance(gsrc, list):
+        raise Refused("%s: 'groups' must be a list" % MEDIA_MANIFEST)
+    group_rows = []
+    for gi, e in enumerate(gsrc or []):
+        if not isinstance(e, dict):
+            raise Refused("%s: groups[%d] must be an object" % (MEDIA_MANIFEST, gi))
+        group_rows.append((take(e.get("art"), "art", "groups[%d].art" % gi),
+                           take(e.get("anim"), "anim", "groups[%d].anim" % gi),
+                           take(e.get("music"), "wav", "groups[%d].music" % gi),
+                           take(e.get("confirm"), "wav", "groups[%d].confirm" % gi)))
+    out = {"rows": rows, "group_rows": group_rows,
            "sound_move": take(man.get("sound_move"), "wav", "sound_move") or None,
            "sound_confirm": take(man.get("sound_confirm"), "wav", "sound_confirm") or None,
            "volume": None, "mixer_volume": None, "files": files, "total": total, "kinds": kinds,
@@ -1740,6 +2005,11 @@ def media_budget_refusal(media):
         if over:
             why.append("  over the share: %s" % ", ".join("image %d" % i for i in over))
         why.append("  a file two images share is counted for both")
+    gnames = [n for row in media.get("group_rows") or [] for n in row if n]
+    gbytes = sum(media["sizes"].get(n, 0) for n in set(gnames))
+    if gbytes:
+        why.append("  ...plus %s of random-card pictures, which those rows do not show "
+                   "(a random card is not an image)" % _mb(gbytes))
     return "\n".join(why)
 
 
@@ -2147,6 +2417,44 @@ def debugfs_walk(ref, sub="/"):
 
 
 # ============================================================================= injection
+def selector_file_version(path):
+    """(major, minor, ...) from a codeselect binary's own version string, or None when the
+    file does not carry one.  The binary says what it is; a card's build.json is a record
+    of what someone meant to put there."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read(SELECTOR_VERSION_MAX)
+    except OSError:
+        return None
+    m = SELECTOR_VERSION_RE.search(blob)
+    if not m:
+        return None
+    try:
+        return tuple(int(x) for x in m.group(1).decode("ascii").split("."))
+    except ValueError:
+        return None
+
+
+def check_selector_reads_conf(binary, conf_text):
+    """Refuse to write a conf the menu that will read it cannot understand.
+
+    Only `group=` needs this so far: every other key this tool writes is either older than
+    the selector or ignored by one that does not know it, which is what "unknown keys are
+    ignored so the file can grow" buys.  A group is different because dropping it does not
+    degrade the menu, it changes which images the card offers at all."""
+    if "\ngroup=" not in "\n" + conf_text:
+        return
+    ver = selector_file_version(binary)
+    if ver is None:
+        raise Refused("%s carries no version string, so it cannot be shown to read a group= line; "
+                      "rebuild the selector with %s" % (binary, os.path.join(HERE, "buildselect.sh")))
+    if ver < SELECTOR_GROUP_VERSION:
+        raise Refused("this menu needs codeselect %s or later to read a group= line, and %s is %s; "
+                      "rebuild the selector with %s"
+                      % (".".join(str(x) for x in SELECTOR_GROUP_VERSION), binary,
+                         ".".join(str(x) for x in ver), os.path.join(HERE, "buildselect.sh")))
+
+
 def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None, manifests=None):
     """Copy the selector files into `stage` with their FINAL modes (debugfs write copies the source
     mode).  `media_files` ({name: source path}, from plan_media) go to stage/media/<name> and
@@ -2176,6 +2484,9 @@ def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None
         shutil.copyfile(src, dst)
         os.chmod(dst, mode)
         items.append((dst, SELECT_DIR + "/" + card, mode))
+    # THE CONF AND THE PROGRAM THAT READS IT GO ON THE CARD TOGETHER, so this is the one
+    # place that can hold them to each other.
+    check_selector_reads_conf(os.path.join(stage, "codeselect"), conf_text)
     conf = os.path.join(stage, "images.conf")
     with open(conf, "w", newline="\n") as f:
         f.write(conf_text)
@@ -2422,9 +2733,10 @@ def conf_for_plan(plan, args, existing=None, media=None):
         if devs != plan.devices():
             raise Refused("--conf %s lists %r but the card holds %r" % (args.conf, devs, plan.devices()))
         return text
-    ex = existing or {"images": [], "media": [], "default": None, "timeout": None, "font": None,
-                      "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None,
-                      "theme": None, "colors": {}}
+    ex = existing or {"images": [], "media": [], "groups": [], "default": None,
+                      "default_card": None, "timeout": None,
+                      "font": None, "sound_move": None, "sound_confirm": None, "volume": None,
+                      "mixer_volume": None, "theme": None, "colors": {}}
     n = len(plan.trees)
     same_n = len(ex["images"]) == n
     titles = split_list(getattr(args, "titles", None))
@@ -2476,9 +2788,38 @@ def conf_for_plan(plan, args, existing=None, media=None):
             theme = None
         if not colors:
             colors = dict(ex.get("colors") or {})
+    # THE GROUPS: the flags when they were given, else whatever the card already carries.
+    grows = list((media or {}).get("group_rows") or [])
+    groups = [dict(g) for g in (getattr(args, "groups", None) or ex.get("groups") or [])]
+    if grows and len(grows) != len(groups):
+        raise Refused("%s lists %d random-card picture(s); the card has %d random card(s)"
+                      % (MEDIA_MANIFEST, len(grows), len(groups)))
+    for gi, g in enumerate(groups):
+        if g.get("media"):
+            continue
+        # A RANDOM CARD IS A CARD: its picture, its music bed and its confirm sound
+        # are its own when the media set carries them (item 106).  Borrowing its first
+        # member's was how the bed the owner picked was dropped on the floor (David,
+        # 2026-09-11), and "the game's own logo" means nothing on a card that stands
+        # for forty of them either.  A null is a field the owner turned OFF, which is
+        # why an empty group row still wins over the borrow - only a media set with no
+        # groups at all falls back, which is what a card built before this did.
+        borrowed = ("", "", "", "")
+        if rows and g.get("members"):
+            first = g["members"][0]
+            if 0 <= first < len(rows):
+                borrowed = rows[first]
+        if gi < len(grows):
+            g["media"] = tuple(grows[gi])
+        elif rows and g.get("members"):
+            g["media"] = borrowed
+    default_card = getattr(args, "default_card", None)
+    if default_card is None:
+        default_card = ex.get("default_card")
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
-                              machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)))
+                              machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
+                              groups=groups, default_card=default_card)
 
 
 # ============================================================================= the JSON sidecars
@@ -2502,6 +2843,12 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
             prev[im["device"]] = im
     vers = {v["device"]: v for v in (versions or []) if v.get("device")}
     sources = list(sources or [])
+    # which group (if any) owns each image, so a loader can rebuild the card rows without
+    # re-deriving the members from the conf's index arithmetic
+    group_of = {}
+    for gi, g in enumerate(conf.get("groups") or []):
+        for m in g["members"]:
+            group_of[m] = gi
     rows = []
     for i, (dev, title, sub) in enumerate(conf["images"]):
         art, anim, music, confirm = conf["media"][i] if i < len(conf["media"]) else MEDIA_ROW
@@ -2517,7 +2864,9 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
             ("confirm", confirm or None),
             ("title_dir", v.get("title") or old.get("title_dir")),
             ("version", v.get("version") or old.get("version")),
-            ("node_fw_version", v.get("node_fw_version") or old.get("node_fw_version"))]))
+            ("node_fw_version", v.get("node_fw_version") or old.get("node_fw_version")),
+            # null when this image is a card of its own (item 106)
+            ("group", group_of.get(i))]))
     return collections.OrderedDict([
         ("tool", "mkmulticard"),
         ("version", VERSION),
@@ -2531,7 +2880,17 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("sound_move", conf["sound_move"]),
         ("sound_confirm", conf["sound_confirm"]),
         ("theme", conf.get("theme")),
-        ("colors", dict(conf.get("colors") or {}))])
+        ("colors", dict(conf.get("colors") or {})),
+        # ONE ENTRY PER GROUP CARD (item 106), with the media *_source keys the tab's
+        # staleness check needs - a group card's art is prepared like any other card's
+        ("groups", [collections.OrderedDict([
+            ("title", g["title"]), ("subtitle", g["subtitle"]), ("members", list(g["members"])),
+            # whether its games keep cards of their own, and where its own card sits
+            ("keep", bool(g.get("keep"))), ("pos", g.get("pos")),
+            ("roll", g.get("roll", ROLL_DEFAULT)),
+            ("art", g["media"][0] or None), ("anim", g["media"][1] or None),
+            ("music", g["media"][2] or None), ("confirm", g["media"][3] or None)])
+            for g in (conf.get("groups") or [])])])
 
 
 def selector_manifests(plan, conf_text, media_dir=None, sources=None, existing_build=None,
@@ -4256,7 +4615,8 @@ def render_images_conf_text(conf):
         [s for (_d, _t, s) in conf["images"]], conf["default"], conf["timeout"], conf["font"],
         conf["media"], conf["sound_move"], conf["sound_confirm"], volume, conf["mixer_volume"],
         media_dir=conf.get("media_dir"), theme=conf.get("theme"), colors=conf.get("colors"),
-        machine_volume=mv, debug_log=bool(conf.get("debug_log")))
+        machine_volume=mv, debug_log=bool(conf.get("debug_log")), groups=conf.get("groups"),
+        default_card=conf.get("default_card"))
 
 
 # ============================================================================= reading a card back
@@ -5871,6 +6231,15 @@ def inspect_card(card, media_out=None):
         ("partitions", parts), ("images", images),
         # what is on every games tree, and whether its source moved since (item 93)
         ("trees", trees_report(path, plan, trees_rec, warnings)),
+        ("groups", [collections.OrderedDict([
+            ("index", gi), ("title", g["title"]), ("subtitle", g["subtitle"]),
+            ("members", list(g["members"])),
+            ("keep", bool(g.get("keep"))), ("pos", g.get("pos")),
+            ("roll", g.get("roll", ROLL_DEFAULT)),
+            ("art", g["media"][0] or None), ("anim", g["media"][1] or None),
+            ("music", g["media"][2] or None), ("confirm", g["media"][3] or None)])
+            for gi, g in enumerate(conf.get("groups") or [])]),
+        ("default_card", conf.get("default_card")),
         ("timeout", conf["timeout"]), ("default", conf["default"]),
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
         ("mixer_volume", conf["mixer_volume"]),
@@ -5917,8 +6286,22 @@ def print_inspect(rep):
              rep["sound_move"], rep["sound_confirm"], rep["font"], rep.get("debug_log") or "off"))
     colors = "".join(" color_%s=%s" % kv for kv in sorted((rep.get("colors") or {}).items()))
     print("theme      %s%s" % (rep.get("theme") or "(the selector's default)", colors))
+    # WHAT THE PLAYER ACTUALLY SCROLLS THROUGH (item 106), before the per-image detail:
+    # a card that shows five images as three cards is not obvious from the image list,
+    # and "which of these do I see" is the first question a group raises.
+    for g in rep.get("groups") or []:
+        print("group %d    %r / %r  members %d-%d%s"
+              % (g["index"], g["title"], g["subtitle"], g["members"][0], g["members"][-1],
+                 "  (its games keep their own cards too)" if g.get("keep") else ""))
+        print("           art=%s anim=%s music=%s confirm=%s"
+              % (g["art"], g["anim"], g["music"], g["confirm"] or "(the menu's)"))
+        print("           one card; it boots a different member every power-up")
+        if not g.get("keep"):
+            print("           its games have no cards of their own")
     for im in rep["images"]:
-        print("image %d    %s  %r / %r" % (im["index"], im["device"], im["title"], im["subtitle"]))
+        gi = next((g["index"] for g in (rep.get("groups") or []) if im["index"] in g["members"]), None)
+        print("image %d    %s  %r / %r%s" % (im["index"], im["device"], im["title"], im["subtitle"],
+                                            "" if gi is None else "  (in group %d)" % gi))
         print("           art=%s anim=%s music=%s confirm=%s"
               % (im["art"], im["anim"], im["music"],
                  im["confirm"] or "(the menu's)"))
@@ -6245,7 +6628,8 @@ def synth_media_dir(d, n_images):
 
 
 class Checks:
-    """``ok &= <expression>`` that SAYS WHICH EXPRESSION FAILED.
+    """``ok &= <expression>`` - or ``ok &= <expression>, <diagnostic>`` - that SAYS
+    WHICH EXPRESSION FAILED.
 
     The selftest is one long chain of `ok &=`, and a False in the middle of
     it used to print nothing at all: the run just ended in FAIL, and the
@@ -6258,14 +6642,24 @@ class Checks:
         self.failed = []
 
     def __iand__(self, value):
+        # ok &= <check>, <diagnostic> is an augmented assignment, so Python builds a
+        # TUPLE out of the two - and a 2-tuple is always truthy.  Eleven checks in this
+        # file were written that way and every one of them was a no-op that could never
+        # fail (found 2026-09-10, when a new one passed over a card built the wrong way).
+        # The intent is unambiguous, so it is honoured rather than banned: the first item
+        # is the check and the second is printed when it fails.
+        why = None
+        if isinstance(value, tuple) and len(value) == 2:
+            value, why = value
         if not value:
             # the CALLER's frame, file and line together: a name taken from
             # this module and a line taken from the caller would point at a
             # line that is not the check
             frame = sys._getframe(1)
             line = frame.f_lineno
-            print("    CHECK FAILED at %s:%d"
-                  % (os.path.basename(frame.f_code.co_filename), line))
+            print("    CHECK FAILED at %s:%d%s"
+                  % (os.path.basename(frame.f_code.co_filename), line,
+                     "" if why is None else "  %r" % (why,)))
             self.failed.append(line)
             self.ok = False
         return self
@@ -6293,7 +6687,11 @@ def selftest(d, selector_file=None):
     sel = os.path.join(d, "seldir")
     os.makedirs(sel, exist_ok=True)
     with open(os.path.join(sel, "codeselect"), "wb") as f:
-        f.write(open(selector_file, "rb").read() if selector_file else b"#!/bin/sh\necho '[select] chose 0 selftest'\n")
+        # the stand-in carries a VERSION STRING, because the group gate (item 106) reads
+        # one off this file before it will write a group= line beside it; a fake with no
+        # version is exactly what that gate is meant to refuse, and part 8 covers that too
+        f.write(open(selector_file, "rb").read() if selector_file
+                else b"#!/bin/sh\n# codeselect 3.0 (selftest stand-in)\necho '[select] chose 0 selftest'\n")
     with open(os.path.join(sel, "select.sh"), "w", newline="\n") as f:
         f.write("#!/bin/sh\n# selftest placeholder\nexit 0\n")
     media = synth_media_dir(os.path.join(d, "media dir"), 3)
@@ -6957,6 +7355,62 @@ def selftest(d, selector_file=None):
         ok &= not any(n in (".blobs", "img1", "img2") for n in
                       (e[4] for e in debugfs_ls(fs_ref(x, gx.part(3)[1] * SECTOR), "/")))
     print("SELFTEST part 7 (extract)", "PASS" if ok else "FAIL")
+
+    # ---- PART 8: a GROUP card - several images the player meets as one (item 106)
+    print("== build (store) with a group: A stock, plus B and C as ONE jukebox card")
+    out8 = os.path.join(d, "group.img")
+    ok &= main(["build", "--primary", A, "--group", "JUKEBOX|a different set every power-up",
+                "--member", B, "--member", C, "--out", out8, "--selector-dir", sel,
+                "--size", "content", "--allow-version-mismatch", "--force"]) == 0
+    # --layout was never given: a group makes `auto` pick the compact build, because the
+    # members are the same title with a few songs changed and each would otherwise cost a
+    # full copy
+    plan8 = plan_from_card(out8)
+    ok &= plan8.layout == "store", plan8.layout
+    conf8 = card_conf(out8)
+    ok &= [d_ for (d_, _t, _s) in conf8["images"]] == [
+        "/dev/mmcblk0p3", "/dev/mmcblk0p3:img1", "/dev/mmcblk0p3:img2"], conf8["images"]
+    ok &= len(conf8["groups"]) == 1 and conf8["groups"][0]["members"] == [1, 2], conf8["groups"]
+    ok &= conf8["groups"][0]["title"] == "JUKEBOX"
+    # THE GROUP LINE SITS WHERE ITS CARD SITS: before image 1, not at the end
+    raw8 = debugfs_cat(select_ref(out8), SELECT_DIR + "/images.conf").decode("utf-8")
+    kinds8 = [ln.split("=")[0] for ln in raw8.splitlines() if ln[:6] in ("image=", "group=")]
+    ok &= kinds8 == ["image", "group", "image", "image"], kinds8
+    print("== three trees, but the menu draws two cards")
+    rep8 = inspect_card(out8)
+    ok &= len(rep8["images"]) == 3 and len(rep8["groups"]) == 1
+    ok &= rep8["groups"][0]["members"] == [1, 2] and rep8["groups"][0]["title"] == "JUKEBOX"
+    ok &= [im["title_dir"] for im in rep8["images"]] == ["A_title", "B_title", "C_title"]
+    b8 = json.loads(debugfs_cat(select_ref(out8), SELECT_DIR + "/" + BUILD_MANIFEST).decode("utf-8"))
+    ok &= [im["group"] for im in b8["images"]] == [None, 0, 0], b8["images"]
+    ok &= b8["groups"][0]["members"] == [1, 2]
+    print("== parts.py --list-games still sees three trees: a group is a MENU idea, not a layout one")
+    r8 = subprocess.run([sys.executable, parts_py, "--list-games", out8],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    rows8 = [ln.split() for ln in r8.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
+    ok &= r8.returncode == 0 and [(rw[0], rw[3]) for rw in rows8] == [
+        ("3", "A_title"), ("3", "B_title"), ("3", "C_title")], rows8
+    ok &= verify_card(out8, verify_plan(out8, [A, B, C]), sel, mode="full")
+    print("== --layout multi with a group is refused, and the refusal says what it would have cost")
+    buf8 = io.StringIO()
+    with contextlib.redirect_stdout(buf8), contextlib.redirect_stderr(buf8):
+        rc8 = main(["build", "--primary", A, "--group", "J|x", "--member", B, "--member", C,
+                    "--out", os.path.join(d, "nope.img"), "--selector-dir", sel,
+                    "--layout", "multi", "--allow-version-mismatch", "--force"])
+    ok &= rc8 == 2 and "each cost a full copy" in buf8.getvalue(), (rc8, buf8.getvalue()[-400:])
+    print("== a selector with no version string is refused a group= conf")
+    sel8 = os.path.join(d, "seldir noversion")
+    os.makedirs(sel8, exist_ok=True)
+    for name in os.listdir(sel):
+        if os.path.isfile(os.path.join(sel, name)):
+            shutil.copyfile(os.path.join(sel, name), os.path.join(sel8, name))
+    with open(os.path.join(sel8, "codeselect"), "wb") as f:
+        f.write(b"#!/bin/sh\necho no version here\n")
+    buf8b = io.StringIO()
+    with contextlib.redirect_stdout(buf8b), contextlib.redirect_stderr(buf8b):
+        rc8b = main(["inject", "--card", out8, "--selector-dir", sel8])
+    ok &= rc8b == 2 and "carries no version string" in buf8b.getvalue(), (rc8b, buf8b.getvalue()[-400:])
+    print("SELFTEST part 8 (group)", "PASS" if ok else "FAIL")
     print("SELFTEST", "PASS" if ok else "FAIL")
     return bool(ok)
 
@@ -6980,10 +7434,97 @@ def selftest_crash(card):
 
 
 # ============================================================================= CLI
+class _OrderedImage(argparse.Action):
+    """--extra / --group / --member / --members-list, IN THE ORDER THEY WERE TYPED.
+
+    A group names its members by image index, and the only thing that fixes an index is
+    where the flag sat on the command line - `--group X --member A --member B` means A
+    and B are the group's, and the next `--extra` closes it.  argparse's `append` throws
+    that ordering away, which is why this exists.
+
+    The action only records; :func:`resolve_image_args` turns the record into
+    ``args.extra`` and ``args.groups`` after parsing.  It deliberately never mutates the
+    list argparse handed it: that list is the parser's own `default=[]` object, and
+    appending to it would leak into the next parse in the same process."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        order = list(getattr(namespace, "image_order", None) or [])
+        order.append((option_string.lstrip("-"), values))
+        namespace.image_order = order
+
+
+def read_members_list(path):
+    """One image path per line; blanks and # comments skipped.  For a folder of forty
+    song-set variants, which is not a command line anybody should have to type."""
+    out = []
+    with open(path, "r") as f:
+        for raw in f:
+            line = raw.strip()
+            if line and not line.startswith("#"):
+                out.append(line)
+    if not out:
+        raise Refused("--members-list %s names no image" % path)
+    return out
+
+
+def resolve_image_args(args):
+    """Turn the recorded flag order into (extras, groups) and put both on `args`.
+
+    Every image is still an --extra to the rest of this tool: a member IS an image line,
+    which is the whole reason select.sh and the choice file never learned that groups
+    exist.  What the group adds is a card drawn in front of several of them."""
+    order = getattr(args, "image_order", None)
+    if order is None:
+        args.groups = []
+        return args
+    extras, groups, open_group = [], [], None
+    for kind, value in order:
+        if kind == "extra":
+            open_group = None
+            extras.append(value)
+        elif kind == "group":
+            title, _sep, subtitle = value.partition("|")
+            open_group = {"title": title.strip(), "subtitle": subtitle.strip(), "members": []}
+            groups.append(open_group)
+        elif kind == "group-over":
+            # A GROUP OVER IMAGES THAT ARE ALREADY ON THE CARD.  It adds no games:
+            # it puts one more CARD in front of games that keep their own, which is
+            # "surprise me, or pick one" (David, 2026-09-10).  Its place in the menu
+            # is where the flag sat, which is why this is an ordered action at all.
+            spec, _sep, rest = value.partition("|")
+            title, _sep, subtitle = rest.partition("|")
+            open_group = None
+            groups.append({"title": title.strip(), "subtitle": subtitle.strip(),
+                           "members": parse_member_spec(spec), "keep": True,
+                           "pos": len(extras) + 1})
+        elif kind in ("member", "members-list"):
+            if open_group is None:
+                raise Refused("--%s must follow a --group" % kind)
+            for path in ([value] if kind == "member" else read_members_list(value)):
+                extras.append(path)
+                open_group["members"].append(len(extras))     # image 0 is the primary
+    args.extra = extras
+    args.groups = [g for g in groups]
+    # ...and HOW EACH ONE PICKS, by group index: a card's rule is not ordered
+    # against the images the way its members are, so it is named rather than
+    # positioned.
+    for spec in getattr(args, "group_roll", None) or []:
+        idx, sep, mode = str(spec).partition("=")
+        if not sep or not idx.strip().isdigit():
+            raise Refused("--group-roll %r: expected G=MODE, where G is a group index" % (spec,))
+        g = int(idx.strip())
+        if not (0 <= g < len(args.groups)):
+            raise Refused("--group-roll %d: there is no group %d (%d given)"
+                          % (g, g, len(args.groups)))
+        args.groups[g]["roll"] = check_roll(mode)
+    return args
+
+
 def _add_images(s, out_flag, reach_flag=True, layout_flag=True):
     s.add_argument("--primary", required=True, help="the image whose p1/p2/p3/p5/p6 the card gets (index 0)")
-    s.add_argument("--extra", action="append", default=[], metavar="IMG",
+    s.add_argument("--extra", action=_OrderedImage, default=[], metavar="IMG",
                    help="an extra image (its games partition becomes p7 [parts layout] or p7/imgN [multi layout])")
+    _add_group_flags(s)
     if out_flag:
         s.add_argument(out_flag, required=True, help="the multi-image card image")
     if layout_flag:
@@ -6994,6 +7535,34 @@ def _add_images(s, out_flag, reach_flag=True, layout_flag=True):
                             "store of the files the images share (root only; never USB-update such a card)")
     if reach_flag:
         _add_reach_flag(s)
+
+
+def _add_group_flags(s):
+    """A GROUP CARD (item 106): several images shown as one card, which boots a member at
+    random on every power-up and never the one it booted last.  The flags are ORDERED
+    against --extra: --group opens one, the --member flags after it fill it, and the next
+    --extra or --group closes it."""
+    s.add_argument("--group", action=_OrderedImage, metavar="TITLE|SUBTITLE",
+                   help="open a GROUP card: the --member images after this are shown as one card, "
+                        "which boots a different one of them every power-up (repeatable; forces "
+                        "--layout store, since the members would otherwise each cost a full copy)")
+    s.add_argument("--member", action=_OrderedImage, metavar="IMG",
+                   help="an image inside the --group just opened (repeatable; at least two per group)")
+    s.add_argument("--members-list", action=_OrderedImage, metavar="FILE",
+                   help="add every image named in FILE (one path per line, # comments skipped) to the "
+                        "--group just opened - a folder of forty song-set variants is not a command line")
+    s.add_argument("--group-over", action=_OrderedImage, metavar="A-B|TITLE|SUBTITLE",
+                   help="a random card over images ALREADY on the card (0-based, e.g. '1-2|RANDOM|pick "
+                        "one or let it roll'): it adds no games and those images KEEP their own cards, "
+                        "so the menu offers the builds and a 'surprise me' beside them. Its place in "
+                        "the menu is where this flag sits among the --extra ones")
+    s.add_argument("--group-roll", action="append", default=[], metavar="G=MODE",
+                   help="how random card G picks: not-last (never the one it booted last - "
+                        "the default), any (the dice, repeats and all), or shuffle (every "
+                        "member once before any of them comes round again)")
+    s.add_argument("--default-card", type=int, metavar="N",
+                   help="highlight CARD N (menu order) rather than an image - the only way to name a "
+                        "--group-over card, whose members all keep cards of their own")
 
 
 def _add_reach_flag(s):
@@ -7066,8 +7635,9 @@ def main(argv=None):
     _add_conf_flags(s)
     s.add_argument("--primary", help="RECORD this path as image 0's source in build.json; nothing is read "
                                      "from it (without it the card's own build.json is carried through)")
-    s.add_argument("--extra", action="append", default=[], metavar="IMG",
+    s.add_argument("--extra", action=_OrderedImage, default=[], metavar="IMG",
                    help="RECORD this path as the next image's source in build.json (repeatable); nothing is read from it")
+    _add_group_flags(s)
     _add_reach_flag(s)
     s = sub.add_parser("inspect", help="read a finished card back: table, menu, provenance, media, validator state")
     s.add_argument("--card", required=True, help="the card to read (READ-ONLY; nothing is written to it)")
@@ -7103,8 +7673,9 @@ def main(argv=None):
                                       "minute (root: a loop mount of the card's partitions)")
     s.add_argument("--card", required=True, help="the multi card to update IN PLACE")
     s.add_argument("--primary", help="image 0's source (default: what the card's build.json recorded)")
-    s.add_argument("--extra", action="append", default=[], metavar="IMG",
+    s.add_argument("--extra", action=_OrderedImage, default=[], metavar="IMG",
                    help="the extra images in their new order (default: what build.json recorded)")
+    _add_group_flags(s)
     _add_conf_flags(s)
     s.add_argument("--bypass-validation", action="store_true",
                    help="neuter Stern's validator in every tree whose game changed (the others keep their state)")
@@ -7129,6 +7700,7 @@ def main(argv=None):
         selftest_crash(argv[1])
         return 0
     a = ap.parse_args(argv)
+    resolve_image_args(a)          # --extra/--group/--member in the order they were typed
     try:
         if a.cmd == "plan":
             meter = None
@@ -7138,14 +7710,14 @@ def main(argv=None):
                 PROGRESS.start(measure_total([a.primary] + list(a.extra)), "measuring")
                 meter = PROGRESS
             plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size, cache_dir=a.cache_dir,
-                             progress=meter)
+                             progress=meter, groups=a.groups)
             if meter is not None:
                 meter.finish()
             # the media is checked HERE, not after the layout, so `plan` says
             # the same thing `build` would refuse with - before anything is
             # copied (item 105)
             media = plan_media(a.media_dir, len(plan.trees)) if a.media_dir else None
-            print_plan(plan, media)
+            print_plan(plan, media, getattr(a, "groups", None))
             check_reachable(plan, a.allow_unreachable)
             recs = plan_identities(plan, progress=None)
             try:                                 # plan writes nothing, so it reports and does
@@ -7158,8 +7730,13 @@ def main(argv=None):
             check_output_path(a.out, [a.primary] + a.extra + [a.conf, a.selector_dir, a.media_dir], force=a.force)
             if not a.no_inject and not a.selector_dir:
                 raise Refused("build needs --selector-dir (or --no-inject)")
-            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size, cache_dir=a.cache_dir)
-            print_plan(plan)
+            # THE GROUPS REACH THE PLANNER, not only the conf: --layout auto picks the
+            # compact build when one exists, and parts/multi with one is refused. Without
+            # this the gate is dead and a group quietly lands on a multi card, where every
+            # member costs a full copy - which is the whole thing it exists to prevent.
+            plan = make_plan(a.primary, a.extra, a.layout, size_class=a.size,
+                             cache_dir=a.cache_dir, groups=a.groups)
+            print_plan(plan, groups=a.groups)
             check_reachable(plan, a.allow_unreachable)       # before a byte is written
             if plan.layout == "store":
                 ok, why = loop_available()

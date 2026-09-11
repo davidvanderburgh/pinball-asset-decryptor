@@ -173,7 +173,8 @@ expect "$T/choice" 4
 pix "$T/menu_nine.ppm" $((449 + 28 + 166)) 262 2060C0
 # its left neighbour (image 3: art0 + anim, not highlighted, pinned -> frame 1)
 pix "$T/menu_nine.ppm" $((60 + 28 + 166)) 262 00C000
-# a 17th image is refused
+# a 17th image is refused - as a 17th CARD since item 106, which is the cap
+# that bounds the menu; 17 image lines are well inside the image cap of 64
 { for i in $(seq 1 17); do echo "image=p7:img$i|B$i|x"; done; } > "$T/many.conf"
 rm -f "$T/choice"
 if run "$T/x.ppm" "$T/many.conf"; then echo "headless: FAIL 17 images accepted"; exit 1; fi
@@ -216,7 +217,9 @@ if [ -n "$CAPBIN" ] && [ -f "$CAPBIN" ]; then
             grep "anim: image" "$T/cap40.log"; exit 1; }
     done
     # and the shipped binary still refuses that conf: the cap is a build-time
-    # decision, not something a card can talk the menu into
+    # decision, not something a card can talk the menu into.  40 ungrouped
+    # images are 40 CARDS, which is what $CAPBIN raises and the shipped
+    # binary holds at 16
     rm -f "$T/choice"
     if run "$T/x.ppm" "$T/cap.conf"; then echo "headless: FAIL a $n-image conf was accepted at cap 16"; exit 1; fi
     python3 "$HERE/ppm2png.py" "$T/menu_cap.ppm" "$T/codeselect_menu_cap.png"
@@ -530,6 +533,391 @@ grep -q "log: 0 KB this run: the file stops here (stderr goes on)" "$T/rot.log" 
 size=$(stat -c %s "$T/rot.log")
 [ "$size" -lt 1000 ] || { echo "headless: FAIL the capped log is $size bytes"; exit 1; }
 expect "$T/choice" 0
+
+# 15. IMAGE GROUPS (item 106).  Several image lines shown as ONE card, whose
+#     confirm boots a member at random.  The properties worth proving are that
+#     the CHOICE FILE still holds an image index (select.sh never learns that
+#     groups exist), that the roll never repeats the last member, and that
+#     every way of writing a group wrong is dropped rather than fatal.
+cat > "$T/group.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|the primary|art0.png||
+image=/dev/mmcblk0p3:img1|CUSTOM A|first custom build|art1.png||
+image=/dev/mmcblk0p3:img2|CUSTOM B|second custom build|art2.png||
+group=3-5|JUKEBOX|a different song set every power-up|art0.png|anim1.gif|
+image=/dev/mmcblk0p3:img3|JUKEBOX - set 1|Help!, Yesterday
+image=/dev/mmcblk0p3:img4|JUKEBOX - set 2|Let It Be, Hey Jude
+image=/dev/mmcblk0p3:img5|JUKEBOX - set 3|Come Together, Something
+default=4
+timeout=1
+EOF
+
+# 15a. SIX image lines are FOUR cards, and the group is the fourth.  default=4
+#      is a MEMBER, so the highlight lands on its group's card - that mapping
+#      is why a remembered member needs no state file of its own.
+rm -f "$T/choice" "$T/last" "$T/grp.log"
+run "$T/menu_group.ppm" "$T/group.conf" --no-invert --media "$T/media" --log "$T/grp.log"
+grep -q "conf: 6 image line(s) in 4 card(s), 1 group(s)" "$T/grp.log" || {
+    echo "headless: FAIL six images did not come out as four cards"; grep "^conf:" "$T/grp.log"; exit 1; }
+grep -q "highlight 4 (JUKEBOX) from conf default, card 4/4 (group JUKEBOX, 3 members)" "$T/grp.log" || {
+    echo "headless: FAIL the menu line does not name the group"; grep "menu:" "$T/grp.log"; exit 1; }
+# the countdown boots a MEMBER, and both index files hold that image
+chose=$(cat "$T/choice")
+case "$chose" in 3|4|5) ;; *) echo "headless: FAIL the group booted image '$chose', not one of 3-5"; exit 1;; esac
+expect "$T/last" "$chose"
+grep -q "group: card 4 boots image $chose (rolled from JUKEBOX (not-last): 3 candidates" "$T/grp.log" || {
+    echo "headless: FAIL no roll line"; grep "group:" "$T/grp.log"; exit 1; }
+# `chose N` keeps its prefix - padsw_test.py greps it - and gains the clause
+grep -qE "chose $chose JUKEBOX - set [123] \(rolled from JUKEBOX \(not-last\): 3 candidates" "$T/grp.log" || {
+    echo "headless: FAIL the chose line lost its shape"; grep "chose " "$T/grp.log"; exit 1; }
+
+# 15b. --pick boots a named member without rolling; a --pick that is not a
+#      member of the confirmed card is refused and the roll happens anyway,
+#      because a menu must never boot something it did not offer.
+rm -f "$T/choice" "$T/last"
+run "$T/menu_pick.ppm" "$T/group.conf" --no-invert --media "$T/media" --pick 5
+expect "$T/choice" 5
+rm -f "$T/choice" "$T/last" "$T/pick.log"
+run "$T/menu_pick2.ppm" "$T/group.conf" --no-invert --media "$T/media" --pick 1 --log "$T/pick.log"
+grep -q -- "--pick 1 is not a member of JUKEBOX: rolling instead" "$T/pick.log" || {
+    echo "headless: FAIL --pick 1 was not refused"; grep "pick" "$T/pick.log"; exit 1; }
+chose=$(cat "$T/choice")
+case "$chose" in 3|4|5) ;; *) echo "headless: FAIL a refused --pick booted '$chose'"; exit 1;; esac
+
+# 15c. --seed makes the roll reproducible.  The last-choice file is cleared
+#      between the two runs: it is an INPUT to the roll (the exclusion below),
+#      so leaving run 1's choice behind would change run 2's candidate set and
+#      the test would be measuring the exclusion instead of the seed.
+rm -f "$T/choice" "$T/last"
+run "$T/menu_seed.ppm" "$T/group.conf" --no-invert --media "$T/media" --seed 7
+a=$(cat "$T/choice")
+rm -f "$T/choice" "$T/last"
+run "$T/menu_seed.ppm" "$T/group.conf" --no-invert --media "$T/media" --seed 7
+b=$(cat "$T/choice")
+[ "$a" = "$b" ] || { echo "headless: FAIL --seed 7 gave $a then $b"; exit 1; }
+
+# 15d. THE LAST MEMBER IS NEVER ROLLED AGAIN.  This is the property the whole
+#      item exists for: a fair coin over three sets would repeat about a third
+#      of the time, and a jukebox that plays the same songs twice running is
+#      the complaint that filed this.  Ten seeds, every one of them not 4.
+for s in 0 1 2 3 4 5 6 7 8 9; do
+    rm -f "$T/choice"
+    echo 4 > "$T/last"
+    run "$T/menu_excl.ppm" "$T/group.conf" --no-invert --media "$T/media" --seed $s
+    got=$(cat "$T/choice")
+    [ "$got" != "4" ] || { echo "headless: FAIL seed $s rolled the last member (4) again"; exit 1; }
+    case "$got" in 3|5) ;; *) echo "headless: FAIL seed $s rolled '$got', not 3 or 5"; exit 1;; esac
+done
+
+# 15e. THE LIMITS.  Images and cards are different numbers now: 46 image lines
+#      behind one group is two cards and loads, 65 image lines is past the
+#      image cap, and 17 plain images is past the CARD cap even though it is
+#      well inside the image one.
+{ echo "image=/dev/mmcblk0p3|STERN STOCK|the primary"
+  echo "group=1-45|BIG JUKEBOX|45 song sets"
+  for i in $(seq 1 45); do echo "image=/dev/mmcblk0p3:img$i|SET $i|song set $i"; done
+  echo default=0; echo timeout=1; } > "$T/big.conf"
+rm -f "$T/choice" "$T/last" "$T/big.log"
+run "$T/menu_big.ppm" "$T/big.conf" --no-invert --log "$T/big.log"
+grep -q "conf: 46 image line(s) in 2 card(s), 1 group(s)" "$T/big.log" || {
+    echo "headless: FAIL 46 images behind one group did not load"; grep "^conf:" "$T/big.log"; exit 1; }
+expect "$T/choice" 0
+{ for i in $(seq 1 65); do echo "image=/dev/mmcblk0p3:img$i|B$i|x"; done; } > "$T/toomany.conf"
+rm -f "$T/choice"
+if run "$T/x.ppm" "$T/toomany.conf"; then echo "headless: FAIL 65 image lines accepted"; exit 1; fi
+{ for i in $(seq 1 17); do echo "image=/dev/mmcblk0p3:img$i|B$i|x"; done; } > "$T/toomanycards.conf"
+rm -f "$T/choice"
+if run "$T/x.ppm" "$T/toomanycards.conf" > "$T/cards.out"; then echo "headless: FAIL 17 cards accepted"; exit 1; fi
+# the refusal names the CARD cap and both counts, so a builder who hit it can
+# see at a glance whether a group would have got them under it
+grep -qF "more than 16 cards (17 images, 0 group(s))" "$T/cards.out" || {
+    echo "headless: FAIL no card-limit message"; cat "$T/cards.out"; exit 1; }
+
+# 15f. EVERY WAY OF WRITING A GROUP WRONG IS DROPPED, NEVER FATAL.  A machine
+#      whose owner mistyped a member list still boots; it just shows a card
+#      the mistake did not reach.  Four mistakes in one file: an out-of-range
+#      member, image 0 (the primary, which must stay bootable alone), a member
+#      a previous group already claimed, and a token that is not a number.
+cat > "$T/badgroup.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|the primary
+image=/dev/mmcblk0p3:img1|A|first
+image=/dev/mmcblk0p3:img2|B|second
+group=1-2|FIRST|takes both
+group=0,2,99,x|SECOND|nothing left
+default=0
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/bad.log"
+run "$T/menu_badgroup.ppm" "$T/badgroup.conf" --no-invert --log "$T/bad.log"
+expect "$T/choice" 0
+for want in "group member 99 names no image line: dropped" \
+            "image 0 is the primary and cannot be a member of a consuming group: dropped" \
+            "image 2 is already in the group on line 4: dropped" \
+            "group member 'x' is not a number: dropped" \
+            "group 'SECOND' has no usable member: dropped"; do
+    grep -qF "$want" "$T/bad.log" || {
+        echo "headless: FAIL missing warning: $want"; grep "^conf:" "$T/bad.log"; exit 1; }
+done
+grep -q "conf: 3 image line(s) in 2 card(s), 2 group(s)" "$T/bad.log" || {
+    echo "headless: FAIL the surviving group did not make two cards"; grep "^conf:" "$T/bad.log"; exit 1; }
+
+# 15g. THE PREVIEW renders the group card, and its stdout line still parses:
+#      `highlight` echoes the IMAGE asked for, `card K/M` says where it landed.
+rm -f "$T/snap.log"
+snap "$T/snap_group.ppm" "$T/group.conf" --media "$T/media" --highlight 4
+grep -q "highlight 4 (JUKEBOX) from --highlight, card 4/4 (group JUKEBOX, 3 members)" "$T/snap.out" || {
+    echo "headless: FAIL the snapshot line does not name the group"; cat "$T/snap.out"; exit 1; }
+grep -q ", pictures " "$T/snap.out" || {
+    echo "headless: FAIL the snapshot line lost its pictures tail"; cat "$T/snap.out"; exit 1; }
+[ -f "$T/snap_group.ppm" ] || { echo "headless: FAIL no group snapshot written"; exit 1; }
+python3 "$HERE/ppm2png.py" "$T/snap_group.ppm" "$T/codeselect_group.png"
+python3 "$HERE/ppm2png.py" "$T/menu_group.ppm" "$T/codeselect_menu_group.png"
+
+# 16. A GROUP THAT KEEPS ITS MEMBERS, and a group that is the FIRST card
+#     (item 106, reopened 2026-09-10).  David, looking at the tab refusing his
+#     list: "why can't the first one be a random group? what if i want
+#     RANDOM|CUSTOM1|CUSTOM2? I should be able to add a random at any point."
+#     A '+' on the member spec keeps the members' own cards, so one card can
+#     offer "surprise me" beside the very builds it rolls between.
+cat > "$T/keep.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|the primary
+image=/dev/mmcblk0p3:img1|CUSTOM 1|orchestral
+image=/dev/mmcblk0p3:img2|CUSTOM 2|standard
+group=+1-2|RANDOM|surprise me
+default=0
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/keep.log"
+run "$T/menu_keep.ppm" "$T/keep.conf" --no-invert --log "$T/keep.log"
+# THREE image lines, FOUR cards: the two customs keep their own AND the group
+grep -q "conf: 3 image line(s) in 4 card(s), 1 group(s)" "$T/keep.log" || {
+    echo "headless: FAIL a keeping group did not leave its members their cards"
+    grep "^ *[0-9.]* conf:" "$T/keep.log"; exit 1; }
+expect "$T/choice" 0
+
+# 16a. AN IMAGE'S OWN CARD WINS THE HIGHLIGHT.  A kept member has two cards,
+#      and the one a player means when they pick that build is its own.
+rm -f "$T/choice"; echo 1 > "$T/last"
+run "$T/menu_keep2.ppm" "$T/keep.conf" --no-invert --log "$T/keep2.log"
+grep -q "highlight 1 (CUSTOM 1) from last choice, card 2/4" "$T/keep2.log" || {
+    echo "headless: FAIL a kept member did not highlight its OWN card"
+    grep "menu:" "$T/keep2.log"; exit 1; }
+expect "$T/choice" 1
+
+# 16b. THE GROUP CARD CAN BE FIRST.  Its line sits above image 0's, and the
+#      primary is still image 0 - the two were conflated, and they are not the
+#      same thing.  Measured before this was built: the selector already did it.
+cat > "$T/first.conf" <<'EOF'
+group=+1-2|RANDOM|surprise me
+image=/dev/mmcblk0p3|STERN STOCK|the primary
+image=/dev/mmcblk0p3:img1|CUSTOM 1|orchestral
+image=/dev/mmcblk0p3:img2|CUSTOM 2|standard
+default=0
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/first.log"
+run "$T/menu_first.ppm" "$T/first.conf" --no-invert --log "$T/first.log"
+grep -q "highlight 0 (STERN STOCK) from conf default, card 2/4" "$T/first.log" || {
+    echo "headless: FAIL the group card is not first"; grep "menu:" "$T/first.log"; exit 1; }
+expect "$T/choice" 0
+
+# 16c. IMAGE 0 MAY BE A MEMBER OF A KEEPING GROUP - the primary still has a
+#      card of its own, which is the whole reason the rule existed - and may
+#      NOT be one of a consuming group.
+cat > "$T/prim.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|the primary
+image=/dev/mmcblk0p3:img1|CUSTOM 1|orchestral
+group=+0-1|RANDOM|stock or custom
+default=0
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/prim.log"
+run "$T/menu_prim.ppm" "$T/prim.conf" --no-invert --log "$T/prim.log"
+grep -q "conf: 2 image line(s) in 3 card(s), 1 group(s)" "$T/prim.log" || {
+    echo "headless: FAIL image 0 was refused by a KEEPING group"
+    grep "^ *[0-9.]* conf:" "$T/prim.log"; exit 1; }
+sed 's/^group=+0-1/group=0-1/' "$T/prim.conf" > "$T/prim2.conf"
+rm -f "$T/choice" "$T/last" "$T/prim2.log"
+run "$T/menu_prim2.ppm" "$T/prim2.conf" --no-invert --log "$T/prim2.log"
+grep -q "image 0 is the primary and cannot be a member of a consuming group" "$T/prim2.log" || {
+    echo "headless: FAIL a CONSUMING group was allowed image 0"
+    grep "^conf:" "$T/prim2.log"; exit 1; }
+
+# 16d. THE ROLL EXCLUDES BY DEVICE.  A kept member reached from its OWN card
+#      must not be handed straight back by the group a moment later - which an
+#      index-only exclusion would do the moment the same build had two indexes.
+#      Here image 1 is the last choice, so ten seeds must all give image 2.
+for s in 0 1 2 3 4 5 6 7 8 9; do
+    rm -f "$T/choice"
+    echo 1 > "$T/last"
+    run "$T/menu_excl2.ppm" "$T/keep.conf" --no-invert --highlight-card 3 --seed $s
+    got=$(cat "$T/choice")
+    [ "$got" = "2" ] || { echo "headless: FAIL seed $s rolled '$got', not 2 (the exclusion)"; exit 1; }
+done
+
+# 16e. THE CARD THE PLAYER CHOSE IS WHAT COMES BACK, not the build the roll
+#      landed on.  A kept member has a card of its own, so remembering only the
+#      IMAGE turned "surprise me" into "that one, from now on" after a single
+#      power-up: the next boot highlighted the build's own card and the
+#      countdown booted it.  The last-choice file carries the card as well now.
+rm -f "$T/choice"
+printf '1 3\n' > "$T/last"
+run "$T/menu_keep3.ppm" "$T/keep.conf" --no-invert --log "$T/keep3.log"
+grep -q "card 4/4 (group RANDOM, 2 members)" "$T/keep3.log" || {
+    echo "headless: FAIL the random card was not what came back"
+    grep "menu:" "$T/keep3.log"; exit 1; }
+# ...and it rolled again rather than handing back the build it booted last
+expect "$T/choice" 2
+[ "$(cat "$T/last")" = "1 3" ] && { echo "headless: FAIL the last file was not rewritten"; exit 1; }
+grep -q "^2 3$" "$T/last" || {
+    echo "headless: FAIL the last file did not record the CARD it was chosen from"
+    cat "$T/last"; exit 1; }
+# a file from an older selector is ONE number and still reads: the image alone,
+# which resolves to that build's own card (16a)
+rm -f "$T/choice"; printf '1\n' > "$T/last"
+run "$T/menu_keep4.ppm" "$T/keep.conf" --no-invert --log "$T/keep4.log"
+grep -q "highlight 1 (CUSTOM 1) from last choice, card 2/4" "$T/keep4.log" || {
+    echo "headless: FAIL a one-number last file did not read as the image"
+    grep "menu:" "$T/keep4.log"; exit 1; }
+
+# 16f. default_card= OUTRANKS default=, because a conf carries both and only
+#      one of them can be a deliberate answer: every conf the builder writes has
+#      a `default=`, and `default_card=` is written only when somebody named a
+#      card no image can name.  This is David's own layout: three builds and a
+#      RANDOM card over the last two, powering up unattended on the random one.
+cat > "$T/dcard.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|the primary
+image=/dev/mmcblk0p3:img1|CUSTOM 1|orchestral
+image=/dev/mmcblk0p3:img2|CUSTOM 2|standard
+group=+1-2|RANDOM|pick one or let it roll
+default=0
+default_card=3
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/dcard.log"
+run "$T/menu_dcard.ppm" "$T/dcard.conf" --no-invert --log "$T/dcard.log"
+grep -q "from conf default_card, card 4/4 (group RANDOM, 2 members)" "$T/dcard.log" || {
+    echo "headless: FAIL default_card did not outrank default"
+    grep "menu:" "$T/dcard.log"; exit 1; }
+got=$(cat "$T/choice")
+[ "$got" = "1" ] || [ "$got" = "2" ] || {
+    echo "headless: FAIL an unattended power-up on the random card chose '$got'"; exit 1; }
+# ...and the SECOND power-up comes back to the random card and rolls the other
+# one, which is the whole point of the layout
+rm -f "$T/choice"
+run "$T/menu_dcard2.ppm" "$T/dcard.conf" --no-invert --log "$T/dcard2.log"
+grep -q "from last choice, card 4/4 (group RANDOM, 2 members)" "$T/dcard2.log" || {
+    echo "headless: FAIL the second power-up left the random card"
+    grep "menu:" "$T/dcard2.log"; exit 1; }
+second=$(cat "$T/choice")
+[ "$second" != "$got" ] || {
+    echo "headless: FAIL two power-ups in a row booted image $got twice"; exit 1; }
+# without default_card the same conf powers up on the image default= names
+sed '/^default_card=/d' "$T/dcard.conf" > "$T/dcard3.conf"
+rm -f "$T/choice" "$T/last"
+run "$T/menu_dcard3.ppm" "$T/dcard3.conf" --no-invert --log "$T/dcard3.log"
+grep -q "highlight 0 (STERN STOCK) from conf default, card 1/4" "$T/dcard3.log" || {
+    echo "headless: FAIL default= stopped working without default_card="
+    grep "menu:" "$T/dcard3.log"; exit 1; }
+expect "$T/choice" 0
+
+# 16g. --loading-out: the LOADING frame out of a SNAPSHOT, which is how the
+#      app's preview shows what pressing START does.  It is the one moment a
+#      random card tells the player which build they got, so it shows THAT
+#      BUILD's picture and subtitle - not the card's own.  Nothing else of the
+#      confirm happens: no choice file, no last file, no boot.
+cat > "$T/ldg.conf" <<'EOF'
+image=p3|STERN STOCK|the primary|art0.png||
+image=p7|CUSTOM 1|orchestral|art1.png||
+group=+0-1|RANDOM|surprise me|art0.png||
+default=0
+timeout=1
+EOF
+rm -f "$T/choice" "$T/last" "$T/ldg.loading.ppm" "$T/ldg.log"
+snap "$T/ldg.ppm" "$T/ldg.conf" --media "$T/media" --highlight-card 2      --loading-out "$T/ldg.loading.ppm" --pick 1 --log "$T/ldg.log" || {
+    echo "headless: FAIL --loading-out exit $?"; cat "$T/snap.out"; exit 1; }
+[ -f "$T/ldg.loading.ppm" ] || { echo "headless: FAIL no LOADING frame written"; exit 1; }
+[ ! -f "$T/choice" ] && [ ! -f "$T/last" ] || {
+    echo "headless: FAIL --loading-out wrote a choice/last file"; exit 1; }
+grep -qF "loading: $T/ldg.loading.ppm 1360x768, card 3 boots image 1 (CUSTOM 1)" "$T/snap.out" || {
+    echo "headless: FAIL the loading line"; cat "$T/snap.out"; exit 1; }
+# THE PICKED BUILD'S OWN PICTURE, not the card's: image 1's art is 2060C0 and
+# the group's is art0.png (C03040), so the two are told apart by colour alone
+band "$T/ldg.loading.ppm" 400 200 960 380 2060C0
+if band "$T/ldg.loading.ppm" 400 200 960 380 C03040 2>/dev/null; then
+    echo "headless: FAIL the loading frame showed the CARD's picture"; exit 1; fi
+# ...and the SUBTITLE, which is where a jukebox keeps the difference: its
+# members are one title with different song sets, so the title alone says the
+# same thing whichever one the roll landed on.  The same frame with the
+# subtitle taken out of the conf must not come out the same picture.
+sed 's/^image=p7|CUSTOM 1|orchestral|/image=p7|CUSTOM 1||/' "$T/ldg.conf" > "$T/ldg3.conf"
+rm -f "$T/choice" "$T/last"
+snap "$T/ldg3.ppm" "$T/ldg3.conf" --media "$T/media" --highlight-card 2 \
+     --loading-out "$T/ldg3.loading.ppm" --pick 1
+cmp -s "$T/ldg.loading.ppm" "$T/ldg3.loading.ppm" && {
+    echo "headless: FAIL the member's subtitle is not on the LOADING frame"; exit 1; }
+python3 "$HERE/ppm2png.py" "$T/ldg.loading.ppm" "$T/codeselect_loading_group.png"
+rm -f "$T/choice" "$T/last"
+snap "$T/ldg2.ppm" "$T/ldg.conf" --media "$T/media" --highlight-card 0      --loading-out "$T/ldg2.loading.ppm"
+grep -qF "card 1 boots image 0 (STERN STOCK)" "$T/snap.out" || {
+    echo "headless: FAIL an ordinary card's loading frame"; cat "$T/snap.out"; exit 1; }
+band "$T/ldg2.loading.ppm" 400 200 960 380 C03040
+
+# 16h. HOW A RANDOM CARD PICKS, and the preview picking the same way.  The
+#      word sits in the member spec: `any` (dice, repeats and all), `not-last`
+#      (never the one it booted last - the default, and with two members that
+#      alternates for ever) and `shuffle` (every member once before any of them
+#      comes round again).  --roll-state is the roll's memory for a SNAPSHOT:
+#      read before and written after, so a preview rolls exactly as the machine
+#      does without touching the machine's own file.
+mkroll() {  # mkroll WORD - the 3-member JUKEBOX conf, picking that way
+    sed "s#^group=3-5|#group=$1:3-5|#" "$T/group.conf" > "$T/roll.conf"
+}
+rollonce() {  # rollonce STATE -> the image it rolled
+    rm -f "$T/choice" "$T/last"
+    snap "$T/rl.ppm" "$T/roll.conf" --media "$T/media" --highlight-card 3 \
+         --loading-out "$T/rl.loading.ppm" --roll-state "$1"
+    grep -oE 'boots image [0-9]+' "$T/snap.out" | head -1 | awk '{print $3}'
+}
+# SHUFFLE deals all three before any of them comes round again
+mkroll shuffle
+rm -f "$T/roll.state"
+got=$( { rollonce "$T/roll.state"; rollonce "$T/roll.state"; rollonce "$T/roll.state"; } | sort | tr '\n' ' ')
+[ "$got" = "3 4 5 " ] || {
+    echo "headless: FAIL shuffle dealt '$got', not each of 3 4 5 once"; exit 1; }
+grep -q "^bag0=" "$T/roll.state" || {
+    echo "headless: FAIL the deck was not written to the roll state"
+    cat "$T/roll.state"; exit 1; }
+# ...and the fourth reshuffles rather than coming out empty
+fourth=$(rollonce "$T/roll.state")
+case "$fourth" in 3|4|5) ;; *) echo "headless: FAIL the reshuffle gave '$fourth'"; exit 1;; esac
+# NOT-LAST never repeats the one before it
+mkroll not-last
+rm -f "$T/roll.state3"
+prev=""
+for k in 1 2 3 4 5 6; do
+    now=$(rollonce "$T/roll.state3")
+    [ "$now" != "$prev" ] || { echo "headless: FAIL not-last repeated image $now"; exit 1; }
+    grep -q "(not-last)" "$T/snap.out" || {
+        echo "headless: FAIL the log does not say how it picked"; exit 1; }
+    prev=$now
+done
+# ANY may repeat - it is the dice - and considers every member every time
+mkroll any
+rm -f "$T/roll.state4"
+rollonce "$T/roll.state4" > /dev/null
+grep -q "rolled from JUKEBOX (any): 3 candidates" "$T/snap.out" || {
+    echo "headless: FAIL 'any' did not consider every member"; cat "$T/snap.out"; exit 1; }
+
+# a word nobody knows is dropped out loud, and the card still works
+sed 's#^group=any:3-5|#group=sideways:3-5|#' "$T/roll.conf" > "$T/roll5.conf"
+rm -f "$T/choice" "$T/last"
+rm -f "$T/choice" "$T/last"
+snap "$T/rl.ppm" "$T/roll5.conf" --media "$T/media" --highlight-card 3 \
+     --loading-out "$T/rl.loading.ppm" --log "$T/roll5.log"
+grep -q "is not any / not-last / shuffle" "$T/roll5.log" || {
+    echo "headless: FAIL an unknown picking rule was silent"; grep conf: "$T/roll5.log"; exit 1; }
+grep -q "rolled from JUKEBOX (not-last)" "$T/snap.out" || {
+    echo "headless: FAIL the default did not stand in"; cat "$T/snap.out"; exit 1; }
 
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"

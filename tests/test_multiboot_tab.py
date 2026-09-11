@@ -800,7 +800,18 @@ def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
     assert words[words.index("--snapshot") + 1] == multiboot_tab.wsl(ppm)
     assert words[words.index("--conf") + 1] == multiboot_tab.wsl(conf)
     assert words[words.index("--media") + 1] == multiboot_tab.wsl(media)
-    assert words[words.index("--highlight") + 1] == "1"
+    assert words[words.index("--highlight-card") + 1] == "1"
+    assert "--highlight" not in words, "the preview names a CARD, not an image"
+    assert "--loading-out" not in words, "asked for, never assumed"
+    assert "--roll-state" not in words, "asked for, never assumed"
+    rolled = preview_snapshot_args("/bin/cs", conf, media, ppm, 1, 3,
+                                   roll_state="/x/roll.state")
+    assert rolled[rolled.index("--roll-state") + 1] == \
+        multiboot_tab.wsl("/x/roll.state")
+    with_loading = preview_snapshot_args("/bin/cs", conf, media, ppm, 1, 3,
+                                         loading="/x/loading_ab_1.ppm")
+    assert with_loading[with_loading.index("--loading-out") + 1] == \
+        multiboot_tab.wsl("/x/loading_ab_1.ppm")
     assert words[words.index("--anim-frame") + 1] == "3"
     assert words[words.index("--input") + 1] == "none"
     for flag in ("--out", "--last", "--timeout", "--headless"):
@@ -1672,19 +1683,26 @@ def test_the_row_icons_act_on_the_row_they_are_in(tmp_path):
         root.destroy()
 
 
-def test_the_template_row_adds_an_image(tmp_path):
+def test_the_template_row_offers_the_ways_in(tmp_path):
     """The last row of the table is the '+': an empty card shows only that
-    row, which is both the way in and the lesson."""
+    row, which is both the way in and the lesson.
+
+    It ASKS now rather than going straight to the file dialog. The row says
+    "image or random group", and doing one of them silently taught nobody the
+    other was there (David, 2026-09-10)."""
     root, panel = _panel()
-    asked = []
-    panel._add_image = lambda: asked.append(len(panel._rows))
-    # the table's on_add is late-bound through the panel, so the stub above
-    # is what a '+' click reaches
+    shown = []
+    panel._popup_add_menu = lambda choices: shown.append(choices)
     try:
         root.update()
         assert panel._table.count() == 0
         _click_cell(root, panel, "add", "title")
-        assert asked == [0]
+        assert len(shown) == 1, "a click on the row opens the menu"
+        assert [c[1] for c in shown[0]] == [
+            "_add_image", "_add_random_over_existing", "_add_group",
+            "_add_group_folder"]
+        # ...with only the one an empty card can actually do left live
+        assert [c[2] for c in shown[0]] == [True, False, False, False]
     finally:
         root.destroy()
 
@@ -2533,8 +2551,10 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
         return [(multiboot_tab.AUDIO_LABEL, [py, "-c", code])]
 
     def snapshot(binary, conf, media_dir, ppm, hl, n, rootfs="~/r", cwd=None,
-                 frames=1):
+                 frames=1, loading=None, roll_state=None):
         seen["snapshot"].append((binary, conf, media_dir, ppm, hl, n, frames))
+        seen.setdefault("loading", []).append(loading)
+        seen.setdefault("roll_state", []).append(roll_state)
         label = (multiboot_tab.ANIM_LABEL if frames > 1 else "frame %d" % n)
         if fail == "frame":
             code = "print('[select] error: bad conf'); raise SystemExit(2)"
@@ -2552,10 +2572,18 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
             "    open(p, 'wb').write(b'P6\\n136 77\\n255\\n' + "
             "bytes([40, 60, 90]) * (136 * 77))\n"
             "    print('[select] snapshot: %s 136x77, highlight %d (T) from "
-            "--highlight, frame %d of %d, timeout 15 s, invert 0, font f, "
-            "media m, footer \"x\", pictures 1:10,10,32,8' % (w, hl, f, total))\n")
+            "--highlight-card, card %d/9, frame %d of %d, timeout 15 s, invert "
+            "0, font f, media m, footer \"x\", pictures 1:10,10,32,8'"
+            " % (w, hl, hl + 1, f, total))\n"
+            # ...and the LOADING frame beside them, which is what the Select
+            # button shows (item 106)
+            "if len(sys.argv) > 7 and sys.argv[7]:\n"
+            "    open(sys.argv[7], 'wb').write(b'P6\\n136 77\\n255\\n' + "
+            "bytes([90, 20, 20]) * (136 * 77))\n"
+            "    print('[select] loading: %s 136x77, card %d boots image 0 (T)'"
+            " % (sys.argv[7], hl + 1))\n")
         return [(label, [py, "-c", code, ppm, _tool_path(ppm), str(hl),
-                         str(n), str(frames), str(length)])]
+                         str(n), str(frames), str(length), loading or ""])]
     monkeypatch.setattr(multiboot_tab, "ensure_selector_commands", ensure)
     monkeypatch.setattr(multiboot_tab, "preview_prepare_commands", prepare)
     monkeypatch.setattr(multiboot_tab, "audio_prepare_commands", audio)
@@ -3418,6 +3446,113 @@ def test_which_frames_a_run_wrote_is_read_off_the_selectors_own_lines():
     assert parse_snapshot_frames(still) == [("/my cards/f_0.ppm", 0, 0)]
     assert parse_snapshot_frames("") == []
     assert parse_snapshot_frames("codeselect: anim: image 1 4 frames") == []
+
+
+def test_the_loading_frame_is_rendered_beside_the_menu_frame(tmp_path, monkeypatch):
+    """What pressing START does, drawn by the selector out of the load that has
+    already happened: the picture the machine shows while the card boots. It is
+    the one moment a RANDOM card says which build it rolled, which is the whole
+    reason to be able to see it (David, 2026-09-11)."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path)
+    try:
+        for q in _images(tmp_path, 2):
+            panel.add_image(q)
+        panel._table.select(0)
+        root.update()
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        # the render asked for one, beside the frame and named for the card
+        assert seen["loading"] and seen["loading"][0], seen["loading"]
+        want = mb.loading_path(mb.preview_dir_for(panel.form().out),
+                               panel._pv_fp, 0)
+        assert seen["loading"][-1] == want, seen["loading"]
+        assert os.path.isfile(want), "the selector wrote no LOADING frame"
+        # ...and Select shows THE CARD ON SCREEN's, not the last render's: a
+        # redraw happens only when something changed, so the render's own answer
+        # is the last card that needed drawing (David, 2026-09-11: pressing
+        # Select on an image showed the random card's frame)
+        assert panel._loading_frame() == want
+        assert panel._loading_frame(card=1) is None
+        before = panel._pv_src
+        assert panel.press_select() is True
+        assert panel._black_still == want
+        assert panel._pv_src == before, "the beat must not lose the menu frame"
+        # with no file there is still a beat, black as it always was
+        os.remove(want)
+        assert panel._loading_frame() is None
+        assert panel.press_select() is True
+        assert panel._black_still is None
+    finally:
+        root.destroy()
+
+
+def test_selecting_a_random_card_rolls_again(tmp_path, monkeypatch):
+    """The roll happens inside the selector, so a frame rendered earlier holds
+    the roll THAT render made. A preview nobody edited never rendered again, so
+    the same member came up every time (David, 2026-09-11: "whenever i select
+    random, the loaded one is always the first image"). One press, one run."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path)
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        panel._table.select(2)
+        root.update()
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        runs = len(seen["snapshot"])
+        # the random card is selected: a press asks the selector for one more
+        assert panel.press_select() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert len(seen["snapshot"]) == runs + 1, "the press rendered nothing"
+        assert seen["loading"][-1] == panel._pv_load_frame
+        assert seen["snapshot"][-1][4] == 2, "...for the card on screen"
+        # ...and it SAYS which build it landed on, because a jukebox's members
+        # share a title and the frame alone can leave you guessing
+        assert "rolled" in panel._pv_caption.lower(), panel._pv_caption
+        # THE DECODED FRAME IS CACHED BY PATH and the reroll rewrites that same
+        # path: without dropping it the file changed and the picture did not,
+        # so ten presses showed one roll ten times (David, 2026-09-11)
+        key = os.path.abspath(panel._pv_load_frame)
+        panel._pv_photos[key] = "stale"
+        panel._pv_photo_order.append(key)
+        assert panel.press_select() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert panel._pv_photos.get(key) != "stale", "the old picture was kept"
+        # THE MACHINE NEVER HANDS BACK THE BUILD YOU JUST HAD, and it knows
+        # which from its own memory on the card. A snapshot reads no such file,
+        # so the preview passes what IT last rolled - and the roll here is then
+        # the roll there (David, 2026-09-11: "the preview needs to show the same
+        # random logic as the machine").
+        assert seen["roll_state"][-1] == panel._roll_state_path(), seen["roll_state"]
+        # an ORDINARY card cannot roll, so its frame is not rendered again
+        panel._table.select(0)
+        root.update()
+        runs = len(seen["snapshot"])
+        assert panel.press_select() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert len(seen["snapshot"]) == runs, "an ordinary card has nothing to roll"
+    finally:
+        root.destroy()
+
+
+def test_the_loading_frame_is_swept_with_its_form(tmp_path):
+    """One per card rather than per frame, and cleared by the same sweep - or
+    preview/ grows a file per form for as long as the tab is open."""
+    mb = multiboot_tab
+    pv = str(tmp_path)
+    keep, gone = "abc123", "def456"
+    for fp in (keep, gone):
+        for name in (mb.loading_path(pv, fp, 0), mb.frame_path(pv, fp, 0, 0)):
+            with open(name, "wb") as f:
+                f.write(b"x")
+    stale = [os.path.basename(x) for x in mb.stale_frames(pv, keep)]
+    assert sorted(stale) == ["frame_def456_0_0.ppm", "loading_def456_0.ppm"]
 
 
 def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):
@@ -8308,5 +8443,1154 @@ def test_the_card_pick_dialog_offers_the_menu_or_the_whole_card(monkeypatch):
         assert dlg.whole() is True
         dlg._read()
         assert got == [(d.device_path, True)]
+    finally:
+        root.destroy()
+# ---- item 106: a GROUP row - several games behind one card -----------------
+
+def _group_form(tmp_path, n_members=3):
+    """A form of: the primary, one plain extra, and a group of `n_members`."""
+    mb = multiboot_tab
+    paths = []
+    for name in ["stock", "custom"] + ["set%d" % i for i in range(1, n_members + 1)]:
+        f = tmp_path / (name + ".raw")
+        f.write_bytes(b"x")
+        paths.append(str(f))
+    rows = [ImageRow(path=paths[0], title="STERN STOCK"),
+            ImageRow(path=paths[1], title="CUSTOM A"),
+            ImageRow(path="", title="JUKEBOX",
+                     subtitle="a different set every power-up",
+                     members=[mb.MemberRow(path=q, title="SET %d" % (k + 1))
+                              for k, q in enumerate(paths[2:])])]
+    return MultibootForm(images=rows, out=str(tmp_path / "card.raw")), paths
+
+
+def test_rows_are_cards_and_trees_are_games(tmp_path):
+    """The two index spaces meet in form_trees and nowhere else. images.conf,
+    the choice file, --titles and --art N= count IMAGES; the table, the preview
+    and --highlight count CARDS. They are the same number until a group row
+    makes them differ, and every bug this feature can have is a place that used
+    one where it meant the other."""
+    mb = multiboot_tab
+    form, paths = _group_form(tmp_path)
+    assert len(form.images) == 3, "three cards"
+    trees = mb.form_trees(form)
+    assert [t[0] for t in trees] == [0, 1, 2, 3, 4], "five games"
+    assert [t[1] for t in trees] == paths
+    assert [t[2] for t in trees] == [0, 1, 2, 2, 2], "the row each game sits in"
+    assert [t[3] for t in trees] == [None, None, 0, 1, 2]
+    assert [mb.row_first_image(form, i) for i in range(3)] == [0, 1, 2]
+    assert mb.is_group(form.images[2]) and not mb.is_group(form.images[0])
+
+
+def test_a_group_row_becomes_group_and_member_flags_in_row_order(tmp_path):
+    mb = multiboot_tab
+    form, paths = _group_form(tmp_path)
+    args = mb._image_args(form)
+    assert args[:2] == ["--primary", mb.wsl(paths[0])]
+    assert args[2:4] == ["--extra", mb.wsl(paths[1])]
+    assert args[4:6] == ["--group", "JUKEBOX|a different set every power-up"]
+    assert args[6:] == ["--member", mb.wsl(paths[2]),
+                        "--member", mb.wsl(paths[3]),
+                        "--member", mb.wsl(paths[4])]
+
+
+def test_a_group_forces_the_compact_build(tmp_path):
+    """David, 2026-09-09. mkmulticard refuses parts/multi with a group outright;
+    the tab ticks the box so the reason is visible before the press."""
+    mb = multiboot_tab
+    form, _paths = _group_form(tmp_path)
+    assert form.compact is False, "the tick itself is still off by default"
+    assert mb.form_compact(form) is True
+    pa = mb.plan_args(form)
+    assert pa[pa.index("--layout") + 1] == "store"
+    ba = build_args(form)
+    assert ba[ba.index("--layout") + 1] == "store"
+    # ...and a form with no group is left exactly as it was
+    plain = MultibootForm(images=form.images[:2], out=form.out)
+    assert mb.form_compact(plain) is False
+    pb = build_args(plain)
+    assert pb[pb.index("--layout") + 1] == "auto"
+
+
+def test_titles_and_the_default_are_per_game_not_per_row(tmp_path):
+    """images.conf's image= lines are one per GAME, so --titles is too; a group
+    card's own title rides on its --group flag. --default names an image as
+    well, and a group row is named by its first member."""
+    form, _paths = _group_form(tmp_path)
+    # THE GROUP GOES FIRST among the extras, so a row index and an image index
+    # can never agree by luck: the plain row is row 2 and image 4.
+    form.images = [form.images[0], form.images[2], form.images[1]]
+    args = build_args(form)
+    titles = args[args.index("--titles") + 1].split(";")
+    assert titles == ["STERN STOCK", "SET 1", "SET 2", "SET 3", "CUSTOM A"]
+    assert "JUKEBOX" not in titles, "the card's title goes on --group"
+    form.default = 1                                  # the group ROW
+    da = build_args(form)
+    assert da[da.index("--default") + 1] == "1", "a group row is named by its first member"
+    form.default = 2                                  # the PLAIN row after it
+    db = build_args(form)
+    assert db[db.index("--default") + 1] == "4", "row 2 is image 4 under a 3-member group"
+
+
+def test_the_media_indexes_are_games(tmp_path):
+    """media.json carries one row per games tree, which is what plan_media
+    expects, and a group card takes its first member's. Using the row number
+    here would shift every media row after the first group."""
+    args = multiboot_tab.prepare_args(_group_form(tmp_path)[0],
+                                      str(tmp_path / "media"))
+    arts = [args[i + 1] for i, a in enumerate(args) if a == "--art"]
+    assert [x.split("=")[0] for x in arts] == ["0", "1", "2", "3", "4"]
+
+
+def test_the_preview_can_highlight_a_random_card(tmp_path):
+    """THE PREVIEW HIGHLIGHTS A CARD. `--highlight`, `default=` and the choice
+    file all name an IMAGE, which is right for them: they say which GAME boots.
+    A random card over images that keep their own cards is not any image - no
+    image index resolves to it - so naming its first member lit up that member's
+    own card, the flippers walked straight past the random one, and the first
+    card was drawn twice (David, 2026-09-11: "the left right flippers can't
+    highlight the random one")."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        form = panel.form()
+        assert [mb.preview_highlight(form, r) for r in range(3)] == [0, 1, 2]
+        words = mb.preview_snapshot_args("/bin/cs", "c.conf", "media", "f.ppm",
+                                         mb.preview_highlight(form, 2), 0)
+        assert words[words.index("--highlight-card") + 1] == "2"
+    finally:
+        root.destroy()
+    # ...and a CONSUMING group's card is still its row, with the games it
+    # swallowed not shifting the ones below it
+    form, _paths = _group_form(tmp_path)
+    assert [mb.preview_highlight(form, r) for r in range(len(form.images))] \
+        == list(range(len(form.images)))
+
+
+def test_a_random_card_says_what_it_rolls_between(tmp_path):
+    """It has no source of its own and never will - its games are its members -
+    so the caption that says "(no source recorded)" about an image read as a
+    fault on a random card (David, 2026-09-11)."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        cap = mb._cell_image(panel.form().images[1])
+        assert "no source recorded" not in cap, cap
+        assert cap.startswith("rolls between 2 games:"), cap
+        assert os.path.basename(paths[1]) in cap
+        # a game this machine does not have is still counted
+        panel._rows[1].members[0].path = str(tmp_path / "gone.raw")
+        cap = mb._cell_image(panel.form().images[1])
+        assert "[1 not on this machine]" in cap, cap
+    finally:
+        root.destroy()
+
+
+def test_the_preview_conf_draws_one_card_per_row(tmp_path):
+    form, _paths = _group_form(tmp_path)
+    form.default = 2
+    text = write_preview_conf(form)
+    kinds = [l.split("=")[0] for l in text.splitlines()
+             if l[:6] in ("image=", "group=")]
+    assert kinds == ["image", "image", "group", "image", "image", "image"]
+    assert "group=2-4|JUKEBOX|a different set every power-up" in text
+    assert "default=2" in text, "the group row's first member, not the row"
+
+
+def test_a_member_change_is_a_rebuild_not_a_menu_edit(tmp_path):
+    """Adding, removing or swapping a member changes which games are on the
+    card, which only a build can do. If the key did not move with them, a
+    member change would look like a menu edit and an inject would leave the
+    card's games as they were."""
+    before, _paths = _group_form(tmp_path)
+    after, _ = _group_form(tmp_path)
+    assert diff_forms(before, after)[1] == []
+    after.images[2].members = after.images[2].members[:2]
+    _menu, rebuild = diff_forms(before, after)
+    assert rebuild, "dropping a member must ask for a build"
+    # ...and a title change on the same row is still only a menu edit
+    same, _ = _group_form(tmp_path)
+    same.images[2].title = "JUKEBOX 2"
+    menu, rebuild = diff_forms(before, same)
+    assert rebuild == [] and menu
+
+
+def test_the_form_refuses_a_group_that_cannot_be_built(tmp_path):
+    form, _paths = _group_form(tmp_path)
+    assert validate_form(form) == []
+    one = _group_form(tmp_path)[0]
+    one.images[2].members = one.images[2].members[:1]
+    assert any("at least 2" in e for e in validate_form(one))
+    # the machine boots image 0 when the menu is not honoured, so it cannot roll
+    first = _group_form(tmp_path)[0]
+    first.images = [first.images[2], first.images[0], first.images[1]]
+    assert any("primary and cannot be a random group" in e
+               for e in validate_form(first))
+    # the same .raw twice, once plain and once as a member
+    dup = _group_form(tmp_path)[0]
+    dup.images[1].path = dup.images[2].members[0].path
+    assert any("listed twice" in e for e in validate_form(dup))
+    # a member file that is not there
+    gone = _group_form(tmp_path)[0]
+    gone.images[2].members[1].path = str(tmp_path / "nope.raw")
+    assert any("no such file" in e for e in validate_form(gone))
+
+
+def test_a_saved_state_brings_a_group_back_as_rows_not_as_a_string(tmp_path):
+    """str([]) is "[]", a truthy STRING - so an ordinary row restored from a
+    state file used to read as a group with one member called "[". Every
+    non-bool row field went through str(); this one is a list of rows."""
+    mb = multiboot_tab
+    form, paths = _group_form(tmp_path)
+    doc = [mb.asdict(r) for r in form.images]
+    back = rows_from_state(doc)
+    assert len(back) == 3
+    assert not mb.is_group(back[0]) and not mb.is_group(back[1])
+    assert mb.is_group(back[2])
+    assert [m.path for m in back[2].members] == paths[2:]
+    assert [m.title for m in back[2].members] == ["SET 1", "SET 2", "SET 3"]
+    assert mb._image_args(MultibootForm(images=back, out="x")) == mb._image_args(form)
+def test_the_list_says_a_row_is_a_group_and_what_code_it_runs():
+    """Nothing else in the table can tell a group from a plain image, and "why
+    does this card have no file" is the first thing a person would otherwise
+    ask."""
+    mb = multiboot_tab
+    row = ImageRow(path="", title="JUKEBOX",
+                   members=[mb.MemberRow(path="/nope/a.raw", version="1.29.0"),
+                            mb.MemberRow(path="/nope/b.raw", version="1.29.0"),
+                            mb.MemberRow(path="/nope/c.raw", version="1.29.0")])
+    cell = list_title(row, 2)
+    assert "JUKEBOX" in cell and "(random, 3 sets)" in cell
+    assert "[3 not on this machine]" in cell
+    assert mb.list_code(row) == "1.29.0"
+    # a jukebox whose members run different code is worth seeing: swapping
+    # between two versions reflashes the node boards at every boot
+    row.members[1].version = "1.30.0"
+    assert mb.list_code(row) == "mixed"
+    # ...but a version that has simply not been READ yet is blank, and calling
+    # that a disagreement would alarm somebody over nothing: only two different
+    # KNOWN versions are mixed.
+    row.members[1].version = ""
+    assert mb.list_code(row) == "1.29.0"
+    for m in row.members:
+        m.version = ""
+    assert mb.list_code(row) == "", "nothing read yet says nothing"
+    plain = ImageRow(path="", title="CUSTOM", version="1.29.0")
+    assert mb.list_code(plain) == "1.29.0"
+    assert "(random" not in list_title(plain, 1)
+
+
+def test_add_group_builds_one_row_out_of_several_games(tmp_path):
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        form = panel.form()
+        assert len(form.images) == 2, "two cards"
+        assert len(multiboot_tab.form_trees(form)) == 4, "four games"
+        assert multiboot_tab.is_group(form.images[1])
+        assert [m.path for m in form.images[1].members] == paths[1:]
+        assert validate_form(form) == []
+    finally:
+        root.destroy()
+
+
+def test_a_group_cannot_be_the_primary(tmp_path):
+    """The machine boots image 0 when the menu is not honoured, so it has to be
+    one known game rather than a roll."""
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_group(paths[1:], title="JUKEBOX")
+        assert panel.form().images == [], "nothing was added"
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        assert len(panel.form().images) == 2
+    finally:
+        root.destroy()
+
+
+def test_a_folder_of_variants_becomes_one_group(tmp_path):
+    """Forty song-set variants are a folder, not a file dialog somebody should
+    have to shift-click through - which is the case that filed this item."""
+    root, panel = _panel()
+    try:
+        panel.add_image(_images(tmp_path, 1)[0])
+        d = tmp_path / "beatles sets"
+        d.mkdir()
+        for n in ("c.raw", "a.raw", "b.raw"):
+            (d / n).write_bytes(bytes(16))
+        (d / "notes.txt").write_text("not a card", encoding="utf-8")
+        panel.add_group_from_folder(str(d))
+        row = panel.form().images[1]
+        assert [os.path.basename(m.path) for m in row.members] == \
+            ["a.raw", "b.raw", "c.raw"], "sorted, and the .txt left alone"
+        assert row.title == "BEATLES SETS"
+        # an empty folder says so rather than making a row with no games
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        panel.add_group_from_folder(str(empty))
+        assert len(panel.form().images) == 2
+    finally:
+        root.destroy()
+
+
+def test_a_group_locks_the_compact_tick_on(tmp_path):
+    """mkmulticard refuses parts/multi with a group outright; the tick is the
+    same fact where a person can see it BEFORE the press."""
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        root.update()
+        assert panel._compact_var.get() is False
+        assert "disabled" not in panel._compact_chk.state()
+        assert panel._compact_tip.text == panel.COMPACT_TIP
+        panel.add_group(paths[2:], title="JUKEBOX")
+        root.update()
+        assert panel._compact_var.get() is True
+        assert "disabled" in panel._compact_chk.state()
+        assert "needs it" in panel._compact_tip.text
+        # ...and removing the group hands the tick back
+        panel._rows.pop()
+        panel._refresh_tree()
+        root.update()
+        assert "disabled" not in panel._compact_chk.state()
+        assert panel._compact_tip.text == panel.COMPACT_TIP
+    finally:
+        root.destroy()
+
+
+def test_the_compact_tick_is_no_longer_called_experimental():
+    """Item 95's gate is cleared: David flashed the TMNT store card and booted
+    all three images on 2026-09-10."""
+    root, panel = _panel()
+    try:
+        assert "experimental" not in panel.COMPACT_TIP.lower()
+        assert "experimental" not in panel.COMPACT_TIP_GROUP.lower()
+    finally:
+        root.destroy()
+def test_the_table_actually_shows_the_group_cells(tmp_path):
+    """list_title and list_code are only worth having if _values calls them -
+    the Code cell read row.version straight for a while, which is blank on a
+    group row however many of its members have been probed."""
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        for m in panel._rows[1].members:
+            m.version = "1.29.0"
+        cells = panel._values(1, panel._rows[1])
+        assert "(random, 3 sets)" in cells["title"]
+        assert cells["code"] == "1.29.0"
+        panel._rows[1].members[0].version = "1.30.0"
+        assert panel._values(1, panel._rows[1])["code"] == "mixed"
+    finally:
+        root.destroy()
+def _grouped_inspect(tmp_path):
+    """An inspect report for a card of: the primary, then a 3-member group -
+    the shape mkmulticard writes (one entry per GAME plus a groups block)."""
+    paths = []
+    for n in ("stock", "s1", "s2", "s3"):
+        f = tmp_path / (n + ".raw")
+        f.write_bytes(bytes(16))
+        paths.append(str(f))
+    images = [{"index": i, "device": "/dev/mmcblk0p3" if i == 0
+               else "/dev/mmcblk0p3:img%d" % i,
+               "source": paths[i], "source_exists": True,
+               "title": ["STERN STOCK", "SET 1", "SET 2", "SET 3"][i],
+               "subtitle": "", "version": "1.29.0"} for i in range(4)]
+    info = {"card": "c.raw", "images": images, "warnings": [],
+            "groups": [{"index": 0, "title": "JUKEBOX",
+                        "subtitle": "a different set every power-up",
+                        "members": [1, 2, 3], "art": "art1.png",
+                        "anim": None, "music": None, "confirm": None}],
+            "default": 1, "timeout": 15, "volume": 50, "layout": "store"}
+    return info, paths
+
+
+def test_loading_a_card_folds_its_groups_back_into_rows(tmp_path):
+    """inspect reports one entry per GAME plus a groups block; the tab's list is
+    CARDS. Without the fold a loaded jukebox card would come up as three
+    ordinary rows and an Apply would flatten it."""
+    mb = multiboot_tab
+    info, paths = _grouped_inspect(tmp_path)
+    rows, _warnings = mb.rows_from_inspect(info)
+    assert len(rows) == 2, "one primary and one group card"
+    assert not mb.is_group(rows[0]) and rows[0].path == host_path(paths[0])
+    g = rows[1]
+    assert mb.is_group(g)
+    assert g.title == "JUKEBOX" and g.subtitle == "a different set every power-up"
+    assert [m.path for m in g.members] == [host_path(q) for q in paths[1:]]
+    assert [m.title for m in g.members] == ["SET 1", "SET 2", "SET 3"]
+    assert [m.version for m in g.members] == ["1.29.0"] * 3
+    # the CARD's media is the group's own, not its first member's row
+    assert g.art == "art1.png" and g.art_on_card is True
+    # ...and it comes straight back out as the same flags
+    form = mb.MultibootForm(images=rows, out="x")
+    args = mb._image_args(form)
+    assert args[2:4] == ["--group", "JUKEBOX|a different set every power-up"]
+    assert args[4:] == ["--member", mb.wsl(host_path(paths[1])),
+                        "--member", mb.wsl(host_path(paths[2])),
+                        "--member", mb.wsl(host_path(paths[3]))]
+
+
+def test_a_groups_block_this_tool_cannot_make_sense_of_is_left_alone(tmp_path):
+    """A report whose members do not all exist must not be half-folded: the
+    card would then be silently changed by a load."""
+    mb = multiboot_tab
+    info, _paths = _grouped_inspect(tmp_path)
+    info["groups"][0]["members"] = [1, 2, 99]
+    rows, _w = mb.rows_from_inspect(info)
+    assert len(rows) == 4 and not any(mb.is_group(r) for r in rows)
+    # ...and a one-member group is a plain card, not a group
+    info["groups"][0]["members"] = [2]
+    rows, _w = mb.rows_from_inspect(info)
+    assert len(rows) == 4 and not any(mb.is_group(r) for r in rows)
+    # a card with no groups at all is exactly what it always was
+    info.pop("groups")
+    rows, _w = mb.rows_from_inspect(info)
+    assert len(rows) == 4 and not any(mb.is_group(r) for r in rows)
+def test_the_add_row_is_the_way_into_a_group(tmp_path):
+    """Both group commands were on the right-click menu only, while the big
+    obvious row at the bottom of the list still added a plain image - so
+    somebody looking for the feature would not find it (David, on the built
+    branch: "I don't see any interface in the GUI for a user to do so")."""
+    root, panel = _panel()
+    try:
+        # AN EMPTY LIST STILL SHOWS THEM ALL, greyed with the reason: the row
+        # promises "image or random group", so silently doing one of them
+        # teaches nobody that the other is there.
+        choices = panel.add_row_choices()
+        assert [c[1] for c in choices] == [
+            "_add_image", "_add_random_over_existing", "_add_group",
+            "_add_group_folder"]
+        assert [c[2] for c in choices] == [True, False, False, False]
+        assert "add the primary image first" in choices[2][0]
+        assert "add two images first" in choices[1][0]
+        panel.add_image(_images(tmp_path, 2)[0])
+        # one image: a group that brings its OWN games is live, one over the
+        # list is not - it needs two to choose between
+        live = dict((c[1], c[2]) for c in panel.add_row_choices())
+        assert live == {"_add_image": True, "_add_random_over_existing": False,
+                        "_add_group": True, "_add_group_folder": True}
+        panel.add_image(_images(tmp_path, 2)[1])
+        assert all(c[2] for c in panel.add_row_choices())
+        labels = [c[0] for c in panel.add_row_choices()]
+        assert labels == ["Add image…",
+                          "Add random over the images above…",
+                          "Add random group…",
+                          "Add random group from folder…"]
+        # every one of them names a method that exists and is callable
+        for _lbl, attr, _live, _why in panel.add_row_choices():
+            assert callable(getattr(panel, attr))
+        # and the row itself says a group is on offer, not just an image
+        assert "random group" in panel.ADD_ROW_TEXT.lower()
+    finally:
+        root.destroy()
+_OK_PATH = ("missing", "Build & verify will write a new card at x.", "gray", False)
+
+
+def test_the_status_row_counts_a_groups_games_not_its_empty_path(tmp_path):
+    """A GROUP row has no path of its own - its games are its members - so
+    reading row.path here reported a perfectly good jukebox card as "Image 1
+    has no file" and put a red cross on the status row. Caught on the first
+    screenshot of the finished tab."""
+    mb = multiboot_tab
+    form, paths = _group_form(tmp_path)
+    checks = dict((k, (state, detail))
+                  for k, _lbl, state, detail in
+                  status_checks(form.images, _OK_PATH, "", card="none"))
+    state, detail = checks["images"]
+    assert state == "ok", detail
+    assert "3 cards over 5 games" in detail
+    # a group whose games are not on this machine still says which game
+    gone = _group_form(tmp_path)[0]
+    gone.images[2].members[1].path = str(tmp_path / "nope.raw")
+    checks = dict((k, (state, detail))
+                  for k, _lbl, state, detail in
+                  status_checks(gone.images, _OK_PATH, "", card="none"))
+    state, detail = checks["images"]
+    assert state == "bad"
+    assert "Image 2, game 2 is not on this machine" in detail, detail
+    # and a plain list is worded exactly as it always was
+    plain = mb.MultibootForm(images=form.images[:2], out="x")
+    checks = dict((k, (state, detail))
+                  for k, _lbl, state, detail in
+                  status_checks(plain.images, _OK_PATH, "", card="none"))
+    assert checks["images"][0] == "ok"
+    assert checks["images"][1] == "2 images, in the order the menu offers them."
+# ---- item 106 reopened: RANDOM beside the builds it rolls between ----------
+
+def test_davids_layout_two_builds_and_a_random_over_them(tmp_path):
+    """David, with a screenshot of the tab refusing it: "what if i want
+    RANDOM|CUSTOM1|CUSTOM2? I should be able to add a random at any point."
+    Two builds, plus one card that rolls between them. It adds no games."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM",
+                                       subtitle="pick one or let it roll")
+        form = panel.form()
+        assert len(form.images) == 3, "three cards"
+        # ...over TWO games: a keeping group puts nothing new on the card
+        trees = mb.form_trees(form)
+        assert [t[1] for t in trees] == paths, "two games, and only two"
+        assert mb.is_group(form.images[2]) and form.images[2].keep is True
+        assert validate_form(form) == [], validate_form(form)
+        # the flags say it: no --member, no new --extra, just a card over 0-1
+        args = mb._image_args(form)
+        assert args == ["--primary", mb.wsl(paths[0]),
+                        "--extra", mb.wsl(paths[1]),
+                        "--group-over", "0-1|RANDOM|pick one or let it roll"]
+    finally:
+        root.destroy()
+
+
+def test_a_random_over_existing_needs_two_images_first(tmp_path):
+    root, panel = _panel()
+    try:
+        panel.add_image(_images(tmp_path, 1)[0])
+        panel.add_random_over_existing()
+        assert len(panel.form().images) == 1, "nothing was added"
+        panel.add_image(_images(tmp_path, 2)[1])
+        panel.add_random_over_existing()
+        assert len(panel.form().images) == 3
+    finally:
+        root.destroy()
+
+
+def test_a_keeping_group_may_be_the_first_card(tmp_path):
+    """The primary is the first PLAIN row, not the first row. A keeping group
+    adds no games, so putting one at the top takes nothing away."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        panel._rows.insert(0, panel._rows.pop())          # RANDOM to the top
+        panel._refresh_tree()
+        form = panel.form()
+        assert mb.is_group(form.images[0])
+        assert validate_form(form) == [], validate_form(form)
+        args = mb._image_args(form)
+        assert args[0] == "--primary" and args[1] == mb.wsl(paths[0])
+        assert args[2] == "--group-over", "its card comes before the images"
+        # ...but a CONSUMING group at the top still takes the primary away
+        panel._rows[0].keep = False
+        errs = validate_form(panel.form())
+        assert any("cannot be a random group that hides its games" in e for e in errs)
+    finally:
+        root.destroy()
+
+
+def test_the_countdown_can_land_on_a_random_card(tmp_path):
+    """Once its games keep cards of their own, no image index resolves to the
+    group - and a random card the countdown cannot land on is useless for an
+    unattended power-up, which is the whole point of the card."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        form = panel.form()
+        form.default = 2                                  # the RANDOM row
+        args = build_args(form)
+        assert args[args.index("--default-card") + 1] == "2"
+        # a plain row still names an image and asks for no card
+        form.default = 1
+        args = build_args(form)
+        assert "--default-card" not in args
+        assert args[args.index("--default") + 1] == "1"
+    finally:
+        root.destroy()
+
+
+def test_loading_a_card_keeps_a_keeping_groups_member_rows(tmp_path):
+    """A consuming group takes its members' rows away; a keeping one adds a
+    card in front of rows that stay exactly where they are."""
+    mb = multiboot_tab
+    info, paths = _grouped_inspect(tmp_path)
+    info["groups"][0].update(keep=True, members=[1, 2], pos=4)
+    rows, _w = mb.rows_from_inspect(info)
+    # 4 images, and the group card LAST because that is where its line sat
+    assert len(rows) == 5
+    assert [mb.is_group(r) for r in rows] == [False, False, False, False, True]
+    assert rows[4].keep is True
+    assert [m.path for m in rows[4].members] == [host_path(q) for q in paths[1:3]]
+    # ...and with pos 0 its card is first
+    info["groups"][0]["pos"] = 0
+    rows, _w = mb.rows_from_inspect(info)
+    assert mb.is_group(rows[0]) and len(rows) == 5
+def test_the_status_row_does_not_call_a_keeping_groups_games_duplicates(tmp_path):
+    """A keeping group's games ARE other rows' - being listed elsewhere is the
+    point of it. Counting that as a duplicate is what put a red cross on
+    David's perfectly good two-builds-plus-RANDOM card."""
+    mb = multiboot_tab
+    paths = _images(tmp_path, 2)
+    rows = [ImageRow(path=paths[0], title="A"), ImageRow(path=paths[1], title="B"),
+            ImageRow(path="", title="RANDOM", keep=True,
+                     members=[mb.MemberRow(path=paths[0]), mb.MemberRow(path=paths[1])])]
+    checks = dict((k, (st, d)) for k, _l, st, d in
+                  status_checks(rows, _OK_PATH, "", card="none"))
+    state, detail = checks["images"]
+    assert state == "ok", detail
+    assert "3 cards over 2 games" in detail, detail
+    # a CONSUMING group still counts its games, because they are its own
+    rows[2].keep = False
+    rows[2].members = [mb.MemberRow(path=str(tmp_path / "c.raw")),
+                       mb.MemberRow(path=str(tmp_path / "d.raw"))]
+    for n in ("c.raw", "d.raw"):
+        (tmp_path / n).write_bytes(bytes(16))
+    checks = dict((k, (st, d)) for k, _l, st, d in
+                  status_checks(rows, _OK_PATH, "", card="none"))
+    assert checks["images"][0] == "ok"
+    assert "3 cards over 4 games" in checks["images"][1]
+def test_the_add_rows_words_fit_the_column_they_sit_in():
+    """The template row is a row like any other and says its words in the Title
+    column (image_table._Row explains why it is not a wide spanning label). So
+    the label has to FIT that column, or it is cut off - and cut off sooner on
+    a narrow window, which is how David found it. The full sentence is in the
+    tooltip, which has no width to fit."""
+    root, panel = _panel()
+    try:
+        chars = panel._table.cell_chars[0]
+        assert len(panel.ADD_ROW_TEXT) <= chars, (
+            "%r is %d characters and the Title column holds %d"
+            % (panel.ADD_ROW_TEXT, len(panel.ADD_ROW_TEXT), chars))
+        # it still says both things it is for
+        low = panel.ADD_ROW_TEXT.lower()
+        assert "image" in low and "random" in low
+        # ...and the tooltip, which has the room, says what the row offers
+        assert "random" in panel.LIST_TIP.lower()
+    finally:
+        root.destroy()
+def test_selectmedia_is_never_shown_the_card_builders_group_flags(tmp_path):
+    """The two tools share --primary and --extra and nothing else. Handing
+    selectmedia the card builder's arguments made it exit 2 on --group-over and
+    took the whole preview down with it (David's log). It has group flags of
+    its OWN now (--group-members / --group-art / --group-anim, tested below),
+    which is not the same vocabulary."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        form = panel.form()
+        args = mb.prepare_args(form, str(tmp_path / "media"))
+        assert "--group-over" not in args and "--group" not in args
+        assert "--member" not in args
+        assert args[args.index("--primary") + 1] == mb.wsl(paths[0])
+        assert [args[i + 1] for i, a in enumerate(args) if a == "--extra"]             == [mb.wsl(paths[1])]
+        # ...and a CONSUMING group's games are extras, because they ARE games
+        panel._rows.pop()
+        panel.add_group(_images(tmp_path, 4)[2:], title="JUKEBOX")
+        args = mb.prepare_args(panel.form(), str(tmp_path / "media"))
+        assert "--group" not in args and "--member" not in args
+        assert len([a for a in args if a == "--extra"]) == 3
+        # the card builder, which DOES know the flags, still gets them
+        assert "--group" in mb._image_args(panel.form())
+    finally:
+        root.destroy()
+
+
+# ---- item 106: a RANDOM card's own picture ---------------------------------
+
+def test_a_random_cards_pictures_round_trip_through_the_row(tmp_path):
+    """Every style the dialog offers has to come back off the row as the style
+    that was chosen. The row stores two fields and the dialog offers one
+    choice, so the reading is where a pairing can be lost - and two of the nine
+    (cycling and stack) deliberately share a still."""
+    mb = multiboot_tab
+    row = ImageRow(path="", members=[object(), object()])
+    for kind in mb.GROUP_MEDIA_NAMES:
+        mb.set_group_media(row, kind, str(tmp_path / "own.png"))
+        assert mb.group_media_kind(row) == kind, (kind, row.art, row.anim)
+    # ...and a row from before this existed reads as the default rather than as
+    # a file called 'auto'
+    row.art, row.anim = "auto", "none"
+    assert mb.group_media_kind(row) == mb.GROUP_MEDIA_DEFAULT == "cycling"
+    # a file the LOAD read off the card is the card's own, as for an image
+    row.art, row.art_on_card = "gart0.png", True
+    assert mb.group_media_kind(row) == "card"
+
+
+def test_the_editor_offers_a_random_card_its_own_pictures(tmp_path):
+    """David, looking at the Edit dialog on a random row: "the options for a
+    Random group need to be bespoke to a random group. we should have options
+    like 'stack of logos', 'big ?', etc." Not one of the image options survives
+    the move: every one of them names "the game", and this card is several."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        panel._table.select(1)
+        root.update()
+        dlg = panel.edit_image()
+        root.update()
+        values = [w.cget("value") for w in _radios(dlg.body)]
+        n = len(mb.GROUP_MEDIA_NAMES)
+        assert values[:n] == list(mb.GROUP_MEDIA_NAMES), values
+        # ...and HOW IT PICKS, which is the only other question a random card
+        # has that an image does not
+        assert values[n:] == list(mb.ROLL_NAMES), values
+        assert "logo" not in values and "attract" not in values
+        assert "random card" in dlg.top.title().lower()
+        # no video row: a random card's picture is drawn, not clipped
+        assert sorted(panel._media_entries) == ["picture"]
+        assert panel._ed_media.get() == "cycling"
+        # pick one, and the row carries it
+        panel._ed_media.set("question")
+        root.update()
+        row = panel.form().images[1]
+        assert (row.art, row.anim) == ("question", "none")
+        assert panel._table.cell(1, "media") == "question"
+        # ...and the moving one writes both halves
+        panel._ed_media.set("reel")
+        root.update()
+        row = panel.form().images[1]
+        assert (row.art, row.anim) == ("shuffle", "reel")
+    finally:
+        root.destroy()
+
+
+def test_prepare_is_told_which_games_a_random_card_rolls_between(tmp_path):
+    """The picture is drawn from the MEMBERS' logos, so selectmedia has to be
+    told which images they are - by IMAGE index, which is not the row and not
+    the group."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        args = mb.prepare_args(panel.form(), str(tmp_path / "media"))
+        assert "--group-members" in args
+        assert args[args.index("--group-members") + 1] == "0=1,2,3"
+        assert args[args.index("--group-art") + 1] == "0=stack"
+        assert args[args.index("--group-anim") + 1] == "0=cycling"
+        # a keeping group names the images its members ALREADY are
+        panel._rows.pop()
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        args = mb.prepare_args(panel.form(), str(tmp_path / "media"))
+        assert args[args.index("--group-members") + 1] == "0=0,1"
+    finally:
+        root.destroy()
+
+
+def test_a_member_game_asks_for_no_picture_of_its_own(tmp_path):
+    """One card stands in front of all of them and nothing in the menu ever
+    draws a member - the LOADING frame included, which names the member under
+    the CARD's picture. Forty song sets would otherwise render forty logos and
+    forty copies of one music bed into a 96 MB budget."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        panel._rows[1].music = str(tmp_path / "bed.wav")
+        args = mb.prepare_args(panel.form(), str(tmp_path / "media"))
+        arts = [args[i + 1] for i, a in enumerate(args) if a == "--art"]
+        anims = [args[i + 1] for i, a in enumerate(args) if a == "--anim"]
+        assert arts == ["0=auto", "1=none", "2=none", "3=none"], arts
+        assert anims == ["0=none", "1=none", "2=none", "3=none"], anims
+        # A RANDOM CARD IS A CARD: its bed is prepared against the CARD, so no
+        # member carries it and there is one copy of the wav, not two
+        musics = [args[i + 1] for i, a in enumerate(args) if a == "--music"]
+        assert musics == ["0=none", "1=none", "2=none", "3=none"], musics
+        assert args[args.index("--group-music") + 1] == \
+            "0=" + mb.wsl(str(tmp_path / "bed.wav"))
+    finally:
+        root.destroy()
+
+
+def test_the_preview_draws_a_random_card_over_images_that_stay(tmp_path):
+    """David's `C1 | C2 | RANDOM` is a KEEPING group, which puts no game on the
+    card - and a preview that walked the games drew it with no random card in
+    it at all. The conf walks CARDS."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM", subtitle="or roll")
+        conf = mb.write_preview_conf(panel.form())
+        lines = [l for l in conf.splitlines() if l.startswith("group=")]
+        # the card's own rule rides in the spec, and its own sounds in the line
+        assert lines == ["group=+any:0-1|RANDOM|or roll|gart0.png|ganim0.gif|"], conf
+        assert len([l for l in conf.splitlines() if l.startswith("image=")]) == 2
+        # a CONSUMING group's line still sits in front of its first member
+        panel._rows.pop()
+        panel.add_group(_images(tmp_path, 4)[2:], title="JUKEBOX")
+        conf = mb.write_preview_conf(panel.form())
+        body = [l for l in conf.splitlines() if l[:1] != "#"]
+        assert body[2].startswith("group=any:2-3|JUKEBOX"), body
+        assert "|gart0.png|ganim0.gif|" in body[2]
+    finally:
+        root.destroy()
+
+
+def test_the_card_after_a_random_one_plays_its_own_clip(tmp_path):
+    """The rects the selector reports are CARDS and the media files are
+    numbered by IMAGE, so `anim2.gif` is the wrong clip for card 2 the moment a
+    group above it swallows two images. The name is derived, not formatted."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:3], title="JUKEBOX")
+        panel.add_image(paths[3])
+        names = mb.card_media_names(panel.form())
+        assert names[0] == ("art0.png", "", "", "")
+        assert names[1] == ("gart0.png", "ganim0.gif", "", "")
+        # card 2 is IMAGE 3: the group above it took images 1 and 2
+        assert names[2] == ("art3.png", "", "", "")
+    finally:
+        root.destroy()
+
+
+def test_a_random_cards_style_is_not_looked_for_as_a_file(tmp_path):
+    """`stack` is a style, not a path. Walking a group row's art the way an
+    image's is walked reports "art file not found: stack" about a card that is
+    perfectly well formed - and a picture FILE is still checked."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        form = panel.form()
+        assert validate_form(form) == [], validate_form(form)
+        mb.set_group_media(form.images[1], "picture", str(tmp_path / "gone.png"))
+        assert any("gone.png" in e for e in validate_form(form)), validate_form(form)
+    finally:
+        root.destroy()
+
+
+def test_adding_a_song_set_re_renders_the_random_cards_picture(tmp_path):
+    """The picture is drawn from the members, so the member list is part of
+    what the prepared media depends on - without it, adding a song set to a
+    jukebox left the old picture up."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:3], title="JUKEBOX")
+        before = media_fingerprint(panel.form())
+        panel._rows[1].members.append(
+            mb.MemberRow(path=paths[3], title="another set"))
+        assert media_fingerprint(panel.form()) != before
+        # ...and so is the style
+        after = media_fingerprint(panel.form())
+        mb.set_group_media(panel._rows[1], "mosaic")
+        assert media_fingerprint(panel.form()) != after
+    finally:
+        root.destroy()
+
+
+def test_the_pictures_are_cut_for_the_menu_the_cards_make(tmp_path):
+    """A jukebox of song sets is a TWO card menu however many games it holds,
+    and selectmedia sizes a picture for the panel it will be drawn in. Handing
+    it the image count would cut every picture for a forty-panel menu."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        args = mb.prepare_args(panel.form(), str(tmp_path / "media"))
+        assert args[args.index("--cards") + 1] == "2", "one card, plus the random one"
+        assert len([a for a in args if a == "--extra"]) == 3, "...over three games"
+    finally:
+        root.destroy()
+
+
+# ---- item 106: deleting a game, and picking games that are already here ----
+
+def test_deleting_a_game_takes_it_out_of_every_random_card(tmp_path):
+    """A KEEPING group's members are games OTHER rows put on the card, so a row
+    that goes takes its membership with it. Leaving it behind left a form the
+    tab would never have let anyone build, and the only sign was the preview
+    declining to redraw (David, 2026-09-11: "whenever i delete an image, i
+    expect the preview to update with it")."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        for q in paths:
+            panel.add_image(q)
+        panel.add_random_over_existing(title="RANDOM")
+        assert len(panel.form().images) == 4
+        # drop the middle build: the random card rolls between the other two
+        panel.remove_image(1)
+        rows = panel.form().images
+        assert len(rows) == 3, "the image went, the random card stayed"
+        group = rows[-1]
+        assert mb.is_group(group) and len(group.members) == 2
+        assert paths[1] not in mb.row_paths(group)
+        assert validate_form(panel.form()) == [], validate_form(panel.form())
+        # ...and dropping another leaves it nothing to roll between, so its
+        # card goes too rather than sitting there invalid
+        panel.remove_image(0)
+        rows = panel.form().images
+        assert len(rows) == 1 and not mb.is_group(rows[0])
+        # one image is an incomplete card, which is a different complaint - what
+        # matters is that nothing is left saying a game is missing or listed
+        # twice, which is what a stranded membership produced
+        errs = validate_form(panel.form())
+        assert errs == ["Add at least two images: the primary (stock) and one "
+                        "more."], errs
+    finally:
+        root.destroy()
+
+
+def test_a_random_card_over_games_already_here_is_the_keeping_kind(tmp_path):
+    """Picking games that are already on the card means "roll between THESE",
+    not "put a second copy of each on the card" - which is what a consuming
+    group would do, and the form then refused itself with 'game 1 is listed
+    twice' (David's log, 2026-09-11)."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_group(paths[:2], title="RANDOM")
+        rows = panel.form().images
+        assert len(rows) == 3 and mb.is_group(rows[2])
+        assert rows[2].keep is True, "it rolls between the builds that are here"
+        assert [t[1] for t in mb.form_trees(panel.form())] == paths[:2], \
+            "and it puts no new game on the card"
+        assert validate_form(panel.form()) == [], validate_form(panel.form())
+        # HALF and half is neither, and saying so beats a build-time refusal
+        panel._rows.pop()
+        panel.add_group([paths[0], paths[2]], title="MIXED")
+        assert len(panel.form().images) == 2, "nothing was added"
+        assert "already on the card" in panel.message().lower()
+    finally:
+        root.destroy()
+
+
+def test_a_random_cards_games_must_be_next_to_each_other(tmp_path):
+    """The builder writes a group as `<first>-<last>`, so a gap in the run is a
+    refusal minutes into a build. The list says so instead."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        for q in paths:
+            panel.add_image(q)
+        panel.add_group([paths[0], paths[2]], title="ENDS")
+        form = panel.form()
+        assert mb.is_group(form.images[3]) and form.images[3].keep
+        errs = validate_form(form)
+        assert any("next to each other" in e for e in errs), errs
+    finally:
+        root.destroy()
+
+
+def test_a_new_random_card_is_truly_random_and_can_be_changed(tmp_path):
+    """David, 2026-09-11: "so is it truly random if it is remembering the last
+    choice? If there's only two images, it will end up just alternating forever
+    ... We should make it truly random instead i think. and make it an option
+    ... to change it to a 'shuffle' type (like perceived random like ipod)."
+
+    A NEW card is the dice. A card LOADED from one built before there was a
+    choice keeps doing what it did - a card already in the world must not change
+    under its owner."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        row = panel._rows[1]            # the panel's own row, not a copy
+        assert row.roll == "any" == mb.ROLL_DEFAULT
+        assert mb.row_roll(row) == "any"
+        # the builder is TOLD, every time: what the dialog says is what the card
+        # does, whatever the conf's own default is
+        args = mb.build_args(panel.form())
+        assert args[args.index("--group-roll") + 1] == "0=any"
+        # ...and a card that says nothing reads as what such a card has always
+        # done, which is not the same answer
+        row.roll = ""
+        assert mb.row_roll(row) == "not-last" == mb.ROLL_FALLBACK
+        row.roll = "shuffle"
+        args = mb.build_args(panel.form())
+        assert args[args.index("--group-roll") + 1] == "0=shuffle"
+    finally:
+        root.destroy()
+
+
+def test_the_dialog_changes_how_a_random_card_picks(tmp_path):
+    """It is its own section, because it is not what the card SHOWS - it is
+    what the card DOES."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        panel._table.select(1)
+        root.update()
+        dlg = panel.edit_image()
+        root.update()
+        assert [w.cget("value") for w in _radios(dlg.body)][-len(mb.ROLL_NAMES):]             == list(mb.ROLL_NAMES), "the choices are on screen, not just in a var"
+        assert panel._ed_roll.get() == "any"
+        panel._ed_roll.set("shuffle")
+        root.update()
+        assert panel.form().images[1].roll == "shuffle"
+        dlg.ok()
+        root.update()
+        # an ordinary row has no such question and is not given one
+        panel._table.select(0)
+        root.update()
+        dlg = panel.edit_image()
+        root.update()
+        assert [w.cget("value") for w in _radios(dlg.body)] == \
+            ["logo", "picture", "attract", "video", "none"]
+    finally:
+        root.destroy()
+
+
+def test_a_random_card_plays_its_own_music_when_it_is_highlighted(tmp_path):
+    """A RANDOM CARD IS A CARD: the bed that plays while it is highlighted is
+    its own. The manifest's image rows were read at the CARD index, which for a
+    random card is some other game's row or none at all - so the bed the owner
+    picked was never heard (David, 2026-09-11: "i'm not hearing music that i
+    selected when hovering over the random card")."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        bed = tmp_path / "bed.wav"
+        bed.write_bytes(b"RIFF....WAVEfmt ")
+        panel._rows[1].music = str(bed)
+        # what the prepare is asked for: the CARD's bed, against the card
+        args = mb.prepare_args(panel.form(), str(tmp_path / "media"))
+        assert args[args.index("--group-music") + 1] == "0=" + mb.wsl(str(bed))
+        # ...and what the preview plays for it comes out of the group's row
+        media = str(tmp_path / "media")
+        os.makedirs(media, exist_ok=True)
+        wav = os.path.join(media, "gmusic0.wav")
+        with open(wav, "wb") as f:
+            f.write(b"RIFF")
+        manifest = {"images": [{"music": "music0.wav"}],
+                    "groups": [{"music": "gmusic0.wav", "music_source": mb.wsl(str(bed))}],
+                    "sound_move": None, "sound_confirm": None}
+        got = mb.manifest_sounds(manifest, media, 1, group=0)
+        assert got["music"] == wav
+        # the image rows are what a PLAIN card reads, and they are a different
+        # answer at the same number
+        assert mb.manifest_sounds(manifest, media, 1)["music"] == ""
+    finally:
+        root.destroy()
+
+
+def test_select_on_an_image_does_not_show_the_random_cards_frame(tmp_path,
+                                                                 monkeypatch):
+    """One LOADING frame per (form, card), and the press reads the CARD ON
+    SCREEN's. The last render's answer is the last card that needed drawing,
+    which is not where you are looking - so pressing Select on an image showed
+    whatever the random card last rolled (David, 2026-09-11)."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path)
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        # draw the random card, then walk back to the first image
+        panel._table.select(2)
+        root.update()
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        panel._table.select(0)
+        root.update()
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        pv = mb.preview_dir_for(panel.form().out)
+        assert panel._loading_frame() == mb.loading_path(pv, panel._pv_fp, 0)
+        # ...and pressing on an ORDINARY card draws it at once: its frame
+        # cannot change, so there is nothing to wait for and nothing to reroll
+        assert panel.press_select() is True
+        assert panel._black_still == mb.loading_path(pv, panel._pv_fp, 0)
+        # the RANDOM card holds black until its own roll lands, rather than
+        # flashing the build the last roll drew
+        panel._table.select(2)
+        root.update()
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        runs = len(seen["snapshot"])
+        assert panel.press_select() is True
+        assert panel._black_still is None, "the old roll was on screen"
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert len(seen["snapshot"]) == runs + 1
+        assert panel._black_still == mb.loading_path(pv, panel._pv_fp, 2)
+    finally:
+        root.destroy()
+
+
+def test_a_random_cards_music_is_not_reported_missing_for_ever(tmp_path):
+    """A row is a CARD and the manifest has two kinds of row - one per game and
+    one per random card. Reading the games' rows at a card's number said a
+    random card's music was never rendered, for ever (David, 2026-09-11: the
+    strip reading "not rendered (image 3's music)")."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        bed = tmp_path / "bed.wav"
+        bed.write_bytes(b"RIFF")
+        panel._rows[2].music = str(bed)
+        media = panel.media_dir()
+        os.makedirs(media, exist_ok=True)
+        with open(os.path.join(media, "gmusic0.wav"), "wb") as f:
+            f.write(b"RIFF")
+        with open(os.path.join(media, "media.json"), "w", encoding="utf-8") as f:
+            json.dump({"images": [{"music": None, "music_source": "none"},
+                                  {"music": None, "music_source": "none"}],
+                       "groups": [{"music": "gmusic0.wav",
+                                   "music_source": mb.wsl(str(bed))}],
+                       "sound_move": "move.wav", "sound_move_source": "auto",
+                       "sound_confirm": "confirm.wav",
+                       "sound_confirm_source": "auto"}, f)
+        panel._manifest_cache = {}
+        missing = panel._sounds_missing()
+        assert not [m for m in missing if "music" in m], missing
+        # ...and when it really is missing, it is named as a card
+        panel._rows[2].music = str(tmp_path / "other.wav")
+        assert "the random card's music" in panel._sounds_missing()
     finally:
         root.destroy()

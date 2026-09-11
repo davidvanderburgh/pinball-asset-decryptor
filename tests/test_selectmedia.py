@@ -59,6 +59,26 @@ def tiny_png(w=4, h=3, rgba=(200, 40, 60, 255)):
             + _chunk(b"IDAT", zlib.compress(row * h)) + _chunk(b"IEND", b""))
 
 
+def _rgba_png(w, h, rgba, block=None):
+    """An RGBA PNG of one colour, optionally with a rectangle of a second
+    one, written by hand.
+
+    A REAL LOGO IS TRANSPARENT with anything at all stored under the alpha,
+    and a stub without that cannot show the bug that made (the first real
+    random card came out as a magenta box)."""
+    bx0, by0, bx1, by1 = block[0] if block else (0, 0, 0, 0)
+    fill = bytes(rgba)
+    mark = bytes(block[1]) if block else b""
+    rows = bytearray()
+    for y in range(h):
+        rows += b"\x00"
+        for x in range(w):
+            rows += mark if (block and bx0 <= x < bx1 and by0 <= y < by1) else fill
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr)
+            + _chunk(b"IDAT", zlib.compress(bytes(rows))) + _chunk(b"IEND", b""))
+
+
 def tiny_gif(frames=2, delay_cs=10, w=1, h=1, gce=True):
     """A minimal animated GIF: 1x1 frames, one global colour table, LZW bodies borrowed
     from the canonical smallest GIF."""
@@ -1187,3 +1207,316 @@ def test_a_long_bed_is_cut_and_faded(sm, tmp_path, monkeypatch):
     src, secs, fade = seen["args"]
     assert src == str(track)
     assert secs == sm.MUSIC_MAX_SECONDS and fade == sm.MUSIC_FADE_MS
+# ---- item 106: a RANDOM card's own picture ---------------------------------
+
+def _member_logos(sm, n, size=(400, 225)):
+    """n distinct member logos, each a flat colour so a renderer that drops or
+    repeats one is visible rather than plausible.
+
+    NO PIL ANYWHERE IN HERE, because there is none in the renderers: the app's
+    own runtime has no PIL, no pip and no apt lists, and a picture that needs a
+    library the user installs is a picture nobody sees."""
+    hues = [(200, 40, 40), (40, 90, 200), (40, 170, 80), (200, 150, 30),
+            (150, 60, 200), (220, 110, 40)]
+    return [sm.Panel(size[0], size[1], hues[i % len(hues)]) for i in range(n)]
+
+
+def test_a_random_cards_picture_needs_no_pil(sm, monkeypatch):
+    """The app's own runtime has no PIL, no pip and no apt lists, and "no user
+    ever builds or resolves a dependency" is this repo's rule - so a picture
+    that imports it is a picture nobody sees (David, 2026-09-11, from the app:
+    "i can't get the app to show me the random group preview", with `refused: a
+    random card's picture needs PIL`). Hide it and draw all eight anyway."""
+    import builtins
+    real_import = builtins.__import__
+
+    def no_pil(name, *a, **kw):
+        if name == "PIL" or name.startswith("PIL."):
+            raise ImportError("PIL is not installed in the app's runtime")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", no_pil)
+    logos = _member_logos(sm, 2, (32, 18))
+    for style in sm.group_style_names():
+        im = sm.render_group_still(style, logos, (64, 36))
+        assert (im.w, im.h) == (64, 36), style
+    for style in sm.group_style_names(animated=True):
+        frames, _delay = sm.render_group_frames(style, logos, (64, 36))
+        assert frames, style
+
+
+def test_every_still_style_fills_the_panel(sm):
+    """A RANDOM card has no single game, so its picture is drawn from the
+    members' own logos. Whatever the style, it must come out exactly panel
+    sized - the menu blits it into a fixed box."""
+    size = (512, 288)
+    logos = _member_logos(sm, 4)
+    for style in sm.group_style_names():
+        im = sm.render_group_still(style, logos, size)
+        assert (im.w, im.h) == size, style
+        # and it is not a blank card: something was drawn
+        assert len(im.colours()) > 1, style
+
+
+def test_a_mosaic_shows_every_member_not_the_first_one_over_and_over(sm):
+    """"Every member at once" is the whole claim of this style, and nothing was
+    checking it: the panel is full of colour either way. The logos are distinct
+    flat colours for exactly this - a repeat is visible, not plausible."""
+    logos = _member_logos(sm, 4, (32, 18))
+    im = sm.render_group_still("mosaic", logos, (96, 54))
+    seen = set(c[:3] for c in im.colours())
+    for k, l in enumerate(logos):
+        assert l.at(0, 0)[:3] in seen, "member %d is missing from the mosaic" % k
+
+
+def test_a_still_style_survives_one_member_and_forty(sm):
+    """One member is a degenerate group the selector still accepts, and forty is
+    the jukebox this item was filed for. Neither may raise."""
+    for n in (1, 2, 40):
+        for style in sm.group_style_names():
+            im = sm.render_group_still(style, _member_logos(sm, n, (64, 36)), (128, 72))
+            assert (im.w, im.h) == (128, 72), (style, n)
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg writes the GIF")
+def test_the_animated_styles_make_a_gif_the_selector_can_read(sm, tmp_path):
+    size = (128, 72)
+    for style in sm.group_style_names(animated=True):
+        frames, delay = sm.render_group_frames(style, _member_logos(sm, 4, (64, 36)), size)
+        assert frames and all((f.w, f.h) == size for f in frames), style
+        assert 0 < delay <= 1000, style
+        out = str(tmp_path / ("g_%s.gif" % style))
+        sm.write_group_gif(frames, delay, out)
+        info = sm.gif_info(open(out, "rb").read())
+        assert info, "%s did not come out as a GIF this tool can read" % style
+        # the selector's own caps, which a card has to stay inside
+        assert info["frames"] <= sm.GIF_MAX_FRAMES, (style, info["frames"])
+        assert (info["w"], info["h"]) == size, style
+        assert os.path.getsize(out) <= sm.GIF_MAX_BYTES, style
+
+
+def test_cycling_shows_each_member_once(sm):
+    """It is a slideshow of the very things the card can boot, so a member
+    missing from it is the whole point missed."""
+    logos = _member_logos(sm, 5, (64, 36))
+    frames, delay = sm.render_group_frames("cycling", logos, (128, 72))
+    assert len(frames) == 5
+    assert delay == sm.GROUP_CYCLE_MS
+    # each frame carries its own member's colour, so none was repeated
+    seen = [max(f.colours().items(), key=lambda kv: kv[1])[0] for f in frames]
+    assert len(set(seen)) == 5, seen
+
+
+def test_a_bad_style_is_refused_by_name(sm):
+    with pytest.raises(sm.Refused) as e:
+        sm.render_group_still("sparkles", _member_logos(sm, 2), (64, 36))
+    assert "sparkles" in str(e.value) and "mosaic" in str(e.value)
+    with pytest.raises(sm.Refused) as e:
+        sm.render_group_frames("sparkles", _member_logos(sm, 2), (64, 36))
+    assert "cycling" in str(e.value)
+    # ...and no members at all is refused rather than drawn as an empty card
+    with pytest.raises(sm.Refused):
+        sm.render_group_still("mosaic", [], (64, 36))
+
+
+def test_the_group_specs_are_read_by_group_index_not_image_index(sm):
+    """A RANDOM card's picture belongs to the CARD; the whole point of it is
+    that it is not any one game's."""
+    assert sm.parse_group_specs(["0=mosaic", "2=question"], "group-art")         == {0: "mosaic", 2: "question"}
+    assert sm.parse_group_members(["0=1,2,3"]) == {0: [1, 2, 3]}
+    assert sm.parse_group_members(["0= 4 , 5 "]) == {0: [4, 5]}
+    for bad, what in ((["mosaic"], "group-art"), (["x=mosaic"], "group-art"),
+                      (["0=a"], "group-art")):
+        if what == "group-art" and bad == ["0=a"]:
+            continue                     # a bare value is a style or a file, checked later
+        with pytest.raises(sm.Refused):
+            sm.parse_group_specs(bad, what)
+    with pytest.raises(sm.Refused):
+        sm.parse_group_specs(["0=a", "0=b"], "group-art")     # the same group twice
+    with pytest.raises(sm.Refused):
+        sm.parse_group_members(["0=1,x"])
+    with pytest.raises(sm.Refused):
+        sm.parse_group_members(["0="])
+
+
+def test_media_json_carries_a_random_cards_own_picture(sm, tmp_path):
+    """A RANDOM card's picture belongs to no image, so nothing in the images
+    list references it - and the manifest is what decides which files are
+    staged onto the card and which are swept as stale. Without a place for it,
+    a picture that was rendered would then be deleted and never copied."""
+    plain = sm.build_manifest([("art0.png", None, None, None)])
+    assert "groups" not in plain, "a card with no group is what it always was"
+    m = sm.build_manifest([("art0.png", None, None, None),
+                           ("art1.png", None, None, None)],
+                          groups=[{"members": [0, 1], "art": "gart0.png",
+                                   "anim": "ganim0.gif",
+                                   "art_source": "stack",
+                                   "anim_source": "cycling"}])
+    assert sm.validate_manifest(m) is m
+    assert m["groups"] == [{"members": [0, 1], "art": "gart0.png",
+                            "anim": "ganim0.gif",
+                            # a random card is a card: it has sounds of its own
+                            "music": None, "confirm": None,
+                            "art_source": "stack", "anim_source": "cycling",
+                            "music_source": None, "confirm_source": None}]
+    assert sm.manifest_files(m) == ["art0.png", "art1.png",
+                                    "gart0.png", "ganim0.gif"]
+
+
+@pytest.mark.parametrize("bad", [
+    {"members": [], "art": "gart0.png"},                      # no members
+    {"members": ["1"], "art": "gart0.png"},                   # not indexes
+    {"members": [0, 1], "art": "../gart0.png"},               # not a flat name
+    {"members": [0, 1], "art": "gart0.png", "style": "fan"},  # a key nobody writes
+])
+def test_a_malformed_group_row_is_refused(sm, bad):
+    m = sm.build_manifest([("art0.png", None, None, None)])
+    m["groups"] = [bad]
+    with pytest.raises(sm.Refused):
+        sm.validate_manifest(m)
+
+
+def test_the_stale_sweep_keeps_the_picture_it_just_drew(sm, tmp_path):
+    """...and takes away the one a deleted random card left behind, which is
+    the whole reason the sweep exists: an orphan rides along in the budget."""
+    d = str(tmp_path)
+    for name in ("gart0.png", "ganim0.gif", "gart1.png", "ganim1.gif"):
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(b"x")
+    m = sm.build_manifest([("art0.png", None, None, None)],
+                          groups=[{"members": [0, 1], "art": "gart0.png",
+                                   "anim": "ganim0.gif"}])
+    removed = sm.sweep_stale(d, m, log=lambda *a: None)
+    assert sorted(removed) == ["ganim1.gif", "gart1.png"]
+    assert os.path.isfile(os.path.join(d, "gart0.png"))
+    assert not os.path.isfile(os.path.join(d, "gart1.png"))
+
+
+def test_the_groups_must_be_numbered_without_a_gap(sm):
+    """media.json lists them in order and mkmulticard matches its own group
+    flags to that list BY POSITION, so a gap would hand group 2's picture to
+    group 1 - silently, and only on the machine."""
+    assert sm.parse_group_members(["0=0,1", "1=2,3"]) == {0: [0, 1], 1: [2, 3]}
+    with pytest.raises(sm.Refused, match="numbered 0"):
+        sm.parse_group_members(["0=0,1", "2=2,3"])
+    with pytest.raises(sm.Refused, match="numbered 0"):
+        sm.parse_group_members(["1=0,1"])
+
+
+#: what a transparent logo hides under its alpha, and must never paint
+HIDDEN = (255, 0, 255)
+
+
+def _stub_group_card(sm, tmp_path, monkeypatch, n=2):
+    """Two 'card images' whose logo is a hand-written PNG, so _prepare_group can
+    be driven without a 4 GB .raw.
+
+    A REAL LOGO IS TRANSPARENT, with anything at all stored under the alpha -
+    magenta, on the 1987 card - so the stub has some. An opaque stub cannot show
+    the bug that made."""
+    paths = []
+    for i in range(n):
+        raw = tmp_path / ("card%d.raw" % i)
+        raw.write_bytes(bytes(8 + i))
+        paths.append(str(raw))
+    data = _rgba_png(64, 36, HIDDEN + (0,), block=((20, 10, 44, 26), (20, 200, 20, 255)))
+    monkeypatch.setattr(sm, "logo_bytes", lambda ci, part, title: (data, "/x/GameLogo.png"))
+    return paths, (lambda p: (None, None, "title"))
+
+
+def test_a_random_cards_picture_is_rendered_cached_and_checked(sm, tmp_path, monkeypatch):
+    """_prepare_group end to end. TWO BUGS LIVED HERE and neither unit test saw
+    them, because both were in the plumbing around the renderers: the cache
+    stamp joined source_stamp DICTS as if they were strings (TypeError on the
+    first real card), and the animation check was inverted - gif_fits answers
+    with the REASON and None when it fits, so every animation that fitted was
+    refused and every one that did not was written."""
+    images, card = _stub_group_card(sm, tmp_path, monkeypatch)
+    out = str(tmp_path / "out")
+    work = str(tmp_path / "work")
+    os.makedirs(out)
+    os.makedirs(work)
+    said = []
+    bed = str(tmp_path / "bed.wav")
+    write_wav(bed, seconds=0.2)
+    names = sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72),
+                              out, work, card, log=said.append,
+                              music=bed, confirm="synth")
+    # A RANDOM CARD IS A CARD: the bed that plays while it is highlighted and
+    # the sound it makes when it is chosen are ITS OWN, not its first member's
+    # (David, 2026-09-11: "i'm not hearing music that i selected when hovering
+    # over the random card").
+    assert names == {"art": "gart0.png", "anim": "ganim0.gif",
+                     "music": "gmusic0.wav", "confirm": "gconfirm0.wav"}
+    for n in names.values():
+        assert os.path.getsize(os.path.join(out, n)) > 0, n
+    # ...and the logo reached the renderers WITH its alpha
+    back = sm.panel_from_file(os.path.join(out, "gart0.png"), (128, 72))
+    assert not [c for c in back.colours() if c[:3] == HIDDEN and c[3] > 200], \
+        "the hidden background was painted onto the card"
+    assert sm.gif_fits(sm.gif_info(open(os.path.join(out, "ganim0.gif"), "rb").read())) is None
+    # the second run costs nothing...
+    said[:] = []
+    sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72),
+                      out, work, card, log=said.append)
+    assert all("cached" in line for line in said), said
+    # ...until a member changes, which is the whole reason the members are in
+    # the sidecar's params: it can record only ONE source
+    open(images[1], "wb").write(bytes(99))
+    said[:] = []
+    sm._prepare_group(0, [0, 1], "stack", "cycling", images, (128, 72),
+                      out, work, card, log=said.append)
+    assert not any("cached" in line for line in said), said
+
+
+def test_an_oversized_random_card_animation_is_refused_with_the_reason(sm, tmp_path,
+                                                                      monkeypatch):
+    images, card = _stub_group_card(sm, tmp_path, monkeypatch)
+    out, work = str(tmp_path / "out"), str(tmp_path / "work")
+    os.makedirs(out)
+    os.makedirs(work)
+    monkeypatch.setattr(sm, "GIF_MAX_BYTES", 8)
+    with pytest.raises(sm.Refused) as e:
+        sm._prepare_group(0, [0, 1], None, "cycling", images, (128, 72),
+                          out, work, card, log=lambda *a: None)
+    assert "does not fit" in str(e.value) and ">" in str(e.value)
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg scales the art")
+def test_the_panel_is_sized_by_the_cards_not_the_images(sm, tmp_path, capsys):
+    """A jukebox of forty song sets is a TWO card menu. Sizing its pictures for
+    forty images hands the selector a thumbnail to blow up."""
+    src = tmp_path / "own.png"
+    src.write_bytes(_rgba_png(60, 40, (30, 30, 30, 255)))
+
+    def run(out, *extra):
+        os.makedirs(out)
+        rc = sm.main(["prepare", "--primary", "a.raw", "--extra", "b.raw",
+                      "--out", out, "--art", str(src), "--sound-move", "none",
+                      "--sound-confirm", "none"] + list(extra))
+        assert rc == 0, capsys.readouterr().out
+        with open(os.path.join(out, "art0.png"), "rb") as f:
+            return sm.png_size(f.read())
+
+    assert run(str(tmp_path / "two")) == sm.panel_size_for(2)
+    assert run(str(tmp_path / "four"), "--cards", "4") == sm.panel_size_for(4)
+    assert sm.panel_size_for(2) != sm.panel_size_for(4), "the sizes really differ"
+
+
+def test_a_logos_transparent_background_is_never_painted(sm):
+    """A logo pulled off a card is a PNG with a transparent background, and the
+    RGB stored under that alpha is anything at all - on the 1987 card it is a
+    flat magenta. The first real random card came out as a magenta box, and
+    every test here passed, because a test logo is a flat opaque colour with no
+    alpha to lose. This one has some."""
+    hidden = HIDDEN
+    logo = sm.Panel(80, 45, hidden + (0,))                  # every pixel hidden
+    logo.rect(30, 15, 50, 30, (20, 200, 20, 255))           # ...but one block
+    size = (128, 72)
+    panels = [sm.render_group_still(st, [logo, logo], size)
+              for st in sm.group_style_names()]
+    for st in sm.group_style_names(animated=True):
+        panels += sm.render_group_frames(st, [logo, logo], size)[0]
+    for im in panels:
+        n = sum(c for col, c in im.colours().items() if col[:3] == hidden)
+        assert n == 0, "%d pixels of the hidden background were painted" % n

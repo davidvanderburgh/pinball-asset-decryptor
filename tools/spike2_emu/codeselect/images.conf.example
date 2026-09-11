@@ -14,7 +14,19 @@
 #                menu-wide sound_confirm (empty or absent = sound_confirm)
 #                Media names are files in the media directory; empty = none;
 #                three-field and six-field lines are still valid.
+#   group=<members>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
+#     Several images shown as ONE card. Confirming it - by hand or when the
+#     countdown runs out - boots one MEMBER at random, and never the one it
+#     booted last, so a card of song-set variants plays a different set every
+#     power-up. <members> is image indexes as a range and/or a list ('3-5',
+#     '3,5,7-9'); the rest of the line is a card's display fields, exactly as
+#     an image line carries them, and the card sits in the menu where the line
+#     sits. Members stay ordinary image= lines and keep their indexes.
+#     A member that names no image line is dropped, a group left with no
+#     member is dropped, and image 0 is never a member: a mistyped group shows
+#     a smaller menu, it never stops the machine booting.
 #   default=N    highlight when there is no usable /data/codeselect.last
+#                An index that is a group MEMBER highlights its group's card.
 #   timeout=S    seconds before the highlighted image boots by itself; 0 = wait
 #   font=PATH    optional TrueType font (default: /usr/local/codeselect/font.ttf,
 #                then the card's /usr/local/spike/VeraMono.ttf)
@@ -33,12 +45,17 @@
 #                        heading, card, card_hl, frame, frame_hl, title, title_hl,
 #                        subtitle, subtitle_hl, label, label_hl, footer, countdown
 #
-# WAVs: RIFF PCM 16-bit 44100 Hz, 1 or 2 channels. Up to 16 images; two to
-# four sit in a row, more become a carousel. Unknown keys are ignored.
+# WAVs: RIFF PCM 16-bit 44100 Hz, 1 or 2 channels. Up to 64 image lines in at
+# most 16 CARDS and 8 groups - a group of forty variants is one card; two to
+# four cards sit in a row, more become a carousel. Unknown keys are ignored.
 #
 # The card builder writes this file; edit the names as you like.
 image=/dev/mmcblk0p3|STERN STOCK|TMNT Pro 1.59.0 - original Stern code|art0.png||
 image=/dev/mmcblk0p7|TMNT 1987|1.59.0 - upscaled cartoon retheme|art1.png|anim1.gif|music1.wav|confirm1.wav
+#group=2-4|JUKEBOX|a different song set every power-up (3 sets)|art2.png|anim2.gif|
+#image=/dev/mmcblk0p7:img2|JUKEBOX - set 1|Help!, Yesterday
+#image=/dev/mmcblk0p7:img3|JUKEBOX - set 2|Let It Be, Hey Jude
+#image=/dev/mmcblk0p7:img4|JUKEBOX - set 3|Come Together, Something
 sound_move=move.wav
 sound_confirm=confirm.wav
 volume=50

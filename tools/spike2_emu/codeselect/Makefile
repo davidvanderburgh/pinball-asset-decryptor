@@ -55,13 +55,15 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 # in the rootfs). Hand prototypes in audio_alsa.c: no headers on the box.
 AUDLIBS   = -l:libasound.so.2
 
-# THE PAST-32 BINARY (item 105).  The animation tick used to mark the images
+# THE PAST-32 BINARY (item 105).  The animation tick used to mark the cards
 # that moved in an `unsigned` bitmask (`1u << i`), which is undefined from
-# image 32 up and fails silently.  It is a flag array now, and this second
-# build of the SAME sources at a raised cap is what proves it: nothing else
-# in the tree can reach 32 images while CONF_MAX_IMAGES is 16, so without it
-# the fix would stay untested until item 106 raised the cap for real.  Built
-# by `make check`, never installed, never written to a card.
+# card 32 up and fails silently.  It is a flag array now, and this second
+# build of the SAME sources at a raised cap is what proves it: a menu is
+# CONF_MAX_CARDS wide (16) and no conf can talk the shipped binary past that,
+# so without this build the fix would stay untested.  Item 106 raised the
+# IMAGE cap to 64 and left CARDS at 16 - a group of forty variants is one
+# card - so the override moved to the cap that actually sizes the tick.
+# Built by `make check`, never installed, never written to a card.
 CAP_N    ?= 40
 CAPBUILD  = $(BUILD)-cap$(CAP_N)
 CAPBIN    = $(CAPBUILD)/codeselect
@@ -95,7 +97,7 @@ $(BIN): $(OBJS)
 
 # a recursive build of the same sources: only BUILD and the cap differ
 capbin:
-> $(MAKE) BUILD="$(CAPBUILD)" EXTRA_CFLAGS=-DCONF_MAX_IMAGES=$(CAP_N) "$(CAPBIN)"
+> $(MAKE) BUILD="$(CAPBUILD)" EXTRA_CFLAGS=-DCONF_MAX_CARDS=$(CAP_N) "$(CAPBIN)"
 
 check: $(BIN) capbin
 > bash test/check_elf.sh "$(CROSS)" "$(BIN)"

@@ -190,8 +190,10 @@ ANIM_PARAMS_RE = re.compile(r"^(%s)(?::(%s)(?::(\d+))?)?$" % (_NUM_RE, _NUM_RE))
 ART_AT_RE = re.compile(r"^%s$" % _NUM_RE)                                             # T
 SOUND_AT_RE = re.compile(r"^\d+$")                                                    # auto@IDX
 STALE_FULL_RE = re.compile(r"^(?:(?:art|anim|music)\d+\.(?:png|gif|wav)"
-                           r"|confirm\d+\.wav|(?:move|confirm)\.wav)$")
-STALE_VISUAL_RE = re.compile(r"^(art|anim)\d+\.(png|gif)$")
+                           r"|confirm\d+\.wav|(?:move|confirm)\.wav"
+                           r"|gart\d+\.png|ganim\d+\.gif"
+                           r"|(?:gmusic|gconfirm)\d+\.wav)$")
+STALE_VISUAL_RE = re.compile(r"^(?:g?art\d+\.png|g?anim\d+\.gif)$")
 
 
 class Refused(Exception):
@@ -572,13 +574,20 @@ def check_output_dir(path):
 
 # ---- the manifest ---------------------------------------------------------------------------
 def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_VOLUME,
-                   sources=None, sound_move_source=None, sound_confirm_source=None):
+                   sources=None, sound_move_source=None, sound_confirm_source=None,
+                   groups=None):
     """images = [(art|None, anim|None, music|None[, confirm|None]), ...] -> the media.json
     dict.  A row's fourth field is the image's OWN confirm sound; null (or a 3-field row)
     means it falls back to the menu-wide sound_confirm.
     sources = [(art_spec, anim_spec[, confirm_spec[, music_spec]]), ...] (one per image)
     adds 'art_source' / 'anim_source' / 'confirm_source' / 'music_source' - the spec
     strings the GUI round-trips; a shorter row leaves the rest null.
+    groups = [{"members": [i, ...], "art": name|None, "anim": name|None,
+    "art_source": spec|None, "anim_source": spec|None}, ...] is a RANDOM card's own
+    picture (item 106) - one entry per group, in group order.  It is a CARD's media,
+    not an image's, which is why it cannot live in the rows: a group card has no
+    image of its own.  The key is left OUT of the manifest when there are no groups,
+    so a card without one is byte for byte what this tool has always written.
     sound_move_source / sound_confirm_source are the specs the two MENU sounds were
     rendered from, so a set whose sound was CHANGED (its file is still there, but from
     a different source) reads as stale rather than ready - see the GUI's
@@ -606,6 +615,22 @@ def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_V
             row["confirm_source"] = src[2] if len(src) > 2 else None
             row["music_source"] = src[3] if len(src) > 3 else None
         out["images"].append(row)
+    for gi, g in enumerate(groups or []):
+        members = [int(m) for m in (g.get("members") or [])]
+        if not members:
+            raise Refused("build_manifest: group %d has no members" % gi)
+        for nm in (g.get("art"), g.get("anim")):
+            if nm:
+                check_media_name(nm)
+        out.setdefault("groups", []).append(
+            {"members": members, "art": g.get("art") or None,
+             "anim": g.get("anim") or None,
+             "music": g.get("music") or None,
+             "confirm": g.get("confirm") or None,
+             "art_source": g.get("art_source") or None,
+             "anim_source": g.get("anim_source") or None,
+             "music_source": g.get("music_source") or None,
+             "confirm_source": g.get("confirm_source") or None})
     return out
 
 
@@ -633,6 +658,37 @@ def validate_manifest(m):
                            "music_source"}
         if extra:
             raise Refused("media.json: images[%d] has unknown keys %s" % (i, sorted(extra)))
+    groups = m.get("groups")
+    if groups is not None:
+        if not isinstance(groups, list):
+            raise Refused("media.json: 'groups' must be a list")
+        for gi, g in enumerate(groups):
+            if not isinstance(g, dict):
+                raise Refused("media.json: groups[%d] is not an object" % gi)
+            members = g.get("members")
+            if not isinstance(members, list) or not members or \
+                    not all(isinstance(x, int) and not isinstance(x, bool) and x >= 0
+                            for x in members):
+                raise Refused("media.json: groups[%d].members must be a list of image "
+                              "indexes" % gi)
+            for k in ("art", "anim", "music", "confirm"):
+                v = g.get(k)
+                if v is not None:
+                    if not isinstance(v, str):
+                        raise Refused("media.json: groups[%d].%s must be a name or null"
+                                      % (gi, k))
+                    check_media_name(v)
+            for k in ("art_source", "anim_source", "music_source", "confirm_source"):
+                v = g.get(k)
+                if v is not None and not isinstance(v, str):
+                    raise Refused("media.json: groups[%d].%s must be a spec string or null"
+                                  % (gi, k))
+            extra = set(g) - {"members", "art", "anim", "music", "confirm",
+                              "art_source", "anim_source", "music_source",
+                              "confirm_source"}
+            if extra:
+                raise Refused("media.json: groups[%d] has unknown keys %s"
+                              % (gi, sorted(extra)))
     for k in ("sound_move", "sound_confirm"):
         v = m.get(k)
         if v is not None:
@@ -656,6 +712,13 @@ def manifest_files(m):
         for k in ("art", "anim", "music", "confirm"):
             if im.get(k) and im[k] not in names:
                 names.append(im[k])
+    # a RANDOM card's own picture is referenced by nothing else: it is not any
+    # image's, so without this it is neither staged onto the card nor kept by
+    # the stale sweep
+    for g in (m.get("groups") or []):
+        for k in ("art", "anim", "music", "confirm"):
+            if g.get(k) and g[k] not in names:
+                names.append(g[k])
     for k in ("sound_move", "sound_confirm"):
         if m.get(k) and m[k] not in names:
             names.append(m[k])
@@ -1693,7 +1756,26 @@ def _sound_default(spec, sources, primary, idx, max_seconds, fade_ms, synth_kind
     return name
 
 
-def _prepare_confirm(i, card, spec, out, sources, log=say):
+def _prepare_music(i, spec, out, log=say, prefix="music"):
+    """music<i>.wav for one card, or None when it has none.  The bed is
+    normalised and faded exactly as every other one is - a RANDOM card's own
+    music goes through this too, which is why it takes the name."""
+    if spec == "none" or not spec:
+        return None
+    src, seconds = split_music_spec(spec)
+    if not os.path.isfile(src):
+        raise Refused("music %d: %s is not a file" % (i, src))
+    target = os.path.join(out, "%s%d.wav" % (prefix, i))
+    normalise_wav(src, target, seconds, MUSIC_FADE_MS)
+    whole = _duration_of(src)
+    log("  %s: %s (%s)"
+        % (os.path.basename(target), src,
+           "the first %.4g s of %.4g s, faded out" % (seconds, whole)
+           if whole and whole > seconds + 0.05 else "%.4g s" % (whole or seconds)))
+    return os.path.basename(target)
+
+
+def _prepare_confirm(i, card, spec, out, sources, log=say, prefix="confirm"):
     """confirm<i>.wav for one image, or None when the image has no confirm sound of its
     own and falls back to the menu-wide confirm.wav ('none', or no 'N=' spec at all).
 
@@ -1709,7 +1791,7 @@ def _prepare_confirm(i, card, spec, out, sources, log=say):
     p = parse_sound_spec(spec, CONFIRM_IDX)
     if p["kind"] == "none":
         return None
-    target = os.path.join(out, "confirm%d.wav" % i)
+    target = os.path.join(out, "%s%d.wav" % (prefix, i))
     name = os.path.basename(target)
     if p["kind"] == "synth":
         drop_sidecar(target)
@@ -1893,12 +1975,671 @@ def sweep_stale(out, manifest, visual_only=False, log=say):
     return removed
 
 
+# ============================================================ a GROUP card's picture
+#
+# A RANDOM card has no single game, so "the game's own logo" means nothing for
+# it: its picture has to say "several games, one of them at random".  These draw
+# that from the MEMBERS' own logos, so the card shows the very builds it rolls
+# between (David, 2026-09-10: "the options for a Random group need to be bespoke
+# to a random group... 'stack of logos', 'big ?'").
+#
+# NO PIL.  The app's own runtime does not have it, has no pip and no apt lists,
+# and "no user ever builds or resolves a dependency" is this repo's rule - so a
+# picture that needs a library the user has to install is a picture nobody sees
+# (David, 2026-09-11, from the app: "i can't get the app to show me the random
+# group preview", with `refused: a random card's picture needs PIL`).  ffmpeg is
+# already required here and is good at exactly the parts that are hard to write:
+# decoding a logo, scaling it with lanczos, and writing a PNG or a palette GIF.
+# The compositing in between is a few hundred lines of arithmetic over a
+# bytearray, which is the half a filtergraph would have made write-only.
+
+
+#: The still styles, and what each says.
+GROUP_ART_STYLES = {
+    "fan": "the members' logos fanned out like a hand of cards",
+    "stack": "the members' logos in a pile, slightly offset",
+    "mosaic": "every member at once, as a grid",
+    "question": "a big '?' over a dimmed mosaic of the members",
+    "shuffle": "the shuffle glyph every music player uses",
+}
+#: ...and the animated ones.
+GROUP_ANIM_STYLES = {
+    "cycling": "each member's logo in turn, a second each",
+    "reel": "a slot reel that spins and eases onto one",
+}
+#: The menu's own 'midnight' colours, which is what a card gets unless its
+#: theme says otherwise.
+GROUP_CARD_RGB = (26, 31, 41)
+GROUP_FRAME_RGB = (60, 70, 88)
+GROUP_HL_RGB = (255, 196, 45)
+GROUP_DIM_RGB = (150, 162, 180)
+#: How long each member holds the panel in the cycling style.
+GROUP_CYCLE_MS = 1000
+#: ...and how many frames the reel spends easing to a stop.
+GROUP_REEL_FRAMES = 24
+#: How many members the reel actually threads onto its strip.  It is a reel,
+#: not a list: past this it says the same thing and costs a blur per cell.
+GROUP_REEL_CELLS = 8
+
+
+def parse_group_specs(specs, what):
+    """``["0=mosaic", "1=cycling"]`` -> ``{0: "mosaic", 1: "cycling"}``.
+
+    A group index, not an image index: a RANDOM card's picture belongs to the
+    CARD, and the whole point of it is that it is not any one game's."""
+    out = {}
+    for spec in specs or []:
+        idx, sep, val = str(spec).partition("=")
+        if not sep or not idx.strip().isdigit():
+            raise Refused("--%s %r: expected G=VALUE, where G is a group index"
+                          % (what, spec))
+        g = int(idx.strip())
+        if g in out:
+            raise Refused("--%s: group %d is given twice" % (what, g))
+        out[g] = val.strip()
+    return out
+
+
+def parse_group_members(specs):
+    """``["0=1,2,3"]`` -> ``{0: [1, 2, 3]}`` - which IMAGES each group covers."""
+    out = {}
+    for g, val in parse_group_specs(specs, "group-members").items():
+        members = []
+        for tok in val.split(","):
+            tok = tok.strip()
+            if not tok.isdigit():
+                raise Refused("--group-members %d=%r: %r is not an image index"
+                              % (g, val, tok))
+            members.append(int(tok))
+        if not members:
+            raise Refused("--group-members %d: no images" % g)
+        out[g] = members
+    # THE GROUPS ARE 0..N-1, WITH NO HOLES: media.json lists them in order and
+    # mkmulticard matches its own group flags to that list BY POSITION, so a gap
+    # here would hand group 2's picture to group 1 - silently, and only on the
+    # machine.
+    if sorted(out) != list(range(len(out))):
+        raise Refused("--group-members: the groups must be numbered 0..%d with no "
+                      "gaps (got %s)" % (len(out) - 1, sorted(out)))
+    return out
+
+
+# ---- the panel: a WxH RGBA bytearray, and the few things a card needs -------
+class Panel(object):
+    """One RGBA image as a flat bytearray, row-major, 4 bytes a pixel.
+
+    Everything a random card's picture needs and nothing else.  The operations
+    are the ones the styles use: fill, alpha-blit, a rectangle, a thick line, a
+    filled polygon, a rotation about a point, a box blur and a crop.  Alpha is
+    STRAIGHT, never premultiplied, because that is what a logo pulled off a card
+    carries and what ffmpeg hands over."""
+
+    __slots__ = ("w", "h", "px")
+
+    def __init__(self, w, h, fill=None, px=None):
+        self.w, self.h = int(w), int(h)
+        if self.w < 1 or self.h < 1:
+            raise Refused("a panel of %dx%d has no pixels" % (w, h))
+        if px is not None:
+            if len(px) != self.w * self.h * 4:
+                raise Refused("panel %dx%d wants %d bytes, got %d"
+                              % (self.w, self.h, self.w * self.h * 4, len(px)))
+            self.px = bytearray(px)
+        else:
+            self.px = bytearray(_rgba(fill) * (self.w * self.h))
+
+    def copy(self):
+        return Panel(self.w, self.h, px=self.px)
+
+    # -- reading ------------------------------------------------------------
+    def at(self, x, y):
+        i = (y * self.w + x) * 4
+        return tuple(self.px[i:i + 4])
+
+    def colours(self):
+        """{(r, g, b, a): count} - what a test asks to see the whole picture."""
+        out = {}
+        px = self.px
+        for i in range(0, len(px), 4):
+            k = (px[i], px[i + 1], px[i + 2], px[i + 3])
+            out[k] = out.get(k, 0) + 1
+        return out
+
+    # -- drawing ------------------------------------------------------------
+    def fill(self, colour):
+        self.px = bytearray(_rgba(colour) * (self.w * self.h))
+
+    def blit(self, src, x, y):
+        """*src* over this panel at (x, y), HONOURING ITS OWN TRANSPARENCY.
+
+        A logo pulled off a card is a PNG with anything at all stored under its
+        alpha - flat magenta, on the 1987 card - so a blit that ignored it
+        painted a coloured box (seen in the emulator, 2026-09-10)."""
+        x, y = int(x), int(y)
+        for sy in range(max(0, -y), min(src.h, self.h - y)):
+            si = sy * src.w * 4
+            di = ((y + sy) * self.w + x) * 4
+            for sx in range(max(0, -x), min(src.w, self.w - x)):
+                s = si + sx * 4
+                a = src.px[s + 3]
+                if not a:
+                    continue
+                d = di + sx * 4
+                if a == 255:
+                    self.px[d:d + 4] = src.px[s:s + 4]
+                    continue
+                ia = 255 - a
+                for c in range(3):
+                    self.px[d + c] = (src.px[s + c] * a + self.px[d + c] * ia + 127) // 255
+                self.px[d + 3] = a + (self.px[d + 3] * ia + 127) // 255
+
+    def rect(self, x0, y0, x1, y1, colour):
+        """A filled rectangle, [x0, x1) x [y0, y1), clipped."""
+        px4 = _rgba(colour)
+        x0, x1 = max(0, int(x0)), min(self.w, int(x1))
+        y0, y1 = max(0, int(y0)), min(self.h, int(y1))
+        if x1 <= x0 or y1 <= y0:
+            return
+        row = px4 * (x1 - x0)
+        for y in range(y0, y1):
+            i = (y * self.w + x0) * 4
+            self.px[i:i + (x1 - x0) * 4] = row
+
+    def outline(self, x0, y0, x1, y1, colour, width=1):
+        width = max(1, int(width))
+        self.rect(x0, y0, x1, y0 + width, colour)
+        self.rect(x0, y1 - width, x1, y1, colour)
+        self.rect(x0, y0, x0 + width, y1, colour)
+        self.rect(x1 - width, y0, x1, y1, colour)
+
+    def dot(self, cx, cy, r, colour):
+        r = max(1, int(r))
+        rr = r * r
+        for dy in range(-r, r + 1):
+            span = int(math.sqrt(max(0, rr - dy * dy)))
+            self.rect(cx - span, cy + dy, cx + span + 1, cy + dy + 1, colour)
+
+    def line(self, points, colour, width):
+        """A thick polyline: a disc stamped along each segment.  Round joints
+        for nothing, which is what the shuffle glyph's corners want."""
+        r = max(1, int(width) // 2)
+        for k in range(len(points) - 1):
+            (ax, ay), (bx, by) = points[k], points[k + 1]
+            steps = int(max(abs(bx - ax), abs(by - ay))) + 1
+            for t in range(steps + 1):
+                f = t / float(steps)
+                self.dot(ax + (bx - ax) * f, ay + (by - ay) * f, r, colour)
+
+    def poly(self, points, colour):
+        """A filled polygon, even-odd, one scanline at a time."""
+        if len(points) < 3:
+            return
+        ys = [p[1] for p in points]
+        for y in range(max(0, int(min(ys))), min(self.h, int(max(ys)) + 1)):
+            xs = []
+            for k in range(len(points)):
+                (x0, y0), (x1, y1) = points[k], points[(k + 1) % len(points)]
+                if (y0 <= y < y1) or (y1 <= y < y0):
+                    xs.append(x0 + (y - y0) * (x1 - x0) / float(y1 - y0))
+            xs.sort()
+            for k in range(0, len(xs) - 1, 2):
+                self.rect(xs[k], y, xs[k + 1] + 1, y + 1, colour)
+
+    # -- whole-panel operations ---------------------------------------------
+    def crop(self, x, y, w, h):
+        """A WxH window, wrapping VERTICALLY - which is what a reel is."""
+        out = Panel(w, h)
+        for row in range(h):
+            sy = (int(y) + row) % self.h
+            si = (sy * self.w + max(0, int(x))) * 4
+            out.px[row * w * 4:(row + 1) * w * 4] = self.px[si:si + w * 4]
+        return out
+
+    def rotated(self, degrees, cx, cy):
+        """Turned about (cx, cy), sampled backwards so no destination pixel is
+        missed.  Nearest neighbour: at a menu panel's size the difference from
+        a bilinear sample is invisible and the cost is not."""
+        out = Panel(self.w, self.h)
+        rad = math.radians(-float(degrees))
+        cos_r, sin_r = math.cos(rad), math.sin(rad)
+        for y in range(self.h):
+            dy = y - cy
+            i = y * self.w * 4
+            for x in range(self.w):
+                dx = x - cx
+                sx = int(cx + dx * cos_r - dy * sin_r + 0.5)
+                sy = int(cy + dx * sin_r + dy * cos_r + 0.5)
+                if 0 <= sx < self.w and 0 <= sy < self.h:
+                    s = (sy * self.w + sx) * 4
+                    out.px[i:i + 4] = self.px[s:s + 4]
+                i += 4
+        return out
+
+    def blurred(self, radius):
+        """A box blur, horizontal then vertical, with a running sum - so the
+        cost is the pixel count and not the radius."""
+        r = int(radius)
+        if r < 1:
+            return self.copy()
+        out = self.copy()
+        for _pass in (0, 1):
+            src, dst = out.px, bytearray(len(out.px))
+            if _pass == 0:
+                n, m, step, jump = self.w, self.h, 4, self.w * 4
+            else:
+                n, m, step, jump = self.h, self.w, self.w * 4, 4
+            span = min(r, n - 1)
+            for line_i in range(m):
+                base = line_i * jump
+                for c in range(4):
+                    total = 0
+                    for k in range(0, span + 1):
+                        total += src[base + k * step + c]
+                    count = span + 1
+                    for k in range(n):
+                        dst[base + k * step + c] = total // count
+                        lo, hi = k - span, k + span + 1
+                        if hi < n:
+                            total += src[base + hi * step + c]
+                            count += 1
+                        if lo >= 0:
+                            total -= src[base + lo * step + c]
+                            count -= 1
+            out.px = dst
+        return out
+
+    def over(self, colour):
+        """This panel composed onto a flat colour, so what comes out is
+        opaque - a still the menu blits into a panel, not a layer."""
+        out = Panel(self.w, self.h, colour)
+        out.blit(self, 0, 0)
+        return out
+
+    def dimmed(self, amount):
+        """Darkened towards black by *amount* (0..1), alpha untouched."""
+        f = max(0.0, min(1.0, 1.0 - float(amount)))
+        px = self.px
+        for i in range(0, len(px), 4):
+            px[i] = int(px[i] * f)
+            px[i + 1] = int(px[i + 1] * f)
+            px[i + 2] = int(px[i + 2] * f)
+        return self
+
+
+def _rgba(colour):
+    """(r, g, b) or (r, g, b, a) or None -> four bytes."""
+    if colour is None:
+        return bytes((0, 0, 0, 0))
+    c = tuple(int(v) & 0xFF for v in colour)
+    if len(c) == 3:
+        c += (255,)
+    if len(c) != 4:
+        raise Refused("a colour is (r, g, b) or (r, g, b, a), not %r" % (colour,))
+    return bytes(c)
+
+
+def panel_from_file(src, size):
+    """*src* (any image ffmpeg reads) scaled to FIT *size*, centred, the rest
+    transparent -> a Panel.  ffmpeg does the decode and the lanczos."""
+    ff = find_ffmpeg()
+    if not ff:
+        raise Refused("ffmpeg is required to read %s" % src)
+    w, h = int(size[0]), int(size[1])
+    vf = ("scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos,"
+          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=#00000000,format=rgba" % (w, h, w, h))
+    r = run([ff, "-v", "error", "-i", src, "-frames:v", "1", "-vf", vf,
+             "-pix_fmt", "rgba", "-f", "rawvideo", "-"], "ffmpeg decode")
+    return Panel(w, h, px=r.stdout)
+
+
+def panel_to_png(panel, out):
+    """A Panel -> a PNG, through ffmpeg's own encoder."""
+    ff = find_ffmpeg()
+    if not ff:
+        raise Refused("ffmpeg is required to write %s" % out)
+    r = subprocess.run([ff, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
+                        "-s", "%dx%d" % (panel.w, panel.h), "-i", "-",
+                        "-frames:v", "1", out],
+                       input=bytes(panel.px), stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+    if r.returncode != 0 or not os.path.isfile(out) or os.path.getsize(out) == 0:
+        tail = r.stderr.decode("utf-8", "replace").strip().splitlines()[-4:]
+        raise Refused("ffmpeg wrote no PNG for %s: %s" % (out, " | ".join(tail)))
+    return out
+
+
+def write_group_gif(frames, delay_ms, out, work=None):
+    """Frames -> a looping palette GIF the selector can read.
+
+    The same two-pass palettegen/paletteuse every other animation on a card goes
+    through (see make_gif), fed from the raw frames rather than from a clip."""
+    if not frames:
+        raise Refused("a random card's animation came out with no frames")
+    ff = find_ffmpeg()
+    if not ff:
+        raise Refused("ffmpeg is required to build a GIF")
+    w, h = frames[0].w, frames[0].h
+    fps = 1000.0 / max(1, int(delay_ms))
+    d = work or os.path.dirname(os.path.abspath(out)) or "."
+    raw = os.path.join(d, "_group_%d.rgba" % os.getpid())
+    pal = os.path.join(d, "_group_%d.png" % os.getpid())
+    try:
+        with open(raw, "wb") as f:
+            for fr in frames:
+                if (fr.w, fr.h) != (w, h):
+                    raise Refused("a random card's frames are not all %dx%d" % (w, h))
+                f.write(bytes(fr.px))
+        pre = ["-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
+               "-s", "%dx%d" % (w, h), "-r", "%.6f" % fps, "-i", raw]
+        run([ff] + pre + ["-vf", "palettegen=max_colors=256:stats_mode=diff", pal],
+            "ffmpeg palettegen")
+        run([ff] + pre + ["-i", pal, "-lavfi",
+                          "[0:v][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+                          "-loop", "0", out], "ffmpeg paletteuse")
+    finally:
+        for f in (raw, pal):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    return out
+
+
+def group_style_names(animated=False):
+    return sorted(GROUP_ANIM_STYLES if animated else GROUP_ART_STYLES)
+
+
+def _fit(panel, w, h):
+    """*panel* scaled to fit WxH, aspect kept - nearest neighbour, which is
+    what a second scale of an already-scaled logo can afford."""
+    w, h = max(1, int(w)), max(1, int(h))
+    f = min(w / float(panel.w), h / float(panel.h))
+    nw, nh = max(1, int(panel.w * f)), max(1, int(panel.h * f))
+    out = Panel(nw, nh)
+    for y in range(nh):
+        sy = min(panel.h - 1, int(y / f))
+        si = sy * panel.w * 4
+        di = y * nw * 4
+        for x in range(nw):
+            sx = min(panel.w - 1, int(x / f))
+            out.px[di + x * 4:di + x * 4 + 4] = panel.px[si + sx * 4:si + sx * 4 + 4]
+    return out
+
+
+def _face(logo, w, h, frame, edge):
+    """One card in a deck: the logo on a slate face with an edge.
+
+    AN EDGE, or a face is just a lighter rectangle - with the logos' own
+    transparency honoured there is nothing else to tell one card in the pile
+    from the panel behind it."""
+    t = _fit(logo, w, h)
+    face = Panel(t.w + 12, t.h + 12, frame)
+    face.outline(0, 0, face.w, face.h, edge, 2)
+    face.blit(t, 6, 6)
+    return face
+
+
+def render_group_still(style, logos, size, colors=None):
+    """One Panel for a group card, drawn from its members' logos."""
+    card, frame, hl, dim = colors or (GROUP_CARD_RGB, GROUP_FRAME_RGB,
+                                      GROUP_HL_RGB, GROUP_DIM_RGB)
+    w, h = int(size[0]), int(size[1])
+    if not logos:
+        raise Refused("a random card's picture needs at least one member logo")
+
+    def mosaic(n):
+        im = Panel(w, h, card)
+        cols = 3 if n <= 9 else int(math.ceil(math.sqrt(n * w / float(h))))
+        cols = max(1, min(cols, n))
+        rows = int(math.ceil(n / float(cols)))
+        cw, ch = max(1, w // cols), max(1, h // rows)
+        for i in range(cols * rows):
+            cell = _fit(logos[i % len(logos)], cw - 3, ch - 3)
+            im.blit(cell, (i % cols) * cw + 1 + (cw - 3 - cell.w) // 2,
+                    (i // cols) * ch + 1 + (ch - 3 - cell.h) // 2)
+        return im
+
+    if style == "mosaic":
+        return mosaic(len(logos))
+    if style == "question":
+        im = mosaic(min(len(logos), 9)).dimmed(0.74)
+        _question_mark(im, hl)
+        return im
+    if style == "shuffle":
+        im = Panel(w, h, card)
+        cx, cy = w // 2, h // 2
+        arm, rise, thick = int(w * 0.30), int(h * 0.17), max(4, int(h * 0.055))
+        for dy in (-rise, rise):
+            im.line([(cx - arm, cy + dy), (cx - int(arm * 0.30), cy + dy),
+                     (cx + int(arm * 0.30), cy - dy), (cx + int(arm * 0.72), cy - dy)],
+                    hl, thick)
+            ax, ay = cx + int(arm * 0.72), cy - dy
+            head = max(6, int(h * 0.10))
+            im.poly([(ax + head * 1.6, ay), (ax, ay - head), (ax, ay + head)], hl)
+        return im
+    if style in ("fan", "stack"):
+        # EACH CARD ON ITS OWN FULL-PANEL LAYER, so the turn cannot shift it:
+        # rotating a small bitmap and pasting it by its corner turns the ones
+        # behind into slivers, which is exactly what the first attempt did.
+        im = Panel(w, h, card)
+        show = logos[:5]
+        base = _fit(show[0], int(w * 0.60), int(h * 0.60))
+        spread = 17.0
+        for k in range(len(show) - 1, -1, -1):
+            face = _face(show[k], base.w, base.h, frame, dim)
+            layer = Panel(w, h)
+            if style == "stack":
+                off = k * max(6, int(h * 0.045))
+                layer.blit(face, (w - face.w) // 2 + off - int(w * 0.04),
+                           (h - face.h) // 2 + off - int(h * 0.07))
+            else:
+                layer.blit(face, (w - face.w) // 2,
+                           (h - face.h) // 2 - int(h * 0.04))
+                # A HAND OF CARDS SPLAYS BOTH WAYS around the one in front, on a
+                # pivot BELOW the panel so they turn from their corner the way
+                # real cards do.  k == 0 is the front card and stays upright.
+                step = (k + 1) // 2
+                ang = spread * step * (1 if k % 2 else -1)
+                if ang:
+                    layer = layer.rotated(ang, w // 2, h + int(h * 0.30))
+            im.blit(layer, 0, 0)
+        return im
+    raise Refused("a random card's picture style %r is not one of %s"
+                  % (style, ", ".join(group_style_names())))
+
+
+def _question_mark(im, colour):
+    """A big '?' drawn rather than typed.
+
+    NO FONT: the app's runtime has no PIL to render one and no promise of a
+    typeface either, and a glyph made of an arc, a stem and a dot is the same
+    mark in every install."""
+    w, h = im.w, im.h
+    r = int(h * 0.20)
+    cx, cy = w // 2, int(h * 0.34)
+    thick = max(4, int(h * 0.085))
+    arc = []
+    for deg in range(200, 381, 10):          # over the top, left to right
+        a = math.radians(deg)
+        arc.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    im.line(arc, colour, thick)
+    tail = arc[-1]
+    im.line([tail, (tail[0], cy + r * 0.55), (cx, cy + r * 1.15),
+             (cx, cy + r * 1.7)], colour, thick)
+    im.dot(cx, int(cy + r * 2.5), max(3, thick // 2 + 1), colour)
+
+
+def render_group_frames(style, logos, size, colors=None):
+    """(frames, delay_ms) for an animated group card."""
+    card, _frame, hl, _dim = colors or (GROUP_CARD_RGB, GROUP_FRAME_RGB,
+                                        GROUP_HL_RGB, GROUP_DIM_RGB)
+    w, h = int(size[0]), int(size[1])
+    if not logos:
+        raise Refused("a random card's picture needs at least one member logo")
+    if style == "cycling":
+        # ONE FRAME PER MEMBER, held a second each.  The panel is what a member
+        # would show on its own card, so the random card is a slideshow of the
+        # very things it can boot - and the selector's own animation path plays
+        # it with no new code at all.
+        frames = []
+        for l in logos[:GIF_MAX_FRAMES]:
+            im = Panel(w, h, card)
+            t = _fit(l, w, h)
+            im.blit(t, (w - t.w) // 2, (h - t.h) // 2)
+            frames.append(im)
+        return frames, GROUP_CYCLE_MS
+    if style == "reel":
+        # A STRIP OF MEMBERS SCROLLING BY, easing to a stop with the winner
+        # between two rails.
+        cells = logos[:GROUP_REEL_CELLS]
+        n_cells = max(2, len(cells))
+        cell = max(8, h // 2)
+        strip_h = cell * n_cells
+        strip = Panel(w, strip_h, card)
+        for i in range(n_cells):
+            t = _fit(cells[i % len(cells)], w, cell - 6)
+            strip.blit(t, (w - t.w) // 2, i * cell + (cell - t.h) // 2)
+        # THE BLUR IS PRE-BAKED, not per frame.  Blurring 32 frames costs 32
+        # blurs; blurring the strip twice costs two, and every frame after that
+        # is a crop - which on a row-major buffer is a memory copy.  It also
+        # reads better: the reel is sharp the instant it stops.
+        smeared = [strip, strip.blurred(max(1, int(h * 0.03))),
+                   strip.blurred(max(2, int(h * 0.07)))]
+        frames = []
+        n = GROUP_REEL_FRAMES
+        spins = 2.0
+        for k in range(n):
+            # ease-out cubic: fast, then crawling onto the stop
+            f = (k + 1) / float(n)
+            p = 1.0 - (1.0 - f) ** 3
+            y = int((spins * strip_h + cell * 0.5) * p) % strip_h
+            speed = 1.0 - p
+            src = smeared[2] if speed > 0.45 else (smeared[1] if speed > 0.12 else strip)
+            im = src.crop(0, y, w, h)
+            rail = max(2, int(h * 0.012))
+            im.rect(0, int(h * 0.33), w, int(h * 0.33) + rail, hl)
+            im.rect(0, int(h * 0.64), w, int(h * 0.64) + rail, hl)
+            frames.append(im)
+        frames += [frames[-1]] * 8          # hold the result a beat
+        return frames, 60
+    raise Refused("a random card's animation style %r is not one of %s"
+                  % (style, ", ".join(group_style_names(animated=True))))
+
+
+def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
+                   card, log=say, music=None, confirm=None, sources=None):
+    """gart<g>.png / ganim<g>.gif for one RANDOM card, from its members' logos.
+
+    Cached on the member CARDS' stamps and the style, so re-running with the
+    same list and the same style costs nothing - the logos are pulled out of
+    the card images, which is the slow part."""
+    names = {}
+    if not members:
+        raise Refused("group %d has no members to draw from" % g)
+    for m in members:
+        if not (0 <= m < len(images)):
+            raise Refused("group %d names image %d, which is not one of the %d"
+                          % (g, m, len(images)))
+    # A SIDECAR RECORDS ONE SOURCE and this picture is drawn from several, so the
+    # first member's stamp is the sidecar's and EVERY member's goes in the
+    # params: a change to any of them, or to the list, misses the cache.
+    stamps = [source_stamp(images[m]) for m in members]
+    stamp = stamps[0]
+    sources = [[x["source"], x["mtime"], x["size"]] for x in stamps]
+
+    def logos():
+        out_logos = []
+        for m in members:
+            ci, part, title = card(images[m])
+            data, _path = logo_bytes(ci, part, title)
+            tmp = os.path.join(work, "glogo%d_%d.png" % (g, m))
+            with open(tmp, "wb") as f:
+                f.write(data)
+            # THE LOGO KEEPS ITS ALPHA all the way here: see Panel.blit - what
+            # is stored under it is anything at all, and painting it was how the
+            # first real card came out as a coloured box.
+            out_logos.append(panel_from_file(tmp, size))
+        return out_logos
+
+    if art_style and art_style != "none":
+        target = os.path.join(out, "gart%d.png" % g)
+        name = os.path.basename(target)
+        own_file = art_style not in GROUP_ART_STYLES      # a picture of their own
+        if own_file and not os.path.isfile(art_style):
+            raise Refused("group %d art %r is neither a style (%s) nor a file"
+                          % (g, art_style, ", ".join(group_style_names())))
+        # THE SIDECAR'S SOURCE IS WHAT THE PICTURE IS MADE OF: the file when there
+        # is one, else the members.  Writing one and checking the other is how a
+        # cache never hits.
+        art_stamp = source_stamp(art_style) if own_file else stamp
+        params = {"style": art_style, "size": list(size),
+                  "members": list(members), "sources": sources}
+        if is_cached(target, art_stamp, params):
+            log("  %s: cached (%s)" % (name, art_style))
+        elif own_file:
+            scale_png(art_style, target, size)
+            write_sidecar(target, art_stamp, params)
+            log("  %s: %s" % (name, art_style))
+        else:
+            panel_to_png(render_group_still(art_style, logos(), size), target)
+            write_sidecar(target, art_stamp, params)
+            log("  %s: %s of %d member(s)" % (name, art_style, len(members)))
+        names["art"] = name
+
+    if anim_style and anim_style != "none":
+        target = os.path.join(out, "ganim%d.gif" % g)
+        name = os.path.basename(target)
+        params = {"style": anim_style, "size": list(size),
+                  "members": list(members), "sources": sources}
+        if is_cached(target, stamp, params):
+            log("  %s: cached (%s)" % (name, anim_style))
+        else:
+            frames, delay = render_group_frames(anim_style, logos(), size)
+            write_group_gif(frames, delay, target, work=work)
+            with open(target, "rb") as f:
+                info = gif_info(f.read())
+            if not info:
+                raise Refused("group %d's %s animation did not come out as a GIF"
+                              % (g, anim_style))
+            # gif_fits() answers with the REASON and None when it fits, so this
+            # reads as it does everywhere else in this file - and the reason is
+            # what the owner needs ("40 members > 150 frames", not "too big")
+            why = gif_fits(info)
+            if why:
+                raise Refused("group %d's %s animation does not fit the selector's "
+                              "limits (%s)" % (g, anim_style, why))
+            write_sidecar(target, stamp, params)
+            log("  %s: %s, %d frames (%s)"
+                % (name, anim_style, len(frames), fmt_bytes(os.path.getsize(target))))
+        names["anim"] = name
+
+    # THE CARD'S OWN SOUNDS.  A random card is a card: it has a music bed and a
+    # confirm sound of its own, and borrowing its first member's was how the one
+    # the owner picked was dropped on the floor (David, 2026-09-11: "i'm not
+    # hearing music that i selected when hovering over the random card").  An
+    # 'auto' confirm is pulled off the FIRST member's card, because that is the
+    # only .raw a random card has any claim on.
+    if music and music != "none":
+        names["music"] = _prepare_music(g, music, out, log=log, prefix="gmusic")
+    if confirm and confirm != "none":
+        names["confirm"] = _prepare_confirm(g, images[members[0]], confirm, out,
+                                            sources if sources is not None else {},
+                                            log=log, prefix="gconfirm")
+    return names
+
+
 def cmd_prepare(a):
     images = [a.primary] + list(a.extra or [])
     n = len(images)
     out = check_output_dir(a.out)
     os.makedirs(out, exist_ok=True)
-    size = parse_size(a.size) if a.size else panel_size_for(n)
+    # THE PANEL IS SIZED BY THE CARDS, NOT THE IMAGES.  A random card stands for
+    # several images and the menu draws one panel for it, so a jukebox of forty
+    # song sets is a TWO card menu - sizing its pictures for forty would hand
+    # the selector a thumbnail to blow up.  --cards is how the caller says so;
+    # without it every image has a card of its own, which is the old rule.
+    ncards = int(getattr(a, "cards", 0) or 0) or n
+    size = parse_size(a.size) if a.size else panel_size_for(ncards)
     arts = [parse_art_spec(s) for s in parse_index_spec(a.art, n, "auto")]
     anims = [parse_anim_spec(s, a.start, a.seconds, a.fps) for s in parse_index_spec(a.anim, n, "none")]
     musics = parse_index_spec(a.music, n, "none")
@@ -1907,6 +2648,15 @@ def cmd_prepare(a):
     for spec in confirm_each:
         if spec is not None:
             parse_sound_spec(spec, CONFIRM_IDX)          # refuse a bad one before any work
+    group_members = parse_group_members(getattr(a, "group_members", None))
+    group_art = parse_group_specs(getattr(a, "group_art", None), "group-art")
+    group_anim = parse_group_specs(getattr(a, "group_anim", None), "group-anim")
+    group_music = parse_group_specs(getattr(a, "group_music", None), "group-music")
+    group_confirm = parse_group_specs(getattr(a, "group_confirm", None), "group-confirm")
+    for g in sorted(set(group_art) | set(group_anim) | set(group_music)
+                    | set(group_confirm)):
+        if g not in group_members:
+            raise Refused("--group-art/--group-anim %d: no --group-members %d=... to draw from" % (g, g))
     visual_only = bool(getattr(a, "visual_only", False))
     say("prepare: %d image%s, panel %dx%d, out %s%s"
         % (n, "" if n == 1 else "s", size[0], size[1], out, " (visual only)" if visual_only else ""))
@@ -1923,25 +2673,19 @@ def cmd_prepare(a):
             cards[path] = (ci, part, title_dir(ci, part))
         return cards[path]
 
+    groups_out = {}
     try:
+        for g in sorted(group_members):
+            groups_out[g] = _prepare_group(
+                g, group_members[g], group_art.get(g), group_anim.get(g),
+                images, size, out, work, card,
+                music=None if visual_only else group_music.get(g),
+                confirm=None if visual_only else group_confirm.get(g),
+                sources=sources)
         for i, img in enumerate(images):
             art = _prepare_art(i, img, arts[i], size, out, work, card)
             anim = _prepare_anim(i, img, anims[i], size, out, work)
-            music = None
-            spec = musics[i]
-            if spec != "none":
-                src, seconds = split_music_spec(spec)
-                if not os.path.isfile(src):
-                    raise Refused("music %d: %s is not a file" % (i, src))
-                music_out = os.path.join(out, "music%d.wav" % i)
-                normalise_wav(src, music_out, seconds, MUSIC_FADE_MS)
-                whole = _duration_of(src)
-                say("  music%d.wav: %s (%s)"
-                    % (i, src,
-                       "the first %.4g s of %.4g s, faded out"
-                       % (seconds, whole) if whole and whole > seconds + 0.05
-                       else "%.4g s" % (whole or seconds)))
-                music = os.path.basename(music_out)
+            music = _prepare_music(i, musics[i], out)
             rows.append([art, anim, music, None])
             specs.append((arts[i]["spec"], anims[i]["spec"], confirm_each[i],
                           musics[i]))
@@ -1962,9 +2706,20 @@ def cmd_prepare(a):
     # The two menu sounds' own sources, so a set whose sound was CHANGED (the
     # file is still there, from a different source) reads as stale.  None on a
     # --visual-only run, which renders no menu sound at all.
+    man_groups = [{"members": group_members[g],
+                   "art": groups_out[g].get("art"),
+                   "anim": groups_out[g].get("anim"),
+                   "music": groups_out[g].get("music"),
+                   "confirm": groups_out[g].get("confirm"),
+                   "art_source": group_art.get(g),
+                   "anim_source": group_anim.get(g),
+                   "music_source": None if visual_only else group_music.get(g),
+                   "confirm_source": None if visual_only else group_confirm.get(g)}
+                  for g in sorted(group_members)]
     m = build_manifest(rows, move, confirm, a.volume, sources=specs,
                        sound_move_source=(None if visual_only else a.sound_move),
-                       sound_confirm_source=(None if visual_only else confirm_wide))
+                       sound_confirm_source=(None if visual_only else confirm_wide),
+                       groups=man_groups)
     with open(os.path.join(out, "media.json"), "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
         f.write("\n")
@@ -2048,6 +2803,25 @@ def main(argv=None):
                    help="the menu-wide confirm sound (a bare value, the default 'auto'); "
                         "'N=...' gives image N its own confirm<N>.wav ('auto' = that image's "
                         "own card, 'none' = it falls back to the menu-wide one)")
+    s.add_argument("--cards", type=int, default=0, metavar="N",
+                   help="how many CARDS the menu draws (default: one per image) - a random "
+                        "card stands for several images, and the pictures are sized for the "
+                        "panel the menu actually draws")
+    s.add_argument("--group-members", action="append", default=[], metavar="G=A,B,C",
+                   help="which IMAGES random card G rolls between - its picture is drawn from "
+                        "their logos (repeatable, one per group)")
+    s.add_argument("--group-art", action="append", default=[], metavar="G=STYLE|PATH|none",
+                   help="random card G's still: a style (%s), a picture file, or none"
+                        % "/".join(sorted(GROUP_ART_STYLES)))
+    s.add_argument("--group-anim", action="append", default=[], metavar="G=STYLE|none",
+                   help="random card G's animation: %s, or none"
+                        % " / ".join(sorted(GROUP_ANIM_STYLES)))
+    s.add_argument("--group-music", action="append", default=[], metavar="G=WAV|none",
+                   help="random card G's own music bed - a card is a card, and its bed is "
+                        "not its first member's")
+    s.add_argument("--group-confirm", action="append", default=[], metavar="G=SPEC|none",
+                   help="random card G's own confirm sound: auto (off its first member's "
+                        "card), auto@IDX, synth, a WAV, or none for the menu's")
     s.add_argument("--visual-only", action="store_true",
                    help="art/anim (+music) only: no move/confirm sounds, none pulled off a card (the GUI preview)")
     s.add_argument("--volume", type=int, default=DEFAULT_VOLUME)

@@ -596,6 +596,74 @@ def test_the_selector_runs_without_the_shim_and_with_stdin_closed():
     assert "--audio" not in line, "audio is inherited (PAD_AUDIO_PLAY / PAD_AUDIO_FMT), not a rig flag"
 
 
+# ---- item 106: image groups reach the rig conf, or are dropped out loud ----
+
+def test_a_group_line_is_carried_only_when_the_indexes_line_up():
+    """A ``group=`` line names its members by IMAGE INDEX, and the rig conf's
+    indexes are positions in what ``parts.py --list-games`` RESOLVED - not
+    positions in the card's own images.conf.  They coincide exactly when the
+    two counts agree, and a carried group line that did not line up would name
+    the wrong builds, which is worse than not offering the card."""
+    text = _read("run_game.sh")
+    body = text[text.index("SEL_GROUPS=\"\""):text.index("# \u2605 THE CARD'S OWN COUNTDOWN")]
+    assert 'grep -qE \'^[[:space:]]*group[[:space:]]*=\'' in body, \
+        "the card's conf is read the way conf.c reads it: spacing tolerated"
+    assert '[ "${SEL_CARDN:-0}" = "$SEL_N" ]' in body, \
+        "the gate is the card's image count against what resolved here"
+    assert "DROPPED" in body, "a dropped group must be said out loud, not silently"
+
+
+def test_a_group_card_sits_where_its_line_sat():
+    """conf.c lays the cards out in line order, so a group= line put anywhere
+    else shows the menu in a different order from the card's own.
+
+    THE PLACE TRAVELS WITH THE LINE, as the count of image lines above it on
+    the card.  Deriving it from the first member is right only for a group that
+    HIDES its members; a keeping group adds a card over images that stay and
+    can sit anywhere, and its `+1-2` does not even start with a digit - so the
+    old rule dropped the line without a word (seen in a rig conf, not here)."""
+    text = _read("run_game.sh")
+    assert 'awk -v groups="$SEL_GROUPS"' in text
+    carry = text[text.index('SEL_GROUPS=$('):text.index("[select] menu: $(")]
+    assert '\\tgroup=%s' in carry or "\\tgroup=" in carry, \
+        "each line is carried with the place it sat"
+    interleave = text[text.index('awk -v groups="$SEL_GROUPS"'):]
+    interleave = interleave[:interleave.index("default=$SEL_DEFAULT")]
+    assert 'index(g[k], "\\t")' in interleave, "the place is the part before the tab"
+    assert "(NR - 1) in before" in interleave, "image lines are 0-based, like every other index"
+    assert "END { if (NR in before)" in interleave, \
+        "a card that sat after every image has no line to go in front of"
+
+
+def test_the_card_the_countdown_lands_on_is_carried_too():
+    """A RANDOM card over images that keep their own cards is not an image, so
+    `default=` cannot name it and `default_card=` does.  Without this the rig
+    dropped it and an unattended power-up booted whichever image `default=`
+    named instead - which is exactly the card the owner did NOT ask for."""
+    text = _read("run_game.sh")
+    body = text[text.index("echo \"default=$SEL_DEFAULT\""):
+                text.index("echo \"timeout=$SEL_TIMEOUT\"")]
+    assert "default_card=" in body, "the card's own default_card= must reach the rig conf"
+    assert '[ -n "$SEL_GROUPS" ]' in body, \
+        "it is carried on the same gate as the group lines: a card index means " \
+        "nothing without them"
+
+
+def test_pad_select_pick_reaches_the_selector_and_nothing_else_does():
+    """PAD_SELECT_PICK=<image> pins which member a group card boots, so a
+    two-boot proof run can say which build it expected on the glass.  It is a
+    rig knob: it never reaches a card, and --seed deliberately has no rig
+    knob at all - a run seeded the same way twice would prove nothing about
+    the roll."""
+    text = _read("run_game.sh")
+    line = next(ln for ln in text.splitlines()
+                if 'chroot "$R" /usr/local/codeselect/codeselect' in ln)
+    assert "$SEL_PICK" in line
+    assert "--seed" not in text, "there is no rig knob for the seed, on purpose"
+    guard = text[text.index('SEL_PICK=""'):text.index("$SEL_PICK", text.index('SEL_PICK=""') + 20)]
+    assert "*[!0-9]*" in guard, "anything that is not a number must not become a flag"
+
+
 # ---- item 90 v2: N images (the multi layout's tokens) and the media --------
 
 #: The guard every item-90 block sits under, in both scripts. `= 1` and not

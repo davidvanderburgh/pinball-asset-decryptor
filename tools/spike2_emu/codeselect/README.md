@@ -81,6 +81,7 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
            [--media DIR] [--audio auto|alsa|fifo:PATH|none] [--audio-fmt PATH]
            [--volume 0-100] [--anim-frame N] [--audio-dump FILE]
            [--snapshot FILE.ppm] [--highlight N] [--frames K]
+           [--pick N] [--seed N]
 ```
 
 | option | default | meaning |
@@ -99,6 +100,8 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--headless` | off | no EGL; the loop runs (1360x768) and the last menu frame is written as P6 PPM; the LOADING frame goes to `FILE.loading.ppm` |
 | `--snapshot` | off | render ONE menu frame (1360x768, the moment the menu appears) as a P6 PPM and exit 0 - no EGL, no input backend, no audio, no choice/last file: the preview (below) |
 | `--highlight` | conf `default=`, else 0 | `--snapshot` only: the highlighted card (0-based); the last-choice file is never read; past the last image = exit 2 |
+| `--pick` | - | boot image N instead of rolling a group card's member. Tests and proof runs only; never written to a card, and refused when N is not a member of the card that was confirmed |
+| `--seed` | - | make a group card's roll reproducible. Tests only |
 | `--frames` | 1 | `--snapshot` only: write K frames (1-150) out of ONE load, starting at `--anim-frame` and stepping by one, wrapping; K > 1 makes the `--snapshot` value a printf pattern holding exactly one bare `%d`, the frame number (below) |
 | `--invert` | auto | auto = `/games/data/boot_display_cmd` contains the token `-invert` (rotate 180, as boot_display does) |
 | `--preamble` | `min` | `hw` only: how much of the game's node-bus bring-up to replay first |
@@ -461,11 +464,44 @@ the seventh field is ignored. `<device>` is the block device on hardware -
 `/dev/mmcblk0p3`, `/dev/mmcblk0p7`, or
 `/dev/mmcblk0p7:img2` for a games tree in a subdirectory of a shared
 partition - and an opaque token in the emulator (`p3`, `p7`, `p7:img2`). Up
-to 16 images (`CONF_MAX_IMAGES`) - **from five the menu scrolls three at a
+to 64 image lines (`CONF_MAX_IMAGES`) in at most 16 CARDS (`CONF_MAX_CARDS`)
+- **from five cards the menu scrolls three at a
 time**, centred on the highlight and wrapping at both ends, with a `< n / N >`
-counter under them, so the cap is not what fits the screen. `volume` is
+counter under them, so the cap is not what fits the screen. Images and cards
+are the same number until a `group=` line makes them differ (below). `volume` is
 clamped to 0-100,
 `mixer_volume` to 0-63. Unknown keys are ignored so the file can grow.
+
+**Image groups: one card that boots a different member every power-up.**
+
+```
+group=<members>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
+```
+
+Several images shown as ONE card. Confirming it - by hand or when the
+countdown runs out - boots one MEMBER at random, and never the one it booted
+last, so a card of song-set variants plays a different set every power-up.
+`<members>` is 0-based image indexes as a range and/or a list (`3-5`,
+`3,5,7-9`); everything after it is a card's display fields, exactly as an
+image line carries them. The card sits in the menu where the line sits, and
+the builder writes it immediately before its first member. Members stay
+ordinary `image=` lines and keep their indexes, which is why `select.sh` and
+the choice file never learn that groups exist.
+
+`default=`, `--default`, `--highlight` and `/data/codeselect.last` stay IMAGE
+indexes; an index that is a member highlights its group's card, so the
+remembered choice lights the group up again and the next countdown rolls
+afresh. No state file of its own. Up to 8 groups (`CONF_MAX_GROUPS`), and a
+group of forty variants counts as forty images and one card.
+
+Nothing about a group is fatal: a member naming no image line is dropped, a
+group left with no member is dropped, an image named by two groups belongs to
+the first, image 0 is never a member (the primary must stay bootable on its
+own), and a one-member group behaves as a plain card. Each is logged as a
+`conf:` line and the machine still boots. Only the limits refuse a file. A
+selector at 2.9 or below ignores `group=` and refuses more than 16 image
+lines, so it exits 2 and the primary boots - degraded, not bricked - which is
+why `inject` gates a `group=` conf on the selector reading 3.0 or above.
 
 **The machine's own volume.** `volume=machine` makes the menu play at the
 MASTER VOLUME SETTING the owner set on the coin door instead of at a number.

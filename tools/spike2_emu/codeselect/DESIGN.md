@@ -419,6 +419,99 @@ one.  Hardware-only proofs, until which the tick says experimental: Stern's upda
 tolerating `.blobs/` and `img1/` at `/games`' root, and the same-device remount.  Detail in
 `tools/spike2_emu/README.md`, "The compact layout".
 
+## Image groups - one card that rolls a member every power-up (item 106)
+
+A tester wanted twenty to forty song-set variants of one title on a single card, one of
+them chosen at random on every power-up, sitting in the menu beside Stern's build and his
+own: "for the end user, everything looks standard except for the songs".  A group is that
+card.
+
+**Grammar.** Members stay ordinary `image=` lines; ONE new key names them and carries a
+card's display fields exactly as an image line does:
+
+```
+group=<members>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
+```
+
+`<members>` is 0-based image indexes as a range and/or a list (`3-5`, `3,5,7-9`).  The
+builder writes the line immediately before its first member and the card sits in the menu
+where the line sits.  **`select.sh` is untouched**: its awk counts `image=` lines and the
+choice file still holds an image index, which is the whole reason members are image lines
+rather than a line kind of their own.
+
+**Images and cards are now different numbers.** `CONF_MAX_IMAGES` is 64 (the trees on the
+card), `CONF_MAX_CARDS` 16 (what the menu draws and the player scrolls), `CONF_MAX_GROUPS`
+8.  A group of forty variants is forty images and one card.  Everything visual in
+`codeselect.c` - the media arrays, the layout, the carousel, the `< n / N >` counter, the
+snapshot, the animation tick - walks CARDS through `conf_card_face()`; only the boot
+decision and the two index files still speak in images.
+
+**Highlight and memory.** `default=`, `--default`, `--highlight` and `/data/codeselect.last`
+stay IMAGE indexes, and an index that is a member highlights its group's card.  That one
+mapping is why a group needs no state file: the remembered member lights the jukebox card
+up again and the next countdown rolls from it afresh.
+
+**The roll** happens at the confirm, not at start-up, so the time the player spent reading
+the menu is in it.  The member `/data/codeselect.last` names is excluded, so a group of two
+or more never repeats across two power-ups - a fair coin over three sets would repeat about
+a third of the time, which is the complaint that filed this.  The seed stirs four sources
+because not one is good alone on this machine: `/dev/urandom` (the card's 3.14 kernel, asked
+best-effort), `CLOCK_MONOTONIC` (only nanoseconds since power-up, and a cold boot reaches
+this menu at very nearly the same one every time), `time()` (one value for a whole run) and
+the pid (nearly constant in an init that starts the same processes in the same order).
+`--pick <image>` and `--seed N` are for tests and proof runs and are never written to a
+card; a `--pick` that is not a member of the confirmed card is refused and the roll happens
+anyway, because the menu must never boot something it did not offer.
+
+**Nothing about a group is fatal.**  A member naming no image line is dropped, a group left
+with no member is dropped, an image named by two groups belongs to the first, image 0 is
+never a member (the primary must stay bootable on its own), and a one-member group behaves
+as a plain card.  Each is logged as a `conf:` line and the machine boots.  Only the limits
+refuse a file, exactly as too many image lines always has.
+
+**Compatibility.** A new selector reads an old conf unchanged, and a conf with no `group=`
+line produces byte-identical log and snapshot output - the `card K/M` clause appears only
+where groups exist.  An old selector (2.9 or below) ignores `group=` and refuses more than
+16 image lines, so it exits 2 and the primary boots: degraded, not bricked.  `inject` gates
+on the selector reading 3.0 or above.
+
+**A trap for the HEADLESS HARNESS ALONE, and narrower than it first looked.**  Under a bare
+`qemu-arm-static -L $ROOT` the open of `/dev/urandom` is redirected into the rootfs copy, where
+`dev/urandom` is an empty regular file, so the read returns 0 bytes and the clock seeds the
+roll; the log says so on the line `group: /dev/urandom gave 0 byte(s)`.  That is the
+headless tests' harness and nothing else.  **A real rig run chroots into the rootfs, where
+`/dev/urandom` is the device node, and the seed line reads `urandom+clock`** - measured on the
+2026-09-10 proof run below.  On the machine it is the real character device too.  The fallback
+exists for the case where the card's 3.14 kernel does not answer, not because this path is
+normally starved.
+
+**PROVEN IN THE EMULATOR, 2026-09-10.**  David's TMNT store card
+(`turtles-1_59_0.store-stock+1987pro+1987le.16G.sdcard.raw`, the one he flashed and booted on
+the machine for item 95's gate) had its MENU alone re-injected: the stock build as image 0, and
+the 1987 pro and the 1987 LE as one card called `1987 RANDOM`.  Three image lines, two cards.
+`default=1` names a MEMBER, so the countdown lands on the group and every boot below is an
+UNATTENDED POWER-UP with no key press at all - the tester's actual case, and a stricter test
+than pressing START on the card.
+
+| boot | last choice | the menu said | it booted | rendering |
+|---|---|---|---|---|
+| 1 | 0 (left from the machine) | `highlight 0 (STERN 1.59.0) from last choice, card 1/2` | `chose 0` - no rolled clause, because a plain card does not roll | stock |
+| 2 | none | `highlight 1 (1987 RANDOM) from conf default, card 2/2 (group 1987 RANDOM, 2 members)` | `group: card 2 boots image 1 (rolled from 1987 RANDOM: 2 candidates, urandom+clock)`, `p3:img1` bound | 51 fps |
+| 3 | 1 | `highlight 1 (1987 RANDOM) from last choice, card 2/2 (...)` | `group: card 2 boots image 2 (rolled from 1987 RANDOM: 1 candidate)`, `p3:img2` bound | 45 fps |
+
+What each row is for.  **Boot 1** is the control: a plain card in the same menu still behaves
+exactly as it did, and its `chose` line is unchanged.  **Boot 2** is the roll itself - the seed
+came from `urandom+clock`, and `run_game.sh` reported `1 group line(s) carried from the card`,
+so the emulator's index gate agreed the card's image count matched what it resolved.  **Boot 3
+is the property the whole item exists for**: the remembered member re-highlighted its GROUP's
+card (which is why a group needs no state file of its own), and the roll then excluded it,
+leaving `1 candidate` - so the card played the other build.  Two consecutive unattended
+power-ups, two different games.
+
+**Hardware proof is David's**: the same card, two power-ups of his machine.  The card is left as
+a group card for exactly that; its previous three-image menu was saved first and can be injected
+back.
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both

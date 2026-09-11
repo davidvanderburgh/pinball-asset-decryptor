@@ -260,7 +260,17 @@ CONF_FONT = "/usr/local/codeselect/font.ttf"
 LIBRARY_PREFIXES = ("D:/Pinball/images", "/mnt/d/Pinball/images")
 
 #: images.conf v2 carries up to 16 images.
+#: WHAT THE PLAYER SCROLLS THROUGH: one per table row.  A row that carries
+#: members is a GROUP card - several games behind one card, which boots a
+#: different one of them every power-up (item 106) - so rows and games stopped
+#: being the same number.  Both must match mkmulticard's MAX_CARDS / MAX_IMAGES
+#: and conf.h's CONF_MAX_CARDS / CONF_MAX_IMAGES.
 MAX_IMAGES = 16
+MAX_CARDS = 16
+#: ...and the games (trees) behind them.  A jukebox of forty song-set variants
+#: is forty trees and one row.
+MAX_TREES = 64
+MAX_GROUPS = 8
 
 #: The image list is as tall as it has rows, between these two: eight rows
 #: of empty box under two images is a hole in the tab, and a list that
@@ -425,9 +435,25 @@ AUDIO_LABEL = "audio"
 # ---------------------------------------------------------------------------
 
 @dataclass
+class MemberRow:
+    """One game inside a GROUP row (item 106).  It is a whole games tree on the
+    card, exactly like a plain row's, and it gets its own image= line - what the
+    group adds is a single card drawn in front of several of them.  It carries
+    no media of its own: the card does, and there is one card."""
+    path: str
+    title: str = ""
+    #: read off the .raw, never typed - the same rule as ImageRow.version
+    version: str = ""
+
+
+@dataclass
 class ImageRow:
-    """One image on the card.  Index 0 is the primary (its p1/p2/p3/p5/p6 are
-    the card's; the machine boots it when the menu is not honoured)."""
+    """ONE CARD in the menu.  Index 0 is the primary (its p1/p2/p3/p5/p6 are
+    the card's; the machine boots it when the menu is not honoured).
+
+    A row with `members` is a GROUP card: it draws one picture and one title,
+    and confirming it boots one of its members at random, a different one every
+    power-up.  Its own `path` is then unused - the members are the games."""
     path: str
     title: str = ""
     subtitle: str = ""
@@ -457,6 +483,233 @@ class ImageRow:
     anim_on_card: bool = False   # card that no source string explains, so
     music_on_card: bool = False  # nothing here can re-render it
     confirm_on_card: bool = False
+    #: A GROUP card's games (item 106).  Empty = an ordinary row, which is
+    #: every row that existed before this field did.  default_factory, not
+    #: [], because a mutable default is shared by every instance.
+    members: list = field(default_factory=list)
+    #: ...and whether those games ALSO keep cards of their own, so the menu
+    #: offers them beside the random one (David, 2026-09-10: "what if i want
+    #: RANDOM|CUSTOM1|CUSTOM2?").  False = the group swallows them, which is
+    #: the forty-variant jukebox and stays the default.
+    keep: bool = False
+    #: HOW IT PICKS: one of ROLL_MODES.  "" reads as the card's own default,
+    #: which is what a card built before there was a choice does.
+    roll: str = ""
+
+
+#: HOW A RANDOM CARD PICKS (David, 2026-09-11: "so is it truly random if it is
+#: remembering the last choice? ... We should make it truly random instead i
+#: think. and make it an option ... to change it to a 'shuffle' type (like
+#: perceived random like ipod)").  ``(mode, label)`` in the order the dialog
+#: offers them.
+ROLL_MODES = (
+    ("any", "Truly random - it can give you the same one twice"),
+    ("shuffle", "Shuffle - every game once before any repeats"),
+    ("not-last", "Never the one it booted last"),
+)
+#: What a NEW random card does, which is what the word says on the tin.
+ROLL_DEFAULT = "any"
+#: ...and what a card with no rule on it does, which is what every card built
+#: before there was a choice did.  The two differ on purpose: a card already in
+#: the world must not change under its owner, and a new one should do the
+#: obvious thing.
+ROLL_FALLBACK = "not-last"
+ROLL_NAMES = tuple(m for m, _label in ROLL_MODES)
+
+
+def row_roll(row):
+    """How a random card picks, as one of :data:`ROLL_NAMES`."""
+    v = (getattr(row, "roll", "") or "").strip().lower()
+    return v if v in ROLL_NAMES else ROLL_FALLBACK
+
+
+def roll_label(mode):
+    for m, label in ROLL_MODES:
+        if m == mode:
+            return label
+    return mode
+
+
+def is_group(row):
+    """A row that stands for several games rather than one.
+
+    THE LIST, not its truthiness.  A saved state used to put every non-bool row
+    field through ``str()``, and ``str([]) == "[]"`` is a truthy STRING - so an
+    ordinary row restored from a state file read as a group with one member
+    called "[".  restore fills this field properly now (below), and this check
+    is the belt: anything that is not a list of member rows is not a group."""
+    members = getattr(row, "members", None)
+    return isinstance(members, (list, tuple)) and len(members) > 0
+
+
+def row_paths(row):
+    """The .raw file(s) this row puts on the card, in image order: its own for
+    a plain row, its members' for a group."""
+    if is_group(row):
+        return [(m.path or "").strip().strip(chr(34)) for m in row.members]
+    return [(row.path or "").strip().strip(chr(34))]
+
+
+def form_trees(form):
+    """Every GAME the form will write, in image order:
+    ``[(image_index, path, row_index, member_index_or_None), ...]``.
+
+    THE TWO INDEX SPACES MEET HERE and nowhere else.  images.conf, the choice
+    file, ``--titles`` and ``--art N=`` all count IMAGES; the table, the
+    preview and ``--highlight`` count CARDS.  They are the same number until a
+    group row makes them differ, and every bug this feature can have is a place
+    that used one where it meant the other."""
+    out = []
+    seen = {}
+    for ri, row in enumerate(form.images):
+        if is_group(row) and row.keep:
+            # A KEEPING GROUP ADDS NO GAMES.  Its members are games other rows
+            # already put on the card, so they must not be counted twice - the
+            # whole point is one card in front of trees that are already there.
+            continue
+        if is_group(row):
+            for mi, path in enumerate(row_paths(row)):
+                seen.setdefault(_norm(path), len(out))
+                out.append((len(out), path, ri, mi))
+        else:
+            path = row_paths(row)[0]
+            seen.setdefault(_norm(path), len(out))
+            out.append((len(out), path, ri, None))
+    return out
+
+
+def group_member_images(form, row):
+    """The IMAGE indexes a keeping group's members resolve to - the games other
+    rows put on the card.  -1 for a member no row carries, which validate_form
+    is what refuses."""
+    where = {}
+    for img, path, _ri, _mi in form_trees(form):
+        where.setdefault(_norm(path), img)
+    return [where.get(_norm(q), -1) for q in row_paths(row)]
+
+
+def form_groups(form):
+    """Every RANDOM card in the form, in the order its flags are written:
+    ``[(group_index, row_index, row, [image indexes]), ...]``.
+
+    THE GROUP INDEX IS A THIRD INDEX SPACE, after images and cards - it is the
+    ordinal of the group among the groups, which is what ``--group-art G=`` and
+    media.json's groups list both count, and what mkmulticard matches its own
+    ``--group`` flags against BY POSITION.  All three are the same number on a
+    card with one group at the top and none of them is on a card with two."""
+    per_row = {}
+    for img, _p, ri, mi in form_trees(form):
+        if mi is not None:
+            per_row.setdefault(ri, []).append(img)
+    out = []
+    for ri, row in enumerate(form.images):
+        if not is_group(row):
+            continue
+        imgs = [i for i in group_member_images(form, row) if i >= 0] \
+            if row.keep else per_row.get(ri, [])
+        out.append((len(out), ri, row, imgs))
+    return out
+
+
+def card_media_names(form):
+    """The media files each CARD's menu entry names, by row - a row IS a card.
+    ``[(art, anim, music, confirm), ...]``, '' where the card has none.
+
+    THE FILES ARE NUMBERED BY IMAGE AND THE CARDS ARE NOT.  `anim3.gif` belongs
+    to the card in row 2 the moment a group above it swallows two images, which
+    is why this is derived rather than assumed: the preview's conf, and the Play
+    overlay that lays a GIF over the rendered frame, both need the card's file
+    and had been asking for the card NUMBER's.  A random card's own picture is
+    `gart<G>.png` / `ganim<G>.gif`, numbered by GROUP."""
+    first = {}
+    for img, _p, ri, _mi in form_trees(form):
+        first.setdefault(ri, img)
+    gi_of = {ri: gi for gi, ri, _row, _imgs in form_groups(form)}
+    out = []
+    for ri, row in enumerate(form.images):
+        if is_group(row):
+            gi = gi_of.get(ri, 0)
+            art = (row.art or "").strip() if row.art_on_card else (
+                "gart%d.png" % gi if group_art_spec(row) != "none" else "")
+            anim = (row.anim or "").strip() if row.anim_on_card else (
+                "ganim%d.gif" % gi if group_anim_spec(row) != "none" else "")
+            music = (row.music or "").strip() if row.music_on_card else (
+                "gmusic%d.wav" % gi if _media_value(row.music) != "none" else "")
+            confirm = (row.confirm or "").strip() if row.confirm_on_card else (
+                "gconfirm%d.wav" % gi if confirm_spec(row) != "none" else "")
+        else:
+            i = first.get(ri, 0)
+            art = "art%d.png" % i if art_spec(row) != "none" else ""
+            anim = "anim%d.gif" % i if anim_spec(row) != "none" else ""
+            music = "music%d.wav" % i if _media_value(row.music) != "none" else ""
+            confirm = "confirm%d.wav" % i if confirm_spec(row) != "none" else ""
+        out.append((art, anim, music, confirm))
+    return out
+
+
+def drop_game_from_groups(rows, path):
+    """A game leaving the card leaves every RANDOM card that rolled between
+    them -> ``(rows, notes)``.
+
+    A KEEPING group's members are games OTHER rows put on the card, so a row
+    that goes takes its membership with it; a card left with fewer than two
+    games to roll between is not a random card any more and goes as well.  A
+    CONSUMING group owns its members outright - they are on no other row - so
+    it is not touched here.
+
+    Deleting a row used to leave the membership behind, and the only sign of it
+    was the preview quietly refusing to redraw (David, 2026-09-11: "whenever i
+    delete an image, i expect the preview to update with it").  Addition
+    enforces these rules; deletion has to keep them.
+    """
+    key = _norm((path or "").strip().strip('"'))
+    out, notes = [], []
+    if not key:
+        return list(rows), notes
+    for row in rows:
+        if is_group(row) and row.keep:
+            left = [m for m in row.members
+                    if _norm((m.path or "").strip().strip('"')) != key]
+            if len(left) != len(row.members):
+                name = (row.title or "").strip() or "The random card"
+                if len(left) < 2:
+                    notes.append("%s had nothing left to roll between, so its "
+                                 "card went too." % name)
+                    continue
+                notes.append("%s rolls between %d game(s) now."
+                             % (name, len(left)))
+                row.members = left
+        out.append(row)
+    return out, notes
+
+
+def row_first_image(form, row_index):
+    """The image index a row's card stands on: its own, or its first member's.
+    What ``--highlight`` (which names an IMAGE) is given for a table ROW."""
+    for img, _p, ri, _mi in form_trees(form):
+        if ri == row_index:
+            return img
+    # a KEEPING group puts no game on the card, so it has no image of its own;
+    # its first member's is what names it
+    rows = getattr(form, "images", None) or []
+    if 0 <= row_index < len(rows) and is_group(rows[row_index]):
+        imgs = [i for i in group_member_images(form, rows[row_index]) if i >= 0]
+        if imgs:
+            return imgs[0]
+    return 0
+
+
+def form_cards(form):
+    """The menu's cards in order, as ``[(row_index, is_group)]`` - which is just
+    the rows, because a row IS a card.  Here so the card-index arithmetic the
+    conf needs has one home."""
+    return [(ri, is_group(r)) for ri, r in enumerate(form.images)]
+
+
+def row_card_index(form, row_index):
+    """A row's CARD index, which is its row number - the two are the same thing
+    and this says so where the conf's `default_card=` needs it."""
+    return int(row_index)
 
 
 def on_card_fields(row):
@@ -817,6 +1070,34 @@ def preview_dir_for(out):
 #: wrote to the same file name the newer form had already written, either
 #: form could be shown the other's picture.  Two forms, two names.
 _FRAME_RE = re.compile(r"^frame_([0-9a-f]+)_(\d+)_(\d+)\.ppm$")
+#: ...and the LOADING frame beside them, one per card rather than per frame.
+_LOADING_RE = re.compile(r"^loading_([0-9a-f]+)_(\d+)\.ppm$")
+#: What the selector says it rolled, on its own `loading:` line.
+_ROLL_RE = re.compile(r"card \d+ boots image (\d+)")
+
+
+def rolled_image(text):
+    """The IMAGE a `loading:` line says the card boots, or None."""
+    m = _ROLL_RE.search(text or "")
+    return int(m.group(1)) if m else None
+
+
+def game_name(form, image):
+    """What to call image *image* of *form* - "title - subtitle" when it has
+    one, because a jukebox's members are one title with different song sets and
+    the title alone does not tell them apart."""
+    for i, path, ri, mi in form_trees(form):
+        if i != image:
+            continue
+        row = form.images[ri]
+        if mi is None:
+            bits = [(row.title or "").strip() or suggest_title(path)[0],
+                    (row.subtitle or "").strip()]
+        else:
+            bits = [(row.members[mi].title or "").strip()
+                    or suggest_title(path)[0], ""]
+        return " - ".join(b for b in bits if b)
+    return "image %d" % image
 
 
 def frame_path(preview_dir, fingerprint, highlight, frame):
@@ -824,6 +1105,19 @@ def frame_path(preview_dir, fingerprint, highlight, frame):
     ``frame_<fingerprint>_<highlight>_<frame>.ppm``."""
     return os.path.join(preview_dir, "frame_%s_%d_%d.ppm"
                         % (fingerprint, highlight, frame))
+
+
+def loading_path(preview_dir, fingerprint, highlight):
+    """The LOADING frame a snapshot writes beside its menu frame:
+    ``loading_<fingerprint>_<highlight>.ppm``.
+
+    ONE PER CARD, not per frame: it is what the machine draws AFTER the card is
+    confirmed, and nothing is animating by then.  A RANDOM card rolls for it,
+    so the file holds the member THIS render landed on - which is the whole
+    reason to be able to see it (David, 2026-09-11: "I want to see this
+    especially for how it looks with the random one")."""
+    return os.path.join(preview_dir, "loading_%s_%d.ppm"
+                        % (fingerprint, highlight))
 
 
 def frame_pattern(preview_dir, fingerprint, highlight):
@@ -858,7 +1152,7 @@ def stale_frames(preview_dir, keep):
         return []
     out = []
     for name in names:
-        m = _FRAME_RE.match(name)
+        m = _FRAME_RE.match(name) or _LOADING_RE.match(name)
         if m and m.group(1) != keep:
             out.append(os.path.join(preview_dir, name))
     return out
@@ -905,10 +1199,17 @@ def read_manifest(media_dir):
     return m if isinstance(m, dict) else {}
 
 
-def manifest_sounds(manifest, media_dir, highlight):
+def manifest_sounds(manifest, media_dir, highlight, group=None):
     """``{"music", "move", "confirm"}`` - the WAV behind each of the menu's
-    three sounds for image *highlight*, as full paths under *media_dir*, and
+    three sounds for the highlighted CARD, as full paths under *media_dir*, and
     "" for one this media set has not got.
+
+    *group* is the card's GROUP INDEX when it is a random card, and then the
+    manifest's `groups` row is what answers - not `images[highlight]`, which is
+    some other game's row or none at all.  Reading the image rows for a card
+    index is how the bed an owner picked for a random card went unheard (David,
+    2026-09-11: "i'm not hearing music that i selected when hovering over the
+    random card").
 
     The fallbacks are the selector's, not ours: an image plays its OWN
     confirm sound when it has one (the seventh images.conf field) and the
@@ -916,8 +1217,13 @@ def manifest_sounds(manifest, media_dir, highlight):
     A ``--visual-only`` prepare (the one the preview runs for itself) writes
     the music but no move or confirm sound at all, which is why "" here is
     ordinary and has to be said rather than treated as a fault."""
-    images = manifest.get("images") or []
-    row = images[highlight] if 0 <= highlight < len(images) else None
+    if group is None:
+        rows = manifest.get("images") or []
+        idx = highlight
+    else:
+        rows = manifest.get("groups") or []
+        idx = int(group)
+    row = rows[idx] if 0 <= idx < len(rows) else None
     row = row if isinstance(row, dict) else {}
 
     def full(name):
@@ -968,10 +1274,85 @@ def validate_form(form, sources=True):
                     "more.")
     if not n:
         errs.append("There are no images.")
-    if n > MAX_IMAGES:
-        errs.append("At most %d images fit one card." % MAX_IMAGES)
+    if n > MAX_CARDS:
+        errs.append("At most %d images fit one card." % MAX_CARDS)
+    ngroups = sum(1 for r in form.images if is_group(r))
+    if ngroups > MAX_GROUPS:
+        errs.append("At most %d random groups fit one card." % MAX_GROUPS)
+    ntrees = len(form_trees(form))
+    if ntrees > MAX_TREES:
+        errs.append("That is %d games in %d rows; at most %d fit one card."
+                    % (ntrees, n, MAX_TREES))
+    if form.images and is_group(form.images[0]) and not form.images[0].keep:
+        # A CONSUMING group here would leave the card with no primary at all:
+        # the machine boots image 0 when the menu is not honoured, and that has
+        # to be one known game rather than a roll.  A KEEPING group adds no
+        # games, so the primary is still whichever plain row is first.
+        errs.append("The first image is the primary and cannot be a random "
+                    "group that hides its games. Tick 'also show each game on "
+                    "its own card', or move it down.")
+    if form.images and not any(not is_group(r) or not r.keep for r in form.images):
+        errs.append("Add at least one plain image: a card made only of random "
+                    "groups has no primary to boot.")
+    # what the card will actually carry, so a KEEPING group's members can be
+    # checked against it rather than counted as games of their own
+    games_on_card = set()
+    for _img, _path, _ri, _mi in form_trees(form):
+        if _path:
+            games_on_card.add(_norm(_path))
     seen = set()
     for i, row in enumerate(form.images):
+        if is_group(row):
+            if len(row.members) < 2:
+                errs.append("Image %d is a random group with %d game(s); a "
+                            "group needs at least 2." % (i, len(row.members)))
+            for mi, m in enumerate(row.members):
+                mp = (m.path or "").strip().strip('"')
+                if not sources:
+                    continue
+                if not mp:
+                    errs.append("Image %d, game %d has no file." % (i, mi + 1))
+                elif not os.path.isfile(mp):
+                    errs.append("Image %d, game %d: no such file: %s"
+                                % (i, mi + 1, mp))
+                elif row.keep:
+                    # ITS GAMES ARE OTHER ROWS'.  Being listed elsewhere is the
+                    # POINT of a keeping group, so the only thing to check is
+                    # that the game really is on the card.
+                    if _norm(mp) not in games_on_card:
+                        errs.append("Image %d, game %d is not one of the images "
+                                    "on this card: %s" % (i, mi + 1, mp))
+                else:
+                    key = _norm(mp)
+                    if key in seen:
+                        errs.append("Image %d, game %d is listed twice: %s"
+                                    % (i, mi + 1, mp))
+                    seen.add(key)
+            if row.keep and len(set(_norm(q) for q in row_paths(row))) != len(row.members):
+                errs.append("Image %d names the same game twice." % i)
+            if row.keep and sources:
+                # A GROUP'S MEMBERS MUST BE ONE RUN of image indexes - the
+                # builder refuses a gap, because a group= line is written as
+                # `<first>-<last>`.  Saying so here is the difference between
+                # a red cross in the list and a refusal minutes into a build.
+                imgs = sorted(i2 for i2 in group_member_images(form, row) if i2 >= 0)
+                if len(imgs) == len(row.members) and imgs and \
+                        imgs != list(range(imgs[0], imgs[0] + len(imgs))):
+                    errs.append(
+                        "Image %d rolls between games that are not next to "
+                        "each other on the card; move them together." % i)
+            for what, text in (("title", row.title), ("subtitle", row.subtitle)):
+                if _BAD_TEXT.search(text or ""):
+                    errs.append("Image %d: the %s must not contain | ; $ or `."
+                                % (i, what))
+            on_card = dict(on_card_fields(row))
+            for what, val in media_fields_to_check(row):
+                if what in on_card:
+                    continue
+                if is_file_choice(val) and not os.path.isfile(val.strip()):
+                    errs.append("Image %d: %s file not found: %s"
+                                % (i, what, val))
+            continue
         p = (row.path or "").strip().strip('"')
         if not sources:
             pass
@@ -989,8 +1370,7 @@ def validate_form(form, sources=True):
                 errs.append("Image %d: the %s must not contain | ; $ or `."
                             % (i, what))
         on_card = dict(on_card_fields(row))
-        for what, val in (("art", row.art), ("animation", row.anim),
-                          ("music", row.music)):
+        for what, val in media_fields_to_check(row):
             # A file name a load read off the card is not a path on this
             # machine and is not looked for: it is already in the media dir
             # the load extracted, and the preview draws it from there.
@@ -1362,10 +1742,92 @@ def split_music_source(spec):
     return host_path(t)
 
 
+def form_compact(form):
+    """Whether this form builds the compact layout.
+
+    A GROUP FORCES IT.  A jukebox card's games are the same title with a few
+    songs changed, so on the older layouts each member costs a full copy: forty
+    Beatles variants are about 18 GB of duplicate content the compact build
+    holds once.  mkmulticard refuses parts/multi with a group outright; the tab
+    ticks the box and disables it, so the reason is visible before the press
+    rather than in a refusal after it (David, 2026-09-09)."""
+    return bool(form.compact) or any(is_group(r) for r in form.images)
+
+
+def _media_image_args(form):
+    """--primary and --extra for every GAME, and nothing else.
+
+    selectmedia.py renders pictures and sounds for the games on the card; it
+    has never heard of a group and does not need to, because a group card's
+    media is one of theirs.  It shares no vocabulary with mkmulticard beyond
+    these two flags, so handing it `_image_args` made it exit 2 on
+    `--group-over` and took the whole preview down with it (David's log,
+    2026-09-10: "selectmedia.py: error: unrecognized arguments: --group-over").
+    """
+    trees = [t[1] for t in form_trees(form)]
+    args = ["--primary", wsl(trees[0] if trees else "")]
+    for path in trees[1:]:
+        args += ["--extra", wsl(path)]
+    return args
+
+
+def group_roll_args(form):
+    """``--group-roll G=MODE`` for every random card, spelled out - so what the
+    dialog says is what the card does, whatever the conf's own default is."""
+    args = []
+    for gi, _ri, row, _imgs in form_groups(form):
+        args += ["--group-roll", "%d=%s" % (gi, row_roll(row))]
+    return args
+
+
 def _image_args(form):
-    args = ["--primary", wsl(form.images[0].path.strip().strip('"'))]
-    for row in form.images[1:]:
-        args += ["--extra", wsl(row.path.strip().strip('"'))]
+    """--primary, then each row IN TABLE ORDER as either an --extra or a
+    --group with its --member games.  The order matters: mkmulticard reads
+    these flags as one ordered sequence, because the only thing that fixes a
+    member's image index is where its flag sat (item 106)."""
+    trees = form_trees(form)
+    primary = next((t[1] for t in trees), "")
+    args = ["--primary", wsl(primary)]
+    for ri, row in enumerate(form.images):
+        if is_group(row) and row.keep:
+            # IT ADDS NO GAMES: it names images other rows already put there,
+            # and its place among these flags is where its card sits.
+            imgs = [i for i in group_member_images(form, row) if i >= 0]
+            if len(imgs) >= 2:
+                args += ["--group-over", "%d-%d|%s|%s"
+                         % (min(imgs), max(imgs), (row.title or "").strip(),
+                            (row.subtitle or "").strip())]
+            continue
+        if is_group(row):
+            args += ["--group", "%s|%s" % ((row.title or "").strip(),
+                                           (row.subtitle or "").strip())]
+            for path in row_paths(row):
+                args += ["--member", wsl(path)]
+            continue
+        if ri == 0:
+            continue                      # already given as --primary
+        args += ["--extra", wsl(row_paths(row)[0])]
+    return args
+
+
+def group_media_args(form):
+    """``--group-members`` / ``--group-art`` / ``--group-anim``, one set per
+    RANDOM card, numbered 0..N-1 in row order.  selectmedia draws the card from
+    the members' own logos, so it has to be told which images they are."""
+    args = []
+    for gi, _ri, row, imgs in form_groups(form):
+        if not imgs:
+            continue
+        args += ["--group-members", "%d=%s" % (gi, ",".join(str(i) for i in imgs)),
+                 "--group-art", "%d=%s" % (gi, group_art_spec(row)),
+                 "--group-anim", "%d=%s" % (gi, group_anim_spec(row)),
+                 # A RANDOM CARD IS A CARD: the bed that plays while it is
+                 # highlighted and the sound it makes when it is chosen are its
+                 # own, not its first member's (David, 2026-09-11: "i'm not
+                 # hearing music that i selected when hovering over the random
+                 # card").
+                 "--group-music", "%d=%s" % (gi, _media_value(row.music)),
+                 "--group-confirm", "%d=%s" % (gi, confirm_spec(row))]
     return args
 
 
@@ -1377,22 +1839,48 @@ def prepare_args(form, media_dir, visual_only=False):
     which then holds media.json.  ``visual_only`` is the preview's half: the
     art and animations with the same specs, no move / confirm sound work
     (music entries are still named, so the manifest rows match)."""
-    args = [SELECTMEDIA, "prepare"] + _image_args(form) + [
-        "--out", wsl(media_dir)]
+    args = [SELECTMEDIA, "prepare"] + _media_image_args(form) + [
+        "--out", wsl(media_dir),
+        # THE PANEL IS SIZED BY THE CARDS: a row is a card, and a random card
+        # stands for several images.  Without this a jukebox of forty song sets
+        # would have its pictures cut for a forty-panel menu and drawn in a
+        # two-panel one.
+        "--cards", str(max(1, len(form.images)))] + group_media_args(form)
     if visual_only:
         args.append("--visual-only")
-    for i, row in enumerate(form.images):
-        args += ["--art", "%d=%s" % (i, art_spec(row)),
-                 "--anim", "%d=%s" % (i, anim_spec(row)),
-                 "--music", "%d=%s" % (i, _media_value(row.music))]
+    # THE N= INDEXES ARE IMAGES.  media.json carries one row per games tree,
+    # which is what mkmulticard's plan_media expects.  Using the table's row
+    # number here would silently shift every media row after the first group.
+    #
+    # A GROUP'S MEMBER GAMES ASK FOR NOTHING TO LOOK AT.  They have no card of
+    # their own - one card stands in front of all of them, with its own picture
+    # (--group-art) and its own name - and nothing in the menu ever draws them,
+    # the LOADING frame included (it names the member under the CARD's
+    # picture).  Forty song sets would otherwise render forty logos and forty
+    # copies of one music bed into a 96 MB budget, for a card that shows one.
+    # The card's SOUNDS are still the first member's row, which is where
+    # mkmulticard reads them from.
+    for i, _path, ri, mi in form_trees(form):
+        row = form.images[ri]
+        if mi is None:
+            args += ["--art", "%d=%s" % (i, art_spec(row)),
+                     "--anim", "%d=%s" % (i, anim_spec(row)),
+                     "--music", "%d=%s" % (i, _media_value(row.music))]
+        else:
+            # ...and nothing to HEAR either: the card's own bed is prepared
+            # against the card (see group_media_args), so a member carrying one
+            # would be a second copy of the same wav.
+            args += ["--art", "%d=none" % i, "--anim", "%d=none" % i,
+                     "--music", "%d=none" % i]
     if not visual_only:
         args += ["--sound-move", _media_value(form.sound_move),
                  "--sound-confirm", _media_value(form.sound_confirm)]
         # ...then each image's own, after the menu-wide one: the bare value
         # and the N= values are one appending option, and the tool tells
         # them apart by the prefix, not by the order.
-        for i, row in enumerate(form.images):
-            args += ["--sound-confirm", "%d=%s" % (i, confirm_spec(row))]
+        for i, _path, ri, mi in form_trees(form):
+            args += ["--sound-confirm", "%d=%s"
+                     % (i, confirm_spec(form.images[ri]) if mi is None else "none")]
     args += ["--volume", str(int(form.volume))]
     return args
 
@@ -1405,28 +1893,50 @@ def preview_prepare_args(form, media_dir):
 def plan_args(form):
     """``mkmulticard.py plan``: the layout and whether it fits 16G / 32G.
     Writes nothing."""
-    return ([MKMULTICARD, "plan"] + _image_args(form)
-            + ["--layout", "store" if form.compact else "auto"] + cache_dir_args())
+    return ([MKMULTICARD, "plan"] + _image_args(form) + group_roll_args(form)
+            + ["--layout", "store" if form_compact(form) else "auto"] + cache_dir_args())
 
 
 def build_args(form):
     """``mkmulticard.py build``.  ``--layout auto`` = today's p7 layout for
     one extra image, the img1/img2/... partition for more."""
-    titles = [(r.title or "").strip() or suggest_title(r.path)[0]
-              for r in form.images]
-    subtitles = [(r.subtitle or "").strip() for r in form.images]
-    args = [MKMULTICARD, "build"] + _image_args(form) + [
+    # --titles and --subtitles are ONE PER GAME, because images.conf's image=
+    # lines are.  A group card's own title and subtitle do not go here: they
+    # ride on its --group flag, and its members keep their own names so the
+    # LOADING frame can say which song set the roll landed on.
+    titles, subtitles = [], []
+    for _i, path, ri, mi in form_trees(form):
+        row = form.images[ri]
+        if mi is None:
+            titles.append((row.title or "").strip() or suggest_title(path)[0])
+            subtitles.append((row.subtitle or "").strip())
+        else:
+            m = row.members[mi]
+            titles.append((m.title or "").strip() or suggest_title(path)[0])
+            subtitles.append("")
+    args = [MKMULTICARD, "build"] + _image_args(form) + group_roll_args(form) + [
         "--out", wsl(form.out.strip().strip('"')),
         "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
-        "--layout", "store" if form.compact else "auto",
+        "--layout", "store" if form_compact(form) else "auto",
         "--titles", ";".join(titles),
         "--timeout", str(int(form.timeout)),
-        "--default", str(int(form.default)),
+        # --default names an IMAGE (so does the choice file, and so does the
+        # menu's own memory); the tab's number is the highlighted ROW.  A row
+        # that is a consuming group is named by its first member, and the
+        # selector highlights that member's card - which is the group's.
+        "--default", str(row_first_image(form, int(form.default))),
         # The tab's knob is the volume of record: the same number goes into
         # media.json (prepare) and into images.conf here, so a text-only card
         # with no prepared media still carries it.
         "--volume", str(int(form.volume)),
     ] + theme_args(form)
+    # A KEEPING GROUP'S CARD CANNOT BE NAMED BY AN IMAGE: its games all keep
+    # cards of their own, so no image index resolves to it.  A random card the
+    # countdown cannot land on is useless for an unattended power-up, which is
+    # the whole point - so the card index goes too.
+    d = int(form.default)
+    if 0 <= d < len(form.images) and is_group(form.images[d]) and form.images[d].keep:
+        args += ["--default-card", str(row_card_index(form, d))]
     if form.machine_volume:
         # ...and on the machine the menu plays at ITS setting, not that number
         args.append("--machine-volume")
@@ -1497,7 +2007,8 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
               for r in form.images]
     subtitles = [(r.subtitle or "").strip() for r in form.images]
     args = [MKMULTICARD, "update",
-            "--card", wsl(card.strip().strip('"'))] + _image_args(form) + [
+            "--card", wsl(card.strip().strip('"'))] + _image_args(form)
+    args += group_roll_args(form) + [
             "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
             "--titles", ";".join(titles),
             "--subtitles", ";".join(subtitles),
@@ -1530,12 +2041,27 @@ def inspect_args(card, media_out=None, as_json=False):
     return args
 
 
+def preview_highlight(form, row_index):
+    """The ``--highlight-card`` value for a table ROW, which is the row.
+
+    THE PREVIEW HIGHLIGHTS A CARD, NOT AN IMAGE.  `--highlight`, `default=` and
+    the choice file all name an image, and that is right for them - they say
+    which GAME boots.  The preview says which CARD the player is looking at,
+    and a RANDOM card over images that keep their own is not any image: no
+    image index resolves to it.  Sending its first member instead lit up that
+    member's own card, so the flippers walked past the random one and drew the
+    first card twice (David, 2026-09-11: "the left right flippers can't
+    highlight the random one").  A row IS a card, so this is the row."""
+    return row_card_index(form, int(row_index))
+
+
 def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
-                          rootfs=DEFAULT_ROOTFS, frames=1):
+                          rootfs=DEFAULT_ROOTFS, frames=1, loading=None,
+                          roll_state=None):
     """``qemu-arm-static -L <rootfs> <codeselect> --snapshot <ppm> ...``:
     ONE menu frame as the machine would show it - the conf, the media,
-    highlight N, the animation at frame N, the countdown as if just started,
-    no input, no audio, no choice file - then exit.
+    the CARD highlighted, the animation at frame N, the countdown as if just
+    started, no input, no audio, no choice file - then exit.
 
     ``frames`` > 1 asks for a WHOLE RUN out of that one load: *ppm* is then
     a :func:`frame_pattern` and the selector writes K files, starting at
@@ -1546,10 +2072,27 @@ def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
     args = ["qemu-arm-static", "-L", rootfs, binary,
             "--snapshot", wsl(ppm), "--conf", wsl(conf),
             "--media", wsl(media_dir),
-            "--highlight", str(int(highlight)),
+            # A CARD, not an image: see preview_highlight.  The two are the
+            # same number until a group card makes them differ, and then only
+            # this one can name the group's.
+            "--highlight-card", str(int(highlight)),
             "--anim-frame", str(int(frame))]
     if int(frames) > 1:
         args += ["--frames", str(int(frames))]
+    if loading:
+        # ...and the frame the machine draws once this card is confirmed.  It
+        # costs one more PPM out of a load that has already happened, and it is
+        # the only way to see what a RANDOM card says it rolled.
+        args += ["--loading-out", wsl(loading)]
+    if roll_state:
+        # THE ROLL'S MEMORY, which is what makes the preview's roll the
+        # machine's roll: what was booted last, and what each shuffle has
+        # already dealt.  A snapshot reads no last-choice file - it writes
+        # nothing and must not depend on the machine's memory - so the preview
+        # names a file of its own and the selector reads and writes THAT one
+        # (David, 2026-09-11: "the preview needs to show the same random logic
+        # as the machine").
+        args += ["--roll-state", wsl(roll_state)]
     return args + ["--input", "none"]
 
 
@@ -1928,14 +2471,46 @@ def write_preview_conf(form):
     device tokens are placeholders - a picture boots nothing."""
     lines = ["# written by the Multi-boot tab for its preview; the devices "
              "are placeholders,", "# everything else is the form"]
-    for i, row in enumerate(form.images):
-        dev = "p3" if i == 0 else ("p7" if i == 1 else "p7:img%d" % i)
-        title = (row.title or "").strip() or suggest_title(row.path)[0]
-        art = "art%d.png" % i if art_spec(row) != "none" else ""
-        anim = "anim%d.gif" % i if anim_spec(row) != "none" else ""
-        lines.append("image=%s|%s|%s|%s|%s|" % (
-            dev, title, (row.subtitle or "").strip(), art, anim))
-    lines += ["default=%d" % int(form.default),
+    # ONE image LINE PER GAME and one card per ROW, exactly as the built card
+    # has them - a preview that drew a group as a single image line would show
+    # the right picture for the wrong reason and would stop matching the moment
+    # the member count mattered.  The media names are keyed by IMAGE, because
+    # that is how prepare wrote them, and a group card borrows its first
+    # member's - the same rule mkmulticard follows.
+    trees = form_trees(form)
+    names = card_media_names(form)
+    per_row = {}
+    # the conf's own fields, in the selector's order
+    for img, path, ri, mi in trees:
+        per_row.setdefault(ri, []).append((img, path, mi))
+    groups = {ri: imgs for _gi, ri, _row, imgs in form_groups(form)}
+    # THE ROWS ARE THE CARDS, so this walks rows: a KEEPING group puts no game
+    # on the card at all, and a preview that only walked the games drew David's
+    # `C1 | C2 | RANDOM` with no random card in it.
+    for ri, row in enumerate(form.images):
+        art, anim, music, _confirm = names[ri]
+        if is_group(row):
+            imgs = groups.get(ri) or []
+            if len(imgs) >= 2:
+                lines.append("group=%s%s%d-%d|%s|%s|%s|%s|%s" % (
+                    "+" if row.keep else "",
+                    "" if row_roll(row) == ROLL_FALLBACK else row_roll(row) + ":",
+                    min(imgs), max(imgs),
+                    (row.title or "").strip() or "GROUP",
+                    (row.subtitle or "").strip(), art, anim, music))
+            if row.keep:
+                continue                      # its games are other rows'
+        for img, path, mi in per_row.get(ri, []):
+            dev = "p3" if img == 0 else ("p7" if img == 1 else "p7:img%d" % img)
+            if mi is None:
+                title = (row.title or "").strip() or suggest_title(path)[0]
+                lines.append("image=%s|%s|%s|%s|%s|%s" % (
+                    dev, title, (row.subtitle or "").strip(), art, anim, music))
+            else:
+                m = row.members[mi]
+                title = (m.title or "").strip() or suggest_title(path)[0]
+                lines.append("image=%s|%s||||" % (dev, title))
+    lines += ["default=%d" % row_first_image(form, int(form.default)),
               "timeout=%d" % int(form.timeout),
               "volume=%d" % int(form.volume),
               "font=" + CONF_FONT]
@@ -1949,7 +2524,12 @@ def preview_fingerprint(form):
     their art / animation specs, the selector and the output.  A frame
     cached under one fingerprint is never shown for another form."""
     data = [write_preview_conf(form),
-            [((r.path or "").strip(), art_spec(r), anim_spec(r))
+            [((r.path or "").strip(),
+              group_art_spec(r) if is_group(r) else art_spec(r),
+              group_anim_spec(r) if is_group(r) else anim_spec(r),
+              # a member change is a different picture list, so it must be a
+              # different fingerprint or a stale frame is shown for it
+              row_paths(r) if is_group(r) else None)
              for r in form.images],
             form.selector_dir, (form.out or "").strip()]
     return hashlib.sha1(json.dumps(data).encode("utf-8")).hexdigest()[:12]
@@ -1964,10 +2544,16 @@ def media_fingerprint(form):
     every snapshot.  This is the whole point of the split: retyping a title
     costs one snapshot (~80 ms of selector time), and only a media change
     pays for selectmedia's prepare."""
-    data = [[((r.path or "").strip(), art_spec(r), anim_spec(r),
+    data = [[((r.path or "").strip(),
+              group_art_spec(r) if is_group(r) else art_spec(r),
+              group_anim_spec(r) if is_group(r) else anim_spec(r),
               _media_value(r.music), confirm_spec(r), bool(r.art_on_card),
               bool(r.anim_on_card), bool(r.music_on_card),
-              bool(r.confirm_on_card))
+              bool(r.confirm_on_card),
+              # A RANDOM CARD'S PICTURE IS DRAWN FROM ITS MEMBERS, so its
+              # member list is part of what the media depends on - without it,
+              # adding a song set to a jukebox left the old picture up.
+              row_paths(r) if is_group(r) else None)
              for r in form.images],
             _media_value(form.sound_move), _media_value(form.sound_confirm),
             int(form.volume)]
@@ -2092,7 +2678,8 @@ def ensure_selector_commands(form, cwd=None, card=""):
 
 
 def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
-                      rootfs=DEFAULT_ROOTFS, cwd=None, frames=1):
+                      rootfs=DEFAULT_ROOTFS, cwd=None, frames=1, loading=None,
+                      roll_state=None):
     """One snapshot step.  A run of frames is ONE step and is labelled
     :data:`ANIM_LABEL` - what a failure of it is named after, and what the
     finished step's own output is read back through."""
@@ -2100,7 +2687,7 @@ def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
     return [(label,
              wsl_command(preview_snapshot_args(binary, conf, media_dir, ppm,
                                                highlight, frame, rootfs,
-                                               frames),
+                                               frames, loading, roll_state),
                          cwd, exe=None))]
 
 
@@ -2551,7 +3138,73 @@ def rows_from_inspect(info):
                             "can still be changed, but the card cannot be "
                             "rebuilt here." % (i, row.path))
         rows.append(row)
-    return rows, warnings
+    return group_rows(rows, info.get("groups")), warnings
+
+
+def group_rows(rows, groups):
+    """Fold the images a card's ``groups`` block names back into GROUP ROWS.
+
+    inspect reports one entry per game and a separate groups block (which is
+    what mkmulticard writes); the tab's list is CARDS, so a load has to put
+    them back together or a loaded jukebox card would come up as N ordinary
+    rows and an Apply would flatten it.  A group whose members do not all
+    exist in the image list is left alone rather than half-folded - a report
+    this tool cannot make sense of must not silently change the card."""
+    if not groups:
+        return rows
+    good, owned = [], {}
+    for gi, g in enumerate(groups or []):
+        members = [m for m in (g.get("members") or [])
+                   if isinstance(m, int) and 0 <= m < len(rows)]
+        if len(members) != len(g.get("members") or []) or len(members) < 2:
+            continue                       # not one this tool can make sense of
+        good.append(gi)
+        if not g.get("keep"):
+            # only a CONSUMING group takes its members' rows away; a keeping
+            # one adds a card in front of rows that stay exactly where they are
+            for m in members:
+                owned[m] = gi
+
+    def card_for(gi):
+        g = groups[gi]
+        members = [MemberRow(path=rows[m].path, title=rows[m].title,
+                             version=rows[m].version)
+                   for m in (g.get("members") or [])]
+        card = ImageRow(path="", title=g.get("title") or "RANDOM",
+                        subtitle=g.get("subtitle") or "", members=members,
+                        keep=bool(g.get("keep")),
+                        # HOW IT PICKS comes back with it: a card built before
+                        # there was a choice reports none, and that reads as
+                        # what such a card does (see row_roll).
+                        roll=(g.get("roll") or ""))
+        # the card's own media is the group's, not its first member's row
+        for key in ("art", "anim", "music", "confirm"):
+            val = (g.get(key) or "")
+            if val:
+                setattr(card, key, val)
+                setattr(card, key + "_on_card", True)
+        return card
+
+    # a group's card sits where the card says it does: `pos` is the image its
+    # line came before, and a group with no pos recorded stands where its
+    # members were (which is what a consuming one always did)
+    at = {}
+    for gi in good:
+        g = groups[gi]
+        pos = g.get("pos")
+        if pos is None:
+            pos = min(g.get("members") or [0])
+        at.setdefault(int(pos), []).append(gi)
+    out = []
+    for i, row in enumerate(rows):
+        for gi in at.get(i, ()):
+            out.append(card_for(gi))
+        if i in owned:
+            continue                       # a consumed member has no row left
+        out.append(row)
+    for gi in at.get(len(rows), ()):
+        out.append(card_for(gi))
+    return out
 
 
 def form_from_inspect(info, card, media_dir="", selector_dir=None):
@@ -2614,7 +3267,14 @@ MEDIA_FIELDS = ("art", "animation", "music", "move sound", "confirm sound")
 
 def _row_key(row):
     """What makes an image row THE SAME image: its source file, or the card
-    device it came from when this machine does not have the file."""
+    device it came from when this machine does not have the file.
+
+    A GROUP ROW IS ITS MEMBERS.  Adding, removing or swapping one of them
+    changes which games are on the card, which only a build can do - so the
+    key has to move when they do, or a member change would look like a menu
+    edit and an inject would leave the card's games as they were."""
+    if is_group(row):
+        return "group:" + "|".join(_norm(x) if x else "?" for x in row_paths(row))
     p = (row.path or "").strip().strip('"')
     return _norm(p) if p else "device:" + (row.device or "?")
 
@@ -2927,21 +3587,45 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
     else:
         why = ""
         seen = set()
+        # EVERY GAME BEHIND EVERY ROW, not every row's own file.  A GROUP row
+        # has no path of its own - its games are its members - so reading
+        # row.path here reported a perfectly good jukebox card as "Image 1 has
+        # no file" and put a red cross on the status row (David, 2026-09-10,
+        # looking at the first screenshot of it).
         for i, row in enumerate(rows):
-            p = (getattr(row, "path", "") or "").strip().strip('"')
-            if not p:
-                why = "Image %d has no file." % i
-            elif not loaded_card and not os.path.isfile(p):
-                why = "Image %d is not on this machine: %s" % (i, p)
-            elif _norm(p) in seen:
-                why = "Image %d is listed twice: %s" % (i, p)
-            else:
-                seen.add(_norm(p))
-                continue
-            break
-        out.append(("images", label, "bad" if why else "ok",
-                    why or "%d images, in the order the menu offers them."
-                    % n))
+            paths = row_paths(row)
+            if is_group(row) and len(paths) < 2:
+                why = ("Image %d is a random group with %d game(s); a group "
+                       "needs at least 2." % (i, len(paths)))
+                break
+            # A KEEPING GROUP'S GAMES ARE OTHER ROWS'.  Being listed elsewhere
+            # is the POINT of it, so it must not be counted as a duplicate -
+            # which is what put a red cross on David's perfectly good card.
+            keeping = is_group(row) and getattr(row, "keep", False)
+            for k, q in enumerate(paths):
+                where = ("Image %d, game %d" % (i, k + 1) if is_group(row)
+                         else "Image %d" % i)
+                if not q:
+                    why = "%s has no file." % where
+                elif not loaded_card and not os.path.isfile(q):
+                    why = "%s is not on this machine: %s" % (where, q)
+                elif keeping:
+                    continue
+                elif _norm(q) in seen:
+                    why = "%s is listed twice: %s" % (where, q)
+                else:
+                    seen.add(_norm(q))
+                    continue
+                break
+            if why:
+                break
+        ngames = sum(len(row_paths(r)) for r in rows
+                     if not (is_group(r) and getattr(r, "keep", False)))
+        detail = "%d images, in the order the menu offers them." % n
+        if ngames != n:
+            detail = ("%d cards over %d games, in the order the menu offers "
+                      "them." % (n, ngames))
+        out.append(("images", label, "bad" if why else "ok", why or detail))
 
     # 3. WHETHER THE CARD EXISTS - a CARD, not a file with the right name.
     name = os.path.basename(loaded_card) or "the card"
@@ -3164,6 +3848,14 @@ def rows_from_state(images, resolve=None):
             if f.name not in entry:
                 continue
             val = entry[f.name]
+            if f.name == "members":
+                # a list of member ROWS, not a string: everything else here is
+                # a text field, and str() on a list is how "[]" became a group
+                kw[f.name] = [MemberRow(path=str(m.get("path") or ""),
+                                        title=str(m.get("title") or ""),
+                                        version=str(m.get("version") or ""))
+                              for m in (val or ()) if isinstance(m, dict)]
+                continue
             kw[f.name] = bool(val) if isinstance(f.default, bool) \
                 else str("" if val is None else val)
         kw.setdefault("path", "")
@@ -3173,6 +3865,9 @@ def rows_from_state(images, resolve=None):
             continue
         if row.path:
             row.path = resolve(row.path)
+        for m in row.members:
+            if m.path:
+                m.path = resolve(m.path)
         if row.art_video.strip():
             row.art_video = resolve(row.art_video)
         for name in _STATE_ROW_PATHS:
@@ -3506,6 +4201,16 @@ def _cell_image(row):
     """The .raw the image was copied from, said plainly when this machine
     does not have it (a loaded card names sources that may live on another
     disk) and when the card names none at all."""
+    if is_group(row):
+        # A RANDOM CARD HAS NO SOURCE OF ITS OWN and never will: its games are
+        # its members.  Saying "(no source recorded)" about it read as a fault
+        # (David, 2026-09-11), when the answer is simply the list of games.
+        names = [os.path.basename(q) or "?" for q in row_paths(row)]
+        missing = sum(1 for q in row_paths(row) if not q or not os.path.isfile(q))
+        shown = ", ".join(names[:3]) + (", …" if len(names) > 3 else "")
+        return "rolls between %d game%s: %s%s" % (
+            len(names), "" if len(names) == 1 else "s", shown,
+            "   [%d not on this machine]" % missing if missing else "")
     p = (row.path or "").strip()
     if not p:
         return "(no source recorded%s)" % (
@@ -3638,6 +4343,130 @@ def set_media(row, kind, path="", start=""):
     return row
 
 
+#: WHAT A RANDOM CARD SHOWS, which is not what an image shows (David,
+#: 2026-09-10, looking at the Edit dialog on a group row: "the options for a
+#: Random group need to be bespoke to a random group. we should have options
+#: like 'stack of logos', 'big ?', etc. come up with some sweet looking ideas
+#: for it").  "The game's own logo" has no game to refer to on a card that
+#: stands for forty of them, so every one of these is drawn from the MEMBERS'
+#: own logos - the card shows the very builds it can boot.
+#:
+#: ``(kind, label, art style, animation style)``, and the kind IS the style, so
+#: what the row stores is what selectmedia is asked for.  The two animated ones
+#: carry a still as well, because a card is drawn standing still whenever it is
+#: not the highlighted one: `cycling` rests on the pile it deals from, and
+#: `reel` rests on the shuffle glyph, which is what a reel that has not been
+#: spun yet looks like.
+GROUP_MEDIA_KINDS = (
+    ("cycling", "Each game's logo in turn", "stack", "cycling"),
+    ("reel", "A slot reel, spinning to one of them", "shuffle", "reel"),
+    ("fan", "The logos fanned out, like a hand of cards", "fan", "none"),
+    ("stack", "The logos in a pile", "stack", "none"),
+    ("mosaic", "Every game at once, as a grid", "mosaic", "none"),
+    ("question", "A big '?' over the games", "question", "none"),
+    ("shuffle", "The shuffle symbol", "shuffle", "none"),
+    ("picture", "A picture file", "", "none"),
+    ("none", "Nothing - text only", "none", "none"),
+)
+#: The one a NEW random card starts on.  It moves, which is what makes a card
+#: the eye goes to, and it names every game the roll can land on - which is the
+#: one question a random card leaves the player with.
+GROUP_MEDIA_DEFAULT = "cycling"
+GROUP_MEDIA_NAMES = tuple(k for k, _l, _a, _n in GROUP_MEDIA_KINDS)
+
+
+def _group_kind(kind):
+    for k, label, art, anim in GROUP_MEDIA_KINDS:
+        if k == kind:
+            return k, label, art, anim
+    return None
+
+
+def group_media_kind(row):
+    """Which of :data:`GROUP_MEDIA_KINDS` a RANDOM card's art + animation are.
+
+    'card' for a picture a load read off the card, exactly as :func:`media_kind`
+    means it.  A row from before this dialog existed carries the plain default
+    ``auto``, which meant "its first member's logo"; it reads as the default
+    style now rather than as a file called auto."""
+    if row.art_on_card or row.anim_on_card:
+        return "card"
+    art = (row.art or "").strip().strip('"')
+    anim = (row.anim or "").strip().strip('"').lower()
+    if anim not in ("", "none"):
+        for k, _l, _a, n in GROUP_MEDIA_KINDS:
+            if n != "none" and anim == n:
+                return k
+        return GROUP_MEDIA_DEFAULT          # an animation this build cannot draw
+    a = art.lower()
+    if a in ("", "auto"):
+        return GROUP_MEDIA_DEFAULT
+    if a == "none":
+        return "none"
+    for k, _l, style, n in GROUP_MEDIA_KINDS:
+        if n == "none" and style and a == style:
+            return k
+    return "picture"
+
+
+def set_group_media(row, kind, path=""):
+    """The dialog's one choice -> a RANDOM card's row.  'card' writes nothing,
+    the way :func:`set_media` leaves a card's own files alone."""
+    if kind == "card":
+        return row
+    found = _group_kind(kind)
+    if found is None:
+        raise ValueError("not a random card's picture: %r" % (kind,))
+    _k, _label, art, anim = found
+    row.art_on_card = row.anim_on_card = False
+    row.art_video = row.art_time = row.anim_start = ""
+    row.art = (path or "").strip().strip('"') if kind == "picture" else art
+    row.anim = anim
+    return row
+
+
+def group_media_file(row):
+    """The picture file a random card was pointed at; '' for every style."""
+    return (row.art or "").strip().strip('"') \
+        if group_media_kind(row) == "picture" else ""
+
+
+def group_art_spec(row):
+    """The ``--group-art G=`` value: a style name, a picture file, or none."""
+    kind = group_media_kind(row)
+    if kind == "picture":
+        return wsl(group_media_file(row))
+    found = _group_kind(kind)
+    return (found[2] if found else "") or "none"
+
+
+def group_anim_spec(row):
+    """The ``--group-anim G=`` value: a style name, or none."""
+    found = _group_kind(group_media_kind(row))
+    return (found[3] if found else "none") or "none"
+
+
+def media_fields_to_check(row):
+    """The ``(what, value)`` media fields of a row that name a FILE on this
+    machine, for the two validators.
+
+    A RANDOM CARD'S PICTURE IS A STYLE, NOT A PATH.  Walking a group row's art
+    the way an image's is walked reports "art file not found: stack" about a
+    card that is perfectly well formed - the same class of bug as every other
+    one this feature has had, which is a place that treats a card as an image.
+    A file a LOAD read off the card is still named here, because both
+    validators have something to say about one."""
+    if not is_group(row):
+        return (("art", row.art), ("animation", row.anim), ("music", row.music))
+    pairs = []
+    if row.art_on_card or group_media_kind(row) == "picture":
+        pairs.append(("art", row.art))
+    if row.anim_on_card:
+        pairs.append(("animation", row.anim))
+    pairs.append(("music", row.music))
+    return tuple(pairs)
+
+
 def _same_file(a, b):
     a, b = (a or "").strip().strip('"'), (b or "").strip().strip('"')
     return bool(a) and bool(b) and _norm(a) == _norm(b)
@@ -3658,7 +4487,17 @@ def cell_media(row):
     own words - ``logo``, ``attract video @20s``, ``intro.mp4 @3s``,
     ``logo.png``, ``none`` - and, when the still is not the one its
     animation implies (a pair an older form made, or a card carries), both
-    halves: ``attract.mov @21s + attract video @20s``."""
+    halves: ``attract.mov @21s + attract video @20s``.
+
+    A RANDOM CARD says which of its own styles it is drawn in - it has no game
+    whose logo could be "the logo"."""
+    if is_group(row):
+        kind = group_media_kind(row)
+        if kind == "card":
+            return (row.art or "").strip() + " (on the card)"
+        if kind == "picture":
+            return os.path.basename(group_media_file(row))
+        return kind
     kind = media_kind(row)
     if kind == "logo":
         return "logo"
@@ -3691,6 +4530,16 @@ def list_title(row, index=0):
     back to), and - because a list with no Image column must still say it -
     what is wrong with the .raw this image came from."""
     title = (row.title or "").strip()
+    if is_group(row):
+        # A GROUP ROW SAYS SO IN THE LIST.  Nothing else in this table can
+        # tell one from a plain image, and "why does this card have no file"
+        # is the first thing a person would otherwise ask.
+        missing = [q for q in row_paths(row) if not q or not os.path.isfile(q)]
+        cell = "%s  (random, %d sets)" % (title or "image %d" % index,
+                                          len(row.members))
+        if missing:
+            cell += "  [%d not on this machine]" % len(missing)
+        return cell
     path = (row.path or "").strip().strip('"')
     if not title:
         title = suggest_title(path)[0] if path else "image %d" % index
@@ -3699,6 +4548,23 @@ def list_title(row, index=0):
     if not os.path.isfile(path):
         return "%s  [not on this machine]" % title
     return title
+
+
+def list_code(row):
+    """The list's Code cell for a row: the game code version, or - for a group
+    whose members do not agree - `mixed`.  The members of a jukebox card are
+    meant to be one title with different songs, so a `mixed` here is worth
+    seeing: swapping between two code versions reflashes the node boards."""
+    if not is_group(row):
+        return (row.version or "").strip()
+    known = sorted(set((m.version or "").strip() for m in row.members
+                       if (m.version or "").strip()))
+    if not known:
+        return ""
+    # ONLY TWO DIFFERENT KNOWN VERSIONS ARE MIXED.  A version is read off the
+    # .raw and a member that has not been read yet is blank, so treating a
+    # blank as a disagreement would alarm somebody over nothing.
+    return "mixed" if len(known) > 1 else known[0]
 
 
 def menu_summary(form):
@@ -3857,6 +4723,16 @@ class ImageEditorDialog(_Modal):
              ("video", "A video file"),
              ("none", "Nothing - text only"))
 
+    #: ...and what a RANDOM CARD offers instead (David, 2026-09-10: "the
+    #: options for a Random group need to be bespoke to a random group").  Not
+    #: one of the five above survives the move: each of them names "the game",
+    #: and this card is several of them.  See GROUP_MEDIA_KINDS.
+    GROUP_KINDS = tuple((k, label) for k, label, _a, _n in GROUP_MEDIA_KINDS)
+
+    GROUP_NOTE = ("Every one of these is drawn from the logos of the games "
+                  "this card rolls between, so the card shows what it can "
+                  "boot. The moving ones play while the card is highlighted.")
+
     #: What the two file rows browse for.
     FILETYPES = {"picture": [("Pictures", "*.png *.jpg *.jpeg")],
                  "video": [("Videos", "*.mp4 *.mov *.mkv *.avi *.gif")]}
@@ -3876,11 +4752,14 @@ class ImageEditorDialog(_Modal):
     def __init__(self, panel, index, row):
         _Modal.__init__(
             self, panel._parent,
-            "Edit image %d — %s" % (index, os.path.basename(
-                (row.path or "").strip()) or row.device or "no source"),
+            ("Edit random card %d — %d games" % (index, len(row.members)))
+            if is_group(row) else
+            ("Edit image %d — %s" % (index, os.path.basename(
+                (row.path or "").strip()) or row.device or "no source")),
             panel._theme_fn, on_ok=panel._image_editor_ok,
             on_cancel=panel._image_editor_cancel)
         self._panel = panel
+        self._group = is_group(row)
         b = self.body
         th = THEMES.get(panel._theme_fn()) or THEMES["dark"]
         ttk.Label(b, text=_cell_image(row), foreground=th["gray"],
@@ -3905,11 +4784,11 @@ class ImageEditorDialog(_Modal):
         panel._media_entries = {}
         panel._clip_widgets = []
         r = 0
-        for kind, label in self.KINDS:
+        for kind, label in (self.GROUP_KINDS if self._group else self.KINDS):
             ttk.Radiobutton(g, text=label, value=kind,
                             variable=panel._ed_media).grid(
                 row=r, column=0, sticky=tk.W, pady=3, padx=(0, 10))
-            if kind in self.FILETYPES:
+            if kind in self.FILETYPES and not (self._group and kind == "video"):
                 var = panel._ed_picture if kind == "picture" \
                     else panel._ed_video
                 entry = ttk.Entry(g, textvariable=var, width=26)
@@ -3944,9 +4823,29 @@ class ImageEditorDialog(_Modal):
         g.columnconfigure(1, weight=1)
         ttk.Label(box, foreground=th["gray"], wraplength=500,
                   justify=tk.LEFT,
-                  text="A video is the still too: the frame it starts on "
+                  text=self.GROUP_NOTE if self._group else
+                       "A video is the still too: the frame it starts on "
                        "shows while the image is not highlighted.").pack(
             anchor=tk.W, padx=8, pady=(0, 6))
+
+        if self._group:
+            # HOW IT PICKS.  Its own box, because it is not what the card
+            # SHOWS - it is what the card DOES, and it is the only question a
+            # random card has that an image does not (David, 2026-09-11).
+            rollbox = ttk.LabelFrame(b, text="How it picks")
+            rollbox.pack(fill=tk.X, pady=(10, 0))
+            rg = ttk.Frame(rollbox)
+            rg.pack(fill=tk.X, padx=8, pady=6)
+            for r, (mode, label) in enumerate(ROLL_MODES):
+                ttk.Radiobutton(rg, text=label, value=mode,
+                                variable=panel._ed_roll).grid(
+                    row=r, column=0, sticky=tk.W, pady=3)
+            ttk.Label(rollbox, foreground=th["gray"], wraplength=500,
+                      justify=tk.LEFT,
+                      text="The machine remembers across power-ups: a shuffle "
+                           "deals every game once before any of them comes "
+                           "round again, and picks up where it left off.").pack(
+                anchor=tk.W, padx=8, pady=(0, 6))
 
         soundbox = ttk.LabelFrame(b, text="Sounds")
         soundbox.pack(fill=tk.X, pady=(10, 0))
@@ -4409,11 +5308,14 @@ class MultibootPanel:
                 "it off the card, ▲ / ▼ move it in the menu's order (the "
                 "outlined arrow means that row cannot go further). The last "
                 "row adds one. A double-click or Enter opens a row, and a "
-                "right-click - or the menu key - offers the same five "
-                "commands. The first image is the PRIMARY: its boot files "
+                "right-click - or the menu key - offers the same "
+                "commands. The last row also adds a RANDOM card: one card "
+                "that boots a different game every power-up, either over "
+                "images already in this list or over games of its own. The "
+                "first image is the PRIMARY: its boot files "
                 "are the card's, and the machine falls back to it. Up to %d "
                 "images fit one card; from five the menu scrolls three at a "
-                "time, with a counter under them." % MAX_IMAGES)
+                "time, with a counter under them." % MAX_CARDS)
 
     PREVIEW_TIP = ("The boot menu as the machine will draw it. It redraws "
                    "itself about a third of a second after you stop typing; "
@@ -4651,6 +5553,7 @@ class MultibootPanel:
         #: keeps its own, so switching back and forth loses nothing), and
         #: the clip fields either video kind uses.
         self._ed_media = tk.StringVar(value="logo")
+        self._ed_roll = tk.StringVar(value=ROLL_DEFAULT)
         self._ed_picture = tk.StringVar()
         self._ed_video = tk.StringVar()
         self._ed_music = tk.StringVar(value="none")
@@ -4659,7 +5562,7 @@ class MultibootPanel:
         self._ed_media_vars = (self._ed_media, self._ed_picture,
                                self._ed_video, self._ed_anim_start)
         for var in (self._ed_title, self._ed_sub, self._ed_music,
-                    self._ed_confirm):
+                    self._ed_confirm, self._ed_roll):
             var.trace_add("write", lambda *_a: self._editor_changed())
         # ...and a write to what the image SHOWS is the one time the row's
         # art and animation are derived again from the dialog's choice.
@@ -4758,6 +5661,8 @@ class MultibootPanel:
         self._pv_error = False          # ...whether it is saying it in red
         self._pv_logged = ""            # ...and the last line it sent to the Log
         self._pv_loading = False        # a programmatic write, not a typed one
+        self._black_still = None        # the LOADING frame the beat is holding
+        self._pv_load_frame = None      # ...and the one the last render wrote
         self._hl_touched = False        # Highlight typed by hand: stop following Default
         self._play_job = None
         self._play_fp = None
@@ -4853,7 +5758,7 @@ class MultibootPanel:
                                   lambda *_a: self._frame_changed(typed=True))
         # ...and everything that changes the picture asks for a re-render.
         for var in (self._ed_title, self._ed_sub, self._ed_music,
-                    self._ed_confirm) + self._ed_media_vars + (
+                    self._ed_confirm, self._ed_roll) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._default_var,
                     self._out_var, self._selector_var,
@@ -5400,7 +6305,7 @@ class MultibootPanel:
             on_select=self._on_table_select,
             on_activate=lambda i: self.edit_image(i),
             on_action=self._table_action,
-            on_add=lambda: self._add_image(),
+            on_add=lambda: self._add_row_clicked(),
             on_context=self._popup_list_menu,
             add_text=self.ADD_ROW_TEXT, add_tip=self.LIST_TIP,
             visible_rows=LIST_MIN_ROWS, max_rows=LIST_MAX_ROWS)
@@ -5431,6 +6336,9 @@ class MultibootPanel:
     #: entries are greyed when the click missed every image row, so a
     #: right-click on the template row or on empty space offers Add… alone.
     LIST_ACTIONS = (("Add image…", "_add_image", False),
+                    ("Add random over the images above…", "_add_random_over_existing", False),
+                    ("Add random group…", "_add_group", False),
+                    ("Add random group from folder…", "_add_group_folder", False),
                     ("Edit image…", "edit_image", True),
                     ("Remove image", "_remove_image", True),
                     (None, None, False),
@@ -5524,11 +6432,18 @@ class MultibootPanel:
         "room is what compact saved - stored once, so not on the card.")
 
     COMPACT_TIP = (
-        "Compact build (experimental): one copy of every file the images "
+        "Compact build: one copy of every file the images "
         "have in common, stored once. Smaller card, same games - the bar "
         "shows what it saves as a hatched part of the free room. A card "
         "built this way must be changed with this app, not by a Stern USB "
         "update. Off = the card layouts this app has always made.")
+
+    #: ...and why it cannot be turned off while a random group is in the list.
+    COMPACT_TIP_GROUP = (
+        "Compact build, and a random group needs it: the games behind one "
+        "card are near-identical, so on the older layouts each one would cost "
+        "a full copy of the image. Stored once, forty song sets fit a 32 GB "
+        "card. Remove the random group to turn this off.")
 
     def _compact_changed(self):
         """The compact tick moved: the size is a different question now
@@ -5827,8 +6742,11 @@ class MultibootPanel:
         # section ... [x] Compact build ... shows the space savings on the
         # bar"): the compact layout's tick lives HERE, where the size is
         # looked at, and the bar answers what it buys.  Off by default (item
-        # 95's rule: opt-in, experimental until a store card has booted on a
-        # machine).  Packed before the bar so it is never the widget a
+        # 95's rule: opt-in) - but no longer called experimental: David flashed
+        # the TMNT store card and booted all three images on 2026-09-10, which
+        # was the gate item 95 left open.  A RANDOM GROUP forces it on and
+        # disables the box (item 106), because its members would otherwise each
+        # cost a full copy.  Packed before the bar so it is never the widget a
         # narrow tab gives up.
         if not hasattr(self, "_compact_var"):
             self._compact_var = tk.BooleanVar(value=False)
@@ -6524,7 +7442,14 @@ class MultibootPanel:
 
     #: What the template row says.  Dim, with a green '+': an empty card
     #: shows only this, which is both the way in and the lesson.
-    ADD_ROW_TEXT = "Add an image…"
+    #: THE TEMPLATE ROW'S WORDS, and they have to FIT: the row sits in the
+    #: same grid as every other one (see image_table._Row) and says its
+    #: words in the Title column, which is about 30 characters wide - so a
+    #: longer label is simply cut off, and cut off sooner on a narrow
+    #: window (David, 2026-09-10: "narrow app window widths, the label for
+    #: 'add a game image or random group' is getting cut off").  The full
+    #: sentence lives in LIST_TIP, which has no width to fit.
+    ADD_ROW_TEXT = "Add image or random group…"
 
     def _values(self, i, row):
         """ONE ROW OF THE TABLE, as a dict keyed by column id: the title
@@ -6542,7 +7467,7 @@ class MultibootPanel:
             "media": cell_media(row),
             "music": _cell(row.music),
             "sound": self._confirm_cell(row),
-            "code": (row.version or "").strip(),
+            "code": list_code(row),
         }
 
     def _refresh_tree(self, select=None):
@@ -6557,6 +7482,7 @@ class MultibootPanel:
         rebuild that a caller is about to cancel (a restore) or that no one
         is watching (a non-interactive test) never leaves a premature
         'being drawn' caption on the strip."""
+        self._sync_compact_lock()
         table = getattr(self, "_table", None)
         if table is None:
             return
@@ -6701,7 +7627,10 @@ class MultibootPanel:
         self._loading = True
         try:
             row = self._rows[i] if i is not None else ImageRow("")
-            kind, path = media_kind(row), media_file(row)
+            if is_group(row):
+                kind, path = group_media_kind(row), group_media_file(row)
+            else:
+                kind, path = media_kind(row), media_file(row)
             self._ed_title.set(row.title)
             self._ed_sub.set(row.subtitle)
             self._ed_media.set(kind)
@@ -6709,6 +7638,7 @@ class MultibootPanel:
             self._ed_video.set(path if kind == "video" else "")
             self._ed_music.set(row.music)
             self._ed_confirm.set(row.confirm or "menu")
+            self._ed_roll.set(row_roll(row))
             # A still taken off a video with no clip yet (an older form)
             # keeps its second as the clip's start.
             self._ed_anim_start.set(row.anim_start or (
@@ -6739,6 +7669,9 @@ class MultibootPanel:
                 setattr(row, flag, False)
         row.title = self._ed_title.get()
         row.subtitle = self._ed_sub.get()
+        if is_group(row):
+            v = self._ed_roll.get().strip()
+            row.roll = v if v in ROLL_NAMES else ROLL_DEFAULT
         was = (row.music, row.confirm)
         row.music = self._ed_music.get()
         # "menu" is what the box says and "" is what the row keeps, so a row
@@ -6765,6 +7698,13 @@ class MultibootPanel:
         puts back what the load read (the dialog's own backup of the row),
         so a choice tried and untried in one sitting costs nothing."""
         kind = self._ed_media.get().strip() or "logo"
+        if is_group(row) and kind != "card":
+            # THE TWO LISTS SHARE 'picture', 'none' AND 'card' AND NOTHING
+            # ELSE, so a choice left over from an image row (the dialog is one
+            # set of vars for every row) is not a choice this row can make.
+            set_group_media(row, kind if kind in GROUP_MEDIA_NAMES
+                            else GROUP_MEDIA_DEFAULT, self._ed_picture.get())
+            return
         if kind == "card":
             if self._edit_backup is not None and self._edit_backup[0] == i:
                 was = self._edit_backup[1]
@@ -6810,6 +7750,66 @@ class MultibootPanel:
             self._maybe_default_output()
         self._ok("")
 
+    #: What the add row at the foot of the list offers, as
+    #: ``(label, method name)``.  Pure, so a test can ask what the row would
+    #: show without popping a menu.
+    ADD_ROW_CHOICES = (("Add image…", "_add_image"),
+                       ("Add random over the images above…", "_add_random_over_existing"),
+                       ("Add random group…", "_add_group"),
+                       ("Add random group from folder…", "_add_group_folder"))
+
+    def add_row_choices(self):
+        """The add row's choices, as ``(label, method, enabled, why)``.
+
+        EVERY CHOICE IS ALWAYS SHOWN, and the ones that cannot apply yet are
+        greyed with the reason in their label.  The first version offered
+        nothing at all on an empty list and went straight to the file dialog,
+        which is the right OUTCOME - the first image is the primary and can
+        never be a roll - but it means a row promising "image or random group"
+        silently does one of them and teaches nobody that the other is there
+        (David, 2026-09-10: "left clicking either of these when the selections
+        are blank only lets me add a single image first").
+        """
+        plain = sum(1 for r in self._rows if not is_group(r))
+        out = []
+        for label, attr in self.ADD_ROW_CHOICES:
+            why = ""
+            if attr == "_add_random_over_existing" and plain < 2:
+                why = "add two images first"
+            elif attr != "_add_image" and not self._rows:
+                why = "add the primary image first"
+            out.append(((label if not why else "%s  (%s)" % (label, why)),
+                        attr, not why, why))
+        return tuple(out)
+
+    def _add_row_clicked(self):
+        """The add row at the foot of the list.
+
+        A GROUP HAD NO DISCOVERABLE WAY IN.  Both group commands were on the
+        right-click menu only, while the big obvious row at the bottom of the
+        list still added a plain image - so somebody looking for the feature
+        would not find it (David, 2026-09-10, on the built branch: "I don't see
+        any interface in the GUI for a user to do so").  The row asks now."""
+        self._popup_add_menu(self.add_row_choices())
+
+    def _popup_add_menu(self, choices):
+        """Put the add row's choices under the pointer.
+
+        A SEAM, not ceremony: `tk_popup` takes a grab and does not return until
+        the menu is dismissed, so a test that clicks the row would hang on it
+        for ever.  The decision is `add_row_choices`, which is pure; this is
+        only the showing of it, and a test replaces this."""
+        menu = tk.Menu(self._table, tearoff=0)
+        for label, attr, live, _why in choices:
+            menu.add_command(label=label,
+                             state=tk.NORMAL if live else tk.DISABLED,
+                             command=lambda a=attr: getattr(self, a)())
+        try:
+            x, y = self._table.winfo_pointerxy()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+
     def _add_image(self):
         path = filedialog.askopenfilename(
             title="Pick a Spike 2 card image for the card",
@@ -6817,14 +7817,163 @@ class MultibootPanel:
         if path:
             self.add_image(path)
 
-    def _remove_image(self):
-        i = self._selected()
-        if i is None:
+    def add_group(self, paths, title="", subtitle=""):
+        """Append a GROUP card: one row the menu draws, several games behind it,
+        a different one booted every power-up (item 106).  The public half of
+        Add group…, and what the tests drive."""
+        paths = [(q or "").strip().strip('"') for q in (paths or [])]
+        paths = [q for q in paths if q]
+        if not paths:
             return
+        if len(self._rows) >= MAX_CARDS:
+            self._error("At most %d images fit one card." % MAX_CARDS)
+            return
+        if not self._rows:
+            # image 0 is the primary and the machine boots it when the menu is
+            # not honoured, so it cannot be a roll
+            self._error("Add the primary (stock) image first: the first image "
+                        "cannot be a random group.")
+            return
+        trees = len(form_trees(self.form())) + len(paths)
+        if trees > MAX_TREES:
+            self._error("That would be %d games; at most %d fit one card."
+                        % (trees, MAX_TREES))
+            return
+        if sum(1 for r in self._rows if is_group(r)) >= MAX_GROUPS:
+            self._error("At most %d random groups fit one card." % MAX_GROUPS)
+            return
+        # PICKING GAMES THAT ARE ALREADY ON THE CARD MEANS THE OTHER KIND OF
+        # RANDOM CARD.  A consuming group would put a second copy of each on the
+        # card and the form would refuse itself with "game 1 is listed twice" -
+        # which is what David got, and the only sign of it was the preview
+        # declining to redraw.  What he asked for by picking them is a card that
+        # rolls between the builds that are there, which is the keeping kind.
+        on_card = {}
+        for ri, r in enumerate(self._rows):
+            if not is_group(r):
+                for q in row_paths(r):
+                    on_card.setdefault(_norm(q), ri)
+        already = [q for q in paths if _norm(q) in on_card]
+        keep = len(already) == len(paths)
+        if already and not keep:
+            self._error(
+                "%d of these %d games are already on the card (%s). A random "
+                "card either rolls between games that are already here, or "
+                "brings its own - not both."
+                % (len(already), len(paths),
+                   ", ".join(os.path.basename(q) for q in already[:3])))
+            return
+        members = [MemberRow(path=q, title=suggest_title(q)[0]) for q in paths]
+        self._rows.append(set_group_media(
+            ImageRow(path="", title=title or "RANDOM", subtitle=subtitle,
+                     members=members, keep=keep, roll=ROLL_DEFAULT),
+            GROUP_MEDIA_DEFAULT))
+        self._refresh_tree(select=len(self._rows) - 1)
+        # a group forces the compact build; show that in the tick straight away
+        self._sync_compact_lock()
+        self._ok("")
+
+    def _add_group(self):
+        paths = filedialog.askopenfilenames(
+            title="Pick the card images this one card will choose between",
+            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+        if paths:
+            self.add_group(list(paths))
+
+    def add_random_over_existing(self, title="RANDOM", subtitle=""):
+        """A random card over the images ALREADY in the list, which keep their
+        own cards (item 106, reopened).  This is David's `C1 | C2 | RANDOM`: the
+        menu offers the builds AND a "surprise me" beside them, and it adds not
+        one byte to the card because it puts no new game on it."""
+        plain = [r for r in self._rows if not is_group(r)]
+        if len(plain) < 2:
+            self._error("Add at least two images first: a random card chooses "
+                        "between images that are already on the card.")
+            return
+        if len(self._rows) >= MAX_CARDS:
+            self._error("At most %d images fit one card." % MAX_CARDS)
+            return
+        if sum(1 for r in self._rows if is_group(r)) >= MAX_GROUPS:
+            self._error("At most %d random groups fit one card." % MAX_GROUPS)
+            return
+        members = [MemberRow(path=(r.path or "").strip().strip(chr(34)),
+                             title=(r.title or "").strip(), version=r.version)
+                   for r in plain]
+        self._rows.append(set_group_media(
+            ImageRow(path="", title=title, subtitle=subtitle, members=members,
+                     keep=True, roll=ROLL_DEFAULT), GROUP_MEDIA_DEFAULT))
+        self._refresh_tree(select=len(self._rows) - 1)
+        self._ok("")
+
+    def _add_random_over_existing(self):
+        self.add_random_over_existing()
+
+    def add_group_from_folder(self, folder):
+        """Every ``*.raw`` in *folder*, sorted, as one group card.  Forty
+        song-set variants are a folder, not a file dialog somebody should have
+        to shift-click through - which is the case that filed this item."""
+        try:
+            names = sorted(n for n in os.listdir(folder)
+                           if n.lower().endswith((".raw", ".img")))
+        except OSError as e:
+            self._error("Cannot read %s: %s" % (folder, e))
+            return
+        if not names:
+            self._error("No .raw card images in %s." % folder)
+            return
+        self.add_group([os.path.join(folder, n) for n in names],
+                       title=os.path.basename(os.path.normpath(folder)).upper())
+
+    def _add_group_folder(self):
+        folder = filedialog.askdirectory(
+            title="Pick a folder of card images for one random card")
+        if folder:
+            self.add_group_from_folder(folder)
+
+    def _sync_compact_lock(self):
+        """A group forces the compact build, so the tick goes on and greys out
+        while one is in the list - with the tooltip saying why.  mkmulticard
+        refuses parts/multi with a group outright; this is the same fact where
+        a person can see it BEFORE the press (David, 2026-09-09)."""
+        chk = getattr(self, "_compact_chk", None)
+        if chk is None:
+            return
+        locked = any(is_group(r) for r in self._rows)
+        try:
+            if locked:
+                self._compact_var.set(True)
+                chk.state(["disabled"])
+            else:
+                chk.state(["!disabled"])
+        except tk.TclError:                             # pragma: no cover
+            return
+        tip = getattr(self, "_compact_tip", None)
+        if tip is not None:
+            tip.text = self.COMPACT_TIP_GROUP if locked else self.COMPACT_TIP
+
+    def remove_image(self, i):
+        """Remove row *i*, AND every random card's claim on the game it took
+        with it (see :func:`drop_game_from_groups`).  The public half of the
+        list's delete button, and what the tests drive."""
+        if not 0 <= i < len(self._rows):
+            return
+        gone = self._rows[i]
         del self._rows[i]
+        notes = []
+        if not is_group(gone):
+            for q in row_paths(gone):
+                self._rows, said = drop_game_from_groups(self._rows, q)
+                notes += said
         self._refresh_tree(select=min(i, len(self._rows) - 1))
+        self._sync_compact_lock()       # the last group may have just gone
         if i == 0:
             self._maybe_default_output()
+        self._ok(" ".join(notes) if notes else "")
+
+    def _remove_image(self):
+        i = self._selected()
+        if i is not None:
+            self.remove_image(i)
 
     def _move_image(self, delta):
         i = self._selected()
@@ -8355,8 +9504,7 @@ class MultibootPanel:
                     errs.append("Image %d: the %s must not contain | ; $ "
                                 "or `." % (i, what))
             on_card = dict(on_card_fields(row))
-            for what, val in (("art", row.art), ("animation", row.anim),
-                              ("music", row.music)):
+            for what, val in media_fields_to_check(row):
                 if what in on_card:
                     if prepare:
                         errs.append(
@@ -8368,7 +9516,21 @@ class MultibootPanel:
                 elif is_file_choice(val) and not os.path.isfile(val.strip()):
                     errs.append("Image %d: %s file not found: %s"
                                 % (i, what, val))
-            if prepare and not os.path.isfile((row.path or "").strip()):
+            if prepare and is_group(row) and group_art_spec(row) not in ("", "none"):
+                # A RANDOM CARD'S PICTURE IS DRAWN FROM ITS MEMBERS' LOGOS, so
+                # the hazard 'auto' has on an image row it has on every style
+                # here: the .raw files have to be on this machine to pull a
+                # logo out of.
+                for mi, m in enumerate(row.members):
+                    mp = (m.path or "").strip().strip('"')
+                    if group_media_kind(row) != "picture" and not os.path.isfile(mp):
+                        errs.append(
+                            "Image %d, game %d: the random card's picture is "
+                            "drawn from this game's logo - and %s is not on "
+                            "this machine. Point the card at a picture file, "
+                            "or make the change where the game is."
+                            % (i, mi + 1, mp or "its image"))
+            elif prepare and not os.path.isfile((row.path or "").strip()):
                 for what, spec in (("art", art_spec(row)),
                                    ("animation", anim_spec(row))):
                     if spec == "auto" or spec.startswith("auto@"):
@@ -9137,7 +10299,10 @@ class MultibootPanel:
         hl = (_int(self._hl_var, _int(self._default_var, 0))
               if highlight is None else int(highlight))
         manifest = self._manifest(media)
-        sounds = manifest_sounds(manifest, media, hl)
+        # A RANDOM CARD'S SOUNDS ARE ITS OWN ROW's, and a card index is not an
+        # image index the moment one exists.
+        gi = {ri: g for g, ri, _row, _imgs in form_groups(self.form())}.get(hl)
+        sounds = manifest_sounds(manifest, media, hl, group=gi)
         # THE FORM SAYS WHETHER AN IMAGE HAS A SOUND; the manifest only says
         # which file.  A row set to 'none' since the last prepare still has
         # its old bed - and its old confirm - sitting in that directory, and
@@ -9164,8 +10329,10 @@ class MultibootPanel:
         # update to the new music selection") describes a card nobody is
         # going to build.  Silence until the new one is rendered - the
         # audio step follows a change by itself (see _auto_render).
-        rows = manifest.get("images") or []
-        entry = rows[hl] if 0 <= hl < len(rows) and isinstance(rows[hl], dict) else {}
+        rows = manifest.get("groups") if gi is not None else manifest.get("images")
+        rows = rows or []
+        key = gi if gi is not None else hl
+        entry = rows[key] if 0 <= key < len(rows) and isinstance(rows[key], dict) else {}
         if row is not None and sounds["music"]:
             was = entry.get("music_source")
             if was is not None and was != _media_value(row.music):
@@ -9335,20 +10502,35 @@ class MultibootPanel:
         if gone(self._menu_confirm() != "none", manifest.get("sound_confirm"),
                 manifest.get("sound_confirm_source"), confirm_now):
             missing.append("the confirm sound")
-        rows = manifest.get("images") or []
+        # A ROW IS A CARD, and the manifest has two kinds of row: one per GAME
+        # and one per RANDOM CARD.  Reading the games' rows at a card's number
+        # said a random card's music was never rendered, for ever (David,
+        # 2026-09-11: the strip reading "not rendered (image 3's music)").
+        imgs = manifest.get("images") or []
+        grps = manifest.get("groups") or []
+        first = {}
+        for img, _p, ri, _mi in form_trees(self.form()):
+            first.setdefault(ri, img)
+        gi_of = {ri: g for g, ri, _row, _imgs in form_groups(self.form())}
         for i, row in enumerate(self._rows):
-            entry = rows[i] if i < len(rows) and isinstance(rows[i], dict) \
+            if i in gi_of:
+                rows, key = grps, gi_of[i]
+                what = "the random card's"
+            else:
+                rows, key = imgs, first.get(i, i)
+                # The images are numbered the way the picture numbers them,
+                # from one, because this is said to a person (see _image_label).
+                what = "image %d's" % (i + 1)
+            entry = rows[key] if 0 <= key < len(rows) and isinstance(rows[key], dict) \
                 else {}
-            # The images are numbered the way the picture numbers them, from
-            # one, because this is said to a person (see _image_label).
             music_now = _media_value(row.music)
             if gone(music_now not in ("", "none"), entry.get("music"),
                     entry.get("music_source"), music_now):
-                missing.append("image %d's music" % (i + 1))
+                missing.append("%s music" % what)
             confirm_now = confirm_spec(row)
             if gone(confirm_now != "none", entry.get("confirm"),
                     entry.get("confirm_source"), confirm_now):
-                missing.append("image %d's confirm sound" % (i + 1))
+                missing.append("%s confirm sound" % what)
         return missing
 
     def _sounds_ready(self):
@@ -9444,20 +10626,107 @@ class MultibootPanel:
     LOADING_MS = 1000
 
     def press_select(self):
-        """START, on the picture: the chosen image's confirm sound, and the
-        screen black while it plays.
+        """START, on the picture: the chosen card's confirm sound, and the
+        LOADING frame the machine draws while it plays.
 
-        The machine draws a LOADING frame, plays that card's confirm sound
-        to completion and boots - so the black is not decoration, it is the
-        moment the menu hands over.  Hearing the sound against the picture
-        it belongs to is the whole point of being able to press this before
-        a card exists."""
+        THE LOADING FRAME IS WHERE A RANDOM CARD SAYS WHAT IT ROLLED - the one
+        moment the player is told which build they got (David, 2026-09-11: "I
+        want to see this especially for how it looks with the random one") - so
+        the preview shows the real one the selector drew.  A black beat stood in
+        for it before, and still does when there is no frame to show: an older
+        selector, or a render that has not finished."""
         self.play_confirm()
-        self._blackout()
+        # A RANDOM CARD ROLLS AGAIN ON EVERY PRESS, and showing the frame the
+        # LAST roll drew while this one is rendering put two different builds on
+        # screen in quick succession (David, 2026-09-11).  So the beat stays
+        # black for a random card until its own roll lands - which is what the
+        # machine shows in that moment anyway - and an ordinary card, whose
+        # frame cannot change, is drawn at once.
+        rolling = self._roll_loading()
+        if not rolling:
+            self._blackout(self._loading_frame())
+        else:
+            self._blackout()
         return True
 
-    def _blackout(self):
-        """Black the canvas for :data:`LOADING_MS`, then put the frame back.
+    def _roll_loading(self):
+        """Ask the selector for the LOADING frame again, so a random card rolls
+        again - and show it when it lands.
+
+        It is one snapshot out of a load that is already cheap (the same step
+        the preview runs on a keystroke), and only on a deliberate press.  It
+        asks for nothing when there is no pipeline yet, when the card on screen
+        is not a random one (an ordinary card's frame cannot change), or when
+        the worker is busy: the beat then holds whatever the last render drew,
+        which is what it always showed."""
+        if not self._pv_bin or not self._pv_fp or self._stopped:
+            return False
+        form = self.form()
+        hl = _int(self._hl_var, 0)
+        if not (0 <= hl < len(form.images) and is_group(form.images[hl])):
+            return False
+        pv = preview_dir_for(form.out)
+        conf = os.path.join(pv, "images.conf")
+        if not pv or not os.path.isfile(conf):
+            return False
+        path = loading_path(pv, self._pv_fp, hl)
+        ppm = os.path.join(pv, "roll_%d.ppm" % hl)
+        cmds = snapshot_commands(self._pv_bin, conf, self.media_dir(), ppm,
+                                 preview_highlight(form, hl), 0,
+                                 rootfs_for(form.selector_dir),
+                                 loading=path,
+                                 roll_state=self._roll_state_path())
+
+        def done(rc, failed, texts):
+            img = rolled_image(texts.get(cmds[0][0], "")) if rc == 0 else None
+            if img is not None:
+                # SAY WHICH ONE, where a person can see it: the two builds of a
+                # jukebox share a title, so the frame alone can leave you
+                # guessing whether it rolled at all.
+                self._pv_say("The random card rolled %s."
+                             % game_name(form, img))
+            if rc == 0 and os.path.isfile(path) and not self._stopped:
+                # THE DECODED FRAME IS CACHED BY PATH, and the reroll writes the
+                # same path: without this the file changed and the picture did
+                # not, so ten presses showed one roll ten times (David,
+                # 2026-09-11: "i just pressed the random button 10 times in a
+                # row and each time the result was the same").
+                self._drop_photo(path)
+                self._blackout(path)        # the new roll, and a fresh beat
+
+        return bool(self._run_commands(cmds, on_done=done, preview=True,
+                                       quiet=[c[0] for c in cmds]))
+
+    def _roll_state_path(self):
+        """The preview's OWN copy of the roll's memory - what was booted last
+        and what each shuffle has dealt.
+
+        The machine keeps this on the card, beside its last choice; the preview
+        keeps one in its own directory, so pressing Select walks the same deck
+        the machine would without ever reading or writing the machine's."""
+        pv = preview_dir_for(self.form().out)
+        return os.path.join(pv, "roll.state") if pv else ""
+
+    def _loading_frame(self, card=None):
+        """The LOADING frame for the card on screen, or None.
+
+        KEYED ON THE CARD THAT IS HIGHLIGHTED NOW, not on the last render: a
+        redraw happens only when something changed, so the render's own answer
+        is the last card that needed drawing - which is how pressing Select on
+        an ordinary image showed the random card's loading frame (David,
+        2026-09-11).  One file per (form, card), so the right one is on disk
+        whenever that card has been drawn under this form."""
+        fp = self._pv_fp
+        pv = preview_dir_for(self.form().out) if fp else ""
+        if not pv:
+            return None
+        hl = _int(self._hl_var, 0) if card is None else int(card)
+        path = loading_path(pv, fp, hl)
+        return path if os.path.isfile(path) else None
+
+    def _blackout(self, still=None):
+        """Hold *still* (the LOADING frame) for :data:`LOADING_MS`, or black
+        when there is none, then put the frame back.
 
         The picture on screen is not thrown away - it is re-shown from the
         file it was drawn from - so this costs no render and cannot leave
@@ -9466,10 +10735,22 @@ class MultibootPanel:
         if canvas is None:                              # pragma: no cover
             return False
         self._cancel_blackout()
+        self._black_still = still or None
         try:
             canvas.delete("all")
         except tk.TclError:                             # pragma: no cover
             return False
+        if still:
+            # drawn WITHOUT touching _pv_src: the beat ends by putting back
+            # whatever was on screen, which is the menu frame
+            photo = self._scaled_photo(still)
+            if photo is not None:
+                self._pv_photo = photo
+                try:
+                    canvas.create_image(self._pv_w // 2 + 1, self._pv_h // 2 + 1,
+                                        image=photo, anchor=tk.CENTER)
+                except tk.TclError:                     # pragma: no cover
+                    pass
         try:
             self._black_job = self._timer().after(self.LOADING_MS,
                                                   self._blackout_over)
@@ -10138,14 +11419,23 @@ class MultibootPanel:
         first = wanted[0]
         ppm = (frame_pattern(pv, fp, hl) if run > 1
                else frame_path(pv, fp, hl, first))
+        # THE LOADING FRAME IS REMEMBERED, not derived again later: it is the
+        # file THIS render asked the selector for, and what the Select button
+        # shows.  Deriving it from the form afterwards means guessing which
+        # highlight the render used, and the answer is here.
+        self._pv_load_frame = loading_path(pv, fp, hl)
 
         def argv(texts):
             binary = parse_selector_path(texts.get("selector", "")) \
                 or self._pv_bin
             if not binary:
                 raise RuntimeError("the selector step named no binary")
-            return snapshot_commands(binary, conf, media, ppm, hl, first,
-                                     rootfs, frames=run)[0][1]
+            # hl is a table ROW, and a row IS a card (see preview_highlight),
+            # which is what the cache key above keeps too.
+            return snapshot_commands(binary, conf, media, ppm,
+                                     preview_highlight(form, hl), first,
+                                     rootfs, frames=run,
+                                     loading=loading_path(pv, fp, hl))[0][1]
         draw = ANIM_LABEL if run > 1 else "frame %d" % first
         cmds.append((draw, argv))
 
@@ -10385,8 +11675,14 @@ class MultibootPanel:
         if not media or not _HAVE_PIL:
             return out
         k = float(scale)
+        names = card_media_names(self.form())
         for i, rect in sorted(rects.items()):
-            path = os.path.join(media, "anim%d.gif" % int(i))
+            # `i` IS A CARD, and the files are numbered by image (and a random
+            # card's by group), so the name is derived rather than formatted
+            name = names[i][1] if 0 <= i < len(names) else ""
+            if not name:
+                continue
+            path = os.path.join(media, name)
             try:
                 st = os.stat(path)
             except OSError:
@@ -10479,7 +11775,11 @@ class MultibootPanel:
         media = self._pv_media or self.media_dir()
         if not media:
             return None
-        path = os.path.join(media, "anim%d.gif" % int(hl))
+        names = card_media_names(self.form())
+        name = names[hl][1] if 0 <= hl < len(names) else ""
+        if not name:
+            return None
+        path = os.path.join(media, name)
         try:
             st = os.stat(path)
             key = (path, st.st_mtime, st.st_size)

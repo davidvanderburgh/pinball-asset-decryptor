@@ -777,7 +777,8 @@ def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
     assert words[words.index("--snapshot") + 1] == multiboot_tab.wsl(ppm)
     assert words[words.index("--conf") + 1] == multiboot_tab.wsl(conf)
     assert words[words.index("--media") + 1] == multiboot_tab.wsl(media)
-    assert words[words.index("--highlight") + 1] == "1"
+    assert words[words.index("--highlight-card") + 1] == "1"
+    assert "--highlight" not in words, "the preview names a CARD, not an image"
     assert words[words.index("--anim-frame") + 1] == "3"
     assert words[words.index("--input") + 1] == "none"
     for flag in ("--out", "--last", "--timeout", "--headless"):
@@ -8391,17 +8392,55 @@ def test_the_media_indexes_are_games(tmp_path):
     assert [x.split("=")[0] for x in arts] == ["0", "1", "2", "3", "4"]
 
 
-def test_the_preview_highlights_a_card_by_naming_one_of_its_games(tmp_path):
-    """--highlight names an IMAGE and the selector lights up the CARD that image
-    belongs to. Sending the row number would highlight the wrong card on any
-    list with a group above the row being previewed."""
+def test_the_preview_can_highlight_a_random_card(tmp_path):
+    """THE PREVIEW HIGHLIGHTS A CARD. `--highlight`, `default=` and the choice
+    file all name an IMAGE, which is right for them: they say which GAME boots.
+    A random card over images that keep their own cards is not any image - no
+    image index resolves to it - so naming its first member lit up that member's
+    own card, the flippers walked straight past the random one, and the first
+    card was drawn twice (David, 2026-09-11: "the left right flippers can't
+    highlight the random one")."""
     mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        form = panel.form()
+        assert [mb.preview_highlight(form, r) for r in range(3)] == [0, 1, 2]
+        words = mb.preview_snapshot_args("/bin/cs", "c.conf", "media", "f.ppm",
+                                         mb.preview_highlight(form, 2), 0)
+        assert words[words.index("--highlight-card") + 1] == "2"
+    finally:
+        root.destroy()
+    # ...and a CONSUMING group's card is still its row, with the games it
+    # swallowed not shifting the ones below it
     form, _paths = _group_form(tmp_path)
-    assert mb.preview_highlight(form, 2) == 2
-    # put the group first among the extras: row 2 is then image 4
-    form.images = [form.images[0], form.images[2], form.images[1]]
-    assert mb.preview_highlight(form, 1) == 1
-    assert mb.preview_highlight(form, 2) == 4
+    assert [mb.preview_highlight(form, r) for r in range(len(form.images))] \
+        == list(range(len(form.images)))
+
+
+def test_a_random_card_says_what_it_rolls_between(tmp_path):
+    """It has no source of its own and never will - its games are its members -
+    so the caption that says "(no source recorded)" about an image read as a
+    fault on a random card (David, 2026-09-11)."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        cap = mb._cell_image(panel.form().images[1])
+        assert "no source recorded" not in cap, cap
+        assert cap.startswith("rolls between 2 games:"), cap
+        assert os.path.basename(paths[1]) in cap
+        # a game this machine does not have is still counted
+        panel._rows[1].members[0].path = str(tmp_path / "gone.raw")
+        cap = mb._cell_image(panel.form().images[1])
+        assert "[1 not on this machine]" in cap, cap
+    finally:
+        root.destroy()
 
 
 def test_the_preview_conf_draws_one_card_per_row(tmp_path):

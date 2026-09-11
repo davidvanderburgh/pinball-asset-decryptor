@@ -1929,23 +1929,25 @@ def inspect_args(card, media_out=None, as_json=False):
 
 
 def preview_highlight(form, row_index):
-    """The ``--highlight`` value for a table ROW.
+    """The ``--highlight-card`` value for a table ROW, which is the row.
 
-    The selector's ``--highlight`` names an IMAGE, like ``default=`` and the
-    choice file, and it highlights the CARD that image belongs to.  For an
-    ordinary row those are the same number; for a group row the row must send
-    its first member, and the menu lights up the group's card.  Sending the row
-    number instead would highlight the wrong card on any list with a group
-    above the row being previewed."""
-    return row_first_image(form, int(row_index))
+    THE PREVIEW HIGHLIGHTS A CARD, NOT AN IMAGE.  `--highlight`, `default=` and
+    the choice file all name an image, and that is right for them - they say
+    which GAME boots.  The preview says which CARD the player is looking at,
+    and a RANDOM card over images that keep their own is not any image: no
+    image index resolves to it.  Sending its first member instead lit up that
+    member's own card, so the flippers walked past the random one and drew the
+    first card twice (David, 2026-09-11: "the left right flippers can't
+    highlight the random one").  A row IS a card, so this is the row."""
+    return row_card_index(form, int(row_index))
 
 
 def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
                           rootfs=DEFAULT_ROOTFS, frames=1):
     """``qemu-arm-static -L <rootfs> <codeselect> --snapshot <ppm> ...``:
     ONE menu frame as the machine would show it - the conf, the media,
-    highlight N, the animation at frame N, the countdown as if just started,
-    no input, no audio, no choice file - then exit.
+    the CARD highlighted, the animation at frame N, the countdown as if just
+    started, no input, no audio, no choice file - then exit.
 
     ``frames`` > 1 asks for a WHOLE RUN out of that one load: *ppm* is then
     a :func:`frame_pattern` and the selector writes K files, starting at
@@ -1956,7 +1958,10 @@ def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
     args = ["qemu-arm-static", "-L", rootfs, binary,
             "--snapshot", wsl(ppm), "--conf", wsl(conf),
             "--media", wsl(media_dir),
-            "--highlight", str(int(highlight)),
+            # A CARD, not an image: see preview_highlight.  The two are the
+            # same number until a group card makes them differ, and then only
+            # this one can name the group's.
+            "--highlight-card", str(int(highlight)),
             "--anim-frame", str(int(frame))]
     if int(frames) > 1:
         args += ["--frames", str(int(frames))]
@@ -4047,6 +4052,16 @@ def _cell_image(row):
     """The .raw the image was copied from, said plainly when this machine
     does not have it (a loaded card names sources that may live on another
     disk) and when the card names none at all."""
+    if is_group(row):
+        # A RANDOM CARD HAS NO SOURCE OF ITS OWN and never will: its games are
+        # its members.  Saying "(no source recorded)" about it read as a fault
+        # (David, 2026-09-11), when the answer is simply the list of games.
+        names = [os.path.basename(q) or "?" for q in row_paths(row)]
+        missing = sum(1 for q in row_paths(row) if not q or not os.path.isfile(q))
+        shown = ", ".join(names[:3]) + (", …" if len(names) > 3 else "")
+        return "rolls between %d game%s: %s%s" % (
+            len(names), "" if len(names) == 1 else "s", shown,
+            "   [%d not on this machine]" % missing if missing else "")
     p = (row.path or "").strip()
     if not p:
         return "(no source recorded%s)" % (
@@ -11115,9 +11130,8 @@ class MultibootPanel:
                 or self._pv_bin
             if not binary:
                 raise RuntimeError("the selector step named no binary")
-            # hl is a table ROW; --highlight names an IMAGE (see
-            # preview_highlight).  The cache key above keeps the row, which is
-            # what a person asked to see.
+            # hl is a table ROW, and a row IS a card (see preview_highlight),
+            # which is what the cache key above keeps too.
             return snapshot_commands(binary, conf, media, ppm,
                                      preview_highlight(form, hl), first,
                                      rootfs, frames=run)[0][1]

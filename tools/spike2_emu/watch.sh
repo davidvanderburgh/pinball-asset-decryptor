@@ -296,6 +296,29 @@ fi
 GAME=${GAME:-godzilla_pro}
 export PAD_GAME="$GAME"
 
+# THE GAME MUST OWN ITS NVRAM (item 111). The guest runs as this user (root
+# only inside its own namespace), and an elevated rig step - a root selftest,
+# a root-run build - leaves data/nv/<title> and nvram-<title>.bin owned by
+# root, which the game cannot write. Beatles then exits within seconds with
+# FATAL error 256 ("NVMigration: create_current_map_file created an invalid
+# or mismatched file"), written only to /dump/debug_log.txt; other titles
+# lose their settings and audits silently. Nothing in the run can repair it
+# (root's files), so refuse with the one command that does.
+if [ "$(id -u)" != 0 ]; then
+    nv_bad=""
+    for p in "$ROOT/data/nv/$GAME" "$ROOT/data/nvram-$GAME.bin"; do
+        [ -e "$p" ] || continue
+        [ -O "$p" ] || nv_bad="$nv_bad $p"
+    done
+    if [ -n "$nv_bad" ]; then
+        echo "[watch] REFUSING: this title's NVRAM is not owned by $(id -un):$nv_bad" >&2
+        echo "[watch]   an elevated rig step left it to root, and the game cannot write it (Beatles" >&2
+        echo "[watch]   exits with FATAL error 256 in seconds; other titles lose their settings)." >&2
+        echo "[watch]   Fix: wsl -u root chown -R $(id -un):$(id -gn) $ROOT/data $ROOT/dump" >&2
+        exit 1
+    fi
+fi
+
 # UNPOPULATED NODES ARE PER TITLE, AND ARE NOW DERIVED FROM THE TITLE.
 # The shim answers all 64 node addresses, so an absent board looks present, and
 # slot 2 is the one board whose "registered" bit is board[+144] != 0 - a
@@ -2392,6 +2415,18 @@ while :; do
             echo "[watch] the guest left a crash report in game.out:"
             grep -a '\[segv\]' "$ROOT/dump/game.out" | grep -av scenebytes | head -40
         fi
+        # A CLEAN EXIT HAS ITS REASON IN THE GAME'S OWN DEBUG LOG, NOT OURS (item
+        # 111): the game's FATAL routine writes "** FATAL: error N (text)." to
+        # /dump/debug_log.txt and exit(4)s, and the pane showed only the VPU
+        # firmware noise. Beatles died that way for a fortnight - error 256,
+        # NVMigration could not create its map file, because an elevated run
+        # had left data/nv/beatles owned by root. The lines carry the game's own
+        # clock; the last ones are this run's when the game just exited.
+        if grep -aq 'FATAL' "$ROOT/dump/debug_log.txt" 2>/dev/null; then
+            echo "[watch] the game's own debug log ($ROOT/dump/debug_log.txt) holds FATAL lines; the last:"
+            grep -a 'FATAL' "$ROOT/dump/debug_log.txt" | tail -2 | cut -c1-200
+        fi
+        grep -a '^\[exit\] status' "$LOG" 2>/dev/null | grep -av 'child process' | tail -1
         break
     fi
     if [ "$END" != 0 ] && [ "$(date +%s)" -ge "$END" ]; then

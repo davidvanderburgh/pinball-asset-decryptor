@@ -1874,6 +1874,25 @@ static void map_null_page(void)
  * game asked for. The text bounds are wide (0x8000..0x600000) because every
  * title's game is linked at 0x8000 and none has reached 6 MB of text. */
 extern void _exit(int);
+extern int setenv(const char *, const char *, int);
+extern int atoi(const char *);
+/* The game's own pid, carried in the ENVIRONMENT: a system()/popen() child execs a
+ * new shell that loads this shim afresh, so a static set by a constructor would only
+ * ever hold the child's own pid. The first process to load the shim with the variable
+ * unset is the game; everything that inherits it is not. */
+static int shim_is_child(void)
+{
+    static int is_child = -1;
+    if (is_child == -1) {
+        char *p = getenv("PAD_SHIM_GAME_PID"), b[24];
+        long me = syscall(20);
+        if (p && *p) is_child = atoi(p) != me;
+        else { snprintf(b, sizeof b, "%ld", me); setenv("PAD_SHIM_GAME_PID", b, 1); is_child = 0; }
+    }
+    return is_child;
+}
+__attribute__((constructor)) static void note_main_pid(void) { shim_is_child(); }
+
 void shim_exit(int status) __asm__("exit");
 void shim_exit(int status)
 {
@@ -1882,6 +1901,14 @@ void shim_exit(int status)
     char b[200];
     int i, shown = 0;
     if (!real_exit) real_exit = dlsym(RTLD_NEXT, "exit");
+    if (shim_is_child()) {
+        /* the shell a system()/popen() forked, exiting: one line, no stack - its text
+         * is busybox's and the words would only mislead */
+        snprintf(b, sizeof b, "[exit] status=%d (a child process, pid %ld)\n", status, (long)syscall(20));
+        logmsg(b);
+        if (real_exit) real_exit(status);
+        _exit(status);
+    }
     snprintf(b, sizeof b, "[exit] status=%d from 0x%lx tid=%ld\n", status,
              (unsigned long)__builtin_return_address(0), (long)syscall(224));
     logmsg(b);

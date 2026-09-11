@@ -114,6 +114,7 @@ install: $(BIN)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/codeselect"
 > install -m 755 select.sh "$(DESTDIR)$(PREFIX)/select.sh"
+> install -m 755 materialize.py "$(DESTDIR)$(PREFIX)/materialize.py"
 > install -m 644 images.conf.example "$(DESTDIR)$(PREFIX)/images.conf.example"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the card's VeraMono.ttf will be used"; fi
 > if [ -d media ]; then install -d "$(DESTDIR)$(PREFIX)/media"; for f in media/*; do if [ -f "$$f" ]; then install -m 644 "$$f" "$(DESTDIR)$(PREFIX)/media/"; fi; done; fi

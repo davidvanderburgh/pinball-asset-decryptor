@@ -210,5 +210,80 @@ grep -q "has no device" "$W/out" || { echo "select_sh_test: FAIL (nodev) message
 CODESELECT_MULTI="$W/blocked/multi" \
 hook fallback 2 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $W/multi2" "mount --bind $W/multi2/img2 $G"
 grep -q "using $W/multi2" "$W/out" || { echo "select_sh_test: FAIL (fallback) message"; cat "$W/out"; exit 1; }
+# ---- deltas (item 107): a tree carrying .multiboot/deltas runs materialize.py --------------
+# the fake mount grows the index under img2 when FAKE_DELTAS is set; the fake python records
+# its command line; no --mount-dev when CODESELECT_WORKDEV is empty (a plain work directory)
+cat > "$W/fakepy" <<'EOF'
+#!/bin/sh
+echo "$*" > "$PYARGS"
+echo "materialize: fake ran"
+exit 0
+EOF
+chmod 755 "$W/fakepy"
+cp materialize.py "$W/materialize.py"
+export PYARGS="$W/pyargs"
+sed -i 's|^: > "$mp/game".*|&; if [ -n "$FAKE_DELTAS" ]; then mkdir -p "$mp/img2/.multiboot"; : > "$mp/img2/.multiboot/deltas"; fi|' "$W/fakemount"
+: > "$PYARGS"
+FAKE_DELTAS=1 CODESELECT_PYTHON="$W/fakepy" CODESELECT_WORKDEV= CODESELECT_WORKMNT="$W/work" \
+hook deltas 2 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $M" "mount --bind $M/img2 $G"
+grep -q "image 2: stores deltas: rebuilding them" "$W/out" || { echo "select_sh_test: FAIL (deltas) message"; cat "$W/out"; exit 1; }
+grep -q "materialize: fake ran" "$W/out" || { echo "select_sh_test: FAIL (deltas) materialize.py was not run"; cat "$W/out"; exit 1; }
+case " $(cat "$PYARGS") " in
+    *" $W/materialize.py --store $M --tree img2 --games $G --work $W/work "*) ;;
+    *) echo "select_sh_test: FAIL (deltas) materialize.py arguments:"; cat "$PYARGS"; exit 1 ;;
+esac
+case " $(cat "$PYARGS") " in *" --mount-dev "*) echo "select_sh_test: FAIL (deltas) --mount-dev with an empty CODESELECT_WORKDEV"; cat "$PYARGS"; exit 1 ;; esac
+[ -d "$W/work" ] || { echo "select_sh_test: FAIL (deltas) the work mountpoint was not created"; exit 1; }
+# the default work device reaches the script as --mount-dev
+: > "$PYARGS"
+FAKE_DELTAS=1 CODESELECT_PYTHON="$W/fakepy" CODESELECT_WORKMNT="$W/work" \
+hook deltasdev 2 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $M" "mount --bind $M/img2 $G"
+case " $(cat "$PYARGS") " in *" --mount-dev /dev/mmcblk0p7 "*) ;; *) echo "select_sh_test: FAIL (deltasdev) no --mount-dev /dev/mmcblk0p7:"; cat "$PYARGS"; exit 1 ;; esac
+# no python on the card: the bind stands, the base's files play, and the log says why
+FAKE_DELTAS=1 CODESELECT_PYTHON="$W/nosuchpython" \
+hook deltasnopy 2 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $M" "mount --bind $M/img2 $G"
+grep -q "there is no $W/nosuchpython: the game plays the base's files" "$W/out" || { echo "select_sh_test: FAIL (deltasnopy) message"; cat "$W/out"; exit 1; }
+# a tree without the index runs nothing (the same mounts, no python line)
+: > "$PYARGS"
+CODESELECT_PYTHON="$W/fakepy" \
+hook nodeltas 2 0 "" "umount $G" "mount -t ext4 -o ro,relatime,exec /dev/mmcblk0p7 $M" "mount --bind $M/img2 $G"
+[ -z "$(cat "$PYARGS")" ] || { echo "select_sh_test: FAIL (nodeltas) materialize.py ran with no index"; exit 1; }
+# and the real script, under this host's python, against a real tiny store: the
+# fake mount's tree gets a base blob, a delta of it and an index, and the work
+# file comes out as the variant with a stamp beside it
+PYREAL=$(command -v python3 || command -v python)
+if [ -n "$PYREAL" ]; then
+    rm -rf "$W/work" "$W/multi"
+    cat > "$W/mkstore.py" <<'EOF'
+import hashlib, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))
+import materialize as mz
+root, sub = sys.argv[2], "img2"
+base = bytes(bytearray(range(256))) * 200
+var = bytearray(base); var[1000:1010] = b"0123456789"; var = bytes(var)
+os.makedirs(os.path.join(root, ".blobs")); os.makedirs(os.path.join(root, sub, ".multiboot")); os.makedirs(os.path.join(root, sub, "t"))
+key = hashlib.sha256(base).hexdigest() + ".0644.0.0"
+open(os.path.join(root, ".blobs", key), "wb").write(base)
+open(os.path.join(root, sub, "t", "image.bin"), "wb").write(base)
+open(os.path.join(root, sub, "game"), "wb").write(b"")
+sha = hashlib.sha256(var).hexdigest(); name = sha + ".0644.0.0.delta"
+def ch(b):
+    for i in range(0, len(b), 4096): yield b[i:i + 4096]
+ranges = mz.find_delta(ch(base), ch(var), len(base))
+with open(os.path.join(root, ".blobs", name), "wb") as f: mz.write_delta(f, key, sha, len(base), ranges, ch(var))
+mz.write_index(os.path.join(root, sub, ".multiboot", "deltas"), [("t/image.bin", key, name, len(base))])
+open(os.path.join(root, "want"), "wb").write(var)
+EOF
+    "$PYREAL" "$W/mkstore.py" "$W/materialize.py" "$W/multi"
+    # the fake mount would wipe the tree: run the function's own command line instead
+    CODESELECT_DIR="$W" "$PYREAL" "$W/materialize.py" --store "$W/multi" --tree img2 --games "$G" --work "$W/work" --no-bind --verify > "$W/out" 2>&1 \
+        || { echo "select_sh_test: FAIL (real) materialize.py exited non-zero"; cat "$W/out"; exit 1; }
+    cmp -s "$W/work/t/image.bin" "$W/multi/want" || { echo "select_sh_test: FAIL (real) the work file is not the variant"; cat "$W/out"; exit 1; }
+    grep -q "^base " "$W/work/t/image.bin.stamp" || { echo "select_sh_test: FAIL (real) no stamp"; ls -l "$W/work/t"; exit 1; }
+    grep -q "1 of 1 delta file(s) in place" "$W/out" || { echo "select_sh_test: FAIL (real) message"; cat "$W/out"; exit 1; }
+    real="materialize.py for real under $PYREAL"
+else
+    real="no python on this host: materialize.py's own run skipped"
+fi
 rm -rf "$W"
-echo "select_sh_test: OK ($awks; the hook against fake mounts: 11 cases)"
+echo "select_sh_test: OK ($awks; the hook against fake mounts: 15 cases; $real)"

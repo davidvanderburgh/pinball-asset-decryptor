@@ -84,6 +84,33 @@ has_game() {
     [ -e "$1/game" ] || [ -L "$1/game" ]
 }
 
+# ITEM 107 - DELTAS. A store card (--layout store) may keep a tree's file as a
+# byte-range DELTA of another tree's: the tree's own file is then a hardlink to
+# the BASE (it plays the base's songs as it stands) and <tree>/.multiboot/deltas
+# names what to rebuild. materialize.py - shipped beside this script, run with
+# the card's own python2.7 - mounts the work partition rw, rebuilds each file
+# under a stamp and binds it over its path under /games. It exits 0 on every
+# failure, so a broken delta means the base's songs and never a machine that
+# will not boot. Runs AFTER the tree is bound, so the bind targets exist.
+# The CODESELECT_* variables exist for the tests (a stand-in python, a plain
+# directory for the work partition); the hook runs with the defaults.
+PY=${CODESELECT_PYTHON:-/usr/bin/python2.7}
+WORKDEV=${CODESELECT_WORKDEV-/dev/mmcblk0p7}
+WORKMNT=${CODESELECT_WORKMNT:-/mnt/work}
+materialize() {   # materialize STORE-MOUNT SUB
+    [ -f "$1/$2/.multiboot/deltas" ] || return 0
+    [ -x "$PY" ] || { log "image $idx: stores deltas but there is no $PY: the game plays the base's files"; return 0; }
+    [ -f "$DIR/materialize.py" ] || { log "image $idx: stores deltas but there is no $DIR/materialize.py: the game plays the base's files"; return 0; }
+    wm=$WORKMNT
+    if ! mkdir -p "$wm" 2>/dev/null; then
+        wm=/var/volatile/work
+        mkdir -p "$wm" 2>/dev/null
+    fi
+    log "image $idx: stores deltas: rebuilding them on $WORKDEV at $wm"
+    "$PY" "$DIR/materialize.py" --store "$1" --tree "$2" --games "$GAMES" --work "$wm" \
+        ${WORKDEV:+--mount-dev "$WORKDEV"} ${LOG:+--log "$LOG"} </dev/null
+}
+
 case "$1" in
     --lookup)
         [ -n "$2" ] || { echo "usage: select.sh --lookup N [conf]" >&2; exit 1; }
@@ -158,6 +185,7 @@ else
     if [ -d "$mp" ] && $MOUNT -t ext4 -o ro,relatime,exec "$dev" "$mp"; then
         if [ -d "$mp/$sub" ] && $MOUNT --bind "$mp/$sub" "$GAMES" && has_game "$GAMES"; then
             log "image $idx: mounted $dev at $mp, $sub bound over $GAMES"
+            materialize "$mp" "$sub"
             exit 0
         fi
         log "no $mp/$sub/game or the bind failed: remounting the primary $PRIMARY"

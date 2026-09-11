@@ -548,7 +548,7 @@ SETSID=""
 USERNS="-r"
 [ "$(id -u)" = 0 ] && USERNS=""
 unshare $USERNS -m -p -f $SETSID bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" "$PIVOT" \
-        "${PIVOTROOT:-}" "$OVERRIDE_SRC" "${SEL_DIRS:-}" <<'INNER'
+        "${PIVOTROOT:-}" "$OVERRIDE_SRC" "${SEL_DIRS:-}" "$S" <<'INNER'
 R="$1"
 NODEBUS_PTY="$2"
 GAME="$3"
@@ -565,6 +565,9 @@ OVERRIDE_SRC="$7"
 # `<partition idx><TAB><mounted title directory>`. Empty on every run that
 # did not ask for the selector, and then nothing below reads it.
 SEL_DIRS="$8"
+# The rig's own directory (item 107): codeselect/materialize.py lives there, and
+# the plain variable does not cross into `bash -s`.
+S="$9"
 # pivot_root needs the new root to BE a mount, and everything mounted below then
 # rides the pivot, so the self-bind of $R must come FIRST - before proc/sys/tmp.
 # Guarded, so the chroot path is untouched.
@@ -783,6 +786,26 @@ if [ -n "$SEL_DIRS" ]; then
 ' "$SEL_DIR" > "$R/dump/vidroot"
         [ "$(basename "$SEL_DIR")" = "$GAME" ] || \
             echo "[select] NOTE: that image's title directory is $(basename "$SEL_DIR"); it runs as /games/$GAME with the primary's tables"
+        # ★ ITEM 107 - A TREE THAT STORES FILES AS DELTAS IS REBUILT BEFORE THE
+        # GAME SEES IT. On a store card the chosen tree is <store>/imgK/<title>
+        # and a delta'd tree carries <store>/imgK/.multiboot/deltas; its own
+        # image.bin is a hardlink to the BASE blob (the songs of the image it
+        # was derived from), and materialize.py rebuilds the variant into the
+        # work directory and binds it over the file the game opens - the same
+        # script select.sh runs on the machine with the card's python2.7, here
+        # with the host's python3 and a plain directory for the work
+        # partition. Never fatal: it exits 0 on every failure and the game
+        # plays the base's songs, which is what the machine would do too.
+        # $R/dump persists across runs, so the second run of the same variant
+        # finds its stamp and copies nothing.
+        SEL_TREE=$(dirname "$SEL_DIR"); SEL_SUB=$(basename "$SEL_TREE"); SEL_STORE=$(dirname "$SEL_TREE")
+        if [ -f "$SEL_TREE/.multiboot/deltas" ] && [ -d "$SEL_STORE/.blobs" ]; then
+            mkdir -p "$R/dump/work"
+            echo "[select] image $SEL_CHOICE stores files as deltas: rebuilding them under $R/dump/work"
+            python3 "$S/codeselect/materialize.py" --store "$SEL_STORE" --tree "$SEL_SUB" \
+                --games "$R/games" --games-title "$GAME" --work "$R/dump/work" \
+                --log "$R/dump/materialize.log" </dev/null 2>&1 | sed 's/^/[select] /'
+        fi
     else
         echo "[select] fallback: primary (could not bind $SEL_DIR over /games/$GAME)" >&2
     fi

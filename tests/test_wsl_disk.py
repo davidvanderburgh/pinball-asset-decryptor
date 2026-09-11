@@ -269,3 +269,109 @@ def test_resize_surfaces_wsl_error(monkeypatch):
     with pytest.raises(wsl_disk.WslDiskError) as ei:
         wsl_disk.resize_disk(50 * GiB)
     assert "no space on host" in str(ei.value)
+
+
+# --- Spike 2 emulator card cache in the disk dialog (2026-09-11) -----------
+#
+# David asked for the emulator's cached cards to show up in "Manage disk
+# space" alongside the two staging locations.  The cache is the biggest thing
+# the app writes (7 GB a card) and lives on a THIRD disk, so these pin the
+# two things that make the row honest: the shape handed to the tree, and the
+# freed-bytes accounting, which must count only what a re-read says is gone.
+
+_CACHE_LIST = (
+    "entry\tdungeons_and_dragons_le-1_00_0\t8074035\t8074035\t1757600580\t"
+    "/mnt/c/cards/dnd.raw\n"
+    "entry\tturtles-1_59_0.store\t7444889\t7444889\t0\t/mnt/d/t.raw\n"
+    "disk\t16777216\t33554432\n"
+)
+
+
+def _patch_rig(monkeypatch, text, dropped=None):
+    """Point disk_dialog's rig helpers at canned output, recording drops."""
+    from pinball_decryptor.gui import disk_dialog
+    from pinball_decryptor.gui.emulate_tab import parse_cache_list
+    calls = []
+
+    def _rig_cmd(script, *args):
+        calls.append((script,) + args)
+        return ["true"]
+
+    monkeypatch.setattr(disk_dialog, "_emu_rig",
+                        lambda: (_rig_cmd, parse_cache_list))
+
+    class _Out:
+        def __init__(self, payload):
+            self.stdout = payload.encode("utf-8")
+
+    state = {"text": text}
+
+    def _run(cmd, **kw):
+        if calls and calls[-1][1] == "--cache-drop":
+            (dropped if dropped is not None else []).append(calls[-1][2])
+            state["text"] = "\n".join(
+                l for l in state["text"].splitlines()
+                if not any("\t%s\t" % d in l
+                           for d in (dropped or []))) + "\n"
+        return _Out(state["text"])
+
+    monkeypatch.setattr(disk_dialog.subprocess, "run", _run)
+    return calls
+
+
+def test_emu_cache_scan_shapes_rows_like_the_other_scanners(monkeypatch):
+    from pinball_decryptor.gui import disk_dialog
+    _patch_rig(monkeypatch, _CACHE_LIST)
+
+    entries, usage = disk_dialog.scan_emu_cache()
+    assert [e["path"] for e in entries] == [
+        "dungeons_and_dragons_le-1_00_0", "turtles-1_59_0.store"]
+    # every key the tree reads, on every row
+    for e in entries:
+        assert set(("path", "size", "manufacturer", "detail")) <= set(e)
+        assert e["manufacturer"] == "Stern Spike 2"
+    # KiB from du becomes bytes, so _fmt agrees with the other two locations
+    assert entries[0]["size"] == 8074035 * 1024
+    # a card with no sidecar says so rather than showing the epoch
+    assert "never booted" in entries[1]["detail"]
+    assert "last booted" in entries[0]["detail"]
+    # the cache's OWN disk, not either of the other two
+    assert usage["total"] == 33554432 * 1024
+    assert usage["free"] == 16777216 * 1024
+    assert usage["pct"] == 50
+
+
+def test_emu_cache_scan_is_silent_without_a_rig(monkeypatch):
+    """No emulator must cost a greyed row, never a traceback."""
+    from pinball_decryptor.gui import disk_dialog
+    monkeypatch.setattr(disk_dialog, "_emu_rig", lambda: None)
+    assert disk_dialog.scan_emu_cache() == ([], None)
+    assert disk_dialog.drop_emu_cache(["anything"], {"anything": 1}) == 0
+
+
+def test_emu_cache_drop_counts_only_what_actually_went(monkeypatch):
+    from pinball_decryptor.gui import disk_dialog
+    dropped = []
+    calls = _patch_rig(monkeypatch, _CACHE_LIST, dropped)
+
+    sizes = {"dungeons_and_dragons_le-1_00_0": 8074035 * 1024,
+             "turtles-1_59_0.store": 7444889 * 1024}
+    freed = disk_dialog.drop_emu_cache(["dungeons_and_dragons_le-1_00_0"],
+                                       sizes)
+    assert dropped == ["dungeons_and_dragons_le-1_00_0"]
+    assert freed == 8074035 * 1024
+    assert ("cardmount.sh", "--cache-drop",
+            "dungeons_and_dragons_le-1_00_0") in calls
+
+
+def test_emu_cache_drop_reports_zero_when_the_card_survives(monkeypatch):
+    """A drop that silently did nothing must not claim the bytes.
+
+    The number goes straight into the usage bar, so a hopeful total would
+    draw a drop on a disk that never changed.
+    """
+    from pinball_decryptor.gui import disk_dialog
+    _patch_rig(monkeypatch, _CACHE_LIST)   # no `dropped` list: nothing leaves
+    freed = disk_dialog.drop_emu_cache(
+        ["turtles-1_59_0.store"], {"turtles-1_59_0.store": 7444889 * 1024})
+    assert freed == 0

@@ -1,15 +1,22 @@
 """Manage disk space — a "disk management" modal for the app's scratch space.
 
-The app stages its heavy disk work in two places on Windows:
+The app puts heavy data in three places, on three different disks:
 
   * **WSL** — the native-tool pipelines (Chicago Gaming, Dutch Pinball, Barrels
     of Fun, Jersey Jack) do their ext4/dd/debugfs work inside the default WSL2
     distro, whose virtual disk grows on demand and never shrinks on its own.
   * **The Windows temp dir** (``%TEMP%``) — other paths stage host-side, most
-    notably **Stern Spike 2**, which never touches WSL at all.
+    notably **Stern Spike 2** extraction, which never touches WSL at all.
+  * **The Spike 2 emulator's card cache** — whole 7 GB card images kept on the
+    emulator's own work disk so a boot does not re-read the card every time.
+    Added 2026-09-11 at David's ask; it is by far the largest of the three and
+    was previously visible only from the emulator tab's Card cache window.
 
 A completed run cleans up after itself, but crashed/cancelled runs leave
-staging behind in either place.  This modal shows, at a glance:
+staging behind in either of the first two.  The cache is different in kind:
+it is meant to be there, and dropping a card costs a re-copy on its next boot
+rather than nothing — so every label that can reach it says so.  This modal
+shows, at a glance:
   * how full each disk is (usage bars),
   * every leftover staging item, grouped by location → manufacturer/game, with
     its size, and
@@ -21,7 +28,10 @@ Cleaning up staging is fast and needs no privileges; reclaiming compacts the
 action.  Slow work runs on worker threads and marshals back via ``after``.
 """
 
+import subprocess
+import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -31,7 +41,127 @@ from .theme import THEMES, dark_titlebar, platform_font
 
 _LOC_WSL = "wsl"
 _LOC_HOST = "host"
-_LOC_LABEL = {_LOC_WSL: "WSL staging", _LOC_HOST: "Windows temp (%TEMP%)"}
+_LOC_EMU = "emu"
+_LOC_LABEL = {
+    _LOC_WSL: "WSL staging",
+    _LOC_HOST: "Windows temp (%TEMP%)",
+    # Short, because the row already sits under a description that spells out
+    # the re-copy cost and the confirm says it again with the size.  The long
+    # form made a tree row that ran off the end of the column.
+    _LOC_EMU: "Spike 2 emulator card cache",
+}
+
+_CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
+# ----------------------------------------------------------------------
+# Spike 2 emulator card cache (David, 2026-09-11: "the manage disk space
+# window should also have the emulator cache items shown")
+#
+# The cache is the biggest thing this app puts on disk by a distance -- one
+# card is 7 GB and the rig keeps several -- and until now it was reachable
+# ONLY from the emulator tab's own Card cache window, so the dialog whose
+# whole job is "where did my disk go" answered without it.
+#
+# It is a THIRD location, not a third flavour of the two that already exist:
+# it lives on the emulator's own work disk, which is neither the default
+# distro's .vhdx that the WSL bar reports nor the Windows temp drive.  So it
+# gets its own usage bar, its own group, and its own delete path, and the
+# freed bytes are folded back into its own bar rather than either other one.
+#
+# It is also NOT leftover staging.  Nothing crashed to put it there; it is a
+# deliberate cache, and deleting it costs a 7 GB re-copy on the next boot
+# rather than nothing.  Every label in this file says so, and the confirm
+# says it again with the size, because "Clean all" reaches it too.
+# ----------------------------------------------------------------------
+def _emu_rig():
+    """Import the emulator tab's rig helpers, or ``None`` if unavailable.
+
+    Deferred and inside a try: this dialog is opened by users who may have
+    no emulator, no WSL and no rig, and a missing card cache must cost them
+    a greyed-out row rather than a traceback.
+    """
+    try:
+        from .emulate_tab import parse_cache_list, rig_cmd
+        return rig_cmd, parse_cache_list
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
+def scan_emu_cache():
+    """``(entries, usage)`` for the emulator card cache; ``([], None)`` if none.
+
+    Entries are shaped like the other two scanners' (``path`` / ``size`` /
+    ``manufacturer`` / ``detail``) so the tree does not need to know which
+    scanner produced a row.  ``path`` carries the cache LABEL, which is what
+    ``cardmount.sh --cache-drop`` takes -- the rig addresses a cached card by
+    label, not by filesystem path, and that is the identity the delete needs.
+    """
+    rig = _emu_rig()
+    if not rig:
+        return [], None
+    rig_cmd, parse_cache_list = rig
+    try:
+        out = subprocess.run(rig_cmd("cardmount.sh", "--cache-list"),
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL,
+                             timeout=30, creationflags=_CREATE_FLAGS)
+        text = out.stdout.decode("utf-8", "replace")
+    except Exception:                                        # noqa: BLE001
+        return [], None
+
+    rows, disk = parse_cache_list(text)
+    entries = []
+    for r in rows:
+        detail = r["label"]
+        if r.get("boot"):
+            detail += "   last booted %s" % time.strftime(
+                "%Y-%m-%d %H:%M", time.localtime(r["boot"]))
+        else:
+            detail += "   never booted"
+        entries.append({"path": r["label"],
+                        "size": r["real_kb"] * 1024,
+                        "manufacturer": "Stern Spike 2",
+                        "detail": detail})
+
+    usage = None
+    if disk:
+        avail_kb, size_kb = disk
+        total = size_kb * 1024
+        free = avail_kb * 1024
+        used = max(0, total - free)
+        usage = {"total": total, "free": free, "used": used,
+                 "pct": int(round(used * 100.0 / total)) if total else 0}
+    return entries, usage
+
+
+def drop_emu_cache(labels, sizes):
+    """Drop cached cards by label; return the bytes actually freed.
+
+    *sizes* is ``{label: bytes}`` from the scan the caller is already
+    holding, so this costs ONE extra rig round trip rather than three --
+    each is a ``wsl.exe`` hop that can take seconds.
+
+    Each drop is independent, so one failure must not strand the rest: the
+    loop keeps going, and the total counts only the labels a re-read
+    confirms are gone.  A drop that silently did nothing therefore reports
+    zero freed instead of a number the disk will contradict.
+    """
+    rig = _emu_rig()
+    if not rig or not labels:
+        return 0
+    rig_cmd, _ = rig
+    for label in labels:
+        try:
+            subprocess.run(rig_cmd("cardmount.sh", "--cache-drop", label),
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL,
+                           timeout=60, creationflags=_CREATE_FLAGS)
+        except Exception:                                    # noqa: BLE001
+            continue
+    still = {e["path"] for e in scan_emu_cache()[0]}
+    return sum(sz for lbl, sz in (sizes or {}).items()
+               if lbl in labels and lbl not in still)
 
 
 def _fmt(n):
@@ -63,6 +193,7 @@ class DiskManagerDialog:
         self._wsl_ok = False
         self._usage_wsl = None
         self._usage_host = None
+        self._usage_emu = None
         self._vhdx = None
 
         self._build()
@@ -92,25 +223,30 @@ class DiskManagerDialog:
             body,
             text=("The tools stage their work in WSL (Chicago Gaming, Dutch "
                   "Pinball, Barrels of Fun, Jersey Jack) and in the Windows "
-                  "temp folder (Stern, plus render/ffmpeg scratch). Neither "
-                  "shrinks on its own — clean up leftover staging here."),
+                  "temp folder (Stern, plus render/ffmpeg scratch), and the "
+                  "Spike 2 emulator keeps whole cards cached on its own disk. "
+                  "None of them shrinks on its own — clean up here."),
             font=(self._sans, 9), foreground=th["gray"],
             wraplength=620, justify="left").pack(anchor="w", pady=(2, 12))
 
-        # ---- Usage bars (WSL + Windows temp drive) --------------------
+        # ---- Usage bars (WSL + Windows temp drive + emulator disk) ----
         self._wsl_usage_lbl, self._wsl_bar = self._make_usage_row(
             body, "Checking WSL…")
         self._host_usage_lbl, self._host_bar = self._make_usage_row(
             body, "Checking Windows temp drive…")
+        self._emu_usage_lbl, self._emu_bar = self._make_usage_row(
+            body, "Checking the Spike 2 emulator cache…")
 
-        # ---- Leftover-staging tree ------------------------------------
-        ttk.Label(body, text="Leftover staging",
+        # ---- Staging + cache tree -------------------------------------
+        ttk.Label(body, text="Leftover staging and caches",
                   font=(self._sans, 10, "bold")).pack(anchor="w", pady=(8, 0))
         ttk.Label(
             body,
             text=("Select rows to remove, or use “Clean all”. Finished runs "
-                  "clean up after themselves; what shows here is from crashed "
-                  "or cancelled runs."),
+                  "clean up after themselves, so the staging rows here are "
+                  "from crashed or cancelled runs. Cached emulator cards are "
+                  "different: they are meant to be there, and deleting one "
+                  "costs a re-copy the next time that card boots."),
             font=(self._sans, 9), foreground=th["gray"],
             wraplength=620, justify="left").pack(anchor="w", pady=(0, 4))
 
@@ -253,6 +389,24 @@ class DiskManagerDialog:
             self._host_usage_lbl.configure(text="Windows temp drive: unknown")
             self._redraw_bar(self._host_bar, None)
 
+    def _render_emu_usage(self):
+        """The emulator's OWN disk, which is neither of the other two.
+
+        Said out loud in the label ("emulator disk") because a third bar that
+        did not name its disk would read as a second opinion about the first.
+        """
+        if self._usage_emu:
+            u = self._usage_emu
+            self._emu_usage_lbl.configure(
+                text="Spike 2 emulator disk: %s used of %s  (%s free, %d%%)"
+                % (_fmt(u["used"]), _fmt(u["total"]), _fmt(u["free"]),
+                   u["pct"]))
+            self._redraw_bar(self._emu_bar, u["pct"])
+        else:
+            self._emu_usage_lbl.configure(
+                text="Spike 2 emulator cache: nothing cached")
+            self._redraw_bar(self._emu_bar, None)
+
     @staticmethod
     def _adjust_usage(usage, freed):
         """Optimistically fold *freed* bytes back into a usage dict in place."""
@@ -365,6 +519,11 @@ class DiskManagerDialog:
                 except Exception as e:  # noqa: BLE001
                     data["wsl_ok"] = False
                     data["wsl_msg"] = str(e)
+            # The emulator cache is independent of both: it answers on a rig
+            # that may exist without WSL staging (Linux, macOS) and may be
+            # absent on a machine that has plenty of it.  Its own try lives
+            # in scan_emu_cache, which returns empty rather than raising.
+            data["emu_entries"], data["emu_usage"] = scan_emu_cache()
             self._after(self._apply_scan, my_id, data)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -383,23 +542,41 @@ class DiskManagerDialog:
         self._usage_host = data.get("host_usage")
         self._render_host_usage()
 
+        # Emulator card-cache disk usage bar.
+        self._usage_emu = data.get("emu_usage")
+        self._render_emu_usage()
+
         # Combined entries (tag each with its location).
         entries = []
         for e in data.get("wsl_entries", []):
             entries.append({**e, "location": _LOC_WSL})
         for e in data.get("host_entries", []):
             entries.append({**e, "location": _LOC_HOST})
+        for e in data.get("emu_entries", []):
+            entries.append({**e, "location": _LOC_EMU})
         self._entries = entries
         self._vhdx = data.get("vhdx")
         self._populate_tree()
         self._update_reclaim_label()
 
-        total = sum(e["size"] for e in self._entries)
-        if self._entries:
-            status = "Found %d staging item(s) using %s." % (
-                len(self._entries), _fmt(total))
+        # Counted apart, because "12 staging items" over a list that is
+        # mostly cached cards would be a wrong sentence about the thing the
+        # user is looking at.
+        staging = [e for e in entries if e["location"] != _LOC_EMU]
+        cached = [e for e in entries if e["location"] == _LOC_EMU]
+        parts = []
+        if staging:
+            parts.append("%d staging item%s using %s" % (
+                len(staging), "" if len(staging) == 1 else "s",
+                _fmt(sum(e["size"] for e in staging))))
+        if cached:
+            parts.append("%d cached card%s using %s" % (
+                len(cached), "" if len(cached) == 1 else "s",
+                _fmt(sum(e["size"] for e in cached))))
+        if parts:
+            status = "Found " + " and ".join(parts) + "."
         else:
-            status = "No leftover staging — nothing to clean up."
+            status = "No leftover staging and no cached cards."
         self._set_busy(False, status)
 
     def _populate_tree(self):
@@ -410,7 +587,7 @@ class DiskManagerDialog:
         for e in self._entries:
             self._size_by[(e["location"], e["path"])] = e["size"]
 
-        for loc in (_LOC_WSL, _LOC_HOST):
+        for loc in (_LOC_WSL, _LOC_HOST, _LOC_EMU):
             loc_items = [e for e in self._entries if e["location"] == loc]
             if not loc_items:
                 continue
@@ -473,35 +650,62 @@ class DiskManagerDialog:
     def _do_clean(self, metas, label):
         if self._busy or not metas:
             return
-        total = sum(self._size_by.get((m["location"], m["path"]), 0)
-                    for m in metas)
-        if not messagebox.askyesno(
-                "Delete staging",
-                "Delete %d staging item(s) (%s)?\n\nThis only removes leftover "
-                "intermediate files — your extracted assets and built images "
-                "are not touched." % (len(metas), _fmt(total)),
-                parent=self._dlg):
-            return
         wsl_paths = [m["path"] for m in metas if m["location"] == _LOC_WSL]
         host_paths = [m["path"] for m in metas if m["location"] == _LOC_HOST]
-        deleted = set(wsl_paths) | set(host_paths)
-        self._set_busy(True, "Deleting %s staging…" % label)
+        emu_labels = [m["path"] for m in metas if m["location"] == _LOC_EMU]
+
+        staging_n = len(wsl_paths) + len(host_paths)
+        staging_sz = sum(self._size_by.get((m["location"], m["path"]), 0)
+                         for m in metas if m["location"] != _LOC_EMU)
+        emu_sizes = {l: self._size_by.get((_LOC_EMU, l), 0)
+                     for l in emu_labels}
+        emu_sz = sum(emu_sizes.values())
+
+        # The two halves cost different things, so the confirm says both
+        # rather than one total: staging is free to lose, a cached card is a
+        # 7 GB re-copy.  "Clean all" reaches the cache too, which is exactly
+        # why this sentence has to exist.
+        lines = []
+        if staging_n:
+            lines.append("%d staging item%s (%s) — leftover intermediate "
+                         "files only." % (staging_n,
+                                          "" if staging_n == 1 else "s",
+                                          _fmt(staging_sz)))
+        if emu_labels:
+            lines.append("%d cached emulator card%s (%s) — each one re-copies "
+                         "the next time that card boots."
+                         % (len(emu_labels),
+                            "" if len(emu_labels) == 1 else "s",
+                            _fmt(emu_sz)))
+        if not messagebox.askyesno(
+                "Delete staging",
+                "Delete:\n\n  • " + "\n  • ".join(lines)
+                + "\n\nYour extracted assets and built images are not touched.",
+                parent=self._dlg):
+            return
+        deleted = ({(_LOC_WSL, p) for p in wsl_paths}
+                   | {(_LOC_HOST, p) for p in host_paths}
+                   | {(_LOC_EMU, l) for l in emu_labels})
+        self._set_busy(True, "Deleting %s…" % label)
 
         def _worker():
-            wsl_freed = host_freed = 0
+            wsl_freed = host_freed = emu_freed = 0
             err = None
             try:
                 if wsl_paths:
                     wsl_freed = wsl_disk.delete(wsl_paths)
                 if host_paths:
                     host_freed = host_temp.delete(host_paths)
+                if emu_labels:
+                    emu_freed = drop_emu_cache(emu_labels, emu_sizes)
             except Exception as e:  # noqa: BLE001
                 err = str(e)
-            self._after(self._after_clean, wsl_freed, host_freed, deleted, err)
+            self._after(self._after_clean, wsl_freed, host_freed, emu_freed,
+                        deleted, err)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _after_clean(self, wsl_freed, host_freed, deleted, err):
+    def _after_clean(self, wsl_freed, host_freed, emu_freed, deleted, err):
         if not self._alive():
             return
         if err:
@@ -513,17 +717,27 @@ class DiskManagerDialog:
         # cleaned rows and fold the freed bytes back into the usage bars; the
         # numbers we just acted on are authoritative.  Refresh stays available
         # for an exact re-scan.
-        self._entries = [e for e in self._entries if e["path"] not in deleted]
+        # Keyed by (location, path): a cache LABEL and a staging PATH live in
+        # different namespaces, so identity has to carry both or one could
+        # evict the other.
+        self._entries = [e for e in self._entries
+                         if (e["location"], e["path"]) not in deleted]
         self._populate_tree()
         self._adjust_usage(self._usage_wsl, wsl_freed)
         self._render_wsl_usage()
         self._adjust_usage(self._usage_host, host_freed)
         self._render_host_usage()
-        # Freeing WSL space grows what a compact could reclaim.
+        # The emulator's bytes come off the EMULATOR's disk. Folding them into
+        # either bar above would draw a drop on a disk that never changed.
+        self._adjust_usage(self._usage_emu, emu_freed)
+        self._render_emu_usage()
+        # Freeing WSL space grows what a compact could reclaim -- and only WSL
+        # space does: the emulator's disk is not the .vhdx that compacts.
         if self._vhdx and self._vhdx.get("reclaimable") is not None:
             self._vhdx["reclaimable"] += wsl_freed
         self._update_reclaim_label()
-        self._set_busy(False, "Freed %s." % _fmt(wsl_freed + host_freed))
+        self._set_busy(False, "Freed %s."
+                       % _fmt(wsl_freed + host_freed + emu_freed))
 
     # ------------------------------------------------------------------
     # Reclaim (compact .vhdx)

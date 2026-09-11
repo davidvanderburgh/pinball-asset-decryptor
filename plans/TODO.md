@@ -1956,201 +1956,6 @@ These have each been violated at least once and each cost a run or a window:
       change itself (once one exists) is small and has already been
       drafted once.
 
-- [ ] **21b. Ball HANDLING: a ball model, so multiball works.** `S2 D3`
-      ← IN PROGRESS *(**Split out of item 21 on 2026-08-10**, when the
-      FEEDBACK half closed as 21a. The item always said the two halves were
-      different prices and that the cheap one lands alone; this is the dear
-      one, and it is the whole of what is left.)* *(**D4 → D3, 2026-08-10
-      evening:** the eject coil index is no longer unknown, the model and the
-      feeder are built and pass an end-to-end offline harness on two titles,
-      and what is left needs a run rather than a new instrument.)*
-      **★★ BUILT THIS PASS, branch `item/21b`, and THE LOOP IS CLOSED — live
-      on the game's own display, see (6). Established:**
-      **(1) THE TROUGH-EJECT COIL INDEX WAS ALWAYS READABLE AT THE DESK, and
-      this item's "item 3 is upstream" blocker below is wrong.** The device
-      table names every coil against the (group, index) the fire frame
-      carries: godzilla_pro `TROUGH` = group 6 index 1 = **node 8 index 1**;
-      jaws_le = group 7 index 1 = **node 9 index 1**, so nothing may hard-code
-      the node. **The mapping is confirmed 5 positive and 4 negative against
-      item 3's own labelled ball search** — it fired 2, 3, 4, 7, 8, which the
-      table names RIGHT/LEFT SLINGSHOT, AUTO PLUNGER, POP BUMPER, RIGHT SCOOP,
-      and did NOT fire 0, 1, 5, 6, which it names RIGHT FLIPPER, TROUGH, LEFT
-      FLIPPER, UP LEFT FLIP. A ball search fires exactly the first set and
-      exactly not the second. No run was needed for any of it.
-      **(2) `ballmodel.py` — the ramp rule in one place.** With k balls home
-      positions 1..k are made, so an eject opens the HIGHEST made position and
-      a return closes the LOWEST open one. `plunge.py` now goes through it
-      instead of carrying its own `reversed()`, which is the fact item 20 was
-      a bug in. It also reports a trough that is not a contiguous stack.
-      **(3) `ballfeed.py` — the thing that answers the game.** Watches the
-      padled coil counter at 50 Hz INSIDE WSL (a host-side loop is capped near
-      6 actions/s by the ~80 ms wsl.exe spawn, item 24/26) and drives the
-      trough and shooter-lane switches under source letter `b`. It never
-      remembers a request: the game's own retry is the queue, which is what
-      folds a retry burst into one ball. `watch.sh` starts it, `alive.sh` and
-      `killgame.sh` count and kill it (same day, per the non-negotiable).
-      **(4) `plunge.py drain`** — nothing simulates a playfield, so a drain
-      cannot be an event and is now an action. Without it a multiball could
-      start and never end.
-      **(5) Verified offline end-to-end, `ballfeedtest.py`, on the REAL tables
-      of TWO titles** (godzilla_pro node 8, jaws_le node 9): a coil-counter
-      bump takes a ball out of the FAR end, lands it in the shooter lane,
-      refuses a retry inside the minimum gap, launches on the auto plunger,
-      feeds three balls for a multiball, and refuses an empty trough rather
-      than going negative. The harness found a real bug (refusals de-duped
-      against one slot flooded the log by alternating) before a run paid for
-      it. 37 unit tests beside it.
-      **The one guessed number: `PAD_BALL_MIN_GAP_MS` (600).** A retry burst
-      and a multiball feed are the same coil at different spacings and only a
-      measured multiball can say where the line is. It logs every refusal it
-      makes on that number, so it is visible rather than silently deciding how
-      many balls a multiball gets.
-      **★★★ (6) VERIFIED LIVE, godzilla_pro, 2026-08-10, on the GAME'S OWN
-      DISPLAY. THE LOOP IS CLOSED: BALL 1 came up with nobody running
-      `plunge.py plunge`.** `plunge.py coin` then `plunge.py start`, and the
-      game fired its own trough eject; the feeder opened TROUGH 6 and closed
-      SHOOTER LANE; the screen showed PLAYER 1 / BALL 1 (screenshot). That is
-      the exact measurement at the top of this item — `coin` + `start` leaving
-      the trough at 6 of 6 — now reading 5 of 6 for the right reason.
-      **Two INDEPENDENT confirmations of the coil identification arrived free,
-      and neither was designed for:** the game drove the eject at **lvl=225**,
-      which is exactly the service menu's own "Trough Eject Power 225 (88%)",
-      and the auto plunger at **lvl=150 = 0x96**, which is exactly what
-      coildecode.py recorded from the ball-search capture ("the AUTO PLUNGER
-      goes out at 0x96 where everything else is 0xff"). The two coils the rig
-      now acts on are named by the table, by item 3's search, and by their own
-      drive strengths.
-      **THE WHOLE BALL CYCLE RAN, three feeds and two launches:** eject →
-      lane → launch → `plunge.py drain` → the game re-served → the feeder fed
-      again → **the game fired its own AUTO PLUNGER** and the feeder launched
-      it. The re-serves were BALL SAVE, correctly (score 00, drained seconds
-      after the plunge), which is why the display stayed on BALL 1 — that is
-      the machine behaving, not the rig failing.
-      **MEASURED, and it retires the one guessed number for now: ZERO
-      refusals in the whole run.** The game never sent a retry burst, so the
-      ~20 ms response beat its retry window every time and
-      `PAD_BALL_MIN_GAP_MS` never fired. It is still a guess for the multiball
-      case, where the spacing is the game's and not the rig's.
-      **A BUG THE OFFLINE HARNESS COULD NOT HAVE FOUND, and it is the reason
-      the first live start did nothing: the shim creates `dump/padled`
-      LAZILY,** on the first LED frame, so a feeder started by watch.sh comes
-      up a minute ahead of it — and "not yet" was being read as "gone", so it
-      announced the run was over and exited having fed nothing. The harness
-      writes the block before it starts anything and could never see it. Fixed:
-      waiting is right until the block has been seen ONCE.
-      **NOT ESTABLISHED — A MULTIBALL, which is this item's actual acceptance.**
-      No multiball was reached: getting one needs a game played into a mode,
-      not scripted pokes, and this run never scored (ball save kept re-serving
-      a 0-score ball). Everything the feed mechanism does for ball two of a
-      multiball it has now done three times for one ball, but that is an
-      argument, not the oracle this item asked for.
-      **★★ (7) DAVID REACHED A MULTIBALL BY HAND, 2026-08-11 — MECHAGODZILLA
-      MULTIBALL, `trough 3/6   3 in play` on 21a's panel — and it does NOT
-      close this item, because it was FED BY HAND.** His run was the app's,
-      i.e. main's watch.sh, which has no `ballfeed.py`; the `[sw] +67f/-67f`
-      lines in his log are virtual-playfield clicks. So the game will start a
-      multiball and the panel counts it correctly, which is worth knowing —
-      but the acceptance is a multiball the FEEDER served, and that still
-      needs a run from this branch.
-      **★★ (8) AND IT EXPOSED A REAL GAP, now fixed: nothing in the window
-      could put a ball back.** David: *"how do i drain a ball? pressing one of
-      the trough switches doesn't drain the ball. is there a way to just click
-      on the ball indicators to add or remove it to the playfield?"* Pressing
-      the switch cannot work and never could — item 24's press-and-hold is
-      MOMENTARY and a ball in a trough holds its switch closed for as long as
-      it sits there, so a press is a ball that arrives and leaves. The only
-      latching control in the window was `Reset balls`, which makes six.
-      **The six dots are the control now:** click an occupied one for
-      `plunge.py take` (one ball out), an empty one for `plunge.py drain` (one
-      ball home). The STACK decides which switch moves, not which dot was
-      clicked — clicking the third of four opens the far end, which is item
-      20's geometry and what the panel exists to show. Bound with a per-item
-      `tag_bind` returning `"break"`, NOT via `info`, so item 24's hit-test
-      promise holds. Tested with real Tk, not a stub canvas: the thing under
-      test is a binding.
-      **★★ (9) DAVID USED IT: "ok it's working well", 2026-08-11, plus two
-      faults he found by using it, both now fixed.**
-      **(a) "when hovering over the circles, it's not always indicating that i
-      can click on it."** A Tk rule, not a mis-binding, and "always" is the
-      clue: an item drawn with `fill=""` is hittable ONLY ON ITS OUTLINE, so a
-      filled ball was a 14 px disc and an EMPTY position — hollow on purpose —
-      was a 1 px ring. **Validated on a labelled example first** (two ovals,
-      one hollow one filled, a generated click at each centre: only the filled
-      one fired, and the hollow one only on its outline). Fixed with a
-      per-position hit pad the colour of the panel, covering ball AND number,
-      so the target is the whole cell. The regression test generates a REAL
-      pointer event, because a direct call cannot see the rule under test.
-      **(b) "plunge should not be auto-ejecting a ball either (it should just
-      get the ball out of the shooter lane)"** — and then, on the build that
-      took that literally, **"it doesn't seem to be doing anything now. at ball
-      start, plunge should: eject a ball into the shooter lane closing the
-      shooter lane switch, then moments later it opens the shooter lane
-      switch."** ▼ **The middle version was a regression and is worth
-      recording as one:** the complaint was never "never eject", it was
-      ejecting a SECOND ball when one was already in the lane — which only
-      became possible because ballfeed.py now puts one there. Reading it as
-      unconditional turned Plunge into a no-op on the most ordinary press
-      there is: ball start, empty lane, no feeder (which is every run started
-      from a checkout without `ballfeed.py`, i.e. most runs today).
-      **`plunge` is conditional now** — lane occupied, launch it and eject
-      nothing; lane empty, serve — which is what the real control does.
-      `serve` stays as the unconditional form and is what the TROUGH coil
-      marker plays, since that marker IS the eject. coilact's AUTO PLUNGER no
-      longer fabricates an arrival into an empty lane.
-      **The harness checks BOTH directions**, because the one-sided version
-      looked correct in isolation; neither check alone is the requirement.
-      **Resume:** play a game into a multiball with a run FROM THIS BRANCH and
-      read `~/padball.log` beside the screen — the acceptance is 2+ balls in
-      play on the GAME's display, served by the feeder, and the log will say
-      how many ejects it answered and whether `PAD_BALL_MIN_GAP_MS` ever
-      refused one. State the repeats. Nothing of this pass is on main, so
-      David's own sessions do not have the feeder or the clickable dots.
-      **★ DAVID, 2026-08-06: "we will need some sophisticated ball handling
-      and clear feedback about how many balls are in play. for example, during
-      multiball, many balls are in play."** The feedback clause is 21a, done
-      and on main. This is the ball handling.
-      **THERE IS NO BALL MODEL ANYWHERE IN THIS RIG.** `plunge.py` opens one
-      trough switch and works the shooter lane; nothing tracks where a ball
-      is, notices a drain, or feeds a second ball when the game asks for one.
-      Multiball is the game firing the trough eject repeatedly and expecting
-      balls to arrive; nothing answers.
-      **MEASURED 2026-08-10 during 21a's run, and it is this item's whole
-      problem in one line: the game's own trough eject does not move a ball
-      here.** `plunge.py coin` then `plunge.py start` left the trough reading
-      6 of 6 on both the panel and `swshow.py`; the count moved only when
-      `plunge.py plunge` opened TROUGH 6 itself. So every ball this rig has
-      ever "played" was moved by a script pretending, and nothing closes the
-      loop between the coil the game fires and the switch that should answer.
-      **~~ITEM 3 IS UPSTREAM~~ — WRONG, and resolved above on 2026-08-10.**
-      This said the trough-eject index was one of the unlabelled 0, 1, 5, 6
-      and that an auto-feed would have to be driven blind on a timer. The
-      device table names it outright and item 3's ball search confirms the
-      mapping both ways; see (1). Kept rather than deleted because "the
-      unlabelled coils are unknown" is the belief that made this item D4, and
-      the thing that dissolved it was reading a table the rig already builds.
-      **What item 20 established that this can build on** (`e1e9cb3`): the
-      trough is a STACK with a known direction — TROUGH 1 is the eject end (it
-      sits beside TROUGH JAM), TROUGH 6 is the far end, balls are taken from
-      the far end and a returning ball fills the far end first. So "eject a
-      ball" and "a ball drains" are both one switch on a known end, and the
-      model is a count plus that rule.
-      **21a shipped the instrument for watching this work**, and that was
-      deliberate: the panel draws the six positions in trough order off
-      `mrg[]`, so a model that ejects from the wrong end is visible by eye in
-      one glance rather than by reading a `[sw]` stream. `trough.py` already
-      answers "which switches, in what order" for any title.
-      **Acceptance:** a multiball starts with more than one ball genuinely in
-      play — the oracle is the game's own display, not the rig's model of
-      itself, because a model that feeds itself will always agree with itself.
-      — S2: single-ball play works, so nobody loses a ball to this; what it
-      costs is every run that wants multiball, and it is a capability nothing
-      else can work around. D4: it needs several runs, it needs a game played
-      into a multiball, and its first dependency (the eject coil index) is
-      itself an unfinished item.
-      *(That D is superseded — see the D4 → D3 note on the title line,
-      which is the current grading: the eject coil index is now known. Annotated
-      2026-09-11, the way item 82 already annotates its own.)*
-
 - [x] **46. On turtles_pro the ACTION BUTTON is FINICKY, not dead: it works
       occasionally in attract and never selects a character during a game.**
       `S2 D4` DONE 2026-08-26, `item/46`, `a803135`. **The button was never
@@ -4866,87 +4671,6 @@ These have each been violated at least once and each cost a run or a window:
       both windows already build a bar; `Field` needs one packed above its
       canvas (mind `pick_scale`'s chrome budget).
 
-- [ ] **71. dungeons_and_dragons_le draws its 255-device map on a BLANK
-      field while the card ships the exact drawing the map names.** `S3 D2`
-      *(Filed 2026-08-23 from Sam's report: "playfield artwork doesn't
-      display (though the map is present)" — Dungeons & Dragons, X-Men,
-      Jurassic Park. Only the first is a bug; the census below answers the
-      other two.)*
-      The device table names its layout image `TestMode/Rope_LE-Premium-X8-
-      X9_TOP_rotated_edit_cropped` (229 of 255 records on it) and the card
-      ships exactly that file at 313x710 with every coordinate inside it
-      ("229 playfield records, 0 outside the 313x710 artwork" — cardaudit;
-      max x=303, y=654). It never reaches the window because
-      `gameinfo.find_playfield_art()` keeps only filenames containing
-      "playfield" (gameinfo.py:248) and D&D names its drawing after the
-      codename Rope; king_kong_le survives the identical TestMode pattern
-      only because Stern spelled "Playfield" inside the Rodeo filename. So
-      the art is not REFUSED — `layout_art()`'s size gate never sees it, and
-      it would pass — it is never FOUND, and layout_art()'s docstring
-      already names the disease: the table name and the file lookup "are
-      found by two unrelated pieces of code" (playfield.py:2146-2152).
-      **The fix is to stop guessing when the guess fails:** if the token
-      match finds nothing, resolve `devicexy.layout_image()`'s own name
-      against `assets/nuk/images/<image>.png` — the table says which picture
-      it was authored on. Mirror it in cardaudit.py:111 (a whole-word
-      variant of the same filter; they agree on every filename at issue),
-      which is why README.md's table calls this card "none shipped" about a
-      drawing it ships. elvira3's `System/TestMode/universal_topper_scaled`
-      is a candidate the fallback may start finding — harmless
-      (layout_is_usable() still routes elvira3 to Schematic), but check it
-      in the sweep.
-      **This corrects item 57's close note** (~line 863: "genuinely ship no
-      CAD drawing at all (confirmed: no `Test` or `TestMode` folder
-      exists)" — the DnD card HAS TestMode with three drawings; the
-      `games/<title>/` stub dir is just empty outside a run,
-      gameinfo.py:74-78) and README.md's D&D rows.
-      **Census for Sam's other two, answered not chased:** uncanny_xmen_le
-      0.97.0 and jurassic_park_le 1.15.0 carry ZERO device records and their
-      cards ship NO `Test/` or `TestMode/` directory at all (read directly
-      off both cards: images/ holds only Connectivity/System) — their "map"
-      is item 50's designed schematic/LED-grid view; nothing on those builds
-      exists to draw. Known behavior, not this item — and per-build: a newer
-      Stern release could start shipping both (README.md:79-83 makes exactly
-      this point for godzilla_le).
-      **Acceptance:** a bounded dungeons_and_dragons_le run opens the
-      artwork view with the Rope drawing behind its markers (screenshot);
-      cardaudit.py over all card images changes ONLY the D&D row (plus
-      possibly elvira3's art column); mktables caches
-      `tables/dungeons_and_dragons_le/playfield.png`; README.md's D&D row
-      and the "genuinely ship none" list corrected.
-      — S3: cosmetic — the map, the switches (104 live) and the game work
-      today. D2: the failing filter and the table-side name are both
-      located; the catalogue-wide regression control is a desk run of
-      cardaudit; one bounded run to see the window.
-      **★ 2026-08-23, David challenged the X-Men/JP half of the census and
-      the recheck both CONFIRMS it and CORRECTS two claims under it.**
-      Full-card sweeps this time (every partition, IHDR of every image,
-      magic-sniff of every extensionless blob, raw PNG-signature scan of
-      jurassic_park_le's whole 7.86GB and uncanny_xmen_le's 1.88GB
-      image.bin): NO playfield drawing exists anywhere on uncanny_xmen_le
-      0.97.0 or jurassic_park_le 1.15.0 — the census stands, now on
-      exhaustive evidence, but it is a property of THOSE BUILDS (ask any
-      tester on newer code for their version). The corrections: (1) "ZERO
-      device records" was the PARSER, not the card — both titles show the
-      documented aerosmith parser-gap signature (X-Men: 810 seeds → 17
-      garbage validations; JP: 1164 → 17, 'image' strings like
-      `/spine/src/Slot.cpp`), so absent POSITIONS are not proven, only
-      absent ART is; the 0-records class RE (batman/aerosmith, still
-      unowned) now has two more confirmed members. (2) **NEWER BUILDS
-      MOVED THE ART DIRS**: uncanny_xmen_le 0.97.0 has NO `images/Test/`
-      or `images/TestMode/` AT ALL — service art now lives under
-      `images/System/TestMode/` (beatles 1.29 ships BOTH trees) — so
-      find_playfield_art() and cardaudit's ART_DIRS would MISS playfield
-      art a future build ships in the new location. The fix this item
-      already prescribes (resolve the table's OWN layout_image name
-      against `assets/nuk/images/<name>.png`) handles that generically —
-      the name carries its own relative path — and the sweep control
-      should include an X-Men-class card so no-art rows stay no-art.
-      Counterexample now on hand: beatles-1_29_0 parses 180 records with
-      `Test/beatles_playfield.png` found by the CURRENT filter — art:yes
-      with no change. Also noted: JP's card is NOT in the WSL cardcache;
-      it lives in the repo library `images/Stern/spike2/`.
-
 - [x] **73. The FIXED cabinet keys are compiled to GODZILLA's switch ids, so
       on the swelf-generation titles Enter lands on a DIP switch instead of
       Service Select — mechanism CONFIRMED at the desk on all three reported
@@ -7343,6 +7067,295 @@ document. Nothing here was disproven; every entry is kept whole.
 
 ## Done
 
+**CLOSED AS DONE ON 2026-09-11 AT DAVID'S CALL, after the batch of eleven below: items
+21b and 71.** 21b's code shipped and is live-verified on main, but its own
+multiball acceptance was never run; 71 had nothing built at all. Each entry's
+CLOSED line says which. Numbers are not retired.
+
+- [x] **21b. Ball HANDLING: a ball model, so multiball works.** `S2 D3`
+      *(**Split out of item 21 on 2026-08-10**, when the
+      FEEDBACK half closed as 21a. The item always said the two halves were
+      different prices and that the cheap one lands alone; this is the dear
+      one, and it is the whole of what is left.)* *(**D4 → D3, 2026-08-10
+      evening:** the eject coil index is no longer unknown, the model and the
+      feeder are built and pass an end-to-end offline harness on two titles,
+      and what is left needs a run rather than a new instrument.)*
+      **★★ BUILT THIS PASS, branch `item/21b`, and THE LOOP IS CLOSED — live
+      on the game's own display, see (6). Established:**
+      **(1) THE TROUGH-EJECT COIL INDEX WAS ALWAYS READABLE AT THE DESK, and
+      this item's "item 3 is upstream" blocker below is wrong.** The device
+      table names every coil against the (group, index) the fire frame
+      carries: godzilla_pro `TROUGH` = group 6 index 1 = **node 8 index 1**;
+      jaws_le = group 7 index 1 = **node 9 index 1**, so nothing may hard-code
+      the node. **The mapping is confirmed 5 positive and 4 negative against
+      item 3's own labelled ball search** — it fired 2, 3, 4, 7, 8, which the
+      table names RIGHT/LEFT SLINGSHOT, AUTO PLUNGER, POP BUMPER, RIGHT SCOOP,
+      and did NOT fire 0, 1, 5, 6, which it names RIGHT FLIPPER, TROUGH, LEFT
+      FLIPPER, UP LEFT FLIP. A ball search fires exactly the first set and
+      exactly not the second. No run was needed for any of it.
+      **(2) `ballmodel.py` — the ramp rule in one place.** With k balls home
+      positions 1..k are made, so an eject opens the HIGHEST made position and
+      a return closes the LOWEST open one. `plunge.py` now goes through it
+      instead of carrying its own `reversed()`, which is the fact item 20 was
+      a bug in. It also reports a trough that is not a contiguous stack.
+      **(3) `ballfeed.py` — the thing that answers the game.** Watches the
+      padled coil counter at 50 Hz INSIDE WSL (a host-side loop is capped near
+      6 actions/s by the ~80 ms wsl.exe spawn, item 24/26) and drives the
+      trough and shooter-lane switches under source letter `b`. It never
+      remembers a request: the game's own retry is the queue, which is what
+      folds a retry burst into one ball. `watch.sh` starts it, `alive.sh` and
+      `killgame.sh` count and kill it (same day, per the non-negotiable).
+      **(4) `plunge.py drain`** — nothing simulates a playfield, so a drain
+      cannot be an event and is now an action. Without it a multiball could
+      start and never end.
+      **(5) Verified offline end-to-end, `ballfeedtest.py`, on the REAL tables
+      of TWO titles** (godzilla_pro node 8, jaws_le node 9): a coil-counter
+      bump takes a ball out of the FAR end, lands it in the shooter lane,
+      refuses a retry inside the minimum gap, launches on the auto plunger,
+      feeds three balls for a multiball, and refuses an empty trough rather
+      than going negative. The harness found a real bug (refusals de-duped
+      against one slot flooded the log by alternating) before a run paid for
+      it. 37 unit tests beside it.
+      **The one guessed number: `PAD_BALL_MIN_GAP_MS` (600).** A retry burst
+      and a multiball feed are the same coil at different spacings and only a
+      measured multiball can say where the line is. It logs every refusal it
+      makes on that number, so it is visible rather than silently deciding how
+      many balls a multiball gets.
+      **★★★ (6) VERIFIED LIVE, godzilla_pro, 2026-08-10, on the GAME'S OWN
+      DISPLAY. THE LOOP IS CLOSED: BALL 1 came up with nobody running
+      `plunge.py plunge`.** `plunge.py coin` then `plunge.py start`, and the
+      game fired its own trough eject; the feeder opened TROUGH 6 and closed
+      SHOOTER LANE; the screen showed PLAYER 1 / BALL 1 (screenshot). That is
+      the exact measurement at the top of this item — `coin` + `start` leaving
+      the trough at 6 of 6 — now reading 5 of 6 for the right reason.
+      **Two INDEPENDENT confirmations of the coil identification arrived free,
+      and neither was designed for:** the game drove the eject at **lvl=225**,
+      which is exactly the service menu's own "Trough Eject Power 225 (88%)",
+      and the auto plunger at **lvl=150 = 0x96**, which is exactly what
+      coildecode.py recorded from the ball-search capture ("the AUTO PLUNGER
+      goes out at 0x96 where everything else is 0xff"). The two coils the rig
+      now acts on are named by the table, by item 3's search, and by their own
+      drive strengths.
+      **THE WHOLE BALL CYCLE RAN, three feeds and two launches:** eject →
+      lane → launch → `plunge.py drain` → the game re-served → the feeder fed
+      again → **the game fired its own AUTO PLUNGER** and the feeder launched
+      it. The re-serves were BALL SAVE, correctly (score 00, drained seconds
+      after the plunge), which is why the display stayed on BALL 1 — that is
+      the machine behaving, not the rig failing.
+      **MEASURED, and it retires the one guessed number for now: ZERO
+      refusals in the whole run.** The game never sent a retry burst, so the
+      ~20 ms response beat its retry window every time and
+      `PAD_BALL_MIN_GAP_MS` never fired. It is still a guess for the multiball
+      case, where the spacing is the game's and not the rig's.
+      **A BUG THE OFFLINE HARNESS COULD NOT HAVE FOUND, and it is the reason
+      the first live start did nothing: the shim creates `dump/padled`
+      LAZILY,** on the first LED frame, so a feeder started by watch.sh comes
+      up a minute ahead of it — and "not yet" was being read as "gone", so it
+      announced the run was over and exited having fed nothing. The harness
+      writes the block before it starts anything and could never see it. Fixed:
+      waiting is right until the block has been seen ONCE.
+      **NOT ESTABLISHED — A MULTIBALL, which is this item's actual acceptance.**
+      No multiball was reached: getting one needs a game played into a mode,
+      not scripted pokes, and this run never scored (ball save kept re-serving
+      a 0-score ball). Everything the feed mechanism does for ball two of a
+      multiball it has now done three times for one ball, but that is an
+      argument, not the oracle this item asked for.
+      **★★ (7) DAVID REACHED A MULTIBALL BY HAND, 2026-08-11 — MECHAGODZILLA
+      MULTIBALL, `trough 3/6   3 in play` on 21a's panel — and it does NOT
+      close this item, because it was FED BY HAND.** His run was the app's,
+      i.e. main's watch.sh, which has no `ballfeed.py`; the `[sw] +67f/-67f`
+      lines in his log are virtual-playfield clicks. So the game will start a
+      multiball and the panel counts it correctly, which is worth knowing —
+      but the acceptance is a multiball the FEEDER served, and that still
+      needs a run from this branch.
+      **★★ (8) AND IT EXPOSED A REAL GAP, now fixed: nothing in the window
+      could put a ball back.** David: *"how do i drain a ball? pressing one of
+      the trough switches doesn't drain the ball. is there a way to just click
+      on the ball indicators to add or remove it to the playfield?"* Pressing
+      the switch cannot work and never could — item 24's press-and-hold is
+      MOMENTARY and a ball in a trough holds its switch closed for as long as
+      it sits there, so a press is a ball that arrives and leaves. The only
+      latching control in the window was `Reset balls`, which makes six.
+      **The six dots are the control now:** click an occupied one for
+      `plunge.py take` (one ball out), an empty one for `plunge.py drain` (one
+      ball home). The STACK decides which switch moves, not which dot was
+      clicked — clicking the third of four opens the far end, which is item
+      20's geometry and what the panel exists to show. Bound with a per-item
+      `tag_bind` returning `"break"`, NOT via `info`, so item 24's hit-test
+      promise holds. Tested with real Tk, not a stub canvas: the thing under
+      test is a binding.
+      **★★ (9) DAVID USED IT: "ok it's working well", 2026-08-11, plus two
+      faults he found by using it, both now fixed.**
+      **(a) "when hovering over the circles, it's not always indicating that i
+      can click on it."** A Tk rule, not a mis-binding, and "always" is the
+      clue: an item drawn with `fill=""` is hittable ONLY ON ITS OUTLINE, so a
+      filled ball was a 14 px disc and an EMPTY position — hollow on purpose —
+      was a 1 px ring. **Validated on a labelled example first** (two ovals,
+      one hollow one filled, a generated click at each centre: only the filled
+      one fired, and the hollow one only on its outline). Fixed with a
+      per-position hit pad the colour of the panel, covering ball AND number,
+      so the target is the whole cell. The regression test generates a REAL
+      pointer event, because a direct call cannot see the rule under test.
+      **(b) "plunge should not be auto-ejecting a ball either (it should just
+      get the ball out of the shooter lane)"** — and then, on the build that
+      took that literally, **"it doesn't seem to be doing anything now. at ball
+      start, plunge should: eject a ball into the shooter lane closing the
+      shooter lane switch, then moments later it opens the shooter lane
+      switch."** ▼ **The middle version was a regression and is worth
+      recording as one:** the complaint was never "never eject", it was
+      ejecting a SECOND ball when one was already in the lane — which only
+      became possible because ballfeed.py now puts one there. Reading it as
+      unconditional turned Plunge into a no-op on the most ordinary press
+      there is: ball start, empty lane, no feeder (which is every run started
+      from a checkout without `ballfeed.py`, i.e. most runs today).
+      **`plunge` is conditional now** — lane occupied, launch it and eject
+      nothing; lane empty, serve — which is what the real control does.
+      `serve` stays as the unconditional form and is what the TROUGH coil
+      marker plays, since that marker IS the eject. coilact's AUTO PLUNGER no
+      longer fabricates an arrival into an empty lane.
+      **The harness checks BOTH directions**, because the one-sided version
+      looked correct in isolation; neither check alone is the requirement.
+      **Resume:** play a game into a multiball with a run FROM THIS BRANCH and
+      read `~/padball.log` beside the screen — the acceptance is 2+ balls in
+      play on the GAME's display, served by the feeder, and the log will say
+      how many ejects it answered and whether `PAD_BALL_MIN_GAP_MS` ever
+      refused one. State the repeats. Nothing of this pass is on main, so
+      David's own sessions do not have the feeder or the clickable dots.
+      **★ DAVID, 2026-08-06: "we will need some sophisticated ball handling
+      and clear feedback about how many balls are in play. for example, during
+      multiball, many balls are in play."** The feedback clause is 21a, done
+      and on main. This is the ball handling.
+      **THERE IS NO BALL MODEL ANYWHERE IN THIS RIG.** `plunge.py` opens one
+      trough switch and works the shooter lane; nothing tracks where a ball
+      is, notices a drain, or feeds a second ball when the game asks for one.
+      Multiball is the game firing the trough eject repeatedly and expecting
+      balls to arrive; nothing answers.
+      **MEASURED 2026-08-10 during 21a's run, and it is this item's whole
+      problem in one line: the game's own trough eject does not move a ball
+      here.** `plunge.py coin` then `plunge.py start` left the trough reading
+      6 of 6 on both the panel and `swshow.py`; the count moved only when
+      `plunge.py plunge` opened TROUGH 6 itself. So every ball this rig has
+      ever "played" was moved by a script pretending, and nothing closes the
+      loop between the coil the game fires and the switch that should answer.
+      **~~ITEM 3 IS UPSTREAM~~ — WRONG, and resolved above on 2026-08-10.**
+      This said the trough-eject index was one of the unlabelled 0, 1, 5, 6
+      and that an auto-feed would have to be driven blind on a timer. The
+      device table names it outright and item 3's ball search confirms the
+      mapping both ways; see (1). Kept rather than deleted because "the
+      unlabelled coils are unknown" is the belief that made this item D4, and
+      the thing that dissolved it was reading a table the rig already builds.
+      **What item 20 established that this can build on** (`e1e9cb3`): the
+      trough is a STACK with a known direction — TROUGH 1 is the eject end (it
+      sits beside TROUGH JAM), TROUGH 6 is the far end, balls are taken from
+      the far end and a returning ball fills the far end first. So "eject a
+      ball" and "a ball drains" are both one switch on a known end, and the
+      model is a count plus that rule.
+      **21a shipped the instrument for watching this work**, and that was
+      deliberate: the panel draws the six positions in trough order off
+      `mrg[]`, so a model that ejects from the wrong end is visible by eye in
+      one glance rather than by reading a `[sw]` stream. `trough.py` already
+      answers "which switches, in what order" for any title.
+      **Acceptance:** a multiball starts with more than one ball genuinely in
+      play — the oracle is the game's own display, not the rig's model of
+      itself, because a model that feeds itself will always agree with itself.
+      — S2: single-ball play works, so nobody loses a ball to this; what it
+      costs is every run that wants multiball, and it is a capability nothing
+      else can work around. D4: it needs several runs, it needs a game played
+      into a multiball, and its first dependency (the eject coil index) is
+      itself an unfinished item.
+      *(That D is superseded — see the D4 → D3 note on the title line,
+      which is the current grading: the eject coil index is now known. Annotated
+      2026-09-11, the way item 82 already annotates its own.)*
+      ← CLOSED 2026-09-11 at David's call. The ball model and the feeder
+      SHIPPED and are live-verified on main (ballmodel.py, ballfeed.py): the
+      game asks for a ball and gets one, BALL 1. The multiball acceptance
+      was never run, so nothing here proves more than one ball is genuinely
+      in play. The item/21b branch is merged and gone; no work is stranded.
+
+- [x] **71. dungeons_and_dragons_le draws its 255-device map on a BLANK
+      field while the card ships the exact drawing the map names.** `S3 D2`
+      *(Filed 2026-08-23 from Sam's report: "playfield artwork doesn't
+      display (though the map is present)" — Dungeons & Dragons, X-Men,
+      Jurassic Park. Only the first is a bug; the census below answers the
+      other two.)*
+      The device table names its layout image `TestMode/Rope_LE-Premium-X8-
+      X9_TOP_rotated_edit_cropped` (229 of 255 records on it) and the card
+      ships exactly that file at 313x710 with every coordinate inside it
+      ("229 playfield records, 0 outside the 313x710 artwork" — cardaudit;
+      max x=303, y=654). It never reaches the window because
+      `gameinfo.find_playfield_art()` keeps only filenames containing
+      "playfield" (gameinfo.py:248) and D&D names its drawing after the
+      codename Rope; king_kong_le survives the identical TestMode pattern
+      only because Stern spelled "Playfield" inside the Rodeo filename. So
+      the art is not REFUSED — `layout_art()`'s size gate never sees it, and
+      it would pass — it is never FOUND, and layout_art()'s docstring
+      already names the disease: the table name and the file lookup "are
+      found by two unrelated pieces of code" (playfield.py:2146-2152).
+      **The fix is to stop guessing when the guess fails:** if the token
+      match finds nothing, resolve `devicexy.layout_image()`'s own name
+      against `assets/nuk/images/<image>.png` — the table says which picture
+      it was authored on. Mirror it in cardaudit.py:111 (a whole-word
+      variant of the same filter; they agree on every filename at issue),
+      which is why README.md's table calls this card "none shipped" about a
+      drawing it ships. elvira3's `System/TestMode/universal_topper_scaled`
+      is a candidate the fallback may start finding — harmless
+      (layout_is_usable() still routes elvira3 to Schematic), but check it
+      in the sweep.
+      **This corrects item 57's close note** (~line 863: "genuinely ship no
+      CAD drawing at all (confirmed: no `Test` or `TestMode` folder
+      exists)" — the DnD card HAS TestMode with three drawings; the
+      `games/<title>/` stub dir is just empty outside a run,
+      gameinfo.py:74-78) and README.md's D&D rows.
+      **Census for Sam's other two, answered not chased:** uncanny_xmen_le
+      0.97.0 and jurassic_park_le 1.15.0 carry ZERO device records and their
+      cards ship NO `Test/` or `TestMode/` directory at all (read directly
+      off both cards: images/ holds only Connectivity/System) — their "map"
+      is item 50's designed schematic/LED-grid view; nothing on those builds
+      exists to draw. Known behavior, not this item — and per-build: a newer
+      Stern release could start shipping both (README.md:79-83 makes exactly
+      this point for godzilla_le).
+      **Acceptance:** a bounded dungeons_and_dragons_le run opens the
+      artwork view with the Rope drawing behind its markers (screenshot);
+      cardaudit.py over all card images changes ONLY the D&D row (plus
+      possibly elvira3's art column); mktables caches
+      `tables/dungeons_and_dragons_le/playfield.png`; README.md's D&D row
+      and the "genuinely ship none" list corrected.
+      — S3: cosmetic — the map, the switches (104 live) and the game work
+      today. D2: the failing filter and the table-side name are both
+      located; the catalogue-wide regression control is a desk run of
+      cardaudit; one bounded run to see the window.
+      **★ 2026-08-23, David challenged the X-Men/JP half of the census and
+      the recheck both CONFIRMS it and CORRECTS two claims under it.**
+      Full-card sweeps this time (every partition, IHDR of every image,
+      magic-sniff of every extensionless blob, raw PNG-signature scan of
+      jurassic_park_le's whole 7.86GB and uncanny_xmen_le's 1.88GB
+      image.bin): NO playfield drawing exists anywhere on uncanny_xmen_le
+      0.97.0 or jurassic_park_le 1.15.0 — the census stands, now on
+      exhaustive evidence, but it is a property of THOSE BUILDS (ask any
+      tester on newer code for their version). The corrections: (1) "ZERO
+      device records" was the PARSER, not the card — both titles show the
+      documented aerosmith parser-gap signature (X-Men: 810 seeds → 17
+      garbage validations; JP: 1164 → 17, 'image' strings like
+      `/spine/src/Slot.cpp`), so absent POSITIONS are not proven, only
+      absent ART is; the 0-records class RE (batman/aerosmith, still
+      unowned) now has two more confirmed members. (2) **NEWER BUILDS
+      MOVED THE ART DIRS**: uncanny_xmen_le 0.97.0 has NO `images/Test/`
+      or `images/TestMode/` AT ALL — service art now lives under
+      `images/System/TestMode/` (beatles 1.29 ships BOTH trees) — so
+      find_playfield_art() and cardaudit's ART_DIRS would MISS playfield
+      art a future build ships in the new location. The fix this item
+      already prescribes (resolve the table's OWN layout_image name
+      against `assets/nuk/images/<name>.png`) handles that generically —
+      the name carries its own relative path — and the sweep control
+      should include an X-Men-class card so no-art rows stay no-art.
+      Counterexample now on hand: beatles-1_29_0 parses 180 records with
+      `Test/beatles_playfield.png` found by the CURRENT filter — art:yes
+      with no change. Also noted: JP's card is NOT in the WSL cardcache;
+      it lives in the repo library `images/Stern/spike2/`.
+      ← CLOSED 2026-09-11 at David's call. NOT FIXED, and nothing was built.
+      The failing filter, the table-side layout_image name and the generic
+      fix are all written down below, with a beatles counterexample already
+      on hand.
 **CLOSED IN ONE BATCH ON 2026-09-11 AT DAVID'S CALL, on the same prune that dropped
 1d, 64, 75 and 84: items 67, 29, 33, 82, 65, 70, 32, 30, 72, 38 and 36b.**
 He was told first that three of them (29, 33, 82) record a shipped core ask

@@ -49,6 +49,8 @@
 #   --store   the store's root (where .blobs/ is): the mounted p3
 #   --tree    the tree's subdirectory in the store ('' = the primary's own root)
 #   --games   where that tree is bound (the game's /games); the binds go here
+#   --games-title NAME   the tree's title directory is bound at <games>/NAME, not
+#             under its own name (the emulator rig: every image runs as /games/$PAD_GAME)
 #   --work    the rw directory the work files live in (p7's mountpoint on the
 #             card, $R/dump/work in the rig); --mount-dev mounts DEV there first
 #   --verify  hash every materialized file and refuse the bind on a mismatch
@@ -163,14 +165,14 @@ def _header_bytes(base_key, sha256, size, ranges):
     return b"".join(lines)
 
 
-def write_delta(out, base_key, sha256, size, ranges, new_chunks):
-    """Write a delta blob to the open binary file `out`: the header, then the bytes of
-    `ranges` cut out of the `new_chunks` stream in one pass.  -> the payload's byte count."""
+def delta_chunks(base_key, sha256, size, ranges, new_chunks):
+    """A delta blob as a stream: the header, then the bytes of `ranges` cut out of the
+    `new_chunks` stream in one pass.  Raises ValueError (at the end) when the stream was
+    too short for its ranges."""
     ranges = merge_ranges(ranges)
-    out.write(_header_bytes(base_key, sha256, size, ranges))
+    yield _header_bytes(base_key, sha256, size, ranges)
     want = list(ranges)
     pos = 0
-    written = 0
     for c in new_chunks:
         end = pos + len(c)
         while want and want[0][0] < end:
@@ -178,8 +180,7 @@ def write_delta(out, base_key, sha256, size, ranges, new_chunks):
             lo = max(off, pos) - pos
             hi = min(off + n, end) - pos
             if hi > lo:
-                out.write(c[lo:hi])
-                written += hi - lo
+                yield c[lo:hi]
             if off + n <= end:
                 want.pop(0)
             else:
@@ -187,6 +188,20 @@ def write_delta(out, base_key, sha256, size, ranges, new_chunks):
         pos = end
     if want:
         raise ValueError("the stream ended at %d before range %r" % (pos, want[0]))
+
+
+def payload_bytes(ranges):
+    return sum(n for _o, n in merge_ranges(ranges))
+
+
+def write_delta(out, base_key, sha256, size, ranges, new_chunks):
+    """Write a delta blob to the open binary file `out` -> the payload's byte count."""
+    it = delta_chunks(base_key, sha256, size, ranges, new_chunks)
+    out.write(next(it))                                        # the header
+    written = 0
+    for piece in it:
+        out.write(piece)
+        written += len(piece)
     return written
 
 
@@ -535,6 +550,13 @@ def main(argv=None):
             continue
         if a["bind"]:
             target = os.path.join(games, rel)
+            if a["games_title"]:
+                # the tree's title directory is bound under another name (the emulator
+                # rig runs every image as /games/$PAD_GAME): the first path component
+                # of `rel` is that directory, so it is the one that gets renamed
+                parts = rel.split("/", 1)
+                target = os.path.join(games, a["games_title"], parts[1]) if len(parts) == 2 \
+                    else os.path.join(games, a["games_title"])
             if not os.path.isfile(target):
                 log("%s: no such file under %s to bind over: the game plays the base's file" % (rel, games))
                 continue
@@ -549,7 +571,7 @@ def main(argv=None):
 
 
 def _parse(argv):
-    a = {"store": None, "tree": "", "games": None, "work": None, "mount_dev": None,
+    a = {"store": None, "tree": "", "games": None, "games_title": None, "work": None, "mount_dev": None,
          "mount_opts": "rw,noatime", "bind": True, "verify": False, "log": None}
     it = iter(argv)
     for opt in it:
@@ -557,7 +579,8 @@ def _parse(argv):
             a["bind"] = False
         elif opt == "--verify":
             a["verify"] = True
-        elif opt in ("--store", "--tree", "--games", "--work", "--mount-dev", "--mount-opts", "--log"):
+        elif opt in ("--store", "--tree", "--games", "--games-title", "--work", "--mount-dev", "--mount-opts",
+                     "--log"):
             try:
                 a[opt[2:].replace("-", "_")] = next(it)
             except StopIteration:

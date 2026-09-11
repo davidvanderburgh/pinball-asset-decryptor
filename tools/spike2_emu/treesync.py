@@ -38,6 +38,7 @@ import time
 
 TREES_NAME = "trees.json"            # the card's record, on p2 beside build.json
 TREES_FORMAT = 1
+TREES_FORMAT_DELTAS = 2              # written only when a tree stores a delta (item 107): older tools refuse it
 CACHE_DIRNAME = "pinball_spike2_multiboot"
 CACHE_ENV = "MULTIBOOT_CACHE"
 HASH_CHUNK = 1 << 20                  # 1 MiB reads: fast on DrvFs, 8 MiB reads are not
@@ -46,10 +47,25 @@ TMP_MARK = ".tmp."                    # a file being written: <name>.tmp.<pid>
 SKIP_ROOT = ("lost+found",)
 BLOBS_DIR = ".blobs"                  # the compact layout's store (item 95): one inode per unique file
 STORE_SKIP = (BLOBS_DIR, ".multiboot", "lost+found")
+TREE_SKIP = (".multiboot",)           # in EVERY store tree: where the tree's own delta index lives (item 107)
+DELTA_SUFFIX = ".delta"               # a delta blob's name: <blob_key>.delta (item 107)
+DELTA_INDEX = ".multiboot/deltas"     # a tree's own list of its delta files, what the card reads at boot
+DELTA_MIN_SIZE = 1 << 20              # files smaller than this are never deltas: the header would cost more
 
 
 class TreesError(Exception):
     """A manifest, cache or executor refusal, with the reason in words."""
+
+
+def _materialize():
+    """codeselect/materialize.py - the delta FORMAT lives there (it is the file that ships
+    to the card and rebuilds the deltas at boot, in the card python's own subset), and
+    this module reads and writes the format through it so it is defined once."""
+    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "codeselect")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    import materialize
+    return materialize
 
 
 # ============================================================================ the model
@@ -128,27 +144,51 @@ class SourceManifest:
 
 
 class ImageTrees:
-    """One image as the card records it."""
+    """One image as the card records it.  `deltas` (item 107): {rel: {"base": base blob
+    key, "delta": delta blob name, "size": n, "bytes": payload bytes, "ranges": n}} for the
+    files this tree stores as a DELTA of another tree's blob - on the card the tree's own
+    file at `rel` is a hardlink to the BASE blob, so its content hashes to the base's
+    sha256, not the recorded one; the record keeps the SOURCE's digest and this field is
+    how verify knows why they differ (tree_as_on_card in mkmulticard)."""
 
-    def __init__(self, index, device, sub, tree, stamp=None, uuid=None, bypass=None):
+    def __init__(self, index, device, sub, tree, stamp=None, uuid=None, bypass=None, deltas=None):
         self.index, self.device, self.sub, self.tree = index, device, sub, tree
         self.stamp = dict(stamp) if stamp else None
         self.uuid = uuid
         self.bypass = dict(bypass) if bypass else None       # {"game": sha, "sidx": sha} after a bypass
+        self.deltas = {k: dict(v) for k, v in deltas.items()} if deltas else None
 
     def to_dict(self):
         d = {"index": self.index, "device": self.device, "tree": self.sub, "source": self.stamp,
              "uuid": self.uuid, "bytes": self.tree.bytes(), "bypass": self.bypass}
+        if self.deltas:
+            d["deltas"] = {k: self.deltas[k] for k in sorted(self.deltas)}
         d.update(self.tree.to_dict())
         return d
 
     @classmethod
     def from_dict(cls, d):
         try:
+            deltas = d.get("deltas") or None
+            if deltas is not None:
+                deltas = {str(k): {"base": str(v["base"]), "delta": str(v["delta"]), "size": int(v["size"]),
+                                   "bytes": int(v.get("bytes", 0)), "ranges": int(v.get("ranges", 0))}
+                          for k, v in deltas.items()}
             return cls(int(d["index"]), d["device"], d.get("tree", ""), TreeManifest.from_dict(d),
-                       d.get("source"), d.get("uuid"), d.get("bypass"))
-        except (KeyError, TypeError, ValueError) as e:
+                       d.get("source"), d.get("uuid"), d.get("bypass"), deltas)
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
             raise TreesError("trees.json image entry is malformed: %s" % e)
+
+    def base_sha(self, rel):
+        """The sha256 the card's own file at `rel` hashes to: the base blob's for a delta'd
+        file, the recorded one otherwise."""
+        if self.deltas and rel in self.deltas:
+            return self.deltas[rel]["base"].split(".")[0]
+        r = self.tree.files.get(rel)
+        return r.sha256 if r else None
+
+    def delta_names(self):
+        return {v["delta"] for v in (self.deltas or {}).values()}
 
 
 class CardTrees:
@@ -170,8 +210,25 @@ class CardTrees:
                 return im
         return None
 
+    def has_deltas(self):
+        return any(im.deltas for im in self.images)
+
+    def delta_names(self):
+        """Every delta blob some tree of this record names - what gc_blobs must keep."""
+        out = set()
+        for im in self.images:
+            out |= im.delta_names()
+        return out
+
     def to_json(self):
-        d = {"format": TREES_FORMAT, "tool": self.tool, "version": self.version, "written": self.written,
+        # FORMAT 2 ONLY WHEN A DELTA EXISTS (item 107).  A tool from before deltas reading a
+        # delta'd card would fail verify on every delta'd file (their content is the base's)
+        # and, worse, its update's gc_blobs would REMOVE every delta blob - nothing links
+        # them - and every variant would silently play the base's songs.  The format number
+        # is what makes such a tool refuse the card out loud instead; a card without a delta
+        # keeps format 1 so nothing older is refused for no reason.
+        fmt = TREES_FORMAT_DELTAS if self.has_deltas() else TREES_FORMAT
+        d = {"format": fmt, "tool": self.tool, "version": self.version, "written": self.written,
              "layout": self.layout, "primary": self.primary, "synced": self.synced, "dirty": self.dirty,
              "images": [im.to_dict() for im in sorted(self.images, key=lambda i: i.index)]}
         return json.dumps(d, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -182,9 +239,9 @@ class CardTrees:
             d = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
         except ValueError as e:
             raise TreesError("trees.json is not JSON: %s" % e)
-        if not isinstance(d, dict) or d.get("format") != TREES_FORMAT:
+        if not isinstance(d, dict) or d.get("format") not in (TREES_FORMAT, TREES_FORMAT_DELTAS):
             raise TreesError("trees.json format %r is not %d (a newer tool wrote it?)"
-                             % (d.get("format") if isinstance(d, dict) else None, TREES_FORMAT))
+                             % (d.get("format") if isinstance(d, dict) else None, TREES_FORMAT_DELTAS))
         return cls([ImageTrees.from_dict(i) for i in d.get("images", [])], d.get("primary"), d.get("synced", ()),
                    d.get("dirty", ()), d.get("layout"), d.get("tool", "mkmulticard"), d.get("version"),
                    d.get("written"))
@@ -210,18 +267,43 @@ def parse_blob_key(name):
     return m.group(1), int(m.group(2), 8), int(m.group(3)), int(m.group(4))
 
 
-def dedup_costs(manifests):
+def delta_name(rec):
+    """The name of a file's DELTA blob (item 107): its full blob key plus the suffix, so the
+    name still says what the file hashes to and how it is owned."""
+    return blob_key(rec) + DELTA_SUFFIX
+
+
+def parse_delta_name(name):
+    """-> (sha256, mode, uid, gid) of the FILE a delta blob rebuilds, or None."""
+    if not name.endswith(DELTA_SUFFIX):
+        return None
+    return parse_blob_key(name[:-len(DELTA_SUFFIX)])
+
+
+def dedup_costs(manifests, deltas=None):
     """What each image costs in a store, in order: the bytes of blobs FIRST needed by that
     image among the images before it (a file repeated inside one tree counts once too) ->
-    (unique bytes per image, shared bytes = sum of tree bytes - sum of unique)."""
+    (unique bytes per image, shared bytes = sum of tree bytes - sum of unique).
+    A file stored as a DELTA (item 107) costs its delta's bytes the first time that delta
+    is needed and nothing after; the base it rides on is some earlier image's blob and is
+    costed there.  `deltas` is a list parallel to `manifests` of {rel: {"bytes": n, ...}}
+    (a plan's, before any record exists); an ImageTrees' own `.deltas` is used when the
+    list is not given."""
     seen = set()
     unique = []
     total = 0
-    for man in manifests:
+    for i, man in enumerate(manifests):
         tree = man.tree if hasattr(man, "tree") else man
+        mine_deltas = (deltas[i] if deltas is not None and i < len(deltas) else getattr(man, "deltas", None)) or {}
         mine = 0
-        for rec in tree.files.values():
+        for rel, rec in tree.files.items():
             total += rec.size
+            if rel in mine_deltas:
+                k = delta_name(rec)
+                if k not in seen:
+                    seen.add(k)
+                    mine += int(mine_deltas[rel].get("bytes", 0))
+                continue
             k = blob_key(rec)
             if k not in seen:
                 seen.add(k)
@@ -573,6 +655,10 @@ class FsOps:
     def write_stream(self, rel, chunks, mode, uid, gid, mtime):
         raise NotImplementedError
 
+    def read_chunks(self, rel, chunk=HASH_CHUNK):
+        """The bytes of a regular file, in `chunk` pieces (a base blob, for a delta)."""
+        raise NotImplementedError
+
     def set_attrs(self, rel, mode=None, uid=None, gid=None):
         raise NotImplementedError
 
@@ -730,6 +816,14 @@ class MemOps(FsOps):
         self.entries[rel] = {"kind": "file", "node": node}
         self.next_ino += 1
 
+    def read_chunks(self, rel, chunk=HASH_CHUNK):
+        e = self.entries.get(rel)
+        if e is None or e["kind"] != "file":
+            raise OSError(errno.ENOENT, "no such file", rel)
+        b = self._node(e)["data"]
+        for i in range(0, len(b), chunk):
+            yield b[i:i + chunk]
+
     def set_attrs(self, rel, mode=None, uid=None, gid=None):
         self._tick("attrs " + rel)
         e = self._node(self.entries[rel])
@@ -848,15 +942,25 @@ def sweep_tmp(ops, prefix=""):
     return n
 
 
-def apply_changes(ops, prefix, changes, new, source, progress=None, store=False):
+def apply_changes(ops, prefix, changes, new, source, progress=None, store=False, deltas=None):
     """Apply `changes` (diff_tree's order) to the tree at `prefix` on `ops`, taking bytes
     from `source.chunks(rel)`.  Every write is tmp + rename; nothing is removed before
     every add is done; every step is idempotent (a re-run after a crash converges).
     With `store` (item 95) a file is a HARDLINK to `.blobs/<blob_key>`: a blob the store
     already holds is linked without a byte read or written, a missing one is written into
-    the store first.  -> {"written": n, "bytes": n, "removed": n, "linked": n}."""
+    the store first.  -> {"written": n, "bytes": n, "removed": n, "linked": n}.
+    With `deltas` too (item 107: {rel: {"base": base blob key, "ranges": [(off, len)]}},
+    find_deltas' answer for this tree) a named file is stored as a DELTA BLOB - the
+    header and the ranges' bytes, cut from the source in one pass - and the tree's own
+    file is linked to the BASE blob; the stats then also carry "deltas" (blobs written),
+    "delta_bytes" and "delta_files" ({rel: the record's entry}).  A base the store does
+    not hold at that size is not an error: the file is stored whole, and "delta_skipped"
+    counts it."""
     p = progress or _NoProgress()
     stats = {"written": 0, "bytes": 0, "removed": 0, "linked": 0}
+    if deltas is not None:
+        stats.update({"deltas": 0, "delta_bytes": 0, "delta_files": {}, "delta_skipped": 0})
+    mz = _materialize() if deltas else None
     pending_removals = []
     for c in changes:
         rel = _join(prefix, c.rel)
@@ -881,6 +985,33 @@ def apply_changes(ops, prefix, changes, new, source, progress=None, store=False)
             tmp = tmp_name(rel)
             if ops.exists(tmp):
                 ops.unlink(tmp)
+            dplan = deltas.get(c.rel) if (store and deltas) else None
+            if dplan is not None:
+                base = BLOBS_DIR + "/" + dplan["base"]
+                bst = ops.lstat(base)
+                if bst is None or bst["kind"] != "file" or bst.get("size") != r.size:
+                    stats["delta_skipped"] += 1               # no such base here: stored whole below
+                else:
+                    ranges = [(int(o), int(n)) for o, n in dplan["ranges"]]
+                    dname = delta_name(r)
+                    dblob = BLOBS_DIR + "/" + dname
+                    if ops.lstat(dblob) is None:
+                        dtmp = BLOBS_DIR + "/" + TMP_MARK + dname + "." + str(os.getpid())
+                        if ops.exists(dtmp):
+                            ops.unlink(dtmp)
+                        # the meter counts the SOURCE read (the whole file goes by), not the delta out
+                        ops.write_stream(dtmp, mz.delta_chunks(dplan["base"], r.sha256, r.size, ranges,
+                                                               _metered(source.chunks(c.rel), p)),
+                                         0o600, 0, 0, r.mtime)
+                        ops.rename(dtmp, dblob)
+                        stats["deltas"] += 1
+                        stats["delta_bytes"] += mz.payload_bytes(ranges)
+                    if not (st is not None and st["kind"] == "file" and st["ino"] == bst["ino"]):
+                        ops.link(base, tmp)
+                        ops.rename(tmp, rel)
+                    stats["delta_files"][c.rel] = {"base": dplan["base"], "delta": dname, "size": r.size,
+                                                   "bytes": mz.payload_bytes(ranges), "ranges": len(ranges)}
+                    continue
             if store:
                 blob = BLOBS_DIR + "/" + blob_key(r)
                 bst = ops.lstat(blob)
@@ -962,9 +1093,12 @@ def adopt_tree(ops, prefix, manifest):
     return stats
 
 
-def gc_blobs(ops):
+def gc_blobs(ops, keep_deltas=None):
     """Remove every blob no tree links any more (nlink 1: the store's own name) and every
-    half-written one.  -> (n removed, bytes)."""
+    half-written one.  A DELTA blob (item 107) is never linked, so its link count says
+    nothing: it is removed only when `keep_deltas` (the record's delta_names()) is given
+    and does not name it; with `keep_deltas` None every delta is left alone.
+    -> (n removed, bytes)."""
     n = nbytes = 0
     if not ops.exists(BLOBS_DIR):
         return 0, 0
@@ -973,17 +1107,138 @@ def gc_blobs(ops):
         st = ops.lstat(rel)
         if st is None or st["kind"] != "file":
             continue
-        if is_tmp(name) or st.get("nlink", 1) <= 1:
+        if is_tmp(name):
+            dead = True
+        elif name.endswith(DELTA_SUFFIX):
+            dead = keep_deltas is not None and name not in keep_deltas
+        else:
+            dead = st.get("nlink", 1) <= 1
+        if dead:
             ops.unlink(rel)
             n += 1
             nbytes += st.get("size", 0)
     return n, nbytes
 
 
+def write_delta_index(ops, prefix, delta_files):
+    """Write (or remove) a tree's own list of its delta files, `<prefix>/.multiboot/deltas`
+    (item 107) - the tab lines materialize.py reads on the card.  `delta_files` is
+    apply_changes' "delta_files" (or an ImageTrees.deltas); empty = no index, and a stale
+    one is removed.  -> True when an index is in place."""
+    mz = _materialize()
+    d = _join(prefix, ".multiboot")
+    idx = _join(prefix, DELTA_INDEX)
+    if not delta_files:
+        if ops.exists(idx):
+            ops.unlink(idx)
+        if ops.exists(d) and not ops.listdir(d):
+            ops.rmdir(d)
+        return False
+    if not ops.exists(d):
+        ops.mkdir(d, 0o755, 0, 0)
+    entries = [(rel, v["base"], v["delta"], int(v["size"])) for rel, v in delta_files.items()]
+    tmp = tmp_name(idx)
+    if ops.exists(tmp):
+        ops.unlink(tmp)
+    ops.write_stream(tmp, [mz.index_bytes(entries)], 0o644, 0, 0, int(time.time()))
+    ops.rename(tmp, idx)
+    return True
+
+
 def _metered(chunks, progress):
     for c in chunks:
         progress.add(len(c))
         yield c
+
+
+# ============================================================================ deltas (item 107)
+_DELTA_CACHE_FORMAT = 1
+MISS = object()                       # load_cached_delta: nothing cached (None there means "not a delta")
+
+
+def _delta_cache_name(base_sha, new_sha):
+    return "delta-%s-%s.json" % (base_sha, new_sha)
+
+
+def load_cached_delta(base_sha, new_sha, size, cache_dir=None):
+    """The cached compare of one (base, variant) pair -> ranges (a list), None for "compared
+    and NOT a delta", or the sentinel MISS when nothing is cached."""
+    name = _delta_cache_name(base_sha, new_sha)
+    for d in cache_dir_candidates(cache_dir):
+        p = os.path.join(d, name)
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, "rb") as f:
+                rec = json.loads(f.read().decode("utf-8"))
+            if rec.get("format") != _DELTA_CACHE_FORMAT or int(rec.get("size", -1)) != size:
+                continue
+            ranges = rec.get("ranges")
+            return None if ranges is None else [(int(o), int(n)) for o, n in ranges]
+        except (OSError, ValueError, TypeError):
+            continue
+    return MISS
+
+
+def store_cached_delta(base_sha, new_sha, size, ranges, cache_dir=None):
+    try:
+        d = cache_dir_for_write(cache_dir)
+        p = os.path.join(d, _delta_cache_name(base_sha, new_sha))
+        tmp = p + TMP_MARK + str(os.getpid())
+        with open(tmp, "wb") as f:
+            f.write(json.dumps({"format": _DELTA_CACHE_FORMAT, "size": size,
+                                "ranges": None if ranges is None else [[o, n] for o, n in ranges]},
+                               separators=(",", ":")).encode("utf-8"))
+        os.replace(tmp, p)
+    except OSError:
+        pass                                    # a cache is a convenience, never a refusal
+
+
+def find_deltas(manifests, chunks_of, cache_dir=None, progress=None, min_size=DELTA_MIN_SIZE, note=None):
+    """Which files of each tree can be stored as a DELTA of an earlier tree's FULL blob at the
+    same path (item 107): the same size, another sha256, at least `min_size`, and a block
+    compare of the two (materialize.find_delta) finding no more than its fraction differing.
+    Every full blob seen at that path is tried in order (a variant of a variant may be near
+    the second and nothing like the first); the compare stops early past the limit.  A
+    variant whose sha an earlier tree already stores as a delta shares that delta blob.
+    `chunks_of(i, rel)` yields tree i's bytes at `rel`; `progress.add(n)` sees every byte
+    read; `note(text)` is told each compare.  Compares are cached by (base sha, new sha) -
+    negatives too - so a re-plan reads nothing.
+    -> [{rel: {"base": base blob key, "ranges": [(off, len)], "bytes": n}}], one per tree."""
+    mz = _materialize()
+    p = progress or _NoProgress()
+    out = []
+    fulls = {}                # rel -> [(index, FileRec)] of every full blob at that path, in order
+    known = {}                # rel -> {sha: entry} of every delta at that path so far
+    for i, man in enumerate(manifests):
+        tree = man.tree if hasattr(man, "tree") else man
+        mine = {}
+        for rel, rec in sorted(tree.files.items()):
+            cands = fulls.get(rel)
+            if rec.size >= min_size and cands and not any(b.sha256 == rec.sha256 for _j, b in cands):
+                prior = known.get(rel, {}).get(rec.sha256)
+                if prior is not None:
+                    mine[rel] = dict(prior)
+                    continue
+                for j, brec in cands:
+                    if brec.size != rec.size:
+                        continue
+                    ranges = load_cached_delta(brec.sha256, rec.sha256, rec.size, cache_dir)
+                    if ranges is MISS:
+                        if note:
+                            note("comparing image %d's %s with image %d's (%d bytes)" % (i, rel, j, rec.size))
+                        ranges = mz.find_delta(_metered(chunks_of(j, rel), p), _metered(chunks_of(i, rel), p),
+                                               rec.size)
+                        store_cached_delta(brec.sha256, rec.sha256, rec.size, ranges, cache_dir)
+                    if ranges:
+                        entry = {"base": blob_key(brec), "ranges": ranges, "bytes": mz.payload_bytes(ranges)}
+                        mine[rel] = entry
+                        known.setdefault(rel, {})[rec.sha256] = entry
+                        break
+            if rel not in mine and not any(b.sha256 == rec.sha256 for _j, b in fulls.get(rel, ())):
+                fulls.setdefault(rel, []).append((i, rec))
+        out.append(mine)
+    return out
 
 
 def apply_tree_actions(ops, actions, tmp_tag=None):

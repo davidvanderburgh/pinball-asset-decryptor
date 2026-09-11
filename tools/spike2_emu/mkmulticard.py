@@ -184,6 +184,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 
 #: The repo root (tools/spike2_emu/../..): the validator bypass and the ext4 reader are the
 #: app's own plugins/stern modules, imported lazily so the pure parts need no package.
@@ -238,6 +239,10 @@ SELECTOR_FILES = collections.OrderedDict([
     ("codeselect", ("codeselect", 0o755, True)),
     ("select.sh", ("select.sh", 0o755, True)),
     ("font.ttf", ("font.ttf", 0o644, False)),
+    # item 107: rebuilds a store card's delta files at boot (select.sh runs it with the
+    # card's python2.7); not required, because a card without a delta never calls it -
+    # a build that MAKES a delta refuses a selector dir without it (need_materializer)
+    ("materialize.py", ("materialize.py", 0o755, False)),
 ])
 FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\Pinball\\images")
 
@@ -564,6 +569,12 @@ def build_work_bytes(plan):
         total += (plan.store_src_count or 0) * SECTOR
         if plan.store_unique:
             total += sum(plan.store_unique[1:])
+        # a delta (item 107) costs the store its ranges but the build READS the whole source
+        # file to cut them out, and the meter counts the read
+        for i, d in enumerate(plan.store_deltas or []):
+            if i and plan.manifests and i < len(plan.manifests):
+                tree = plan.manifests[i].tree
+                total += sum(tree.files[rel].size - int(v.get("bytes", 0)) for rel, v in d.items() if rel in tree.files)
         return total
     total = PRE_P1 * SECTOR + sum(p.count * SECTOR for p in plan.prims + plan.logs)
     if plan.layout == "multi" and plan.multi_used:
@@ -786,6 +797,7 @@ class Plan:
         self.store_unique = None        # per image, the bytes only it brings to the store (plan/build)
         self.store_shared = None        # the bytes the images share by content, stored once
         self.store_meta = None          # the primary's own filesystem overhead inside p3
+        self.store_deltas = None        # per image, {rel: {base, ranges, bytes}} stored as deltas (item 107)
         self.manifests = None           # the sources' manifests when the plan hashed them
         if layout == "parts":
             for x, xp in zip(self.extra_geoms, self.extras):
@@ -1030,7 +1042,8 @@ def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdir
         return Plan(P, XG, primary, list(extras), "store", multi_subdirs=subs, store_sectors=int(store_sectors))
     ts = _treesync()
     mans = measure_sources([primary] + list(extras), cache_dir, progress)
-    unique, shared = ts.dedup_costs(mans)
+    deltas = find_source_deltas([primary] + list(extras), mans, cache_dir, progress)
+    unique, shared = ts.dedup_costs(mans, deltas)
     _t3, s3, c3 = P.part(3)
     used3 = _used_bytes_or_none(primary, s3 * SECTOR)
     meta = max(0, used3 - mans[0].tree.bytes()) if used3 is not None else 0
@@ -1057,7 +1070,67 @@ def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdir
     plan.store_unique = unique
     plan.store_shared = shared
     plan.store_meta = meta
+    plan.store_deltas = deltas
     return plan
+
+
+class SourceChunks:
+    """`chunks_of(i, rel)` over a list of source cards for treesync.find_deltas: each source's
+    reader is opened once, on first use, and its inode map filled from the manifest (a cached
+    manifest carries none).  Close it when the plan is done."""
+
+    def __init__(self, paths, mans):
+        self.paths, self.mans = list(paths), list(mans)
+        self._open = {}
+
+    def _reader(self, i):
+        if i not in self._open:
+            _v, _s, ext4, _a = _stern_plugins()
+            f = open(self.paths[i], "rb")
+            part = source_part(self.paths[i])
+            r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
+            tree = self.mans[i].tree
+            if not tree.inodes:
+                for rel, kind, ino, _node in r.iter_tree(2):
+                    if kind == "file":
+                        tree.inodes[rel] = ino
+            self._open[i] = (f, r)
+        return self._open[i][1]
+
+    def __call__(self, i, rel):
+        r = self._reader(i)
+        node = r.read_inode(self.mans[i].tree.inodes[rel])
+        for _off, data in r.read_file_chunks(node):
+            yield data
+
+    def close(self):
+        for f, _r in self._open.values():
+            f.close()
+        self._open = {}
+
+
+def find_source_deltas(paths, mans, cache_dir=None, progress=None):
+    """Which files of each source can be stored as a delta of an earlier source's (item 107):
+    treesync.find_deltas over the sources' own bytes.  Every compare is cached by the pair of
+    digests, so a plan of sources seen before reads nothing.  -> one {rel: ...} per source."""
+    ts = _treesync()
+    src = SourceChunks(paths, mans)
+    # MKMULTICARD_DELTA_MIN=<bytes> lowers the size a file must have to be a delta (1 MiB):
+    # the selftest's synthetic cards have a 1 MiB games partition, so nothing on them could
+    # ever be one at the real minimum
+    try:
+        min_size = int(os.environ.get("MKMULTICARD_DELTA_MIN") or ts.DELTA_MIN_SIZE)
+    except ValueError:
+        min_size = ts.DELTA_MIN_SIZE
+
+    def note(text):
+        if progress is not None and hasattr(progress, "step"):
+            progress.step(text)
+        say(text)
+    try:
+        return ts.find_deltas(mans, src, cache_dir, progress, min_size=min_size, note=note)
+    finally:
+        src.close()
 
 
 def make_plan(primary, extras, layout="auto", multi_sectors=None, multi_src=None, multi_subdirs=None,
@@ -1259,6 +1332,16 @@ def print_plan(plan, media=None, groups=None):
                  p3.count * SECTOR >> 20,
                  (", %s shared by content and stored once" % _gb(plan.store_shared))
                  if plan.store_shared is not None else ""))
+        n_deltas = sum(len(d) for d in (plan.store_deltas or []))
+        if n_deltas:
+            saved = 0
+            for i, d in enumerate(plan.store_deltas):
+                tree = plan.manifests[i].tree if plan.manifests and i < len(plan.manifests) else None
+                for rel, v in d.items():
+                    if tree is not None and rel in tree.files:
+                        saved += tree.files[rel].size - int(v.get("bytes", 0))
+            print("p3 (store layout): %d file(s) stored as byte-range DELTAS of an earlier image's, %s saved"
+                  % (n_deltas, _gb(saved)))
     note = plan.unreachable_note()
     print("images: " + ", ".join("%d=%s" % (i, d) for i, d in enumerate(plan.devices()))
           + ("  (%s)" % note if note else ""))
@@ -3288,6 +3371,14 @@ class DirOps(object):
         os.chmod(p, mode)
         os.utime(p, (mtime, mtime))
 
+    def read_chunks(self, rel, chunk=1 << 20):
+        with open(self._p(rel), "rb") as f:
+            while True:
+                b = f.read(chunk)
+                if not b:
+                    return
+                yield b
+
     def set_attrs(self, rel, mode=None, uid=None, gid=None):
         p = self._p(rel)
         if (uid is not None or gid is not None) and hasattr(os, "chown"):
@@ -3548,6 +3639,9 @@ def tree_skip(plan, sub):
     ts = _treesync()
     if plan is not None and plan.layout == "store" and not sub:
         return tuple(ts.SKIP_ROOT) + tuple(ts.STORE_SKIP) + tuple(plan.store_subdirs)
+    if plan is not None and plan.layout == "store":
+        # every store tree may carry its own .multiboot/deltas (item 107): the tool's, not the game's
+        return tuple(ts.SKIP_ROOT) + tuple(ts.TREE_SKIP)
     return tuple(ts.SKIP_ROOT)
 
 
@@ -3811,6 +3905,7 @@ def build_store(plan, out, trees):
             if not ops.exists(sub):
                 ops.mkdir(sub, 0o755, 0, 0)
             changes = ts.diff_tree(None, tree)
+            deltas = (plan.store_deltas[i] if plan.store_deltas and i < len(plan.store_deltas) else None) or {}
             with open(srcs[i], "rb") as f:
                 spart = source_part(srcs[i])
                 r = ext4.Ext4Reader(f, spart.start * SECTOR, spart.count * SECTOR)
@@ -3820,11 +3915,53 @@ def build_store(plan, out, trees):
                             tree.inodes[rel] = ino
                 PROGRESS.step("writing image %d (%s) into the store" % (i, os.path.basename(srcs[i])),
                               sum(c.size for c in changes if c.op == "write"))
-                stats = ts.apply_changes(ops, sub, changes, tree, ts.ReaderSource(r, tree), PROGRESS, store=True)
-            say("image %d %s: %d files written (%s), %d linked to blobs the store already held"
-                % (i, device_name(part.num, sub), stats["written"], _gb(stats["bytes"]), stats["linked"]))
+                stats = ts.apply_changes(ops, sub, changes, tree, ts.ReaderSource(r, tree), PROGRESS, store=True,
+                                         deltas=deltas)
+            say("image %d %s: %d files written (%s), %d linked to blobs the store already held%s"
+                % (i, device_name(part.num, sub), stats["written"], _gb(stats["bytes"]), stats["linked"],
+                   store_delta_words(stats)))
+            # the tree's own index of its deltas (what the card reads at boot) and the record's
+            record_deltas(ops, sub, trees.image(i), stats)
         ops.commit()
     say("store built in %.0f s" % (time.monotonic() - t0))
+
+
+def need_materializer(plan, selector_dir):
+    """A plan that stores a delta (item 107) needs materialize.py on the card, or every
+    variant boots on the base's songs with nothing said: refuse up front, before the copy,
+    naming the file and where it comes from.  A plan without a delta needs nothing."""
+    n = sum(len(d) for d in (plan.store_deltas or []))
+    if not n:
+        return
+    if selector_dir is None:
+        raise Refused("%d file(s) would be stored as deltas, and a card built with --no-inject has no "
+                      "boot menu to rebuild them at boot: inject the selector, or build without deltas" % n)
+    if not os.path.isfile(os.path.join(selector_dir, "materialize.py")):
+        raise Refused("%d file(s) would be stored as deltas, but selector dir %s has no materialize.py to "
+                      "rebuild them at boot - rebuild the selector with %s (it installs the file beside "
+                      "select.sh)" % (n, selector_dir, os.path.join(HERE, "buildselect.sh")))
+
+
+def store_delta_words(stats):
+    """The delta half of a store write's line, or '' (item 107)."""
+    if not stats.get("delta_files") and not stats.get("delta_skipped"):
+        return ""
+    out = ", %d stored as delta(s)" % len(stats["delta_files"])
+    if stats.get("deltas"):
+        out += " (%d written, %s of ranges)" % (stats["deltas"], _gb(stats["delta_bytes"]))
+    if stats.get("delta_skipped"):
+        out += ", %d planned delta(s) stored whole (no base here)" % stats["delta_skipped"]
+    return out
+
+
+def record_deltas(ops, prefix, im, stats):
+    """After apply_changes on a store tree (item 107): the tree's `.multiboot/deltas` index
+    written or removed to match what was stored, and the record's entry set."""
+    ts = _treesync()
+    files = stats.get("delta_files") or None
+    ts.write_delta_index(ops, prefix, files)
+    if im is not None:
+        im.deltas = dict(files) if files else None
 
 
 def bypass_store(card, plan, trees):
@@ -3859,7 +3996,7 @@ def bypass_store(card, plan, trees):
             elif state == "bypassed":
                 line += " (already)"
             print("image %d %s: %s - %s" % (i, dev, line, "; ".join(notes)))
-        n, nbytes = ts.gc_blobs(ops)
+        n, nbytes = ts.gc_blobs(ops, keep_deltas=trees.delta_names())
         if n:
             say("store: %d blob(s) no tree links any more removed (%s)" % (n, _gb(nbytes)))
         ops.commit()
@@ -3880,22 +4017,36 @@ def verify_store(card, plan, rec, check, mode="full"):
         if ts.BLOBS_DIR not in ents:
             check("store: %s at the root of p3" % ts.BLOBS_DIR, False)
             return
-        blobs, bad_names, bad_attrs, tmp = {}, [], [], []
+        blobs, deltas, bad_names, bad_attrs, tmp = {}, {}, [], [], []
         for name, (c, _t) in _dir_entries(r, ents[ts.BLOBS_DIR][0]).items():
             node = r.read_inode(c)
             if ts.is_tmp(name):
                 tmp.append(name)
                 continue
+            if (node["mode"] & ext4.S_IFMT) != ext4.S_IFREG:
+                bad_names.append(name)
+                continue
+            if name.endswith(ts.DELTA_SUFFIX):
+                # a delta blob (item 107): its name carries the FILE's mode/owner (the tree's
+                # link is the base's inode); the blob itself is nobody's file and is not linked
+                if ts.parse_delta_name(name) is None:
+                    bad_names.append(name)
+                    continue
+                deltas[name] = (c, node)
+                continue
             key = ts.parse_blob_key(name)
-            if key is None or (node["mode"] & ext4.S_IFMT) != ext4.S_IFREG:
+            if key is None:
                 bad_names.append(name)
                 continue
             if (node["mode"] & 0o7777, node["uid"], node["gid"]) != key[1:]:
                 bad_attrs.append(name)
             blobs[name] = (c, node)
-        check("store: %d blobs, every name a blob's, none half-written" % len(blobs), not bad_names and not tmp,
+        check("store: %d blobs%s, every name a blob's, none half-written"
+              % (len(blobs), (" + %d deltas" % len(deltas)) if deltas else ""), not bad_names and not tmp,
               "odd %r tmp %r" % (bad_names[:3], tmp[:3]))
         check("store: blob mode/owner match their names", not bad_attrs, "%r" % bad_attrs[:3])
+        if deltas or (rec is not None and rec.has_deltas()):
+            verify_deltas(r, rec, blobs, deltas, check, mode)
         by_ino = {c: name for name, (c, _n) in blobs.items()}
         refs = collections.Counter()
         unlinked = []
@@ -3927,6 +4078,98 @@ def verify_store(card, plan, rec, check, mode="full"):
                     bad.append(name)
             check("store: %d blobs hash to their names (%s, %.0f s)" % (len(blobs), _gb(nbytes), time.monotonic() - t0),
                   not bad, "%r" % bad[:3])
+
+
+def verify_deltas(r, rec, blobs, deltas, check, mode):
+    """The delta half of a store's invariants (item 107): every delta the record names is in
+    the store and every delta in the store is named (a delta nobody names is what an older
+    tool's gc would have removed, and one the record names but the store lacks is a variant
+    that boots on the base's songs); each delta's header names a base blob the store holds at
+    the right size; and, in 'full' mode, base + delta hashes to the delta's name."""
+    ts = _treesync()
+    mz = ts._materialize()
+    named = rec.delta_names() if rec is not None else set()
+    check("store: %d delta blob(s) = the %d the record names" % (len(deltas), len(named)), set(deltas) == named,
+          "unnamed %r missing %r" % (sorted(set(deltas) - named)[:3], sorted(named - set(deltas))[:3]))
+    bad_base, bad_hash, nbytes = [], [], 0
+    t0 = time.monotonic()
+    for name, (c, node) in sorted(deltas.items()):
+        try:
+            head = mz.read_header(_InodeFile(r, node))
+        except (ValueError, IOError, OSError) as e:
+            bad_base.append("%s: %s" % (name[:20], e))
+            continue
+        base = blobs.get(head["base"])
+        if base is None or base[1]["size"] != head["size"]:
+            bad_base.append("%s: base %s %s" % (name[:20], head["base"][:20], "missing" if base is None else "wrong size"))
+            continue
+        if mode == "full":
+            nbytes += head["size"] + node["size"]
+            got = mz.hash_with_delta((d for _o, d in r.read_file_chunks(base[1])), _InodeFile(r, node), head)
+            if got != ts.parse_delta_name(name)[0]:
+                bad_hash.append(name[:20])
+    check("store: every delta names a base blob the store holds at its size", not bad_base, "%r" % bad_base[:3])
+    if mode == "full":
+        check("store: %d delta(s) rebuild to their names over their bases (%s, %.0f s)"
+              % (len(deltas), _gb(nbytes), time.monotonic() - t0), not bad_hash, "%r" % bad_hash[:3])
+
+
+class _InodeFile:
+    """A read-only file object over one inode of an Ext4Reader: read/readline/seek/tell, what
+    materialize.py's header parser and hasher want.  A read maps its file range to disk
+    ranges (Ext4Reader.disk_ranges) and reads exactly those, at least 1 MiB at a time, so a
+    header parse is one read and a payload walk reads each range once."""
+
+    def __init__(self, reader, node):
+        self.r, self.node = reader, node
+        self.size = node["size"]
+        self.pos = 0
+        self._buf = b""
+        self._buf_at = 0
+
+    def _fill(self, upto):
+        """Make sure the buffer covers [pos, upto)."""
+        if self._buf_at <= self.pos and upto <= self._buf_at + len(self._buf):
+            return
+        want = min(max(upto - self.pos, 1 << 20), self.size - self.pos)
+        out = bytearray()
+        for disk, n in self.r.disk_ranges(self.node, self.pos, want):
+            self.r.f.seek(disk)
+            out += self.r.f.read(n)
+        self._buf = bytes(out)
+        self._buf_at = self.pos
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            n = self.size - self.pos
+        n = max(0, min(n, self.size - self.pos))
+        if n == 0:
+            return b""
+        self._fill(self.pos + n)
+        start = self.pos - self._buf_at
+        out = self._buf[start:start + n]
+        self.pos += len(out)
+        return out
+
+    def readline(self):
+        out = bytearray()
+        while self.pos < self.size:
+            b = self.read(1)
+            out += b
+            if b == b"\n":
+                break
+        return bytes(out)
+
+    def seek(self, pos, whence=0):
+        if whence == 1:
+            pos += self.pos
+        elif whence == 2:
+            pos += self.size
+        self.pos = max(0, min(int(pos), self.size))
+        return self.pos
+
+    def tell(self):
+        return self.pos
 
 
 def bypass_explains(reader, root_ino, rels, by):
@@ -3978,6 +4221,9 @@ def verify_trees(card, plan, rec, mode, check, touched=None):
         want = im.tree
         by = im.bypass or {}
         override = {by.get("game_path"): by.get("game"), by.get("sidx_path"): by.get("sidx")}
+        # a delta'd file (item 107) is the BASE blob's inode on the card: it hashes to the base
+        for rel in (im.deltas or {}):
+            override[rel] = im.base_sha(rel)
         t0 = time.monotonic()
         with open(card, "rb") as f:
             r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
@@ -4059,6 +4305,12 @@ def trees_report(card, plan, rec, warnings):
     if plan is not None and plan.layout == "store":
         unique, shared = ts.dedup_costs(rec.images)
         store = collections.OrderedDict([("shared_bytes", shared), ("unique_bytes", unique)])
+        if rec.has_deltas():
+            store["deltas"] = [collections.OrderedDict([
+                ("index", im.index), ("files", sorted(im.deltas)),
+                ("delta_bytes", sum(v["bytes"] for v in im.deltas.values())),
+                ("saved_bytes", sum(v["size"] - v["bytes"] for v in im.deltas.values()))])
+                for im in rec.images if im.deltas]
     return collections.OrderedDict([
         ("recorded", True), ("written", rec.written), ("version", rec.version), ("free_bytes", free),
         ("layout", plan.layout if plan is not None else rec.layout), ("store", store),
@@ -4161,6 +4413,13 @@ def tree_as_on_card(im):
     for path_key, digest_key in (("game_path", "game"), ("sidx_path", "sidx")):
         rel, sha = by.get(path_key), by.get(digest_key)
         if rel and sha and rel in files and files[rel].sha256 != sha:
+            files[rel] = files[rel]._replace(sha256=sha)
+            changed = True
+    # a delta'd file (item 107) is the base blob's bytes on the card until materialize.py
+    # rebuilds it at boot: read back, or recovered, it hashes to the base
+    for rel in (im.deltas or {}):
+        sha = im.base_sha(rel)
+        if rel in files and sha and files[rel].sha256 != sha:
             files[rel] = files[rel]._replace(sha256=sha)
             changed = True
     if not changed:
@@ -4337,7 +4596,19 @@ def _update_locked(a, ts, card, dry):
     touched = {}
     # on a store card a written file costs nothing when the store already holds its blob
     # (another tree's, or one written earlier in this very update)
-    store_keys = {ts.blob_key(fr) for im in rec.images for fr in im.tree.files.values()} if store else set()
+    store_keys = set()
+    if store:
+        for im in rec.images:
+            for rel, fr in im.tree.files.items():
+                store_keys.add(ts.delta_name(fr) if (im.deltas and rel in im.deltas) else ts.blob_key(fr))
+    # ...and a file a delta can express (item 107) costs its ranges, not its size.  The new
+    # list's trees are compared in order, exactly as a build plans them, so a variant's base
+    # is an earlier tree's full blob; a compare seen before is answered from the cache.
+    update_deltas = {}
+    if store:
+        ordered = [new_trees[i][0] for i in range(len(sources))]
+        found = find_source_deltas(sources, [types.SimpleNamespace(tree=t) for t in ordered], a.cache_dir)
+        update_deltas = {i: d for i, d in enumerate(found) if d}
     # --bypass-validation: a tree whose validator is still armed - or half done (item 98:
     # the tick off, the grade restore live) - is patched through the mount even when
     # nothing else changed; its game and .sidx count as writes for the room and the rows
@@ -4383,10 +4654,11 @@ def _update_locked(a, ts, card, dry):
             adds = 0
             for c in ch:
                 if c.op == "write":
-                    k = ts.blob_key(tree.files[c.rel])
+                    d = update_deltas.get(i, {}).get(c.rel)
+                    k = ts.delta_name(tree.files[c.rel]) if d else ts.blob_key(tree.files[c.rel])
                     if k not in store_keys:
                         store_keys.add(k)
-                        adds += c.size
+                        adds += int(d["bytes"]) if d else c.size
             need = min(need, adds)
         per_part_adds[part.num] = per_part_adds.get(part.num, 0) + adds
         per_part_freed[part.num] = per_part_freed.get(part.num, 0) + (adds - need)
@@ -4482,6 +4754,7 @@ def _update_locked(a, ts, card, dry):
         plan = grow_last_partition(card, plan.multi_part.count + grow[1] // SECTOR)
     bypass_digests = {}
     states = {}
+    delta_records = {}                  # index -> the deltas that tree holds after this update (item 107)
     # p3 (image 0) then p7 (every extra): one mount each
     mounts = collections.OrderedDict()
     for i in changes:
@@ -4520,12 +4793,22 @@ def _update_locked(a, ts, card, dry):
                     PROGRESS.step("writing image %d (%s)" % (i, os.path.basename(sources[i])),
                                   sum(c.size for c in changes[i] if c.op == "write"))
                     stats = ts.apply_changes(ops, prefix, changes[i], tree, ts.ReaderSource(r, tree), PROGRESS,
-                                             store=store)
+                                             store=store, deltas=update_deltas.get(i, {}) if store else None)
                 finally:
                     src_reader_ctx.close()
-                say("image %d: %d written (%s), %d removed%s"
+                say("image %d: %d written (%s), %d removed%s%s"
                     % (i, stats["written"], _gb(stats["bytes"]), stats["removed"],
-                       (", %d linked to blobs the store already held" % stats["linked"]) if store else ""))
+                       (", %d linked to blobs the store already held" % stats["linked"]) if store else "",
+                       store_delta_words(stats) if store else ""))
+                if store:
+                    # the deltas this tree holds NOW: what was just stored for the files that
+                    # moved, plus the old record's entries for the files that did not
+                    kept = {rel: v for rel, v in ((old_im.deltas if old_im is not None else None) or {}).items()
+                            if rel in tree.files and old_im.tree.files.get(rel) == tree.files.get(rel)
+                            and not any(c.rel == rel for c in changes[i])}
+                    kept.update(stats.get("delta_files") or {})
+                    record_deltas(ops, prefix, None, {"delta_files": kept})
+                    delta_records[i] = kept
                 # the bypass, through the mount, for a tree whose game or .sidx moved (or that was never done)
                 want_bypass = a.bypass_validation or (
                     bool(old_im is not None and old_im.bypass) and not getattr(a, "restore_validation", False))
@@ -4548,7 +4831,17 @@ def _update_locked(a, ts, card, dry):
                     if store:
                         adopt_written(ops, prefix, written)
             if store:
-                n_gc, b_gc = ts.gc_blobs(ops)
+                # keep every delta some tree of the NEW list names: the ones just written or
+                # kept above, and the untouched trees' recorded ones
+                keep = set()
+                for j in range(len(sources)):
+                    if j in delta_records:
+                        keep |= {v["delta"] for v in delta_records[j].values()}
+                    else:
+                        old_j = new_trees[j][3]
+                        if old_j is not None and old_j.deltas:
+                            keep |= old_j.delta_names()
+                n_gc, b_gc = ts.gc_blobs(ops, keep_deltas=keep)
                 say("store: %d blob(s) no tree links any more removed (%s)" % (n_gc, _gb(b_gc)))
             ops.commit()
     # the record, last: the new trees, the stamps, synced, dirty cleared
@@ -4560,7 +4853,8 @@ def _update_locked(a, ts, card, dry):
         sub = "" if i == 0 else (act.new_sub or "")
         carried = old_im is not None and act.action in ("keep", "rename") and not changes[i]
         by = bypass_digests.get(i, old_im.bypass if carried else None)
-        images.append(ts.ImageTrees(i, device_name(part.num, sub or None), sub, tree, st, uuid, by))
+        deltas = delta_records.get(i, old_im.deltas if (carried and old_im is not None) else None) or None
+        images.append(ts.ImageTrees(i, device_name(part.num, sub or None), sub, tree, st, uuid, by, deltas))
     synced = sorted(set(rec.synced) | set(touched_parts))
     newrec = ts.CardTrees(images, primary=identity, synced=synced, dirty=[], layout=plan.layout, version=VERSION)
     PROGRESS.step("recording what is on the card")
@@ -5002,6 +5296,21 @@ def extract_image(card, index, out, workdir=None, force=False, clean=True, plan=
         raise Refused("%s holds %d image(s); there is no image %d" % (os.path.basename(card), len(plan.trees), index))
     part, sub = plan.trees[index]
     check_output_path(out, [card], force=force)
+    # A DELTA'D IMAGE COMES OUT WITH THE BASE'S BYTES (item 107, the loose end this pass did
+    # not build): the tree's own file IS the base blob, and only the machine's boot rebuilds
+    # the variant.  Said out loud, so nobody plays the recovered image and hears the wrong
+    # songs without a word about why.
+    try:
+        rec_x = read_trees(card)
+    except Refused:
+        rec_x = None
+    im_x = rec_x.image(index) if rec_x is not None else None
+    if im_x is not None and im_x.deltas:
+        say("WARNING: image %d stores %d file(s) as DELTAS of another image's (%s); the image written "
+            "here carries the BASE's bytes for %s - the machine rebuilds the variant at boot, this "
+            "extract does not (item 107 loose end)"
+            % (index, len(im_x.deltas), ", ".join(sorted(im_x.deltas)[:3]),
+               "them" if len(im_x.deltas) > 1 else "it"))
     workdir = workdir or os.path.dirname(os.path.abspath(out))
     os.makedirs(workdir, exist_ok=True)
     G = Geometry.from_file(card)
@@ -7780,6 +8089,7 @@ def main(argv=None):
             # the copy, so the card can say what is on it and a later update knows what moved.
             if not a.no_inject:
                 trees = record_sources(plan, a.cache_dir)
+            need_materializer(plan, a.selector_dir if not a.no_inject else None)
             # THE METER STARTS HERE - the last moment before anything long happens and the
             # first at which every number it needs is known.  Everything above this line
             # refuses in seconds; everything below is the hour the GUI had nothing to show for.

@@ -7913,9 +7913,28 @@ These have each been violated at least once and each cost a run or a window:
       **Loose end filed here, not built:** `recover` of a delta'd image writes the BASE's
       image.bin (the wrong songs) unless it materializes first - the record makes it
       detectable (`im.deltas`), so recover must at least warn.
-      **Resume:** the work order is materialize.py + format, treesync (record, apply, costs,
-      gc), mkmulticard (plan-time discovery, build, verify, update), run_game.sh hook +
-      emulator proof, then p7 + select.sh + hardware; the closing summary says where it got.
+      **Built and desk-proven (2026-09-11, ~55%):** `codeselect/materialize.py` (the format,
+      the on-card rebuild, the stamp protocol; 11 tests + the same protocol run under the
+      card's python 2.7.9 through qemu); treesync's record field (`ImageTrees.deltas`,
+      format 2 only when a delta exists), `dedup_costs` with deltas, `apply_changes(deltas=)`
+      writing the blob and linking the base, `gc_blobs(keep_deltas=)`, `write_delta_index`,
+      `find_deltas` + its pair cache (6 tests); mkmulticard: plan-time discovery in
+      `make_store_plan` (the store is SIZED with the saving), `build_store` writes the
+      index + record, `verify_store`/`verify_deltas` (base+delta rebuilds to the name),
+      `verify_trees` + `tree_as_on_card` hold a delta'd file to the BASE's sha, `update`
+      costs/writes/carries/gc's deltas, `inspect` reports them, `extract` WARNS, a build
+      refuses a selector dir without materialize.py; `select.sh` runs it after the bind
+      (`CODESELECT_PYTHON/WORKDEV/WORKMNT`; select_sh_test 15 cases incl. a real run);
+      `run_game.sh` runs it with the host python3 and `$R/dump/work` after the chosen
+      tree's bind (`--games-title $GAME`); Makefile installs it; PAD_SELECT_SRCS lists it.
+      **Not yet:** the selftest's real-ext4 delta part (under WSL as root), the p7 WORK
+      PARTITION in the store layout (today a delta card would have nothing to mount at
+      boot: select.sh's mount of /dev/mmcblk0p7 fails and the base's songs play), an
+      emulator run of a real Beatles delta card, hardware.
+      **Resume:** extend selftest part 6 with a delta case (MKMULTICARD_DELTA_MIN=4096 on the
+      synthetic cards), run `mkmulticard.py selftest` as root under WSL in /tmp (never under
+      ~), then add p7 (size = largest delta'd file + 10%, mke2fs at build) and prove a
+      two-variant Beatles card in the emulator.
       **PARKED** (before this pass) - not to be taken until the numbers
       demand it: whole-file dedup already puts 40 Beatles variants on a 32 GB
       card (~450 MB each). It pays only for 40+ variants on a 16 GB card, 80+

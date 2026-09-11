@@ -10489,20 +10489,35 @@ class MultibootPanel:
         if gone(self._menu_confirm() != "none", manifest.get("sound_confirm"),
                 manifest.get("sound_confirm_source"), confirm_now):
             missing.append("the confirm sound")
-        rows = manifest.get("images") or []
+        # A ROW IS A CARD, and the manifest has two kinds of row: one per GAME
+        # and one per RANDOM CARD.  Reading the games' rows at a card's number
+        # said a random card's music was never rendered, for ever (David,
+        # 2026-09-11: the strip reading "not rendered (image 3's music)").
+        imgs = manifest.get("images") or []
+        grps = manifest.get("groups") or []
+        first = {}
+        for img, _p, ri, _mi in form_trees(self.form()):
+            first.setdefault(ri, img)
+        gi_of = {ri: g for g, ri, _row, _imgs in form_groups(self.form())}
         for i, row in enumerate(self._rows):
-            entry = rows[i] if i < len(rows) and isinstance(rows[i], dict) \
+            if i in gi_of:
+                rows, key = grps, gi_of[i]
+                what = "the random card's"
+            else:
+                rows, key = imgs, first.get(i, i)
+                # The images are numbered the way the picture numbers them,
+                # from one, because this is said to a person (see _image_label).
+                what = "image %d's" % (i + 1)
+            entry = rows[key] if 0 <= key < len(rows) and isinstance(rows[key], dict) \
                 else {}
-            # The images are numbered the way the picture numbers them, from
-            # one, because this is said to a person (see _image_label).
             music_now = _media_value(row.music)
             if gone(music_now not in ("", "none"), entry.get("music"),
                     entry.get("music_source"), music_now):
-                missing.append("image %d's music" % (i + 1))
+                missing.append("%s music" % what)
             confirm_now = confirm_spec(row)
             if gone(confirm_now != "none", entry.get("confirm"),
                     entry.get("confirm_source"), confirm_now):
-                missing.append("image %d's confirm sound" % (i + 1))
+                missing.append("%s confirm sound" % what)
         return missing
 
     def _sounds_ready(self):
@@ -10608,13 +10623,17 @@ class MultibootPanel:
         for it before, and still does when there is no frame to show: an older
         selector, or a render that has not finished."""
         self.play_confirm()
-        self._blackout(self._loading_frame())
-        # ...AND ROLL AGAIN.  The roll happens inside the selector, so a frame
-        # rendered earlier holds the roll THAT render made - and a preview that
-        # was not edited never rendered again, so the same member came up every
-        # time (David, 2026-09-11: "whenever i select random, the loaded one is
-        # always the first image").  One press, one run, one roll.
-        self._roll_loading()
+        # A RANDOM CARD ROLLS AGAIN ON EVERY PRESS, and showing the frame the
+        # LAST roll drew while this one is rendering put two different builds on
+        # screen in quick succession (David, 2026-09-11).  So the beat stays
+        # black for a random card until its own roll lands - which is what the
+        # machine shows in that moment anyway - and an ordinary card, whose
+        # frame cannot change, is drawn at once.
+        rolling = self._roll_loading()
+        if not rolling:
+            self._blackout(self._loading_frame())
+        else:
+            self._blackout()
         return True
 
     def _roll_loading(self):
@@ -10627,8 +10646,7 @@ class MultibootPanel:
         is not a random one (an ordinary card's frame cannot change), or when
         the worker is busy: the beat then holds whatever the last render drew,
         which is what it always showed."""
-        path = getattr(self, "_pv_load_frame", None)
-        if not path or not self._pv_bin or self._stopped:
+        if not self._pv_bin or not self._pv_fp or self._stopped:
             return False
         form = self.form()
         hl = _int(self._hl_var, 0)
@@ -10636,8 +10654,9 @@ class MultibootPanel:
             return False
         pv = preview_dir_for(form.out)
         conf = os.path.join(pv, "images.conf")
-        if not os.path.isfile(conf):
+        if not pv or not os.path.isfile(conf):
             return False
+        path = loading_path(pv, self._pv_fp, hl)
         ppm = os.path.join(pv, "roll_%d.ppm" % hl)
         cmds = snapshot_commands(self._pv_bin, conf, self.media_dir(), ppm,
                                  preview_highlight(form, hl), 0,
@@ -10675,15 +10694,22 @@ class MultibootPanel:
         pv = preview_dir_for(self.form().out)
         return os.path.join(pv, "roll.state") if pv else ""
 
-    def _loading_frame(self):
-        """The LOADING frame the last render asked for, or None.
+    def _loading_frame(self, card=None):
+        """The LOADING frame for the card on screen, or None.
 
-        The file THAT render named (`_pv_load_frame`), not one derived from the
-        form afterwards - a form edited since has no frame rendered for it,
-        which is exactly the case where there is nothing to show and the black
-        beat is the honest answer."""
-        path = getattr(self, "_pv_load_frame", None)
-        return path if path and os.path.isfile(path) else None
+        KEYED ON THE CARD THAT IS HIGHLIGHTED NOW, not on the last render: a
+        redraw happens only when something changed, so the render's own answer
+        is the last card that needed drawing - which is how pressing Select on
+        an ordinary image showed the random card's loading frame (David,
+        2026-09-11).  One file per (form, card), so the right one is on disk
+        whenever that card has been drawn under this form."""
+        fp = self._pv_fp
+        pv = preview_dir_for(self.form().out) if fp else ""
+        if not pv:
+            return None
+        hl = _int(self._hl_var, 0) if card is None else int(card)
+        path = loading_path(pv, fp, hl)
+        return path if os.path.isfile(path) else None
 
     def _blackout(self, still=None):
         """Hold *still* (the LOADING frame) for :data:`LOADING_MS`, or black

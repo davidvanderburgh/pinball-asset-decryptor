@@ -8654,6 +8654,17 @@ rewriting it.**
       song sets cost one copy of the bed rather than forty. The preview could
       not have played it either: it read the manifest's IMAGE rows at the CARD
       index, which for a random card is some other game's row or none.
+      **AND THREE MORE OF THE SAME CLASS, all found by using it (David,
+      2026-09-11).** A card index where the code had the last render's answer,
+      or an image's: (1) pressing Select on an IMAGE showed the RANDOM card's
+      loading frame, because the press read the frame the last RENDER asked for
+      and a redraw happens only when something changed - it reads the one for
+      the card on screen now, and there is one per form and card on disk; (2) a
+      random card FLASHED TWO BUILDS, the previous roll then this one - it holds
+      black until its own roll lands, which is what the machine shows in that
+      moment anyway, while an ordinary card is drawn at once; (3) the strip said
+      a random card's music was never rendered, for ever, because the check
+      walked the form's ROWS against the manifest's rows for GAMES.
       **Resume:** nothing is owed on the card or the tools. What is left is
       polish and it can close: (a) the eight styles are drawn from the members'
       logos, so two builds that share a logo (the TMNT pair) make every style

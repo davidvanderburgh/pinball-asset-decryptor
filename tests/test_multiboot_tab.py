@@ -3436,16 +3436,22 @@ def test_the_loading_frame_is_rendered_beside_the_menu_frame(tmp_path, monkeypat
     try:
         for q in _images(tmp_path, 2):
             panel.add_image(q)
+        panel._table.select(0)
+        root.update()
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         # the render asked for one, beside the frame and named for the card
         assert seen["loading"] and seen["loading"][0], seen["loading"]
         want = mb.loading_path(mb.preview_dir_for(panel.form().out),
                                panel._pv_fp, 0)
-        assert seen["loading"][0] == want, seen["loading"]
+        assert seen["loading"][-1] == want, seen["loading"]
         assert os.path.isfile(want), "the selector wrote no LOADING frame"
-        # ...and Select shows it instead of the black beat
+        # ...and Select shows THE CARD ON SCREEN's, not the last render's: a
+        # redraw happens only when something changed, so the render's own answer
+        # is the last card that needed drawing (David, 2026-09-11: pressing
+        # Select on an image showed the random card's frame)
         assert panel._loading_frame() == want
+        assert panel._loading_frame(card=1) is None
         before = panel._pv_src
         assert panel.press_select() is True
         assert panel._black_still == want
@@ -9482,5 +9488,86 @@ def test_a_random_card_plays_its_own_music_when_it_is_highlighted(tmp_path):
         # the image rows are what a PLAIN card reads, and they are a different
         # answer at the same number
         assert mb.manifest_sounds(manifest, media, 1)["music"] == ""
+    finally:
+        root.destroy()
+
+
+def test_select_on_an_image_does_not_show_the_random_cards_frame(tmp_path,
+                                                                 monkeypatch):
+    """One LOADING frame per (form, card), and the press reads the CARD ON
+    SCREEN's. The last render's answer is the last card that needed drawing,
+    which is not where you are looking - so pressing Select on an image showed
+    whatever the random card last rolled (David, 2026-09-11)."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path)
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        # draw the random card, then walk back to the first image
+        panel._table.select(2)
+        root.update()
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        panel._table.select(0)
+        root.update()
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        pv = mb.preview_dir_for(panel.form().out)
+        assert panel._loading_frame() == mb.loading_path(pv, panel._pv_fp, 0)
+        # ...and pressing on an ORDINARY card draws it at once: its frame
+        # cannot change, so there is nothing to wait for and nothing to reroll
+        assert panel.press_select() is True
+        assert panel._black_still == mb.loading_path(pv, panel._pv_fp, 0)
+        # the RANDOM card holds black until its own roll lands, rather than
+        # flashing the build the last roll drew
+        panel._table.select(2)
+        root.update()
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        runs = len(seen["snapshot"])
+        assert panel.press_select() is True
+        assert panel._black_still is None, "the old roll was on screen"
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert len(seen["snapshot"]) == runs + 1
+        assert panel._black_still == mb.loading_path(pv, panel._pv_fp, 2)
+    finally:
+        root.destroy()
+
+
+def test_a_random_cards_music_is_not_reported_missing_for_ever(tmp_path):
+    """A row is a CARD and the manifest has two kinds of row - one per game and
+    one per random card. Reading the games' rows at a card's number said a
+    random card's music was never rendered, for ever (David, 2026-09-11: the
+    strip reading "not rendered (image 3's music)")."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 2)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_random_over_existing(title="RANDOM")
+        bed = tmp_path / "bed.wav"
+        bed.write_bytes(b"RIFF")
+        panel._rows[2].music = str(bed)
+        media = panel.media_dir()
+        os.makedirs(media, exist_ok=True)
+        with open(os.path.join(media, "gmusic0.wav"), "wb") as f:
+            f.write(b"RIFF")
+        with open(os.path.join(media, "media.json"), "w", encoding="utf-8") as f:
+            json.dump({"images": [{"music": None, "music_source": "none"},
+                                  {"music": None, "music_source": "none"}],
+                       "groups": [{"music": "gmusic0.wav",
+                                   "music_source": mb.wsl(str(bed))}],
+                       "sound_move": "move.wav", "sound_move_source": "auto",
+                       "sound_confirm": "confirm.wav",
+                       "sound_confirm_source": "auto"}, f)
+        panel._manifest_cache = {}
+        missing = panel._sounds_missing()
+        assert not [m for m in missing if "music" in m], missing
+        # ...and when it really is missing, it is named as a card
+        panel._rows[2].music = str(tmp_path / "other.wav")
+        assert "the random card's music" in panel._sounds_missing()
     finally:
         root.destroy()

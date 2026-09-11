@@ -605,6 +605,42 @@ def card_media_names(form):
     return out
 
 
+def drop_game_from_groups(rows, path):
+    """A game leaving the card leaves every RANDOM card that rolled between
+    them -> ``(rows, notes)``.
+
+    A KEEPING group's members are games OTHER rows put on the card, so a row
+    that goes takes its membership with it; a card left with fewer than two
+    games to roll between is not a random card any more and goes as well.  A
+    CONSUMING group owns its members outright - they are on no other row - so
+    it is not touched here.
+
+    Deleting a row used to leave the membership behind, and the only sign of it
+    was the preview quietly refusing to redraw (David, 2026-09-11: "whenever i
+    delete an image, i expect the preview to update with it").  Addition
+    enforces these rules; deletion has to keep them.
+    """
+    key = _norm((path or "").strip().strip('"'))
+    out, notes = [], []
+    if not key:
+        return list(rows), notes
+    for row in rows:
+        if is_group(row) and row.keep:
+            left = [m for m in row.members
+                    if _norm((m.path or "").strip().strip('"')) != key]
+            if len(left) != len(row.members):
+                name = (row.title or "").strip() or "The random card"
+                if len(left) < 2:
+                    notes.append("%s had nothing left to roll between, so its "
+                                 "card went too." % name)
+                    continue
+                notes.append("%s rolls between %d game(s) now."
+                             % (name, len(left)))
+                row.members = left
+        out.append(row)
+    return out, notes
+
+
 def row_first_image(form, row_index):
     """The image index a row's card stands on: its own, or its first member's.
     What ``--highlight`` (which names an IMAGE) is given for a table ROW."""
@@ -1199,6 +1235,17 @@ def validate_form(form, sources=True):
                     seen.add(key)
             if row.keep and len(set(_norm(q) for q in row_paths(row))) != len(row.members):
                 errs.append("Image %d names the same game twice." % i)
+            if row.keep and sources:
+                # A GROUP'S MEMBERS MUST BE ONE RUN of image indexes - the
+                # builder refuses a gap, because a group= line is written as
+                # `<first>-<last>`.  Saying so here is the difference between
+                # a red cross in the list and a refusal minutes into a build.
+                imgs = sorted(i2 for i2 in group_member_images(form, row) if i2 >= 0)
+                if len(imgs) == len(row.members) and imgs and \
+                        imgs != list(range(imgs[0], imgs[0] + len(imgs))):
+                    errs.append(
+                        "Image %d rolls between games that are not next to "
+                        "each other on the card; move them together." % i)
             for what, text in (("title", row.title), ("subtitle", row.subtitle)):
                 if _BAD_TEXT.search(text or ""):
                     errs.append("Image %d: the %s must not contain | ; $ or `."
@@ -7605,10 +7652,31 @@ class MultibootPanel:
         if sum(1 for r in self._rows if is_group(r)) >= MAX_GROUPS:
             self._error("At most %d random groups fit one card." % MAX_GROUPS)
             return
+        # PICKING GAMES THAT ARE ALREADY ON THE CARD MEANS THE OTHER KIND OF
+        # RANDOM CARD.  A consuming group would put a second copy of each on the
+        # card and the form would refuse itself with "game 1 is listed twice" -
+        # which is what David got, and the only sign of it was the preview
+        # declining to redraw.  What he asked for by picking them is a card that
+        # rolls between the builds that are there, which is the keeping kind.
+        on_card = {}
+        for ri, r in enumerate(self._rows):
+            if not is_group(r):
+                for q in row_paths(r):
+                    on_card.setdefault(_norm(q), ri)
+        already = [q for q in paths if _norm(q) in on_card]
+        keep = len(already) == len(paths)
+        if already and not keep:
+            self._error(
+                "%d of these %d games are already on the card (%s). A random "
+                "card either rolls between games that are already here, or "
+                "brings its own - not both."
+                % (len(already), len(paths),
+                   ", ".join(os.path.basename(q) for q in already[:3])))
+            return
         members = [MemberRow(path=q, title=suggest_title(q)[0]) for q in paths]
         self._rows.append(set_group_media(
             ImageRow(path="", title=title or "RANDOM", subtitle=subtitle,
-                     members=members), GROUP_MEDIA_DEFAULT))
+                     members=members, keep=keep), GROUP_MEDIA_DEFAULT))
         self._refresh_tree(select=len(self._rows) - 1)
         # a group forces the compact build; show that in the tick straight away
         self._sync_compact_lock()
@@ -7692,14 +7760,29 @@ class MultibootPanel:
         if tip is not None:
             tip.text = self.COMPACT_TIP_GROUP if locked else self.COMPACT_TIP
 
-    def _remove_image(self):
-        i = self._selected()
-        if i is None:
+    def remove_image(self, i):
+        """Remove row *i*, AND every random card's claim on the game it took
+        with it (see :func:`drop_game_from_groups`).  The public half of the
+        list's delete button, and what the tests drive."""
+        if not 0 <= i < len(self._rows):
             return
+        gone = self._rows[i]
         del self._rows[i]
+        notes = []
+        if not is_group(gone):
+            for q in row_paths(gone):
+                self._rows, said = drop_game_from_groups(self._rows, q)
+                notes += said
         self._refresh_tree(select=min(i, len(self._rows) - 1))
+        self._sync_compact_lock()       # the last group may have just gone
         if i == 0:
             self._maybe_default_output()
+        self._ok(" ".join(notes) if notes else "")
+
+    def _remove_image(self):
+        i = self._selected()
+        if i is not None:
+            self.remove_image(i)
 
     def _move_image(self, delta):
         i = self._selected()

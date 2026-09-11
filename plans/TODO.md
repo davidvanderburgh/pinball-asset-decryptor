@@ -8563,6 +8563,35 @@ rewriting it.**
       (default_card outranks default, two power-ups alternate, and without
       default_card the image default still works), `make check` green; 19
       negative controls, each fix backed out in turn and watched to go red.
+      **TWO THINGS DAVID HIT IN THE APP THE NEXT MORNING (2026-09-11), both
+      fixed in the same branch:**
+      1. **"i can't get the app to show me the random group preview."** The
+         picture needed PIL, and the app's own runtime has none - no PIL, no
+         pip, and no apt lists to install one from. "No user ever builds or
+         resolves a dependency" is this repo's rule, so THE RENDERERS NO LONGER
+         USE PIL AT ALL: ffmpeg decodes, scales, and writes the PNG and the
+         palette GIF (which is what every other animation on a card already
+         goes through), and the compositing in between is a `Panel` - a WxH
+         RGBA bytearray with blit, rect, line, poly, rotate, box blur and crop.
+         The `?` is drawn from an arc, a stem and a dot rather than typed, so
+         there is no font to find either, and the reel blurs its STRIP twice up
+         front instead of blurring 32 frames. The exact prepare that failed in
+         his log now runs in the app's runtime in 1.5 s, and the menu it draws
+         is pixel-for-pixel the one the PIL version drew.
+      2. **"whenever i delete an image, i expect the preview to update with
+         it."** It could not: deleting a row left the game behind as a member of
+         a random card, which is a form the tab would never have let anyone
+         build, so the preview declined to redraw and said so only in the log.
+         Deletion keeps the rules addition enforces now - a row that goes takes
+         its memberships with it, and a random card left with nothing to roll
+         between goes too, out loud. The same session showed how he got there:
+         "Add random group..." over files ALREADY on the card built a consuming
+         group, which puts a second copy of each on the card and refuses itself
+         with "game 1 is listed twice". Picking games that are already there
+         means the keeping kind, and that is what it makes now; a half-and-half
+         pick is refused by name. A keeping group's games must also be next to
+         each other on the card, which the builder has always required and the
+         list now says before a build finds out.
       **Resume:** nothing is owed on the card or the tools. What is left is
       polish and it can close: (a) the eight styles are drawn from the members'
       logos, so two builds that share a logo (the TMNT pair) make every style

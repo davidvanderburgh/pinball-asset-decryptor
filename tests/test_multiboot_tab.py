@@ -9135,3 +9135,87 @@ def test_the_pictures_are_cut_for_the_menu_the_cards_make(tmp_path):
         assert len([a for a in args if a == "--extra"]) == 3, "...over three games"
     finally:
         root.destroy()
+
+
+# ---- item 106: deleting a game, and picking games that are already here ----
+
+def test_deleting_a_game_takes_it_out_of_every_random_card(tmp_path):
+    """A KEEPING group's members are games OTHER rows put on the card, so a row
+    that goes takes its membership with it. Leaving it behind left a form the
+    tab would never have let anyone build, and the only sign was the preview
+    declining to redraw (David, 2026-09-11: "whenever i delete an image, i
+    expect the preview to update with it")."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        for q in paths:
+            panel.add_image(q)
+        panel.add_random_over_existing(title="RANDOM")
+        assert len(panel.form().images) == 4
+        # drop the middle build: the random card rolls between the other two
+        panel.remove_image(1)
+        rows = panel.form().images
+        assert len(rows) == 3, "the image went, the random card stayed"
+        group = rows[-1]
+        assert mb.is_group(group) and len(group.members) == 2
+        assert paths[1] not in mb.row_paths(group)
+        assert validate_form(panel.form()) == [], validate_form(panel.form())
+        # ...and dropping another leaves it nothing to roll between, so its
+        # card goes too rather than sitting there invalid
+        panel.remove_image(0)
+        rows = panel.form().images
+        assert len(rows) == 1 and not mb.is_group(rows[0])
+        # one image is an incomplete card, which is a different complaint - what
+        # matters is that nothing is left saying a game is missing or listed
+        # twice, which is what a stranded membership produced
+        errs = validate_form(panel.form())
+        assert errs == ["Add at least two images: the primary (stock) and one "
+                        "more."], errs
+    finally:
+        root.destroy()
+
+
+def test_a_random_card_over_games_already_here_is_the_keeping_kind(tmp_path):
+    """Picking games that are already on the card means "roll between THESE",
+    not "put a second copy of each on the card" - which is what a consuming
+    group would do, and the form then refused itself with 'game 1 is listed
+    twice' (David's log, 2026-09-11)."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        panel.add_image(paths[0])
+        panel.add_image(paths[1])
+        panel.add_group(paths[:2], title="RANDOM")
+        rows = panel.form().images
+        assert len(rows) == 3 and mb.is_group(rows[2])
+        assert rows[2].keep is True, "it rolls between the builds that are here"
+        assert [t[1] for t in mb.form_trees(panel.form())] == paths[:2], \
+            "and it puts no new game on the card"
+        assert validate_form(panel.form()) == [], validate_form(panel.form())
+        # HALF and half is neither, and saying so beats a build-time refusal
+        panel._rows.pop()
+        panel.add_group([paths[0], paths[2]], title="MIXED")
+        assert len(panel.form().images) == 2, "nothing was added"
+        assert "already on the card" in panel.message().lower()
+    finally:
+        root.destroy()
+
+
+def test_a_random_cards_games_must_be_next_to_each_other(tmp_path):
+    """The builder writes a group as `<first>-<last>`, so a gap in the run is a
+    refusal minutes into a build. The list says so instead."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 3)
+        for q in paths:
+            panel.add_image(q)
+        panel.add_group([paths[0], paths[2]], title="ENDS")
+        form = panel.form()
+        assert mb.is_group(form.images[3]) and form.images[3].keep
+        errs = validate_form(form)
+        assert any("next to each other" in e for e in errs), errs
+    finally:
+        root.destroy()

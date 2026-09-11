@@ -1957,10 +1957,16 @@ def sweep_stale(out, manifest, visual_only=False, log=say):
 # between (David, 2026-09-10: "the options for a Random group need to be bespoke
 # to a random group... 'stack of logos', 'big ?'").
 #
-# PIL, NOT ffmpeg.  Everywhere else here prefers ffmpeg and falls back to PIL;
-# these are the other way round and say so, because a fanned deck needs rotation
-# with alpha, the question mark needs a glyph, and an ffmpeg filtergraph for
-# either would be write-only.
+# NO PIL.  The app's own runtime does not have it, has no pip and no apt lists,
+# and "no user ever builds or resolves a dependency" is this repo's rule - so a
+# picture that needs a library the user has to install is a picture nobody sees
+# (David, 2026-09-11, from the app: "i can't get the app to show me the random
+# group preview", with `refused: a random card's picture needs PIL`).  ffmpeg is
+# already required here and is good at exactly the parts that are hard to write:
+# decoding a logo, scaling it with lanczos, and writing a PNG or a palette GIF.
+# The compositing in between is a few hundred lines of arithmetic over a
+# bytearray, which is the half a filtergraph would have made write-only.
+
 
 #: The still styles, and what each says.
 GROUP_ART_STYLES = {
@@ -1976,7 +1982,7 @@ GROUP_ANIM_STYLES = {
     "reel": "a slot reel that spins and eases onto one",
 }
 #: The menu's own 'midnight' colours, which is what a card gets unless its
-#: theme says otherwise.  --group-colors overrides them.
+#: theme says otherwise.
 GROUP_CARD_RGB = (26, 31, 41)
 GROUP_FRAME_RGB = (60, 70, 88)
 GROUP_HL_RGB = (255, 196, 45)
@@ -1985,6 +1991,9 @@ GROUP_DIM_RGB = (150, 162, 180)
 GROUP_CYCLE_MS = 1000
 #: ...and how many frames the reel spends easing to a stop.
 GROUP_REEL_FRAMES = 24
+#: How many members the reel actually threads onto its strip.  It is a reel,
+#: not a list: past this it says the same thing and costs a blur per cell.
+GROUP_REEL_CELLS = 8
 
 
 def parse_group_specs(specs, what):
@@ -2029,143 +2038,416 @@ def parse_group_members(specs):
     return out
 
 
-def _pil():
-    try:
-        from PIL import Image, ImageDraw, ImageFilter, ImageFont
-    except ImportError:
-        raise Refused("a random card's picture needs PIL (pip install pillow); "
-                      "ffmpeg alone cannot compose one")
-    return Image, ImageDraw, ImageFilter, ImageFont
+# ---- the panel: a WxH RGBA bytearray, and the few things a card needs -------
+class Panel(object):
+    """One RGBA image as a flat bytearray, row-major, 4 bytes a pixel.
+
+    Everything a random card's picture needs and nothing else.  The operations
+    are the ones the styles use: fill, alpha-blit, a rectangle, a thick line, a
+    filled polygon, a rotation about a point, a box blur and a crop.  Alpha is
+    STRAIGHT, never premultiplied, because that is what a logo pulled off a card
+    carries and what ffmpeg hands over."""
+
+    __slots__ = ("w", "h", "px")
+
+    def __init__(self, w, h, fill=None, px=None):
+        self.w, self.h = int(w), int(h)
+        if self.w < 1 or self.h < 1:
+            raise Refused("a panel of %dx%d has no pixels" % (w, h))
+        if px is not None:
+            if len(px) != self.w * self.h * 4:
+                raise Refused("panel %dx%d wants %d bytes, got %d"
+                              % (self.w, self.h, self.w * self.h * 4, len(px)))
+            self.px = bytearray(px)
+        else:
+            self.px = bytearray(_rgba(fill) * (self.w * self.h))
+
+    def copy(self):
+        return Panel(self.w, self.h, px=self.px)
+
+    # -- reading ------------------------------------------------------------
+    def at(self, x, y):
+        i = (y * self.w + x) * 4
+        return tuple(self.px[i:i + 4])
+
+    def colours(self):
+        """{(r, g, b, a): count} - what a test asks to see the whole picture."""
+        out = {}
+        px = self.px
+        for i in range(0, len(px), 4):
+            k = (px[i], px[i + 1], px[i + 2], px[i + 3])
+            out[k] = out.get(k, 0) + 1
+        return out
+
+    # -- drawing ------------------------------------------------------------
+    def fill(self, colour):
+        self.px = bytearray(_rgba(colour) * (self.w * self.h))
+
+    def blit(self, src, x, y):
+        """*src* over this panel at (x, y), HONOURING ITS OWN TRANSPARENCY.
+
+        A logo pulled off a card is a PNG with anything at all stored under its
+        alpha - flat magenta, on the 1987 card - so a blit that ignored it
+        painted a coloured box (seen in the emulator, 2026-09-10)."""
+        x, y = int(x), int(y)
+        for sy in range(max(0, -y), min(src.h, self.h - y)):
+            si = sy * src.w * 4
+            di = ((y + sy) * self.w + x) * 4
+            for sx in range(max(0, -x), min(src.w, self.w - x)):
+                s = si + sx * 4
+                a = src.px[s + 3]
+                if not a:
+                    continue
+                d = di + sx * 4
+                if a == 255:
+                    self.px[d:d + 4] = src.px[s:s + 4]
+                    continue
+                ia = 255 - a
+                for c in range(3):
+                    self.px[d + c] = (src.px[s + c] * a + self.px[d + c] * ia + 127) // 255
+                self.px[d + 3] = a + (self.px[d + 3] * ia + 127) // 255
+
+    def rect(self, x0, y0, x1, y1, colour):
+        """A filled rectangle, [x0, x1) x [y0, y1), clipped."""
+        px4 = _rgba(colour)
+        x0, x1 = max(0, int(x0)), min(self.w, int(x1))
+        y0, y1 = max(0, int(y0)), min(self.h, int(y1))
+        if x1 <= x0 or y1 <= y0:
+            return
+        row = px4 * (x1 - x0)
+        for y in range(y0, y1):
+            i = (y * self.w + x0) * 4
+            self.px[i:i + (x1 - x0) * 4] = row
+
+    def outline(self, x0, y0, x1, y1, colour, width=1):
+        width = max(1, int(width))
+        self.rect(x0, y0, x1, y0 + width, colour)
+        self.rect(x0, y1 - width, x1, y1, colour)
+        self.rect(x0, y0, x0 + width, y1, colour)
+        self.rect(x1 - width, y0, x1, y1, colour)
+
+    def dot(self, cx, cy, r, colour):
+        r = max(1, int(r))
+        rr = r * r
+        for dy in range(-r, r + 1):
+            span = int(math.sqrt(max(0, rr - dy * dy)))
+            self.rect(cx - span, cy + dy, cx + span + 1, cy + dy + 1, colour)
+
+    def line(self, points, colour, width):
+        """A thick polyline: a disc stamped along each segment.  Round joints
+        for nothing, which is what the shuffle glyph's corners want."""
+        r = max(1, int(width) // 2)
+        for k in range(len(points) - 1):
+            (ax, ay), (bx, by) = points[k], points[k + 1]
+            steps = int(max(abs(bx - ax), abs(by - ay))) + 1
+            for t in range(steps + 1):
+                f = t / float(steps)
+                self.dot(ax + (bx - ax) * f, ay + (by - ay) * f, r, colour)
+
+    def poly(self, points, colour):
+        """A filled polygon, even-odd, one scanline at a time."""
+        if len(points) < 3:
+            return
+        ys = [p[1] for p in points]
+        for y in range(max(0, int(min(ys))), min(self.h, int(max(ys)) + 1)):
+            xs = []
+            for k in range(len(points)):
+                (x0, y0), (x1, y1) = points[k], points[(k + 1) % len(points)]
+                if (y0 <= y < y1) or (y1 <= y < y0):
+                    xs.append(x0 + (y - y0) * (x1 - x0) / float(y1 - y0))
+            xs.sort()
+            for k in range(0, len(xs) - 1, 2):
+                self.rect(xs[k], y, xs[k + 1] + 1, y + 1, colour)
+
+    # -- whole-panel operations ---------------------------------------------
+    def crop(self, x, y, w, h):
+        """A WxH window, wrapping VERTICALLY - which is what a reel is."""
+        out = Panel(w, h)
+        for row in range(h):
+            sy = (int(y) + row) % self.h
+            si = (sy * self.w + max(0, int(x))) * 4
+            out.px[row * w * 4:(row + 1) * w * 4] = self.px[si:si + w * 4]
+        return out
+
+    def rotated(self, degrees, cx, cy):
+        """Turned about (cx, cy), sampled backwards so no destination pixel is
+        missed.  Nearest neighbour: at a menu panel's size the difference from
+        a bilinear sample is invisible and the cost is not."""
+        out = Panel(self.w, self.h)
+        rad = math.radians(-float(degrees))
+        cos_r, sin_r = math.cos(rad), math.sin(rad)
+        for y in range(self.h):
+            dy = y - cy
+            i = y * self.w * 4
+            for x in range(self.w):
+                dx = x - cx
+                sx = int(cx + dx * cos_r - dy * sin_r + 0.5)
+                sy = int(cy + dx * sin_r + dy * cos_r + 0.5)
+                if 0 <= sx < self.w and 0 <= sy < self.h:
+                    s = (sy * self.w + sx) * 4
+                    out.px[i:i + 4] = self.px[s:s + 4]
+                i += 4
+        return out
+
+    def blurred(self, radius):
+        """A box blur, horizontal then vertical, with a running sum - so the
+        cost is the pixel count and not the radius."""
+        r = int(radius)
+        if r < 1:
+            return self.copy()
+        out = self.copy()
+        for _pass in (0, 1):
+            src, dst = out.px, bytearray(len(out.px))
+            if _pass == 0:
+                n, m, step, jump = self.w, self.h, 4, self.w * 4
+            else:
+                n, m, step, jump = self.h, self.w, self.w * 4, 4
+            span = min(r, n - 1)
+            for line_i in range(m):
+                base = line_i * jump
+                for c in range(4):
+                    total = 0
+                    for k in range(0, span + 1):
+                        total += src[base + k * step + c]
+                    count = span + 1
+                    for k in range(n):
+                        dst[base + k * step + c] = total // count
+                        lo, hi = k - span, k + span + 1
+                        if hi < n:
+                            total += src[base + hi * step + c]
+                            count += 1
+                        if lo >= 0:
+                            total -= src[base + lo * step + c]
+                            count -= 1
+            out.px = dst
+        return out
+
+    def over(self, colour):
+        """This panel composed onto a flat colour, so what comes out is
+        opaque - a still the menu blits into a panel, not a layer."""
+        out = Panel(self.w, self.h, colour)
+        out.blit(self, 0, 0)
+        return out
+
+    def dimmed(self, amount):
+        """Darkened towards black by *amount* (0..1), alpha untouched."""
+        f = max(0.0, min(1.0, 1.0 - float(amount)))
+        px = self.px
+        for i in range(0, len(px), 4):
+            px[i] = int(px[i] * f)
+            px[i + 1] = int(px[i + 1] * f)
+            px[i + 2] = int(px[i + 2] * f)
+        return self
 
 
-def _group_font(size):
-    _Image, _Draw, _Filter, ImageFont = _pil()
-    for name in ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf", "Vera.ttf"):
-        try:
-            return ImageFont.truetype(name, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
+def _rgba(colour):
+    """(r, g, b) or (r, g, b, a) or None -> four bytes."""
+    if colour is None:
+        return bytes((0, 0, 0, 0))
+    c = tuple(int(v) & 0xFF for v in colour)
+    if len(c) == 3:
+        c += (255,)
+    if len(c) != 4:
+        raise Refused("a colour is (r, g, b) or (r, g, b, a), not %r" % (colour,))
+    return bytes(c)
 
 
-def _fit(im, w, h):
-    Image, _d, _f, _ft = _pil()
-    out = im.copy()
-    out.thumbnail((max(1, w), max(1, h)), Image.LANCZOS)
+def panel_from_file(src, size):
+    """*src* (any image ffmpeg reads) scaled to FIT *size*, centred, the rest
+    transparent -> a Panel.  ffmpeg does the decode and the lanczos."""
+    ff = find_ffmpeg()
+    if not ff:
+        raise Refused("ffmpeg is required to read %s" % src)
+    w, h = int(size[0]), int(size[1])
+    vf = ("scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos,"
+          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=#00000000,format=rgba" % (w, h, w, h))
+    r = run([ff, "-v", "error", "-i", src, "-frames:v", "1", "-vf", vf,
+             "-pix_fmt", "rgba", "-f", "rawvideo", "-"], "ffmpeg decode")
+    return Panel(w, h, px=r.stdout)
+
+
+def panel_to_png(panel, out):
+    """A Panel -> a PNG, through ffmpeg's own encoder."""
+    ff = find_ffmpeg()
+    if not ff:
+        raise Refused("ffmpeg is required to write %s" % out)
+    r = subprocess.run([ff, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
+                        "-s", "%dx%d" % (panel.w, panel.h), "-i", "-",
+                        "-frames:v", "1", out],
+                       input=bytes(panel.px), stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+    if r.returncode != 0 or not os.path.isfile(out) or os.path.getsize(out) == 0:
+        tail = r.stderr.decode("utf-8", "replace").strip().splitlines()[-4:]
+        raise Refused("ffmpeg wrote no PNG for %s: %s" % (out, " | ".join(tail)))
     return out
 
 
-def _paste(dst, im, pos):
-    """Paste *im* at *pos* HONOURING ITS OWN TRANSPARENCY.
+def write_group_gif(frames, delay_ms, out, work=None):
+    """Frames -> a looping palette GIF the selector can read.
 
-    A LOGO PULLED OFF A CARD IS A PNG WITH A TRANSPARENT BACKGROUND, and
-    dropping the alpha paints whatever RGB is stored under it - which on the
-    1987 card's logo is a flat magenta.  The first real random card came out as
-    a coloured box with a logo in it, and every unit test passed, because a
-    test logo is a flat colour with no alpha to lose.  Seen in the emulator.
-    """
-    dst.paste(im, pos, im if im.mode in ("RGBA", "LA") else None)
+    The same two-pass palettegen/paletteuse every other animation on a card goes
+    through (see make_gif), fed from the raw frames rather than from a clip."""
+    if not frames:
+        raise Refused("a random card's animation came out with no frames")
+    ff = find_ffmpeg()
+    if not ff:
+        raise Refused("ffmpeg is required to build a GIF")
+    w, h = frames[0].w, frames[0].h
+    fps = 1000.0 / max(1, int(delay_ms))
+    d = work or os.path.dirname(os.path.abspath(out)) or "."
+    raw = os.path.join(d, "_group_%d.rgba" % os.getpid())
+    pal = os.path.join(d, "_group_%d.png" % os.getpid())
+    try:
+        with open(raw, "wb") as f:
+            for fr in frames:
+                if (fr.w, fr.h) != (w, h):
+                    raise Refused("a random card's frames are not all %dx%d" % (w, h))
+                f.write(bytes(fr.px))
+        pre = ["-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
+               "-s", "%dx%d" % (w, h), "-r", "%.6f" % fps, "-i", raw]
+        run([ff] + pre + ["-vf", "palettegen=max_colors=256:stats_mode=diff", pal],
+            "ffmpeg palettegen")
+        run([ff] + pre + ["-i", pal, "-lavfi",
+                          "[0:v][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+                          "-loop", "0", out], "ffmpeg paletteuse")
+    finally:
+        for f in (raw, pal):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    return out
 
 
 def group_style_names(animated=False):
     return sorted(GROUP_ANIM_STYLES if animated else GROUP_ART_STYLES)
 
 
+def _fit(panel, w, h):
+    """*panel* scaled to fit WxH, aspect kept - nearest neighbour, which is
+    what a second scale of an already-scaled logo can afford."""
+    w, h = max(1, int(w)), max(1, int(h))
+    f = min(w / float(panel.w), h / float(panel.h))
+    nw, nh = max(1, int(panel.w * f)), max(1, int(panel.h * f))
+    out = Panel(nw, nh)
+    for y in range(nh):
+        sy = min(panel.h - 1, int(y / f))
+        si = sy * panel.w * 4
+        di = y * nw * 4
+        for x in range(nw):
+            sx = min(panel.w - 1, int(x / f))
+            out.px[di + x * 4:di + x * 4 + 4] = panel.px[si + sx * 4:si + sx * 4 + 4]
+    return out
+
+
+def _face(logo, w, h, frame, edge):
+    """One card in a deck: the logo on a slate face with an edge.
+
+    AN EDGE, or a face is just a lighter rectangle - with the logos' own
+    transparency honoured there is nothing else to tell one card in the pile
+    from the panel behind it."""
+    t = _fit(logo, w, h)
+    face = Panel(t.w + 12, t.h + 12, frame)
+    face.outline(0, 0, face.w, face.h, edge, 2)
+    face.blit(t, 6, 6)
+    return face
+
+
 def render_group_still(style, logos, size, colors=None):
-    """One PNG-able PIL image for a group card, from its members' logos."""
-    Image, ImageDraw, _Filter, _Font = _pil()
+    """One Panel for a group card, drawn from its members' logos."""
     card, frame, hl, dim = colors or (GROUP_CARD_RGB, GROUP_FRAME_RGB,
                                       GROUP_HL_RGB, GROUP_DIM_RGB)
-    w, h = size
+    w, h = int(size[0]), int(size[1])
     if not logos:
         raise Refused("a random card's picture needs at least one member logo")
 
     def mosaic(n):
-        im = Image.new("RGB", (w, h), card)
+        im = Panel(w, h, card)
         cols = 3 if n <= 9 else int(math.ceil(math.sqrt(n * w / float(h))))
         cols = max(1, min(cols, n))
         rows = int(math.ceil(n / float(cols)))
-        cw, ch = w // cols, h // rows
+        cw, ch = max(1, w // cols), max(1, h // rows)
         for i in range(cols * rows):
-            src = logos[i % len(logos)]
-            _paste(im, src.resize((max(1, cw - 3), max(1, ch - 3)), Image.LANCZOS),
-                   ((i % cols) * cw + 1, (i // cols) * ch + 1))
+            cell = _fit(logos[i % len(logos)], cw - 3, ch - 3)
+            im.blit(cell, (i % cols) * cw + 1 + (cw - 3 - cell.w) // 2,
+                    (i // cols) * ch + 1 + (ch - 3 - cell.h) // 2)
         return im
 
     if style == "mosaic":
         return mosaic(len(logos))
     if style == "question":
-        im = Image.blend(mosaic(min(len(logos), 9)),
-                         Image.new("RGB", (w, h), (0, 0, 0)), 0.74)
-        d = ImageDraw.Draw(im)
-        # anchor='mm' centres on the glyph's own ink; halving a text bbox puts
-        # the left bearing into the offset and lands it visibly off-centre
-        d.text((w // 2, h // 2), "?", font=_group_font(int(h * 0.7)),
-               fill=hl, anchor="mm")
+        im = mosaic(min(len(logos), 9)).dimmed(0.74)
+        _question_mark(im, hl)
         return im
     if style == "shuffle":
-        im = Image.new("RGB", (w, h), card)
-        d = ImageDraw.Draw(im)
-        cx, cy = w // 2, int(h * 0.46)
-        arm, rise, thick = int(w * 0.29), int(h * 0.15), max(4, int(h * 0.052))
+        im = Panel(w, h, card)
+        cx, cy = w // 2, h // 2
+        arm, rise, thick = int(w * 0.30), int(h * 0.17), max(4, int(h * 0.055))
         for dy in (-rise, rise):
-            d.line([(cx - arm, cy + dy), (cx - int(arm * 0.3), cy + dy),
-                    (cx + int(arm * 0.3), cy - dy), (cx + int(arm * 0.72), cy - dy)],
-                   fill=hl, width=thick, joint="curve")
+            im.line([(cx - arm, cy + dy), (cx - int(arm * 0.30), cy + dy),
+                     (cx + int(arm * 0.30), cy - dy), (cx + int(arm * 0.72), cy - dy)],
+                    hl, thick)
             ax, ay = cx + int(arm * 0.72), cy - dy
-            head = max(6, int(h * 0.09))
-            d.polygon([(ax + head * 1.6, ay), (ax, ay - head), (ax, ay + head)], fill=hl)
-        d.text((w // 2, h - int(h * 0.14)), "RANDOM", font=_group_font(max(10, int(h * 0.085))),
-               fill=dim, anchor="mm")
+            head = max(6, int(h * 0.10))
+            im.poly([(ax + head * 1.6, ay), (ax, ay - head), (ax, ay + head)], hl)
         return im
     if style in ("fan", "stack"):
-        # EACH CARD ON ITS OWN FULL-PANEL LAYER, so rotate() cannot shift it:
-        # pasting rotated bitmaps by their top-left corner turns the ones behind
-        # into slivers, which is exactly what the first try did.
-        im = Image.new("RGBA", (w, h), tuple(card) + (255,))
+        # EACH CARD ON ITS OWN FULL-PANEL LAYER, so the turn cannot shift it:
+        # rotating a small bitmap and pasting it by its corner turns the ones
+        # behind into slivers, which is exactly what the first attempt did.
+        im = Panel(w, h, card)
         show = logos[:5]
         base = _fit(show[0], int(w * 0.60), int(h * 0.60))
-        n = len(show)
-        # A HAND OF CARDS SPLAYS BOTH WAYS around the one in front, turning on a
-        # pivot BELOW the panel so they pivot from their corner the way real
-        # cards do.  Fanning one way only looked like a mistake rather than a
-        # deck (the first version did that).
         spread = 17.0
-        for k in range(n - 1, -1, -1):
-            t = _fit(show[k], base.width, base.height)
-            face = Image.new("RGBA", (t.width + 12, t.height + 12), tuple(frame) + (255,))
-            # AN EDGE, or a face is just a lighter rectangle: with the logos'
-            # own transparency honoured (see _paste) there is nothing else to
-            # tell one card in the pile from the panel behind it.
-            ImageDraw.Draw(face).rectangle(
-                [0, 0, face.width - 1, face.height - 1], outline=tuple(dim) + (255,), width=2)
-            _paste(face, t, (6, 6))
-            layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        for k in range(len(show) - 1, -1, -1):
+            face = _face(show[k], base.w, base.h, frame, dim)
+            layer = Panel(w, h)
             if style == "stack":
                 off = k * max(6, int(h * 0.045))
-                layer.paste(face, ((w - face.width) // 2 + off - int(w * 0.04),
-                                   (h - face.height) // 2 + off - int(h * 0.07)))
+                layer.blit(face, (w - face.w) // 2 + off - int(w * 0.04),
+                           (h - face.h) // 2 + off - int(h * 0.07))
             else:
-                layer.paste(face, ((w - face.width) // 2,
-                                   (h - face.height) // 2 - int(h * 0.04)))
-                # k == 0 is the front card and stays upright; the rest alternate
-                # out to either side of it
+                layer.blit(face, (w - face.w) // 2,
+                           (h - face.h) // 2 - int(h * 0.04))
+                # A HAND OF CARDS SPLAYS BOTH WAYS around the one in front, on a
+                # pivot BELOW the panel so they turn from their corner the way
+                # real cards do.  k == 0 is the front card and stays upright.
                 step = (k + 1) // 2
                 ang = spread * step * (1 if k % 2 else -1)
-                layer = layer.rotate(ang, resample=Image.BICUBIC,
-                                     center=(w // 2, h + int(h * 0.30)))
-            im = Image.alpha_composite(im, layer)
-        return im.convert("RGB")
+                if ang:
+                    layer = layer.rotated(ang, w // 2, h + int(h * 0.30))
+            im.blit(layer, 0, 0)
+        return im
     raise Refused("a random card's picture style %r is not one of %s"
                   % (style, ", ".join(group_style_names())))
 
 
+def _question_mark(im, colour):
+    """A big '?' drawn rather than typed.
+
+    NO FONT: the app's runtime has no PIL to render one and no promise of a
+    typeface either, and a glyph made of an arc, a stem and a dot is the same
+    mark in every install."""
+    w, h = im.w, im.h
+    r = int(h * 0.20)
+    cx, cy = w // 2, int(h * 0.34)
+    thick = max(4, int(h * 0.085))
+    arc = []
+    for deg in range(200, 381, 10):          # over the top, left to right
+        a = math.radians(deg)
+        arc.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    im.line(arc, colour, thick)
+    tail = arc[-1]
+    im.line([tail, (tail[0], cy + r * 0.55), (cx, cy + r * 1.15),
+             (cx, cy + r * 1.7)], colour, thick)
+    im.dot(cx, int(cy + r * 2.5), max(3, thick // 2 + 1), colour)
+
+
 def render_group_frames(style, logos, size, colors=None):
     """(frames, delay_ms) for an animated group card."""
-    Image, _Draw, ImageFilter, _Font = _pil()
     card, _frame, hl, _dim = colors or (GROUP_CARD_RGB, GROUP_FRAME_RGB,
                                         GROUP_HL_RGB, GROUP_DIM_RGB)
-    w, h = size
+    w, h = int(size[0]), int(size[1])
     if not logos:
         raise Refused("a random card's picture needs at least one member logo")
     if style == "cycling":
@@ -2175,65 +2457,47 @@ def render_group_frames(style, logos, size, colors=None):
         # it with no new code at all.
         frames = []
         for l in logos[:GIF_MAX_FRAMES]:
-            im = Image.new("RGB", (w, h), card)
+            im = Panel(w, h, card)
             t = _fit(l, w, h)
-            _paste(im, t, ((w - t.width) // 2, (h - t.height) // 2))
+            im.blit(t, (w - t.w) // 2, (h - t.h) // 2)
             frames.append(im)
         return frames, GROUP_CYCLE_MS
     if style == "reel":
         # A STRIP OF MEMBERS SCROLLING BY, easing to a stop with the winner
-        # between two rails.  Blur falls off as it slows, which is what sells it.
+        # between two rails.
+        cells = logos[:GROUP_REEL_CELLS]
+        n_cells = max(2, len(cells))
         cell = max(8, h // 2)
-        strip_h = cell * max(2, len(logos))
-        strip = Image.new("RGB", (w, strip_h), card)
-        for i in range(max(2, len(logos))):
-            # FULL WIDTH: a narrower strip leaves the card colour down both
-            # edges and reads as a picture with margins rather than as a reel
-            t = _fit(logos[i % len(logos)], w, cell - 6)
-            if t.width < w:
-                t = t.resize((w, max(1, int(t.height * w / float(t.width)))), Image.LANCZOS)
-                if t.height > cell - 6:
-                    top = (t.height - (cell - 6)) // 2
-                    t = t.crop((0, top, w, top + cell - 6))
-            _paste(strip, t, ((w - t.width) // 2, i * cell + (cell - t.height) // 2))
+        strip_h = cell * n_cells
+        strip = Panel(w, strip_h, card)
+        for i in range(n_cells):
+            t = _fit(cells[i % len(cells)], w, cell - 6)
+            strip.blit(t, (w - t.w) // 2, i * cell + (cell - t.h) // 2)
+        # THE BLUR IS PRE-BAKED, not per frame.  Blurring 32 frames costs 32
+        # blurs; blurring the strip twice costs two, and every frame after that
+        # is a crop - which on a row-major buffer is a memory copy.  It also
+        # reads better: the reel is sharp the instant it stops.
+        smeared = [strip, strip.blurred(max(1, int(h * 0.03))),
+                   strip.blurred(max(2, int(h * 0.07)))]
         frames = []
         n = GROUP_REEL_FRAMES
         spins = 2.0
         for k in range(n):
             # ease-out cubic: fast, then crawling onto the stop
-            p = 1.0 - (1.0 - (k + 1) / float(n)) ** 3
+            f = (k + 1) / float(n)
+            p = 1.0 - (1.0 - f) ** 3
             y = int((spins * strip_h + cell * 0.5) * p) % strip_h
-            im = Image.new("RGB", (w, h), card)
-            src = strip.crop((0, 0, w, strip_h))
-            tall = Image.new("RGB", (w, strip_h * 2), card)
-            tall.paste(src, (0, 0))
-            tall.paste(src, (0, strip_h))
-            im.paste(tall.crop((0, y, w, y + h)), (0, 0))
-            speed = (1.0 - p)
-            if speed > 0.02:
-                im = im.filter(ImageFilter.GaussianBlur(0.4 + 5.0 * speed))
-            d = _pil()[1].Draw(im)
+            speed = 1.0 - p
+            src = smeared[2] if speed > 0.45 else (smeared[1] if speed > 0.12 else strip)
+            im = src.crop(0, y, w, h)
             rail = max(2, int(h * 0.012))
-            d.rectangle([0, int(h * 0.33), w, int(h * 0.33) + rail], fill=hl)
-            d.rectangle([0, int(h * 0.64), w, int(h * 0.64) + rail], fill=hl)
+            im.rect(0, int(h * 0.33), w, int(h * 0.33) + rail, hl)
+            im.rect(0, int(h * 0.64), w, int(h * 0.64) + rail, hl)
             frames.append(im)
-        # hold the result a beat before it goes again
-        frames += [frames[-1]] * 8
+        frames += [frames[-1]] * 8          # hold the result a beat
         return frames, 60
     raise Refused("a random card's animation style %r is not one of %s"
                   % (style, ", ".join(group_style_names(animated=True))))
-
-
-def write_group_gif(frames, delay_ms, out):
-    """Save frames as a looping GIF the selector can read."""
-    Image, _d, _f, _ft = _pil()
-    if not frames:
-        raise Refused("a random card's animation came out with no frames")
-    first = frames[0].convert("P", palette=Image.ADAPTIVE, colors=255)
-    rest = [f.convert("P", palette=Image.ADAPTIVE, colors=255) for f in frames[1:]]
-    first.save(out, "GIF", save_all=True, append_images=rest, loop=0,
-               duration=int(delay_ms), optimize=True, disposal=1)
-    return out
 
 
 def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
@@ -2243,7 +2507,6 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
     Cached on the member CARDS' stamps and the style, so re-running with the
     same list and the same style costs nothing - the logos are pulled out of
     the card images, which is the slow part."""
-    Image = _pil()[0]
     names = {}
     if not members:
         raise Refused("group %d has no members to draw from" % g)
@@ -2266,8 +2529,10 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
             tmp = os.path.join(work, "glogo%d_%d.png" % (g, m))
             with open(tmp, "wb") as f:
                 f.write(data)
-            # RGBA, not RGB: see _paste - the alpha is the whole picture
-            out_logos.append(Image.open(tmp).convert("RGBA"))
+            # THE LOGO KEEPS ITS ALPHA all the way here: see Panel.blit - what
+            # is stored under it is anything at all, and painting it was how the
+            # first real card came out as a coloured box.
+            out_logos.append(panel_from_file(tmp, size))
         return out_logos
 
     if art_style and art_style != "none":
@@ -2290,7 +2555,7 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
             write_sidecar(target, art_stamp, params)
             log("  %s: %s" % (name, art_style))
         else:
-            render_group_still(art_style, logos(), size).save(target, "PNG", optimize=True)
+            panel_to_png(render_group_still(art_style, logos(), size), target)
             write_sidecar(target, art_stamp, params)
             log("  %s: %s of %d member(s)" % (name, art_style, len(members)))
         names["art"] = name
@@ -2304,7 +2569,7 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
             log("  %s: cached (%s)" % (name, anim_style))
         else:
             frames, delay = render_group_frames(anim_style, logos(), size)
-            write_group_gif(frames, delay, target)
+            write_group_gif(frames, delay, target, work=work)
             with open(target, "rb") as f:
                 info = gif_info(f.read())
             if not info:

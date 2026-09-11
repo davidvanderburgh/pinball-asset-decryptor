@@ -422,6 +422,7 @@ MULTI_SUBDIR_RE = re.compile(r"^img(\d+)$")
 #: negations unnecessary: what is not on this list is off, including whatever a future
 #: e2fsprogs decides to switch on by default.  The list is then only names that have existed
 #: for a decade, which is what makes it portable in both directions.
+WORK_LABEL = "padwork"      # the deltas' work partition's ext4 label (item 107)
 MULTI_FEATURES = ("none,has_journal,ext_attr,resize_inode,dir_index,filetype,extent,flex_bg,"
                   "sparse_super,large_file,huge_file,uninit_bg,dir_nlink,extra_isize")
 MULTI_SLACK = 0.10                            # size = used * (1 + slack) + headroom, MiB-rounded
@@ -766,7 +767,7 @@ class Plan:
     """
 
     def __init__(self, primary_geom, extra_geoms, primary=None, extras=None, layout="parts",
-                 multi_sectors=None, multi_subdirs=None, multi_src=None, store_sectors=None):
+                 multi_sectors=None, multi_subdirs=None, multi_src=None, store_sectors=None, work_sectors=None):
         P = primary_geom
         if P.ext is None or len(P.logical) < 1:
             raise Refused("%s: no extended partition / logical chain" % (primary or "primary"))
@@ -798,6 +799,7 @@ class Plan:
         self.store_shared = None        # the bytes the images share by content, stored once
         self.store_meta = None          # the primary's own filesystem overhead inside p3
         self.store_deltas = None        # per image, {rel: {base, ranges, bytes}} stored as deltas (item 107)
+        self.work_part = None           # the store layout's p7: where the machine rebuilds the deltas (item 107)
         self.manifests = None           # the sources' manifests when the plan hashed them
         if layout == "parts":
             for x, xp in zip(self.extra_geoms, self.extras):
@@ -855,6 +857,19 @@ class Plan:
                 self.logs.append(Part(num, t, st, lcnt, primary, st0, ebr))
                 num += 1
                 prev_end = st + lcnt - 1
+            if work_sectors:
+                # THE WORK PARTITION (item 107): p7, ext4, empty at build - the machine rebuilds
+                # each delta'd file into it at boot (materialize.py, run by select.sh) and binds
+                # the result over the tree's file.  Nothing else on the machine has the room:
+                # p5 is 72 MiB, p6 532 MiB, /var/volatile half the RAM.  No source: made by
+                # mke2fs after the store, never copied, held by verify to e2fsck.
+                ebr = prev_end + 1
+                st = align_up(ebr + 1)
+                wp = Part(num, 0x83, st, int(work_sectors), None, 0, ebr)
+                self.logs.append(wp)
+                self.work_part = wp
+                num += 1
+                prev_end = st + wp.count - 1
         self.ext_count = prev_end + 1 - self.ext_base
         self.total = prev_end + 1 + TAIL
 
@@ -977,17 +992,19 @@ STORE_HEADROOM = 64 << 20                  # ...and the room a content-sized sto
 STORE_SIZES = ("content",) + tuple(STERN_SIZES)
 
 
-def store_sectors_for_class(P, extra_geoms, primary, extras, subs, cls):
+def store_sectors_for_class(P, extra_geoms, primary, extras, subs, cls, work_sectors=None):
     """The biggest p3 (in sectors) that keeps a store card inside the Stern `cls` image size
-    with p5 and p6 re-laid after it - found by building the plan, since the alignment of the
-    EBR chain is the plan's own arithmetic."""
+    with p5 and p6 (and the deltas' work partition, when there is one) re-laid after it -
+    found by building the plan, since the alignment of the EBR chain is the plan's own
+    arithmetic."""
     total = STERN_SIZES[cls] // SECTOR
     _t3, s3, c3 = P.part(3)
-    cnt = total - TAIL - s3 - sum(lc for (_e, _t, _s, lc) in P.logical) - ALIGN * (len(P.logical) + 1)
+    cnt = total - TAIL - s3 - sum(lc for (_e, _t, _s, lc) in P.logical) - ALIGN * (len(P.logical) + 2) - int(work_sectors or 0)
     cnt = max(c3, cnt - cnt % ALIGN)               # never below the primary's own p3 (an 8G class = the stock p3)
 
     def total_of(n):
-        return Plan(P, extra_geoms, primary, extras, "store", multi_subdirs=subs, store_sectors=n).total
+        return Plan(P, extra_geoms, primary, extras, "store", multi_subdirs=subs, store_sectors=n,
+                    work_sectors=work_sectors).total
     if total_of(c3) > total:
         raise Refused("--size %s: the primary's games partition alone (%s) does not leave room for the store"
                       % (cls, _gb(c3 * SECTOR)))
@@ -1027,22 +1044,46 @@ def measure_total(paths):
     return total
 
 
+WORK_SLACK = 0.10                          # the work partition over its largest delta'd file...
+WORK_HEADROOM = 32 << 20                   # ...plus ext4's own journal and metadata on a small filesystem
+
+
+def work_sectors_for(mans, deltas):
+    """The deltas' work partition, in sectors (item 107): the largest delta'd file plus a
+    tenth plus the filesystem's own overhead, aligned; 0 when nothing is a delta.  One file
+    at a time is rebuilt there (the booted tree's), so the largest is the whole need."""
+    largest = 0
+    for i, d in enumerate(deltas or []):
+        tree = mans[i].tree if i < len(mans) else None
+        for rel in d:
+            if tree is not None and rel in tree.files:
+                largest = max(largest, tree.files[rel].size)
+    if not largest:
+        return 0
+    need = int(largest * (1 + WORK_SLACK)) + WORK_HEADROOM
+    return align_up((need + SECTOR - 1) // SECTOR)
+
+
 def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdirs=None, cache_dir=None,
-                    progress=None):
+                    progress=None, work_sectors=None):
     """The Plan of a store card (item 95).  With `store_sectors` (a card that exists, or verify)
     nothing is read but the tables; otherwise every source's games tree is hashed (or taken
     from the cache) so the store can be sized by the UNION of the images' unique content: to
     the smallest Stern image size that holds it (the default), to `size_class`, or - 'content'
     - to just what it needs plus a small headroom.  The plan carries the manifests and the
-    per-image unique bytes for the size rows."""
+    per-image unique bytes for the size rows.  Files that can be stored as deltas of an
+    earlier image's (item 107) are found here too, and the plan then carries a p7 work
+    partition sized for the largest of them."""
     P = Geometry.from_file(primary)
     XG = [Geometry.from_file(x) for x in extras]
     subs = list(subdirs) if subdirs else ["img%d" % (i + 1) for i in range(len(extras))]
     if store_sectors is not None:
-        return Plan(P, XG, primary, list(extras), "store", multi_subdirs=subs, store_sectors=int(store_sectors))
+        return Plan(P, XG, primary, list(extras), "store", multi_subdirs=subs, store_sectors=int(store_sectors),
+                    work_sectors=work_sectors)
     ts = _treesync()
     mans = measure_sources([primary] + list(extras), cache_dir, progress)
     deltas = find_source_deltas([primary] + list(extras), mans, cache_dir, progress)
+    work_sectors = work_sectors_for(mans, deltas) or None
     unique, shared = ts.dedup_costs(mans, deltas)
     _t3, s3, c3 = P.part(3)
     used3 = _used_bytes_or_none(primary, s3 * SECTOR)
@@ -1052,20 +1093,21 @@ def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdir
         grow = int(sum(unique[1:]) * (1 + STORE_META_SLACK)) + STORE_HEADROOM
         cnt = c3 + align_up((grow + SECTOR - 1) // SECTOR)
     elif size_class is None:
-        fixed = (s3 + TAIL + sum(lc for (_e, _t, _s, lc) in P.logical) + ALIGN * (len(P.logical) + 1)) * SECTOR
+        fixed = (s3 + TAIL + sum(lc for (_e, _t, _s, lc) in P.logical) + ALIGN * (len(P.logical) + 2)
+                 + (work_sectors or 0)) * SECTOR
         cls = next((k for k, v in STERN_SIZES.items() if v >= fixed + need), None)
         if cls is None:
             raise Refused("the images' unique content (%s) does not fit the biggest Stern image size even stored once"
                           % _gb(sum(unique)))
-        cnt = store_sectors_for_class(P, XG, primary, list(extras), subs, cls)
+        cnt = store_sectors_for_class(P, XG, primary, list(extras), subs, cls, work_sectors)
     else:
         if size_class not in STERN_SIZES:
             raise Refused("--size %r: one of %s" % (size_class, "/".join(STORE_SIZES)))
-        cnt = store_sectors_for_class(P, XG, primary, list(extras), subs, size_class)
+        cnt = store_sectors_for_class(P, XG, primary, list(extras), subs, size_class, work_sectors)
         if cnt * SECTOR < need:
             raise Refused("--size %s: the images' unique content needs %s of p3 and the class leaves %s"
                           % (size_class, _gb(need), _gb(cnt * SECTOR)))
-    plan = Plan(P, XG, primary, list(extras), "store", multi_subdirs=subs, store_sectors=cnt)
+    plan = Plan(P, XG, primary, list(extras), "store", multi_subdirs=subs, store_sectors=cnt, work_sectors=work_sectors)
     plan.manifests = mans
     plan.store_unique = unique
     plan.store_shared = shared
@@ -1134,14 +1176,15 @@ def find_source_deltas(paths, mans, cache_dir=None, progress=None):
 
 
 def make_plan(primary, extras, layout="auto", multi_sectors=None, multi_src=None, multi_subdirs=None,
-              size_class=None, store_sectors=None, cache_dir=None, progress=None, groups=None):
+              size_class=None, store_sectors=None, cache_dir=None, progress=None, groups=None, work_sectors=None):
     """The Plan for these images.  `size_class` ('8G'/'16G'/'32G', item 93's --size) fills the
     multi layout's p7 to the END of that Stern image size instead of its content-sized default,
     so later updates and added images have room without a re-layout; refused when the content
     does not fit the class.  The store layout (item 95) is sized by :func:`make_store_plan`."""
     lay = resolve_layout(layout, len(extras), groups)
     if lay == "store":
-        return make_store_plan(primary, extras, size_class, store_sectors, multi_subdirs, cache_dir, progress)
+        return make_store_plan(primary, extras, size_class, store_sectors, multi_subdirs, cache_dir, progress,
+                               work_sectors=work_sectors)
     if size_class == "content":
         size_class = None
     plan = Plan(Geometry.from_file(primary), [Geometry.from_file(x) for x in extras], primary, list(extras),
@@ -1314,6 +1357,8 @@ def print_plan(plan, media=None, groups=None):
                                             for s, x in zip(plan.multi_subdirs, plan.extras))
         else:
             src = "%s@%d" % (os.path.basename(p.src or "image"), p.src_start)
+            if plan.work_part is not None and p.num == plan.work_part.num:
+                src = "work partition: empty ext4 made at build, the deltas' rebuilt files at boot"
         rows.append((p.num, p.ptype, p.start, p.count, src))
     for n, t, st, cnt, src in rows:
         print("p%-3d 0x%02x %-12d %-12d %-12d %-16d %s" % (n, t, st, cnt, st + cnt - 1, cnt * SECTOR, src))
@@ -2331,6 +2376,10 @@ def build_image(plan, out, use_dd=False):
         meter.step("writing the card image")
     copy_range(plan.primary, 0, out, 0, PRE_P1 * SECTOR, "pre-p1 (bootstrap + u-boot)", meter=meter)
     for p in plan.prims + plan.logs:
+        if p.src is None:
+            say("p%d: %s at LBA %d has no source - made after the copy (the deltas' work partition)"
+                % (p.num, _gb(p.count * SECTOR), p.start))
+            continue
         label = "p%d %s" % (p.num, default_title(p.src))
         say("copying %s: %s from %s@LBA %d -> LBA %d" % ("p%d" % p.num, _gb(p.count * SECTOR), os.path.basename(p.src), p.src_start, p.start))
         if meter is not None:
@@ -3923,7 +3972,26 @@ def build_store(plan, out, trees):
             # the tree's own index of its deltas (what the card reads at boot) and the record's
             record_deltas(ops, sub, trees.image(i), stats)
         ops.commit()
+    if plan.work_part is not None:
+        format_work_partition(out, plan)
     say("store built in %.0f s" % (time.monotonic() - t0))
+
+
+def format_work_partition(card, plan):
+    """The deltas' work partition (item 107): an empty ext4 with the stock p3's feature set
+    (the card's 3.14 kernel must mount it), written straight into the card file at the
+    partition's offset - no loop device, nothing to copy - and e2fsck -fn'd."""
+    wp = plan.work_part
+    need_tools("mke2fs", "e2fsck")
+    PROGRESS.step("formatting the work partition p%d (%s)" % (wp.num, _gb(wp.count * SECTOR)))
+    _run(["mke2fs", "-q", "-F", "-t", "ext4", "-m", "0", "-L", WORK_LABEL, "-O", MULTI_FEATURES,
+          "-E", "offset=%d,lazy_itable_init=0,lazy_journal_init=0" % (wp.start * SECTOR),
+          card, str(wp.count * SECTOR // 1024) + "k"])
+    rc, txt = e2fsck(fs_ref(card, wp.start * SECTOR))
+    if rc != 0:
+        raise Refused("the work partition p%d is not clean after mke2fs (rc=%d):\n%s" % (wp.num, rc, txt))
+    say("work partition p%d: %s of empty ext4 (label %s) for the deltas' rebuilt files"
+        % (wp.num, _gb(wp.count * SECTOR), WORK_LABEL))
 
 
 def need_materializer(plan, selector_dir):
@@ -4305,6 +4373,7 @@ def trees_report(card, plan, rec, warnings):
     if plan is not None and plan.layout == "store":
         unique, shared = ts.dedup_costs(rec.images)
         store = collections.OrderedDict([("shared_bytes", shared), ("unique_bytes", unique)])
+        store["work_bytes"] = plan.work_part.count * SECTOR if plan.work_part is not None else None
         if rec.has_deltas():
             store["deltas"] = [collections.OrderedDict([
                 ("index", im.index), ("files", sorted(im.deltas)),
@@ -4582,7 +4651,8 @@ def _update_locked(a, ts, card, dry):
         newplan = plan
     elif store:
         newplan = make_plan(sources[0], sources[1:], "store", store_sectors=plan.prims[2].count,
-                            multi_subdirs=["img%d" % i for i in range(1, len(sources))])
+                            multi_subdirs=["img%d" % i for i in range(1, len(sources))],
+                            work_sectors=plan.work_part.count if plan.work_part is not None else None)
     else:
         newplan = make_plan(sources[0], sources[1:], "multi", multi_sectors=plan.multi_part.count,
                             multi_subdirs=["img%d" % i for i in range(1, len(sources))])
@@ -4609,6 +4679,20 @@ def _update_locked(a, ts, card, dry):
         ordered = [new_trees[i][0] for i in range(len(sources))]
         found = find_source_deltas(sources, [types.SimpleNamespace(tree=t) for t in ordered], a.cache_dir)
         update_deltas = {i: d for i, d in enumerate(found) if d}
+        if update_deltas:
+            # the machine rebuilds a delta'd file into the card's WORK PARTITION; a card built
+            # before item 107 has none, and one built for a smaller file cannot hold a bigger
+            # one - either way the variant plays the base's songs on the machine, so say so
+            # here, where a rebuild is still the cheap answer
+            largest = max(ordered[i].files[rel].size for i, d in update_deltas.items() for rel in d
+                          if rel in ordered[i].files)
+            if plan.work_part is None:
+                u["notes"].append("%d file(s) would be stored as deltas but this card has no work partition (p7) "
+                                  "for the machine to rebuild them in: build a fresh card, or the variant plays the "
+                                  "base's songs on the machine" % sum(len(d) for d in update_deltas.values()))
+            elif largest > plan.work_part.count * SECTOR - WORK_HEADROOM:
+                u["notes"].append("a delta'd file of %s outgrows the work partition p7 (%s): build a fresh card"
+                                  % (_gb(largest), _gb(plan.work_part.count * SECTOR)))
     # --bypass-validation: a tree whose validator is still armed - or half done (item 98:
     # the tick off, the grade restore live) - is patched through the mount even when
     # nothing else changed; its game and .sidx count as writes for the room and the rows
@@ -4891,7 +4975,8 @@ def verify_plan(card, sources):
                          multi_subdirs=own.multi_subdirs)
     if own.layout == "store":
         return make_plan(sources[0], sources[1:], "store", store_sectors=own.prims[2].count,
-                         multi_subdirs=own.store_subdirs)
+                         multi_subdirs=own.store_subdirs,
+                         work_sectors=own.work_part.count if own.work_part is not None else None)
     return make_plan(sources[0], sources[1:], "parts")
 
 
@@ -4992,9 +5077,11 @@ def plan_from_card(card):
     stock_logs = G.logical[:2]
     base = Geometry(G.size, G.mbr, G.prim, G.ext, stock_logs, G.ebr_raw, card)
     subs3 = store_subdirs_on(card)
-    if subs3 and len(G.logical) == 2:
+    if subs3 and len(G.logical) in (2, 3):
+        # a third logical after a store's p5/p6 is the deltas' work partition (item 107)
         _t3, _s3, c3 = G.part(3)
-        return Plan(base, [], card, [], "store", multi_subdirs=subs3, store_sectors=c3)
+        work = G.logical[2][3] if len(G.logical) == 3 else None
+        return Plan(base, [], card, [], "store", multi_subdirs=subs3, store_sectors=c3, work_sectors=work)
     if len(G.logical) == 3:
         subs = multi_subdirs_on(card, 7)
         if subs:
@@ -6223,6 +6310,13 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
             print("p%d: synced in place - held to %s, not to a range md5%s" % (
                 p.num, TREES_MANIFEST, "" if read_part_sidecar(card, p.num) is None else
                 " (a pre-sync sidecar is beside the card and ignored)"))
+            continue
+        if plan.work_part is not None and p.num == plan.work_part.num:
+            # the deltas' work partition (item 107): made empty at build and written by the
+            # MACHINE at every boot, so no md5 can hold it; an intact ext4 is the invariant
+            rc_w, txt_w = e2fsck(fs_ref(card, p.start * SECTOR))
+            check("p%d work partition for the deltas: ext4 clean (%s)" % (p.num, _gb(p.count * SECTOR)), rc_w == 0,
+                  txt_w[-300:] if rc_w else "")
             continue
         try:
             want = read_part_sidecar(card, p.num)
@@ -7553,6 +7647,135 @@ def selftest(d, selector_file=None):
     print("== a raw bypass of a store card is refused")
     ok &= main(["bypass", "--card", out6, "--dry-run"]) == 2
     print("SELFTEST part 6 (store)", "PASS" if ok else "FAIL")
+
+    # ---- PART 6d: DELTAS (item 107) - a variant's file stored as byte ranges over another tree's blob
+    print("== deltas: a same-path same-size file differing in a few blocks is stored as a delta of the earlier tree's blob")
+    mz = ts._materialize()
+    os.environ["MKMULTICARD_DELTA_MIN"] = "4096"       # the synthetic p3 is 1 MiB: nothing on it reaches the real minimum
+    try:
+        big_base = bytes((i * 7 + 3) & 0xFF for i in range(300 * 1024))
+        big_v1 = bytearray(big_base)
+        big_v1[40960:40970] = b"variant-01"
+        big_v1 = bytes(big_v1)
+        big_v2 = bytearray(big_base)
+        big_v2[200000:200012] = b"variant-two!"
+        big_v2 = bytes(big_v2)
+        # the SAME title directory on both cards: a delta is found by path, and a song-set
+        # variant is the same title with a few bodies changed
+        D = make_synthetic_card(os.path.join(d, "D.img"), "D", 0x0D0D0D0D, with_fs=True, title="V_title")
+        E = make_synthetic_card(os.path.join(d, "E.img"), "E", 0x0E0E0E0E, with_fs=True, title="V_title")
+        stage_big = {}
+        for tag_, src_, blob_ in (("base", D, big_base), ("v1", E, big_v1), ("v2", None, big_v2)):
+            stage_big[tag_] = os.path.join(d, "big_%s.bin" % tag_)
+            with open(stage_big[tag_], "wb") as f:
+                f.write(blob_)
+            if src_:
+                put(src_, "/V_title/image.bin", stage_big[tag_])
+        base_rec = source_tree(D)[0].tree.files["V_title/image.bin"]
+        v1_rec = source_tree(E)[0].tree.files["V_title/image.bin"]
+        outd = os.path.join(d, "store_delta.img")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            print_plan(make_plan(D, [E], "store", size_class="content"))
+        pl = buf.getvalue()
+        print(pl)
+        ok &= "1 file(s) stored as byte-range DELTAS" in pl, pl
+        rows_d = {int(ln.split()[2]): int(ln.split()[3]) for ln in pl.splitlines()
+                  if ln.startswith("image-size ") and ln.split()[1].isdigit()}
+        ok &= 4096 <= rows_d[1] < 16384 + 4096, rows_d         # the extra costs one block's delta + its own small files, not 300 KB
+        print("== a build that plans a delta refuses a selector dir without materialize.py, before the copy")
+        build_d = ["build", "--primary", D, "--extra", E, "--out", outd, "--selector-dir", sel, "--layout", "store",
+                   "--size", "content", "--allow-version-mismatch", "--bypass-validation", "--force"]
+        ok &= main(build_d) == 2 and not os.path.exists(outd)
+        shutil.copyfile(os.path.join(HERE, "codeselect", "materialize.py"), os.path.join(sel, "materialize.py"))
+        ok &= main(build_d) == 0
+        Gd = Geometry.from_file(outd)
+        _td, sd3, cd3 = Gd.part(3)
+        pland = plan_from_card(outd)
+        refd = fs_ref(outd, sd3 * SECTOR)
+        # the work partition: p7 after p6, read back off the table, sized for the delta'd file, clean ext4
+        ok &= len(Gd.logical) == 3 and pland.work_part is not None and pland.work_part.num == 7, len(Gd.logical)
+        ok &= pland.work_part.count * SECTOR >= len(big_base) + WORK_HEADROOM, pland.work_part.count
+        ok &= e2fsck(fs_ref(outd, pland.work_part.start * SECTOR))[0] == 0
+        ok &= "work partition" in pl and "p7" in pl
+
+        def delta_card_state():
+            with open(outd, "rb") as f:
+                rd = ext4m.Ext4Reader(f, sd3 * SECTOR, cd3 * SECTOR)
+                blobs_d = _dir_entries(rd, _dir_entries(rd, 2)[ts.BLOBS_DIR][0])
+                ino0 = {rel: ino for rel, _k, ino, _n in rd.iter_tree(tree_root_inode(rd, None), skip=tree_skip(pland, None))}
+                ino1 = {rel: ino for rel, _k, ino, _n in rd.iter_tree(tree_root_inode(rd, "img1"), skip=tree_skip(pland, "img1"))}
+                return blobs_d, ino0, ino1
+        blobs_d, ino0, ino1 = delta_card_state()
+        dnames = sorted(n for n in blobs_d if n.endswith(ts.DELTA_SUFFIX))
+        ok &= dnames == [ts.delta_name(v1_rec)], dnames
+        # the variant tree's file IS the base blob's inode, and the index is the tool's, not the tree's
+        ok &= ino1["V_title/image.bin"] == ino0["V_title/image.bin"] == blobs_d[ts.blob_key(base_rec)][0], (
+            ino1.get("V_title/image.bin"), ino0.get("V_title/image.bin"))
+        ok &= ".multiboot/deltas" not in ino1 and ".multiboot" not in ino1
+        idx_raw = debugfs_cat(refd, "/img1/.multiboot/deltas")
+        want_line = ("V_title/image.bin\t%s\t%s\t%d\n" % (ts.blob_key(base_rec), ts.delta_name(v1_rec), len(big_base))).encode()
+        ok &= idx_raw.startswith(b"# PADDELTAS 1\n") and want_line in idx_raw, idx_raw
+        recd = read_trees(outd)
+        ok &= json.loads(read_select_file(select_ref(outd), TREES_MANIFEST))["format"] == 2
+        ok &= recd.image(0).deltas is None and list(recd.image(1).deltas or {}) == ["V_title/image.bin"]
+        ok &= recd.image(1).deltas["V_title/image.bin"]["bytes"] == 4096 and recd.image(1).deltas["V_title/image.bin"]["ranges"] == 1
+        print("== verify (full) rebuilds base + delta to the record's digest; inspect reports the delta")
+        ok &= verify_card(outd, verify_plan(outd, [D, E]), sel, mode="full")
+        repd = inspect_card(outd)
+        ok &= repd["trees"]["store"]["deltas"] == [collections.OrderedDict([
+            ("index", 1), ("files", ["V_title/image.bin"]), ("delta_bytes", 4096), ("saved_bytes", len(big_base) - 4096)])], repd["trees"]["store"]
+        print("== materialize.py over the card's own bytes rebuilds the variant, stamp and all")
+        mzd = os.path.join(d, "mz store")
+        os.makedirs(os.path.join(mzd, ".blobs"), exist_ok=True)
+        os.makedirs(os.path.join(mzd, "img1", ".multiboot"), exist_ok=True)
+        for n in (ts.blob_key(base_rec), dnames[0]):
+            with open(os.path.join(mzd, ".blobs", n), "wb") as f:
+                f.write(debugfs_cat(refd, "/.blobs/" + n))
+        with open(os.path.join(mzd, "img1", ".multiboot", "deltas"), "wb") as f:
+            f.write(idx_raw)
+        workd = os.path.join(d, "mz work")
+        ok &= mz.main(["--store", mzd, "--tree", "img1", "--games", mzd, "--work", workd, "--no-bind", "--verify"]) == 0
+        with open(os.path.join(workd, "V_title", "image.bin"), "rb") as f:
+            ok &= f.read() == big_v1
+        ok &= mz.read_stamp(os.path.join(workd, "V_title", "image.bin.stamp")) == (ts.blob_key(base_rec), dnames[0])
+        print("== update: the variant becomes another one - costed at its ranges; the old delta goes, the new is written, the base stays")
+        put(E, "/V_title/image.bin", stage_big["v2"])
+        v2_rec = source_tree(E)[0].tree.files["V_title/image.bin"]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main(["update", "--card", outd, "--selector-dir", sel, "--allow-version-mismatch", "--dry-run"])
+        dryd = buf.getvalue()
+        print(dryd)
+        ok &= rc == 0 and "update-size 4096" in dryd and "update-fits YES" in dryd, dryd
+        ok &= main(["update", "--card", outd, "--selector-dir", sel, "--allow-version-mismatch"]) == 0
+        blobs_d, ino0, ino1 = delta_card_state()
+        ok &= sorted(n for n in blobs_d if n.endswith(ts.DELTA_SUFFIX)) == [ts.delta_name(v2_rec)]
+        ok &= ino1["V_title/image.bin"] == blobs_d[ts.blob_key(base_rec)][0]
+        ok &= ts.blob_key(v2_rec) not in blobs_d and ts.blob_key(v1_rec) not in blobs_d      # never stored whole
+        recd = read_trees(outd)
+        ok &= recd.image(1).deltas["V_title/image.bin"]["delta"] == ts.delta_name(v2_rec)
+        ok &= debugfs_cat(refd, "/img1/.multiboot/deltas").find(ts.delta_name(v2_rec).encode()) > 0
+        ok &= verify_card(outd, verify_plan(outd, [D, E]), sel, mode="full")
+        print("== update: nothing changed -> nothing written, the record keeps its delta and its format")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main(["update", "--card", outd, "--selector-dir", sel, "--allow-version-mismatch"])
+        ok &= rc == 0 and "nothing to write" in buf.getvalue(), buf.getvalue()
+        ok &= read_trees(outd).image(1).deltas is not None
+        ok &= json.loads(read_select_file(select_ref(outd), TREES_MANIFEST))["format"] == 2
+        print("== extract of the delta'd image warns, and the image it writes carries the BASE's bytes (the loose end)")
+        xdd = os.path.join(d, "extracted delta")
+        os.makedirs(xdd, exist_ok=True)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            extract_image(outd, 1, os.path.join(xdd, "E_out.img"), plan=pland)
+        ok &= "stores 1 file(s) as DELTAS" in buf.getvalue(), buf.getvalue()
+        xt = source_tree(os.path.join(xdd, "E_out.img"))[0].tree
+        ok &= xt.files["V_title/image.bin"].sha256 == base_rec.sha256
+    finally:
+        os.environ.pop("MKMULTICARD_DELTA_MIN", None)
+    print("SELFTEST part 6d (deltas)", "PASS" if ok else "FAIL")
 
     # ---- PART 7: extract - every image back out of a card as a stock-shaped card of its own
     print("== extract (parts): every image of the A+B+C card, named after its source, p3 byte-equal, p2 stock again")

@@ -1589,7 +1589,32 @@ HELP_CONTENT = {
          "files are the card's, and the machine falls back to it if the "
          "menu ever fails. Up to 16 images fit one card, and from five "
          "the menu scrolls three at a time with a counter under them, so "
-         "a card is not limited to what fits on the screen at once."),
+         "a card is not limited to what fits on the screen at once. One "
+         "card in the menu can also stand for SEVERAL games and boot one "
+         "of them at random - see \u201cA card that picks for you\u201d below."),
+        ("A card that picks for you",
+         "Add image or random group\u2026 at the foot of the list offers three "
+         "more things beside a plain image: a random card over the images "
+         "already on the card, a random card with games of its own, and "
+         "the same from a whole folder of them. Either way it is ONE card "
+         "in the menu, and choosing it - by hand or by the countdown - "
+         "boots one of its games. Forty song-set variants of one title "
+         "become one card that looks completely standard and plays a "
+         "different set every power-up. A random card over images that "
+         "keep their own cards is \u201csurprise me\u201d beside the very builds "
+         "it rolls between."),
+        ("How a random card picks, and what it looks like",
+         "Edit image\u2026 on a random row asks two questions an ordinary "
+         "image does not. HOW IT PICKS: truly random (it can give you the "
+         "same one twice), shuffle (every game once before any repeats, "
+         "remembered across power-ups the way a music player does it), or "
+         "never the one it booted last. AND WHAT IT SHOWS: the games\u2019 own "
+         "logos fanned out like a hand of cards, in a pile, as a grid, "
+         "under a big \u2018?\u2019, the shuffle symbol, each logo in turn, a slot "
+         "reel that spins and settles, a picture file of your own, or "
+         "nothing. It has its own music and confirm sound too. Press "
+         "Select under the preview to see what the machine draws when the "
+         "card is chosen: the build the roll landed on, named."),
         ("The tab, top to bottom",
          "One column, and it never rearranges itself under the window: the "
          "card path first, with From SD card…, Browse… and New card beside "

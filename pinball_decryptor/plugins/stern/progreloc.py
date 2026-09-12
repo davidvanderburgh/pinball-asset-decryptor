@@ -26,7 +26,7 @@ finds:
   executable segments whose combined 32-bit immediate is such an address.
   Both immediates are rewritten on retarget.
 
-Two shapes are deliberately NOT references:
+Three shapes are deliberately NOT references:
 
 * misaligned dwords — A32 code and C data are word-aligned; the thousands
   of misaligned hits on a real ELF are byte soup, and the one class that
@@ -38,7 +38,21 @@ Two shapes are deliberately NOT references:
   bytes into the caption.  Likewise a lone word pointing INTO a string at a
   whitespace character is dismissed (a linker tail-merge never starts on a
   space; a coincidence there would force every edit of the caption to keep
-  a tail nobody displays).
+  a tail nobody displays);
+* the LAST BYTES OF A C STRING — the ELF's own symbol tables are full of
+  C++ mangled names ending ``...EUlPvPKvE_\0`` or ``...S0_PS_\0``, and the
+  three printable characters in front of that terminator read as a
+  little-endian ``0x005f____``, which is squarely inside these games'
+  ``.rodata``.  Every span address on a Spike 2 ELF starts with a zero
+  byte, so the shape is systematic rather than rare: 32 hits on stock
+  Godzilla Pro 1.16, 43 on LE 1.16, and EVERY one of them lands INSIDE a
+  display string, i.e. becomes a phantom "the machine also shows this tail"
+  rule.  PAD-130 is the proving case: ``"PS_\0"`` at file offset ``0x857c``
+  of Godzilla Pro 1.16 reads as ``MEGALON AWARD`` + 4, so renaming that
+  award to ``KAIJU AWARD`` was skipped for not ending in ``LON AWARD``
+  while every other award line on the same card renamed cleanly.
+  Retargeting one would have been worse still: the write lands in the
+  middle of a mangled symbol name.  See :func:`is_string_tail_word`.
 
 A reference is ``{"kind", "delta", "offs", "va"}``: ``delta`` is how far
 into the string it points (0 = the whole string; > 0 = a TAIL such as
@@ -76,6 +90,13 @@ A32_PAIR_WINDOW = 6                      # instructions
 T32_PAIR_WINDOW = 12                     # halfwords
 # Strides (bytes) probed by the packed-counter test.
 COUNTER_STRIDES = range(4, 68, 4)
+# Printable bytes that must run up to a candidate word before it is judged
+# the tail of a C string rather than a pointer, and how far back that run is
+# followed before it counts as text whatever precedes it.  Eight printable
+# bytes ending at a NUL is already a ~1e-6 accident in code or in a pointer
+# table; the mangled names that produce this shape run to hundreds.
+STRING_TAIL_LEAD = 8
+STRING_TAIL_SCAN = 512
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +329,35 @@ def is_counter_word(raw, off, val):
     return False
 
 
+def is_string_tail_word(raw, off):
+    """True when the aligned word at *off* is the last bytes of a
+    NUL-terminated ASCII string — a C++ mangled name in one of the ELF's
+    string tables — rather than a pointer that happens to encode them.
+
+    Both halves have to hold: the word itself ENDS a string (printable
+    bytes then the terminating NUL, inside the word), and it is reached by
+    a printable run of at least :data:`STRING_TAIL_LEAD` bytes that starts
+    at a NUL (or runs past :data:`STRING_TAIL_SCAN`, at which point it is
+    text whatever precedes it).  A genuine pointer fails the second half:
+    whatever sits before it in a table, a literal pool or a struct ends in
+    the zero high byte of an address, or in padding."""
+    if off < 1 or off + 4 > len(raw):
+        return False
+    k = 0
+    while k < 4 and 0x20 <= raw[off + k] <= 0x7e:
+        k += 1
+    if k == 4 or raw[off + k] != 0:
+        return False
+    i = off - 1
+    n = 0
+    while i >= 0 and n < STRING_TAIL_SCAN and 0x20 <= raw[i] <= 0x7e:
+        i -= 1
+        n += 1
+    if n < STRING_TAIL_LEAD:
+        return False
+    return n >= STRING_TAIL_SCAN or (i >= 0 and raw[i] == 0)
+
+
 def reference_census(raw, spans, segs=None):
     """Every reference to every display span: ``{span_off: [ref, ...]}``
     (spans with no reference are absent).  *spans* is
@@ -380,6 +430,8 @@ def reference_census(raw, spans, segs=None):
             d = int(delta[k])
             val = int(a[k])
             if is_counter_word(raw, fo, val):
+                continue
+            if is_string_tail_word(raw, fo):
                 continue
             if d > 0 and ordered[si][3][d].isspace():
                 continue

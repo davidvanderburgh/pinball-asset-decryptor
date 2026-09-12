@@ -1678,14 +1678,6 @@ HELP_CONTENT = {
          "it — Card image, Images, Built, Ready to flash — each with the "
          "sentence behind its mark. Then the SIZE STRIP: which SD card the images "
          "need, the Compact build tick, and a bar of what fills the card. "
-         "WHEN THE CARD YOU NEED IS BIGGER THAN THE GAMES ON IT the line "
-         "adds the two numbers up rather than leaving you to - 10.83 GB "
-         "of games + 6.21 GB free for updates = 17.65 GB, so 32 GB and "
-         "not 16 GB - and the words and the bar carry the rest on their "
-         "tooltip: what the smaller card really holds, that the free room "
-         "is what lets an image be updated in place rather than rebuilt, "
-         "that the first image's card is copied whole, and that Compact "
-         "build is the tick that shrinks it. "
          "Then one bar: Menu settings… and Recover images… on the left, "
          "and on the right ONE green button, Build / flash card…, beside "
          "Run in emulator. "
@@ -1798,12 +1790,7 @@ HELP_CONTENT = {
          "sound is the one that plays WHEN YOU PRESS START on it, not as "
          "you scroll onto it: scrolling plays the menu-wide move click, "
          "which is why a confirm sound you set can sound as though it "
-         "never took. THE TWO CONFIRM BOXES NAME EACH OTHER: they are "
-         "one setting, an image's falling back to the menu's, so Edit "
-         "image says what menu is at the moment instead of only the "
-         "word, and Menu settings names the images that carry a confirm "
-         "sound of their own and so will never play the one in front of "
-         "you."),
+         "never took."),
         ("Using one sound on every image",
          "Every sound row also LISTS the sound files this menu already "
          "uses, under its own words. Browse a WAV in once - for the "

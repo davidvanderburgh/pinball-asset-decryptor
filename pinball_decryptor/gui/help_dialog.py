@@ -1791,6 +1791,17 @@ HELP_CONTENT = {
          "you scroll onto it: scrolling plays the menu-wide move click, "
          "which is why a confirm sound you set can sound as though it "
          "never took."),
+        ("Using one sound on every image",
+         "Every sound row also LISTS the sound files this menu already "
+         "uses, under its own words. Browse a WAV in once - for the "
+         "menu's confirm sound, or for one image's music - and it is on "
+         "the list in all four boxes, so putting the same clip on every "
+         "image is a pick rather than a trip through the file dialog each "
+         "time. They are listed by file name, because the list is only as "
+         "wide as the box above it; picking one sets that file, exactly "
+         "as Browse… would. Only files that are on THIS PC are offered: "
+         "a card built on somebody else's machine loads with their paths "
+         "in it, and those are not sounds this one can read."),
         ("The preview",
          "It redraws itself. Change anything — a title, the countdown, the "
          "art, the highlighted image — and about a third of a second after "

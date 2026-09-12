@@ -23,9 +23,15 @@ card: the rows only have to BE there (and be on this machine, or the size
 strip says it cannot measure), and the refusal the strip reports is fed to
 the same _plan_step the size check's own worker calls.
 
-This rig also runs against a tree that has none of PAD-135's changes - that
-is what the 'before' half is - so everything new is reached through getattr
-and a missing attribute is logged, not raised.
+THE 'BEFORE' HALF RUNS THE SAME FILE AGAINST A TREE THAT HAS NONE OF
+PAD-135's CHANGES - `git archive HEAD` into a scratch directory, this script
+copied in beside it - so nothing here may name an attribute the old tree
+lacks.  It names none: the rows, the two modals and the plan step are all
+seams the tab already had.
+
+The two selector frames in this ticket's artifacts (the carousel's arrows and
+the menu's heading) are NOT from here - they are the real ARM binary, cross
+built out of each tree and rendered under qemu-arm-static.
 """
 import ctypes
 import json
@@ -35,6 +41,7 @@ import sys
 import tempfile
 import time
 import traceback
+import wave
 from ctypes import wintypes
 
 if sys.platform != "win32":
@@ -252,16 +259,14 @@ def s_fill():
     # A SOUND FILE IN THE ROWS, so the ▶ beside it has something to offer and
     # the shot shows the row in the state the ticket is about (his own
     # 3s_ComeTogether_Snippet.wav, by name).
+    # A REAL, PLAYABLE WAV at the format the selector's mixer takes, so the
+    # Play button beside it has something to offer rather than a refusal.
     wav = os.path.join(CARDS, "3s_ComeTogether_Snippet.wav")
-    with open(wav, "wb") as f:                      # a real, playable WAV
-        import struct
-        import wave
-        with wave.open(wav, "wb") as w:
-            w.setnchannels(2)
-            w.setsampwidth(2)
-            w.setframerate(44100)
-            w.writeframes(b"".join(struct.pack("<hh", 0, 0)
-                                   for _ in range(4410)))
+    with wave.open(wav, "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(b"\0" * (4 * 44100 * 2))      # 2 s of silence, stereo
     panel._table.select(0)
     root.update()
     panel._ed_confirm.set(wav)

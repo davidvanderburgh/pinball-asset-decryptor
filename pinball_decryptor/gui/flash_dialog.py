@@ -290,11 +290,17 @@ class FlashImageDialog:
             flash_body, variable=self._menu_var, command=self._sync_sections,
             text="Only the boot menu — fast, and the machine keeps its "
                  "settings and scores")
-        self._menu_chk.pack(anchor="w", pady=(2, 0))
         self._menu_note = ttk.Label(
             flash_body, foreground=self._theme["gray"], wraplength=430,
             justify="left", text="")
-        self._menu_note.pack(anchor="w", padx=(22, 0))
+        # ...and only on a brand whose flash CAN write just the menu.  A JJP
+        # USB stick or a CGC card has no such write, so there the tick was a
+        # Stern promise ("the machine keeps its settings and scores") that
+        # the run could never keep (PAD-138).
+        self._menu_offered = bool(getattr(self._mfr, "menu_flash_phases", ()))
+        if self._menu_offered:
+            self._menu_chk.pack(anchor="w", pady=(2, 0))
+            self._menu_note.pack(anchor="w", padx=(22, 0))
 
         # Target-card row.
         card_row = ttk.Frame(flash_body)
@@ -482,7 +488,7 @@ class FlashImageDialog:
         bytes, and an image with no Linux rootfs as its second partition is
         not a Stern card at all."""
         why = ""
-        can = bool(writing and not building)
+        can = bool(writing and not building and self._menu_offered)
         if can:
             img = (self._image_var.get() or "").strip().strip('"')
             try:

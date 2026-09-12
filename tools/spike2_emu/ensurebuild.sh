@@ -565,7 +565,9 @@ _pad_binfmt_advice() {
          command -v pacman >/dev/null 2>&1; then
         echo "sudo pacman -S --needed qemu-user-static qemu-user-static-binfmt"
     else
-        echo "sudo apt install qemu-user-static"
+        # pad_apt_name: on Ubuntu 26.04 that package is qemu-user-binfmt, and
+        # apt refuses the old name (PAD-139).
+        echo "sudo apt install $(pad_apt_name qemu-user-static)"
     fi
 }
 

@@ -164,7 +164,13 @@ _have() {
 #: upgrade to the next LTS leaves the file executable and the libraries it
 #: needs gone. `@pad_criu` said 1 about that machine right up to the first
 #: save state; `@pad_criu_runs` asks criu itself.
-PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static:1
+#: AND THE FIRST LINE ASKS FOR A STATIC INTERPRETER, NOT FOR A FILE NAME
+#: (PAD-139). `qemu-arm-static` is a name Debian's qemu stopped shipping in 9.2,
+#: so on Ubuntu 26.04 a machine with the interpreter installed and registered
+#: was reported as missing it - see pad_qemu_arm. The package field is still
+#: apt's OLD spelling on purpose: it is the one the tab and both installers
+#: name, and the loop below asks pad_apt_name what this release calls it.
+PAD_SETUP_TOOLS="qemu:@pad_qemu_arm:qemu-user-static:1
 armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf:0
 nativecc:@_pad_cc_works:gcc,libc6-dev:0
 debugfs:debugfs:e2fsprogs:0
@@ -189,7 +195,18 @@ for _t in $PAD_SETUP_TOOLS; do
     # of fails the whole install for the packages beside it.
     [ "$_pkg" = "-" ] && continue
     [ "$_xrel" = 1 ] && _xrel_ok="$_xrel_ok $_pkg"
-    [ "$_ok" = 1 ] || need="$need $_pkg"
+    [ "$_ok" = 1 ] && continue
+    # SPELLED AS THIS RELEASE'S apt SPELLS IT (PAD-139), because `need` is what
+    # setupfix.sh hands to apt-get verbatim: on 26.04 the old name is a virtual
+    # package apt will not choose for you. Only for what is missing, so a
+    # healthy machine asks apt nothing. `pkg_<key>` tells the tab, so the name
+    # it shows, the consent it asks for and the command it prints are the name
+    # apt will actually take; absent means the table's own spelling stands.
+    _said=
+    for _p in $_pkg; do _said="$_said $(pad_apt_name "$_p")"; done
+    _said=${_said# }
+    [ "$_said" = "$_pkg" ] || echo "pkg_$_key=$_said"
+    need="$need $_said"
 done
 echo "need=${need# }"
 

@@ -21,6 +21,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.conftest import HAS_BASH
+
 from pinball_decryptor.gui import _runtime_ui, emulate_tab
 
 from pinball_decryptor.gui.emulate_tab import (DEFAULT_RIG_DIR, parse_status,
@@ -2274,6 +2276,149 @@ def test_only_a_package_that_depends_on_nothing_is_cross_installed():
     gate = fix.split("dpkg-deb -f \"$deb\" Depends", 1)[1]
     assert gate.index('[ -n "$deps$predeps" ]') < gate.index("dpkg -i"), \
         "the dependency gate must come before the install, not after"
+
+
+# ----------------------------------------------------------------------
+# ★ PAD-139: Ubuntu 26.04 has no qemu-user-static.
+#
+# Debian's qemu merged the static build into qemu-user (9.1), dropped the
+# `-static` compatibility links (9.2) and deleted the qemu-user-static package
+# (10.0.3), leaving a VIRTUAL name that qemu-user-binfmt provides.  26.04 LTS
+# carries that qemu.  So the rig looked for a file that release never has, apt
+# refused the name, and the tab told the user his release "does not publish"
+# the package and promised to fetch 24.04's - a package 26.04's own
+# qemu-user-binfmt declares Breaks against.
+# ----------------------------------------------------------------------
+
+#: The fixed setupcheck.sh's answer inside a real Ubuntu 26.04.1 userland with
+#: no qemu installed (ubuntu-base, `apt-get update` against the resolute
+#: archive), on a machine whose handler is registered - the reporter's shape.
+_RESOLUTE = dict(qemu="0", pkg_qemu="qemu-user-binfmt", binfmt="1",
+                 indexed="1", nocand="", xrel="", universe="1",
+                 components="main multiverse restricted universe",
+                 distro="ubuntu 26.04 resolute")
+
+
+def test_the_tab_names_the_package_this_release_installs():
+    facts = _facts(**_RESOLUTE)
+    missing, _ = setup_summary(facts)
+    assert [pkg for pkg, _ in missing] == ["qemu-user-binfmt"]
+    text = setup_notice(facts, can_fix=True)
+    assert "qemu-user-binfmt — runs the machine's own 32-bit ARM" in text
+    assert "installs those in WSL" in text
+    # Not one word of what the reporter was told.
+    for said in ("qemu-user-static", "does not publish",
+                 "Ubuntu %s's archive" % emulate_tab.FALLBACK_RELEASE):
+        assert said not in text, (said, text)
+    # THE CONSENT IS THE NAME apt WILL BE GIVEN, and nothing fetched.
+    assert emulate_tab.setup_fix_steps(facts) == [
+        "Install in WSL:  qemu-user-binfmt"]
+    # ...and the command a Linux desktop is told to type is one apt accepts.
+    assert "sudo apt install qemu-user-binfmt" in setup_notice(facts,
+                                                               can_fix=False)
+
+
+def test_a_rig_that_never_heard_of_pkg_keeps_the_tables_spelling():
+    """Absent keys accuse nobody - and rename nothing."""
+    missing, _ = setup_summary(_facts(qemu="0"))
+    assert [pkg for pkg, _ in missing] == ["qemu-user-static"]
+    assert emulate_tab._apt_name(None, "qemu", "qemu-user-static") == \
+        "qemu-user-static"
+
+
+def test_the_rig_asks_for_the_interpreter_and_apt_for_its_name():
+    """The product scripts must not look for `qemu-arm-static` by name, and
+    what they install has to be asked of apt after the index exists."""
+    for name in ("setupcheck.sh", "run_game.sh"):
+        body = "\n".join(ln for ln in _rig_text(name).splitlines()
+                         if not ln.lstrip().startswith("#"))
+        assert "command -v qemu-arm-static" not in body, name
+        assert "pad_qemu_arm" in body, name
+    check = _rig_text("setupcheck.sh")
+    assert "qemu:@pad_qemu_arm:qemu-user-static:1" in check
+    assert "pad_apt_name" in check and '"pkg_$_key=' in check
+    fix = _rig_text("setupfix.sh")
+    assert "pad_apt_name" in fix.split("if _run apt-get update -qq; then", 1)[1], \
+        "setupfix.sh spells the packages before there is an index to ask"
+    assert "$(pad_apt_name qemu-user-static)" in _rig_text("ensurebuild.sh")
+
+
+@pytest.mark.skipif(not HAS_BASH, reason="no working bash")
+def test_pad_qemu_arm_and_pad_apt_name_on_both_releases():
+    r"""The two rig functions against fakes shaped like the real thing.
+
+    `apt-cache` answers are copied from Ubuntu 24.04 (David's WSL) and from a
+    26.04.1 ubuntu-base after `apt-get update`; `ldd` answers are what glibc's
+    prints for a static-pie qemu and for 24.04's dynamic qemu-arm.  Any dir on
+    the host PATH that holds a real qemu is dropped first, so the answers do
+    not depend on the machine running the test.  Fed on stdin, whole, for the
+    reason test_emulate_setup_check.py gives: `bash` is git-bash on one
+    Windows host and the WSL launcher on the next.
+    """
+    harness = r"""
+tmp=$(mktemp -d) || exit 1
+mkdir -p "$tmp/bin" "$tmp/static" "$tmp/dynamic" "$tmp/old" "$tmp/aptbin"
+clean=
+IFS=:
+for d in $PATH; do
+    [ -e "$d/qemu-arm-static" ] || [ -e "$d/qemu-arm" ] || clean="$clean:$d"
+done
+unset IFS
+for t in head grep sed; do
+    p=$(command -v "$t") || continue
+    case ":$clean:" in *":${p%/*}:"*) ;; *) ln -s "$p" "$tmp/bin/$t" ;; esac
+done
+base=$tmp/bin$clean
+for f in static/qemu-arm dynamic/qemu-arm old/qemu-arm-static; do
+    printf '\177ELF fake' > "$tmp/$f"; chmod +x "$tmp/$f"
+done
+printf '#!/bin/sh\ncase "$1" in\n*/dynamic/*) printf "\\tlinux-vdso.so.1 (0x1)\\n\\tlibglib-2.0.so.0 => /lib/libglib-2.0.so.0 (0x2)\\n" ;;\n*) printf "\\tstatically linked\\n" ;;\nesac\n' > "$tmp/bin/ldd"
+chmod +x "$tmp/bin/ldd"
+echo "--- qemu"
+echo "static=[$(PATH=$tmp/static:$base; pad_qemu_arm)]"
+echo "dynamic=[$(PATH=$tmp/dynamic:$base; pad_qemu_arm)]"
+echo "old=[$(PATH=$tmp/old:$tmp/dynamic:$base; pad_qemu_arm)]"
+echo "none=[$(PATH=$base; pad_qemu_arm)]"
+
+printf '#!/bin/sh\ncase $1 in policy) f="$FAKE/policy.$3" ;; show) f="$FAKE/show.$2" ;; esac\n[ -f "$f" ] && cat "$f"\nexit 0\n' > "$tmp/aptbin/apt-cache"
+chmod +x "$tmp/aptbin/apt-cache"
+mkdir -p "$tmp/resolute" "$tmp/noble" "$tmp/cold" "$tmp/lookalike"
+printf 'qemu-user-static:\n  Installed: (none)\n  Candidate: (none)\n  Version table:\n' > "$tmp/resolute/policy.qemu-user-static"
+printf 'qemu-user-binfmt:\n  Installed: (none)\n  Candidate: 1:10.2.1+ds-1ubuntu3.2\n' > "$tmp/resolute/policy.qemu-user-binfmt"
+printf 'Package: qemu-user-binfmt\nReplaces: qemu-user-binfmt-hwe, qemu-user-static (<< 1:9.1.0)\nProvides: qemu-user-static\nBreaks: qemu-user-static\n' > "$tmp/resolute/show.qemu-user-binfmt"
+printf 'qemu-user-static:\n  Installed: (none)\n  Candidate: 1:8.2.2+ds-0ubuntu1.18\n' > "$tmp/noble/policy.qemu-user-static"
+printf 'qemu-user-binfmt:\n  Installed: (none)\n  Candidate: 1:8.2.2+ds-0ubuntu1.18\n' > "$tmp/noble/policy.qemu-user-binfmt"
+printf 'Package: qemu-user-binfmt\nDepends: qemu-user (= 1:8.2.2+ds-0ubuntu1.18)\nConflicts: qemu-user-static\n' > "$tmp/noble/show.qemu-user-binfmt"
+cp "$tmp/resolute/policy."* "$tmp/lookalike/"
+printf 'Package: qemu-user-binfmt\nProvides: qemu-user-static-binfmt\n' > "$tmp/lookalike/show.qemu-user-binfmt"
+echo "--- apt"
+for shape in resolute noble cold lookalike; do
+    echo "$shape=[$(export FAKE=$tmp/$shape; PATH=$tmp/aptbin:$PATH; pad_apt_name qemu-user-static)]"
+done
+echo "other=[$(export FAKE=$tmp/resolute; PATH=$tmp/aptbin:$PATH; pad_apt_name ffmpeg)]"
+rm -rf "$tmp"
+"""
+    import subprocess
+    src = _rig_text("padpath.sh")
+    out = subprocess.run(["bash", "-s"], input=(src + harness).encode("utf-8"),
+                         capture_output=True, timeout=120)
+    said = out.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace") + said
+    assert "--- apt" in said, said
+    got = dict(ln.split("=", 1) for ln in said.splitlines() if "=[" in ln)
+    # 26.04: plain qemu-arm, static, is the interpreter.
+    assert got["static"].endswith("/static/qemu-arm]"), got
+    # 24.04's qemu-user: a DYNAMIC qemu-arm cannot be copied into a guest.
+    assert got["dynamic"] == "[]", got
+    # Wherever the -static name exists it wins.
+    assert got["old"].endswith("/old/qemu-arm-static]"), got
+    assert got["none"] == "[]", got
+    # apt's answer, not a release number.
+    assert got["resolute"] == "[qemu-user-binfmt]", got
+    assert got["noble"] == "[qemu-user-static]", got
+    assert got["cold"] == "[qemu-user-static]", "no index is not evidence"
+    assert got["lookalike"] == "[qemu-user-static]", got
+    assert got["other"] == "[ffmpeg]", got
 
 
 def test_the_fetch_leaves_the_machine_s_package_sources_alone():

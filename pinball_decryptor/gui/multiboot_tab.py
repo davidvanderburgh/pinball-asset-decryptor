@@ -2090,10 +2090,25 @@ def preview_highlight(form, row_index):
     return row_card_index(form, int(row_index))
 
 
+#: THE ARM INTERPRETER, FOUND WHEN THE STEP RUNS rather than named here.
+#: ``qemu-arm-static`` is a file Ubuntu 26.04 does not ship: its qemu-user
+#: carries the static interpreter as plain ``qemu-arm`` (PAD-139), so naming
+#: the old file failed every preview on that release.  The snapshot is a HOST
+#: process run with ``-L``, so either one draws the frame; the -static name is
+#: tried first because it is what every older machine has.  ``sh -c`` because
+#: every word of the step line is quoted (shell_line), which is what keeps this
+#: script's ``$`` for the shell that runs it.
+QEMU_ARM = ["sh", "-c",
+            'q=$(command -v qemu-arm-static || command -v qemu-arm) || '
+            '{ echo "no qemu-arm-static or qemu-arm in this Linux" >&2; '
+            'exit 127; }; exec "$q" "$@"',
+            "qemu-arm"]
+
+
 def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
                           rootfs=DEFAULT_ROOTFS, frames=1, loading=None,
                           roll_state=None):
-    """``qemu-arm-static -L <rootfs> <codeselect> --snapshot <ppm> ...``:
+    """``qemu-arm -L <rootfs> <codeselect> --snapshot <ppm> ...``:
     ONE menu frame as the machine would show it - the conf, the media,
     the CARD highlighted, the animation at frame N, the countdown as if just
     started, no input, no audio, no choice file - then exit.
@@ -2104,7 +2119,7 @@ def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
     alone - no ``--frames`` at all - because that is the byte-for-byte
     single-frame command line, and the one the selector treats the
     ``--snapshot`` value as a plain file NAME for."""
-    args = ["qemu-arm-static", "-L", rootfs, binary,
+    args = QEMU_ARM + ["-L", rootfs, binary,
             "--snapshot", wsl(ppm), "--conf", wsl(conf),
             "--media", wsl(media_dir),
             # A CARD, not an image: see preview_highlight.  The two are the

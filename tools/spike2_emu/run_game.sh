@@ -473,8 +473,10 @@ trap 'kill $NODEBUS_PID 2>/dev/null; [ -n "$STUB" ] && rmdir "$STUB" 2>/dev/null
 # byte-for-byte the chroot path it has always been.
 PIVOT=${PAD_PIVOT:-}
 if [ -n "$PIVOT" ]; then
-    QEMU=$(command -v qemu-arm-static)
-    [ -x "$QEMU" ] || { echo "[run] PAD_PIVOT needs qemu-arm-static" >&2; exit 1; }
+    # pad_qemu_arm, not `command -v qemu-arm-static`: Ubuntu 26.04 ships the
+    # static interpreter as plain qemu-arm (PAD-139).
+    QEMU=$(pad_qemu_arm)
+    [ -x "$QEMU" ] || { echo "[run] PAD_PIVOT needs a static qemu-arm (qemu-user-static)" >&2; exit 1; }
     # pad_static_busybox (padpath.sh) is the ONE test for this - watch.sh asks
     # it before it requests a pivot at all, and setupcheck.sh asks it before
     # Start is pressed. A run that gets here anyway was asked for by hand.

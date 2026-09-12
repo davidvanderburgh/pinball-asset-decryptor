@@ -316,6 +316,25 @@ if [ -n "$pkgs" ]; then
         fi
     fi
 
+    # ...AND ASK AGAIN WHAT apt CALLS THEM, now that there is an index to ask
+    # (PAD-139). The list above was read before `apt-get update`, and a fresh
+    # WSL has no index, so pad_apt_name had nothing to go on and left every
+    # name as it was. On Ubuntu 26.04 that matters: qemu-user-static is a
+    # virtual package there, and installing it by that name fails with the
+    # interpreter one package name away. A caller's own list is re-spelled the
+    # same way - both installers still say qemu-user-static.
+    if [ "$packages_only" = 1 ] && [ "$#" -gt 0 ]; then
+        said=
+        for pkg in $pkgs; do said="$said $(pad_apt_name "$pkg")"; done
+        said=${said# }
+    else
+        said=$(_get "$facts" need)
+    fi
+    if [ -n "$said" ] && [ "$said" != "$pkgs" ]; then
+        echo "this release names them differently, so installing: $said"
+        pkgs=$said
+    fi
+
     # ONE AT A TIME, and this is not tidiness. `apt-get install a b` is all or
     # nothing: the tester's run named two packages, apt could not resolve one
     # of them, and so it installed NEITHER - he was left with none of the four

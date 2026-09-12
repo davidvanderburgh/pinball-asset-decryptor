@@ -193,6 +193,74 @@ pad_static_busybox() {
     ! ldd /bin/busybox 2>&1 | grep -q '=>'
 }
 
+# ---- ...AND THE ARM INTERPRETER THE GUEST RUNS UNDER ------------------------
+#
+# PAD-139. Every script here spelled it `qemu-arm-static`, and that is a FILE
+# NAME Debian's qemu stopped shipping: 9.1 merged the static build into
+# qemu-user (its /usr/bin/qemu-arm IS the static-pie interpreter now), 9.2
+# dropped the `-static` compatibility links, and 10.0.3 deleted the
+# qemu-user-static package. Ubuntu 25.10 and 26.04 LTS carry that qemu, so a
+# 26.04 machine can have the interpreter and a registered handler and still be
+# told qemu-user-static is missing - by a check that looked for a name.
+#
+# STATIC IS THE FACT, NOT THE NAME. run_game.sh copies this binary INTO the
+# guest root for the checkpointable boot, where a dynamic interpreter's
+# libraries do not exist - and 24.04's qemu-user ships a DYNAMIC qemu-arm, so
+# taking the plain name on its own would clear a machine the run then refuses.
+# So: the -static name first, because wherever it exists it is the static one;
+# then qemu-arm, only when ldd finds no shared library behind it (the same test
+# pad_static_busybox uses).
+#
+# ONE DEFINITION, asked by setupcheck.sh before Start and by run_game.sh during
+# it, for the reason pad_static_busybox gives above.
+pad_qemu_arm() {
+    local q
+    q=$(command -v qemu-arm-static 2>/dev/null)
+    [ -n "$q" ] && [ -x "$q" ] && { printf '%s\n' "$q"; return 0; }
+    q=$(command -v qemu-arm 2>/dev/null)
+    [ -n "$q" ] && [ -x "$q" ] || return 1
+    head -c4 "$q" 2>/dev/null | grep -q ELF || return 1
+    ldd "$q" 2>&1 | grep -q '=>' && return 1
+    printf '%s\n' "$q"
+}
+
+#: ...AND WHAT apt CALLS THE PACKAGE THAT CARRIES IT, on this release. The same
+#: change seen from apt: on 26.04 `qemu-user-static` is a VIRTUAL name that
+#: qemu-user-binfmt and qemu-user-binfmt-hwe both Provide, so
+#: `apt-get install qemu-user-static` answers "has no installation candidate"
+#: with the interpreter one package name away. qemu-user-binfmt is the one to
+#: ask for: it Depends on qemu-user (the static interpreter) and ships the
+#: /usr/lib/binfmt.d/qemu-arm.conf that the handler registration reads.
+#:
+#: ASKED OF apt, NEVER OF A RELEASE NUMBER. A qemu-user-static that apt has a
+#: VERSION of wins wherever one exists (22.04, 24.04, Debian before 10.0.3).
+#: The other spelling is taken only where apt says qemu-user-binfmt PROVIDES the
+#: old name - 24.04's qemu-user-binfmt instead CONFLICTS with it and registers
+#: 24.04's dynamic interpreter, so a looser test would install the wrong thing.
+#: With no index to ask, every name comes back as it went in (setupfix.sh asks
+#: again after its `apt-get update`). Any other name is returned unchanged.
+pad_apt_name() {
+    if [ "$1" = qemu-user-static ] &&
+       ! _pad_apt_candidate qemu-user-static &&
+       _pad_apt_candidate qemu-user-binfmt &&
+       apt-cache show qemu-user-binfmt 2>/dev/null |
+           grep -Eq '^Provides:(.*[ ,])?qemu-user-static( |,|$)'; then
+        echo qemu-user-binfmt
+        return 0
+    fi
+    echo "$1"
+}
+
+#: Does apt have a version of this package to install? Out of apt's downloaded
+#: index, so an empty index answers no - which pad_apt_name turns into "leave
+#: the name alone" rather than into a claim about the archive.
+_pad_apt_candidate() {
+    command -v apt-cache >/dev/null 2>&1 || return 1
+    apt-cache policy -- "$1" 2>/dev/null |
+        sed -n 's/^[[:space:]]*Candidate:[[:space:]]*//p' |
+        grep -v '^(none)$' | grep -q .
+}
+
 # ---- ...AND THE PROGRAM THAT ACTUALLY DOES THE FREEZING --------------------
 #
 # criu dumps the guest and restores it (savestate.sh / restorestate.sh). A

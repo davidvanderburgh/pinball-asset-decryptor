@@ -803,8 +803,10 @@ def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
     ppm = str(tmp_path / "multi" / "preview" / "frame_1_3.ppm")
     words = preview_snapshot_args("/home/d/emusrc/codeselect-preview/"
                                   "codeselect", conf, media, ppm, 1, 3)
-    assert words[:4] == ["qemu-arm-static", "-L", "~/spike2root",
-                         "/home/d/emusrc/codeselect-preview/codeselect"]
+    n = len(multiboot_tab.QEMU_ARM)
+    assert words[:n] == multiboot_tab.QEMU_ARM
+    assert words[n:n + 3] == ["-L", "~/spike2root",
+                              "/home/d/emusrc/codeselect-preview/codeselect"]
     assert words[words.index("--snapshot") + 1] == multiboot_tab.wsl(ppm)
     assert words[words.index("--conf") + 1] == multiboot_tab.wsl(conf)
     assert words[words.index("--media") + 1] == multiboot_tab.wsl(media)
@@ -828,8 +830,9 @@ def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
                                     conf, media, ppm, 1, 3, cwd="/mnt/c/repo")[0]
     assert label == "frame 3"
     line = _line(argv)
-    assert line.startswith("cd /mnt/c/repo && qemu-arm-static -L ~/spike2root "
-                           "~/emusrc/codeselect-preview/codeselect --snapshot ")
+    assert line.startswith("cd /mnt/c/repo && sh -c ")
+    assert (" qemu-arm -L ~/spike2root "
+            "~/emusrc/codeselect-preview/codeselect --snapshot ") in line
     assert "python3" not in line and "\\" not in line
     # the frame count comes from the selector's own log line
     log = ("codeselect: art: image 0 art0.png -> 546x168\n"

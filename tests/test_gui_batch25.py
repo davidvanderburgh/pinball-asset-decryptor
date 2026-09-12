@@ -68,10 +68,11 @@ def test_dropped_warning_names_the_renamed_sibling(tmp_path):
     MainWindow._warn_dropped_assignments(me, "video", saved,
                                          {"video/a.mov": object()},
                                          str(assets))
-    assert len(logs) == 1
+    assert len(logs) == 2          # the note, then the relink hint (PAD-131)
     text, level = logs[0]
     assert level == "info"
     assert '"Promos2.mov"' in text and "different extension" in text
+    assert "Relink moved files" in logs[1][0]
 
 
 # ---------------------------------------------------------------------------

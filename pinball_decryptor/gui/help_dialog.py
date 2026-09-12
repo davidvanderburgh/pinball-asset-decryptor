@@ -1934,6 +1934,15 @@ GENERAL_CONTENT = [
      "a slot that says \"changed on disk\" still tells you what it was "
      "changed with, and from where. Open it from Project ▾ → "
      "\"Change history…\"; it's plain text, so it greps and diffs fine too."),
+    ("Moved to another PC?",
+     "A project records WHERE each replacement came from, not a copy of it, "
+     "so moving the project (or your media library to another drive) leaves "
+     "every recorded path pointing at nothing and the Replace tabs come up "
+     "empty. Project ▾ → \"Relink moved files…\" lists the files it can't "
+     "reach, takes one folder to look in, and re-points every slot at once — "
+     "matched on the file names, so a new drive letter or a re-organised "
+     "library still lands. Nothing is copied, and nothing is written until "
+     "you press Relink."),
     ("The log",
      "The progress dots and log at the bottom mirror every operation; "
      "right-click the log to copy text for a bug report."),

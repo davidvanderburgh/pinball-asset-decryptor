@@ -538,9 +538,15 @@ def test_preview_conf_is_the_form_with_placeholder_devices(tmp_path):
         "image=p3|STERN 1.59.0|Original Stern code|art0.png||",
         "image=p7|turtles_pro-1_59_0|1987 cartoon upscale|art1.png|anim1.gif|",
         "image=p7:img2|IMG 2|||anim2.gif|",
-        "default=1", "timeout=20", "volume=40",
+        "default=1", "timeout=20", "heading=SELECT GAME CODE", "volume=40",
         "font=/usr/local/codeselect/font.ttf", "theme=midnight"]
     assert text.endswith("\n") and "\r" not in text
+    # PAD-135: an emptied heading reaches the preview as 'heading=', which is
+    # what the selector reads as no line across the top
+    form.heading = ""
+    assert "heading=\n" in write_preview_conf(form)
+    form.heading = "THE BEATLES JUKEBOX"
+    assert "heading=THE BEATLES JUKEBOX\n" in write_preview_conf(form)
 
 
 def test_fingerprint_changes_with_what_the_frame_shows(tmp_path):
@@ -890,9 +896,14 @@ def test_the_table_cells_and_the_menu_summary_say_it_in_a_phrase():
                          machine_volume=False)
     assert menu_summary(form) == (
         "sounds click.wav / auto  ·  volume 35  ·  wait for START  ·  "
-        "default 1  ·  theme midnight")
+        "default 1  ·  theme midnight  ·  \"SELECT GAME CODE\"")
     form.machine_volume = True
     assert "volume 35 (the machine's own on the card)" in menu_summary(form)
+    # PAD-135: the heading, quoted and cut - and named in words when there is none
+    form.heading = ""
+    assert menu_summary(form).endswith("no heading")
+    form.heading = "A HEADING FAR TOO LONG FOR ONE SUMMARY LINE"
+    assert menu_summary(form).endswith('"A HEADING FAR TOO LONG FOR …"')
     assert "15 s countdown" in menu_summary(MultibootForm(images=[]))
 
 
@@ -4873,9 +4884,14 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
     assert menu == {"move": "auto", "confirm": "auto", "volume": 50,
                     "timeout": 15, "default": 2,
                     "machine_volume": True,
+                    # PAD-135: a state written before the field existed
+                    # described a menu that said SELECT GAME CODE
+                    "heading": "SELECT GAME CODE",
                     "theme": "midnight", "colors": {}}
     assert "bypass" not in menu_from_state(None)     # always on: not a setting
     assert menu_from_state({"volume": 900})["volume"] == 100
+    # ...and a state that saved an EMPTY heading gets it back, not the default
+    assert menu_from_state({"heading": ""})["heading"] == ""
 
 
 def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
@@ -7218,6 +7234,223 @@ def test_the_theme_is_saved_and_restored_with_the_menu(tmp_path):
         root.destroy()
 
 
+# ---- hearing a sound before the card is built (C FB, PAD-135) ---------------
+def _wav(path, seconds=0.5, rate=44100, width=2, channels=2):
+    import struct
+    import wave
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(width)
+        w.setframerate(rate)
+        w.writeframes(struct.pack("<%dh" % (int(rate * seconds) * channels),
+                                  *([0] * int(rate * seconds) * channels)))
+    return str(path)
+
+
+def test_the_play_button_plays_the_file_a_sound_row_names(tmp_path):
+    """PAD-135: "Could there be an option to preview the audio clip
+    selected?"  A row holding a path plays that file; the Log says which file
+    and how long, because that is the answer to "what does this sound like"
+    when nothing came out of the speakers."""
+    import tkinter as tk
+    root, panel = _panel()
+    played = []
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._audio = type("P", (), {
+            "play": lambda _s, path: played.append(path),
+            "loop": lambda _s, path: None,
+            "set_volume": lambda _s, v: None,
+            "stop": lambda _s: None, "close": lambda _s: None,
+            "status": "", "backend_name": "test", "available": True})()
+        wav = _wav(tmp_path / "come_together.wav", seconds=2.25)
+        var = tk.StringVar(value=wav)
+        assert panel.play_sound_choice("Confirm sound", var) is True
+        assert played == [wav]
+        line = panel.log_lines()[-1]
+        assert "come_together.wav" in line and "2.25 s" in line
+        # ...and Mute is named, so silence is not a mystery
+        panel._pv_mute_var.set(True)
+        assert panel.play_sound_choice("Confirm sound", var) is True
+        assert "Mute is on" in panel.log_lines()[-1]
+        panel._pv_mute_var.set(False)
+        # none: nothing to play, and it says so rather than doing nothing
+        assert panel.play_sound_choice("Music", tk.StringVar(value="none")) \
+            is False
+        assert "set to none" in panel.log_lines()[-1]
+        # a path that is not there
+        assert panel.play_sound_choice(
+            "Music", tk.StringVar(value=str(tmp_path / "gone.wav"))) is False
+        assert "was not found" in panel.log_lines()[-1]
+        # A FILE THE SELECTOR'S MIXER WILL NOT TAKE is not an error about the
+        # card: the build converts it, this preview does not
+        odd = _wav(tmp_path / "odd.wav", seconds=0.2, rate=22050)
+        assert panel.play_sound_choice("Music", tk.StringVar(value=odd)) \
+            is False
+        said = panel.log_lines()[-1]
+        assert "22050 Hz" in said and "The build converts it" in said
+        assert played == [wav, wav]
+    finally:
+        root.destroy()
+
+
+def test_a_word_sound_row_plays_what_the_prepare_rendered_for_that_row(
+        tmp_path):
+    """auto / synth / menu name no file of their own, so the ▶ plays the WAV
+    the media directory holds FOR THAT ROW - the sound the card will carry -
+    and says how to make one when there is none."""
+    import tkinter as tk
+    root, panel = _panel()
+    played = []
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._audio = type("P", (), {
+            "play": lambda _s, path: played.append(path),
+            "loop": lambda _s, path: None,
+            "set_volume": lambda _s, v: None,
+            "stop": lambda _s: None, "close": lambda _s: None,
+            "status": "", "backend_name": "test", "available": True})()
+        # no prepared media at all
+        assert panel.play_sound_choice(
+            "Move sound", tk.StringVar(value="auto")) is False
+        assert "prepared" in panel.log_lines()[-1]
+        media = tmp_path / "media"
+        media.mkdir()
+        move = _wav(media / "move.wav", seconds=0.04)
+        confirm = _wav(media / "confirm.wav", seconds=1.5)
+        (media / "media.json").write_text(json.dumps({
+            "images": [{"art": "art0.png"}, {"art": "art1.png"}],
+            "sound_move": "move.wav", "sound_confirm": "confirm.wav",
+            "sound_move_source": "auto", "sound_confirm_source": "auto",
+            "volume": 50}), encoding="utf-8")
+        panel._media_override = str(media)
+        assert panel.play_sound_choice(
+            "Move sound", tk.StringVar(value="auto")) is True
+        assert played[-1] == move
+        assert panel.play_sound_choice(
+            "Confirm sound", tk.StringVar(value="auto")) is True
+        assert played[-1] == confirm
+        # the Music row has nothing rendered: named, not silently ignored
+        assert panel.play_sound_choice(
+            "Music", tk.StringVar(value="auto")) is False
+        assert "nothing rendered" in panel.log_lines()[-1]
+        # A WORD ON ONE IMAGE'S ROW IS THAT IMAGE'S SOUND, not the previewed
+        # one's: Edit image passes its own row, and the picture is usually on
+        # some other one (PAD-135).  Image 1 has a confirm sound of its own
+        # here; image 0 uses the menu's, which is how the rows start.
+        own = _wav(media / "confirm1.wav", seconds=2.25)
+        panel._rows[1].confirm = "auto"
+        doc = json.loads((media / "media.json").read_text(encoding="utf-8"))
+        doc["images"][1]["confirm"] = "confirm1.wav"
+        doc["images"][1]["confirm_source"] = "auto"
+        (media / "media.json").write_text(json.dumps(doc), encoding="utf-8")
+        panel._manifest_at = ((None, None, None), {})    # re-read it
+        panel._hl_var.set("0")
+        assert panel.play_sound_choice(
+            "Confirm sound", tk.StringVar(value="auto"), image=1) is True
+        assert played[-1] == own
+        assert panel.play_sound_choice(
+            "Confirm sound", tk.StringVar(value="auto"), image=0) is True
+        assert played[-1] == confirm      # image 0 falls back to the menu's
+    finally:
+        root.destroy()
+
+
+# ---- the menu's heading (C FB, PAD-135) --------------------------------------
+def test_the_heading_rides_every_command_line_and_the_preview_conf(tmp_path):
+    """PAD-135, about SELECT GAME CODE: "Can there be an option to change this
+    text?"  The form starts as what the menu already says, --heading is always
+    spelled out (so clearing it CLEARS it rather than leaving the card's), and
+    the field is refused where it is typed rather than half-written."""
+    form = _form(tmp_path, 2)
+    assert form.heading == "SELECT GAME CODE" == multiboot_tab.DEF_HEADING
+    for argv in (build_args(form), inject_args(form, form.out),
+                 multiboot_tab.update_args(form, form.out)):
+        assert argv[argv.index("--heading") + 1] == "SELECT GAME CODE"
+    form.heading = "THE BEATLES JUKEBOX"
+    assert multiboot_tab.heading_args(form) == ["--heading",
+                                                "THE BEATLES JUKEBOX"]
+    assert "heading=THE BEATLES JUKEBOX" in write_preview_conf(form)
+    # the frame depends on it: a new heading is a new picture
+    before = preview_fingerprint(form)
+    form.heading = ""
+    assert preview_fingerprint(form) != before
+    # AN EMPTY BOX IS AN ANSWER: the flag still goes, with nothing after it
+    assert build_args(form)[build_args(form).index("--heading") + 1] == ""
+    assert "heading=\n" in write_preview_conf(form)
+    assert validate_form(form, sources=False) == []
+    # ...and the two things the selector's own field cannot take
+    form.heading = "two\nlines"
+    assert any("one line" in e for e in validate_form(form, sources=False))
+    form.heading = "x" * 200
+    assert any("too long" in e for e in validate_form(form, sources=False))
+
+
+def test_form_from_inspect_carries_the_heading(monkeypatch, tmp_path):
+    """null in the report is a card that never set one, and what it draws IS
+    the selector's line - so that is what the field shows.  An empty string is
+    a card that asked for a bare top, and must not read as "never set"."""
+    _win(monkeypatch)
+    info = _rich_report(tmp_path)
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    info["heading"] = None
+    assert form_from_inspect(info, card, "")[0].heading == "SELECT GAME CODE"
+    info["heading"] = "THE BEATLES JUKEBOX"
+    assert form_from_inspect(info, card, "")[0].heading == "THE BEATLES JUKEBOX"
+    info["heading"] = ""
+    assert form_from_inspect(info, card, "")[0].heading == ""
+
+
+def test_the_heading_is_saved_restored_and_edited_in_menu_settings(tmp_path):
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        assert panel._heading_var.get() == "SELECT GAME CODE"
+        dlg = panel.open_menu_settings()
+        assert dlg is not None
+        panel._heading_var.set("THE BEATLES JUKEBOX")
+        assert panel.form().heading == "THE BEATLES JUKEBOX"
+        assert 'heading "THE BEATLES JUKEBOX"' not in menu_summary(
+            panel.form())         # quoted, no label
+        assert menu_summary(panel.form()).endswith('"THE BEATLES JUKEBOX"')
+        # Cancel puts it back with the rest of the menu
+        panel._menu_settings_cancel()
+        assert panel._heading_var.get() == "SELECT GAME CODE"
+        panel._heading_var.set("")
+        doc = panel.state()
+        assert doc["menu"]["heading"] == ""
+    finally:
+        root.destroy()
+    root, panel = _panel()
+    try:
+        assert panel.restore_state(doc) is True
+        assert panel._heading_var.get() == "" and panel.form().heading == ""
+        panel.new_card()                      # ...and a new card is the default
+        assert panel._heading_var.get() == "SELECT GAME CODE"
+    finally:
+        root.destroy()
+
+
+def test_a_loaded_cards_heading_change_is_a_menu_change(tmp_path):
+    """It is words in images.conf, so an inject writes it in seconds - the
+    card is never rebuilt for a retitled menu."""
+    root, panel, card, _media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        assert "no changes yet" in panel.check_detail("card")
+        panel._heading_var.set("THE BEATLES JUKEBOX")
+        assert "1 menu change (heading)" in panel.check_detail("card")
+        assert panel.apply_to_card() is True
+        inject = [c for c in calls[0] if c[0] == "inject"][0][1]
+        words = _tool_words(inject)
+        assert words[words.index("--heading") + 1] == "THE BEATLES JUKEBOX"
+    finally:
+        root.destroy()
+
+
 def test_a_loaded_cards_theme_change_is_a_menu_change(tmp_path):
     """On a loaded card a new theme is one menu change - an inject, not a
     rebuild - and the inject carries it."""
@@ -7625,10 +7858,27 @@ def test_a_size_check_that_failed_says_so_in_the_strip(tmp_path):
         assert panel.size_view() is None
         assert panel._size_need.cget("text") == panel.SIZE_UNKNOWN
         assert "size check failed" in panel._size_detail.cget("text")
+        # ...AND WHAT THE TOOL SAID, not "see the Log" (PAD-135): the reason is
+        # the only part anybody can act on
+        assert "no logical chain" in panel._size_detail.cget("text")
+        assert "see the Log" not in panel._size_detail.cget("text")
         # ...and a new answer clears it
         panel._plan_step("plan", 0, PLAN_TEXT)
         assert panel._size_need.cget("text") == "16 GB"
         assert "failed" not in panel._size_detail.cget("text")
+        # a failure the tool gave no sentence for still says something
+        panel._plan_step("plan", 2, "plan: exit 2")
+        assert "see the Log" in panel._size_detail.cget("text")
+        # A LONG REFUSAL IS CUT TO THE ONE LINE and hangs whole on the
+        # tooltip: the words share the row with the bar, and the bar is what
+        # would otherwise be pushed off the tab
+        long_why = ("[card] error: the images' unique content needs 6.42 GB "
+                    "of p3 and the 8G class leaves 6.86 GB after the deltas' "
+                    "work partition - this content wants a 16G card")
+        panel._plan_step("plan", 2, long_why)
+        shown = panel._size_detail.cget("text")
+        assert len(shown) <= panel.SIZE_DETAIL_MAX and shown.endswith("…")
+        assert "wants a 16G card" in panel._size_detail_tip.text
     finally:
         root.destroy()
 

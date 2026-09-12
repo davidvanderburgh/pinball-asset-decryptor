@@ -919,6 +919,42 @@ grep -q "is not any / not-last / shuffle" "$T/roll5.log" || {
 grep -q "rolled from JUKEBOX (not-last)" "$T/snap.out" || {
     echo "headless: FAIL the default did not stand in"; cat "$T/snap.out"; exit 1; }
 
+# 17. THE CAROUSEL'S ARROWS and heading= (PAD-135).  Two chevrons in the
+# margins beside the cards, in the heading colour, and ONLY when the cards do
+# not all fit: a four-card menu reaches every card without scrolling, so an
+# arrow there would point at nothing.  The bands are the apex of each chevron
+# (x 28-40 on the left, 1320-1334 on the right, centred on the card row at
+# y 370) - background everywhere else, so presence and absence are both
+# readable off the same two boxes.
+nband() {   # nband PPM X0 Y0 X1 Y1 RRGGBB - NO pixel of that colour in there
+    if band "$@" >/dev/null 2>&1; then
+        echo "headless: FAIL $1 has $6 inside [$2,$3]..[$4,$5]"; exit 1
+    fi
+}
+band "$T/menu_five.ppm" 28 360 40 380 E8ECF1          # the left arrow...
+band "$T/menu_five.ppm" 1320 360 1334 380 E8ECF1      # ...and the right one
+nband "$T/menu_four.ppm" 28 360 40 380 E8ECF1         # four cards all fit: none
+nband "$T/menu_four.ppm" 1320 360 1334 380 E8ECF1
+# heading=: somebody's own line across the top, and an empty one leaves it bare.
+# The heading band is the text's own row (y 60-100), which is background until
+# a heading is drawn into it.
+rm -f "$T/snap.log"
+snap "$T/snap_head.ppm" "$T/three.conf"
+band "$T/snap_head.ppm" 300 60 1060 100 E8ECF1        # the built-in line is there
+{ cat "$T/three.conf"; echo "heading=THE BEATLES JUKEBOX"; } > "$T/head.conf"
+snap "$T/snap_head2.ppm" "$T/head.conf"
+band "$T/snap_head2.ppm" 300 60 1060 100 E8ECF1
+{ cat "$T/three.conf"; echo "heading="; } > "$T/nohead.conf"
+snap "$T/snap_nohead.ppm" "$T/nohead.conf"
+nband "$T/snap_nohead.ppm" 300 60 1060 100 E8ECF1     # ...and 'heading=' is bare
+# a heading far too wide for the glass is cut, never spilled off both edges
+{ cat "$T/three.conf"
+  echo "heading=THIS HEADING IS FAR TOO LONG FOR ANY PANEL AND HAS TO BE CUT DOWN TO THE GLASS INSTEAD OF RUNNING OFF BOTH EDGES OF IT"; } > "$T/widehead.conf"
+snap "$T/snap_widehead.ppm" "$T/widehead.conf"
+nband "$T/snap_widehead.ppm" 0 60 20 100 E8ECF1       # nothing in the left margin
+nband "$T/snap_widehead.ppm" 1340 60 1359 100 E8ECF1  # ...nor the right
+band "$T/snap_widehead.ppm" 300 60 1060 100 E8ECF1    # but the line is drawn
+
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"
 python3 "$HERE/ppm2png.py" "$T/menu_invert.ppm" "$T/codeselect_menu_invert.png" --rot180-of "$T/menu.ppm"

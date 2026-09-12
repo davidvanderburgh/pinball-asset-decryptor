@@ -196,6 +196,7 @@ from tkinter import colorchooser, filedialog, font as tkfont, messagebox, ttk
 from ..core import config, runtime
 from . import _rig
 from .emulate_tab import rig_dir, wsl_account, wsl_home
+from . import preview_audio
 from .preview_audio import PreviewAudio
 from .theme import THEMES, dark_titlebar
 from .widgets import _Tooltip, center_over
@@ -252,6 +253,16 @@ PREVIEW_BUILD_DIR = "~/emusrc/codeselect-preview"
 #: The font the card carries; inside the rootfs, where qemu's ``-L`` prefix
 #: resolves it (the same file the machine reads).
 CONF_FONT = "/usr/local/codeselect/font.ttf"
+
+#: THE LINE ACROSS THE TOP OF THE MENU, as the selector draws it when no card
+#: asked for anything else - codeselect.c's DEF_HEADING and mkmulticard.py's
+#: copy of it, kept in step by name.  It is this tab's DEFAULT rather than a
+#: fallback: the form always shows what the card will actually say, so the
+#: field reads SELECT GAME CODE on a card nobody has retitled and empty only
+#: when somebody meant the top of the menu to be bare.
+DEF_HEADING = "SELECT GAME CODE"
+#: ...and how much of it the selector's field holds (conf.h's CONF_STR - 1).
+HEADING_MAX = 199
 
 #: David's card library - never an output (mkmulticard.py refuses the same
 #: prefixes after resolving links; the repo's own images/ is a junction into
@@ -743,6 +754,12 @@ class MultibootForm:
     #: byte for byte what the tool made before the tick existed.
     compact: bool = False
     timeout: int = 15              # 0 = wait for START
+    #: The line across the top of the menu (C FB, PAD-135: "Can there be an
+    #: option to change this text?").  '' is a real answer and means no line at
+    #: all, so the field always names what the card will say - the selector's
+    #: own wording is the DEFAULT here rather than a hidden fallback, because a
+    #: box that reads empty when the menu says SELECT GAME CODE is a lie.
+    heading: str = DEF_HEADING
     default: int = 0
     # (No bypass field: the validator bypass is ALWAYS ON - build_args and
     # update_args pass it for every image.  David, after the TMNT booted
@@ -887,6 +904,14 @@ def theme_from_card(theme, colors):
     full = dict(theme_colors(base) or {})
     full.update(over)
     return CUSTOM_THEME, full
+
+
+def heading_args(form):
+    """``--heading TEXT`` - always passed, never left off.  The form is the
+    record of what the menu says, so a heading cleared here has to reach the
+    card as ``heading=`` (no line) rather than as "the flag was absent, keep
+    whatever is there"."""
+    return ["--heading", (form.heading or "").strip()]
 
 
 def theme_args(form):
@@ -1405,6 +1430,15 @@ def validate_form(form, sources=True):
         errs.append("Volume is 0-100.")
     if int(form.timeout) < 0:
         errs.append("The countdown cannot be negative (0 = wait for START).")
+    head = (form.heading or "").strip()
+    # A NEWLINE WOULD END THE KEY in images.conf and turn the rest of the line
+    # into an unknown one, so it is refused here rather than half-written; the
+    # length is the selector's own field (PAD-135).
+    if any(c in head for c in "\r\n"):
+        errs.append("The heading has to be one line.")
+    elif len(head.encode("utf-8")) > HEADING_MAX:
+        errs.append("The heading is too long (%d characters at most)."
+                    % HEADING_MAX)
     theme = (form.theme or "").strip().lower() or DEFAULT_THEME
     if theme != CUSTOM_THEME and theme not in theme_names():
         errs.append("The theme %r is not one the selector has." % form.theme)
@@ -1929,7 +1963,7 @@ def build_args(form):
         # media.json (prepare) and into images.conf here, so a text-only card
         # with no prepared media still carries it.
         "--volume", str(int(form.volume)),
-    ] + theme_args(form)
+    ] + heading_args(form) + theme_args(form)
     # A KEEPING GROUP'S CARD CANNOT BE NAMED BY AN IMAGE: its games all keep
     # cards of their own, so no image index resolves to it.  A random card the
     # countdown cannot land on is useless for an unattended power-up, which is
@@ -1989,7 +2023,7 @@ def inject_args(form, card):
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
             "--default", str(int(form.default)),
-            "--volume", str(int(form.volume))] + theme_args(form)
+            "--volume", str(int(form.volume))] + heading_args(form) + theme_args(form)
     if form.machine_volume:
         args.append("--machine-volume")
     if form.media_dir:
@@ -2014,7 +2048,7 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
             "--default", str(int(form.default)),
-            "--volume", str(int(form.volume))] + theme_args(form)
+            "--volume", str(int(form.volume))] + heading_args(form) + theme_args(form)
     if form.machine_volume:
         args.append("--machine-volume")
     args.append("--bypass-validation")      # always (see build_args)
@@ -2512,6 +2546,7 @@ def write_preview_conf(form):
                 lines.append("image=%s|%s||||" % (dev, title))
     lines += ["default=%d" % row_first_image(form, int(form.default)),
               "timeout=%d" % int(form.timeout),
+              "heading=%s" % (form.heading or "").strip(),
               "volume=%d" % int(form.volume),
               "font=" + CONF_FONT]
     lines += theme_conf_lines(form)
@@ -3244,6 +3279,11 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
         volume=_int_of("volume", 50), timeout=_int_of("timeout", 15),
         machine_volume=(info.get("volume") == "machine"),
         compact=(info.get("layout") == "store"),
+        # THE CARD'S OWN HEADING.  null in the report = the card never set
+        # one, and what it draws is the selector's line - so that is what the
+        # field shows; "" = the card asked for a bare top (PAD-135).
+        heading=(DEF_HEADING if info.get("heading") is None
+                 else str(info["heading"])),
         default=_int_of("default", 0),
         theme=theme, colors=colors,
         media_dir=media_dir if (media_dir and os.path.isfile(
@@ -3259,7 +3299,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
 #: MultibootPanel._loaded_diff.)
 MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "move sound", "confirm sound", "volume", "countdown",
-                    "default", "bypass", "theme")
+                    "heading", "default", "bypass", "theme")
 
 #: Of those, the ones the media has to be rendered again for.
 MEDIA_FIELDS = ("art", "animation", "music", "move sound", "confirm sound")
@@ -3308,6 +3348,8 @@ def _menu_fields(before, after):
                        ("default", before.default, after.default)):
         if int(b) != int(a):
             changed.add(name)
+    if (before.heading or "").strip() != (after.heading or "").strip():
+        changed.add("heading")
     if theme_args(before) != theme_args(after):
         changed.add("theme")
     return changed
@@ -3899,6 +3941,10 @@ def menu_from_state(menu):
             "machine_volume": bool(menu.get("machine_volume", True)),
             "compact": bool(menu.get("compact", False)),
             "timeout": max(0, _as_int("timeout", 15)),
+            # A STATE WRITTEN BEFORE THE FIELD EXISTED has no key, and the
+            # menu it describes said SELECT GAME CODE - so the absent key is
+            # that, not "no heading" (PAD-135).
+            "heading": str(menu.get("heading", DEF_HEADING))[:HEADING_MAX],
             "default": max(0, _as_int("default", 0)),
             "theme": theme,
             "colors": clean_colors(menu.get("colors"))}
@@ -4567,14 +4613,22 @@ def list_code(row):
     return "mixed" if len(known) > 1 else known[0]
 
 
+def _one_line_text(text, width):
+    """*text* at most *width* characters, ended with an ellipsis when it had
+    to be cut - what a summary line quotes a free-text field as."""
+    s = " ".join((text or "").split())
+    return s if len(s) <= width else s[:max(1, width - 1)] + "…"
+
+
 def menu_summary(form):
     """The one line beside the 'Menu settings…' button: everything behind it,
     in the order the dialog asks for it."""
     def sound(v):
         v = (v or "").strip() or "none"
         return v if v.lower() in _WORDS else os.path.basename(v)
+    head = (form.heading or "").strip()
     return ("sounds %s / %s  ·  volume %d%s  ·  %s  ·  default %d  ·  "
-            "theme %s" % (
+            "theme %s  ·  %s" % (
                 sound(form.sound_move), sound(form.sound_confirm),
                 int(form.volume),
                 " (the machine's own on the card)" if form.machine_volume
@@ -4582,7 +4636,8 @@ def menu_summary(form):
                 "wait for START" if int(form.timeout) == 0
                 else "%d s countdown" % int(form.timeout),
                 int(form.default),
-                (form.theme or "").strip().lower() or DEFAULT_THEME))
+                (form.theme or "").strip().lower() or DEFAULT_THEME,
+                "no heading" if not head else '"%s"' % _one_line_text(head, 28)))
 
 
 # ---------------------------------------------------------------------------
@@ -4689,10 +4744,23 @@ def _offer_used(cb, var, words, used_fn):
     fill()
 
 
+#: The Play button's face.  THE WORD AND THE TRIANGLE, not the triangle
+#: alone: on its own it came out of the first proof shot as a six-pixel
+#: arrowhead beside a button that says "Browse…" in words, which is not a
+#: control anybody presses.  PLAY_NAME is how the notes beside it refer to it.
+PLAY_NAME = "Play"
+PLAY_LABEL = "\u25b6 " + PLAY_NAME
+PLAY_TIP = ("Hear this sound now, through the preview's own volume and Mute.\n"
+            "A word (auto, synth, menu) plays the file the menu has ready for "
+            "it; pick or type a WAV and it plays that.")
+
+
 def _media_row(parent, row, col, label, var, choices, filetypes,
-               label_w=13, combo_w=26, used_fn=None):
-    """Label + editable combobox (the words, or a typed path) + Browse.
-    ``(combobox, browse button)``.
+               label_w=13, combo_w=26, used_fn=None, on_play=None,
+               theme_fn=None):
+    """Label + editable combobox (the words, or a typed path) + Browse, and -
+    with *on_play* - a ▶ that plays what the row names.
+    ``(combobox, browse button, play button or None)``.
 
     *used_fn* is what the menu already uses (:func:`used_sounds`); given
     one, the box offers those files under its words."""
@@ -4710,7 +4778,19 @@ def _media_row(parent, row, col, label, var, choices, filetypes,
     btn = ttk.Button(parent, text="Browse…", width=9,
                      command=lambda: _browse_into(var, filetypes))
     btn.grid(row=row, column=col + 2, sticky=tk.W, padx=(4, 0), pady=3)
-    return cb, btn
+    # THE ▶ (C FB, PAD-135: "Could there be an option to preview the audio
+    # clip selected? I have no idea to hear what these sound like without
+    # using an external audio player").  Beside Browse…, because the two
+    # belong to the same question - which file is this? - and the answer to
+    # one is usually followed by the other.
+    play = None
+    if on_play is not None:
+        play = ttk.Button(parent, text=PLAY_LABEL, width=8,
+                          command=lambda: on_play(label.rstrip(":"), var))
+        play.grid(row=row, column=col + 3, sticky=tk.W, padx=(4, 0), pady=3)
+        if theme_fn is not None:
+            play.tip = _Tooltip(play, PLAY_TIP, theme_fn)
+    return cb, btn, play
 
 
 class _Modal:
@@ -4950,19 +5030,41 @@ class ImageEditorDialog(_Modal):
         snd.pack(fill=tk.X, padx=8, pady=6)
         # 15, not 13: "Confirm sound:" is fourteen characters, the same
         # measurement Menu settings… already had to make for this label.
+        # THE ROW'S OWN INDEX goes with the ▶: 'auto' here means THIS
+        # image's sound, and the preview's highlight is some other image
+        # whenever this dialog was opened from a row the picture is not on.
+        def hear(what, var, i=index):
+            return panel.play_sound_choice(what, var, image=i)
         _media_row(snd, 0, 0, "Music:", panel._ed_music, MUSIC_CHOICES,
                    [("WAV audio", "*.wav")], label_w=15,
-                   used_fn=panel.used_sounds)
+                   used_fn=panel.used_sounds, on_play=hear,
+                   theme_fn=panel._theme_fn)
         _media_row(snd, 1, 0, "Confirm sound:", panel._ed_confirm,
                    IMAGE_CONFIRM_CHOICES, [("WAV audio", "*.wav")],
-                   label_w=15, used_fn=panel.used_sounds)
+                   label_w=15, used_fn=panel.used_sounds, on_play=hear,
+                   theme_fn=panel._theme_fn)
         snd.columnconfigure(1, weight=1)
-        ttk.Label(b, foreground=th["gray"], wraplength=520, justify=tk.LEFT,
-                  text="The confirm sound is what plays when THIS image is "
-                       "chosen; menu = the one the whole menu uses. Under "
-                       "the words, each list offers every sound file this "
-                       "menu already uses.").pack(
-            anchor=tk.W, pady=(10, 0))
+        # WHAT EACH OF THEM IS FOR, AND WHEN IT PLAYS - inside the box it
+        # describes, and wrapped to the box rather than to a number narrower
+        # than the dialog (C FB, PAD-135 marked the empty band this note used
+        # to leave beside it "wasted space").
+        #
+        # AND IT SAYS 'WHEN YOU PRESS START'.  The old wording - "what plays
+        # when THIS image is chosen" - reads as "when you scroll onto it",
+        # which is the move click; the same tester set every image's confirm
+        # sound to his own clip, walked the menu with the flippers, heard the
+        # click each time and reported that the setting "didn't take".
+        ttk.Label(snd, foreground=th["gray"], wraplength=560,
+                  justify=tk.LEFT,
+                  text="Music loops while this image is highlighted. The "
+                       "confirm sound plays when you press START on it - not "
+                       "as you scroll past, which is the menu's move click. "
+                       "menu = whatever the whole menu uses. Under those "
+                       "words, each list offers every sound file this "
+                       "menu already uses, so the same clip goes on every "
+                       "image without browsing for it again. " + PLAY_NAME
+                       + " hears either one now, here.").grid(
+            row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
 
     def _browse(self, kind):
         """Browse… for a picture or a video.  Live whichever option is
@@ -4993,10 +5095,14 @@ class MenuSettingsDialog(_Modal):
         # ttk label showed "Confirm sounc" (the first shot of this dialog).
         _media_row(g, 0, 0, "Move sound:", panel._move_var, SOUND_CHOICES,
                    [("WAV audio", "*.wav")], label_w=15,
-                   used_fn=panel.used_sounds)
+                   used_fn=panel.used_sounds,
+                   on_play=panel.play_sound_choice,
+                   theme_fn=panel._theme_fn)
         _media_row(g, 1, 0, "Confirm sound:", panel._confirm_var,
                    SOUND_CHOICES, [("WAV audio", "*.wav")], label_w=15,
-                   used_fn=panel.used_sounds)
+                   used_fn=panel.used_sounds,
+                   on_play=panel.play_sound_choice,
+                   theme_fn=panel._theme_fn)
         ttk.Label(g, text="Volume:", width=15).grid(row=2, column=0,
                                                     sticky=tk.W, pady=3)
         vol = ttk.Frame(g)
@@ -5008,30 +5114,45 @@ class MenuSettingsDialog(_Modal):
         ttk.Checkbutton(g, text="On the machine, play at its own volume "
                                 "setting (recommended)",
                         variable=panel._machine_vol_var).grid(
-            row=3, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
-        ttk.Label(g, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
+            row=3, column=0, columnspan=4, sticky=tk.W, pady=(2, 0))
+        ttk.Label(g, foreground=th["gray"], wraplength=560, justify=tk.LEFT,
                   text="auto = a click and a stinger pulled from the primary "
-                       "image; synth = generated tones; under them, each "
-                       "list offers every sound file this menu already "
-                       "uses. The confirm sound "
-                       "plays to the end before the game starts. With the "
-                       "box ticked the menu follows the machine's MASTER "
-                       "VOLUME (the coin-door setting) and the number above "
-                       "is only how loud the preview plays here.").grid(
-            row=4, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
+                       "image; synth = generated tones. The move sound plays "
+                       "on every flipper press; the confirm sound plays to "
+                       "the end after START, before the game loads. "
+                       "Under those words, each list offers every sound "
+                       "file this menu already uses. " +
+                       PLAY_NAME + " hears either one now, here. With the box "
+                       "ticked the menu follows the machine's MASTER VOLUME "
+                       "(the coin-door setting) and the number above is only "
+                       "how loud the preview plays here.").grid(
+            row=4, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
         g.columnconfigure(1, weight=1)
 
         look = ttk.LabelFrame(b, text="Look")
         look.pack(fill=tk.X, pady=(10, 0))
         g1 = ttk.Frame(look)
         g1.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Label(g1, text="Theme:", width=15).grid(row=0, column=0,
+        # THE HEADING FIRST: it is the one part of the look that is words
+        # rather than colour, and it is what somebody notices first (C FB,
+        # PAD-135, about SELECT GAME CODE: "Can there be an option to change
+        # this text?").
+        ttk.Label(g1, text="Heading:", width=15).grid(row=0, column=0,
+                                                      sticky=tk.W, pady=3)
+        panel._heading_entry = ttk.Entry(g1, textvariable=panel._heading_var,
+                                         width=34)
+        panel._heading_entry.grid(row=0, column=1, sticky=tk.EW, pady=3)
+        ttk.Label(g1, foreground=th["gray"], wraplength=560, justify=tk.LEFT,
+                  text="Across the top of the menu. Leave it empty for no "
+                       "heading at all.").grid(row=1, column=0, columnspan=2,
+                                               sticky=tk.W, pady=(0, 4))
+        ttk.Label(g1, text="Theme:", width=15).grid(row=2, column=0,
                                                     sticky=tk.W, pady=3)
         names = theme_names() + [CUSTOM_THEME]
         panel._theme_combo = ttk.Combobox(
             g1, textvariable=panel._theme_pick, state="readonly",
             values=[theme_title(n) for n in names], width=18)
-        panel._theme_combo.grid(row=0, column=1, sticky=tk.W, pady=3)
+        panel._theme_combo.grid(row=2, column=1, sticky=tk.W, pady=3)
         panel._theme_combo.bind("<<ComboboxSelected>>",
                                 lambda _e: panel._theme_picked())
         panel._theme_tip = _Tooltip(panel._theme_combo, "", panel._theme_fn)
@@ -5042,7 +5163,7 @@ class MenuSettingsDialog(_Modal):
         # dialog than the desktop.
         roles = theme_roles()
         grid = ttk.Frame(g1)
-        grid.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
+        grid.grid(row=3, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
         rows = max(1, (len(roles) + 2) // 3)
         for i, role in enumerate(roles):
             r, c = i % rows, (i // rows) * 3
@@ -5067,7 +5188,7 @@ class MenuSettingsDialog(_Modal):
                     "keeps its default colours." % THEMES_JSON)
         ttk.Label(g1, foreground=th["gray"], wraplength=560,
                   justify=tk.LEFT, text=note).grid(
-            row=2, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
         g1.columnconfigure(1, weight=1)
         panel._sync_theme_states()
 
@@ -5545,8 +5666,13 @@ class MultibootPanel:
         self._plan_for = None
         self._plan_job = None
         #: ...and whether the last one FAILED, so the strip can say that
-        #: instead of showing an empty bar with nothing beside it.
+        #: instead of showing an empty bar with nothing beside it - together
+        #: with the tool's OWN refusal sentence, which is the only thing that
+        #: tells anybody what to do about it (C FB, PAD-135: "Error when I
+        #: tried to recalculate the size using the compact build option", and
+        #: all the strip said was that it had failed).
         self._plan_failed = False
+        self._plan_why = ""
         #: ...and the size check that is ON THE WORKER right now (its plan
         #: key), the tool's last meter line about it ``(fraction, stage)``,
         #: and the strip's animation while it waits.  The strip shows it is
@@ -5626,6 +5752,11 @@ class MultibootPanel:
         self._volume_var = tk.StringVar(value="50")
         self._machine_vol_var = tk.BooleanVar(value=True)
         self._timeout_var = tk.StringVar(value="15")
+        #: The line across the top of the menu (PAD-135).  It STARTS as the
+        #: selector's own wording rather than empty, because the box has to
+        #: read as what the menu says: emptying it is how somebody asks for
+        #: no heading at all.
+        self._heading_var = tk.StringVar(value=DEF_HEADING)
         self._default_var = tk.StringVar(value="0")
         #: The compact layout (item 95): OFF by default, and it stays off
         #: until the user ticks it - never set from a card that is merely
@@ -5677,7 +5808,7 @@ class MultibootPanel:
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var,
-                    self._default_var):
+                    self._heading_var, self._default_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
         # Item 100: the compact tick beside the size strip.  Not a menu field
         # (an inject never changes a card's layout: diff_forms puts it in the
@@ -5864,7 +5995,7 @@ class MultibootPanel:
         for var in (self._ed_title, self._ed_sub, self._ed_music,
                     self._ed_confirm, self._ed_roll) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
-                    self._timeout_var, self._default_var,
+                    self._timeout_var, self._heading_var, self._default_var,
                     self._out_var, self._selector_var,
                     self._theme_var) + tuple(self._color_vars.values()):
             var.trace_add("write", lambda *_a: self.schedule_preview())
@@ -6866,6 +6997,12 @@ class MultibootPanel:
         self._size_detail = ttk.Label(row, text="", foreground=th["gray"],
                                       anchor=tk.E)
         self._size_detail.pack(side=tk.RIGHT, padx=(10, 0))
+        #: ...and where a refusal too long for this one line hangs whole.
+        #: The tool's own sentence goes on the strip now (PAD-135), and some
+        #: of them name two sizes and what to do about them - longer than the
+        #: row has, and the row gives the words priority over the bar, so an
+        #: uncut one would push the bar off the tab altogether.
+        self._size_detail_tip = _Tooltip(self._size_detail, "", self._theme_fn)
         self._size_canvas = tk.Canvas(row, height=self.SIZE_BAR_H,
                                       highlightthickness=0, bd=0,
                                       bg=th["trough"])
@@ -6903,7 +7040,11 @@ class MultibootPanel:
                 self._size_need.configure(
                     text=self.SIZE_THINKING if thinking else self.SIZE_UNKNOWN,
                     foreground=th["gray"])
-                self._size_detail.configure(text=text, foreground=th["gray"])
+                self._size_detail.configure(
+                    text=_one_line_text(text, self.SIZE_DETAIL_MAX),
+                    foreground=th["gray"])
+                self._size_detail_tip.text = (
+                    text if len(text) > self.SIZE_DETAIL_MAX else "")
                 self._size_tip.text = self.SIZE_TIP
                 if thinking:
                     self._draw_thinking(canvas, width, height, th)
@@ -6916,6 +7057,7 @@ class MultibootPanel:
             self._size_detail.configure(
                 text=view["detail"],
                 foreground=th["error"] if view["over"] else th["gray"])
+            self._size_detail_tip.text = ""    # the tool's own numbers: short
             scale = float(view["scale"] or 1)
             x = 0.0
             for label, size, kind in view["bands"]:
@@ -6978,6 +7120,11 @@ class MultibootPanel:
                 canvas.create_line(ax, ay, bx, by, fill=color)
             k += step
 
+    #: How much of a sentence the strip's one line takes before the rest of
+    #: it moves to the tooltip.  The bar is what would otherwise be squeezed
+    #: out: this row gives up the CANVAS first, not the words.
+    SIZE_DETAIL_MAX = 92
+
     #: The head while the strip is thinking: the answer is on its way.
     SIZE_THINKING = "\u2026"
 
@@ -7001,7 +7148,9 @@ class MultibootPanel:
         if self._plan_job is not None or self._plan_busy():
             return "measuring", self._measuring_text()
         if self._plan_failed:
-            return "failed", "The size check failed - see the Log."
+            why = (self._plan_why or "").strip()
+            return "failed", ("The size check failed: %s" % why if why
+                              else "The size check failed - see the Log.")
         return "idle", ""
 
     def _size_waiting(self):
@@ -8155,6 +8304,7 @@ class MultibootPanel:
             self._volume_var.set("50")
             self._machine_vol_var.set(True)
             self._timeout_var.set("15")
+            self._heading_var.set(DEF_HEADING)
             self._default_var.set("0")
             self._theme_var.set(DEFAULT_THEME)
             self._seed_colors(theme_colors(DEFAULT_THEME) or {})
@@ -8597,6 +8747,7 @@ class MultibootPanel:
                              self._volume_var.get(),
                              self._machine_vol_var.get(),
                              self._timeout_var.get(),
+                             self._heading_var.get(),
                              self._default_var.get(),
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
@@ -8612,7 +8763,7 @@ class MultibootPanel:
     def _menu_settings_cancel(self):
         self._forget_menu_dialog()
         if self._menu_backup is not None:
-            (move, confirm, vol, machine, timeout, default,
+            (move, confirm, vol, machine, timeout, heading, default,
              selector, theme, colors) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
@@ -8620,6 +8771,7 @@ class MultibootPanel:
             self._volume_var.set(vol)
             self._machine_vol_var.set(machine)
             self._timeout_var.set(timeout)
+            self._heading_var.set(heading)
             self._default_var.set(default)
             self._selector_var.set(selector)
             # the theme and the grid together, or the theme's trace would
@@ -8823,6 +8975,9 @@ class MultibootPanel:
             machine_volume=bool(self._machine_vol_var.get()),
             compact=bool(self._compact_var.get()),
             timeout=_int(self._timeout_var, 15),
+            # NOT `or DEF_HEADING`: an empty box is a menu with no heading,
+            # which is a thing somebody can ask for (PAD-135)
+            heading=self._heading_var.get().strip(),
             default=_int(self._default_var, 0),
             media_dir=media if (media and os.path.isfile(
                 os.path.join(media, "media.json"))) else "",
@@ -8880,6 +9035,7 @@ class MultibootPanel:
                      "machine_volume": bool(self._machine_vol_var.get()),
                      "compact": bool(self._compact_var.get()),
                      "timeout": _int(self._timeout_var, 15),
+                     "heading": self._heading_var.get().strip(),
                      "default": _int(self._default_var, 0),
                      "theme": self._theme_var.get().strip().lower()
                      or DEFAULT_THEME,
@@ -8995,6 +9151,7 @@ class MultibootPanel:
             self._machine_vol_var.set(bool(menu.get("machine_volume", True)))
             self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
+            self._heading_var.set(menu["heading"])
             self._default_var.set(str(menu["default"]))
             self._theme_var.set(menu["theme"])
             # a built-in comes back as the file spells it today; a custom
@@ -9144,6 +9301,7 @@ class MultibootPanel:
         self._plan_info = None
         self._update_info = None
         self._plan_failed = False
+        self._plan_why = ""
         self._size_progress = None
         self._draw_size()               # the stale number goes NOW, not later
         self._cancel_plan()
@@ -9244,10 +9402,16 @@ class MultibootPanel:
         if rc == 0:
             self._plan_info = parse_plan(text)
             self._plan_failed = False
+            self._plan_why = ""
             self._take_versions(self._plan_info.get("versions") or {})
         else:
             self._plan_info = None
             self._plan_failed = True
+            # THE TOOL'S OWN SENTENCE, on the strip.  A size check nobody
+            # asked for still must not be a dead end: "see the Log" made a
+            # tester open a 2 600-line log to find one line saying the
+            # content wants a bigger card (PAD-135).
+            self._plan_why = parse_refusal(text)
         # WHAT THE SENTENCE NOW DESCRIBES.  Claimed here rather than when
         # the run was asked for, so the build's own plan step - the same
         # answer, about the same images - keeps the tab from asking twice.
@@ -9542,6 +9706,7 @@ class MultibootPanel:
             self._machine_vol_var.set(bool(form.machine_volume))
             self._compact_var.set(bool(form.compact))
             self._timeout_var.set(str(int(form.timeout)))
+            self._heading_var.set(form.heading)
             self._default_var.set(str(int(form.default)))
             self._theme_var.set(form.theme)
             self._seed_colors(form.colors if form.theme == CUSTOM_THEME
@@ -10480,6 +10645,103 @@ class MultibootPanel:
         :meth:`form` would put in ``sound_confirm``, without building the
         whole form to ask."""
         return _media_value(self._confirm_var.get().strip() or "none")
+
+    #: Which of :meth:`menu_sounds`' three a sound row stands for, by the
+    #: label the row carries - the only thing that tells a word like ``auto``
+    #: on the Music row from the same word on the Confirm row.
+    SOUND_ROW_KEYS = {"Music": "music", "Confirm sound": "confirm",
+                      "Move sound": "move"}
+
+    def play_sound_choice(self, what, var, image=None):
+        """The ▶ beside a sound row: play what that row names, now.
+
+        C FB, PAD-135: "Could there be an option to preview the audio clip
+        selected? I have no idea to hear what these sound like without using
+        an external audio player."
+
+        WHAT IT PLAYS IS WHAT THE MENU WOULD PLAY, resolved the same two ways
+        the card resolves it.  A row holding a PATH plays that file straight
+        off disk - which is the case the ask is about: a clip nobody has heard
+        yet and nothing has rendered.  A row holding one of the WORDS (auto,
+        synth, menu) has no file of its own until a prepare has made one, so
+        the media directory's WAV for THAT row is played instead - the sound
+        the card will actually carry.  Either way it goes out through the
+        preview's own volume and Mute, so what comes out is what the strip's
+        knob says.
+
+        *image* IS THE ROW THE BUTTON BELONGS TO, and Edit image… passes it:
+        a word on ONE image's Music or Confirm row resolves to that image's
+        own rendered WAV, and the preview's highlight is some other image
+        whenever the dialog was opened from a row the picture is not on.
+        None (Menu settings…, whose two sounds are the whole menu's) leaves it
+        to the highlight, which is what the menu itself would be playing.
+
+        NOTHING HERE RAISES AND NOTHING BLOCKS: the answer - including "there
+        is no file to play yet, and why" - is one line in the Log, which is
+        where the rest of this tab's answers are.  A modal is up while this
+        runs, so a message box on top of it would be a second thing to
+        dismiss for something the button did not manage to do.
+        """
+        value = (var.get() or "").strip().strip('"')
+        label = (what or "Sound").strip()
+        if not value or value.lower() == "none":
+            self._write("%s: nothing to play - it is set to none." % label)
+            return False
+        path, why = self._sound_choice_path(label, value, image)
+        if not path:
+            self._write("%s: %s" % (label, why))
+            return False
+        # THE CONTRACT IS CHECKED HERE so the Log can say what is wrong with
+        # the file.  play() is fire-and-forget on the player's own worker, and
+        # a refusal there would only reach the preview strip - which is behind
+        # the dialog the button is in.
+        try:
+            head = preview_audio.wav_header(path)
+            bad = preview_audio.wav_refusal(head)
+        except preview_audio.WavRefused as exc:
+            self._write("%s: %s" % (label, exc))
+            return False
+        if bad:
+            # NOT A REASON THE CARD WOULD REFUSE IT: the build converts the
+            # file when it renders the card's media, so this says what will
+            # happen rather than what is broken.
+            self._write("%s: %s cannot be played here - %s. The build "
+                        "converts it to 44100 Hz 16-bit; this preview plays "
+                        "files as they are."
+                        % (label, os.path.basename(path), bad))
+            return False
+        audio = self._audio_player()
+        audio.set_volume(self._effective_volume())
+        audio.play(path)
+        self._write("%s: playing %s (%.2f s)%s"
+                    % (label, os.path.basename(path), head["seconds"],
+                       " - Mute is on, so nothing will be heard"
+                       if self._pv_mute_var.get() else ""))
+        return True
+
+    def _sound_choice_path(self, label, value, image=None):
+        """``(path, why)`` for one sound row: the WAV to play, or '' and the
+        sentence saying why there is none yet."""
+        if is_file_choice(value):
+            if not os.path.isfile(value):
+                return "", "%s was not found." % value
+            return value, ""
+        # A WORD, so the file it stands for is whatever the last prepare wrote
+        # for THIS row.  menu_sounds resolves an image's own confirm and the
+        # menu-wide fallback exactly as the selector does, and gives "" for a
+        # sound this media set has not got.
+        media = self.media_dir()
+        if not media or not os.path.isfile(os.path.join(media, "media.json")):
+            return "", ("%s is rendered when the card's media is prepared. "
+                        "Tick Sound beside the preview, or pick a WAV here, "
+                        "and %s plays it." % (value, PLAY_NAME))
+        key = self.SOUND_ROW_KEYS.get(label)
+        sounds = self.menu_sounds(highlight=image) if key else {}
+        path = (sounds or {}).get(key) or ""
+        if not path or not os.path.isfile(path):
+            return "", ("%s has nothing rendered for it yet. Tick Sound "
+                        "beside the preview and it is made." % value)
+        return path, ""
 
     def _audio_player(self):
         """The preview's player, made on the FIRST sound and not before.

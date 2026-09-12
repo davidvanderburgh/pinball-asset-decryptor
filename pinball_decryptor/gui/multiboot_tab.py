@@ -5061,8 +5061,7 @@ class ImageEditorDialog(_Modal):
                        "as you scroll past, which is the menu's move click. "
                        "menu = whatever the whole menu uses. Under those "
                        "words, each list offers every sound file this "
-                       "menu already uses, so the same clip goes on every "
-                       "image without browsing for it again. " + PLAY_NAME
+                       "menu already uses. " + PLAY_NAME
                        + " hears either one now, here.").grid(
             row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
 

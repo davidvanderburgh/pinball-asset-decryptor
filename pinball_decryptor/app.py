@@ -2090,9 +2090,23 @@ class App:
         self.window.reset_steps(mode="write")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
-        self.pipeline = mfr.make_flash_pipeline(
-            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb,
-            menu_only=menu_only)
+        # ``menu_only`` goes only where it was asked for: Stern's is the one
+        # factory that takes it, and handed to every brand's it was a
+        # TypeError out of a plain JJP USB stick (PAD-138).
+        extra = {"menu_only": True} if menu_only else {}
+        try:
+            self.pipeline = mfr.make_flash_pipeline(
+                image_path, device_path, log_cb, phase_cb, progress_cb,
+                done_cb, **extra)
+        except Exception:
+            # Nothing started, so nothing will ever call done_cb - hand the
+            # window back here, or it sits on a Cancel with nothing behind it
+            # and pressing that only greys it out.
+            self.pipeline = None
+            self._active_mode = None
+            self._current_run_is_direct_ssd = False
+            self.window.set_running(False, mode="write")
+            raise
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     def _start_read_card(self, device_path, image_path):

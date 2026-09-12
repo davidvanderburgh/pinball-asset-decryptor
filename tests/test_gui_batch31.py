@@ -490,6 +490,30 @@ def test_the_flash_dialog_offers_the_menu_only_write(app, monkeypatch,
 
 @pytest.mark.gui
 @gui_only
+@pytest.mark.parametrize("key", ["jjp", "cgc"])
+def test_the_menu_only_write_is_only_offered_where_the_flash_has_one(
+        app, monkeypatch, tmp_path, key):
+    """PAD-138: the tick asked the IMAGE whether it had a menu partition and
+    never the BRAND, so a JJP USB stick's dialog carried a Stern promise ("the
+    machine keeps its settings and scores"), and a CGC image with a Linux
+    second partition would have ticked it ON for a flash that cannot do it.
+    Same image as the Stern test above - only the brand differs."""
+    _pick(app, key)
+    img = _spike_image_for(tmp_path)
+    dlg = _make_dialog(app, monkeypatch,
+                       initial_choices={"build": False, "write": True})
+    try:
+        dlg._image_var.set(img)
+        dlg._sync_sections()
+        assert not dlg._menu_chk.winfo_manager(), "not even on the dialog"
+        assert not dlg._menu_note.winfo_manager()
+        assert dlg._menu_var.get() is False
+    finally:
+        dlg._dlg.destroy()
+
+
+@pytest.mark.gui
+@gui_only
 def test_a_window_short_of_its_content_still_shows_start_and_cancel(
         app, monkeypatch, tmp_path):
     """A DIALOG CAN BE WRONG ABOUT ITS HEIGHT; IT MUST NOT BE ABLE TO EAT THE

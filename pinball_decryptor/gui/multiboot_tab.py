@@ -4597,10 +4597,105 @@ def _browse_into(var, filetypes, title="Pick a media file"):
         var.set(path)
 
 
+def used_sounds(rows, *menu):
+    """Every sound FILE this menu already uses, for the dropdowns to offer.
+
+    C FB, 2026-09-12: "the default audio drop downs only list the 3 built in
+    audio suggestions. If I add one (which I want to eventually clone to
+    everything), it would be nice to have it as an option in the drop down
+    list".  Browsing the same WAV in once per image is the whole complaint,
+    so a file chosen ANYWHERE - the menu's two sounds (*menu*) or any image's
+    music or confirm - is then one click away in all four boxes.  ONE list
+    rather than one per field: a WAV is a WAV, and a rule that offered the
+    move sound's file to the move box only would have to be explained.
+
+    ONLY FILES THAT ARE ON THIS MACHINE.  A card built on somebody else's PC
+    loads with their paths in it (the sources are recorded, not the files),
+    and offering one of those is offering a build that stops on 'file not
+    found'.  A value the load could not explain at all (``*_on_card``: a file
+    name on the card, which no source string made) is not a path here either.
+    """
+    out, seen = [], set()
+    vals = list(menu)
+    for row in rows:
+        vals += [v for v, on_card in ((row.music, row.music_on_card),
+                                      (row.confirm, row.confirm_on_card))
+                 if not on_card]
+    for v in vals:
+        v = (v or "").strip().strip('"')
+        if not is_file_choice(v) or _AUTO_IDX_RE.match(v):
+            continue
+        key = os.path.normcase(os.path.abspath(v))
+        if key in seen or not os.path.isfile(v):
+            continue
+        seen.add(key)
+        out.append(v)
+    return sorted(out, key=lambda p: (os.path.basename(p).lower(), p.lower()))
+
+
+def sound_choices(paths):
+    """``[(label, path)]``: how :func:`used_sounds`'s files are OFFERED.
+
+    The label is the file's NAME, not its path.  A ttk dropdown is exactly
+    as wide as the box above it (26 characters here), and every path on one
+    machine starts with the same few folders, so a list of paths is a list
+    of ``C:\\Users\\david\\Doc`` - the same twelve characters, four times.
+    Two files that share a name get their folder as well, and a pair that
+    shares that too keeps its whole path: a list you pick from must not
+    offer the same words twice.
+    """
+    names = {}
+    for p in paths:
+        names.setdefault(os.path.basename(p).lower(), []).append(p)
+    out, taken = [], set()
+    for p in paths:
+        label = os.path.basename(p)
+        if len(names[label.lower()]) > 1:
+            folder = os.path.basename(os.path.dirname(p)) or os.path.dirname(p)
+            label = "%s  (%s)" % (label, folder)
+        if label in taken:
+            label = p
+        taken.add(label)
+        out.append((label, p))
+    return out
+
+
+def _offer_used(cb, var, words, used_fn):
+    """Put the sounds this menu already uses in *cb*'s list, under *words*.
+
+    The list is rebuilt every time it drops open (``postcommand``), so a WAV
+    browsed into the Music box is in the Confirm box's list a moment later
+    without the dialog being closed and opened again.  Picking one writes the
+    PATH into the variable - the label is only what the list can show - which
+    is exactly what Browse… would have written."""
+    labels = {}
+
+    def fill():
+        labels.clear()
+        # ...and a file whose label IS one of the words keeps its path, or
+        # the word above it would quietly pick the file.
+        pairs = [(path if label in words else label, path)
+                 for label, path in sound_choices(used_fn())]
+        labels.update(pairs)
+        cb.configure(values=list(words) + [label for label, _p in pairs])
+
+    def chose(_event=None):
+        path = labels.get(var.get().strip())
+        if path:
+            var.set(path)
+
+    cb.configure(postcommand=fill)
+    cb.bind("<<ComboboxSelected>>", chose)
+    fill()
+
+
 def _media_row(parent, row, col, label, var, choices, filetypes,
-               label_w=13, combo_w=26):
+               label_w=13, combo_w=26, used_fn=None):
     """Label + editable combobox (the words, or a typed path) + Browse.
-    ``(combobox, browse button)``."""
+    ``(combobox, browse button)``.
+
+    *used_fn* is what the menu already uses (:func:`used_sounds`); given
+    one, the box offers those files under its words."""
     # 13, not 10: "Move sound:" is eleven characters and a 10-wide ttk label
     # showed "Move soun" (the tab's first screenshot).
     kw = {"width": label_w} if col == 0 else {}
@@ -4610,6 +4705,8 @@ def _media_row(parent, row, col, label, var, choices, filetypes,
     cb = ttk.Combobox(parent, textvariable=var, values=list(choices),
                       width=combo_w)
     cb.grid(row=row, column=col + 1, sticky=tk.EW, pady=3)
+    if used_fn is not None:
+        _offer_used(cb, var, choices, used_fn)
     btn = ttk.Button(parent, text="Browse…", width=9,
                      command=lambda: _browse_into(var, filetypes))
     btn.grid(row=row, column=col + 2, sticky=tk.W, padx=(4, 0), pady=3)
@@ -4854,14 +4951,17 @@ class ImageEditorDialog(_Modal):
         # 15, not 13: "Confirm sound:" is fourteen characters, the same
         # measurement Menu settings… already had to make for this label.
         _media_row(snd, 0, 0, "Music:", panel._ed_music, MUSIC_CHOICES,
-                   [("WAV audio", "*.wav")], label_w=15)
+                   [("WAV audio", "*.wav")], label_w=15,
+                   used_fn=panel.used_sounds)
         _media_row(snd, 1, 0, "Confirm sound:", panel._ed_confirm,
                    IMAGE_CONFIRM_CHOICES, [("WAV audio", "*.wav")],
-                   label_w=15)
+                   label_w=15, used_fn=panel.used_sounds)
         snd.columnconfigure(1, weight=1)
         ttk.Label(b, foreground=th["gray"], wraplength=520, justify=tk.LEFT,
                   text="The confirm sound is what plays when THIS image is "
-                       "chosen; menu = the one the whole menu uses.").pack(
+                       "chosen; menu = the one the whole menu uses. Under "
+                       "the words, each list offers every sound file this "
+                       "menu already uses.").pack(
             anchor=tk.W, pady=(10, 0))
 
     def _browse(self, kind):
@@ -4892,9 +4992,11 @@ class MenuSettingsDialog(_Modal):
         # 15, not 13: "Confirm sound:" is fourteen characters and a 13-wide
         # ttk label showed "Confirm sounc" (the first shot of this dialog).
         _media_row(g, 0, 0, "Move sound:", panel._move_var, SOUND_CHOICES,
-                   [("WAV audio", "*.wav")], label_w=15)
+                   [("WAV audio", "*.wav")], label_w=15,
+                   used_fn=panel.used_sounds)
         _media_row(g, 1, 0, "Confirm sound:", panel._confirm_var,
-                   SOUND_CHOICES, [("WAV audio", "*.wav")], label_w=15)
+                   SOUND_CHOICES, [("WAV audio", "*.wav")], label_w=15,
+                   used_fn=panel.used_sounds)
         ttk.Label(g, text="Volume:", width=15).grid(row=2, column=0,
                                                     sticky=tk.W, pady=3)
         vol = ttk.Frame(g)
@@ -4909,7 +5011,9 @@ class MenuSettingsDialog(_Modal):
             row=3, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
         ttk.Label(g, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
                   text="auto = a click and a stinger pulled from the primary "
-                       "image; synth = generated tones. The confirm sound "
+                       "image; synth = generated tones; under them, each "
+                       "list offers every sound file this menu already "
+                       "uses. The confirm sound "
                        "plays to the end before the game starts. With the "
                        "box ticked the menu follows the machine's MASTER "
                        "VOLUME (the coin-door setting) and the number above "
@@ -8410,6 +8514,17 @@ class MultibootPanel:
     # ------------------------------------------------------------------
     # the two modals
     # ------------------------------------------------------------------
+
+    def used_sounds(self):
+        """The sound files this menu already uses, for the four sound boxes
+        in the two modals to offer under their words (:func:`used_sounds`).
+
+        The editor writes through to the selected row on every keystroke, so
+        this reads the rows and the two menu variables and is right the
+        moment a box drops open - including a file browsed into another box
+        in the same sitting."""
+        return used_sounds(self._rows, self._move_var.get(),
+                           self._confirm_var.get())
 
     def edit_image(self, index=None):
         """'Edit image…' (also a double-click on the row): the selected

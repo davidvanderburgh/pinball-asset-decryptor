@@ -53,6 +53,7 @@ from pinball_decryptor.gui.multiboot_tab import (
     rebuild_blockers, snapshot_commands, split_anim_source,
     split_art_source, suggest_title, under_library, validate_form,
     write_preview_conf,
+    sound_choices, used_sounds,
     build_args, inject_args)
 
 
@@ -1584,6 +1585,116 @@ def test_an_image_can_have_a_confirm_sound_of_its_own(tmp_path):
         panel._ed_confirm.set("menu")
         assert panel._rows[1].confirm == ""
         assert panel._table.cell(1, "sound") == "(none)"
+    finally:
+        root.destroy()
+
+
+def _combos(widget):
+    """Every ttk.Combobox under *widget*, in creation order."""
+    out = []
+    for w in widget.winfo_children():
+        if w.winfo_class() == "TCombobox":
+            out.append(w)
+        out.extend(_combos(w))
+    return out
+
+
+def test_used_sounds_are_the_files_this_menu_already_has(tmp_path):
+    """C FB: "the drop down list, populated with all current selections
+    would be a nice addition".  One list for all four sound boxes - the
+    menu's own two and every image's music and confirm - with the words,
+    the duplicates, the files on somebody else's machine and the names a
+    load read off the card all left out of it."""
+    a = tmp_path / "ComeTogether.wav"
+    b = tmp_path / "bed" / "Medley.wav"
+    b.parent.mkdir()
+    for p in (a, b):
+        p.write_bytes(bytes(4))
+    gone = str(tmp_path / "not-here.wav")
+    rows = [ImageRow("x", music="none", confirm=str(a)),
+            # the same file again, and spelled with quotes round it
+            ImageRow("y", music=str(b), confirm='"%s"' % a),
+            # a load's own values: a NAME on the card, not a path here
+            ImageRow("z", music="music2.wav", music_on_card=True,
+                     confirm="confirm2.wav", confirm_on_card=True),
+            # ...and a card built on somebody else's PC
+            ImageRow("w", music=gone, confirm="auto@7")]
+    assert used_sounds(rows, "auto", "synth", "") == [str(a), str(b)]
+    # the menu's own two are in it as well
+    assert used_sounds([], str(b), "auto") == [str(b)]
+    # and the labels are file NAMES, because the list is 26 characters wide
+    assert sound_choices([str(a), str(b)]) == [("ComeTogether.wav", str(a)),
+                                               ("Medley.wav", str(b))]
+    # ...unless two of them share one, and then the folder comes too
+    twin = tmp_path / "bed" / "ComeTogether.wav"
+    twin.write_bytes(bytes(4))
+    assert sound_choices([str(a), str(twin)]) == [
+        ("ComeTogether.wav  (%s)" % tmp_path.name, str(a)),
+        ("ComeTogether.wav  (bed)", str(twin))]
+
+
+def test_the_sound_boxes_offer_every_file_the_menu_uses(tmp_path):
+    """...and picking one writes the PATH, which is what Browse… writes.
+
+    The list is rebuilt every time it drops open, so a file browsed into one
+    box is in the next box's list without closing the dialog."""
+    root, panel = _panel()
+    try:
+        wav = tmp_path / "ComeTogether.wav"
+        bed = tmp_path / "Medley.wav"
+        for p in (wav, bed):
+            p.write_bytes(bytes(4))
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        # image 1 has a WAV of its own; the menu's confirm is another
+        panel._table.select(0)
+        panel._load_editor()
+        panel._ed_confirm.set(str(wav))
+        panel._confirm_var.set(str(bed))
+        assert panel.used_sounds() == [str(wav), str(bed)]
+
+        # EDIT IMAGE 2: its boxes offer both files under their own words
+        panel._table.select(1)
+        panel._load_editor()
+        dlg = panel.edit_image()
+        root.update()
+        music_cb, confirm_cb = _combos(dlg.body)
+        assert list(confirm_cb.cget("values")) == [
+            "menu", "auto", "synth", "ComeTogether.wav", "Medley.wav"]
+        assert list(music_cb.cget("values")) == [
+            "none", "ComeTogether.wav", "Medley.wav"]
+        # picking the NAME sets the PATH on the row, exactly as Browse… does
+        panel._ed_confirm.set("ComeTogether.wav")
+        confirm_cb.event_generate("<<ComboboxSelected>>")
+        root.update()
+        assert panel._ed_confirm.get() == str(wav)
+        assert panel.form().images[1].confirm == str(wav)
+        # a WORD picked out of the same list is still the word
+        panel._ed_music.set("none")
+        music_cb.event_generate("<<ComboboxSelected>>")
+        assert panel._ed_music.get() == "none"
+        # a file browsed in now is in the OTHER box's list a moment later,
+        # without the dialog being closed and opened again
+        third = tmp_path / "HeyJude.wav"
+        third.write_bytes(bytes(4))
+        panel._ed_music.set(str(third))
+        root.tk.call(str(confirm_cb.cget("postcommand")))   # the list opens
+        assert "HeyJude.wav" in list(confirm_cb.cget("values"))
+        dlg.cancel()
+        root.update()
+
+        # ...and the menu's own two boxes have the same list
+        menu = panel.open_menu_settings()
+        root.update()
+        move_cb = _combos(menu.body)[0]
+        assert list(move_cb.cget("values")) == [
+            "auto", "synth", "none", "ComeTogether.wav", "Medley.wav"]
+        panel._move_var.set("Medley.wav")
+        move_cb.event_generate("<<ComboboxSelected>>")
+        root.update()
+        assert panel._move_var.get() == str(bed)
+        menu.cancel()
+        root.update()
     finally:
         root.destroy()
 

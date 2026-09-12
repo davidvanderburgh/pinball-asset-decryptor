@@ -1093,6 +1093,22 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    pick at the boot menu, and the run says so; to edit a different
    image, build that image on its own and rebuild the multi-boot card
    from it.
+   **And a run of just your edits no longer ends on a black screen.**
+   Every set of edits carries the card's SD-validation record as well
+   as the files you changed, because a write refreshes that record
+   whatever was edited. That record sits beside the title on the card
+   rather than inside it, and a card run hands the game its own folder
+   and nothing else, so the record had nowhere to land and the run
+   stopped before the game started - the window was already open, so
+   what you saw was a black screen with your own edit named in the log
+   above it. A file that belongs outside the booted title's folder is
+   now named in the log and skipped: nothing here reads it, the
+   machine's own validator being the only thing that ever does, and the
+   same edits are what turn that off (v0.208.2). A file missing from
+   inside the title's folder still stops the run, so does a set built
+   for another card, and so does a set with nothing in it for this
+   title, which would be the stock card playing while the tab says it
+   is testing your edits.
    A **virtual playfield** window opens beside the game: the title's own
    artwork with every switch, coil and insert drawn on it, inserts lit
    live off the node bus, and switches you can click or press and hold

@@ -1543,6 +1543,7 @@ class MainWindow:
                  on_new_project=None,
                  on_save_project_as=None,
                  on_project_properties=None,
+                 on_relink_project=None,
                  on_open_project_manager=None,
                  on_open_recent_project=None,
                  recent_projects_provider=None,
@@ -1583,6 +1584,7 @@ class MainWindow:
         self._on_new_project = on_new_project
         self._on_save_project_as = on_save_project_as
         self._on_project_properties = on_project_properties
+        self._on_relink_project = on_relink_project
         self._on_open_project_manager = on_open_project_manager
         self._on_open_recent_project = on_open_recent_project
         self._recent_projects_provider = recent_projects_provider
@@ -1916,6 +1918,10 @@ class MainWindow:
         self._audio_changed_on_disk = set()
         self._video_changed_on_disk = set()
         self._image_changed_on_disk = set()
+        # The folder the "Relink moved files…" hint has already been said
+        # for, so one move that drops audio AND video AND images says it
+        # once (see _warn_dropped_assignments).
+        self._relink_hint_for = None
         # Rows the Extract baseline has never heard of — strays an older
         # import dropped in the folder, not slots (see _slot_not_on_card).
         # Filled by the same background diff, cleared beside it.
@@ -7800,6 +7806,10 @@ class MainWindow:
         every tab re-points each one's assignments at the new folder so the tabs,
         the warning check, and the build all agree."""
         self.invalidate_asset_scans(rescan_visible=False)
+        # A fresh round of scans may drop assignments again (a relink that
+        # only found half the library, a NAS still offline), so let the
+        # "Relink moved files…" hint speak once more for this folder.
+        self._relink_hint_for = None
         try:
             self._rescan_all_assets_tabs()
         except Exception:
@@ -10033,6 +10043,20 @@ class MainWindow:
             self.append_log("…and %d more saved %s replacement(s) like this."
                             % (len(dropped) - 6, kind),
                             "error" if any_pending else "info")
+        # The one-pass way out.  Without this the only cure the user can see
+        # is re-picking every slot by hand, which on a moved project is
+        # hundreds of clicks ("there's like hundreds and hundreds of changes,
+        # I can't click through each one of them" — PAD-131).  Once per
+        # folder, not once per kind: audio, video and images all land here
+        # on the same move and three copies of one hint is noise.
+        key = os.path.normcase(os.path.normpath(scan_dir or ""))
+        if getattr(self, "_relink_hint_for", None) != key:
+            self._relink_hint_for = key
+            self.append_log(
+                'Moved this project (or the files it points at) to another '
+                'PC or drive? Project ▾ → "Relink moved files…" searches a '
+                'folder you pick and re-points every one of these at once.',
+                "info")
 
     def _seed_names_from_library(self, scan_dir, present_keys, tags):
         """Merge the container names the user gave a PREVIOUS extract of this
@@ -20582,6 +20606,11 @@ class MainWindow:
         _entry("Properties…", self._on_project_properties,
                enabled=have_project)
         _entry("Change history…", self._open_change_history,
+               enabled=have_project)
+        # Moved the project (or the media it points at) to another PC?  The
+        # sidecar records a path per replacement, so the whole lot goes
+        # unreachable at once — this re-points them in one pass.
+        _entry("Relink moved files…", self._on_relink_project,
                enabled=have_project)
         return menu
 

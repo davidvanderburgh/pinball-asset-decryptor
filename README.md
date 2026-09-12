@@ -1691,6 +1691,18 @@ project folder's root — so a slot that says "changed on disk" months
 later still tells you what it was changed with, and from where.  Open
 it from the folder button → **Change history…**; it's plain text, so
 it greps and diffs fine too.
+Moving a project to another PC (or your media library to another
+drive)? The project records *where* each replacement came from, not a
+copy of it, so every one of those paths stops working at once and the
+Replace tabs come up empty. The folder button → **Relink moved
+files…** fixes the lot in one pass: it lists the files it can't reach,
+you point it at the folder that holds them now, and it matches them by
+name plus as much of the old path as still agrees — so a new drive
+letter, a renamed top folder or a re-organised library all still land.
+Nothing is copied, nothing is written until you press Relink, and a
+replacement whose file is still where the project expects it is left
+alone. What it can't find stays listed, so a library spread over two
+folders is just two passes.
 The log survives sessions too: the log pane opens with the previous
 sessions' lines already in it — dimmed, above a clear cut line — so an
 app update or restart no longer wipes what you were looking at. Prefer

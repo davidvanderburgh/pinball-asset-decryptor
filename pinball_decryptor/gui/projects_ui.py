@@ -881,3 +881,255 @@ def open_manager(app):
     center_over(app.root, win, 820, 420)
     win.deiconify()
     refresh()
+
+
+# ----------------------------------------------------------------------
+# Relink moved files
+#
+# The sidecar records the PATH each slot was replaced from, so a project
+# that moves to another PC (or a media library that moves to another
+# drive) loses every replacement at once: live_assignments drops them all
+# and the Replace tabs come up empty.  A modder moving a 500-replacement
+# Godzilla project onto a faster build PC put it plainly — "there's like
+# hundreds and hundreds of changes, I can't click through each one of
+# them".  Hand-editing .staged_changes.json with a find/replace is the
+# workaround and it is not one to ask for.
+#
+# This window is the one pass that fixes the lot: point it at the folder
+# the files live in NOW and core.relink matches each missing source by
+# name plus as much of its recorded path tail as still agrees.  Nothing is
+# written until "Relink" is clicked, and a replacement whose file IS on
+# this PC is never touched.
+# ----------------------------------------------------------------------
+
+_relink_win = [None]      # singleton, like the manager window
+
+
+def open_relink(app, folder=None):
+    """Project ▾ → Relink moved files…: re-point every recorded replacement
+    source that isn't on this PC at the folder that holds it now."""
+    from ..core import history_log, relink, staged_changes
+
+    target = os.path.normpath(folder or app._project_folder())
+    if not target or not os.path.isdir(target):
+        return
+
+    existing = _relink_win[0]
+    if existing is not None:
+        try:
+            existing.lift()
+            existing.focus_force()
+            return
+        except tk.TclError:
+            _relink_win[0] = None
+
+    if not relink.recorded_sources(staged_changes.load(target)):
+        messagebox.showinfo(
+            "Relink moved files",
+            "This project has no recorded replacements yet, so there is "
+            "nothing to re-point.\n\n%s" % target)
+        return
+
+    c = _theme(app)
+    win = tk.Toplevel(app.root)
+    win.withdraw()
+    win.title("Relink moved files")
+    win.configure(bg=c["bg"])
+    _relink_win[0] = win
+
+    state = {"missing": {}, "result": None, "cancel": False, "busy": False}
+
+    head = tk.Label(win, text="", bg=c["bg"], fg=c["fg"], anchor=tk.W,
+                    justify=tk.LEFT, wraplength=800, font=(_SANS_FONT, 9))
+    head.pack(fill=tk.X, padx=12, pady=(12, 2))
+
+    where = tk.Frame(win, bg=c["bg"])
+    where.pack(fill=tk.X, padx=12, pady=(6, 2))
+    tk.Label(where, text="Where are those files now?", bg=c["bg"],
+             fg=c["gray"], font=(_SANS_FONT, 9)).pack(side=tk.LEFT)
+    root_var = tk.StringVar()
+    entry = ttk.Entry(where, textvariable=root_var, width=52)
+    entry.pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
+    browse_btn = ttk.Button(where, text="Browse...")
+    browse_btn.pack(side=tk.LEFT)
+
+    cols = ("file", "slots", "found")
+    tree = ttk.Treeview(win, columns=cols, show="headings",
+                        selectmode="browse", height=12)
+    for col, title, width in (("file", "Replacement file", 250),
+                              ("slots", "Used by", 70),
+                              ("found", "Found at", 440)):
+        tree.heading(col, text=title)
+        tree.column(col, width=width, anchor=tk.W)
+    tree.pack(fill=tk.BOTH, expand=True, padx=12, pady=(8, 4))
+
+    status = tk.Label(win, text="", bg=c["bg"], fg=c["gray"], anchor=tk.W,
+                      justify=tk.LEFT, wraplength=800, font=(_SANS_FONT, 8))
+    status.pack(fill=tk.X, padx=14)
+
+    btns = tk.Frame(win, bg=c["bg"])
+    btns.pack(pady=(6, 10))
+    search_btn = ttk.Button(btns, text="Search")
+    apply_btn = ttk.Button(btns, text="Relink")
+
+    def _set_busy(busy):
+        state["busy"] = busy
+        search_btn.configure(text="Stop" if busy else "Search")
+        for w in (browse_btn, apply_btn):
+            w.configure(state=(tk.DISABLED if busy else tk.NORMAL))
+
+    def refresh_missing():
+        """Re-read the sidecar and re-list what is still unreachable.
+
+        Called on open and again after each relink, so a media library
+        split over two folders is two passes of this window rather than a
+        re-open per folder."""
+        data = staged_changes.load(target)
+        state["missing"] = relink.missing_sources(data)
+        state["result"] = None
+        n_all = len(relink.recorded_sources(data))
+        n_gone = len(state["missing"])
+        tree.delete(*tree.get_children())
+        apply_btn.configure(state=tk.DISABLED, text="Relink")
+        if not n_gone:
+            head.configure(
+                text="All %d replacement file(s) this project records are "
+                     "reachable on this PC. Nothing to re-point." % n_all)
+            status.configure(text=target)
+            return
+        root = relink.common_root(list(state["missing"]))
+        head.configure(
+            text="%d of this project's %d replacement file(s) are not on "
+                 "this PC, so they can't be applied. Pick the folder that "
+                 "holds them now: every slot using them is re-pointed in "
+                 "one pass, matched on the recorded file names. Nothing is "
+                 "copied, and a replacement still sitting where the project "
+                 "expects it is left alone." % (n_gone, n_all))
+        status.configure(
+            text=("Last seen in:  %s" % root) if root else
+            "These came from more than one drive, so do one folder at a "
+            "time. Whatever isn't found stays listed.")
+        for path, slots in state["missing"].items():
+            tree.insert("", tk.END, values=(os.path.basename(path),
+                                            len(slots), path))
+        if root and not (root_var.get() or "").strip():
+            root_var.set(root)
+
+    def browse():
+        p = filedialog.askdirectory(
+            title="The folder that holds these files now", parent=win)
+        if p:
+            root_var.set(os.path.normpath(p))
+
+    def search():
+        if state["busy"]:
+            state["cancel"] = True
+            status.configure(text="Stopping...")
+            return
+        root = (root_var.get() or "").strip()
+        if not os.path.isdir(root):
+            messagebox.showwarning(
+                "Relink moved files",
+                "Pick the folder that holds the replacement files now.",
+                parent=win)
+            return
+        state["cancel"] = False
+        _set_busy(True)
+        status.configure(text="Searching %s ..." % root)
+
+        def tick(seen, seen_in):
+            def show():
+                try:
+                    status.configure(
+                        text="Searching %s ...  (%d file(s) seen)"
+                             % (seen_in, seen))
+                except tk.TclError:
+                    pass
+            try:
+                win.after(0, show)
+            except tk.TclError:
+                state["cancel"] = True
+
+        def work():
+            try:
+                res = relink.plan(staged_changes.load(target), root,
+                                  cancel=lambda: state["cancel"],
+                                  progress=tick)
+            except Exception as e:                            # noqa: BLE001
+                res = e
+            try:
+                win.after(0, lambda: done(res))
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def done(res):
+        _set_busy(False)
+        if isinstance(res, Exception):
+            status.configure(text="The search failed: %s" % res)
+            return
+        state["result"] = res
+        found, amb = res["found"], res["ambiguous"]
+        tree.delete(*tree.get_children())
+        for path, slots in state["missing"].items():
+            new = found.get(path)
+            extra = ""
+            if new and path in amb:
+                extra = ("   (%d files carry this name; the closest match)"
+                         % amb[path])
+            tree.insert("", tk.END, values=(
+                os.path.basename(path), len(slots),
+                (new + extra) if new else "not found under that folder"))
+        n_slots = sum(len(state["missing"][p]) for p in found)
+        if found:
+            apply_btn.configure(state=tk.NORMAL,
+                                text="Relink %d file(s)" % len(found))
+        status.configure(
+            text="Found %d of %d file(s)%s, covering %d slot(s).%s"
+                 % (len(found), len(state["missing"]),
+                    " (search stopped early)" if res["cancelled"] else "",
+                    n_slots,
+                    "  Nothing is written until you click Relink."
+                    if found else
+                    "  Try the folder one level up, or the folder these "
+                    "files were copied into."))
+
+    def do_relink():
+        res = state["result"]
+        if not res or not res["found"]:
+            return
+        # Re-read rather than reuse: the app may have written the sidecar
+        # while this window sat open (any pick on a Replace tab does).
+        data = staged_changes.load(target)
+        data, n_slots, _n_files = relink.apply_plan(data, res["found"])
+        staged_changes.save(target, data)
+        line = relink.summary_line(res, n_slots)
+        history_log.record(target, [line])
+        app.window.append_log(line, "success")
+        if (os.path.normcase(target)
+                == os.path.normcase(app._project_folder() or "")):
+            # The Replace tabs hold their assignments in memory; re-scan so
+            # the restored replacements appear without a re-open.
+            app.window.reload_assets_tabs()
+        messagebox.showinfo("Relink moved files", line, parent=win)
+        refresh_missing()
+
+    def on_close():
+        state["cancel"] = True
+        _relink_win[0] = None
+        win.destroy()
+
+    browse_btn.configure(command=browse)
+    search_btn.configure(command=search)
+    apply_btn.configure(command=do_relink, state=tk.DISABLED)
+    search_btn.pack(side=tk.LEFT, padx=3)
+    apply_btn.pack(side=tk.LEFT, padx=3)
+    ttk.Button(btns, text="Close", command=on_close).pack(side=tk.LEFT,
+                                                          padx=3)
+    win.protocol("WM_DELETE_WINDOW", on_close)
+    entry.bind("<Return>", lambda _e: search())
+
+    refresh_missing()
+    center_over(app.root, win, 880, 500)
+    win.deiconify()

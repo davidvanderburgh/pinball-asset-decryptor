@@ -156,12 +156,16 @@ def test_dropped_warning_demotes_applied_slots(tmp_path):
         append_log=lambda text, level="info": logs.append((text, level)))
     MainWindow._warn_dropped_assignments(me, "video", saved, slots,
                                          str(assets))
-    by_level = {lv: t for t, lv in logs}
-    assert len(logs) == 2
-    assert "already holds its video replacement" in by_level["info"]
-    assert "video/a.mov" in by_level["info"]
-    assert "wasn't restored" in by_level["error"]
-    assert "video/b.mov" in by_level["error"]
+    infos = [t for t, lv in logs if lv == "info"]
+    errors = [t for t, lv in logs if lv == "error"]
+    assert (len(infos), len(errors)) == (2, 1)
+    assert "already holds its video replacement" in infos[0]
+    assert "video/a.mov" in infos[0]
+    assert "wasn't restored" in errors[0]
+    assert "video/b.mov" in errors[0]
+    # …and the one-pass cure for a whole moved project is named once,
+    # after the list rather than inside it (PAD-131).
+    assert "Relink moved files" in infos[1]
     shutil.rmtree(assets)
 
 

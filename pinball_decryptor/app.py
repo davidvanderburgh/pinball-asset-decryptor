@@ -321,6 +321,7 @@ class App:
             on_new_project=self._new_project,
             on_save_project_as=self._save_project_as,
             on_project_properties=self._open_project_properties,
+            on_relink_project=self._open_project_relink,
             on_open_project_manager=self._open_project_manager,
             on_open_recent_project=self._open_project_folder_checked,
             recent_projects_provider=self._recent_projects,
@@ -3398,6 +3399,14 @@ class App:
                     f"continuing WITHOUT them. If they live on a NAS or "
                     f"mapped drive, reconnect it and retry; otherwise "
                     f"re-assign them on the Replace tab.", "error"))
+            # A build is exactly where a moved project bites: this is the
+            # run that quietly comes out unmodified.  Name the one-pass cure
+            # (PAD-131) rather than leaving "re-assign them" as the only
+            # advice on a folder with hundreds of them.
+            self.msg_queue.put(LogMsg(
+                'If this project or your replacement files moved to another '
+                'PC or drive, Project ▾ → "Relink moved files…" re-points '
+                'them all from one folder you pick.', "info"))
         if not assignments:
             return None
 
@@ -5036,6 +5045,10 @@ class App:
     def _open_project_properties(self):
         from .gui import projects_ui
         projects_ui.open_properties(self)
+
+    def _open_project_relink(self):
+        from .gui import projects_ui
+        projects_ui.open_relink(self)
 
     def _open_project_manager(self):
         from .gui import projects_ui

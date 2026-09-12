@@ -61,6 +61,49 @@ def test_store_sectors_for_class_leaves_room_for_the_work_partition(mk):
     assert mk.Plan(g, [], "a.raw", [], "store", store_sectors=with_work + mk.ALIGN, work_sectors=1 << 20).total * mk.SECTOR > mk.STERN_SIZES["16G"]
 
 
+#: The work partition a 380 MB image.bin delta asks for - the file in C FB's six-image
+#: Beatles card (PAD-135), and the reason that card's size check died.
+BEATLES_WORK = 884736
+
+
+def test_store_class_for_never_picks_a_class_the_planner_refuses(mk):
+    """PAD-135: a stock 8G card's p3 fills the 8G class to the last sector, so the
+    deltas' work partition puts it over - and the size class must be chosen by the
+    planner rather than by an estimate that does not know that floor."""
+    g = stock_8g(mk)
+    XG = [extra_8g(mk, "x%d.raw" % i) for i in range(5)]
+    xs = ["x%d.raw" % i for i in range(5)]
+    subs = ["img%d" % (i + 1) for i in range(5)]
+    with pytest.raises(mk.Refused):                # the class the estimate used to pick
+        mk.store_sectors_for_class(g, XG, "a.raw", xs, subs, "8G", BEATLES_WORK)
+    # ...over the whole run of unique-content totals that fit an 8G card at all: six
+    # images that share nearly everything land here, and none of them may come back 8G
+    for need in (5_000_000_000, 6_000_000_000, 6_300_000_000, 6_400_000_000):
+        cls, cnt = mk.store_class_for(g, XG, "a.raw", xs, subs, need, BEATLES_WORK)
+        assert cls == "16G" and cnt * mk.SECTOR >= need
+        plan = mk.Plan(g, XG, "a.raw", xs, "store", multi_subdirs=subs,
+                       store_sectors=cnt, work_sectors=BEATLES_WORK)
+        assert plan.total_bytes <= mk.STERN_SIZES[cls]
+    # with no deltas the same content still fits the 8G class, exactly as before
+    assert mk.store_class_for(g, XG, "a.raw", xs, subs, 6_000_000_000)[0] == "8G"
+    # ...and content no class can hold is refused for THAT reason, not for the layout's
+    with pytest.raises(mk.Refused, match="biggest Stern image size"):
+        mk.store_class_for(g, XG, "a.raw", xs, subs, 40_000_000_000)
+
+
+def test_store_sectors_for_class_refusal_names_the_work_partition(mk):
+    """The sentence the app's size strip now shows: what did not fit, and by how much."""
+    g = stock_8g(mk)
+    with pytest.raises(mk.Refused) as exc:
+        mk.store_sectors_for_class(g, [], "a.raw", [], [], "8G", BEATLES_WORK)
+    said = str(exc.value)
+    assert "work partition" in said and "bigger card" in said and "over by" in said
+    # ...and without deltas there is no work partition to blame
+    with pytest.raises(mk.Refused) as exc:
+        mk.store_sectors_for_class(g, [], "a.raw", [], [], "8G", 1 << 22)
+    assert "work partition" in str(exc.value)
+
+
 def test_print_plan_names_the_work_partition_and_the_deltas(mk, capsys):
     g = stock_8g(mk)
     c3 = g.part(3)[2]

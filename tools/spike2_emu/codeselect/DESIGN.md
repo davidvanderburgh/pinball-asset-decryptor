@@ -205,7 +205,8 @@ full CLI, the log lines and the test list). What it is:
   `eglReleaseThread`. Proven against the bridge libs on a private ring
   (attach, TEXIMAGE 1360x768, per-change TEXSUBIMAGE, 124 acked swaps at
   ~61 fps, exit 0); not yet run on Vivante.
-* The menu: `SELECT GAME CODE`, one card per image with an `IMAGE n` label,
+* The menu: `SELECT GAME CODE` (or images.conf's own `heading=`), one card
+  per image with an `IMAGE n` label,
   the title (shrunk to fit, wrapped to two lines when it must) and the
   subtitle (wrapped to four), the highlighted card framed amber on a lighter
   fill, a footer `LEFT / RIGHT FLIPPER: choose   START or ACTION: boot` and

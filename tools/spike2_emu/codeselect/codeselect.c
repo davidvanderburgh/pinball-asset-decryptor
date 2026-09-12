@@ -83,6 +83,10 @@
 #define FOOT_ACTION  "LEFT / RIGHT FLIPPER: choose      START or ACTION: boot"
 #define PRESS_START  "press START to boot "
 #define PRESS_ACTION "press START or ACTION to boot "
+/* ...and the line across the top, which images.conf's heading= replaces. Same
+ * reason it is a named constant here: the GUI offers it as the field's
+ * placeholder rather than retyping it. */
+#define DEF_HEADING  "SELECT GAME CODE"
 
 struct opts {
     const char *conf, *out, *input, *nodebus, *spi, *padsw, *tables, *last, *log,
@@ -1014,6 +1018,33 @@ static int roll_member(const struct conf *c, int card, int last, int seed,
     return k;
 }
 
+/* THE CAROUSEL'S ARROWS (C FB, PAD-135: "would it be more obvious there are
+ * more than 3 versions if there were arrows left and right (but only if there
+ * are more options available that cannot be displayed on one screen)").
+ *
+ * A chevron in the margin beside the cards - one each side, and ONLY on a
+ * carousel, which is exactly the case where the flippers reach a card that is
+ * not on the glass.  A menu whose cards all fit gets none: there would be
+ * nothing for them to point at.
+ *
+ * Drawn a row at a time because gfx has no line primitive: the apex is at
+ * (ax, cy) and each arm steps one pixel out per row, so a t-wide run at
+ * (ax + dir*d, cy +/- d) covers a 45-degree stroke.  `dir` is +1 for arms that
+ * open to the right (a chevron pointing LEFT) and -1 for the mirror.
+ */
+static void draw_chevron(struct gfx *g, int ax, int cy, int len, int t,
+                         int dir, unsigned rgb)
+{
+    int d;
+    if (len < 2 || t < 1)
+        return;
+    for (d = 0; d <= len; d++) {
+        int x = ax + dir * d - (dir > 0 ? 0 : t - 1);
+        gfx_rect(g, x, cy - d, t, 1, rgb);
+        gfx_rect(g, x, cy + d, t, 1, rgb);
+    }
+}
+
 /* action = this title has a lockdown-bar ACTION button the menu can read; 0
  * means the footer must not promise one */
 static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
@@ -1025,12 +1056,37 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
     char buf[300], widest[300], cut[300];
 
     gfx_fill(g, TH(L, BACKGROUND));
-    gfx_text_center(g, f, 60 * s, W / 2, (int)(96 * s), "SELECT GAME CODE", TH(L, HEADING));
+    /* THE HEADING IS THE CONF'S when it set one (heading=), and it is then
+     * somebody's own words rather than this program's constant - so it is
+     * shrunk to the glass and cut with "..." like every other line that is not
+     * ours.  A heading set to nothing at all leaves the top of the menu
+     * empty on purpose. */
+    {
+        const char *head = c->heading_set ? c->heading : DEF_HEADING;
+        const int wmax = W - (int)(80 * s);
+        if (*head) {
+            float hpx = gfx_fit_px(f, head, wmax, 60 * s, 30 * s);
+            gfx_ellipsize(f, hpx, head, wmax, cut, sizeof cut);
+            gfx_text_center(g, f, hpx, W / 2, (int)(96 * s), cut, TH(L, HEADING));
+        }
+    }
 
     if (L->carousel) {
         /* the neighbours-but-one peek in from the edges: frames only */
         gfx_round_frame(g, card_x(L, -1), L->top, L->cw, L->ch, (int)(22 * s), (int)(3 * s), TH(L, FRAME), TH(L, CARD));
         gfx_round_frame(g, card_x(L, L->vis), L->top, L->cw, L->ch, (int)(22 * s), (int)(3 * s), TH(L, FRAME), TH(L, CARD));
+        /* ...and an arrow over each peek, in the gap between it and the first
+         * full card: the one place on the glass that is neither a card nor
+         * text.  Centred on the card row, so it reads as "the flippers go
+         * this way" rather than as part of the footer. */
+        {
+            int cy = L->top + L->ch / 2;
+            int len = (int)(26 * s), t = (int)(7 * s);
+            int inset = (L->gap - len) / 2;
+            if (inset < 0) inset = 0;
+            draw_chevron(g, card_x(L, 0) - L->gap + inset, cy, len, t, +1, TH(L, HEADING));
+            draw_chevron(g, card_x(L, L->vis) - inset, cy, len, t, -1, TH(L, HEADING));
+        }
     }
     for (slot = 0; slot < L->vis; slot++) {
         int i = slot_image(L, hl, slot);

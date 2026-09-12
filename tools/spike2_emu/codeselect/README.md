@@ -450,6 +450,8 @@ volume=50          # software mix gain 0-100 (default 50)
 #media=/usr/local/codeselect/media
 default=0          # highlight when there is no usable last-choice file
 timeout=10         # 0 = wait for ever
+#heading=THE BEATLES JUKEBOX   # the line across the top (default SELECT GAME CODE)
+#heading=          # ...and an empty one leaves the top of the menu bare
 #font=/usr/local/codeselect/font.ttf
 #theme=midnight    # the colours: midnight arcade neon emerald slate daylight, or custom
 #color_frame_hl=ffc42d   # one colour on top of the theme (the roles are in themes.json)
@@ -467,10 +469,15 @@ partition - and an opaque token in the emulator (`p3`, `p7`, `p7:img2`). Up
 to 64 image lines (`CONF_MAX_IMAGES`) in at most 16 CARDS (`CONF_MAX_CARDS`)
 - **from five cards the menu scrolls three at a
 time**, centred on the highlight and wrapping at both ends, with a `< n / N >`
-counter under them, so the cap is not what fits the screen. Images and cards
+counter under them and a chevron in each margin (a menu whose cards all fit
+gets neither), so the cap is not what fits the screen. Images and cards
 are the same number until a `group=` line makes them differ (below). `volume` is
 clamped to 0-100,
-`mixer_volume` to 0-63. Unknown keys are ignored so the file can grow.
+`mixer_volume` to 0-63. `heading=` replaces the line across the top of the
+menu with free UTF-8 text, shrunk and then cut to the glass like every other
+line the program does not own; the key being ABSENT is the built-in
+`SELECT GAME CODE`, and the key being PRESENT AND EMPTY is no heading at all.
+Unknown keys are ignored so the file can grow.
 
 **Image groups: one card that boots a different member every power-up.**
 

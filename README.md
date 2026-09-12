@@ -1639,6 +1639,20 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    saved validation grades ignored, so a GAME VALIDATION ERROR an earlier
    card left in the machine cannot latch on it. Never update a card built
    this way with a Stern USB update; rebuild it here.
+   An image's picture can come from a video clip — one frame of it, or a
+   short loop of it as the card's animation — and from v0.208.1 that
+   picture is taken from a track the clip actually has a decoder for. A
+   video file can hold more than one video track, and ffmpeg reaches for
+   the biggest one rather than a readable one, so a single track in a
+   format this machine cannot decode ended the whole build on
+   *Decoding requested, but no decoder found for: none*, with the clip
+   that caused it named nowhere. The art now comes off the first
+   decodable track — still frame and animation alike, at that track's
+   own frame rate. When nothing in the clip can be decoded the build
+   says which file it was, the four characters its picture is stored
+   under, and to re-export it as an ordinary H.264 `.mp4` from whatever
+   plays it; a file that holds no video at all says that instead, since
+   an audio file under a video file's name looks the same from here.
 11. **Emulate tab** *(Jersey Jack Pinball — Windows via WSL2)* — the same
    idea for a JJP machine, and a different problem. A JJP game is a
    native x86-64 Linux program, so there is no CPU emulation at all: it

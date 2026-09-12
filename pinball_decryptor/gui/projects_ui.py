@@ -1010,7 +1010,7 @@ def open_relink(app, folder=None):
             "These came from more than one drive, so do one folder at a "
             "time. Whatever isn't found stays listed.")
         for path, slots in state["missing"].items():
-            tree.insert("", tk.END, values=(os.path.basename(path),
+            tree.insert("", tk.END, values=(relink.file_name(path),
                                             len(slots), path))
         if root and not (root_var.get() or "").strip():
             root_var.set(root)
@@ -1079,7 +1079,7 @@ def open_relink(app, folder=None):
                 extra = ("   (%d files carry this name; the closest match)"
                          % amb[path])
             tree.insert("", tk.END, values=(
-                os.path.basename(path), len(slots),
+                relink.file_name(path), len(slots),
                 (new + extra) if new else "not found under that folder"))
         n_slots = sum(len(state["missing"][p]) for p in found)
         if found:

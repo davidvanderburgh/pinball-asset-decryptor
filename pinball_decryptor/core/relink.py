@@ -51,6 +51,18 @@ def _parts(path):
     return [p for p in _SEP_RE.split(path or "") if p and p != "."]
 
 
+def file_name(path):
+    """The file name out of a RECORDED path, whichever PC wrote it.
+
+    ``os.path.basename`` only knows the host's separator, so the name it reads
+    out of a Windows-recorded path on a Mac is the whole path — and a project
+    carried between those two PCs is the case this module exists for.  The
+    window lists these names back to the user, so it needs the same rule the
+    matching uses."""
+    parts = _parts(path)
+    return parts[-1] if parts else ""
+
+
 def recorded_sources(staged):
     """``{source path: [(kind, slot rel), ...]}`` for every replacement the
     sidecar records, in a stable order (kind, then slot).
@@ -97,10 +109,16 @@ def common_root(paths):
     paths = [p for p in (paths or []) if p]
     if not paths:
         return ""
-    first = _parts(os.path.dirname(paths[0]))
+    # The FOLDER of each path, taken with _parts rather than
+    # os.path.dirname: dirname only knows the host's separator, so on a Mac
+    # or a Linux box it reads a whole recorded Windows path as one bare name
+    # and answers "" — which is precisely the PC this module exists to move a
+    # project ONTO, and it made the readout say "more than one drive" for a
+    # set of paths that shared every folder.
+    first = _parts(paths[0])[:-1]
     shared = list(first)
     for p in paths[1:]:
-        other = _parts(os.path.dirname(p))
+        other = _parts(p)[:-1]
         keep = 0
         for a, b in zip(shared, other):
             if a.lower() != b.lower():
@@ -195,7 +213,11 @@ def plan(staged, root, isfile=os.path.isfile, walk=os.walk, cancel=None,
     the files that had more than one candidate under *root*; the pick is
     still the best-ranked one, it just gets said out loud."""
     slots = missing_sources(staged, isfile=isfile)
-    wanted = {os.path.basename(p).lower() for p in slots}
+    # _parts, not os.path.basename, for the same reason common_root does not
+    # use os.path.dirname: a recorded Windows path read on a Mac has no base
+    # name as far as the host's os.path is concerned, so every wanted name
+    # came out as the whole path and the index matched nothing at all.
+    wanted = {parts[-1].lower() for parts in map(_parts, slots) if parts}
     index = build_index(root, wanted_names=wanted, walk=walk, cancel=cancel,
                         progress=progress)
     found, ambiguous, not_found = {}, {}, []

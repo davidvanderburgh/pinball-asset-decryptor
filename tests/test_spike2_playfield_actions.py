@@ -248,6 +248,96 @@ def _overlaps(placed):
             if a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4]]
 
 
+# --------------------------------------------------------------------------
+# HOW MANY ROWS THE WRAP COMES TO IS A FONT MEASUREMENT, NOT A RULE.
+#
+# v0.207.0 was tagged, published and yanked the same hour because the two
+# tests below asserted a row COUNT at a hardcoded canvas width.  Each action
+# button measures about 129 px on the Linux runner and about 135 px on macOS
+# against the narrower labels this developer box renders, so the bottom-row-up
+# wrap legitimately trips one button earlier there: a 900 px canvas that holds
+# one row here takes two on both of those runners, and the 420 px canvas that
+# takes two here takes three.  Every one of those layouts is correct.
+#
+# So the helpers below let the tests assert the RULES that were actually
+# implemented - a canvas with the room uses one row, a canvas without it wraps,
+# and only the BOTTOM row pays for the state cluster - with the widths measured
+# from the widgets instead of baked in.
+# --------------------------------------------------------------------------
+
+def _span(widgets, gap):
+    """What one cluster asks for, its own gaps included - `_place_actions`'
+    own `span()`, so the arithmetic here cannot drift from the arithmetic
+    under test."""
+    if not widgets:
+        return 0
+    return (sum(wdg.winfo_reqwidth() for wdg in widgets)
+            + gap * (len(widgets) - 1))
+
+
+def _state_widgets(f):
+    """The state cluster as `_place_actions` built it, or [] with no flag."""
+    if not getattr(f, "_state_btns", None):
+        return []
+    return [f._slot_box] + f._state_btns
+
+
+def _one_row_width(f):
+    """The narrowest canvas on which both clusters share the bottom edge.
+
+    Measured, because "a canvas with the room" is a question about the font in
+    use and not about a number someone typed.
+    """
+    gap, pad = f.ACT_GAP, f.ACT_PAD
+    state = _state_widgets(f)
+    return (2 * pad + _span(f._acts, gap)
+            + (gap + _span(state, gap) if state else 0))
+
+
+def _act_rows(f, placed):
+    """The ACTION rows only, bottom row first, each left to right.
+
+    Keyed on the bottom edge, which is what one row means here.  The state
+    cluster is dropped: it is a cluster of its own and shares the bottom
+    action row's edge only when it fits beside it.
+    """
+    labels = [b.cget("text") for b in f._acts]
+    rows = {}
+    for p in placed:
+        if p[0] in labels:
+            rows.setdefault(p[4], []).append(p)
+    return [sorted(rows[edge], key=lambda p: p[1])
+            for edge in sorted(rows, reverse=True)]
+
+
+def _assert_the_wrap_is_tight(f, placed, w):
+    """Every action row is FULL: the button that went to the row ABOVE it did
+    not fit, measured against that row's own budget.
+
+    That budget is the whole canvas width less the padding, and less the state
+    cluster on the BOTTOM row ONLY - which is the rule the row count used to
+    stand in for ("two rows, not three: the rows above the bottom keep the
+    whole canvas width").  Charging every row for the state cluster, or
+    reserving nothing for it on the bottom row, both fail here, on any font.
+    """
+    rows = _act_rows(f, placed)
+    assert rows, placed
+    width = {b.cget("text"): b.winfo_reqwidth() for b in f._acts}
+    gap, pad = f.ACT_GAP, f.ACT_PAD
+    avail = max(1, w - 2 * pad)
+    state = _state_widgets(f)
+    state_cost = (_span(state, gap) + gap) if state else 0
+    for depth, row in enumerate(rows[:-1]):
+        budget = avail - (state_cost if depth == 0 else 0)
+        asked = sum(width[p[0]] for p in row) + gap * (len(row) - 1)
+        # Filled right to left from the bottom up, so the button that would
+        # not fit this row is the RIGHTMOST one on the row above it.
+        nxt = width[rows[depth + 1][-1][0]]
+        assert asked + gap + nxt > budget, (
+            "row %d still had room for %r: %d + %d of %d - %r"
+            % (depth, rows[depth + 1][-1][0], asked, nxt, budget, placed))
+
+
 def test_the_bottom_row_never_draws_a_button_on_a_button():
     """PAD-119, C FB 2026-09-08: beatles on a 1080p screen.
 
@@ -284,9 +374,14 @@ def test_the_bottom_row_never_draws_a_button_on_a_button():
 
 
 def test_a_canvas_with_the_room_keeps_them_on_one_row():
-    """The second row is the narrow window's answer and must not become every
-    window's: on a wide canvas the two clusters share the bottom edge exactly
-    as they always did, which is also what keeps the trough panel where it is.
+    """The extra row is the narrow window's answer and must not become every
+    window's: on a canvas with the room the two clusters share the bottom edge
+    exactly as they always did, which is also what keeps the trough panel where
+    it is.
+
+    THE WIDE CANVAS IS MEASURED, NOT 900 PX - see the note above the helpers.
+    Whether a width has "the room" depends on the font, and 900 px has it here
+    and does not on either Unix runner.
     """
     root = _root()
     import playfield
@@ -294,15 +389,18 @@ def test_a_canvas_with_the_room_keeps_them_on_one_row():
     playfield.SAVESTATES = True
     playfield.StateOps._slots_refresh = lambda self, **kw: None
     try:
-        wide = _bare_field(root, 900, 887)
+        narrow = _bare_field(root, 420, 887)
+        assert len({p[4] for p in _placed(narrow)}) > 1, \
+            "the narrow window should have taken another row"
+        _assert_the_wrap_is_tight(narrow, _placed(narrow), 420)
+
+        room = max(900, _one_row_width(narrow))
+        wide = _bare_field(root, room, 887)
         assert _overlaps(_placed(wide)) == []
         assert len({p[4] for p in _placed(wide)}) == 1, \
             "one row means one bottom edge: %r" % (_placed(wide),)
-        narrow = _bare_field(root, 420, 887)
-        assert len({p[4] for p in _placed(narrow)}) == 2, \
-            "the narrow window should have taken a second row"
         # The trough panel sits above whatever the row count came to, or it
-        # lands on the state controls on exactly the windows that needed two.
+        # lands on the state controls on exactly the windows that needed more.
         assert narrow._panel_at[1] < wide._panel_at[1]
     finally:
         playfield.StateOps._slots_refresh = refresh
@@ -434,9 +532,14 @@ def test_five_actions_still_fit_the_1080p_canvas():
             x0, _y0, x1, _y1 = hit[0][1:]
             assert x0 >= 0 and x1 <= 420, \
                 "%s is off the canvas at x %d..%d" % (label, x0, x1)
-        # Two rows, not three: only the BOTTOM action row pays for the state
-        # cluster, so the rows above it keep the whole canvas width.
-        assert len({p[4] for p in placed}) == 2, placed
+        # It wrapped, and only the BOTTOM action row paid for the state
+        # cluster - the rows above it keep the whole canvas width.  Asserted as
+        # that rule rather than as "two rows, not three", because five buttons
+        # ask about 470 px of this canvas's 408 in the font here and about 650
+        # px in the wider ones the Unix runners measure, so two rows and three
+        # rows are both the right answer.  See the note above the helpers.
+        assert len({p[4] for p in placed}) > 1, placed
+        _assert_the_wrap_is_tight(f, placed, 420)
     finally:
         playfield.StateOps._slots_refresh = refresh
         playfield.SAVESTATES = saved

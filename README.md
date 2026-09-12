@@ -908,7 +908,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    (plus a per-slot *Revert to original*) puts files back to their
    extracted originals — instantly from a per-edit backup, without
    re-extracting.
-   From v0.207.0 picks can be dropped in bulk as well as one at a time:
+   From v0.208.0 picks can be dropped in bulk as well as one at a time:
    select a range of rows (click, then Shift-click, or Ctrl-click to add single
    ones — sort by the **Replacement** column first and everything you
    have picked sits together) and right-click the selection, or press
@@ -1111,7 +1111,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    no drawing there was nothing in the window that could put a ball into
    play.
    **The window can start a game, and it says what each press did.**
-   From v0.207.0 the row begins with **Insert coin**: pressing Start on a machine with
+   From v0.208.0 the row begins with **Insert coin**: pressing Start on a machine with
    no credits does nothing, and does it silently, so a mouse-only session
    could never get past attract mode — the coin had only ever been on the
    keyboard. And every one of those buttons, plus a click on a trough
@@ -1720,7 +1720,9 @@ letter, a renamed top folder or a re-organised library all still land.
 Nothing is copied, nothing is written until you press Relink, and a
 replacement whose file is still where the project expects it is left
 alone. What it can't find stays listed, so a library spread over two
-folders is just two passes.
+folders is just two passes. The match reads the recorded paths by
+either separator, so the second PC can be a Mac or a Linux box and a
+project made on Windows still relinks there (and back).
 The log survives sessions too: the log pane opens with the previous
 sessions' lines already in it — dimmed, above a clear cut line — so an
 app update or restart no longer wipes what you were looking at. Prefer

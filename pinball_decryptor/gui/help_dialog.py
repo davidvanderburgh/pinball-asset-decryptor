@@ -150,6 +150,22 @@ HELP_CONTENT = {
          "Write tab reads. There's no separate \"stage\" step: the "
          "replacements you assign are applied automatically when you build the "
          "update on the Write tab."),
+        ("Clearing replacements",
+         "A replacement you pick is remembered against the PROJECT FOLDER, "
+         "not against the card: it is stored in the folder itself, so it "
+         "survives closing the app, and it is still there if you point the "
+         "Extract tab at a different card image. That is what lets you come "
+         "back to a project days later, and it is why picks never disappear "
+         "on their own.\n\n"
+         "To drop some, select the rows — click one, then Shift-click for a "
+         "range or Ctrl-click to add single sounds — and right-click the "
+         "selection. Sort by the Replacement column first and everything you "
+         "have picked sits together. \"Clear replacements…\" beside the "
+         "project folder drops every pick on this tab at once.\n\n"
+         "Clearing a pick only drops the pick: none of your own files are "
+         "touched, and a slot an earlier build already wrote into the project "
+         "folder keeps the bytes it has — \"Revert all changes…\" on the "
+         "Write tab is what restores those."),
         ("Change markers",
          "Green = assigned this session (staged when you build). "
          "\"✓ changed on disk\" = the file sitting in your PROJECT FOLDER no "
@@ -287,6 +303,22 @@ HELP_CONTENT = {
          "Write tab reads. There's no separate \"stage\" step: the "
          "replacements you assign are applied automatically when you build the "
          "update on the Write tab."),
+        ("Clearing replacements",
+         "A replacement you pick is remembered against the PROJECT FOLDER, "
+         "not against the card: it is stored in the folder itself, so it "
+         "survives closing the app, and it is still there if you point the "
+         "Extract tab at a different card image. That is what lets you come "
+         "back to a project days later, and it is why picks never disappear "
+         "on their own.\n\n"
+         "To drop some, select the rows — click one, then Shift-click for a "
+         "range or Ctrl-click to add single clips — and right-click the "
+         "selection. Sort by the Replacement column first and everything you "
+         "have picked sits together. \"Clear replacements…\" beside the "
+         "project folder drops every pick on this tab at once.\n\n"
+         "Clearing a pick only drops the pick: none of your own files are "
+         "touched, and a slot an earlier build already wrote into the project "
+         "folder keeps the bytes it has — \"Revert all changes…\" on the "
+         "Write tab is what restores those."),
         ("Size limits",
          "Patching is size-neutral: a same-or-smaller replacement fits "
          "as-is, a larger one is re-encoded down to the slot's byte budget. "
@@ -397,6 +429,23 @@ HELP_CONTENT = {
          "replacement you assign is auto-fit to its slot (scaled, "
          "format-converted, size-matched) and applied automatically when you "
          "build the update on the Write tab."),
+        ("Clearing replacements",
+         "A replacement you pick is remembered against the PROJECT FOLDER, "
+         "not against the card: it is stored in the folder itself, so it "
+         "survives closing the app, and it is still there if you point the "
+         "Extract tab at a different card image. That is what lets you come "
+         "back to a project days later, and it is why picks never disappear "
+         "on their own.\n\n"
+         "To drop some, select the rows — click one, then Shift-click for a "
+         "range or Ctrl-click to add single images — and right-click the "
+         "selection. Sort by the Replacement column first and everything you "
+         "have picked sits together. \"Clear replacements…\" beside the "
+         "project folder drops every pick on this tab at once, and a scene "
+         "group's own right-click menu clears just that animation.\n\n"
+         "Clearing a pick only drops the pick: none of your own files are "
+         "touched, and a slot an earlier build already wrote into the project "
+         "folder keeps the bytes it has — \"Revert all changes…\" on the "
+         "Write tab is what restores those."),
         ("Where images come from",
          "The Source column tells the four stores apart. \"File\" = a "
          "plain image file on the card (menus, apron/test art). \"Scene "

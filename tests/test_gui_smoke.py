@@ -5103,3 +5103,231 @@ def test_audio_advanced_offers_longer_replacements_and_wires_them_up(
     # Leave a clean slate for later tests.
     app._on_audio_advanced_change({})
     assert "PAD_STERN_AUDIO_GROW" not in os.environ
+
+
+# --------------------------------------------------------------------------
+# PAD-128 — clearing replacement picks in bulk.  DragonRR, 2026-09-11:
+# "We could do with a 'clear all' replacements button - or an ability to
+# select a series/group by highlighting and right click - clear replacement.
+# I currently have 48 replacements - I can order by replacements which is
+# good but I would have to clear each one individually."
+# --------------------------------------------------------------------------
+
+def _seed_image_picks(w, tmp_path):
+    """Scan the image fixture and pick a replacement for three of its four
+    slots, the way the tab's own picker would."""
+    assets = _seed_image_assets(tmp_path)
+    w.write_assets_var.set(assets)
+    _scan_images(w, assets)
+    rep = tmp_path / "mine.png"
+    rep.write_bytes(b"\x89PNG-mine")
+    rels = ["images/loose/logo.png",
+            "images/scene_textures/radimg_8x8_00000003.png",
+            "images/scene_textures/radimg_Char_Select_8x8_00000001.png"]
+    for rel in rels:
+        w._image_assignments[rel] = str(rep)
+    w._refresh_image_list()
+    return assets, rels
+
+
+def test_every_replace_tree_allows_a_range_selection(app,
+                                                     manufacturers_by_key):
+    """`browse` could not HOLD a multi-row selection, so "highlight a series
+    and right-click" was not a thing the user could do at all."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    for kind in ("audio", "video", "image"):
+        tree = getattr(w, "_%s_tree" % kind)
+        assert str(tree.cget("selectmode")) == "extended", kind
+
+
+def test_a_right_click_keeps_an_existing_multi_row_selection(
+        app, manufacturers_by_key, tmp_path):
+    """The rule that makes a range actionable: right-clicking INSIDE the
+    selection keeps it, right-clicking anywhere else selects that row only —
+    which is what every single-row menu on these tabs assumes."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    _assets, rels = _seed_image_picks(w, tmp_path)
+    tree = w._image_tree
+    tree.selection_set(rels)
+    assert w._right_click_selection(tree, rels[1]) == tuple(tree.selection())
+    assert len(w._right_click_selection(tree, rels[1])) == 3
+    other = "images/scene_textures/radimg_Char_Select_8x8_00000002.png"
+    assert w._right_click_selection(tree, other) == (other,)
+    assert tree.selection() == (other,)
+
+
+def test_the_real_right_click_handler_routes_by_selection(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """Through `_image_on_tree_right` itself, because that is where the
+    routing lives: a right-click on a row outside the selection has to give
+    the old single-row menu (it selects that row first, which every entry in
+    it assumes), and one inside a range has to give the bulk menu.
+
+    A tk.Menu on Windows is a native popup that cannot be photographed, so
+    `tk_popup` is captured and its labels read here instead (the PAD-31
+    recipe)."""
+    import tkinter as tk
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    _assets, rels = _seed_image_picks(w, tmp_path)
+    tree = w._image_tree
+
+    shown = []
+    monkeypatch.setattr(tk.Menu, "tk_popup",
+                        lambda self, *a, **k: shown.append(self))
+    monkeypatch.setattr(tk.Menu, "grab_release", lambda self: None)
+
+    class _Ev:
+        x = y = 5
+        x_root = y_root = 200
+
+    def _labels(menu):
+        return [str(menu.entrycget(i, "label"))
+                for i in range(menu.index("end") + 1)
+                if str(menu.type(i)) != "separator"]
+
+    tree.selection_set(rels)
+    monkeypatch.setattr(tree, "identify_row", lambda _y: rels[1])
+    w._image_on_tree_right(_Ev())
+    assert len(shown) == 1
+    assert "Clear 3 replacements in this selection" in _labels(shown[0])
+    assert tree.selection() == tuple(rels)      # the range survived
+
+    other = "images/scene_textures/radimg_Char_Select_8x8_00000002.png"
+    monkeypatch.setattr(tree, "identify_row", lambda _y: other)
+    w._image_on_tree_right(_Ev())
+    assert len(shown) == 2
+    assert "Choose replacement…" in _labels(shown[1])
+    assert tree.selection() == (other,)
+
+
+def test_the_selection_menu_offers_one_clear_for_all_of_it(
+        app, manufacturers_by_key, tmp_path):
+    """The menu itself cannot be photographed (a native popup), so its labels
+    are asserted here instead: the count it offers to clear is the number of
+    selected rows that actually carry a pick, not the selection size."""
+    import tkinter as tk
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    _assets, rels = _seed_image_picks(w, tmp_path)
+    unpicked = "images/scene_textures/radimg_Char_Select_8x8_00000002.png"
+
+    menu = tk.Menu(w._image_tree, tearoff=0)
+    w._add_multi_row_clear(menu, "image", tuple(rels) + (unpicked,))
+    labels = [str(menu.entrycget(i, "label"))
+              for i in range(menu.index("end") + 1)
+              if str(menu.type(i)) != "separator"]
+    assert "4 slots selected" in labels
+    assert "Clear 3 replacements in this selection" in labels
+
+    # A selection with nothing picked says so rather than offering a no-op.
+    menu2 = tk.Menu(w._image_tree, tearoff=0)
+    w._add_multi_row_clear(menu2, "image", (unpicked,))
+    labels2 = [str(menu2.entrycget(i, "label"))
+               for i in range(menu2.index("end") + 1)
+               if str(menu2.type(i)) != "separator"]
+    assert "No replacements in this selection" in labels2
+
+
+def test_clearing_a_selection_drops_every_pick_in_it(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """Three picks, one action, and the untouched fourth slot stays as it
+    was.  The log gets ONE line with the count (the folder's history log
+    names each one), and the sidecar is rewritten so a relaunch agrees."""
+    from pinball_decryptor.core import staged_changes
+    from pinball_decryptor.gui import main_window as mw
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    assets, rels = _seed_image_picks(w, tmp_path)
+    w._image_assignments["images/scene_textures/"
+                         "radimg_Char_Select_8x8_00000002.png"] = "keep.png"
+    monkeypatch.setattr(mw.messagebox, "askyesno", lambda *a, **k: True)
+
+    w._image_tree.selection_set(rels)
+    w._clear_selected_replacements("image")
+
+    assert list(w._image_assignments) == ["images/scene_textures/"
+                                          "radimg_Char_Select_8x8_00000002.png"]
+    assert staged_changes.load(assets).get("image") == w._image_assignments
+    log = w._log_text.get("1.0", "end-1c")
+    assert "Replace Images: cleared 3 replacements" in log
+    assert "cleared replacement for images/loose/logo.png" not in log
+
+
+def test_clear_replacements_button_clears_the_whole_tab(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """The button he asked for, on the row the three Replace tabs share.
+
+    It is greyed out when there is nothing to clear — the same "tell the user
+    it isn't relevant" rule as Revert all changes… — and it drops the PICKS
+    only, which is what the confirm promises.
+    """
+    from pinball_decryptor.gui import main_window as mw
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    for kind in ("audio", "video", "image"):
+        btn = w._clear_all_btns[kind]
+        assert str(btn.cget("text")) == "Clear replacements…"
+        assert str(btn.cget("state")) == "disabled", kind
+
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    _assets, _rels = _seed_image_picks(w, tmp_path)
+    assert str(w._clear_all_btns["image"].cget("state")) == "normal"
+
+    asked = []
+    monkeypatch.setattr(mw.messagebox, "askyesno",
+                        lambda _t, msg, **k: asked.append(msg) or True)
+    w._clear_all_btns["image"].invoke()
+    app.root.update()
+    assert w._image_assignments == {}
+    assert str(w._clear_all_btns["image"].cget("state")) == "disabled"
+    assert asked and "all 3 replacements" in asked[0]
+    # The promise the confirm makes, in the confirm's own words.
+    assert "only drops the picks" in asked[0]
+    assert "Revert all changes" in asked[0]
+
+
+def test_declining_the_confirm_keeps_every_pick(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """A destructive bulk action that fires on No is worse than not having
+    it: 48 picks are an afternoon's work."""
+    from pinball_decryptor.gui import main_window as mw
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    _assets, rels = _seed_image_picks(w, tmp_path)
+    monkeypatch.setattr(mw.messagebox, "askyesno", lambda *a, **k: False)
+    w._clear_all_replacements("image")
+    assert sorted(w._image_assignments) == sorted(rels)
+    w._image_tree.selection_set(rels)
+    w._clear_selected_replacements("image")
+    assert sorted(w._image_assignments) == sorted(rels)
+
+
+def test_one_row_still_clears_without_a_confirm(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """The per-row menu entry is the shared path with a selection of one, and
+    it must not have grown a dialog: it was a single click before."""
+    from pinball_decryptor.gui import main_window as mw
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    _assets, rels = _seed_image_picks(w, tmp_path)
+    monkeypatch.setattr(
+        mw.messagebox, "askyesno",
+        lambda *a, **k: pytest.fail("a single-row clear must not ask"))
+    w._image_tree.selection_set(rels[0])
+    w._image_clear_selected()
+    assert rels[0] not in w._image_assignments
+    assert sorted(w._image_assignments) == sorted(rels[1:])
+    log = w._log_text.get("1.0", "end-1c")
+    assert "cleared replacement for %s" % rels[0] in log

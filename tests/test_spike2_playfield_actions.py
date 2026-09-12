@@ -47,14 +47,30 @@ def _root():
     return root
 
 
+class FakeReply:
+    """A CompletedProcess as far as `helper_message()` cares."""
+
+    def __init__(self, out=b"", err=b""):
+        self.stdout, self.stderr, self.returncode = out, err, 0
+
+
 class FakeDrv:
-    """Records what would have been spawned, and spawns nothing."""
+    """Records what would have been spawned, and spawns nothing.
 
-    def __init__(self):
+    `done` is the PAD-128 result callback, and it is ANSWERED rather than
+    swallowed: the window's fix is that the helper's own reply reaches the
+    status bar, so a fake that dropped the callback would let that break with
+    nothing noticing.  `reply` is what the pretend helper printed.
+    """
+
+    def __init__(self, reply=None):
         self.ran = []
+        self.reply = reply
 
-    def run_script(self, script, *args):
+    def run_script(self, script, *args, done=None):
         self.ran.append((script, args))
+        if done is not None and self.reply is not None:
+            done(self.reply)
 
 
 def _switch_rows():
@@ -288,6 +304,139 @@ def test_a_canvas_with_the_room_keeps_them_on_one_row():
         # The trough panel sits above whatever the row count came to, or it
         # lands on the state controls on exactly the windows that needed two.
         assert narrow._panel_at[1] < wide._panel_at[1]
+    finally:
+        playfield.StateOps._slots_refresh = refresh
+        playfield.SAVESTATES = saved
+        root.destroy()
+
+
+# --------------------------------------------------------------------------
+# PAD-128: the row can start a game, and it says what each press did
+# --------------------------------------------------------------------------
+
+def test_the_row_can_actually_start_a_game():
+    """DragonRR, 2026-09-11: "If I click plunge a ball goes out but again
+    nothing really happens."
+
+    Start on a machine with no credits does nothing, and does it silently -
+    plunge.py's do_coin() carries the measurement, and it cost item 6 five
+    runs - so a row of Start / Plunge / Reset offered no way to begin a game
+    at all unless the user went looking for LEFT COIN on the keyboard.  The
+    coin is an action now, and it is FIRST because that is the order that
+    works.
+    """
+    import playfield
+    labels = [lbl for lbl, _s, _a in playfield.WINDOW_ACTIONS]
+    assert labels[0] == "Insert coin", labels
+    assert labels.index("Insert coin") < labels.index("Start")
+    assert labels.index("Start") < labels.index("Plunge")
+    assert ("Insert coin", "plunge.py", "coin") in playfield.WINDOW_ACTIONS
+
+
+def test_the_coin_button_reaches_plunge_coin():
+    """Through the driver, so a button wired to the wrong verb fails here."""
+    root = _root()
+    import playfield
+    try:
+        view = playfield.Schematic(root, _switch_rows())
+        view.drv = FakeDrv()
+        coin = [b for b in view._acts if b.cget("text") == "Insert coin"]
+        assert len(coin) == 1
+        coin[0].invoke()
+        assert view.drv.ran == [("plunge.py", ("coin",))]
+    finally:
+        root.destroy()
+
+
+def test_a_helper_message_carries_every_line_it_printed():
+    """plunge.py's outcome is its FIRST line and its advice the second, so the
+    save-state ladder's "last tagged line" rule would show the advice with the
+    outcome missing."""
+    import playfield
+    msg = playfield.helper_message(
+        "plunge.py", FakeReply(b"Start pressed\n  NOTE: a game needs CREDITS."
+                               b" Press Insert coin (plunge.py coin) first,"
+                               b" then Start.\n"))
+    assert msg.startswith("Start pressed")
+    assert "needs CREDITS" in msg and "Insert coin" in msg
+    assert "\n" not in msg
+    # stderr too, and after stdout: item 49's "using godzilla_pro's compiled
+    # ids" warning is the reason a user is looking at nonsense.
+    both = playfield.helper_message(
+        "plunge.py", FakeReply(b"done\n", b"using guesses\n"))
+    assert both == "done   using guesses"
+    assert playfield.helper_message("plunge.py", None) == \
+        "plunge.py did not run"
+    assert playfield.helper_message("swexercise.py", FakeReply()) == \
+        "swexercise.py: no output"
+    long = playfield.helper_message("plunge.py", FakeReply(b"x" * 500))
+    assert len(long) == playfield.HELPER_MSG_CAP and long.endswith("…")
+
+
+def test_the_helpers_answer_lands_in_the_status_bar():
+    """The whole of "the game acts like nothing has happened" from this side:
+    the window ran the helper and threw its reply away.
+
+    Real Tk, and the reply is delivered the way the driver delivers it, so
+    this covers the after(0) hop as well as the text.
+    """
+    root = _root()
+    import playfield
+    try:
+        view = playfield.Schematic(root, _switch_rows())
+        view.drv = FakeDrv(reply=FakeReply(
+            b"the trough is empty - nothing to eject\n"))
+        assert view._state_status() is None, "nothing pressed yet"
+        [b for b in view._acts if b.cget("text") == "Plunge"][0].invoke()
+        root.update()                       # run the queued after(0)
+        assert view._state_status() == "the trough is empty - nothing to eject"
+    finally:
+        root.destroy()
+
+
+def test_a_trough_dot_click_also_says_what_it_did():
+    """The dots are the other caller (`run_plunge`), and they are the ones he
+    was clicking: "I can force it in using the black and white icons but the
+    game acts like nothing has happened"."""
+    root = _root()
+    import playfield
+    try:
+        view = playfield.Schematic(root, _switch_rows())
+        view.drv = FakeDrv(reply=FakeReply(
+            b"trough switch 66 closed (ball drained home)\n"))
+        view.run_plunge("drain")
+        root.update()
+        assert view.drv.ran == [("plunge.py", ("drain",))]
+        assert view._state_status() == \
+            "trough switch 66 closed (ball drained home)"
+    finally:
+        root.destroy()
+
+
+def test_five_actions_still_fit_the_1080p_canvas():
+    """PAD-119's window, one button later.  Four actions asked for 372 px of
+    its 408 and five ask for ~470, and nothing stopped `create_window` putting
+    the overflow at a NEGATIVE x - clipped off the canvas, no overlap for that
+    test to catch, and a control simply missing.
+    """
+    root = _root()
+    import playfield
+    saved, refresh = playfield.SAVESTATES, playfield.StateOps._slots_refresh
+    playfield.SAVESTATES = True
+    playfield.StateOps._slots_refresh = lambda self, **kw: None
+    try:
+        f = _bare_field(root, 420, 887)
+        placed = _placed(f)
+        assert _overlaps(placed) == [], placed
+        for label, _s, _a in playfield.WINDOW_ACTIONS:
+            hit = [p for p in placed if p[0] == label]
+            assert hit, "%s is not on the canvas at all" % label
+            x0, _y0, x1, _y1 = hit[0][1:]
+            assert x0 >= 0 and x1 <= 420, \
+                "%s is off the canvas at x %d..%d" % (label, x0, x1)
+        # Two rows, not three: only the BOTTOM action row pays for the state
+        # cluster, so the rows above it keep the whole canvas width.
+        assert len({p[4] for p in placed}) == 2, placed
     finally:
         playfield.StateOps._slots_refresh = refresh
         playfield.SAVESTATES = saved

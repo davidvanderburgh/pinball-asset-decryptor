@@ -908,6 +908,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    (plus a per-slot *Revert to original*) puts files back to their
    extracted originals — instantly from a per-edit backup, without
    re-extracting.
+   Picks can be dropped in bulk as well as one at a time: select a
+   range of rows (click, then Shift-click, or Ctrl-click to add single
+   ones — sort by the **Replacement** column first and everything you
+   have picked sits together) and right-click the selection, or press
+   **Clear replacements…** beside the project folder to drop every pick
+   on that tab. Clearing a pick only drops the pick — nothing of yours
+   is deleted and an already-built slot keeps its bytes, which is what
+   *Revert all changes…* is for.
 8. **Mod Pack tab** — share just your changed files as a zip, or apply
    someone else's mod pack on top of an extracted folder. A pack holds
    **every change made since that folder's last Extract**, not just the
@@ -1102,6 +1110,16 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    ever been drawn on the artwork, beside the plunger, so on a title with
    no drawing there was nothing in the window that could put a ball into
    play.
+   **The window can start a game, and it says what each press did.** The
+   row now begins with **Insert coin**: pressing Start on a machine with
+   no credits does nothing, and does it silently, so a mouse-only session
+   could never get past attract mode — the coin had only ever been on the
+   keyboard. And every one of those buttons, plus a click on a trough
+   ball, now reports the helper's own answer in the status bar for a few
+   seconds ("shooter lane opened (ball launched)", "the trough is empty -
+   nothing to eject", "a game needs CREDITS"). Those sentences were being
+   printed and thrown away, which is why a press that could not do
+   anything looked exactly like one that had.
    **A one-screen cabinet now draws at its own panel size.** The
    machines that carry a single screen instead of a backbox-and-topper
    pair — James Bond 60th, Star Wars Home Edition, Jurassic Park The

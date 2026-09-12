@@ -447,10 +447,91 @@ GONE_POLLS = 2 * TARGET_FPS
 #: the argument, including WHY the boot-time pass can be too early on some
 #: titles - which is what earns this button its place rather than making it a
 #: duplicate of something automatic.
-WINDOW_ACTIONS = (("Start", "plunge.py", "start"),
+#: ★ "INSERT COIN" IS FIRST BECAUSE THE ROW WAS UNUSABLE WITHOUT IT (PAD-128,
+#: DragonRR 2026-09-11: "If I click plunge a ball goes out but again nothing
+#: really happens"). Pressing Start on a machine with no credits does exactly
+#: nothing and does it SILENTLY - plunge.py's do_coin() carries the
+#: measurement, and it cost item 6 five runs - so a window offering Start,
+#: Plunge and Reset but no coin offers no way to start a game at all. The coin
+#: has always been on the keyboard (LEFT COIN, the "5" in the legend), which is
+#: why this went unnoticed: a mouse-only session cannot reach it.
+WINDOW_ACTIONS = (("Insert coin", "plunge.py", "coin"),
+                  ("Start", "plunge.py", "start"),
                   ("Plunge", "plunge.py", "plunge"),
                   ("Reset balls", "plunge.py", "reset"),
                   ("Clear alerts", "swexercise.py", None))
+
+#: How much of a helper's own answer the status bar carries. Long enough for
+#: plunge.py's longest real reply (Start's two lines, ~100 chars) and short
+#: enough that it cannot push the window wider than the artwork.
+HELPER_MSG_CAP = 160
+
+
+def helper_message(script, r):
+    """One status-bar line from a helper's own output.
+
+    ★ THE WINDOW USED TO THROW THIS AWAY, AND THAT IS MOST OF "NOTHING
+    HAPPENED" (PAD-128). `SwitchDriver.run_script` spawned the helper on a
+    thread and dropped its CompletedProcess, so every sentence plunge.py
+    prints - "Start pressed / NOTE: a game needs CREDITS", "the trough is
+    empty - nothing to eject", "shooter lane opened (ball launched)" - went
+    nowhere. A user pressing Plunge on a machine with no game in progress got
+    the same silence as one pressing it with a ball already in the lane, and
+    the two need different next moves.
+
+    EVERY LINE, JOINED, rather than the last one: plunge.py's outcome is the
+    FIRST line and its advice is the second ("Start pressed" then the credit
+    note), and the save-state ladder's "last tagged line" rule - which exists
+    because savegame.sh ends on a bare FAILED - would show the advice without
+    the outcome. stderr comes after stdout so item 49's "using godzilla_pro's
+    compiled ids" warning is visible rather than buried.
+    """
+    if r is None:
+        return "%s did not run" % script
+    lines = [ln.strip() for ln in
+             ((r.stdout or b"").decode("utf8", "replace").splitlines()
+              + (r.stderr or b"").decode("utf8", "replace").splitlines())
+             if ln.strip()]
+    if not lines:
+        return "%s: no output" % script
+    text = "   ".join(lines)
+    if len(text) > HELPER_MSG_CAP:
+        text = text[:HELPER_MSG_CAP - 1] + "…"
+    return text
+
+
+def run_helper(view, script, arg=None):
+    """Run one helper for a view and put its own answer in the status bar.
+
+    ONE FUNCTION RATHER THAN A METHOD ON EACH, for the same reason
+    `poll_switches()` is one: both views had a two-line `run_action` /
+    `run_plunge` pair, they have to agree about what a press does, and this rig
+    has been bitten twice by two copies of one fact drifting.
+
+    `arg` is None for a helper that takes none, which is what keeps
+    WINDOW_ACTIONS a plain table rather than a table with a special case in it.
+    The driver runs these on their own thread because they take seconds -
+    "Clear alerts" takes about twelve - so the reply arrives on that thread and
+    hops back through `after(0)`; a TclError there is a window that closed
+    while its helper was still running.
+    """
+    def done(r):
+        text = helper_message(script, r)
+
+        def show():
+            try:
+                view._flash(text)
+            except (AttributeError, tk.TclError):       # pragma: no cover
+                pass
+        try:
+            view.status.after(0, show)
+        except tk.TclError:                             # pragma: no cover
+            pass
+
+    if arg is None:
+        view.drv.run_script(script, done=done)
+    else:
+        view.drv.run_script(script, arg, done=done)
 
 
 def emu_gone(view, readable):
@@ -560,14 +641,27 @@ class SwitchDriver:
         """
         self.q.put((sw_id, PRESS_MS if ms is None else ms))
 
-    def run_script(self, script, *args):
+    def run_script(self, script, *args, done=None):
         """A helper that is not a switch edge (plunge.py, coilact.py).
 
         Off the queue and on its own thread: these take seconds, and a hold's
         release must not wait behind one.
+
+        `done` is called ON THAT THREAD with the CompletedProcess (or None if
+        it did not run at all), which is how the window gets to say what the
+        helper said - see `helper_message()` for why the answer used to be
+        dropped here and what that cost. A raising callback must not kill the
+        thread silently mid-action, so it is guarded.
         """
-        threading.Thread(target=wsl_run, args=(script,) + args,
-                         daemon=True).start()
+        def work():
+            r = wsl_run(script, *args)
+            if done is not None:
+                try:
+                    done(r)
+                except Exception:                           # noqa: BLE001
+                    pass
+
+        threading.Thread(target=work, daemon=True).start()
 
     # ---- the worker -------------------------------------------------------
     def _run(self):
@@ -2162,8 +2256,7 @@ class StateOps:
         slot = self._current_slot()
         if slot not in getattr(self, "_slot_labels", {}):
             n = self.SLOT_IDS.index(slot) + 1
-            self._state_msg = ("slot %d is empty - nothing to load" % n,
-                               time.monotonic() + 5.0)
+            self._flash("slot %d is empty - nothing to load" % n, 5.0)
             return
         self.run_state("loadgame.sh", slot)
 
@@ -2183,7 +2276,7 @@ class StateOps:
         for b in self._state_btns:
             b.config(state="disabled")
         verb = "saving" if script.startswith("save") else "loading"
-        self._state_msg = ("%s state..." % verb, None)
+        self._flash("%s state..." % verb, None)
 
         def work():
             r = state_run(script, slot, label)
@@ -2214,7 +2307,7 @@ class StateOps:
                               if not ln.rstrip().endswith("FAILED")]
                     text = (saying or tagged or lines
                             or ["%s: no output" % script])[-1]
-                self._state_msg = (text, time.monotonic() + 8.0)
+                self._flash(text)
                 # The picker's labels just changed (a save filled or renamed
                 # a slot); show the new truth without a manual refresh.
                 self._slots_refresh()
@@ -2222,6 +2315,19 @@ class StateOps:
             self.cv.after(0, done)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _flash(self, text, secs=8.0):
+        """Put one line in this view's status bar, over the tick's own.
+
+        ONE OVERRIDE SLOT PER WINDOW, and that is deliberate rather than
+        laziness: a save's result and a ball action's result are the same kind
+        of thing - what the last thing you pressed did - and two slots would
+        race for the one label with no rule about which won. `secs=None` holds
+        it until something replaces it, which is what a "saving state..."
+        in-progress line wants.
+        """
+        self._state_msg = (text, None if secs is None
+                           else time.monotonic() + secs)
 
     def _state_status(self):
         """The status-bar override while a save/load runs, and its result for
@@ -2949,20 +3055,56 @@ class Field(StateOps, LedRing):
             return (sum(wdg.winfo_reqwidth() for wdg in widgets)
                     + self.ACT_GAP * (len(widgets) - 1))
 
-        one_row = not state or (self.ACT_PAD + span(state) + self.ACT_GAP
-                                + span(self._acts) + self.ACT_PAD) <= w
+        # ★ AND THE ACTIONS WRAP AMONG THEMSELVES (PAD-128). PAD-119 moved the
+        # OTHER cluster when the two could not share the bottom edge, which was
+        # the whole fault then, because four buttons still fitted a 420 px
+        # canvas by themselves (372 px of 408). "Insert coin" makes five, they
+        # ask for ~470, and nothing here stopped a button being placed at a
+        # NEGATIVE x - off the left edge of the canvas, clipped, no overlap for
+        # the PAD-119 test to catch and no sign from this side that a control
+        # had gone missing. Exactly the shape of the bug it fixed, one button
+        # later.
+        #
+        # FILLED FROM THE BOTTOM ROW UP, RIGHT TO LEFT, so the hand keeps
+        # finding the last action in the corner the plunger is in, and the
+        # reading order (top to bottom, left to right) is still
+        # WINDOW_ACTIONS' order. Only the BOTTOM row pays for the state
+        # cluster; the rows above it have the whole width, which is what keeps
+        # a 420 px canvas at two rows instead of three - the state controls and
+        # two actions share the bottom edge, three actions sit above them.
+        avail = max(1, w - 2 * self.ACT_PAD)
+        state_cost = (span(state) + self.ACT_GAP) if state else 0
+        todo, act_rows = list(self._acts), []
+        while todo:
+            budget = avail - (state_cost if not act_rows else 0)
+            take = [todo.pop()]
+            while todo:
+                cand = [todo[-1]] + take
+                if span(cand) > budget:
+                    break
+                take = cand
+                todo.pop()
+            act_rows.append(take)               # bottom row first
+        # A single action too wide even for the reduced bottom budget: the
+        # state cluster cannot share that row, and gets its own below-the-
+        # actions row exactly as it did before.
+        bottom_fits = (not state
+                       or self.ACT_PAD + state_cost
+                       + span(act_rows[0]) + self.ACT_PAD <= w)
 
-        x, y = w - self.ACT_PAD, h - self.ACT_PAD
-        # Right to left, so "Reset balls" is the one against the corner and the
-        # reading order left to right is the order the toolbar had.
-        for b in reversed(self._acts):
-            self.cv.create_window(x, y, anchor="se", window=b)
-            x -= b.winfo_reqwidth() + self.ACT_GAP
+        y = h - self.ACT_PAD
+        for depth, chunk in enumerate(act_rows):
+            cy = y - depth * (row_h + self.ACT_GAP)
+            x = w - self.ACT_PAD
+            for b in reversed(chunk):
+                self.cv.create_window(x, cy, anchor="se", window=b)
+                x -= b.winfo_reqwidth() + self.ACT_GAP
 
-        rows = 1
+        rows = len(act_rows) if bottom_fits else len(act_rows) + 1
         if state:
-            rows = 1 if one_row else 2
-            x, sy = self.ACT_PAD, y - (0 if one_row else row_h + self.ACT_GAP)
+            x = self.ACT_PAD
+            sy = y - (0 if bottom_fits
+                      else len(act_rows) * (row_h + self.ACT_GAP))
             for wdg in state:
                 self.cv.create_window(x, sy, anchor="sw", window=wdg)
                 x += wdg.winfo_reqwidth() + self.ACT_GAP
@@ -2997,21 +3139,12 @@ class Field(StateOps, LedRing):
                                         on_ball=self.run_plunge)
 
     def run_plunge(self, what):
-        self.drv.run_script("plunge.py", what)
+        run_helper(self, "plunge.py", what)
 
     def run_action(self, script, arg=None):
-        """One action row entry (item 59). `arg` is None for a helper that
-        takes none, which is what keeps WINDOW_ACTIONS a plain table rather
-        than a table with a special case in it.
-
-        The driver already runs these on their own thread because "these take
-        seconds" - and "Clear alerts" takes about twelve, working ~50 switches
-        at 150+80 ms, so it would freeze the window if it did not.
-        """
-        if arg is None:
-            self.drv.run_script(script)
-        else:
-            self.drv.run_script(script, arg)
+        """One action row entry (item 59) - see `run_helper()`, which both
+        views share so a press cannot mean two different things."""
+        run_helper(self, script, arg)
 
     # ---- live LED and coil state -----------------------------------------
     def read_leds(self):
@@ -4796,21 +4929,12 @@ class Schematic(StateOps):
         self.tick()
 
     def run_plunge(self, what):
-        self.drv.run_script("plunge.py", what)
+        run_helper(self, "plunge.py", what)
 
     def run_action(self, script, arg=None):
-        """One action row entry (item 59). `arg` is None for a helper that
-        takes none, which is what keeps WINDOW_ACTIONS a plain table rather
-        than a table with a special case in it.
-
-        The driver already runs these on their own thread because "these take
-        seconds" - and "Clear alerts" takes about twelve, working ~50 switches
-        at 150+80 ms, so it would freeze the window if it did not.
-        """
-        if arg is None:
-            self.drv.run_script(script)
-        else:
-            self.drv.run_script(script, arg)
+        """One action row entry (item 59) - see `run_helper()`, which both
+        views share so a press cannot mean two different things."""
+        run_helper(self, script, arg)
 
     def _hit(self, ev):
         # canvasx, because the scroll backstop makes window x and canvas x

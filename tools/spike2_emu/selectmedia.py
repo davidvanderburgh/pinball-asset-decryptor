@@ -1049,6 +1049,74 @@ def run(cmd, what):
     return r
 
 
+#: What ffprobe says about a track whose format this ffmpeg has NO DECODER for.
+#: ffmpeg 6 (Ubuntu 24.04) leaves codec_name out of its answer altogether,
+#: ffmpeg 8 prints 'unknown', and ffmpeg's own log calls the same track 'none'
+#: ("Decoding requested, but no decoder found for: none").
+UNDECODABLE = ("", "none", "unknown")
+
+
+def video_tracks(path):
+    """The file's video tracks in ``-map 0:v:N`` order, as
+    ``[{'codec': 'h264', 'tag': 'avc1'}, ...]`` - ``codec`` is "" for a track
+    this ffmpeg cannot decode, ``tag`` the four characters the container
+    stores the format under.  ``[]`` when the file holds no video at all, and
+    None when there is no ffprobe to ask (the caller then leaves ffmpeg's own
+    stream picking alone, exactly as before)."""
+    fp = find_ffmpeg("ffprobe")
+    if not fp:
+        return None
+    r = subprocess.run([fp, "-v", "error", "-select_streams", "v",
+                        "-show_entries", "stream=codec_name,codec_tag_string",
+                        "-of", "json", path],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if r.returncode != 0:
+        return None
+    try:
+        streams = json.loads(r.stdout.decode("utf-8", "replace"))["streams"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    return [{"codec": (s.get("codec_name") or "").strip().lower(),
+             "tag": (s.get("codec_tag_string") or "").strip()}
+            for s in streams]
+
+
+def undecodable_video(path, tracks):
+    """Why no picture can come out of *path*, as a sentence for the operator -
+    the file, the format its picture is stored in, and what to do about it.
+    Never ffmpeg's own words: what it says ("no decoder found for: none")
+    names neither the file nor the fix."""
+    if not tracks:
+        return ("%s holds no video, so there is no picture to take from it - "
+                "check it really is the clip you meant (an audio file with a "
+                "video file's name reads exactly like this)." % path)
+    tags = ", ".join(sorted(set(t["tag"] or "?" for t in tracks)))
+    return ("no picture can be read out of %s: its video is stored as %s, and "
+            "this machine's ffmpeg has no decoder for that. Re-export the clip "
+            "as an ordinary H.264 .mp4 from whatever plays it - converting it "
+            "here would need the very decoder that is missing." % (path, tags))
+
+
+def video_stream(src):
+    """Which video track of *src* to decode: the first one ffmpeg can actually
+    decode, or None when there is no ffprobe and its own pick has to stand.
+    Refuses, in words, when nothing in the file can be decoded.
+
+    FFMPEG PICKS THE BIGGEST TRACK, NOT A READABLE ONE.  A track whose format
+    it has no decoder for is a candidate like any other, so one junk track in
+    front of the picture killed the whole run - the media step ended on
+    ``Decoding requested, but no decoder found for: none`` with the file it
+    could not read named nowhere in it (DoomWalrus666, 2026-09-11, a
+    multi-boot card whose second image had its art taken from such a clip)."""
+    tracks = video_tracks(src)
+    if tracks is None:
+        return None
+    for i, t in enumerate(tracks):
+        if t["codec"] not in UNDECODABLE:
+            return i
+    raise Refused(undecodable_video(src, tracks))
+
+
 def scale_png(src, out, size, seek=None):
     """Aspect-fit *src* (any image ffmpeg/PIL reads) into an RGBA WxH PNG, letterboxed
     with transparency.  ffmpeg (lanczos) when present, PIL otherwise.  seek=T grabs
@@ -1065,7 +1133,11 @@ def scale_png(src, out, size, seek=None):
             os.remove(out)                 # an old file must not pass for a frame ffmpeg never wrote
         except OSError:
             pass
-        run(cmd + ["-i", src, "-frames:v", "1", "-vf", vf, out], "ffmpeg scale")
+        # A STILL IS TAKEN AS IT COMES (one picture, one stream); only a clip
+        # is asked which of its tracks holds the picture.
+        idx = video_stream(src) if (seek is not None or is_video_path(src)) else None
+        pick = [] if idx is None else ["-map", "0:v:%d" % idx]
+        run(cmd + ["-i", src] + pick + ["-frames:v", "1", "-vf", vf, out], "ffmpeg scale")
         if not os.path.isfile(out) or os.path.getsize(out) == 0:
             raise Refused("ffmpeg wrote no frame from %s%s (past the end of the clip?)"
                           % (src, " at %.2f s" % float(seek) if seek is not None else ""))
@@ -1096,11 +1168,17 @@ def make_gif(src, out, plan, start=0.0, workdir=None):
         pre += ["-ss", "%.3f" % start]
     pre += ["-t", "%.3f" % plan.seconds, "-i", src]
     fps_scale = "fps=%d,scale=%d:%d:flags=lanczos" % (plan.fps, plan.w, plan.h)
-    run([ff] + pre + ["-vf", fps_scale + ",palettegen=max_colors=256:stats_mode=diff", pal],
+    # Both passes are pinned to the track the picture is in (see video_stream):
+    # the first as a mapping, the second as the filtergraph's own input label,
+    # because a -lavfi graph picks its unlabelled input the same way ffmpeg does.
+    idx = video_stream(src)
+    pick = [] if idx is None else ["-map", "0:v:%d" % idx]
+    label = "" if idx is None else "[0:v:%d]" % idx
+    run([ff] + pre + pick + ["-vf", fps_scale + ",palettegen=max_colors=256:stats_mode=diff", pal],
         "ffmpeg palettegen")
     try:
         run([ff] + pre + ["-i", pal, "-lavfi",
-                          fps_scale + "[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+                          label + fps_scale + "[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
                           "-frames:v", str(plan.frames), "-loop", "0", out], "ffmpeg paletteuse")
     finally:
         try:
@@ -1193,14 +1271,16 @@ def normalise_wav(src, out, max_seconds=None, fade_ms=0):
     return write_wav_s16(out, L, R)
 
 
-def probe_fps(path, default=None):
+def probe_fps(path, default=None, stream=0):
     """The video's native frame rate (frames per second), or *default* when
-    it cannot be read (no ffprobe, an audio-only or odd file)."""
+    it cannot be read (no ffprobe, an audio-only or odd file).  *stream* is
+    which video track to read it off - the one the GIF will be made from,
+    which is not always the first (see :func:`video_stream`)."""
     fp = find_ffmpeg("ffprobe")
     if not fp:
         return default
     r = subprocess.run(
-        [fp, "-v", "error", "-select_streams", "v:0",
+        [fp, "-v", "error", "-select_streams", "v:%d" % int(stream),
          "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", path],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     text = r.stdout.decode("utf-8", "replace").strip().splitlines()
@@ -1670,7 +1750,8 @@ def cmd_anim(a):
         if a.fps:
             plan = gif_first_plan(size, a.seconds, a.fps)
         else:
-            plan = gif_native_plan(size, probe_fps(src, default=GIF_MAX_NATIVE_FPS), a.seconds)
+            plan = gif_native_plan(size, probe_fps(src, default=GIF_MAX_NATIVE_FPS,
+                                                   stream=video_stream(src) or 0), a.seconds)
         info, used, tries = gif_fit(src, a.out, plan, a.start, work)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -1932,7 +2013,7 @@ def _prepare_anim(i, img, spec, size, out, work, log=say):
     if spec["fps_explicit"]:
         plan = gif_first_plan(size, spec["seconds"], spec["fps"])
     else:
-        native = probe_fps(src, default=spec["fps"])
+        native = probe_fps(src, default=spec["fps"], stream=video_stream(src) or 0)
         plan = gif_native_plan(size, native, spec["seconds"])
         log("  %s: the source's own %.3g fps, a %.3g s loop (%d frames)"
             % (name, plan.fps, plan.seconds, plan.frames))

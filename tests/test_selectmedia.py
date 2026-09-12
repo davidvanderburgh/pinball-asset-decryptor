@@ -1158,6 +1158,86 @@ def test_art_from_a_video_frame(sm, tmp_path):
     assert not os.path.exists(str(tmp_path / "late.png"))
 
 
+def _clip_with_an_unreadable_track(tmp_path, name, second_track=False):
+    """An .mp4 whose FIRST video track is stored under a four-character code
+    no ffmpeg knows - the file is a real, valid MP4 and the track's bytes are
+    real H.264; only the name of the format is nonsense, which is exactly what
+    a clip ffmpeg has no decoder for looks like from the outside.  With
+    *second_track*, a smaller readable MPEG-4 track rides behind it."""
+    import subprocess
+    src = str(tmp_path / name)
+    cmd = [shutil.which("ffmpeg"), "-y", "-v", "error",
+           "-f", "lavfi", "-i", "testsrc=duration=1:size=128x72:rate=10"]
+    if second_track:
+        cmd += ["-f", "lavfi", "-i", "testsrc=duration=1:size=64x36:rate=10",
+                "-map", "0:v", "-map", "1:v", "-c:v:0", "libx264",
+                "-c:v:1", "mpeg4"]
+    cmd += ["-pix_fmt", "yuv420p", src]
+    subprocess.run(cmd, check=True)
+    with open(src, "rb") as f:
+        data = f.read()
+    with open(src, "wb") as f:          # 'avc1' is the H.264 track's, only
+        f.write(data.replace(b"avc1", b"zzq1"))
+    return src
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
+def test_a_clip_no_decoder_can_read_is_refused_by_name(sm, tmp_path):
+    """A clip whose format this ffmpeg has no decoder for is refused with the
+    FILE and the FORMAT in the sentence.
+
+    What it used to say was ffmpeg's own line - 'Decoding requested, but no
+    decoder found for: none' - which names neither, so a menu of several
+    images gave no clue WHICH clip to replace (DoomWalrus666, 2026-09-11)."""
+    src = _clip_with_an_unreadable_track(tmp_path, "victory.mp4")
+    out = str(tmp_path / "art.png")
+    with pytest.raises(sm.Refused) as e:
+        sm.scale_png(src, out, (64, 36), seek=0.0)
+    said = str(e.value)
+    assert "victory.mp4" in said and "zzq1" in said
+    assert "no decoder found for" not in said, "ffmpeg's own words, not ours"
+    assert ".mp4" in said.split("Re-export")[1], "and how to fix it"
+    assert not os.path.exists(out)
+    # the same file, the same sentence, from the animation's encoder
+    with pytest.raises(sm.Refused) as e2:
+        sm.make_gif(src, str(tmp_path / "anim.gif"),
+                    sm.gif_first_plan((64, 36), 1.0, 10), 0.0, str(tmp_path))
+    assert "victory.mp4" in str(e2.value) and "zzq1" in str(e2.value)
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
+def test_the_picture_is_taken_off_the_track_that_holds_one(sm, tmp_path, monkeypatch):
+    """ffmpeg picks the BIGGEST video track, decodable or not, so a junk track
+    in front of the picture killed a run that had a perfectly good picture in
+    it.  Both encoders take the first track that can actually be decoded."""
+    src = _clip_with_an_unreadable_track(tmp_path, "two.mp4", second_track=True)
+    assert [t["codec"] for t in sm.video_tracks(src)][0] in sm.UNDECODABLE
+    assert sm.video_stream(src) == 1, "the readable one, not the first"
+
+    art = str(tmp_path / "art.png")
+    sm.scale_png(src, art, (64, 36), seek=0.0)
+    with open(art, "rb") as f:
+        assert sm.png_size(f.read()) == (64, 36)
+    gif = str(tmp_path / "anim.gif")
+    sm.make_gif(src, gif, sm.gif_first_plan((64, 36), 1.0, 10), 0.0, str(tmp_path))
+    assert sm.gif_info(open(gif, "rb").read())["frames"] > 0
+
+    # ...and ffmpeg's own pick really is the broken one: with the choice
+    # taken away (no ffprobe to ask), the very same call fails.
+    os.remove(art)
+    monkeypatch.setattr(sm, "video_stream", lambda _src: None)
+    with pytest.raises(sm.Refused):
+        sm.scale_png(src, art, (64, 36), seek=0.0)
+
+
+def test_a_file_with_no_video_in_it_says_so(sm):
+    """The other half of the refusal: nothing to decode at all.  An audio file
+    under a video file's name is the common way there, so it is named."""
+    said = sm.undecodable_video("D:/clips/theme.mp4", [])
+    assert "theme.mp4" in said and "no video" in said
+    assert "audio" in said
+
+
 def test_a_music_bed_is_a_loop_not_a_whole_track(sm, tmp_path):
     """A game's music track is minutes long and 176 KB a second, so ONE of
     them is over the whole media budget with nothing left for the pictures.

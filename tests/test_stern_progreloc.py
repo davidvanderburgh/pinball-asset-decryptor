@@ -241,6 +241,28 @@ def test_census_sees_every_reference_kind(synth):
     assert offs["dead"] not in c
 
 
+def test_a_c_string_tail_is_not_a_pointer(synth):
+    """The last three characters of a NUL-terminated C++ mangled name plus
+    its terminator read as a little-endian ``0x005f5350`` — an address
+    squarely inside these games' ``.rodata`` (PAD-130).  Real pointers are
+    reached by a zero high byte or by padding, never by running text."""
+    raw, offs = synth
+    name = b"_ZNSt12_Vector_baseIN6Radium5ShapeEEC4EvEUlPvPKvE0_S0_PS_"
+    buf = bytearray(b"\x00" * 4)
+    while (len(buf) + len(name) - 3) % 4:
+        buf += b"\x00"
+    off = len(buf) + len(name) - 3
+    buf += name + b"\x00" * 4
+    assert struct.unpack_from("<I", buf, off)[0] == 0x005F5350
+    assert pr.is_string_tail_word(bytes(buf), off)
+    # a run too short to be a symbol name stays a pointer
+    short = b"\x00" * 4 + b"ABCD" + name[-3:] + b"\x00" * 4
+    assert struct.unpack_from("<I", short, 8)[0] == 0x005F5350
+    assert not pr.is_string_tail_word(short, 8)
+    assert not pr.is_string_tail_word(raw, offs["plain_lone"])
+    assert not pr.is_string_tail_word(raw, offs["cap_in10"])
+
+
 def test_counter_and_whitespace_lookalikes_are_not_references(synth):
     raw, offs = synth
     c = pr.reference_census(raw, _spans(raw))

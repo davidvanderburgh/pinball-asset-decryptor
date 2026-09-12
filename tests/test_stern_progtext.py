@@ -23,6 +23,12 @@ from pinball_decryptor.plugins.stern import progreloc, progtext
 VBASE = 0x10000
 BODY_OFF = 0x100          # strings/pointers live after the headers
 
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+IMG_DIR = os.environ.get("PAD_SPIKE2_IMG_DIR",
+                         os.path.join(REPO, "images", "Stern", "spike2"))
+GZ_PRO_116 = os.path.join(IMG_DIR,
+                          "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw")
+
 GAME_STOCK = os.path.join(
     os.environ.get("LOCALAPPDATA", ""), "Temp", "claude",
     "C--Users-david-Documents-development-pinball-asset-decryptor",
@@ -30,7 +36,7 @@ GAME_STOCK = os.path.join(
     "game_stock")
 
 
-def _elf(body, flags=5, extra=None):
+def _elf(body, flags=5, extra=None, vbase=VBASE):
     """A minimal 32-bit LE ELF: header + one PT_LOAD covering the file
     (readable + executable, like a game's text segment), plus — with
     *extra* = ``(vaddr, payload)`` — a read-only PT_LOAD appended
@@ -48,7 +54,7 @@ def _elf(body, flags=5, extra=None):
     ph = bytearray(32)
     struct.pack_into("<I", ph, 0, 1)              # PT_LOAD
     struct.pack_into("<I", ph, 4, 0)              # p_offset
-    struct.pack_into("<I", ph, 8, VBASE)          # p_vaddr
+    struct.pack_into("<I", ph, 8, vbase)          # p_vaddr
     struct.pack_into("<I", ph, 16, total)         # p_filesz
     struct.pack_into("<I", ph, 20, total)         # p_memsz
     struct.pack_into("<I", ph, 24, flags)         # p_flags
@@ -578,6 +584,111 @@ def test_relocated_elf_re_extracts_and_extends_from_used(reloc_elf):
     buf = _apply(grown, w3)
     assert _ref_value(buf, "lone", [offs["plain_lone"]]) == \
         ext["base_va"] + ((ext["used"] + 3) & ~3)
+
+
+# ---------------------------------------------------------------------------
+# A C string's last bytes read as a pointer INTO a display line (PAD-130).
+# The ELF's symbol tables are full of C++ mangled names; the three printable
+# characters before one's terminating NUL are a little-endian address in the
+# same .rodata the display strings live in, so the census used to report a
+# tail nobody shows and every rename of the host line was refused for not
+# ending in it.  On stock Godzilla Pro 1.16 that is "MEGALON AWARD" + 4.
+# ---------------------------------------------------------------------------
+
+TAIL_VBASE = 0x5F5000     # .rodata-ish: a VA here has a zero top byte
+AWARD_OFF = 0x140         # VA 0x5f5140, so +4 packs to the bytes "DQ_\0"
+AWARD = "MEGALON AWARD"
+OTHER = "GIGAN AWARD"
+KAIJU = "KAIJU AWARD"
+MANGLED = "_ZN6Radium9FontCache9load_fontEjEUlvE_S0_"
+
+
+def _build_string_tail():
+    """(raw, offs): two award lines, a real lone pointer to each, and a
+    mangled symbol name laid out so its own last three characters and its
+    terminating NUL encode ``AWARD`` + 4."""
+    body = bytearray(b"\x00" * (AWARD_OFF - BODY_OFF))
+    offs = {"award": BODY_OFF + len(body)}
+    body += AWARD.encode() + b"\x00"
+    offs["other"] = BODY_OFF + len(body)
+    body += OTHER.encode() + b"\x00"
+    while (BODY_OFF + len(body)) % 4:
+        body += b"\x00"
+    va = lambda k, d=0: TAIL_VBASE + offs[k] + d
+    offs["award_lone"] = BODY_OFF + len(body)
+    body += struct.pack("<I", va("award"))
+    offs["other_lone"] = BODY_OFF + len(body)
+    body += struct.pack("<I", va("other")) + b"\x00" * 4
+    tail = struct.pack("<I", va("award", 4))
+    assert tail[3] == 0 and all(0x21 <= c <= 0x7E for c in tail[:3])
+    name = (MANGLED + tail[:3].decode("latin1")).encode()
+    while (BODY_OFF + len(body) + len(name) - 3) % 4:
+        body += b"\x00"
+    offs["mangled_word"] = BODY_OFF + len(body) + len(name) - 3
+    body += name + b"\x00" * 4
+    return _elf(bytes(body), vbase=TAIL_VBASE), offs
+
+
+def test_a_mangled_name_tail_is_not_a_standalone_name():
+    raw, offs = _build_string_tail()
+    assert struct.unpack_from("<I", raw, offs["mangled_word"])[0] \
+        == TAIL_VBASE + offs["award"] + 4
+    rows = {r["text"]: r for r in progtext.enumerate_program_strings(raw)}
+    assert rows[AWARD]["refs"] == 1 and rows[AWARD]["tail_of"] is None
+    assert AWARD[4:] not in rows              # no phantom "LON AWARD" row
+    assert progreloc.is_string_tail_word(raw, offs["mangled_word"])
+    assert not progreloc.is_string_tail_word(raw, offs["award_lone"])
+
+
+def test_both_award_lines_rename_to_one_name():
+    """The tester's report: two award lines merged into one name, and only
+    the one with a mangled-name lookalike behind it was ever skipped."""
+    raw, offs = _build_string_tail()
+    msgs, log = _logs()
+    writes, n, blob = progtext.plan_writes(raw, {AWARD: KAIJU, OTHER: KAIJU},
+                                           log)
+    assert n == 2 and blob == b"" and not _warnings(msgs)
+    buf = _apply(raw, writes)
+    assert buf[offs["award"]:offs["award"] + len(AWARD)] \
+        == KAIJU.encode().ljust(len(AWARD), b"\x00")
+    assert buf[offs["other"]:offs["other"] + len(OTHER)] == KAIJU.encode()
+    # the symbol name that used to read as a pointer is left alone, here and
+    # when the host relocates (a retarget would write into the mangled name)
+    word = slice(offs["mangled_word"], offs["mangled_word"] + 4)
+    assert buf[word] == raw[word]
+    writes, n, blob = progtext.plan_writes(
+        raw, {AWARD: "KAIJU AWARD OF THE MONSTER ISLANDS"}, None, RELOC)
+    assert n == 1 and offs["mangled_word"] not in dict(writes)
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not os.path.isfile(GZ_PRO_116),
+                    reason="needs the stock Godzilla Pro 1.16 card image")
+def test_godzilla_pro_116_renames_every_award_line():
+    """The real card PAD-130 was reported on: ``"PS_\0"`` at file offset
+    0x857c of the game ELF reads as ``MEGALON AWARD`` + 4, so that one
+    rename was skipped while the other award lines on the same card
+    renamed cleanly."""
+    from pinball_decryptor.plugins.stern.explorer import CardImage
+    from pinball_decryptor.plugins.stern.info import (_game_elf_bytes,
+                                                      _walk_partition)
+    with CardImage(GZ_PRO_116) as card:
+        part = max((p for p in card.partitions() if p.browsable),
+                   key=lambda p: p.size)
+        reader = card.reader(part.index)
+        raw = _game_elf_bytes(reader, _walk_partition(reader))
+    assert raw[0x857C:0x8580] == b"PS_\x00"
+    rows = {r["text"]: r for r in progtext.enumerate_program_strings(raw)}
+    assert rows["MEGALON AWARD"]["refs"] == 1
+    assert "LON AWARD" not in rows
+    msgs, log = _logs()
+    writes, n, blob = progtext.plan_writes(
+        raw, {"MEGALON AWARD": KAIJU, "GIGAN AWARD": KAIJU,
+              "HEDORAH AWARD": KAIJU}, log)
+    assert n == 3 and blob == b"" and not _warnings(msgs)
+    assert sorted(b for _o, b in writes) == [KAIJU.encode(),
+                                             KAIJU.encode() + b"\x00" * 2,
+                                             KAIJU.encode() + b"\x00" * 2]
 
 
 # ---------------------------------------------------------------------------

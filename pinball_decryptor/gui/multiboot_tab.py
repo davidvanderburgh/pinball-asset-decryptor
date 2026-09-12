@@ -178,6 +178,7 @@ import errno
 import hashlib
 import io
 import json
+import ntpath
 import os
 import queue
 import re
@@ -4289,7 +4290,10 @@ def _shorten(text, width=40):
 def _cell(value):
     """A media field as one word or one file name."""
     v = (value or "").strip()
-    return v if v.lower() in _WORDS or not v else os.path.basename(v)
+    # ntpath, NOT os.path: the field is a RECORDED path, and a card built on
+    # Windows names its WAVs with backslashes that os.path on a Mac or Linux
+    # desktop would hand back whole.  ntpath splits on both separators.
+    return v if v.lower() in _WORDS or not v else ntpath.basename(v)
 
 
 def _cell_image(row):

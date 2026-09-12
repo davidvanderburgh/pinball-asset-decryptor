@@ -8391,6 +8391,148 @@ def test_parse_plan_reads_the_shared_row_and_the_strip_says_so():
     assert v2["detail"] == "4.00 GB of games, 5.00 GB free for updates." and v2["saved"] == 0
 
 
+#: The report's own card (C FB, PAD-137): 10.83 GB of games and 6.21 GB of
+#: room for updates, which together want a 32 GB card the games alone would
+#: not.  Whole sectors, and the rows plus the room plus the overhead add up
+#: to the total, the way the tool's own arithmetic does.
+PLAN_ROOMY = (
+    "image-size 0 /dev/mmcblk0p3 1600000000 Abbey.raw\n"
+    "image-size 1 /dev/mmcblk0p7:img1 4600000000 Pepper.raw\n"
+    "image-size 2 /dev/mmcblk0p7:img2 4630000128 Revolver.raw\n"
+    "image-size free 6210000384 room for updates in the games partitions\n"
+    "image-size overhead 609999872 boot + rootfs + data + dump + metadata\n"
+    "image: 34472657 sectors = 17650000384 bytes (17.65 GB)\n"
+    "  fits Stern 8G  image size 7861174272: NO (spare -9788826112)\n"
+    "  fits Stern 16G image size 15494807552: NO (spare -2155192832)\n"
+    "  fits Stern 32G image size 30359420928: YES (spare 12709420544)\n")
+
+
+def test_the_strip_says_why_the_card_is_bigger_than_the_games():
+    """C FB, PAD-137: "I was wondering why it suggested a 32gb card for my
+    images when it looks like it does not break 16gb".  Both numbers were
+    already on the strip; what was missing was the sum that joins them."""
+    view = card_size_view(parse_plan(PLAN_ROOMY))
+    assert view["head"] == "32 GB" and not view["over"]
+    assert view["detail"] == (
+        "10.83 GB of games + 6.21 GB free for updates = 17.65 GB, "
+        "so 32 GB and not 16 GB.")
+    # ...and the line still fits the strip, which gives the BAR up before
+    # it gives up the words
+    assert len(view["detail"]) <= multiboot_tab.MultibootPanel.SIZE_DETAIL_MAX
+    # the paragraph behind it names the smaller card's real size, the build's
+    # own, and the one tick that does something about it
+    assert "A 16 GB card holds 15.49 GB and this build is 17.65 GB." \
+        in view["why"]
+    assert "Compact build" in view["why"]
+    # the card sizes are the PLAN's, never a table in the view: drop the
+    # 16G row and there is no smaller card to name
+    info = parse_plan(PLAN_ROOMY)
+    del info["fits"]["16G"]
+    assert multiboot_tab.card_without_room(
+        info, info["bytes"], info["free"], "32 GB") is None
+
+
+def test_the_strip_explains_nothing_when_the_games_want_that_card_anyway():
+    """The clause is only for a card the ROOM bought.  A list whose games
+    need the card on their own gets the two numbers and no lecture."""
+    text = PLAN_ROOMY.replace("image-size 1 /dev/mmcblk0p7:img1 4600000000",
+                              "image-size 1 /dev/mmcblk0p7:img1 16000000000")
+    text = text.replace("image: 34472657 sectors = 17650000384 bytes",
+                        "image: 56736329 sectors = 29050000384 bytes")
+    text = text.replace("32G image size 30359420928: YES (spare 12709420544)",
+                        "32G image size 30359420928: YES (spare 1309420544)")
+    text = text.replace("16G image size 15494807552: NO (spare -2155192832)",
+                        "16G image size 15494807552: NO (spare -13555192832)")
+    view = card_size_view(parse_plan(text))
+    assert view["head"] == "32 GB"
+    assert view["detail"] == "22.23 GB of games, 6.21 GB free for updates."
+    assert view["why"] == ""
+    # ...and neither does the compact layout's own sentence grow one
+    assert card_size_view(parse_plan(PLAN_ROOMY.replace(
+        "image-size free", "image-size shared 900000000 stored once\n"
+        "image-size free")))["why"] == ""
+
+
+def test_the_two_confirm_boxes_name_each_other():
+    """C FB, PAD-137: "the confirm sound is both in the image properties and
+    the overall properties which seems to not be in synch".  One setting
+    falling back to the other - so each box says what the other is doing."""
+    rows = [ImageRow("a.raw", title="Abbey Road"),
+            ImageRow("b.raw", title="Sgt. Pepper", confirm="synth"),
+            ImageRow("c.raw", title="Revolver")]
+    assert multiboot_tab.own_confirm_note(rows) == (
+        "1 of the 3 images has a confirm sound of its own - Sgt. Pepper - "
+        "and does not use this one.")
+    rows[2].confirm = r"D:\wav\ComeTogether.wav"
+    assert multiboot_tab.own_confirm_note(rows) == (
+        "2 of the 3 images have a confirm sound of their own - Sgt. Pepper "
+        "and Revolver - and do not use this one.")
+    # a row that inherits says so with '' or the word, and a name a LOAD read
+    # off the card is the image's own
+    assert multiboot_tab.own_confirm_note(
+        [ImageRow("a.raw", confirm=""), ImageRow("b.raw", confirm="menu")]) == ""
+    assert multiboot_tab.has_own_confirm(
+        ImageRow("a.raw", confirm="confirm2.wav", confirm_on_card=True))
+    # ...and a long list does not read out every name
+    many = [ImageRow("%d.raw" % i, title="T%d" % i, confirm="synth")
+            for i in range(5)]
+    assert "T0, T1, T2 and 2 more" in multiboot_tab.own_confirm_note(many)
+    # an untitled row is named the way the list names it
+    assert multiboot_tab.plain_title(ImageRow(""), 2) == "image 2"
+    assert multiboot_tab.plain_title(
+        ImageRow("D:/x/turtles_pro-1_59_0.Release.8G.sdcard.raw")) == \
+        "turtles_pro-1_59_0"
+    # and the other direction: what the image dialog's 'menu' resolves to
+    assert multiboot_tab.menu_confirm_now("auto") == "auto"
+    assert multiboot_tab.menu_confirm_now("") == "none"
+    assert multiboot_tab.menu_confirm_now(r"D:\wav\ComeTogether.wav") == \
+        "ComeTogether.wav"
+
+
+def test_both_sound_panels_carry_the_other_ones_answer(tmp_path):
+    """The two sentences above, in the two dialogs that need them."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._confirm_var.set("auto")
+        panel._rows[1].title = "Sgt. Pepper"
+        panel._rows[1].confirm = "synth"
+        dlg = panel.edit_image(0)
+        root.update()
+        notes = " ".join(_label_texts(dlg.body))
+        assert "menu = whatever the whole menu uses, which is auto at the " \
+            "moment." in notes
+        dlg.cancel()
+        root.update()
+        menu = panel.open_menu_settings()
+        root.update()
+        notes = " ".join(_label_texts(menu.body))
+        assert "1 of the 2 images has a confirm sound of its own - " \
+            "Sgt. Pepper - and does not use this one." in notes
+        menu.cancel()
+        root.update()
+        # ...and with nobody overriding it, Menu settings says nothing
+        panel._rows[1].confirm = ""
+        menu = panel.open_menu_settings()
+        root.update()
+        assert "confirm sound of its own" not in " ".join(
+            _label_texts(menu.body))
+        menu.cancel()
+    finally:
+        root.destroy()
+
+
+def _label_texts(widget):
+    """Every label's text under *widget*, in creation order."""
+    out = []
+    for w in widget.winfo_children():
+        if w.winfo_class() in ("TLabel", "Label"):
+            out.append(str(w.cget("text")))
+        out.extend(_label_texts(w))
+    return out
+
+
 def test_form_from_inspect_reads_the_store_layout_as_the_compact_tick(monkeypatch, tmp_path):
     _win(monkeypatch)
     info = _rich_report(tmp_path)

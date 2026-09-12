@@ -4152,13 +4152,43 @@ def _gbytes(n):
 CARD_SIZES = (("8G", "8 GB"), ("16G", "16 GB"), ("32G", "32 GB"))
 
 
+def card_without_room(info, total, free, need):
+    """``(label, bytes)`` of the card this build would need IF the games
+    partitions kept no room for updates - but only when that is a smaller
+    card than the one it does need.  ``None`` otherwise.
+
+    THE QUESTION THIS ANSWERS is C FB's (PAD-137): "I was wondering why it
+    suggested a 32gb card for my images when it looks like it does not break
+    16gb".  The games were 10.83 GB and the card was 32 GB, and the strip
+    named both numbers without ever joining them up - the 6.21 GB of free
+    room between them was the whole answer and read as a footnote.
+
+    The card sizes come out of the plan's own ``fits`` rows (each is
+    ``total + spare``), never a table here: two places holding Stern's image
+    sizes is one place for them to disagree."""
+    fits = info.get("fits") or {}
+    for key, label in CARD_SIZES:
+        if label == need:
+            # the games alone want this card too, so the room is not what
+            # pushed it up and there is nothing to explain
+            return None
+        spare = fits.get(key)
+        if spare is None:
+            continue
+        cap = total + spare[1]
+        if total - free <= cap:
+            return label, cap
+    return None
+
+
 def card_size_view(info):
     """WHAT THE SIZE STRIP SHOWS, from the plan's numbers and nothing else.
 
     ``{"known", "need", "over", "total", "scale", "cap", "spare", "bands",
-    "head", "detail"}`` - ``bands`` being ``[(label, bytes, kind), ...]`` with
-    *kind* ``"image"`` or ``"overhead"``, and ``cap`` the biggest card there
-    is (where the overflow starts).
+    "head", "detail", "why"}`` - ``bands`` being ``[(label, bytes, kind), ...]``
+    with *kind* ``"image"`` or ``"overhead"``, ``cap`` the biggest card there
+    is (where the overflow starts), and ``why`` the paragraph behind the
+    sentence when the card you must buy is bigger than the games in it.
 
     ``scale`` is the card the bar is drawn against - the smallest one that
     fits - so the fill means "this much of the card you need is used" rather
@@ -4172,7 +4202,8 @@ def card_size_view(info):
     fits = info.get("fits") or {}
     view = {"known": bool(total), "need": None, "over": False,
             "total": total or 0, "scale": total or 1, "spare": None,
-            "cap": None, "bands": [], "head": "", "detail": "", "saved": 0}
+            "cap": None, "bands": [], "head": "", "detail": "", "saved": 0,
+            "why": ""}
     if not total:
         return view
     biggest = fits.get(CARD_SIZES[-1][0])
@@ -4220,6 +4251,24 @@ def card_size_view(info):
         view["head"] = view["need"]
         view["detail"] = "%s of games, %s free for updates." % (
             _gbytes(games), _gbytes(free))
+        # WHY THE CARD IS BIGGER THAN THE GAMES (PAD-137).  Only when the
+        # room is what bought the bigger card: on every other list the two
+        # numbers above are the whole story and a second clause about a card
+        # nobody has to buy would be noise.
+        smaller = card_without_room(info, total, free, view["need"])
+        if smaller:
+            label, cap = smaller
+            view["detail"] = (
+                "%s of games + %s free for updates = %s, so %s and not %s."
+                % (_gbytes(games), _gbytes(free), _gbytes(total),
+                   view["need"], label))
+            view["why"] = (
+                "A %s card holds %s and this build is %s. The games are only "
+                "%s: the rest is the room the games partitions keep free so "
+                "an image can be updated in place, and the first image's card "
+                "is copied whole - empty space and all. Tick Compact build to "
+                "size the card to what is actually in the images."
+                % (label, _gbytes(cap), _gbytes(total), _gbytes(games)))
     else:
         view["head"] = view["need"]
         view["detail"] = "%s of code, %s spare on a %s card." % (
@@ -4611,6 +4660,62 @@ def list_code(row):
     # .raw and a member that has not been read yet is blank, so treating a
     # blank as a disagreement would alarm somebody over nothing.
     return "mixed" if len(known) > 1 else known[0]
+
+
+def has_own_confirm(row):
+    """Whether this image carries a confirm sound OF ITS OWN - the one the
+    machine plays instead of the menu's.  The same test the Confirm column
+    makes (see ``_confirm_cell``): '' and 'menu' both mean the menu's."""
+    own = (getattr(row, "confirm", "") or "").strip()
+    return bool(getattr(row, "confirm_on_card", False)) or bool(
+        own and own.lower() != "menu")
+
+
+def plain_title(row, index=0):
+    """The row's name in a sentence: its menu title, the name the tab would
+    fall back to, or ``image N``.  :func:`list_title`'s answer without the
+    bracketed complaint about the .raw, which reads as part of the name in
+    running text."""
+    title = (row.title or "").strip()
+    if title:
+        return title
+    path = (row.path or "").strip().strip('"')
+    return suggest_title(path)[0] if path else "image %d" % index
+
+
+def menu_confirm_now(value):
+    """What an image's ``menu`` confirm sound actually is: the menu-wide
+    setting, said the way the Confirm column says it.
+
+    C FB, PAD-137: "the confirm sound is both in the image properties and
+    the overall properties which seems to not be in synch".  They are the
+    same setting - one falls back to the other - but the two panels never
+    said so in the same words: the list column already showed the inherited
+    value as ``(auto)`` while the dialog behind it showed ``menu``."""
+    return _cell((value or "").strip()) or "none"
+
+
+def own_confirm_note(rows):
+    """'' or the sentence Menu settings' own note carries about its Confirm
+    sound: which images have one of their own and so never play it.
+
+    The other half of :func:`menu_confirm_now` - each panel says what the
+    other one is doing with the setting they share."""
+    rows = list(rows or ())
+    names = [plain_title(r, i) for i, r in enumerate(rows)
+             if has_own_confirm(r)]
+    if not names:
+        return ""
+    shown = ", ".join(names[:3]) + (
+        " and %d more" % (len(names) - 3) if len(names) > 3 else "")
+    if 1 < len(names) <= 3:
+        shown = ", ".join(names[:-1]) + " and " + names[-1]
+    one = len(names) == 1
+    return ("%d of the %d images %s a confirm sound of %s own - %s - and %s "
+            "use this one." % (len(names), len(rows),
+                               "has" if one else "have",
+                               "its" if one else "their", shown,
+                               "does not" if one else "do not"))
 
 
 def _one_line_text(text, width):
@@ -5054,15 +5159,25 @@ class ImageEditorDialog(_Modal):
         # which is the move click; the same tester set every image's confirm
         # sound to his own clip, walked the menu with the flippers, heard the
         # click each time and reported that the setting "didn't take".
+        #
+        # AND 'menu' NAMES THE SOUND IT MEANS.  The same tester read the two
+        # confirm boxes - this one and Menu settings' - as two settings that
+        # were "not in synch" (C FB, PAD-137), because the list column behind
+        # this dialog already showed the inherited value as '(auto)' while the
+        # box in front of him said 'menu'.  One of them had to say both words.
+        # Computed once, at build: this dialog is modal, so the menu's own
+        # sound cannot change while it is up.
         ttk.Label(snd, foreground=th["gray"], wraplength=560,
                   justify=tk.LEFT,
                   text="Music loops while this image is highlighted. The "
                        "confirm sound plays when you press START on it - not "
                        "as you scroll past, which is the menu's move click. "
-                       "menu = whatever the whole menu uses. Under those "
-                       "words, each list offers every sound file this "
-                       "menu already uses. " + PLAY_NAME
-                       + " hears either one now, here.").grid(
+                       "menu = whatever the whole menu uses, which is %s at "
+                       "the moment. Under those words, each list offers every "
+                       "sound file this menu already uses. %s hears either "
+                       "one now, here."
+                       % (menu_confirm_now(panel._confirm_var.get()),
+                          PLAY_NAME)).grid(
             row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
 
     def _browse(self, kind):
@@ -5114,11 +5229,20 @@ class MenuSettingsDialog(_Modal):
                                 "setting (recommended)",
                         variable=panel._machine_vol_var).grid(
             row=3, column=0, columnspan=4, sticky=tk.W, pady=(2, 0))
+        # WHICH IMAGES IGNORE THE CONFIRM SOUND ABOVE (C FB, PAD-137: the two
+        # confirm boxes "seem to not be in synch").  In the paragraph and
+        # right after the sentence about that sound, not on a line of its
+        # own: this dialog is 729 px tall on a 768 px desktop, and a second
+        # label with its own padding costs two lines and the OK button.
+        # Computed once, at build - the dialog is modal, and nothing behind
+        # it can add an image while it is up.
+        own = own_confirm_note(panel._rows)
         ttk.Label(g, foreground=th["gray"], wraplength=560, justify=tk.LEFT,
                   text="auto = a click and a stinger pulled from the primary "
                        "image; synth = generated tones. The move sound plays "
                        "on every flipper press; the confirm sound plays to "
                        "the end after START, before the game loads. "
+                       + (own + " " if own else "") +
                        "Under those words, each list offers every sound "
                        "file this menu already uses. " +
                        PLAY_NAME + " hears either one now, here. With the box "
@@ -7054,9 +7178,15 @@ class MultibootPanel:
             tone = th["error"] if view["over"] else th["fg"]
             self._size_need.configure(text=view["head"], foreground=tone)
             self._size_detail.configure(
-                text=view["detail"],
+                text=_one_line_text(view["detail"], self.SIZE_DETAIL_MAX),
                 foreground=th["error"] if view["over"] else th["gray"])
-            self._size_detail_tip.text = ""    # the tool's own numbers: short
+            # The tool's own numbers are short, and the sentence that says
+            # why the card is bigger than the games (PAD-137) is not: it
+            # hangs whole off the words, which is where a reader who is
+            # asking that question already has the pointer.
+            self._size_detail_tip.text = view.get("why") or (
+                view["detail"]
+                if len(view["detail"]) > self.SIZE_DETAIL_MAX else "")
             scale = float(view["scale"] or 1)
             x = 0.0
             for label, size, kind in view["bands"]:
@@ -7093,7 +7223,8 @@ class MultibootPanel:
                 ["%s: %s" % (label, _gbytes(size))
                  for label, size, _kind in view["bands"]]
                 + (["Saved by compact (stored once): %s" % _gbytes(view["saved"])]
-                   if view.get("saved") else []))
+                   if view.get("saved") else [])) + (
+                "\n\n" + view["why"] if view.get("why") else "")
         except tk.TclError:                             # pragma: no cover
             pass
 

@@ -441,3 +441,193 @@ def test_the_feeder_writes_a_source_letter_that_padsw_h_documents():
     assert "padsw.set_source('b')" in src
     hdr = open(os.path.join(RIG, "padsw.h"), encoding="utf8").read()
     assert "b  ballfeed.py" in hdr
+
+
+# --- PAD-134: who is playing, and the balls the feeder launched ------------
+#
+# DragonRR, 2026-09-12, trying to reach players 2, 3 and 4 to check their
+# images: "WITH BALL SAVE ON I can reliably drain the ball for player 1 ...
+# but now when I click ball 6 on the B/W display for player 2 it ignores me",
+# and "I suspect the machine thinks a ball is still in play". Every input in
+# his report is a MOUSE click in the playfield window, and the feeder's test
+# for "is a human playing this ball" read the KEYBOARD array - which a mouse
+# never moves. So it called him nobody and drained his live ball back to the
+# trough, and with ball save on that is every ball: the game re-serves and
+# fires its own AUTO PLUNGER (measured on godzilla_pro, item 21b).
+#
+# Offline, against a block written by hand: the only thing faked is the
+# guest's merge (_publish), which is one loop.
+
+
+def _sw(tmp_path, monkeypatch):
+    """ballfeed and padsw, pointed at a block that is not a running game's."""
+    monkeypatch.setenv("PAD_ROOT", str(tmp_path))
+    monkeypatch.setenv("PAD_SW_FILE", str(tmp_path / "padsw"))
+    monkeypatch.setenv("PAD_LED_FILE", str(tmp_path / "padled"))
+    import ballfeed
+    import padsw
+    return ballfeed, padsw
+
+
+def _feeder(ballfeed, tr, lane=62):
+    """A Feeder with its resolution skipped - no tables, no emulator."""
+    f = ballfeed.Feeder.__new__(ballfeed.Feeder)
+    f.dry = False
+    f.trough = tr
+    f.lane = lane
+    f.seen, f.said = {}, {}
+    f.shape = None
+    f.fed = 0
+    f.last_feed = 0.0
+    f.pending = []
+    f.my_gen = None
+    f.hands = 0
+    return f
+
+
+class _Block(bytearray):
+    """The switch block, as mutable as the mmap the helpers are written for.
+
+    A bare bytearray is not enough: padsw.bump() calls flush() on what it was
+    handed, because on a run that is a shared mapping the guest reads. One
+    no-op method is the whole difference.
+    """
+
+    def flush(self):
+        pass
+
+
+def _block(padsw, *made):
+    """The 4096-byte block with `made` closed in the script array AND the
+    merge, which is the only state a real run could be in."""
+    import struct
+    m = _Block(4096)
+    struct.pack_into("<I", m, padsw.OFF_MAGIC, padsw.MAGIC)
+    for i in made:
+        m[padsw.OFF_SCR_HELD + i] = 1
+        m[padsw.OFF_MRG + i] = 1
+    return m
+
+
+def _publish(padsw, m):
+    """The one thing the guest does that a desk test has to do itself."""
+    for i in range(padsw.MAX_ID):
+        m[padsw.OFF_MRG + i] = m[padsw.OFF_SCR_HELD + i]
+
+
+def _other_writer(padsw, m, sw, tag):
+    """Somebody else's script write, tagged the way padsw.bump() tags one."""
+    import struct
+    m[padsw.OFF_SCR_HELD + sw] = 1
+    struct.pack_into("<I", m, padsw.OFF_SCR_SRC, ord(tag))
+    struct.pack_into("<I", m, padsw.OFF_SCR_GEN,
+                     struct.unpack_from("<I", m, padsw.OFF_SCR_GEN)[0] + 1)
+
+
+def test_a_ball_played_with_the_MOUSE_is_not_a_ball_nobody_is_playing(
+        tmp_path, monkeypatch, tr):
+    """PAD-134's fault in one assertion: the window drives switches through
+    the helpers with PAD_SW_SRC=f, and that has to count as somebody playing.
+    """
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _feeder(ballfeed, tr)
+    m = _block(padsw, 71, 70, 69, 68, 67)          # one ball out, five home
+    f.pending = [(0.0, f._claim(m))]
+    _other_writer(padsw, m, 53, "f")               # a click on the artwork
+    f._way_home(m, 1000.0, f._claim(m))
+    assert f.pending == []                         # the ball is the player's
+    assert m[padsw.OFF_SCR_HELD + 66] == 0         # and it was NOT drained
+
+
+def test_the_rigs_own_automation_is_not_somebody_playing(tmp_path, monkeypatch,
+                                                        tr):
+    """The other half, and the reason this is a letter test and not "anything
+    wrote": autoattract, the switch exerciser and longplay run with nobody
+    watching, and THEIR launched balls must still come home - that is what
+    the game's ball search is waiting to see.
+    """
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _feeder(ballfeed, tr)
+    m = _block(padsw, 71, 70, 69, 68, 67)
+    f.pending = [(0.0, f._claim(m))]
+    _other_writer(padsw, m, 53, "a")               # autoattract's Service Back
+    f._way_home(m, 1000.0, f._claim(m))
+    assert f.pending == []
+    assert m[padsw.OFF_SCR_HELD + 66] == 1         # drained home
+
+
+def test_the_feeders_own_writes_are_not_a_pair_of_hands(tmp_path, monkeypatch,
+                                                        tr, ballmodel):
+    """The trap in counting script writes: the feeder writes that array too.
+
+    Without adopting its own bumps, answering one eject would read as a human
+    and cancel the way home of every ball already launched - the stranded ball
+    this fix is about, reintroduced from the other end.
+    """
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _feeder(ballfeed, tr)
+    m = _block(padsw, 71, 70, 69, 68, 67, 62)      # a ball waiting in the lane
+    before = f._claim(m)
+    assert f.run_plan(m, ballmodel.plan_launch(62, True), "auto plunger:")
+    _publish(padsw, m)
+    assert f._claim(m) == before
+
+
+def test_two_launched_balls_both_come_home_rather_than_one_being_forgotten(
+        tmp_path, monkeypatch, tr, ballmodel):
+    """It was ONE slot, so the second launch overwrote the first ball's timer
+    and that ball never came home: the game goes on believing it is in play,
+    which is a START that refuses and a ball search that never ends. A
+    multiball is the game doing this on purpose.
+    """
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _feeder(ballfeed, tr)
+    m = _block(padsw, 71, 70, 69, 68)              # two out, four home
+    claim = f._claim(m)
+    f.pending = [(0.0, claim), (1.0, claim)]
+    f._way_home(m, 1000.0, f._claim(m))
+    # ONE per poll: two drains off one merged read could both pick the same
+    # hole and put two balls in one position.
+    assert len(f.pending) == 1
+    _publish(padsw, m)
+    f._way_home(m, 1000.0, f._claim(m))
+    _publish(padsw, m)
+    assert f.pending == []
+    mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+    assert tr.count(mrg) == 6
+    assert tr.anomaly(mrg) is None
+
+
+def test_a_plunge_does_not_serve_a_ball_while_one_is_already_in_play(
+        tmp_path, monkeypatch, capsys):
+    """The button half of the same fault: the game counts the balls it asked
+    for, so a ball the rig adds is a ball the machine is short for ever, and
+    the next Start gets LOCATING PINBALLS. With ball save on it is one click
+    away - the game auto-plunges the saved ball itself, leaving an empty lane
+    with a ball in play.
+    """
+    monkeypatch.setenv("PAD_ROOT", str(tmp_path))
+    monkeypatch.setenv("PAD_SW_FILE", str(tmp_path / "padsw"))
+    import padsw
+    import plunge
+    # PINNED, not resolved: plunge.py looks its ids up in the running title's
+    # switch table at import, and on a machine that HAS the rig's tables that
+    # is whichever title ran last - a unit test that reads them is a test whose
+    # answer depends on the desk it runs at.
+    monkeypatch.setattr(plunge, "TROUGH", (71, 70, 69, 68, 67, 66))
+    monkeypatch.setattr(plunge, "SHOOTER", 62)
+    monkeypatch.setattr(plunge, "STEP_S", 0.0)
+    monkeypatch.setattr(plunge, "LANE_S", 0.0)
+    out = _block(padsw, 71, 70, 69, 68, 67)        # one ball in play
+    assert plunge.do_plunge(out) == 1
+    said = capsys.readouterr().out
+    assert "already in play" in said
+    assert "drain" in said                         # how a ball in play ends
+    assert out[padsw.OFF_SCR_HELD + 66] == 0       # no second ball served
+
+    # The control, and it is the one David asked for twice: ball start with
+    # every ball home still does the whole story.
+    rest = _block(padsw, 71, 70, 69, 68, 67, 66)
+    assert plunge.do_plunge(rest) == 0
+    assert rest[padsw.OFF_SCR_HELD + 66] == 0      # the far end left
+    assert "ball launched" in capsys.readouterr().out

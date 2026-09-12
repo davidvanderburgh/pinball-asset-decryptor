@@ -693,6 +693,18 @@ ball home after `PAD_BALL_HOME_MS` (default 5000 ms) unless a keyboard event
 claims it — titles that auto-plunge (DnD is the first one seen) were
 declaring **Device Malfunction: Auto Plunger** and emptying their own trough
 under the old always-refuse behavior.
+**PAD-134 (2026-09-12) fixed both halves of that claim.** "A keyboard event"
+was the wrong test: the virtual playfield window drives every switch through
+the helpers with `PAD_SW_SRC=f`, so a MOUSE-ONLY session moved nothing
+padglhost owns and the feeder took the live ball back 5 s after the game
+auto-launched it — with BALL SAVE on, on every ball, because that is when the
+game re-serves and auto-plunges. It now counts a click, a hand-run helper or a
+spinner rip as somebody playing (`HUMAN_TAGS`), and keeps ONE TIMER PER
+LAUNCHED BALL: the single slot it had meant a second launch overwrote the
+first, and that ball could never come home, so the game went on believing it
+was in play — a START that refuses and a LOCATING BALLS search that never
+ends. `plunge.py plunge` also stopped serving a ball into an empty lane when
+the trough says one is already out there.
 **The actual Start-refusal root cause was DATA, not code, and does not ship
 in this repo**: DnD LE's factory ball count is **8** — 6 in the trough plus
 **2 captive in the dragon** — and the game disarms its own Start/Tournament

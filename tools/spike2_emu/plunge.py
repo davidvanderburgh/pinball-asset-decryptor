@@ -251,6 +251,21 @@ def do_plunge(m):
     So it is conditional, which is also what the real button does: a plunger
     launches the ball that is there, and at ball start the machine has just
     put one there.
+
+    ★ AND THE CONDITION NEEDED A SECOND HALF (PAD-134). "The lane is empty" is
+    two different machines: one with every ball home, which is ball start and
+    wants the whole story - and one with a ball ALREADY OUT of the trough,
+    which is a ball in play, and serving there hands the game a ball it never
+    asked for. The game counts the balls it launched; the rig then has one more
+    out than that, so the machine is a ball short for ever: the next Start gets
+    LOCATING PINBALLS, the search fails and it drops back to attract. That is
+    the same fault the TODO records against `plunge.py game`, reached from the
+    button instead - and with BALL SAVE on it is one click away, because the
+    game re-serves and AUTO-PLUNGES the saved ball itself, leaving an empty
+    lane with a ball in play while the player is still reaching for Plunge.
+
+    A ball in play is observable, which is what makes this a check rather than
+    a guess: the trough is not full.
     """
     if _held(m, SHOOTER):
         padsw.take(m, (SHOOTER,))
@@ -258,6 +273,20 @@ def do_plunge(m):
             _set(m, sw, val)
         print("shooter lane opened (ball launched)")
         return 0
+    tr = _model()
+    mrg = _mrg(m)
+    if tr.positions and not tr.full(mrg):
+        # SHORT FIRST LINE, and that is measured rather than tidy: the
+        # playfield window shows this in a status bar as wide as the ARTWORK
+        # (559 px on David's desk), both lines are joined into it, and
+        # whatever is at the end is what gets clipped (PAD-128). So the
+        # refusal leads, and the count and the command form follow.
+        print("a ball is already in play - not ejecting one the game did not"
+              " ask for")
+        print("  trough %d/%d; the ball in play ends on an EMPTY trough dot"
+              " (plunge.py drain)"
+              % (tr.count(mrg), len(tr.positions)))
+        return 1
     return do_serve(m)
 
 

@@ -119,6 +119,25 @@ def plunge_lane_ball(shim, lane):
     time.sleep(0.1)
 
 
+def window_click(shim, sw, tag="f"):
+    """A click on the virtual playfield, as the WINDOW itself makes one.
+
+    The window never writes this block directly: it runs the rig's helpers
+    inside WSL with `PAD_SW_SRC=f` (playfield.wsl_run), so what reaches the
+    guest is a SCRIPT write carrying that letter - which is the only evidence
+    the feeder has that a person with a mouse is playing (PAD-134). Press and
+    release, because that is what a click is, and the source letter goes in
+    BEFORE the generation exactly as padsw.bump() writes it.
+    """
+    for val in (1, 0):
+        shim.m[padsw.OFF_SCR_HELD + sw] = val
+        struct.pack_into("<I", shim.m, padsw.OFF_SCR_SRC, ord(tag))
+        struct.pack_into("<I", shim.m, padsw.OFF_SCR_GEN,
+                         struct.unpack_from("<I", shim.m,
+                                            padsw.OFF_SCR_GEN)[0] + 1)
+        time.sleep(0.08)
+
+
 def main():
     game = sys.argv[1] if len(sys.argv) > 1 else "godzilla_pro"
     tables = os.path.join(padpath.tables() or "", game)
@@ -142,10 +161,17 @@ def main():
     shim.start()
     wire = Wire(led)
 
+    # PAD_BALL_HOME_MS=0 FOR THIS BLOCK, and it is not a detail. These checks
+    # are about the FEED - how many balls an eject burst puts in play and that
+    # an empty trough is refused - and the way home is a drain on a timer that
+    # would put balls back underneath them. It used to be invisible here by
+    # accident: one pending slot, overwritten by every launch, never matured.
+    # With one timer per launched ball (PAD-134) it does, so the way home gets
+    # its own section and its own feeder below rather than leaking into these.
     env = dict(os.environ, PAD_SW_FILE=sw, PAD_LED_FILE=led,
                PAD_TABLES=padpath.tables() or "", PAD_GAME=game,
                PAD_BALL_HZ="50", PAD_BALL_LANE_MS="150",
-               PAD_BALL_MIN_GAP_MS="300")
+               PAD_BALL_MIN_GAP_MS="300", PAD_BALL_HOME_MS="0")
     p = subprocess.Popen([sys.executable, os.path.join(HERE, "ballfeed.py")],
                          env=env, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -261,6 +287,96 @@ def main():
     check("take removes a ball without touching the lane",
           shim.count(ids), before - 1)
     check("take left the lane alone", shim.merged(lane) if lane else 0, 0)
+
+    # ---- PAD-134: a plunge with a ball already in play serves NOTHING ------
+    # The trough is short several balls by now and the lane is empty, which is
+    # a machine with balls in play. Serving there hands the game a ball it
+    # never asked for, and the game's own count never grows to match: the
+    # machine is a ball short for ever and the next Start gets LOCATING
+    # PINBALLS. With BALL SAVE on it is one click away, because the game
+    # re-serves and auto-plunges the saved ball itself.
+    before = shim.count(ids)
+    out_txt = run("plunge")
+    time.sleep(0.3)
+    check("plunge with a ball ALREADY IN PLAY ejects nothing",
+          shim.count(ids), before)
+    check("...and says why, naming how a ball in play ends",
+          ("already in play" in out_txt and "drain" in out_txt), True)
+    run("reset")
+    time.sleep(0.3)
+    run("plunge")
+    time.sleep(0.3)
+    check("...and a full trough still serves (ball start is unchanged)",
+          shim.count(ids), len(ids) - 1)
+
+    # ---- PAD-134: THE WAY HOME, which nothing here used to reach -----------
+    # A launched ball that nobody is playing drains back to the trough, and
+    # the two faults this section exists for are the two the old one slot
+    # could not express: a ball the rig takes back while a MOUSE-ONLY player
+    # is playing it, and a second launched ball the rig forgets entirely.
+    # Its own feeder because the way home has to be ON for these.
+    run("reset")
+    time.sleep(0.3)
+    # Long enough that two launches fit INSIDE one ball's wait, because the
+    # second launch landing after the first ball had already come home is the
+    # one way this section could pass while the fault it is about was still
+    # there.
+    henv = dict(env, PAD_BALL_HOME_MS="1500")
+    p2 = subprocess.Popen([sys.executable, os.path.join(HERE, "ballfeed.py")],
+                          env=henv, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, bufsize=1)
+    out2 = []
+    threading.Thread(target=lambda: [out2.append(l.rstrip()) for l in p2.stdout],
+                     daemon=True).start()
+    time.sleep(0.6)
+
+    def launch():
+        """What the game does when it serves a ball and plunges it itself."""
+        wire.fire(eject)
+        time.sleep(0.25)
+        wire.fire(plunger)
+        time.sleep(0.2)
+
+    launch()
+    check("a launched ball nobody is playing is out of the trough",
+          shim.count(ids), len(ids) - 1)
+    time.sleep(1.8)
+    check("...and comes home by itself", shim.count(ids), len(ids))
+
+    # A MOUSE-ONLY SESSION. DragonRR, 2026-09-12: every input in his report is
+    # a click in the playfield window - the plunger, the Mechagodzilla spinner,
+    # an outlane, a trough dot - and not one of them moves the KEYBOARD array
+    # the old test read. So the feeder called him "nobody" and took his ball.
+    # What to click: the Mechagodzilla spinner, the switch his mail names, if
+    # this title has one - otherwise any playfield switch that is not the
+    # trough or the lane. All the click has to be is a script write tagged `f`.
+    click_sw = next((r["id"] for r in rows
+                     if "SPINNER" in (r["name"] or "").upper()), None)
+    if click_sw is None:
+        click_sw = next(r["id"] for r in rows
+                        if r["id"] not in ids and r["id"] != lane
+                        and r.get("node") != 0)
+    launch()
+    window_click(shim, click_sw)
+    time.sleep(1.8)
+    check("a ball somebody is PLAYING with the mouse stays in play",
+          shim.count(ids), len(ids) - 1)
+    check("...and the feeder says so rather than going quiet",
+          any("somebody is playing" in l for l in out2), True)
+    run("reset")
+    time.sleep(0.4)
+
+    # TWO LAUNCHED BALLS, which is a multiball - and the shape that stranded a
+    # ball for ever, because the second launch overwrote the first one's timer
+    # and nothing was left to bring that ball home.
+    launch()
+    launch()
+    check("two launches put two balls in play", shim.count(ids), len(ids) - 2)
+    time.sleep(2.5)
+    check("BOTH come home - neither is forgotten", shim.count(ids), len(ids))
+    p2.terminate()
+    p2.wait(timeout=5)
+    out.extend(out2)
 
     shim.stop = True
     print("\n--- ballfeed.py said ---")

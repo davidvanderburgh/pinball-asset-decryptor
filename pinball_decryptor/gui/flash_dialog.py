@@ -98,7 +98,8 @@ class FlashImageDialog:
                  initial_image=None, on_build_flash=None, build_target="",
                  can_build=False, cannot_build_reason="",
                  has_pending_changes=True, initial_choices=None,
-                 on_choices=None, handed_in="", fresh_image=False):
+                 on_choices=None, handed_in="", fresh_image=False,
+                 flashed_fn=None):
         self._parent = parent
         self._mfr = manufacturer
         self._on_flash = on_flash
@@ -120,6 +121,9 @@ class FlashImageDialog:
         # check compares, it would pass and leave the old games on the SD card.
         self._fresh_image = (os.path.normpath(initial_image)
                              if fresh_image and initial_image else "")
+        # ...and whether a flash of an image has FINISHED onto an SD card
+        # from here, asked of the app, which records every one (PAD-145).
+        self._flashed_fn = flashed_fn
         self._cannot_build_reason = cannot_build_reason
         self._has_pending_changes = has_pending_changes
         self._on_choices = on_choices
@@ -319,10 +323,15 @@ class FlashImageDialog:
         # /data and /dump alone, so the machine keeps its settings and scores,
         # which a whole-image flash cannot.
         #
-        # DEFAULT ON when the image supports it: the run REFUSES a card this
-        # image was not flashed from, naming what differed, so a wrong default
-        # costs one refusal - while the wrong default the other way costs an
-        # hour, every time.
+        # DEFAULT ON for an image a flash has already put onto an SD card
+        # from here, and only then.  It used to be on for any image that
+        # could take it, since the run refuses a card this image was not
+        # flashed onto - but that ticked it for cards no SD card had ever
+        # held, and a tester who had just built one reported it twice
+        # (PAD-144, then PAD-145: "only boot menu" was still checked, on a
+        # card built in an earlier run and flashed on its own).  Once a
+        # flash of it finishes, the app records it and the next dialog ticks
+        # it again, so the fast write stays one dialog away for its card.
         self._menu_var = tk.BooleanVar(value=False)
         self._menu_chk = ttk.Checkbutton(
             flash_body, variable=self._menu_var, command=self._sync_sections,
@@ -527,17 +536,35 @@ class FlashImageDialog:
     _MENU_NOTE_FRESH = ("This card was only just built or updated, so no SD "
                         "card holds it yet: the whole image has to be "
                         "written.")
+    _MENU_NOTE_UNFLASHED = ("This image has not been flashed onto an SD card "
+                            "from here yet, so the whole of it is written, "
+                            "games and all - what an SD card needs the first "
+                            "time. If yours already has this image, tick this "
+                            "to write only the menu; it checks the card "
+                            "first.")
+
+    def _was_flashed(self, img):
+        """Has a flash of *img* finished from here?  Asked of the app; a
+        dialog opened without the question knows of none."""
+        if self._flashed_fn is None:
+            return False
+        try:
+            return bool(self._flashed_fn(img))
+        except Exception:                               # noqa: BLE001
+            return False
 
     def _sync_menu_only(self, writing, building):
         """Offer the menu-only write only where it can mean anything: a
         flash (not a build+flash - a fresh image was never on that card, nor
         a handed-in card that was only just built or updated, see __init__)
-        of an image that HAS a menu partition to write.
+        of an image that HAS a menu partition to write - and tick it only for
+        an image a flash has already put onto an SD card (see _was_flashed).
 
         The image is asked, not assumed: reading its partition table is 512
         bytes, and an image with no Linux rootfs as its second partition is
         not a Stern card at all."""
         why = ""
+        flashed = False
         img = (self._image_var.get() or "").strip().strip('"')
         # Fresh is about THAT card: browse to another image and it is offered.
         fresh = bool(self._fresh_image and img
@@ -547,9 +574,10 @@ class FlashImageDialog:
         if can:
             try:
                 menu_write_plan(img)
-                why = self._MENU_NOTE_OK
             except Exception:                           # noqa: BLE001
                 can = False                 # not a card image, or not there
+            else:
+                flashed = self._was_flashed(img)
         elif writing and building:
             why = self._MENU_NOTE_BUILD
         elif writing and fresh:
@@ -561,13 +589,16 @@ class FlashImageDialog:
         if not can:
             self._menu_var.set(False)
         elif self._menu_seen != self._image_var.get():
-            # First sight of an image that supports it: on by default.
-            self._menu_var.set(True)
+            # First sight of an image that supports it: on by default only
+            # when an SD card already has it.
+            self._menu_var.set(flashed)
         self._menu_seen = self._image_var.get()
+        if can:
+            why = (self._MENU_NOTE_OK if self._menu_var.get()
+                   else self._MENU_NOTE_WHOLE if flashed
+                   else self._MENU_NOTE_UNFLASHED)
         try:
-            self._menu_note.configure(
-                text=(why if (can and self._menu_var.get()) or not can
-                      else self._MENU_NOTE_WHOLE))
+            self._menu_note.configure(text=why)
         except tk.TclError:                             # pragma: no cover
             pass
 

@@ -91,6 +91,29 @@ def usbipd_path():
                                if os.path.isfile(USBIPD_FALLBACK) else None)
 
 
+def rdp_client_running():
+    """Is WSLg's window layer connected - an ``msrdc.exe`` on this desktop?
+
+    WSLg shows every Linux window through one RDP client process.  With it
+    gone the rig runs perfectly and NOTHING appears: the game draws into
+    Xephyr, Xephyr draws into an X server nobody is looking at, and the CPU
+    climbs while the desktop stays empty (David, 2026-09-13: "i don't see any
+    of the display windows ... i just hear my cpu go crazy" - the client had
+    been killed hours earlier to close a ghost window, and PulseAudio's RDP
+    sink went with it).  ``wsl --shutdown`` (the Fix stuck state button)
+    brings it back.  None when the question cannot be asked (not Windows,
+    no tasklist)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        out = subprocess.run(["tasklist.exe", "/FI", "IMAGENAME eq msrdc.exe", "/NH"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=20, creationflags=_rig.CREATE_FLAGS)
+    except Exception:                                      # noqa: BLE001
+        return None
+    return b"msrdc.exe" in out.stdout.lower()
+
+
 def attach_dongle_cmd():
     """Hand the Sentinel key to WSL.
 
@@ -513,6 +536,14 @@ class JJPEmulatePanel:
                     self._mark_wrong_key()
                 elif rc not in (0, None):
                     self._log("JJP: start failed (exit %d)." % rc)
+                elif rdp_client_running() is False:
+                    # the rig is up and nothing can show it (see
+                    # rdp_client_running) - say so, and name the way out
+                    self._log("JJP: WSLg's window layer is not running (no "
+                              "msrdc.exe on this desktop), so the game's "
+                              "windows cannot appear and sound has nowhere to "
+                              "go. Press 'Fix stuck state' (it restarts WSL) "
+                              "and Start again.")
             except Exception as exc:                       # noqa: BLE001
                 self._log("JJP: start failed: %s" % exc)
             finally:

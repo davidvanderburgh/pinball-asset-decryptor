@@ -6208,8 +6208,10 @@ These have each been violated at least once and each cost a run or a window:
 
 - [x] **114. `jjpselect`: the boot selector runs on a JJP rootfs (x86, X11,
       the cabinet buttons off `/dev/jjpio`).** `S3 D3` **DONE 2026-09-12 on
-      `item/114` (`cc2cd46`, `ca8fa4f`), awaiting /finish — see the DONE
-      block at the end of this entry.** *(Filed 2026-09-12 from
+      `item/114` (`cc2cd46`, `ca8fa4f`) — NOT released on its own: it is the
+      base of `feature/jjp-multiboot`, and the family's ONE `/finish` runs
+      after 119 closes (David, 2026-09-13; the rule is written in item 115).
+      See the DONE block at the end of this entry.** *(Filed 2026-09-12 from
       `plans/jjp_multiboot_plan.md`, the JJP multi-boot plan — gitignored like
       the handoff, so it is local to David's machine and these six entries
       carry everything a fresh checkout needs; David has a GNR key, wants an

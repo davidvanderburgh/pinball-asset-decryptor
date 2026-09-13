@@ -427,8 +427,10 @@ installer against a patch of the ISO's own squashfs copy, every piece (present,
 to scratch and compares every staged file with the shas `build.json` recorded.
 
 Measured on the Guns N' Roses pair (stock 3.03 + the Chaka retheme, 2026-09-13):
-5.80 GB + 6.52 GB of root pieces plus 0.64 GB of installer make a 13.0 GB ISO,
-so a 16 GB FAT32 stick. Two traps paid: Clonezilla evals `ocs_live_run`, so the
+5.80 GB + 6.52 GB of root pieces plus 0.64 GB of installer make a 12.97 GB ISO,
+so a 16 GB FAT32 stick; the build took 4 min 38 s with the stock root already
+in the cache (copy, stage, re-partclone, write) and the full verify 5 min 54 s
+for its 33 checks. Two traps paid: Clonezilla evals `ocs_live_run`, so the
 cfg line is `bash /lib/live/mount/medium/jjp/pad_install.sh` and no exec bit is
 needed on a FAT copy; and a global `sync()` under WSL2 waits on the virtiofs
 Windows drives and never came back, so the tool only ever `syncfs`es the one

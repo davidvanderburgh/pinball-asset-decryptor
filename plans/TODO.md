@@ -6378,8 +6378,13 @@ These have each been violated at least once and each cost a run or a window:
       masked-updater check above. Left on the plan: a REAL `updater.sh` run
       against a fake /mnt/usb delta lands with 117's unshare wiring.
 
-- [ ] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
-      ISO out.** `S3 D3` ← WORKING ON *(Plan §2.4. After 115, not before; lands with 117.
+- [x] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
+      ISO out.** `S3 D3` **DONE 2026-09-13 on `item/116` (`6b60b1e`,
+      `b9173b7`, plus the closing commit) — NOT released on its own: merged
+      into `feature/jjp-multiboot`, and the family's ONE `/finish` runs after
+      119 closes. Proven at the ISO level on the real GNR pair (plan row R5);
+      booting it is 117. See the DONE block at the end of this entry.**
+      *(Plan §2.4. After 115, not before; lands with 117.
       Branch from and merge into `feature/jjp-multiboot` — the rule is in 115.)*
       Same CLI protocol as `mkmulticard.py` so the tab's parsers hold: `plan /
       build / inject / verify / inspect`, `[card] progress a/b p% what`,
@@ -6417,8 +6422,8 @@ These have each been violated at least once and each cost a run or a window:
       — S3: feature. D3: the largest desk item of the six, over proven
       pieces (partclone/xorriso/selectmedia), with `verify` and one rig boot
       as the run.
-      **IN PROGRESS 2026-09-13 (item/116 from feature/jjp-multiboot, `6b60b1e`).**
-      **Established:** `tools/jjp_emu/mkjjpmulti.py` (imports mkmulticard.py
+      **DONE 2026-09-13 (`6b60b1e`, `b9173b7` on item/116, from
+      feature/jjp-multiboot).** `tools/jjp_emu/mkjjpmulti.py` (imports mkmulticard.py
       for the shared pure parts: Refused/say/PROGRESS, media.json planning,
       themes, the library-path refusal) with `plan / build / inject / verify /
       inspect / media / selftest`. Root A = image 0's sda3 restored into the
@@ -6459,10 +6464,28 @@ These have each been violated at least once and each cost a run or a window:
       Extract output (the tab's job in 118), not this CLI. "The app's stick
       flow writes it" is exercised in 118 as well; here `verify` proves the
       FAT32 precondition.
-      **Resume:** the real GNR build is running (scratch build116.sh: media ->
-      plan -> build -> inspect -> verify, ~25 min, output /var/tmp/jjp116/
-      GunsNRoses-v03.03.multi.iso); record its numbers, README section, close,
-      merge into feature/jjp-multiboot, then 117.
+      **The real run (R5), 2026-09-13, scratch build116.sh under the rig
+      lock:** `media` (auto art = each image's JJP logo at 522x294, synthetic
+      click/chime, 445.6 KB) → `plan` (5.80 GB + 6.52 GB of pieces + 0.64 GB
+      overhead = 13.02 GB estimated, `stick: 16G`, both images GunsNRoses 03.03
+      with game `c4672be7…` and fl.dat `e92e8bcb…`, 8.81 / 9.52 GB used) →
+      `build` in **4 min 38 s** (the cached stock root copied, 11 files staged,
+      e2fsck rc 0, re-partcloned into 6 pieces / 5.81 GB, Chaka's 7 pieces
+      mapped as sda5, ISO written) → `/var/tmp/jjp116/GunsNRoses-v03.03.multi.iso`
+      **12.97 GB** → `inspect` / `--json` read it back (both images, sources,
+      shas, `installer_redirected: true`) → `verify --primary --extra` **PASS
+      33/33 in 5 min 54 s**: both cfg lines, the installer = patch(the ISO's own
+      squashfs copy) with an 11-line diff, mode 755, every piece present and
+      gunzip -t clean, every file under 4 GiB, sda5 byte-identical to Chaka's
+      sda3 (7 vs 7), sda1/2/4 untouched, split size 1000000000 kept, root A
+      restored: all 11 staged shas match build.json, the hook exactly once,
+      images.conf inside = the ISO's copy, the game sha = the record. The rig
+      lock released, alive 0. The Chaka restore now sits at the rig's slug
+      path (`/var/tmp/jjp_CHAKAs_LOTLJ_V1.0_GNR_LE_3.03/sda3.raw`, carrying the
+      `vf` link item 115's hook made - harmless), the stock one unchanged; the
+      ISO, `/var/tmp/jjp116/{sel,media,inspect.json}` wait for 117. The sync()
+      casualty (pid 24913, state D) stays until WSL restarts; it holds nothing.
+      README "Building a multi-boot install ISO (item 116)".
 
 - [ ] **117. The JJP rig boots a multi-boot install ISO and proves the
       choice.** `S3 D3` *(Plan §2.8. After 115; 116 and this land together —

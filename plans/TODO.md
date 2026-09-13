@@ -6579,8 +6579,15 @@ These have each been violated at least once and each cost a run or a window:
       feature branch, because 118 needs this rig wiring; `feature/jjp-multiboot`
       fast-forwarded to this close, and item/118 merged it in.
 
-- [ ] **118. The Multi-boot tab learns a second platform: JJP declares
-      `multiboot=True` and the tab stops hard-coding Stern.** `S3 D3` *(Plan
+- [x] **118. The Multi-boot tab learns a second platform: JJP declares
+      `multiboot=True` and the tab stops hard-coding Stern.** `S3 D3`
+      **DONE 2026-09-13 on `item/118` (`5cbbdaf` … `eb4570a`, plus the closing
+      commit) — NOT released on its own: merged into `feature/jjp-multiboot`,
+      and the family's ONE `/finish` runs after 119 closes. Emulator-proven:
+      the tab built and verified the GNR multi ISO, and David launched the
+      rig from the tab into its menu and drove it. The stick from the green
+      button moved to 119 (David). See the close note at the end of this
+      entry.** *(Plan
       §2.7. After 116 and 117, not before. Branch from and merge into
       `feature/jjp-multiboot` — the rule is in 115.)* A `MultibootBackend` object
       (Stern today, JJP added) holding everything the 2026-09-12 audit found
@@ -6603,10 +6610,8 @@ These have each been violated at least once and each cost a run or a window:
       launch the rig from the tab and see the menu.
       — S3: feature. D3: a refactor across a 12.8k-line tab plus the JJP
       wiring, with one app-driven build + launch as the run.
-      **IN PROGRESS 2026-09-13 (item/118, branched from item/117's tip
-      `9ca367e` because it needs 117's rig wiring; NOT from the feature
-      branch).** ~80%: the tab builds the ISO; the stick and the launch wait
-      on hardware.
+      **DONE 2026-09-13 (item/118, branched from item/117's tip `9ca367e`
+      because it needed 117's rig wiring; it carries 117's close).**
       **Established:** `gui/multiboot_backend.py` - a frozen `MultibootBackend`
       per platform (`STERN`, `JJP`, `backend_for()`): the builder and media
       tool, `--card`/`--iso`, image extensions and dialog filters, the output
@@ -6812,32 +6817,32 @@ These have each been violated at least once and each cost a run or a window:
       QueryFullProcessImageNameW), and logs how many. Run on the real desktop
       it listed both hidden ghosts as msrdc.exe windows and chose nothing
       more to hide. The frames only go for good at a WSL restart.
-      **Owed (hardware, David):** (a) the green button's stick tick on a real
-      USB stick (the JJP flash dialog's FAT32 copy of the 12.97 GB ISO); (b)
-      'Run in emulator' from the tab → the Emulate JJP tab's watch.sh, which
-      needs the GNR key (attached over usbipd since 117's with-key run).
-      David is driving this himself from the app (2026-09-13: "i want to
-      drive it"); a scripted attempt through the real tab code got as far as
-      the launch (the button enabled, launch_iso → the Emulate JJP tab,
-      watch.sh restoring the ISO from D:) before he stopped it. NOTE: the
-      Emulate JJP tab runs its rig in the DEFAULT distro (no `distro=` on
-      its rig commands), so its restore lands beside item 117's; that base
-      was removed so the tab restores from ITS ISO - the first Run in
-      emulator takes several minutes (13 GB read off D:); (c) the rest of
-      his look at the tab.
-      **Resume:** open the app, pick Jersey Jack, Multi-boot: add the two
-      ISOs (or Browse… to `D:\Pinball\multi\GunsNRoses-v03.03.multi.iso`,
-      which loads it), Build / make stick… with the stick tick on a 16 GB
-      stick; with the GNR key attached press Run in emulator (the Emulate JJP
-      tab starts the rig; the menu appears on the game window); then close
-      this (117 closed 2026-09-13 and is merged in here), merge item/118 into
-      feature/jjp-multiboot, and 119 is the machine.
+      **Closed 2026-09-13 (David: "fold it into 119 and close 118").** Of the
+      acceptance, the build from the tab and the launch from the tab are met:
+      the tab built and verified the GNR multi ISO, and David ran the rig from
+      the app into the menu and drove it (the flippers and Start from either
+      window, the game on the key). The stick from the green button - the JJP
+      flash dialog's FAT32 copy of the 12.97 GB ISO, which no part of this
+      item exercised - is now the FIRST step of 119, which needs that stick
+      anyway. NOTE for later runs: the Emulate JJP tab runs its rig in the
+      DEFAULT distro (no `distro=` on its rig commands), and the multi ISO's
+      restore is cached there under `/var/tmp/jjp_GunsNRoses-v03.03.multi`.
+      Merged into `feature/jjp-multiboot` (a fast-forward: item/118 holds
+      item/117's close).
 
 - [ ] **119. First GNR machine boot of a multi-boot install.** `S3 D3` *(Plan
       §2.9. After 118. David's hardware; whatever it finds is fixed on the
       spot. Branch from and merge into `feature/jjp-multiboot` — the rule is
       in 115 — and this is the item whose close is followed by the ONE
-      `/finish` of the whole family.)* Stick from 118, key in the machine, install (settings/scores
+      `/finish` of the whole family.)* **First, the stick (moved here from
+      118's acceptance, David 2026-09-13):** in the app, Jersey Jack →
+      Multi-boot, Browse… to `D:\Pinball\multi\GunsNRoses-v03.03.multi.iso`
+      (or build it again), then Build / make stick… with the stick tick on a
+      16 GB or larger USB stick. The app's JJP stick maker formats it FAT32
+      and copies the ISO's files (no piece is over 4 GB; `mkjjpmulti.py
+      verify` checked that). Before taking it to the machine, confirm the
+      stick carries `jjp/pad_install.sh` and that both boot configs'
+      `ocs_live_run` line names it (read the files off the stick). Then: key in the machine, install (settings/scores
       are wiped — JJP's installer always does), first boot with the coin door
       OPEN. Expected: the menu on the backglass, flippers move, START
       confirms, 15 s timeout boots image 0, both images play, the key is

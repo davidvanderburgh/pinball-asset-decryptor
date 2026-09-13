@@ -6488,7 +6488,7 @@ These have each been violated at least once and each cost a run or a window:
       README "Building a multi-boot install ISO (item 116)".
 
 - [ ] **117. The JJP rig boots a multi-boot install ISO and proves the
-      choice.** `S3 D3` *(Plan §2.8. After 115; 116 and this land together —
+      choice.** `S3 D3` ← WORKING ON *(Plan §2.8. After 115; 116 and this land together —
       the rig can start from a hand-staged `sda5.raw` before the builder
       exists. Branch from and merge into `feature/jjp-multiboot` — the rule
       is in 115.)* `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO

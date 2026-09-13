@@ -178,12 +178,19 @@ from pinball_decryptor.app import App  # noqa: E402
 #: THE RUN STOPS AT THE PLAN.  The selector step is the whole subject, and
 #: the plan after it is the proof the run moved on; the build (a 16 GB card,
 #: as root) and the verify never belong in a photograph of this.
+#:
+#: ...AND IT NEVER ENDS ON ITS OWN.  A run whose last step succeeds is a
+#: card "built and verified" as far as the tab knows, and the capture is
+#: four tiles with event processing between them: a warm-cache plan finished
+#: half way through one and the status line in the photograph claimed a card
+#: that was never written.  The held step is killed by the rig's cancel.
 _orig_build_commands = multiboot_tab.build_commands
+HOLD = ("hold", [sys.executable, "-c", "import time; time.sleep(900)"])
 
 
 def _selector_and_plan_only(*a, **kw):
     return [c for c in _orig_build_commands(*a, **kw)
-            if c[0] in ("selector", "plan")]
+            if c[0] in ("selector", "plan")] + [HOLD]
 
 
 multiboot_tab.build_commands = _selector_and_plan_only

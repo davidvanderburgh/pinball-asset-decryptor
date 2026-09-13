@@ -120,7 +120,9 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 # the rootfs alsa-lib 1.0.28 (GLIBC_2.4 only; its libdl/libpthread/librt are
 # in the rootfs). Hand prototypes in audio_alsa.c: no headers on the box.
 AUDLIBS   = -l:libasound.so.2
-SRCS = codeselect.c conf.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
+# input_jjpio.c is plain POSIX and rides along: codeselect.c dispatches every
+# backend by name, and on a Stern card `--input jjpio` finds no /dev/jjpio
+SRCS = codeselect.c conf.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
 HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
 endif
 
@@ -169,6 +171,7 @@ capbin:
 ifeq ($(PLATFORM),jjp)
 check: $(BIN) capbin
 > bash test/check_elf_jjp.sh "$(BIN)" "$(JJPROOT)"
+> bash test/check_elf_jjp_selftest.sh "$(BUILD)/t"
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > $(PYTHON) test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
 > $(PYTHON) test/jjpio_test.py "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"

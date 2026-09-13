@@ -584,3 +584,73 @@ across the hand-off and `alive.sh` read 0 after every run.
 4. Insider Connected: log in from the stock image first (it grades and
    persists P/P/P), then from the 1987 image.
 
+## The JJP build (item 114) — the same menu on a JJP machine
+
+`make PLATFORM=jjp` builds the SAME sources, natively on the WSL host, as
+`build-jjp/jjpselect` for a JJP machine's rootfs (x86-64, Ubuntu 21.10,
+glibc 2.34, Mesa, an X server that `jjp.service` starts through `xinit` for
+`rungame.sh`).  Nothing in the menu, the conf, the media, the themes, the
+groups or the choice contract changes; three files stand in for the Stern
+hardware and one header defends the build:
+
+- **`egl_x11.c`** implements the `egl_stern.h` interface on an X window:
+  override-redirect, at 0,0, sized to the main display (a screen wider than
+  16:9 — a second display — is cut to a 16:9 box of its height).  EGL/GLES2
+  are **dlopen'd, never linked** — the build host has no libGLESv2 at all,
+  and a machine whose Mesa is missing or broken still gets a menu through
+  the second path, **XPutImage** of the canvas, centred (`PAD_SELECT_NO_EGL=1`
+  forces it, for a proof run or a diagnosis; it paces itself to 60 Hz, the
+  vsync a swap would give).  Xlib is declared by hand, like EGL always was;
+  `Visual` and `XSetWindowAttributes` are the two structs laid out by hand.
+  `w`/`h` reported to the menu are the CANVAS (1360x768), so the layout, the
+  snapshot and the picture on the glass are one thing; the quad scales it.
+- **`input_jjpio.c`** (`--input jjpio`) reads the cabinet buttons the way
+  JJP's own installer helper does — `jjpcrt`, unstripped on every install
+  stick: `read(fd, buf, 64)` then `write(fd, 64 zero bytes)` on
+  `/dev/jjpio100` (udev's name; `/dev/jjpio0` is the driver's).  **LEFT =
+  byte 1 bit 0, RIGHT = byte 1 bit 2, START = byte 3 bit 0, active low**,
+  press = released-then-low.  The zero OUT frame is JJP's idle frame, written
+  by their installer on a powered machine, so it drives no coil; it is the
+  only thing ever written.  Paced to 200 Hz behind `poll()` (the rig's CUSE
+  board answers at once).  A missing board is one log line and a menu that
+  times out into the primary.  `key_left=` / `key_right=` / `key_start=`
+  `<byte>.<bit>` in images.conf move a button; `--learn` logs the four
+  cabinet bytes whenever they change, which is how a machine is calibrated.
+  No Action button, no service cluster: `input_has()` keeps them off the
+  footer.
+- **`stubs_jjp.c`**: `codec.c` and `input_hw.c` as no-ops.  A PC has an
+  `/dev/i2c-1` of its own and the SGTL5000 code must never be let near it.
+- **`jjp_glibc.h`**, force-included: the host's glibc 2.39 headers redirect
+  `strtol`/`sscanf` to `__isoc23_*` under `_GNU_SOURCE`, which a 2.34 card
+  lacks (`tools/jjp_emu/build.sh` met it first).  And `STBTT_fmod` is a local
+  one-liner because 2.38 gave `fmod` a new symbol version.
+
+`JJPROOT=<a mounted card image's root>` links against the card's own
+libraries (every symbol version pinned) and lets `test/check_elf_jjp.sh`
+prove that every STRONG undefined symbol resolves there; without it the host's
+runtime libs are linked by soname and the ceiling (GLIBC ≤ 2.34, a NEEDED
+whitelist without libEGL/libGLESv2, the x86-64 interpreter) still holds.
+`test/check_elf_jjp_selftest.sh` builds a host program needing
+`fmod@GLIBC_2.38` and requires the check to refuse it — a ceiling nobody has
+watched say no is not a test.
+
+`make check PLATFORM=jjp` = the ceiling + its selftest + `headless.sh`
+(every case, natively — `test/native.sh` is the `$QEMU` stand-in that drops
+the `-L ROOT`) + `padsw_test.py` + `jjpio_test.py` (a pty plays the board:
+right/left/right/start → `chose 1`, every byte written back zero, a `key_*`
+remap, no board at all → the default boots).  **`BUILD` must be a Linux
+path** — DrvFs has no FIFOs and the padsw test makes one.  The card's paths
+are baked in (`/jjpe/gen1/padselect/{images.conf,font.ttf,media}`,
+`/jjpe/temp/padselect.choice`, `/jjpe/perm/padselect.last`); `make install
+PLATFORM=jjp DESTDIR=…` puts the selector under `/jjpe/gen1/padselect/`.
+The hook that runs it (`padselect.sh`, the bind of the chosen image's game
+directory, the update refusal) is item 115.
+
+**Proven in the JJP rig (2026-09-12)**, inside the GNR 3.03 jail on the
+rig's Xephyr at 1920x1080 with the CUSE `/dev/jjpio100` and the switch shm
+poked at `jjpcrt`'s bits: `egl: up after 1 attempt(s)` on the card's own
+Mesa 21.2.6 (llvmpipe; 188 loops/s), `key: right/left/right/start`, `chose
+1`, choice file 1, exit 0, 1935 frames read and 1935 zero frames written,
+teardown to `alive.sh` 0; then the same run with `PAD_SELECT_NO_EGL=1`
+(XPutImage, 62 loops/s).  The GNR hardware run is item 119.
+

@@ -472,15 +472,21 @@ int egl_stern_init(struct egl_stern *e, int retries, int retry_ms)
         sel_log("x11: giving up after %d attempts", retries);
         return -1;
     }
-    if (gl_up(e) == 0 && build_program(e) == 0) {
+    /* PAD_SELECT_NO_EGL=1 skips path 1, so the fallback can be run and seen
+     * on a box where EGL works (the rig proof; a machine being diagnosed) */
+    if (getenv("PAD_SELECT_NO_EGL") && atoi(getenv("PAD_SELECT_NO_EGL"))) {
+        sel_log("egl: skipped (PAD_SELECT_NO_EGL), drawing with XPutImage");
+    } else if (gl_up(e) == 0 && build_program(e) == 0) {
         X.mode = 1;
         e->up = 1;
         sel_log("egl: up after %d attempt(s), glGetError=0x%x, canvas %dx%d scaled to %dx%d",
                 attempt, G.glGetError(), CANVAS_W, CANVAS_H, X.win_w, X.win_h);
         return 0;
     }
-    gl_drop(e);
-    sel_log("egl: not available, drawing with XPutImage instead");
+    if (X.edpy || G.egl) {
+        gl_drop(e);
+        sel_log("egl: not available, drawing with XPutImage instead");
+    }
     if (ximage_up() < 0) return -1;
     X.mode = 2;
     e->up = 1;
@@ -516,6 +522,8 @@ void egl_stern_frame(struct egl_stern *e, const unsigned char *packed, int x, in
     if (!e->up) return;
     if (X.mode == 2) {
         /* only what changed goes to the server; nothing to do on a clean frame */
+        static long long next_tick;
+        long long now;
         if (packed && w > 0 && h > 0) {
             if (x + w > CANVAS_W) w = CANVAS_W - x;
             if (y + h > CANVAS_H) h = CANVAS_H - y;
@@ -525,6 +533,15 @@ void egl_stern_frame(struct egl_stern *e, const unsigned char *packed, int x, in
             }
             XFlush(X.dpy);
         }
+        /* THE VSYNC THIS PATH DOES NOT HAVE.  The menu loop presents every
+         * pass and lets the swap pace it; eglSwapBuffers blocks, XPutImage of
+         * nothing returns at once, and the first fallback run spun a core at
+         * twenty million passes a second.  Hold this path to 60 frames a
+         * second the way a swap would. */
+        now = sel_now_ms();
+        if (next_tick > now && next_tick - now <= 17) sel_sleep_ms(next_tick - now);
+        now = sel_now_ms();
+        next_tick = (next_tick > now - 17 ? next_tick : now) + 16;
         e->frames++;
         return;
     }

@@ -47,6 +47,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import _rig
+# The Volume / Mute knob is the other Emulate tabs' own: one control file for
+# every rig, so the level is the same whichever tab starts a game (item 118).
+from .emulate_tab import AUDIO_CTL_FILE, _load_audio_ctl, _write_audio_ctl
 from .widgets import _Tooltip
 
 #: The rig ships in the repo next to this package, so it survives a reboot and
@@ -312,6 +315,13 @@ class JJPEmulatePanel:
         except (tk.TclError, RuntimeError):
             pass
 
+    def _on_volume_change(self, *_args):
+        """Volume / Mute moved: write the live control file the rig follows.
+        ``*_args`` because ``ttk.Scale`` calls back with its value and the
+        Checkbutton with nothing - the variables are already current."""
+        gain = max(0.0, min(1.0, self._volume_var.get() / 100.0))
+        _write_audio_ctl(gain, bool(self._mute_var.get()))
+
     def _footer(self, kind, pct=None, text=""):
         """Move the footer's ladder, from ANY thread (the launch streams
         from a worker; the poll applies on the main loop).  Nothing on a
@@ -418,6 +428,33 @@ class JJPEmulatePanel:
                  "board devices. Closes ALL WSL sessions and takes ~15s; your "
                  "ISO and settings are untouched.",
                  self._theme_fn)
+
+        # The volume trio, the same as the Spike 2 and Spike 1 tabs' rows and
+        # the same control file.  It is this PC's level for the emulated game
+        # and its boot menu, not the machine's own volume adjustment, and it
+        # is LIVE: tools/jjp_emu/jjpvol.py follows the file while a game runs.
+        vol0, mute0 = _load_audio_ctl()
+        self._volume_var = tk.DoubleVar(value=vol0 * 100)
+        self._mute_var = tk.BooleanVar(value=mute0)
+        ttk.Label(ctl, text="Volume:").pack(side=tk.LEFT, padx=(16, 0))
+        self._vol_scale = ttk.Scale(ctl, from_=0, to=100, length=110,
+                                    orient=tk.HORIZONTAL,
+                                    variable=self._volume_var,
+                                    command=self._on_volume_change)
+        self._vol_scale.pack(side=tk.LEFT, padx=(4, 0))
+        self._mute_chk = ttk.Checkbutton(ctl, text="Mute",
+                                         variable=self._mute_var,
+                                         command=self._on_volume_change)
+        self._mute_chk.pack(side=tk.LEFT, padx=(6, 0))
+        for w in (self._vol_scale, self._mute_chk):
+            _Tooltip(w,
+                     "This PC's volume for the emulated game and its boot "
+                     "menu - not the machine's own volume setting. It changes "
+                     "a running game at once, and it is the same level as the "
+                     "other Emulate tabs.",
+                     self._theme_fn)
+        # Seed the file now, so a first Start plays at what the slider shows.
+        self._on_volume_change()
 
         # --- state headline ----------------------------------------------
         self._state_lbl = ttk.Label(outer, text="Checking…",
@@ -530,8 +567,12 @@ class JJPEmulatePanel:
                 # the one failure worth pulling into the headline (the key IS
                 # plugged in, so "No security key" would mislead) and it is
                 # caught the instant "WRONG KEY" is printed.
+                # PAD_AUDIO_CTL: the Volume / Mute file audio.sh hands to
+                # jjpvol.py, so the knob reaches the running game.
                 rc, saw_wrong_key = self._run_streaming(
-                    rig_cmd_root("watch.sh", *args), timeout=1800)
+                    rig_cmd_root("watch.sh", *args,
+                                 env=["PAD_AUDIO_CTL=" + AUDIO_CTL_FILE]),
+                    timeout=1800)
                 if saw_wrong_key or rc == 7:
                     self._mark_wrong_key()
                 elif rc not in (0, None):

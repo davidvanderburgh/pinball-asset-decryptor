@@ -23,6 +23,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ "$(id -u)" = "0" ] || { echo "audio.sh: must run as root" >&2; exit 2; }
 mountpoint -q "$JJP_JAIL" || { echo "audio.sh: jail not mounted; run jail.sh" >&2; exit 3; }
 
+# The last run's volume follower (step 6) goes whichever way this run goes: a
+# muted run has no stream to hold, and a sounding one starts its own.
+pkill -f 'jjpvol\.py' 2>/dev/null
+
 # 0. MUTED, when asked.  PAD_AUDIO=0 is the Spike 2 rig's knob and the rule
 #    every run here follows unless somebody wants sound (David works beside
 #    the runs): ALSA's default becomes the null device, so the game plays
@@ -118,3 +122,15 @@ echo "--- pulse server, as seen from inside the jail ---"
 printf '%s\n' "$PROBE" | head -4
 echo "--- aplay -l inside the jail ---"
 chroot "$JJP_JAIL" /bin/bash -c 'aplay -l 2>&1 | head -4'
+
+# 6. The app's Volume / Mute, LIVE.  The Emulate JJP tab hands in the same
+#    control file the other Emulate tabs write (PAD_AUDIO_CTL, a Windows path
+#    or a WSL one); jjpvol.py holds every stream the game and its boot menu open
+#    at that level, the way padplay.py does for the Stern rigs.  Detached, so it
+#    outlives this script; it ends with the jail, and stop.sh ends it too.
+if [ -n "${PAD_AUDIO_CTL:-}" ]; then
+    CTL=$(jjp_norm_path "$PAD_AUDIO_CTL")
+    setsid python3 "$HERE/jjpvol.py" --ctl "$CTL" --jail "$JJP_JAIL" --pulse "$JJP_PULSE" \
+        >>"$JJP_LOG_DIR/jjp_vol.log" 2>&1 </dev/null &
+    echo "audio: volume follows the app's Volume / Mute ($CTL)"
+fi

@@ -651,6 +651,22 @@ class MatrixUI:
             anywhere, because the game ejects and then waits for the trough to
             CHANGE, which a static fill can never do.
         """
+        if devices.get('cabinet_only'):
+            # THE BOOT MENU'S MATRIX on a first run (jjpsw_launch.sh --menu, a
+            # multi-boot image whose title has no device tables yet): the
+            # flippers and Start, and nothing else.  The block is NOT idled -
+            # that would wipe the rest frame seed_rest.py laid for a game about
+            # to latch its trough - and there is no trough to seat or coil to
+            # watch.  jjpsw_launch.sh reopens the full matrix once the game is up.
+            # The feeder is still made (over no trough and no coils) so every
+            # button and the tick that ask it for something get an answer.
+            self.feeder = jjpball.Feeder(
+                self.shm, self.switches, [],
+                after=self.root.after, log=self._ball_log, now=time.monotonic,
+                board=BOARD_IO, **self.ball_opts)
+            self._ball_log('cabinet switches only, for the boot menu - the '
+                           'playfield opens once the game is up')
+            return
         self.shm.idle()
         self.latched.clear()
 

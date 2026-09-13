@@ -6735,6 +6735,42 @@ These have each been violated at least once and each cost a run or a window:
       windows cannot appear and names Fix stuck state (`rdp_client_running`).
       Memory: feedback_never_kill_msrdc. The CPU is the game on llvmpipe
       (software GL), as in every run of this rig.
+      **His fourth look (after Fix stuck state): "the emulator did not hand
+      over control of the flipper buttons during the boot menu", "the virtual
+      playfield is not showing up", "missing volume controls on the jjp
+      emulate tab".** The switch matrix (the virtual playfield, and the only
+      place the flipper/Start keys live) opened only after the game step and
+      refused without a running game - on a multi-boot run the menu is up
+      with NO game, so it never opened (the earlier runs had only looked
+      right because zombie `game` processes passed its `pgrep -c -x game`).
+      Fixed: `watch.sh` opens the matrix BEFORE the game step on a
+      multi-boot image (`jjpsw_launch.sh --menu`) from this title's saved
+      tables (right for both images: same game binary), or - a first run with
+      none - a cabinet-only table of the three switches the menu reads (LEFT
+      b1.0, RIGHT b1.2, START b3.0; `jjpsw.py` then leaves the rest frame
+      alone); the post-game step spawns a detached `--await-game` that reads
+      the live tables once the game is up and reopens a cabinet-only matrix
+      onto them; `stop.sh` ends the waiter; the launcher counts live games
+      only. Volume: the JJP tab gets the other Emulate tabs' Volume / Mute
+      (same `audio_ctl.json`), hands it to `watch.sh` as `PAD_AUDIO_CTL`, and
+      `audio.sh` starts `tools/jjp_emu/jjpvol.py`, which holds every
+      PulseAudio stream of `game` / `jjpselect` at that level (pactl inside
+      the jail; cube root of the linear gain; mute at 0), live, until the jail
+      goes or `stop.sh` ends it. **Proven on the rig (muted, scratch
+      proof118menu.sh):** jjpvol on a live silent pacat stream set raw 32768
+      (50 %, gain 0.125) then Mute yes; audio.sh with the file started the
+      follower, stop.sh ended it; watch.sh on the multi ISO opened the matrix
+      in the "switch matrix (for the boot menu)" step (mode cached), xdotool
+      sent Right then 1 to the matrix window and the selector logged `key:
+      right`, `key: start`, `chose 1 CHAKAs LOTLJ`, the game came up on root
+      B (`bound_lower=…/rootb`) and the waiter refreshed the tables
+      (calibration ok); with no saved tables the matrix opened cabinet-only,
+      1 booted image 0, and once the game was up it was reopened onto the
+      game's own tables (297 switches, calibration ok, mode full); teardown
+      alive 0, matrix 0, follower 0, waiter 0. Tests: tests/test_jjpvol.py (8),
+      3 new in test_jjp_emulate_tab.py (62 total), GUI smoke 143. NOTE: the
+      shared audio_ctl.json on David's machine says Mute on at 49 %, so JJP
+      runs from the app start muted until he unticks it.
       **Owed (hardware, David):** (a) the green button's stick tick on a real
       USB stick (the JJP flash dialog's FAT32 copy of the 12.97 GB ISO); (b)
       'Run in emulator' from the tab → the Emulate JJP tab's watch.sh, which

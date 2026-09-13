@@ -51,7 +51,26 @@ wsl -u root -- env JJP_ISO=/var/tmp/jjp116/GunsNRoses-v03.03.multi.iso bash tool
 
 is the whole thing (mount, jail, dongle, audio, boards, display, game, the
 matrix): the menu appears on the Xephyr window, LEFT / RIGHT move, START
-confirms, the timeout boots the highlighted image. `JJP_SELECT=0` in the
+confirms, the timeout boots the highlighted image.
+
+**The menu's buttons are the switch matrix's keys**, the same ones a game
+uses: click the matrix window, then Left / Right (or a / ') for the flippers
+and 1 for Start. The matrix therefore opens BEFORE the game step on a
+multi-boot image (`jjpsw_launch.sh --menu`), not after it: it used to need a
+running game, so the menu came and went with nothing to press (David,
+2026-09-13). It opens from this title's saved device tables, which are right
+for both images because a multi-boot install's two images run the same game
+binary; on a first run with none saved it opens with the three cabinet
+switches alone (LEFT byte 1 bit 0, RIGHT byte 1 bit 2, START byte 3 bit 0),
+and a detached `jjpsw_launch.sh --await-game` reopens it onto the game's own
+tables once the game is up. Stop ends the waiter with the matrix.
+
+**Volume.** The Emulate JJP tab's Volume / Mute is the other Emulate tabs'
+knob and file (`audio_ctl.json`). The tab hands the file to `watch.sh` as
+`PAD_AUDIO_CTL`; `audio.sh` starts `jjpvol.py`, which holds every PulseAudio
+stream the game and the menu open at that level (pactl run inside the jail),
+live, until the jail goes or `stop.sh` ends it. A muted rig (`PAD_AUDIO=0`) or
+a PulseAudio that does not answer has no stream to hold and starts none. `JJP_SELECT=0` in the
 environment skips the menu (image 0), `JJP_SELECT=1` insists on it. To drive
 the menu from a script, poke the cabinet bytes in the shared block the CUSE
 boards serve (RIGHT = byte 1 bit 2, LEFT = byte 1 bit 0, START = byte 3 bit 0,

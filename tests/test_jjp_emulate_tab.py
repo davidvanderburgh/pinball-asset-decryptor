@@ -596,6 +596,70 @@ def test_run_streaming_survives_a_popen_failure(panel, monkeypatch):
     assert rc is None and wrong is False
 
 
+# ----------------------------------------------------------- volume (item 118) --
+
+def test_volume_row_sits_with_start_and_writes_the_shared_file(panel, monkeypatch):
+    """The JJP tab had no Volume / Mute at all (David, 2026-09-13).  It is the
+    other Emulate tabs' knob and their file, beside Start."""
+    wrote = []
+    monkeypatch.setattr(jjp_emulate_tab, "_write_audio_ctl",
+                        lambda gain, muted: wrote.append((gain, muted)))
+    assert panel._vol_scale.master is panel._go_btn.master
+    assert panel._mute_chk.master is panel._go_btn.master
+    panel._volume_var.set(40)
+    panel._mute_var.set(True)
+    panel._on_volume_change()
+    assert wrote[-1] == (0.4, True)
+
+
+def test_start_hands_the_volume_file_to_the_rig(panel, monkeypatch):
+    """audio.sh starts jjpvol.py on PAD_AUDIO_CTL, so the file has to ride
+    into watch.sh or the knob moves nothing."""
+    import time as _t
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(panel, "_attach_dongle", lambda: True)
+    monkeypatch.setattr(jjp_emulate_tab, "rdp_client_running", lambda: True)
+    seen = []
+    monkeypatch.setattr(panel, "_run_streaming",
+                        lambda cmd, timeout=1800: (seen.append(cmd), (0, False))[1])
+    panel._iso_var.set("D:/Pinball/x.iso")
+    panel._start_async()
+    for _ in range(40):
+        if seen:
+            break
+        _t.sleep(0.05)
+    assert seen, "watch.sh was never launched"
+    assert "PAD_AUDIO_CTL=" + jjp_emulate_tab.AUDIO_CTL_FILE in seen[0]
+    assert seen[0][-1] == "D:/Pinball/x.iso"
+
+
+def test_footer_ladder_follows_the_launch_and_the_poll(root):
+    """JJP's own ladder (Restore image / Boot / Game / Ready), not Stern's
+    Node boards, moved by the launch's step lines and by the poll."""
+    import tkinter as tk
+    calls = []
+    frame = tk.Frame(root)
+    p = JJPEmulatePanel(frame, iso_var=tk.StringVar(),
+                        footer_cb=lambda k, pct=None, t="": calls.append((k, pct)))
+    p._schedule_poll = lambda ms=None: None
+    p.build(frame)
+    try:
+        for ln in ("== mount image ==", "  sda3: 40%", "== jail ==",
+                   "== display ==", "== game (GunsNRoses) =="):
+            p._footer_line(ln)
+        root.update()
+        assert calls == [("copy", 0), ("copy", 40), ("boot", None),
+                         ("boot", None), ("techalerts", None)]
+        del calls[:]
+        p._apply({"game_procs": "0", "selector_procs": "1", "dongle_present": "1"})
+        p._apply({"game_procs": "3", "selector_procs": "0", "dongle_present": "1"})
+        root.update()
+        assert [k for k, _ in calls] == ["techalerts", "run"]
+    finally:
+        p._stopped = True
+        frame.destroy()
+
+
 # ------------------------------------------------- key present but not shared --
 
 def test_a_key_in_the_pc_is_not_the_same_as_no_key():

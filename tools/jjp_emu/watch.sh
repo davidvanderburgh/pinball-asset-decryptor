@@ -125,6 +125,22 @@ step "seed rest state"
 python3 "$HERE/seed_rest.py" "${JJP_DEVICES_JSON:-/var/tmp/jjp_devices.json}" \
     || echo "watch.sh: rest seed skipped"
 
+# A MULTI-BOOT image shows its boot menu before any game exists, and the menu is
+# driven by the cabinet's flippers and Start - which, in this rig, are the
+# switch matrix's keys.  The matrix used to open only once a game was running,
+# so the menu came and went with nothing on the desktop to press (David,
+# 2026-09-13: "the emulator did not hand over control of the flipper buttons
+# during the boot menu").  So it opens HERE, before the game step:
+# jjpsw_launch.sh --menu uses this title's cached device tables (both images of
+# a multi-boot install run the same game binary - the builder refuses any other
+# pair) or, on a first run with no tables yet, the three cabinet switches alone;
+# the matrix step after the game reads the live tables.
+if jjp_multiboot && [ "${JJP_NO_MATRIX:-0}" != "1" ] && [ "${JJP_SELECT:-}" != "0" ]; then
+    step "switch matrix (for the boot menu)"
+    bash "$HERE/jjpsw_launch.sh" --menu \
+        || echo "watch.sh: the switch matrix did not open - the menu's countdown will boot its default"
+fi
+
 step "game ($(jjp_title))"
 JJP_DISPLAY=$RUN_DISPLAY bash "$HERE/run_game.sh" --detach
 rc=$?

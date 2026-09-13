@@ -34,7 +34,10 @@ TWO KINDS OF TEST, both without a card, a rootfs or WSL:
 import io
 import os
 import re
+import shlex
+import shutil
 import struct
+import subprocess
 import sys
 
 import pytest
@@ -1288,6 +1291,75 @@ def test_the_refusal_the_tab_shows_names_the_missing_tool():
     # ...and the old sentence is still there for a build that DID start and
     # failed, where "see the lines above" is the accurate answer.
     assert "see the lines above" in body
+
+
+def test_a_blocked_install_names_the_directory_and_its_owner():
+    """★ PAD-140.  A guest filesystem the app's emulator Start unpacked AS
+    ROOT has a root-owned /usr/local, the user's `make install` cannot create
+    codeselect/ in it, and coreutils reports the failed mkdir as the stat
+    after it:
+
+        [build]   install: cannot change permissions of
+                  '/home/home/spike2root/usr/local/codeselect': No such file or directory
+        [selector] error: the boot menu program could not be built - see the lines above.
+
+    One question (padpath.sh's pad_select_blocker), asked by buildselect.sh
+    before anything is staged and by the refusal the tab's status bar shows.
+    """
+    pp = _read("padpath.sh")
+    assert "pad_select_blocker() {" in pp
+    code = _code(_read("buildselect.sh"))
+    assert "pad_select_blocker" in code
+    assert code.index("pad_select_blocker") < code.index("pad_stage"), (
+        "asked before a source is staged")
+    ask = code[code.index("pad_select_blocker"):code.index("pad_stage")]
+    assert "exit 1" in ask and "stat -c %U" in ask, (
+        "the refusal must stop the build and name the owner")
+    text = _read("ensureselect.sh")
+    body = text[text.index("if ! pad_ensure_select"):]
+    assert (body.index("_pad_select_gap") < body.index("pad_select_blocker")
+            < body.index("see the lines above")), (
+        "a missing tool first, then who owns the directory, then the rest")
+    # ...and a root run hands back the one file ensureselect.sh installs itself
+    assert 'chown --reference="$SEL_DIR" "$SEL_DIR/materialize.py"' in text
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not shutil.which("bash")
+                    or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="needs POSIX permission bits and a non-root user")
+def test_pad_select_blocker_answers_for_each_shape(tmp_path):
+    """The helper itself, lifted out of padpath.sh (sourcing all of it asks
+    WSL questions) and run against the shapes that matter."""
+    pp = _read("padpath.sh")
+    fn = pp[pp.index("pad_select_blocker() {"):]
+    fn = fn[:fn.index("\n}") + 2]
+    root = tmp_path / "rootfs"
+    local = root / "usr" / "local"
+    local.mkdir(parents=True)
+
+    def ask():
+        script = ('%s\nPAD_SELECT_BIN=%s/usr/local/codeselect/codeselect\n'
+                  'pad_select_blocker; echo "rc=$?"'
+                  % (fn, shlex.quote(str(root))))
+        out = subprocess.run(["bash", "-c", script], stdout=subprocess.PIPE,
+                             universal_newlines=True).stdout
+        return out.strip().splitlines()
+
+    # a writable /usr/local with no codeselect in it yet: nothing in the way
+    assert ask() == ["rc=1"]
+    # root's /usr/local, as far as this user can tell: THAT is the answer
+    local.chmod(0o555)
+    try:
+        assert ask() == [str(local), "rc=0"]
+    finally:
+        local.chmod(0o755)
+    # an installed tree of the user's own
+    (local / "codeselect").mkdir()
+    assert ask() == ["rc=1"]
+    # a link to nowhere where the directory should be
+    (local / "codeselect").rmdir()
+    os.symlink(str(tmp_path / "gone"), str(local / "codeselect"))
+    assert ask() == [str(local / "codeselect"), "rc=0"]
 
 
 def _selector_tree():

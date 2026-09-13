@@ -2227,20 +2227,27 @@ def root_command(args, cwd=None, exe="python3"):
         return wsl_command_root(args, cwd, exe)
 
     def later(_texts):
-        home = wsl_home()
-        if not home:
-            user, root_home = wsl_account()
-            if user != "root":
-                raise RuntimeError(
-                    "cannot find your WSL home (wsl.exe -e whoami / getent "
-                    "both failed) - the card is written as root and needs it "
-                    "to find ~/spike2root; check that WSL starts, then try "
-                    "again")
-            # No override when the probe could not read root's passwd row:
-            # `wsl -u root` sets HOME itself, and that is the same account.
-            home = root_home or None
-        return wsl_command_root(args, cwd, exe, home=home)
+        return wsl_command_root(args, cwd, exe, home=_root_step_home())
     return later
+
+
+def _root_step_home():
+    """The HOME a root step carries (see :func:`root_command`): the desktop
+    user's, or root's own on a root-default distro - ``None`` when root's
+    passwd row could not be read, because ``wsl -u root`` sets that one
+    itself.  Raises RuntimeError, in a sentence, when WSL would not say who
+    it logs in as.  On the worker only: it is two ``wsl.exe`` probes."""
+    home = wsl_home()
+    if home:
+        return home
+    user, root_home = wsl_account()
+    if user != "root":
+        raise RuntimeError(
+            "cannot find your WSL home (wsl.exe -e whoami / getent "
+            "both failed) - the card is written as root and needs it "
+            "to find ~/spike2root; check that WSL starts, then try "
+            "again")
+    return root_home or None
 
 
 def menu_card_image_path(drive):
@@ -2404,9 +2411,10 @@ def install_selector_line(selector_dir, card="", tool=ENSURESELECT):
     a second copy of it: ensurebuild.sh unpacks the guest filesystem from
     *card* when the machine has none, builds the menu program when it is
     missing, rebuilds it when this app ships newer sources, and leaves what
-    is installed alone when a rebuild is not possible.  It runs AS THE USER
-    (the build itself needs root; an installed tree owned by root is the
-    next rebuild's permission error), and it writes no card.
+    is installed alone when a rebuild is not possible.  On Windows it runs
+    AS ROOT with the desktop user's HOME (:func:`install_selector_args`,
+    PAD-140) and buildselect.sh hands what it installs back to that user,
+    so the next rebuild as the user still can.  It writes no card.
 
     A selector directory that is not a rootfs's own - only
     ``PAD_MULTIBOOT_SELECTOR`` can make one - is CHECKED and never written
@@ -2430,13 +2438,39 @@ def install_selector_line(selector_dir, card="", tool=ENSURESELECT):
 def install_selector_args(form, cwd=None):
     """The card's 'selector' step argv (see :func:`install_selector_line`).
     The primary image rides along: it is what the guest filesystem is
-    unpacked from on a machine that has never made one."""
+    unpacked from on a machine that has never made one.
+
+    AS ROOT ON WINDOWS, with the desktop user's HOME - a callable the worker
+    resolves, for :func:`root_command`'s reason (PAD-140).  This step
+    INSTALLS into the guest filesystem, and on Windows that filesystem is
+    usually root's: the Emulate tab's Start is ``wsl -u root`` and debugfs
+    unpacks as root, so anybody who had run a game once could never create
+    ``/usr/local/codeselect`` in it, and their first multi-boot build
+    stopped on coreutils' account of that failed mkdir -
+
+        install: cannot change permissions of
+        '/home/home/spike2root/usr/local/codeselect': No such file or directory
+
+    buildselect.sh hands everything it installs back to the owner of HOME,
+    so the menu program is the user's either way.  A probe that cannot say
+    who WSL logs in as degrades to the user step this used to be (the build
+    step after it says the sentence).  Linux keeps the user: nothing there
+    unpacks the filesystem as root."""
     if cwd is None:
         cwd = wsl(repo_dir())
     card = (form.images[0].path.strip().strip('"') if form.images else "")
-    line = install_selector_line(form.selector_dir,
-                                 wsl(card) if card else "")
-    return wsl_shell("cd %s && %s" % (_q(cwd), line))
+    line = "cd %s && %s" % (_q(cwd), install_selector_line(
+        form.selector_dir, wsl(card) if card else ""))
+    if sys.platform != "win32":
+        return wsl_shell(line)
+
+    def later(_texts):
+        try:
+            home = _root_step_home()
+        except RuntimeError:
+            return wsl_shell(line)
+        return wsl_shell_root(line, home)
+    return later
 
 
 def install_selector_commands(form, cwd=None):

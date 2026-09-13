@@ -32,6 +32,13 @@
 #
 # The card argument is only used to build the guest filesystem the first time;
 # every later run finds it there and costs a digest of the selector's sources.
+#
+# THE APP RUNS THIS AS ROOT (PAD-140), with the desktop user's HOME. On Windows
+# the guest filesystem is usually root's - the Emulate tab's Start unpacks it
+# as root - and a user cannot create /usr/local/codeselect inside it. What
+# buildselect.sh installs is handed back to the owner of HOME. Run as a user
+# whose install is blocked, the refusal below names the directory and its
+# owner instead of the stat coreutils reports.
 . "$(dirname "$0")/padpath.sh"
 . "$(dirname "$0")/ensurebuild.sh"
 
@@ -74,6 +81,11 @@ if ! pad_ensure_select; then
     # so the two can never name different tools.
     if gap=$(_pad_select_gap); then
         echo "$ERR the boot menu program could not be built: this Linux has no ${gap%% *} (on Debian/Ubuntu: apt install ${gap#* }), and that is what builds it. It belongs at $PAD_SELECT_BIN" >&2
+    elif blocker=$(pad_select_blocker); then
+        # ...AND WHEN THE REASON IS WHO OWNS THE PLACE IT GOES, SAY THAT
+        # (PAD-140). buildselect.sh refused in the same words above; this is
+        # the line the tab's status bar shows.
+        echo "$ERR the boot menu program could not be installed: $blocker belongs to $(stat -c %U "$blocker" 2>/dev/null || echo another account) and this Linux account ($(id -un 2>/dev/null || id -u)) may not write into it. It belongs at $PAD_SELECT_BIN" >&2
     else
         echo "$ERR the boot menu program could not be built - see the lines above. It belongs at $PAD_SELECT_BIN" >&2
     fi
@@ -100,6 +112,11 @@ fi
 # buildselect.sh at a person who has never run it. Put the file there here.
 if [ ! -e "$SEL_DIR/materialize.py" ] && [ -f "$RIG/codeselect/materialize.py" ]; then
     if install -m 755 "$RIG/codeselect/materialize.py" "$SEL_DIR/materialize.py" 2>/dev/null; then
+        # As root (the Multi-boot tab's run) the file goes to whoever owns
+        # the directory it landed in, as give_back() does for the rest.
+        if [ "$(id -u)" = 0 ]; then
+            chown --reference="$SEL_DIR" "$SEL_DIR/materialize.py" 2>/dev/null
+        fi
         echo "[selector] materialize.py installed beside the menu (rebuilds a compact card's deltas at boot)"
     else
         echo "[selector] WARNING: could not install materialize.py into $SEL_DIR; a compact build that stores deltas will refuse" >&2

@@ -1714,6 +1714,15 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    PC are offered: a card built on somebody else's machine loads with
    their paths recorded in it, and those are not sounds this one can
    read.
+   **The move sound never plays over itself.** From v0.212.3 a flipper
+   press while the move sound is still playing moves the highlight and
+   leaves the sound alone, on the card and in the tab's preview alike,
+   so a long clip is heard once however fast you flip instead of piling
+   up a copy per press, and a move sound taken from a file is cut to
+   3 s with a short fade. **Run in emulator** draws the menu with the
+   card's own heading, theme and colours, its sounds keep time with the
+   flipper presses where they used to fall seconds behind, and the
+   countdown reads `starting <title> in N s`.
    An image's picture can come from a video clip — one frame of it, or a
    short loop of it as the card's animation — and from v0.208.1 that
    picture is taken from a track the clip actually has a decoder for. A

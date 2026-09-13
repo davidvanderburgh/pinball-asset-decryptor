@@ -1656,7 +1656,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    **Build / flash card…** writes the card and, if you want, flashes it
    onto an SD card in the same run — you pick which SD card in the next
    dialog, the Write tab's own picker, and nothing is written to one
-   until you have chosen it there and confirmed. On the machine the flippers move
+   until you have chosen it there and confirmed. That dialog's **Only the
+   boot menu** tick rewrites just the menu and leaves the machine's
+   settings and scores alone; from v0.212.7 it starts ticked only for a
+   card a flash from this app has already put onto an SD card, and any
+   other card starts unticked and is written whole. On the machine the flippers move
    the highlight, START boots the highlighted image, and a countdown
    boots the remembered choice by itself; the first image in the list is
    the primary, and the machine falls back to it if the menu ever fails.

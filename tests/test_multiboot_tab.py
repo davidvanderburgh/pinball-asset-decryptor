@@ -2179,7 +2179,7 @@ def test_an_action_waits_for_the_render_instead_of_being_refused(tmp_path):
 
 def test_flash_button_passes_the_output_path(tmp_path):
     flashed = []
-    root, panel = _panel(flash_fn=flashed.append)
+    root, panel = _panel(flash_fn=lambda p, fresh=False: flashed.append(p))
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
@@ -5570,7 +5570,7 @@ def test_the_build_flash_modal_can_build_then_flash(tmp_path):
     finished card straight to the flash flow."""
     root, panel, card, media = _loaded(tmp_path)
     flashed = []
-    panel._flash_fn = lambda p: flashed.append(p)
+    panel._flash_fn = lambda p, fresh=False: flashed.append(p)
     try:
         # a recorder that reports success, so the after-hook (flash) runs
         def ok(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
@@ -5597,6 +5597,29 @@ def test_the_build_flash_modal_can_build_then_flash(tmp_path):
         panel._ed_sub.set("y")
         panel._do_build_flash(True, True)
         assert flashed == []
+    finally:
+        root.destroy()
+
+
+def test_a_card_just_built_or_updated_is_handed_on_as_fresh(tmp_path):
+    """PAD-144: a card the modal just BUILT, or UPDATED (game files rewritten
+    inside it), is on no SD card yet, so the flash dialog must write it whole
+    - its menu-only write would refuse a fresh build, and pass an update's
+    check while leaving the old games on the SD card.  An APPLY changes only
+    the menu, which is what that write is for; flashing the card as it is
+    says nothing about it either way."""
+    root, panel, card, media = _loaded(tmp_path)
+    flashed = []
+    panel._flash_fn = lambda p, fresh=False: flashed.append((p, fresh))
+    try:
+        for name in ("_build_card", "update_card", "apply_to_card"):
+            setattr(panel, name, lambda after=None: after and after())
+        for action in ("build", "update", "apply"):
+            panel._write_plan = lambda a=action: {"action": a}
+            panel._do_build_flash(True, True)
+        panel._do_build_flash(False, True)
+        assert flashed == [(card, True), (card, True), (card, False),
+                           (card, False)]
     finally:
         root.destroy()
 

@@ -560,3 +560,104 @@ def test_a_window_short_of_its_content_still_shows_start_and_cancel(
                 "build=%s write=%s menu=%s" % (build, write, menu)
     finally:
         dlg._dlg.destroy()
+
+
+# ---- a card the Multi-boot tab hands in is only written (PAD-144) -----------
+def _reader():
+    from pinball_decryptor.core.drives import PhysicalDrive
+    return PhysicalDrive(device_path=r"\\.\PHYSICALDRIVE9",
+                         model="Generic- USB3.0 CRW -SD",
+                         size_bytes=15_931_539_456, bus_type="USB")
+
+
+@pytest.mark.gui
+@gui_only
+def test_a_card_from_the_multiboot_tab_is_only_written(app, monkeypatch,
+                                                       tmp_path):
+    """The tester's screenshot: the dialog the Multi-boot tab opens still
+    carried the Write tab's "Build a fresh image" section and its single-game
+    build path ("Could you even use this option to create a fresh build of a
+    multigame?"), and Start asked "Nothing modified" - a check on Write-tab
+    edits the card never came from ("its not really true since I am not
+    rebuilding but pointing to a custom image")."""
+    from tkinter import messagebox
+    _pick(app, "stern")
+    img = _spike_image_for(tmp_path)
+    asked, flashed, remembered = [], [], []
+    monkeypatch.setattr(messagebox, "askyesno",
+                        lambda title, *a, **k: asked.append(title) or True)
+    dlg = _make_dialog(
+        app, monkeypatch, initial_image=img, handed_in="Multi-boot",
+        has_pending_changes=False, on_choices=remembered.append,
+        initial_choices={"build": True, "write": True},
+        on_flash=lambda i, d, menu_only=False: flashed.append(
+            (i, d, menu_only)))
+    try:
+        # no Build section, and no write tick to untick into a dead Start
+        assert not dlg._build_box.winfo_manager()
+        assert not dlg._write_chk.winfo_manager()
+        assert (dlg._build_var.get(), dlg._write_var.get()) == (False, True)
+        assert dlg._image_var.get() == img
+        assert dlg._start_btn.cget("text") == "Flash image"
+        # unticked, the note says what the whole write is for
+        dlg._menu_var.set(False)
+        dlg._sync_sections()
+        assert "first time" in dlg._menu_note.cget("text")
+        dlg._selected = _reader()
+        dlg._do_start()
+        assert asked == ["Erase the SD card and continue?"]
+        assert flashed == [(img, r"\\.\PHYSICALDRIVE9", False)]
+        # ...and writing that card is not the Write tab's choice to remember
+        assert remembered == []
+    finally:
+        if dlg._dlg.winfo_exists():
+            dlg._dlg.destroy()
+
+
+@pytest.mark.gui
+@gui_only
+def test_a_card_just_built_is_written_whole(app, monkeypatch, tmp_path):
+    """"Only the boot menu" came up ticked on a card the Multi-boot tab had
+    only just built.  That write refuses any SD card the image was not
+    already flashed onto, so on a fresh card the default could only cost a
+    refusal - and after an update, which rewrites game files inside the
+    card, it would pass its check and leave the old games on the SD card.
+    Any OTHER image picked in the box is offered it as before."""
+    _pick(app, "stern")
+    img = _spike_image_for(tmp_path)
+    dlg = _make_dialog(app, monkeypatch, initial_image=img,
+                       handed_in="Multi-boot", fresh_image=True)
+    try:
+        assert dlg._menu_var.get() is False
+        assert "disabled" in dlg._menu_chk.state()
+        assert "no SD card holds it yet" in dlg._menu_note.cget("text")
+        (tmp_path / "older").mkdir()
+        dlg._image_var.set(_spike_image_for(tmp_path / "older"))
+        dlg._sync_sections()
+        assert dlg._menu_var.get() is True
+        assert "disabled" not in dlg._menu_chk.state()
+    finally:
+        dlg._dlg.destroy()
+
+
+@pytest.mark.gui
+@gui_only
+def test_the_multiboot_hand_off_reaches_the_dialog(app, monkeypatch,
+                                                   tmp_path):
+    """The wiring: the Multi-boot tab's flash_fn names the tab and passes
+    fresh on; the Write tab's own button hands nothing in."""
+    from pinball_decryptor.gui import flash_dialog
+    _pick(app, "stern")
+    win = app.window
+    panel = getattr(win, "_multiboot_panel", None)
+    if panel is None:
+        pytest.skip("no Multi-boot tab in this build")
+    img = _spike_image_for(tmp_path)
+    opened = []
+    monkeypatch.setattr(flash_dialog, "FlashImageDialog",
+                        lambda *a, **kw: opened.append(kw))
+    panel._flash_fn(img, fresh=True)
+    win._open_flash_dialog()
+    assert [(kw["handed_in"], kw["fresh_image"]) for kw in opened] == [
+        ("Multi-boot", True), ("", False)]
+    assert opened[0]["initial_image"] == img

@@ -14663,7 +14663,8 @@ class MainWindow:
             theme_fn=lambda: self._current_theme,
             badge_fn=self._make_round_icon,
             resize_fn=self._resize_notebook_to_current_tab,
-            flash_fn=lambda p: self._open_flash_dialog(initial_image=p),
+            flash_fn=lambda p, fresh=False: self._open_flash_dialog(
+                initial_image=p, fresh=fresh),
             emulate_fn=run_emulator,
             phase_fn=self.set_multiboot_phase,
             status_fn=self.set_status)
@@ -21275,7 +21276,7 @@ class MainWindow:
         if self._help_window is not None:
             self._help_window.refresh(tab_name)
 
-    def _open_flash_dialog(self, initial_image=None):
+    def _open_flash_dialog(self, initial_image=None, fresh=False):
         """Open the two-section Build / flash modal.
 
         Section 1 builds a fresh image (the Write tab's normal Build, path
@@ -21287,7 +21288,10 @@ class MainWindow:
         Refuses while a run is in flight (the status area is busy).
 
         ``initial_image``: a finished image handed in by another tab (the
-        Multi-boot tab's card) - the dialog then opens flash-only on it."""
+        Multi-boot tab's card) - the dialog then only writes it: no Build
+        section, no "nothing modified" check, and nothing remembered as the
+        Write tab's own choice.  ``fresh``: that card was only just built or
+        updated, so no SD card holds it yet and it is written whole."""
         if self._on_flash_image is None:
             return
         if self._is_running():
@@ -21319,12 +21323,14 @@ class MainWindow:
         initial = target if (target and os.path.isfile(target)) else None
         mfr_key = getattr(self._current_mfr, "key", "")
         choices = self._saved_flash_choices.get(mfr_key)
+        handed_in = ""
         if initial_image and os.path.isfile(initial_image):
             # Item 90: a card handed in by the Multi-boot tab.  Flash THAT
-            # file, and open flash-only - the build section would build the
-            # Write tab's image, which is not the card that was just made.
+            # file, with no build section at all - it would build the Write
+            # tab's image, which is not the card that was just made, and
+            # shown unticked it read as a way to rebuild the card (PAD-144).
             initial = initial_image
-            choices = {"build": False, "write": True}
+            handed_in = "Multi-boot"
         from .flash_dialog import FlashImageDialog
         FlashImageDialog(
             self._tk_root(),
@@ -21338,7 +21344,9 @@ class MainWindow:
             cannot_build_reason=reason,
             has_pending_changes=self._has_pending_write_changes(),
             initial_choices=choices,
-            on_choices=lambda c, k=mfr_key: self._remember_flash_choices(k, c))
+            on_choices=lambda c, k=mfr_key: self._remember_flash_choices(k, c),
+            handed_in=handed_in,
+            fresh_image=bool(handed_in and fresh))
 
     def _open_read_card_dialog(self):
         """Open the "Save card as image…" modal (card → .raw file).

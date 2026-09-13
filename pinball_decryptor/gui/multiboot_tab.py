@@ -3379,9 +3379,13 @@ def rows_from_inspect(info):
                 % (i, what, (val or "").strip(),
                    im.get(key) or ("%s file" % what)))
         if not row.path:
-            warnings.append("Image %d: this card does not record which .raw "
+            # the device token says which platform's file this was: a JJP
+            # root slot holds an install ISO, a Stern partition a .raw
+            what = ("install ISO" if (row.device or "").startswith("root")
+                    else ".raw")
+            warnings.append("Image %d: this card does not record which %s "
                             "it was built from (%s)."
-                            % (i, row.device or "no device"))
+                            % (i, what, row.device or "no device"))
         elif im.get("source_exists") is False or not os.path.isfile(row.path):
             warnings.append("Image %d: %s is not on this machine - the menu "
                             "can still be changed, but the card cannot be "
@@ -5872,6 +5876,33 @@ class MultibootPanel:
                      "otherwise. The ISO is made by the rig's tools under "
                      "WSL; nothing here touches the ISOs you pick.")
 
+    #: The JJP platform's words for the list and the size strip (item 118):
+    #: two install ISOs and no random card, a USB stick rather than an SD
+    #: card, and no compact layout or in-place update to explain.  Swapped
+    #: onto the instance by _apply_platform_words; the Stern class attributes
+    #: stay what every Stern test pins.
+    ADD_ROW_TEXT_JJP = "Add the second ISO…"
+    LIST_TIP_JJP = ("Each row carries its own icons: ✎ edits the image, − takes "
+                    "it off the stick, ▲ / ▼ swap the two in the menu's order "
+                    "(the outlined arrow means that row cannot go further). "
+                    "The last row adds the second install ISO. A double-click "
+                    "or Enter opens a row, and a right-click - or the menu key "
+                    "- offers the same commands. The first image is the "
+                    "PRIMARY: it goes into the machine's root A with the menu, "
+                    "the second into root B exactly as it is, and the machine "
+                    "falls back to the first. Exactly two fit: JJP's A/B root "
+                    "slots hold one install each.")
+    SIZE_TIP_JJP = (
+        "How big a USB stick this install needs - measured by the tool from "
+        "the two ISOs' partition pieces, not guessed from the ISO files. The "
+        "bar is the stick you would have to buy: each band is one image's "
+        "root as it goes onto the stick (the primary re-imaged with the "
+        "menu, the second verbatim), and the grey one at the end is what "
+        "the stick spends on itself (the installer's live system, the EFI, "
+        "boot and perm pieces and the configs). The stick is FAT32, so every "
+        "piece stays under 4 GB. It re-measures itself whenever the image "
+        "list changes.")
+
     # USER-FACING COPY IS GENERIC.  Nothing the tab says names a title, a
     # build or a version as an example (David, 2026-09-02: most people
     # using this have never heard of the card it was written for) - what a
@@ -6495,6 +6526,34 @@ class MultibootPanel:
         about = getattr(getattr(self, "_about_badge", None), "icon_tip", None)
         if about is not None:
             about.text = self.ABOUT_TIP if be.key == "stern" else self.ABOUT_TIP_JJP
+        # THE LIST'S AND THE SIZE STRIP'S WORDS: two install ISOs and no
+        # random card on JJP, a USB stick rather than an SD card, and no
+        # compact layout or in-place update to explain.  Instance attributes
+        # over the class's, so a Stern panel keeps the texts its tests pin.
+        cls = type(self)
+        jjp = be.key == "jjp"
+        self.ADD_ROW_TEXT = cls.ADD_ROW_TEXT_JJP if jjp else cls.ADD_ROW_TEXT
+        self.LIST_TIP = cls.LIST_TIP_JJP if jjp else cls.LIST_TIP
+        self.SIZE_TIP = cls.SIZE_TIP_JJP if jjp else cls.SIZE_TIP
+        table = getattr(self, "_table", None)
+        if table is not None:
+            table.add_text, table.add_tip = self.ADD_ROW_TEXT, self.LIST_TIP
+            add_row = getattr(table, "_add_row", None)
+            if add_row is not None:
+                # the add row takes its words and its tip when it is made:
+                # remake it, and the table places it again
+                try:
+                    add_row.destroy()
+                    table._add_row = None
+                    table.set_rows(list(getattr(table, "_values", None) or []),
+                                   select=getattr(table, "_sel", None))
+                except tk.TclError:                     # pragma: no cover
+                    pass
+        need_tip = getattr(self, "_size_need_tip", None)
+        if need_tip is not None:
+            need_tip.text = self.SIZE_TIP
+        if getattr(self, "_size_canvas", None) is not None:
+            self._draw_size()                   # re-reads SIZE_TIP for the strip
         for attr, text in (("_src_lbl", be.out_label),
                            ("_size_lbl", be.medium_needed)):
             w = getattr(self, attr, None)
@@ -12110,12 +12169,17 @@ class MultibootPanel:
         # once it names a card image in a folder that exists (or one folder
         # below one that does - <out dir> is where the card goes anyway).
         # Anything else waits for Render now, which creates what it needs.
+        # THE PLATFORM SAYS WHAT AN OUTPUT ENDS IN: a Stern card is a .raw,
+        # a JJP multi-boot install is an .iso - hard-coding the first here
+        # left the JJP tab saying "not a .raw" about the ISO it had just
+        # loaded, and never drawing it (David, 2026-09-13).
+        be = self._backend
         out_dir = os.path.dirname(os.path.abspath(out))
-        if not (out.lower().endswith((".raw", ".img"))
+        if not (out.lower().endswith(be.image_exts)
                 and (os.path.isdir(out_dir)
                      or os.path.isdir(os.path.dirname(out_dir)))):
-            self._pv_stale("the card path is not a .raw in a folder that "
-                           "exists yet")
+            self._pv_stale("the %s path is not a %s in a folder that "
+                           "exists yet" % (be.out_noun, be.out_ext))
             return False
         # NOT RED, BUT NOT SILENT EITHER.  An unfinished form is the normal
         # state while someone is typing, so this must not paint the status

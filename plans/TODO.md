@@ -6659,14 +6659,40 @@ These have each been violated at least once and each cost a run or a window:
       into ITS caches; PAD-Runtime v6 has partclone/xorriso/pigz/e2fsprogs/
       make/gcc/libc6-dev/ffmpeg but no squashfs-tools (hence the loop mount)
       and no PIL. Memory: reference_app_runs_tools_in_pad_runtime_distro.
+      **David's first look (2026-09-13, the app from this worktree, JJP,
+      Browse… to the built ISO):** the ISO loaded (2 images, the rows, the
+      16 GB strip) but the PREVIEW NEVER DREW and the caption said "the card
+      path is not a .raw in a folder that exists yet" - `_auto_render`'s
+      gate was hard-coded to Stern's `.raw`/`.img`, so a JJP `.iso` output
+      could never draw by itself. Fixed: the gate reads the backend's
+      `image_exts` and words the refusal with its `out_noun`/`out_ext`
+      (Stern's sentence unchanged). Proven through the real tab code: a
+      loaded ISO now renders in ~1 s - `ensurejjpselect.sh` finds the built
+      `/var/tmp/jjpselect` up to date (no mount), the card's own media is
+      drawn, `jjpselect --snapshot` writes the 1360x768 frame (SELECT GAME
+      CODE, both cards with the JJP logo art, the primary highlighted,
+      "booting GunsNRoses-v03.03 in 15 s"). The other Stern words that
+      showed on the JJP tab went with it: the add row ("Add the second ISO…"
+      instead of "Add image or random…"), the list tip (no RANDOM card, root
+      A/root B), the size strip's tip (a USB stick, the ISOs' pieces, FAT32)
+      - instance attributes swapped by `_apply_platform_words`, the Stern
+      class texts untouched - and the load warning "does not record which
+      .raw" says "install ISO" for a root-slot device. The `plan` on a
+      loaded card prints `game=? fl.dat=? used=?` (it runs as the user and
+      the restores are root's) - cosmetic, left alone.
       **Owed (hardware, David):** (a) the green button's stick tick on a real
       USB stick (the JJP flash dialog's FAT32 copy of the 12.97 GB ISO); (b)
       'Run in emulator' from the tab → the Emulate JJP tab's watch.sh, which
-      needs the GNR key (its dongle step is fatal without one; the key is
-      attached over usbipd since 117's with-key run, so this is now a
-      desk step); (c) a look at the tab itself in the app with JJP selected
-      (the words, the two-row list, the preview drawn by the native
-      jjpselect - not seen on a screen this pass).
+      needs the GNR key (attached over usbipd since 117's with-key run).
+      David is driving this himself from the app (2026-09-13: "i want to
+      drive it"); a scripted attempt through the real tab code got as far as
+      the launch (the button enabled, launch_iso → the Emulate JJP tab,
+      watch.sh restoring the ISO from D:) before he stopped it. NOTE: the
+      Emulate JJP tab runs its rig in the DEFAULT distro (no `distro=` on
+      its rig commands), so its restore lands beside item 117's; that base
+      was removed so the tab restores from ITS ISO - the first Run in
+      emulator takes several minutes (13 GB read off D:); (c) the rest of
+      his look at the tab.
       **Resume:** open the app, pick Jersey Jack, Multi-boot: add the two
       ISOs (or Browse… to `D:\Pinball\multi\GunsNRoses-v03.03.multi.iso`,
       which loads it), Build / make stick… with the stick tick on a 16 GB

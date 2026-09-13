@@ -524,7 +524,13 @@ def restore_pieces(pieces, dest, meter=None, label="sda3"):
         if os.path.exists(p):
             os.unlink(p)
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    cmd = 'set -o pipefail; gunzip -c | partclone.restore -C -N -s - -o "$0" >"$1" 2>&1'
+    # TEXT mode, not -N: in partclone 0.3.x -N means "use the NCURSES
+    # interface", so the log used to hold a full-screen UI's escape codes and
+    # a failure's tail was unreadable.  -f 5 -B: a "Completed: N%" line every
+    # five seconds and no block-count line under each - the log stays small
+    # and a refusal's tail says how far it got.  (The meter above is the
+    # builder's own progress; this is only what the log records.)
+    cmd = 'set -o pipefail; gunzip -c | partclone.restore -C -f 5 -B -s - -o "$0" >"$1" 2>&1'
     proc = subprocess.Popen(["bash", "-c", cmd, part, log], stdin=subprocess.PIPE)
     fed = 0
     broken = False

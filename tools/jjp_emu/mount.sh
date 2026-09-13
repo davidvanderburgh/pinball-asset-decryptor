@@ -91,7 +91,12 @@ mountpoint -q "$ISOMNT" || mount -o ro,loop "$ISO" "$ISOMNT" || {
 
 IMG=$(ls -d "$ISOMNT"/home/partimag/img 2>/dev/null | head -1)
 [ -d "$IMG" ] || { echo "mount.sh: $ISO does not look like a JJP Clonezilla image" >&2; exit 6; }
+# Clonezilla's own `parts` is the list the SOURCE machine had (sda1-4 on a
+# stock image); a multi-boot ISO (item 116) carries an sda5 set as well, so
+# the sets are read off the image directory - the same list the restore
+# below walks.
 echo "partitions in image: $(cat "$IMG/parts" 2>/dev/null)"
+echo "piece sets in image: $(ls "$IMG" 2>/dev/null | grep -oE '^sda[0-9]+\.' | sort -u | tr -d '.' | tr '\n' ' ')"
 
 restore_one() {
     part=$1; dest=$2
@@ -101,7 +106,7 @@ restore_one() {
     fi
     set -- "$IMG/$part".*-ptcl-img.gz.*
     [ -e "$1" ] || { echo "  $part: not in this image, skipping"; return 1; }
-    echo "  $part: restoring $# chunk(s) -> $dest"
+    echo "  $part: restoring $# chunk(s) ($(du -shc "$@" | tail -1 | cut -f1) compressed) -> $dest"
 
     # -C disables partclone's "target is smaller than source" check.  Restoring
     # into a fresh regular file, partclone sees a 0-byte target and refuses
@@ -112,8 +117,29 @@ restore_one() {
     # image was already restored on disk from an earlier session, so mount.sh
     # skipped straight to "already restored"; Godfather is the first real
     # restore and the first to exercise this path.)
-    if ! cat "$IMG/$part".*-ptcl-img.gz.* | gunzip -c \
-            | partclone.restore -C -N -s - -o "$dest" >/dev/null 2>&1; then
+    #
+    # PROGRESS, one line per ten percent.  This used to pass -N and throw
+    # stderr away - and in partclone 0.3.x -N is "use the NCURSES interface",
+    # not "no curses": the rig was asking for the full-screen UI and sending
+    # it to /dev/null, so a restore off a USB disk was minutes of nothing.
+    # The Emulate JJP tab streams this script's lines, and it sat on
+    # "Starting..." with no movement for a whole restore (David, 2026-09-13:
+    # "it looks stuck?").  TEXT mode (no -N) prints carriage-return updates
+    # to stderr - "Elapsed: ..., Remaining: ..., Completed:   7.62%, ..." -
+    # every -f seconds, -B without the block-count line under each; the
+    # filter turns them into a line per ten percent, and the restore's own
+    # exit status is read off the pipeline, not the filter's.  (Proven on a
+    # 3.4 GB ISO in the app's distro, 2026-09-13.)
+    cat "$IMG/$part".*-ptcl-img.gz.* | gunzip -c \
+        | partclone.restore -C -f 1 -B -s - -o "$dest" 2>&1 >/dev/null \
+        | tr '\r' '\n' \
+        | awk -v part="$part" '
+            /Completed:/ {
+                sub(/.*Completed:[ ]*/, "")
+                p = int(int($1) / 10) * 10
+                if (p > last) { last = p; printf "  %s: %d%%\n", part, p; fflush() }
+            }'
+    if [ "${PIPESTATUS[2]}" != "0" ]; then
         echo "  $part: partclone failed" >&2; rm -f "$dest"; return 1
     fi
 

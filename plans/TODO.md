@@ -6680,6 +6680,25 @@ These have each been violated at least once and each cost a run or a window:
       .raw" says "install ISO" for a root-slot device. The `plan` on a
       loaded card prints `game=? fl.dat=? used=?` (it runs as the user and
       the restores are root's) - cosmetic, left alone.
+      **His Run in emulator (2026-09-13, from the tab, the key attached):**
+      worked end to end - the launch streamed into the Emulate JJP tab, the
+      rig restored the ISO from D: in the default distro, the menu came up
+      ~7.5 min after the click, the 15 s countdown booted image 0, the game
+      ran on the key (`game_procs=3`, `hasplmd=1`, `choice=0`, hook `image 0
+      chosen`). What he saw meanwhile: "it looks stuck?" - the Start button
+      on "Starting…" and the log on `sda3: restoring 6 chunk(s)` for minutes,
+      because `mount.sh` passed partclone `-N` and sent its output to
+      /dev/null - and in partclone 0.3.x **-N means USE the ncurses UI**, not
+      "no curses": the rig was drawing a full-screen UI into nowhere. Fixed:
+      text mode (`-f 1 -B`), the updates filtered to one `  sdaN: 10%` line
+      per ten percent (the tab streams them), each set's compressed size on
+      its "restoring" line, and a `piece sets in image:` line read off the
+      image dir (Clonezilla's `parts` lists the SOURCE machine's sda1-4 and
+      misled on a multi-boot ISO that carries sda5). The builder's
+      `restore_pieces` had the same `-N`: its log was curses escape codes, so
+      a refusal's tail said nothing; now `-f 5 -B`. Proven on the Pirates ISO
+      (3.4 GB) restored for real in the app's distro, and `restore_pieces` on
+      its sda2. Memory: reference_partclone_N_is_ncurses.
       **Owed (hardware, David):** (a) the green button's stick tick on a real
       USB stick (the JJP flash dialog's FAT32 copy of the 12.97 GB ISO); (b)
       'Run in emulator' from the tab → the Emulate JJP tab's watch.sh, which

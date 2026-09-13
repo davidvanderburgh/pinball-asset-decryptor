@@ -5461,19 +5461,32 @@ class BuildFlashDialog(_Modal):
         gf = ttk.Frame(flash)
         gf.pack(fill=tk.X, padx=8, pady=6)
         self._flash_chk = ttk.Checkbutton(
-            gf, text="Write the card onto an SD card", variable=self._flash_var,
-            command=self._sync)
+            gf, text="Write the card onto an SD card (you pick which card next)",
+            variable=self._flash_var, command=self._sync)
         self._flash_chk.pack(anchor=tk.W)
+        # IT SAYS WHERE THE CARD IS PICKED.  This tick names no drive
+        # because it has none to name: Start hands the finished card to the
+        # app's own flash dialog, and THAT is where the SD card is chosen and
+        # the erase confirmed.  A tick that said nothing about it read as
+        # 'it will write somewhere' (PAD-143: "I don't see the option to pick
+        # which drive letter so I am not sure where its actually going to
+        # end up").
+        #
         # ...AND IT NAMES THE FAST PATH, because this is where someone
         # about to wait an hour is standing (David, twice: "flashing the
         # whole thing takes over an hour with my slow sd card").  The
         # menu-only write lives one dialog further on, and a fast option
         # nobody can find is a fast option nobody has.
         ttk.Label(gf, foreground=th["gray"], wraplength=460, justify=tk.LEFT,
-                  text="Flashing the whole image erases and replaces the "
+                  text="WHICH SD CARD? You pick it in the next dialog: "
+                       "Start opens the SD-card picker the Write tab uses, "
+                       "and nothing is written to any card until you have "
+                       "chosen one there and confirmed. Tick this with the "
+                       "write above and the picker opens once that write has "
+                       "finished, so building and flashing is one step.\n\n"
+                       "Flashing the whole image erases and replaces the "
                        "whole SD card, and needs Administrator (approved "
-                       "when the write starts). Tick this with the write "
-                       "above to build and flash in one step.\n\n"
+                       "when the write starts).\n\n"
                        "CHANGED ONLY THE MENU? The next dialog offers "
                        "'Only the boot menu' - it writes the menu partition "
                        "and nothing else, which is about a minute instead of "

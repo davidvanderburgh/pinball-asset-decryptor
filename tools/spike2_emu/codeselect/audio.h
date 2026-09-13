@@ -67,6 +67,8 @@ const char *audio_sink_name(const struct audio *a);  /* "alsa" | "fifo" | "dump"
 int  audio_play(struct audio *a, const struct audio_clip *c, int loop);
 void audio_stop(struct audio *a, int voice);         /* short fade, then free */
 int  audio_playing(const struct audio *a, int voice);
+/* ...and still playing THIS clip: not stopped, and not stolen by another */
+int  audio_playing_clip(const struct audio *a, int voice, const struct audio_clip *c);
 void audio_pump(struct audio *a, long long now_ms);  /* every loop iteration */
 /* how long the sink runs ahead (ms): after a voice ends, keep pumping this
  * long before closing so the sink has really played it */

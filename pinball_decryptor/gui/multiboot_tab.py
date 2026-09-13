@@ -118,7 +118,8 @@ are those - they move the highlight and WRAP, exactly as codeselect.c's
 EV_LEFT / EV_RIGHT do (``hl = (hl + n - 1) % n`` / ``hl = (hl + 1) % n``),
 and the arrow keys do the same while the picture has the focus.  'Sound'
 plays what the menu plays, through :mod:`.preview_audio`: the highlighted
-image's music bed, the move click on every flipper press, and - from the
+image's music bed, the move click on a flipper press (never over itself,
+as on the card), and - from the
 picture's right-click menu - that image's own confirm sound, the one
 sound with no other way of being heard before a card is written.  Every
 WAV is the one media.json names, so what is heard is what the card will
@@ -5293,7 +5294,8 @@ class MenuSettingsDialog(_Modal):
         ttk.Label(g, foreground=th["gray"], wraplength=560, justify=tk.LEFT,
                   text="auto = a click and a stinger pulled from the primary "
                        "image; synth = generated tones. The move sound plays "
-                       "on every flipper press; the confirm sound plays to "
+                       "on a flipper press, never over itself, and a file is "
+                       "cut to 3 s; the confirm sound plays to "
                        "the end after START, before the game loads. "
                        + (own + " " if own else "") +
                        "Under those words, each list offers every sound "

@@ -381,7 +381,7 @@ def stand_in_frame(path):
         d.text(((x0 + x1) / 2 - tw / 2, y0 + 286), sub, font=f,
                fill=(225, 230, 240) if hi else (120, 130, 150))
     centred(626, selector_footer(), 26, (150, 160, 180))
-    centred(690, "booting %s in %d s" % (IMAGES[HIGHLIGHT][1], TIMEOUT_NOW),
+    centred(690, "starting %s in %d s" % (IMAGES[HIGHLIGHT][1], TIMEOUT_NOW),
             30, (250, 190, 40))
     img.save(path)           # .ppm -> binary P6, what --snapshot writes
     return path

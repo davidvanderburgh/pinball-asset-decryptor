@@ -6206,6 +6206,178 @@ These have each been violated at least once and each cost a run or a window:
       flipper brings the menu up. After 106, not before.
       — S3: friction. D3: one mechanism on two input paths, needs a run to see.
 
+- [ ] **114. `jjpselect`: the boot selector runs on a JJP rootfs (x86, X11,
+      the cabinet buttons off `/dev/jjpio`).** `S3 D3` *(Filed 2026-09-12 from
+      `plans/jjp_multiboot_plan.md`, the JJP multi-boot plan — gitignored like
+      the handoff, so it is local to David's machine and these six entries
+      carry everything a fresh checkout needs; David has a GNR key, wants an
+      install stick, and shared settings — decided the same day. First of
+      six; the others say "after N".)* Port `codeselect` to the
+      JJP card: `egl_x11.c` replaces `egl_stern.c` (override-redirect
+      fullscreen X window on `DISPLAY=:0`, Mesa `eglGetDisplay(xdpy)` +
+      `eglCreateWindowSurface`; the 1360x768 canvas scales on the one quad;
+      **XShmPutImage fallback** if EGL bring-up fails), a new `--input jjpio`
+      backend (`input_jjpio.c`) that does exactly what JJP's own installer
+      helper `jjpcrt` does — `read(fd, buf, 64)` then `write(fd, 64 zero
+      bytes)` on `/dev/jjpio100` (fallback `/dev/jjpio0`); **LEFT = byte 1 bit
+      0, RIGHT = byte 1 bit 2, START = byte 3 bit 0, active low, press =
+      released-then-low**; the zero OUT frame is JJP's idle frame, written by
+      their installer on a powered machine, so it drives no coil. `input_hw.c`,
+      `codec.c`, `nvm.c` are dropped; `audio_alsa.c` opens `default` only
+      (silent is acceptable). Conf keys `key_left/right/start=<byte>.<bit>`
+      and a `--learn` flag that logs the raw direct bytes on change. Build
+      natively in WSL against the CARD's glibc 2.34 the way
+      `tools/jjp_emu/build.sh` links `jjphwshim.so`; `check_elf.sh` gets a
+      GLIBC <= 2.34 ceiling and a NEEDED whitelist. `make check` keeps the
+      headless render/conf cases plus a jjpio case over a fake 64-byte device;
+      `--snapshot` works natively (no qemu). Oracle: the rig's Xephyr shows
+      the menu, the matrix UI's L/R Flipper and Start (CUSE `/dev/jjpio100`,
+      `tools/jjp_emu/jjpshm.h` byte 1/3) move and confirm, the choice file
+      holds one integer, exit 0/2 as `conf.c` pins. Acceptance: that run, plus
+      `make check` green, plus the ELF ceiling test refusing a 2.35 symbol.
+      — S3: a feature; flashing one image at a time is the workaround. D3: a
+      known-shape port on a seam that already exists (`struct input_ops`),
+      but it needs rig runs to see it draw and take keys.
+
+- [ ] **115. `padselect.sh`: the JJP hook binds the chosen image's game
+      directory over the primary's, and refuses JJP's own updater.** `S3 D3`
+      *(Plan §2.2 and §2.5. After 114, not before — its rig gates need the
+      selector, though the shell tests do not.)* One guarded line in root A's
+      `rungame.sh` right after `runonce.sh`: `[ -x $JJPEDIR/scripts/padselect.sh
+      ] && . $JJPEDIR/scripts/padselect.sh`. The script (dash): read
+      `$JJPEDIR/padselect/images.conf` (< 2 images → return); run `jjpselect
+      --out /jjpe/temp/padselect.choice --last /jjpe/perm/padselect.last
+      --input jjpio`; rc != 0 → boot image 0 untouched; index N → device token
+      `rootB` resolves to `/dev/disk/by-uuid/$FS_UUID_ROOTB` from the card's
+      OWN `/jjpe/gen1/scripts/fs_uuids.sh` (never a UUID of ours), `mount -o
+      rw,noatime,discard` at `/jjpe/multi/b` — skipped when
+      `/jjpe/multi/b/jjpe/gen1` is already there, which is how the rig
+      pre-mounts it (one script, both worlds) — then `mount --bind
+      /jjpe/multi/b/jjpe/gen1/$GAMENAME /jjpe/gen1/$GAMENAME`; re-do what
+      `runonce.sh` did on the tree the game now sees (`ln -s -f -T
+      /jjpe/perm/vf $GAMEDIR/vf`, `chown -R root:root $GAMEDIR/*`, `chmod +x
+      $GAMEDIR/game`); any failure undoes the bind and unmounts. `jjp_update=
+      refuse|allow` (derived `refuse` with a second image): a bind over
+      `$JJPEDIR/scripts/updater.sh` for the life of the boot that writes
+      `update refused: multi-boot install` to `/jjpe/temp/rprogress` and
+      `pcprogress` and exits non-zero — JJP's updater rsyncs/partclones the
+      OTHER slot (= image 1) and then `swapgrub.sh -p b`, which would boot
+      image 1 with no menu. One log line per boot into
+      `/jjpe/temp/padselect.log` (rotated `.1`, 1 MiB cap); the selector's
+      own log only with `--debug-log`. Shell tests like `select_sh_test.sh`
+      (fake selector, fake mount/umount, dash). Oracle in the rig: plan rows
+      R1 (one image: boots identical to stock), R2 (Wonka pair with David's
+      key: the modified asset shows on choice 1), R4 (selector missing /
+      killed / bad conf / unmountable root B → image 0 every time, one line
+      says why), R6 (`updater.sh` from the jail with a fake `/mnt/usb` delta →
+      refused, root B unchanged). Acceptance: those four rows green and
+      `alive.sh` 0 after each.
+      — S3: feature. D3: a small script, but the proof is four rig runs and a
+      real rw slot mount.
+
+- [ ] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
+      ISO out.** `S3 D3` *(Plan §2.4. After 115, not before; lands with 117.)*
+      Same CLI protocol as `mkmulticard.py` so the tab's parsers hold: `plan /
+      build / inject / verify / inspect`, `[card] progress a/b p% what`,
+      `image-size` rows, `[card] error:` refusals, the `images.conf` writer,
+      `themes.json`. `build`: restore both sda3 sets to raw (the rig's
+      `mount.sh` recipe, cached per ISO); GATE — `version_info.txt`
+      `Name`+`Version`, `setenv.sh` `GAMENAME`, sha256 of
+      `/jjpe/gen1/<GAME>/game` and `fl.dat` must all match (refuse otherwise;
+      `--allow-version-mismatch` reserved for a later whole-`/jjpe/gen1`
+      bind); media via `selectmedia.py` with three JJP seams in place of the
+      Stern ones (art = a PNG decrypted out of `edata` with the plugin's own
+      crypto, clip = an attract webm → GIF, sound = a WAV; zero-crypto default
+      art = `miscfiles/graphics/JJP_logo_message.png`, which is plaintext);
+      stage the hook, `jjpselect`, font, conf and `media/` into image 0's raw
+      (root loop mount, or the plugin's mode-preserving debugfs writes);
+      re-partclone image 0 with the plugin's own recipe
+      (`_phase_convert_standalone`: `e2fsck -fy`, `partclone.ext4 -c | pigz
+      --rsyncable | split -b 1000000000`); copy image 1's sda3 pieces VERBATIM
+      renamed `sda5.ext4-ptcl-img.gz.a?`; put a copy of the stick's own
+      `jjp_install.sh` at `/jjp/pad_install.sh` with two edits — `check_image
+      "ROOT B" "sda5.ext4-ptcl-img"` and line 362 `restore_partition
+      "$PART_ROOTB" "sda5.ext4-ptcl-img" "$FS_UUID_ROOTB"` — and point both
+      `syslinux/syslinux.cfg` and `boot/grub/grub.cfg` at it:
+      `ocs_live_run="/lib/live/mount/medium/jjp/pad_install.sh"`
+      (`medium_path` IS the stick, so no squashfs repack); `xorriso -indev
+      stock -outdev out.multi.iso -boot_image any replay` with `-map`s (the
+      plugin's `_phase_build_iso` pattern). `verify` re-mounts the ISO:
+      `gunzip -t` every piece, the two cfg lines, the installer diff, the
+      hook files' shas inside sda3. `inject` = re-stage + re-partclone image 0
+      + rebuild the ISO. Sizes for the GNR pair: 5.8 + 6.5 + ~0.6 GB = ~13 GB
+      → a 16 GB FAT32 stick through the app's existing stick flow. Acceptance:
+      plan row R5 (`verify` PASS on the built GNR ISO; the app's stick flow
+      writes it; the installer/cfg diff is exactly the lines above) and R3
+      through 117.
+      — S3: feature. D3: the largest desk item of the six, over proven
+      pieces (partclone/xorriso/selectmedia), with `verify` and one rig boot
+      as the run.
+
+- [ ] **117. The JJP rig boots a multi-boot install ISO and proves the
+      choice.** `S3 D3` *(Plan §2.8. After 115; 116 and this land together —
+      the rig can start from a hand-staged `sda5.raw` before the builder
+      exists.)* `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO
+      carries, so `JJP_ISO=<multi.iso>` yields `sda3.raw` (root) and
+      `sda5.raw` (image 1); `jail.sh` overlays `sda5.raw` with its own tmpfs
+      upper (rw, as root B is on the machine) at `$JJP_JAIL/jjpe/multi/b`;
+      `run_game.sh` runs `$RUN` under `unshare -m` and sources
+      `$JJPEDIR/scripts/padselect.sh` at the point `rungame.sh` does (display
+      up, before `./game`) when the image carries it; `JJP_SELECT` is the
+      same three-way switch as `PAD_SELECT` (unset = ask the image, 1/0
+      force); `status.sh` gains `multiboot=` and `choice=`; `alive.sh` gains
+      `jjpselect`; nothing new for `unjail.sh` because the namespace dies
+      with the run. Oracles: `padselect.log`, `findmnt /jjpe/gen1/<GAME>` in
+      the jail, the game log's `Loaded N files (bytes)` line (differs between
+      the two GNR images: 8.206 vs 8.864 GiB used), `grab.sh` of attract.
+      Acceptance: plan row R3 on the real GNR artifact WITH David's GNR key
+      attached over usbipd (choose 1 → Chaka art in attract; choose 0 →
+      stock), the proof table written into `tools/jjp_emu/MULTIBOOT.md` (the
+      JJP twin of `codeselect/DESIGN.md`), `alive.sh` 0 after.
+      — S3: feature. D3: rig plumbing over known pieces, but the acceptance
+      is a real two-image boot with the GNR key.
+
+- [ ] **118. The Multi-boot tab learns a second platform: JJP declares
+      `multiboot=True` and the tab stops hard-coding Stern.** `S3 D3` *(Plan
+      §2.7. After 116 and 117, not before.)* A `MultibootBackend` object
+      (Stern today, JJP added) holding everything the 2026-09-12 audit found
+      hard-coded in `gui/multiboot_tab.py`: `TOOL_DIR`/`MKMULTICARD`/
+      `SELECTMEDIA`/`CODESELECT_SRC` (216–223), `SELECTOR_SUFFIX`/
+      `DEFAULT_SELECTOR_DIR`/`DEFAULT_ROOTFS`/`CONF_FONT` (237–256),
+      `FRAME_W/H` (326), `write_preview_conf`'s `p3/p7/p7:imgN` tokens (2554)
+      vs `rootA/rootB/rootB:imgN`, `_FITS_RE` `fits Stern <N>G` (3973),
+      `CARD_SIZES` (4165) vs "USB stick needed: 16 GB / SSD needs 111 GiB",
+      the `<model>-<size>G.sdcard.raw` default name vs `<Game>-<ver>.multi.iso`,
+      the "SD card" wording (5423–7498), qemu for the preview (2101) vs native
+      `jjpselect --snapshot`, `flash_fn` (JJP: the stick pipeline on the multi
+      ISO), `emulate_fn` (JJP: `JJP_ISO=<multi.iso>` with the selector on).
+      `image_table.py` untouched; the phase chips keep Media / Copy / Inject /
+      Verify. `plugins/jjp/manufacturer.py` `capabilities` gains
+      `multiboot=True`; the tab shows through the existing one-line gate
+      (`main_window.py:17227`). Tests for both backends; the 319-test tab
+      suite must stay green for Stern byte-for-byte. Acceptance: build the GNR
+      multi ISO from the tab, make a stick from it with the green button,
+      launch the rig from the tab and see the menu.
+      — S3: feature. D3: a refactor across a 12.8k-line tab plus the JJP
+      wiring, with one app-driven build + launch as the run.
+
+- [ ] **119. First GNR machine boot of a multi-boot install.** `S3 D3` *(Plan
+      §2.9. After 118. David's hardware; whatever it finds is fixed on the
+      spot.)* Stick from 118, key in the machine, install (settings/scores
+      are wiped — JJP's installer always does), first boot with the coin door
+      OPEN. Expected: the menu on the backglass, flippers move, START
+      confirms, 15 s timeout boots image 0, both images play, the key is
+      accepted by both. Afterwards read `/jjpe/temp/padselect.log` (a
+      Direct-SSD read, or `dumplogs.sh -u` from the game's Utilities menu). If
+      the buttons do nothing: `--learn` names the bytes that changed, and
+      `key_*=` in `images.conf` + `inject` fixes it. The two hardware-only
+      unknowns (a second opener of `/dev/jjpio` before the game, EGL on the
+      machine's GPU under the `jjpxorg` confs) can only be answered here.
+      Acceptance: "worked" from the machine, both images, plus one power-cycle
+      into each.
+      — S3: feature. D3: hardware-only; what it finds cannot be provoked on
+      the desk, and a dead menu still boots stock.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

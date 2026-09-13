@@ -654,3 +654,42 @@ Mesa 21.2.6 (llvmpipe; 188 loops/s), `key: right/left/right/start`, `chose
 teardown to `alive.sh` 0; then the same run with `PAD_SELECT_NO_EGL=1`
 (XPutImage, 62 loops/s).  The GNR hardware run is item 119.
 
+### The hook: `padselect.sh` (item 115)
+
+The JJP twin of `select.sh`, in dash — the shell `rungame.sh` is written
+for.  The builder adds ONE line to root A's `/jjpe/gen1/scripts/rungame.sh`,
+right after `$JJPEDIR/scripts/runonce.sh` and before `while true`:
+
+```
+[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh
+```
+
+**Executed, never sourced.** `rungame.sh` runs under `jjp.service` with
+`Restart=always`; an `exit` inside a sourced file would take `rungame.sh`
+down and loop the service.  A child's exit is nothing, and its mounts are in
+the same namespace, which is all `rungame.sh` needs.
+
+In order: with fewer than two `image=` lines it is silent.  Otherwise
+**JJP's updater is masked** — `updater.sh` rsyncs or partclones the OTHER
+root slot (image 1) and then `swapgrub.sh -p b`, so a JJP update would
+overwrite the second image and boot it with no menu; a tiny script is
+bind-mounted over `/jjpe/gen1/scripts/updater.sh` for the life of the boot
+(a namespace change, nothing new on the disk) and tells the game's update
+screen why through `rprogress`/`pcprogress`; `jjp_update=allow` in the conf
+leaves the updater alone.  Then `jjpselect` (exit 0 = a choice, else image
+0).  The chosen image's token: `rootA` (nothing), `rootB` (root B mounted rw
+by the UUID in the card's OWN `scripts/fs_uuids.sh` at `/jjpe/multi/b` —
+skipped when the tree is already there, which is how the rig pre-mounts it,
+so one script serves both worlds), `rootB:<sub>` (a directory at root B's
+top holding `<GAMENAME>/`).  Then `mount --bind <tree>/<GAMENAME>
+/jjpe/gen1/<GAMENAME>` and what `runonce.sh` did on the primary's tree, redone
+on the one the game now sees (the `vf` link into `/jjpe/perm`, chown, +x).
+Every failure unwinds the bind and the mount and boots image 0 with one line
+in `/jjpe/temp/padselect.log` (JJP's own log partition; rotated to `.1` past
+1 MiB).  The selector's verbose log only with `log=` in the conf.
+
+`test/padselect_sh_test.sh` drives it under dash and sh with a fake selector,
+fake mount/umount/chown and directories for the partitions — 16 cases, from
+the lookups through every unwind.  `make install PLATFORM=jjp` puts the hook
+under `/jjpe/gen1/scripts/`.
+

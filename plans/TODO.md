@@ -6322,6 +6322,31 @@ These have each been violated at least once and each cost a run or a window:
       `alive.sh` 0 after each.
       — S3: feature. D3: a small script, but the proof is four rig runs and a
       real rw slot mount.
+      **IN PROGRESS 2026-09-13 (item/115 from feature/jjp-multiboot, `0ff0d55`).**
+      **Established:** `tools/spike2_emu/codeselect/padselect.sh` (dash) is
+      EXECUTED by rungame.sh, not sourced — an `exit` in a sourced file would
+      take rungame.sh down and loop jjp.service — so the line is `[ -x
+      $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh`. Order:
+      <2 images → silent; mask updater.sh (bind of a tmpfs script that writes
+      rprogress/pcprogress and exits 1; `jjp_update=allow` lifts it); run
+      jjpselect; token `rootA` / `rootB` / `rootB:<sub>`; root B by
+      `FS_UUID_ROOTB` from the card's fs_uuids.sh at /jjpe/multi/b unless the
+      tree is already there; bind; vf link + chown + chmod; every failure
+      unwinds to image 0 with one line in /jjpe/temp/padselect.log (rotated
+      past 1 MiB). `test/padselect_sh_test.sh`: 16 cases under dash AND sh,
+      green; in `make check PLATFORM=jjp`; `make install PLATFORM=jjp` puts the
+      hook under /jjpe/gen1/scripts.
+      **Scope, honestly:** this pass proves the hook at the MOUNT level in
+      the rig (the Chaka tree pre-mounted as root B, the real selector, real
+      pokes, `findmnt` + edata counts as the oracle, the masked updater
+      refusing); "the game boots the bound tree" is item 117's R3 (the rig's
+      run_game.sh does not call the hook yet). Rows R1/R2/R4/R6 as written
+      above assume that wiring, so the acceptance is restated: the shell
+      suite + a real-selector rig run with the bind landing on Chaka's tree
+      and one run with no root B booting image 0.
+      **Resume:** the Chaka sda3 is restoring into /var/tmp/jjp_chaka (scratch
+      restore_chaka.sh); then run scratchpad rig115.sh (root, under the lock);
+      record; close; merge into feature/jjp-multiboot.
 
 - [ ] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
       ISO out.** `S3 D3` *(Plan §2.4. After 115, not before; lands with 117.

@@ -6,6 +6,12 @@
 #include <math.h>
 #include "gfx.h"
 
+/* glibc 2.38 gave fmod a new symbol version, so a JJP build linked on a
+ * newer host would ask a 2.34 card for fmod@GLIBC_2.38 and die before
+ * main() (test/check_elf_jjp.sh caught it).  stb_truetype's one use of it is
+ * C's own definition in one line; neither platform needs the library call. */
+static double gfx_fmod(double x, double y) { return x - (double)(long long)(x / y) * y; }
+#define STBTT_fmod(x, y) gfx_fmod(x, y)
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "third_party/stb_truetype.h"
 

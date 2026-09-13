@@ -278,6 +278,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     c->mv_key_set = 0;
     c->mv_default = -1;
     c->mixer_volume = -1;
+    c->jjp_byte[0] = c->jjp_byte[1] = c->jjp_byte[2] = -1;
+    c->jjp_bit[0] = c->jjp_bit[1] = c->jjp_bit[2] = -1;
     f = fopen(path, "r");
     if (!f) {
         snprintf(err, errlen, "cannot open %s: %s", path, strerror(errno));
@@ -404,6 +406,24 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             if (*val) c->mixer_volume = clamp_int(val, 0, 63);
         } else if (!strcmp(key, "theme")) {
             copy_field(c->theme, val);
+        } else if (!strcmp(key, "key_left") || !strcmp(key, "key_right") || !strcmp(key, "key_start")) {
+            /* JJP (--input jjpio): <byte>.<bit> in the I/O board frame.  A
+             * value this cannot read is dropped out loud, never fatal - the
+             * backend then uses the installer's positions */
+            int k = !strcmp(key, "key_left") ? 0 : !strcmp(key, "key_right") ? 1 : 2;
+            int b = -1, bt = -1;
+            const char *dot = strchr(val, '.');
+            if (dot && dot > val && dot[1]) {
+                b = atoi(val);
+                bt = atoi(dot + 1);
+            }
+            if (b < 0 || b > 63 || bt < 0 || bt > 7) {
+                conf_warn(c, "%s:%d: %s=%s is not <0-63>.<0-7>: the default position is used",
+                          path, lineno, key, val);
+            } else {
+                c->jjp_byte[k] = b;
+                c->jjp_bit[k] = bt;
+            }
         } else if (!strncmp(key, "color_", 6)) {
             /* one colour on top of the theme.  An unknown role or a value
              * that is not RRGGBB is counted and ignored (main logs the

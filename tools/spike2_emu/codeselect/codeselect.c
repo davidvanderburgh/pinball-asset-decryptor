@@ -52,12 +52,27 @@
 
 #define VERSION "3.0"
 
+/* the card's paths.  Stern's unless the build says otherwise: the JJP build
+ * (make PLATFORM=jjp) puts the selector under /jjpe/gen1/padselect and its
+ * files where JJP keeps such things (Makefile) */
+#ifndef DEF_CONF
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
+#endif
+#ifndef DEF_OUT
 #define DEF_OUT      "/var/volatile/codeselect.choice"
+#endif
+#ifndef DEF_LAST
 #define DEF_LAST     "/data/codeselect.last"
+#endif
+#ifndef DEF_FONT
 #define DEF_FONT     "/usr/local/codeselect/font.ttf"
+#endif
+#ifndef DEF_MEDIA
 #define DEF_MEDIA    "/usr/local/codeselect/media"
+#endif
+#ifndef CARD_FONT
 #define CARD_FONT    "/usr/local/spike/VeraMono.ttf"
+#endif
 #define BOOTDISP_CMD "/games/data/boot_display_cmd"
 #define DEF_TIMEOUT  10
 #define DEF_VOLUME   50
@@ -91,7 +106,8 @@
 struct opts {
     const char *conf, *out, *input, *nodebus, *spi, *padsw, *tables, *last, *log,
                *headless, *font, *preamble, *media, *audio, *audio_fmt, *audio_dump,
-               *snapshot, *codec;
+               *snapshot, *codec, *jjpio;
+    int learn;        /* --input jjpio: log the cabinet bytes whenever they change */
     int timeout;      /* -1 = from conf */
     int def;          /* -1 = from conf */
     int invert;       /* -1 = auto */
@@ -131,9 +147,11 @@ static void usage(FILE *f)
         "codeselect " VERSION " - Spike 2 boot-time code selector\n"
         "  --conf PATH        images.conf (default " DEF_CONF ")\n"
         "  --out PATH         choice file, one line '<index>' (default " DEF_OUT ")\n"
-        "  --input hw|padsw|none   button source (default hw)\n"
+        "  --input hw|padsw|jjpio|none   button source (default hw; jjpio = a JJP machine's I/O board)\n"
         "  --nodebus DEV      node bus tty (default /dev/ttymxc1)\n"
         "  --spi DEV          cabinet spidev, 'none' disables (default /dev/spidev1.0)\n"
+        "  --jjpio DEV        jjpio: the I/O board node (default /dev/jjpio100, then /dev/jjpio0)\n"
+        "  --learn            jjpio: log the four cabinet bytes whenever they change (calibration)\n"
         "  --padsw PATH       rig keyboard file (default $PAD_SW_SHM or /dump/padsw)\n"
         "  --tables PATH      switch_list.txt (default /dump/tables/$PAD_GAME/switch_list.txt)\n"
         "  --timeout SEC      countdown, 0 = wait for ever (overrides conf)\n"
@@ -253,7 +271,9 @@ static int parse_args(struct opts *o, int argc, char **argv)
         ARG("--audio-fmt", audio_fmt)
         ARG("--audio-dump", audio_dump)
         ARG("--codec", codec)
+        ARG("--jjpio", jjpio)
 #undef ARG
+        if (!strcmp(a, "--learn")) { o->learn = 1; continue; }
         if (!strcmp(a, "--timeout")) { if (!v) goto missing; o->timeout = atoi(v); i++; continue; }
         if (!strcmp(a, "--default")) { if (!v) goto missing; o->def = atoi(v); i++; continue; }
         if (!strcmp(a, "--volume")) { if (!v) goto missing; o->volume = atoi(v); i++; continue; }
@@ -275,8 +295,9 @@ missing:
         fprintf(stderr, "codeselect: %s needs a value\n", a);
         return -1;
     }
-    if (strcmp(o->input, "hw") && strcmp(o->input, "padsw") && strcmp(o->input, "none")) {
-        fprintf(stderr, "codeselect: --input must be hw, padsw or none\n");
+    if (strcmp(o->input, "hw") && strcmp(o->input, "padsw") && strcmp(o->input, "jjpio")
+        && strcmp(o->input, "none")) {
+        fprintf(stderr, "codeselect: --input must be hw, padsw, jjpio or none\n");
         return -1;
     }
     if (strcmp(o->codec, "auto") && strcmp(o->codec, "off")) {
@@ -1597,8 +1618,20 @@ int main(int argc, char **argv)
     else snprintf(padsw, sizeof padsw, "%s", getenv("PAD_SW_SHM") ? getenv("PAD_SW_SHM") : "/dump/padsw");
     icfg.padsw = padsw;
     icfg.tables = tables;
+    /* jjpio: the node, the three cabinet buttons' places in the frame (the
+     * conf's key_*=, or jjpcrt's), and whether to log the bytes */
+    icfg.jjpio = o.jjpio;
+    icfg.jjp_learn = o.learn;
+    {
+        int k;
+        for (k = 0; k < 3; k++) {
+            icfg.jjp_byte[k] = c.jjp_byte[k];
+            icfg.jjp_bit[k] = c.jjp_bit[k];
+        }
+    }
     if (!strcmp(o.input, "hw")) in = input_hw_open(&icfg);
     else if (!strcmp(o.input, "padsw")) in = input_padsw_open(&icfg);
+    else if (!strcmp(o.input, "jjpio")) in = input_jjpio_open(&icfg);
 
     /* THE AUDIO SECTION, in the game's order (0x1fa9c8 then 0x1fb2a8): the
      * codecs as found go in the log; the amplifiers are muted in the cabinet

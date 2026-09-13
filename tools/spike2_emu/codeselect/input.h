@@ -39,6 +39,13 @@ struct input_cfg {
     int preamble_full;        /* hw: also replay the game's write-only frames */
     const char *padsw;        /* padsw: the 4096-byte shared file */
     const char *tables;       /* padsw: switch_list.txt, may be missing */
+    /* jjpio (a JJP machine, input_jjpio.c): the I/O board node, or NULL for
+     * the built-in list; the three cabinet buttons LEFT, RIGHT, START as a
+     * frame byte and bit (byte -1 = jjpcrt's positions, the defaults); and
+     * whether to log the cabinet bytes whenever they change (--learn) */
+    const char *jjpio;
+    int jjp_byte[3], jjp_bit[3];
+    int jjp_learn;
 };
 
 struct input;
@@ -71,6 +78,9 @@ const char *input_event_name(int ev);
 
 struct input *input_hw_open(const struct input_cfg *cfg);
 struct input *input_padsw_open(const struct input_cfg *cfg);
+/* jjpio: a JJP machine's cabinet buttons off /dev/jjpio (input_jjpio.c);
+ * only in the JJP build - the Stern build does not link it */
+struct input *input_jjpio_open(const struct input_cfg *cfg);
 /* hw only - no-ops on every other backend (they return -1 / do nothing):
  *   input_hw_bridge  sends the CPU board's bridge MCU a one-argument command
  *                    ({cmd, 01, arg}, write-only, like the game's 0x59ebac)

@@ -54,6 +54,12 @@
  *                            the default is 'midnight') or 'custom'
  *   color_<role>=RRGGBB      one colour on top of the theme (the roles are in
  *                            themes.json); a bad value is counted and ignored
+ *   key_left=<byte>.<bit>    JJP only (--input jjpio): where the LEFT flipper
+ *   key_right=<byte>.<bit>   / RIGHT flipper / START sit in the I/O board's
+ *   key_start=<byte>.<bit>   64-byte frame, active low.  Absent = the places
+ *                            JJP's own installer reads (1.0, 1.2, 3.0); a
+ *                            value that is not <0-63>.<0-7> is warned about
+ *                            and ignored.  A Stern card ignores them.
  *
  * A GROUP IS NEVER FATAL.  A member index naming no image line is dropped, a
  * group left with no member is dropped, an image named by two groups belongs
@@ -194,6 +200,7 @@ struct conf {
     unsigned color[TH_N];          /* color_<role>= overrides... */
     unsigned char color_set[TH_N]; /* ...and which roles the conf set */
     int bad_colors;    /* color_ keys with an unknown role or a value that is not RRGGBB: ignored, counted */
+    int jjp_byte[3], jjp_bit[3];   /* key_left/right/start= (byte -1 when absent) */
 };
 
 /* 0 ok (c->n >= 1), -1 error with a message in err. */

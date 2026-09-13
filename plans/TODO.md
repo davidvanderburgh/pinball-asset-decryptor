@@ -6379,7 +6379,7 @@ These have each been violated at least once and each cost a run or a window:
       against a fake /mnt/usb delta lands with 117's unshare wiring.
 
 - [ ] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
-      ISO out.** `S3 D3` *(Plan §2.4. After 115, not before; lands with 117.
+      ISO out.** `S3 D3` ← WORKING ON *(Plan §2.4. After 115, not before; lands with 117.
       Branch from and merge into `feature/jjp-multiboot` — the rule is in 115.)*
       Same CLI protocol as `mkmulticard.py` so the tab's parsers hold: `plan /
       build / inject / verify / inspect`, `[card] progress a/b p% what`,

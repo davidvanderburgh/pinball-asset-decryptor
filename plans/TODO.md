@@ -6277,7 +6277,7 @@ These have each been violated at least once and each cost a run or a window:
       scales 1360x768), the hook (item 115).
 
 - [ ] **115. `padselect.sh`: the JJP hook binds the chosen image's game
-      directory over the primary's, and refuses JJP's own updater.** `S3 D3`
+      directory over the primary's, and refuses JJP's own updater.** `S3 D3` ← WORKING ON
       *(Plan §2.2 and §2.5. After 114, not before — its rig gates need the
       selector, though the shell tests do not.)*
       **THE JJP CHAIN'S BRANCH RULE (David, 2026-09-13: "not to release until

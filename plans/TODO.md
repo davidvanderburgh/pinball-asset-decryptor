@@ -6487,8 +6487,13 @@ These have each been violated at least once and each cost a run or a window:
       casualty (pid 24913, state D) stays until WSL restarts; it holds nothing.
       README "Building a multi-boot install ISO (item 116)".
 
-- [ ] **117. The JJP rig boots a multi-boot install ISO and proves the
-      choice.** `S3 D3` *(Plan §2.8. After 115; 116 and this land together —
+- [x] **117. The JJP rig boots a multi-boot install ISO and proves the
+      choice.** `S3 D3` **DONE 2026-09-13 on `item/117` (`9ca367e`,
+      `5b7d768`, plus the closing commit) — NOT released on its own: merged
+      into `feature/jjp-multiboot`, and the family's ONE `/finish` runs after
+      119 closes. Emulator-proven WITH David's GNR key, both images (plan row
+      R3). See the DONE block at the end of this entry.**
+      *(Plan §2.8. After 115; 116 and this land together —
       the rig can start from a hand-staged `sda5.raw` before the builder
       exists. Branch from and merge into `feature/jjp-multiboot` — the rule
       is in 115.)* `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO
@@ -6510,9 +6515,9 @@ These have each been violated at least once and each cost a run or a window:
       JJP twin of `codeselect/DESIGN.md`), `alive.sh` 0 after.
       — S3: feature. D3: rig plumbing over known pieces, but the acceptance
       is a real two-image boot with the GNR key.
-      **IN PROGRESS 2026-09-13 (item/117 from feature/jjp-multiboot at 116's
-      close, `868cbaa`).** ~85%: everything but the key.
-      **Established (rig-proven, `tools/jjp_emu/MULTIBOOT.md` has the table):**
+      **DONE 2026-09-13 (`9ca367e`, `5b7d768` on item/117, from
+      feature/jjp-multiboot at 116's close, `868cbaa`).**
+      **Established (rig-proven, `tools/jjp_emu/MULTIBOOT.md` has both tables):**
       `padpath.sh` gains `JJP_ROOTB_RAW`/`JJP_ROOTB`/`JJP_OVLB`/`JJP_MULTI_B`
       (`/jjpe/multi/b`), `JJP_SELECT`, `jjp_multiboot()`, `jjp_select_count()`;
       `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO carries (read
@@ -6542,20 +6547,37 @@ These have each been violated at least once and each cost a run or a window:
       connected); teardown 0 mounts, alive 0. Two overlays read alike as
       `overlay[/jjpe/gen1/GunsNRoses]`, so the OPTIONS' `lowerdir=` is the
       oracle (on the machine it is `/dev/sda5[...]`, unambiguous).
-      **Trap paid:** a poke that lands before the menu listens is LOST - the
+      **The run WITH the key (R3, the acceptance), 2026-09-13:** David plugged
+      the GNR key in, `usbipd attach --wsl --hardware-id 0529:0001`, `dongle.sh`
+      found it (`kernel=1-1`, `hasplmd ready after 1s`, `dongle_present=1`);
+      `watch.sh` muted (`PAD_AUDIO=0`, `audio.sh` now writes a null-device
+      `asound.conf` for that - `5b7d768`). Choose 1 (RIGHT, START) → selector
+      `chose 1 CHAKA'S LOTLJ`, hook bound root B's tree, `[rig] game tree:
+      overlay[…] lowerdir=<base>/rootb`, `status.sh` `choice=1
+      bound_lower=<base>/rootb game_procs=3` at 168 s up, no H0007, one exit-68
+      restart like every GNR run here, `grab.sh` of attract = Chaka's poster
+      wall behind a COMA MULTIBALL high-score card (99.9 % drawn). Choose 0
+      (START alone from a cleared `perm/padselect.last`) → `chose 0 GUNS N'
+      ROSES 3.03`, `image 0 chosen: the primary, already in place`, `no bind:
+      image 0`, `choice=0`, `bound_lower=` empty, `game_procs=3` at 535 s up,
+      `du -sb edata` inside the run's namespace 4,450,623,016 (stock; Chaka
+      5,157,432,132), attract = the stock playfield render (99.4 % drawn). Both
+      attracts carry `COIN DOOR IS OPEN` (the rig's idle cabinet frame; every
+      GNR run here). `killgame.sh` 3 → 0, `stop.sh --all`, alive 0. Captures
+      and driver output at `C:\tmp\jjp117\`.
+      **Traps paid:** a poke that lands before the menu listens is LOST - the
       first attempt's first run recorded no choice; scripted runs now wait for
-      the selector log's `menu:` line (`JJP_SELECT_LOG=1`).
-      **Owed - the acceptance's other half, David's hardware:** R3 WITH the GNR
-      key. **Resume:** plug the GNR key in, `usbipd attach --wsl --hardware-id
-      0529:0001`, then from the item-117 worktree `wsl -u root -- env
-      JJP_ISO=/var/tmp/jjp116/GunsNRoses-v03.03.multi.iso PAD_AUDIO=0 bash
-      tools/jjp_emu/watch.sh`; choose 1 (RIGHT, START) and read `status.sh`
-      (`bound_lower=…/rootb`), the game log's `Loaded N files` line (8.864 GiB
-      = Chaka vs 8.206), `grab.sh` of attract (Chaka art); then choose 0 →
-      stock. Record in MULTIBOOT.md, close, merge into feature/jjp-multiboot.
+      the selector log's `menu:` line (`JJP_SELECT_LOG=1`). The menu REMEMBERS
+      (`perm/padselect.last`): the with-key driver's second run started
+      highlighted on 1, so RIGHT, RIGHT wrapped back onto Chaka; clear the
+      memory or read the `menu:` line's `highlight N` before poking. And GNR's
+      game log has NO `Loaded N files (bytes)` line - the oracle this entry
+      named does not exist (the log is NetworkManager and sensor noise);
+      `bound_lower`, the hook log, the `[rig] game tree:` line, `du` of edata
+      in the run's namespace and `grab.sh` are the oracles that do.
       Item 118 branched from THIS branch's tip (`item/117`), not from the
-      feature branch, because 118 needs this rig wiring; when 117 closes the
-      feature branch takes both.
+      feature branch, because 118 needs this rig wiring; `feature/jjp-multiboot`
+      fast-forwarded to this close, and item/118 merged it in.
 
 - [ ] **118. The Multi-boot tab learns a second platform: JJP declares
       `multiboot=True` and the tab stops hard-coding Stern.** `S3 D3` *(Plan

@@ -65,6 +65,20 @@ the selector is still starting is simply lost: the first run of 2026-09-13
 recorded no choice for exactly that reason, and the rerun with the wait
 recorded every key.
 
+Two more things a driver has to know. **The menu remembers.** `jjpselect`
+writes its last choice to `perm/padselect.last` and starts highlighted on it,
+so a second run in the same jail starts on whatever the first one chose:
+"RIGHT, RIGHT wraps back to 0" is only true from a fresh perm, and the with-key
+proof's second attempt chose Chaka twice that way. Either read the `menu:`
+line's `highlight N` before poking, or remove `$JJP_JAIL/jjpe/perm/padselect.last`
+and press START alone for the conf's default. **And GNR's game log has no
+`Loaded N files (bytes)` line.** The plan named it as an oracle; the log is
+NetworkManager and sensor noise, nothing about assets. What does tell the two
+images apart while the game runs: `status.sh`'s `bound_lower`, the hook log,
+the `[rig] game tree:` line, `nsenter -t <leader> -m du -sb
+$JJP_JAIL/jjpe/gen1/GunsNRoses/edata` (4,450,623,016 stock, 5,157,432,132
+Chaka), and `grab.sh` of attract.
+
 ## Proof (2026-09-13, the GNR multi-boot ISO of item 116, no Sentinel key attached)
 
 | step | oracle | result |
@@ -81,9 +95,25 @@ recorded every key.
 | the game | `./game` after the hook | `Sentinel key not found (H0007)` in every run: no key was attached (`usbipd list` showed none connected), so the game exited at its first envelope call, right after the bind was made |
 | teardown | `unjail.sh`, `stop.sh --all`, `alive.sh --total` | 0 jail mounts, `game=0 matrix=0 xephyr=0 cuse=0`, alive 0 |
 
-**Owed (plan row R3, needs David's GNR key over usbipd):** with the key
-attached, choose 1 and confirm from three places while the game runs: the game
-log's `Loaded N files (bytes)` line (the two images differ: 8.206 vs 8.864 GiB
-used), `status.sh`'s `bound_lower` ending in `/rootb`, and `grab.sh` of attract
-showing the Chaka art; then choose 0 and see stock attract. The command is
-`watch.sh` with `JJP_ISO` pointing at the multi ISO; nothing else changes.
+## Proof (2026-09-13, WITH David's GNR key over usbipd - plan row R3)
+
+The same command, `watch.sh` with `JJP_ISO` on the multi ISO, muted
+(`PAD_AUDIO=0`), the menu driven by pokes, the game left to boot the chosen
+image and settle into attract. `usbipd attach --wsl --hardware-id 0529:0001`
+put the key on the bus; `dongle.sh` found it (`key: kernel=1-1
+node=/dev/bus/usb/001/002`, `hasplmd ready after 1s`, `dongle_present=1`).
+
+| step | oracle | result |
+|---|---|---|
+| choose 1 | RIGHT, START | selector `chose 1 CHAKA'S LOTLJ`; hook `image 1: rootB - /jjpe/multi/b/jjpe/gen1/GunsNRoses bound over /jjpe/gen1/GunsNRoses`; game log `[rig] game tree: overlay[/jjpe/gen1/GunsNRoses] rw,relatime,lowerdir=<base>/rootb,upperdir=/var/tmp/jjp_ovlb/up,…`; `status.sh` `choice=1 bound=overlay[/jjpe/gen1/GunsNRoses] bound_lower=<base>/rootb`, `game_procs=3`, 168 s up when read |
+| Chaka runs | the game itself | no `H0007`; one `exit 68 - restarting (1)` (every GNR run here does that once) and then attract: `grab.sh` shows Chaka's poster wall behind a COMA MULTIBALL high-score card, 99.9 % non-black |
+| choose 0 | START alone, after `perm/padselect.last` was removed (menu line: `highlight 0 (GUNS N' ROSES 3.03) from conf default`) | `chose 0 GUNS N' ROSES 3.03`; hook `image 0 chosen: the primary, already in place`; game log `[rig] game tree: /jjpe/gen1/GunsNRoses (no bind: image 0)`; `choice=0`, `bound=` and `bound_lower=` empty, `game_procs=3`, 535 s up when read |
+| stock runs | the game itself | `du -sb` of `edata` from inside the run's namespace = 4,450,623,016 (stock; Chaka's is 5,157,432,132); attract is the stock playfield render, 99.4 % non-black |
+| both | the overlay both attracts carry | `COIN DOOR IS OPEN`: the rig's cabinet frame reads the door open (the shim's idle frame), the same as every GNR run in this rig and nothing to do with multi-boot |
+| teardown | `killgame.sh`, `stop.sh --all`, `alive.sh --total` | `killed 3; still running: 0`, 0 jail mounts, `game=0 matrix=0 xephyr=0 cuse=0`, alive 0 |
+
+The captures and both drivers' output are kept outside the repo at
+`C:\tmp\jjp117\` (`attract_chaka.png`, `attract_stock.png`, `rig117key*.out`).
+That is the acceptance: the machine's own scripts, unchanged, boot whichever
+image the cabinet buttons pick, with the key answering for both. What is left
+for the hardware is item 119.

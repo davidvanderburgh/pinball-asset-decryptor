@@ -1650,7 +1650,9 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    card image: the stock code, the card you built with this app, another
    build), give each a title, a picture and a sound if you like, and
    **Build / flash card…** writes the card and, if you want, flashes it
-   onto an SD card in the same dialog. On the machine the flippers move
+   onto an SD card in the same run — you pick which SD card in the next
+   dialog, the Write tab's own picker, and nothing is written to one
+   until you have chosen it there and confirmed. On the machine the flippers move
    the highlight, START boots the highlighted image, and a countdown
    boots the remembered choice by itself; the first image in the list is
    the primary, and the machine falls back to it if the menu ever fails.

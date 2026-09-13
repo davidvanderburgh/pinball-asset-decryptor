@@ -272,6 +272,26 @@ class JJPEmulatePanel:
     def iso_path(self):
         return (self._iso_var.get() if self._iso_var is not None else "").strip()
 
+    def launch_iso(self, path):
+        """Start the rig on *path* - the Multi-boot tab's 'Run in emulator'
+        (item 118), handed a multi-boot install ISO it just built.  Exactly
+        the Start button's launch: the rig itself shows the boot menu when the
+        image carries one (run_game.sh asks the image; JJP_SELECT unset), so
+        nothing here has to know the ISO is a multi-boot one.  Refused, in a
+        log line, while a start or stop is already in flight."""
+        path = (path or "").strip()
+        if not path:
+            return False
+        if self._busy:
+            self._log("JJP: a start or stop is already running - wait for it, "
+                      "then start %s." % os.path.basename(path))
+            return False
+        if self._iso_var is None:
+            self._iso_var = tk.StringVar()
+        self._iso_var.set(path)
+        self._start_async()
+        return True
+
     # ------------------------------------------------------------------
     # construction
     # ------------------------------------------------------------------

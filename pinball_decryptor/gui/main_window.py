@@ -14546,6 +14546,22 @@ class MainWindow:
             # Show the Emulate tab so the start is watched where its status
             # lives, then launch exactly as its own Start button would, with
             # PAD_SELECT=1 so the rig shows the card's menu first.
+            #
+            # A JJP multi-boot ISO (item 118) goes to the Emulate JJP tab: its
+            # rig shows the menu by itself when the image carries one
+            # (run_game.sh asks the image), so the launch is the tab's own.
+            if getattr(self._multiboot_panel, "platform", "stern") == "jjp":
+                jjp = getattr(self, "_jjp_emulate_panel", None)
+                if jjp is None:
+                    self.append_log("[multi-boot] the Emulate JJP tab is not "
+                                    "built; cannot start the rig")
+                    return
+                try:
+                    self._notebook.select(self._tab_jjp_emulate)
+                except tk.TclError:
+                    pass
+                jjp.launch_iso(path)
+                return
             try:
                 self._notebook.select(self._tab_emulate)
             except tk.TclError:
@@ -17225,6 +17241,13 @@ class MainWindow:
         self._configure_tab("Emulate Spike1",
                             getattr(caps, "emulate_spike1", False))
         self._configure_tab("Multi-boot", getattr(caps, "multiboot", False))
+        # ...and the tab BUILDS FOR THIS MANUFACTURER (item 118): Stern's SD
+        # card or a JJP install ISO, the same panel with the other backend
+        # behind it.  Only a manufacturer that has the tab gets to switch it,
+        # so a plugin without multi-boot never clears a card being edited.
+        mb_panel = getattr(self, "_multiboot_panel", None)
+        if mb_panel is not None and getattr(caps, "multiboot", False):
+            mb_panel.set_platform(getattr(mfr, "key", "stern"))
         # If the tab that was selected just got hidden (e.g. Extract when
         # switching to a capture-only era), move to the first visible tab so the
         # working view is never left showing a blank hidden pane.

@@ -201,6 +201,16 @@ from . import preview_audio
 from .preview_audio import PreviewAudio
 from .theme import THEMES, dark_titlebar
 from .widgets import _Tooltip, center_over
+# THE PLATFORMS (item 118): what this module hard-coded for the Stern card,
+# gathered per manufacturer so the same tab builds a JJP multi-boot install
+# ISO.  Every builder below takes its backend from the form (``platform``),
+# the panel from the manufacturer the app switched to, and the default is
+# Stern - so every argv the Stern tests pin is unchanged.
+from .multiboot_backend import JJP, backend_for
+
+#: Where the JJP builder keeps its scratch (a loop-mounted copy of root A, the
+#: re-imaged pieces): a Linux path, never beside the output on a Windows drive.
+JJP_WORKDIR = "/var/tmp/pad_jjpmulti_work"
 
 # Pillow scales the preview smoothly (Tk's own PhotoImage only halves and
 # thirds).  It is a hard dependency of the app - the same guarded import
@@ -773,6 +783,10 @@ class MultibootForm:
     #: role in ``colors`` (``{role: rrggbb}``; empty for a built-in).
     theme: str = DEFAULT_THEME
     colors: dict = field(default_factory=dict)
+    #: WHICH PLATFORM this form is for (item 118): ``stern`` (the SD card,
+    #: mkmulticard.py) or ``jjp`` (a multi-boot install ISO, mkjjpmulti.py).
+    #: The command builders read it; a form that never says is a Stern one.
+    platform: str = "stern"
 
 
 _COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
@@ -957,16 +971,12 @@ def _num(value, default=""):
     return v or default
 
 
-def suggest_title(path):
+def suggest_title(path, platform="stern"):
     """``turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw`` ->
     ``('turtles_pro-1_59_0', '1987-upscaled')``: the menu title and subtitle
-    a fresh row starts with.  A suggestion, not a fact - the user renames."""
-    b = os.path.basename(path or "")
-    b = re.sub(r"\.(raw|img|bin|iso)$", "", b, flags=re.I)
-    b = re.sub(r"\.\d+G\.sdcard$", "", b, flags=re.I)
-    b = re.sub(r"\.sdcard$", "", b, flags=re.I)
-    head, _, tail = b.partition(".")
-    return head, tail
+    a fresh row starts with.  A suggestion, not a fact - the user renames.
+    A JJP ISO's name is the whole title (``CHAKAs LOTLJ V1.0 GNR LE 3.03``)."""
+    return backend_for(platform).suggest_title(path)
 
 
 # ---------------------------------------------------------------------------
@@ -1043,21 +1053,19 @@ def under_library(path, resolve=True):
     return False
 
 
-def default_output_path(primary):
+def default_output_path(primary, platform="stern"):
     """``<dir of primary>/multi/<primary basename>.multi.raw`` - and when the
     primary lives IN the library (David's stock cards do), the first folder
     above it that is not: ``D:/Pinball/images/Stern/spike2/x.raw`` ->
     ``D:/Pinball/multi/x.multi.raw``.  A default the tool would refuse is
-    no default."""
+    no default.  A JJP install ISO ends ``.multi.iso`` the same way."""
     d = os.path.dirname(os.path.abspath(primary))
     while under_library(d):
         parent = os.path.dirname(d)
         if parent == d:
             break
         d = parent
-    base = os.path.basename(primary)
-    stem = re.sub(r"\.(raw|img)$", "", base, flags=re.I)
-    return os.path.join(d, "multi", stem + ".multi.raw")
+    return os.path.join(d, "multi", backend_for(platform).output_name(primary))
 
 
 def media_dir_for(out):
@@ -1077,7 +1085,7 @@ def loaded_media_dir(card):
     card = (card or "").strip().strip('"')
     if not card:
         return ""
-    stem = re.sub(r"\.(raw|img)$", "", os.path.basename(card), flags=re.I)
+    stem = re.sub(r"\.(raw|img|iso)$", "", os.path.basename(card), flags=re.I)
     return os.path.join(os.path.dirname(os.path.abspath(card)),
                         "media-" + stem)
 
@@ -1294,17 +1302,23 @@ def validate_form(form, sources=True):
     sources that may not be on THIS machine, and neither drawing its menu
     nor injecting a new one opens them."""
     errs = []
+    be = backend_for(form)
     n = len(form.images)
     if sources and n < 2:
         errs.append("Add at least two images: the primary (stock) and one "
                     "more.")
     if not n:
         errs.append("There are no images.")
-    if n > MAX_CARDS:
-        errs.append("At most %d images fit one card." % MAX_CARDS)
+    if n > be.max_cards:
+        errs.append("At most %d images fit one %s." % (be.max_cards, be.out_noun))
     ngroups = sum(1 for r in form.images if is_group(r))
     if ngroups > MAX_GROUPS:
         errs.append("At most %d random groups fit one card." % MAX_GROUPS)
+    if ngroups and not be.groups:
+        # A JJP install has two root slots and nothing to roll between (item
+        # 118): image 0 is root A, image 1 is root B, and that is the card.
+        errs.append("Random groups are not available for a JJP install: it "
+                    "holds exactly two images, root A and root B.")
     ntrees = len(form_trees(form))
     if ntrees > MAX_TREES:
         errs.append("That is %d games in %d rows; at most %d fit one card."
@@ -1455,7 +1469,7 @@ def validate_form(form, sources=True):
         errs.append("The default image must be one of 0..%d." % (n - 1))
     out = (form.out or "").strip().strip('"')
     if not out:
-        errs.append("Set the output .raw path.")
+        errs.append("Set the output %s path." % be.out_ext)
     else:
         if under_library(out):
             errs.append("The output must not be under the card library (%s) "
@@ -1866,6 +1880,53 @@ def group_media_args(form):
     return args
 
 
+def jjp_selector_dir(selector_dir):
+    """The JJP menu program's directory: what the form names, unless that is
+    empty or the STERN default the form is born with (a form that never
+    said is a Stern form, and its default names an ARM build inside
+    ~/spike2root, which is no place for jjpselect)."""
+    sel = (selector_dir or "").strip().rstrip("/")
+    if not sel or sel == DEFAULT_SELECTOR_DIR.rstrip("/"):
+        return JJP.selector_default
+    return sel
+
+
+def _jjp_sound(spec):
+    """A sound spec for the JJP media step: 'auto' is the CARD's own sound on
+    Stern (pulled off the games partition through the emulator), and a JJP
+    ISO has no such catalogue the tools can reach - so 'auto' is the built-in
+    synthetic click / chime there.  Everything else passes through."""
+    s = _media_value(spec)
+    return "synth" if s.lower().startswith("auto") else s
+
+
+def _jjp_media_args(form, media_dir, visual_only=False):
+    """``mkjjpmulti.py media``: the JJP twin of :func:`prepare_args`.  Two
+    images, no groups; ``--art N=auto`` is the image's own JJP logo (the
+    tool's one seam, plaintext in every JJP root), an 'auto' animation has no
+    seam yet (the attract clip sits encrypted in edata) and is rendered as
+    none, and 'auto' sounds are the synthetic ones (see :func:`_jjp_sound`).
+    The rest is selectmedia's own grammar, which the tool hands through."""
+    args = list(JJP.media_tool) + _media_image_args(form) + ["--out", wsl(media_dir)]
+    if visual_only:
+        args.append("--visual-only")
+    for i, _path, ri, _mi in form_trees(form):
+        row = form.images[ri]
+        anim = anim_spec(row)
+        if anim.lower().startswith("auto"):
+            anim = "none"
+        args += ["--art", "%d=%s" % (i, art_spec(row)),
+                 "--anim", "%d=%s" % (i, anim),
+                 "--music", "%d=%s" % (i, _media_value(row.music))]
+    if not visual_only:
+        args += ["--sound-move", _jjp_sound(form.sound_move),
+                 "--sound-confirm", _jjp_sound(form.sound_confirm)]
+        for i, _path, ri, _mi in form_trees(form):
+            args += ["--sound-confirm", "%d=%s" % (i, _jjp_sound(confirm_spec(form.images[ri])))]
+    args += ["--volume", str(int(form.volume))]
+    return args
+
+
 def prepare_args(form, media_dir, visual_only=False):
     """``selectmedia.py prepare``: the images (the tool pulls 'auto' art and
     clips off them), then ``--art/--anim/--music N=<value>`` for EVERY image
@@ -1873,7 +1934,10 @@ def prepare_args(form, media_dir, visual_only=False):
     disagree about an index - then the globals.  Rendered into *media_dir*,
     which then holds media.json.  ``visual_only`` is the preview's half: the
     art and animations with the same specs, no move / confirm sound work
-    (music entries are still named, so the manifest rows match)."""
+    (music entries are still named, so the manifest rows match).  A JJP form
+    goes to :func:`_jjp_media_args` (the same manifest out of the JJP tool)."""
+    if backend_for(form).key == "jjp":
+        return _jjp_media_args(form, media_dir, visual_only)
     args = [SELECTMEDIA, "prepare"] + _media_image_args(form) + [
         "--out", wsl(media_dir),
         # THE PANEL IS SIZED BY THE CARDS: a row is a card, and a random card
@@ -1927,14 +1991,57 @@ def preview_prepare_args(form, media_dir):
 
 def plan_args(form):
     """``mkmulticard.py plan``: the layout and whether it fits 16G / 32G.
-    Writes nothing."""
+    Writes nothing.  (``mkjjpmulti.py plan`` for a JJP form: the two ISOs'
+    pieces and which USB stick they fit.)"""
+    be = backend_for(form)
+    if be.key == "jjp":
+        args = [be.tool, "plan"] + _image_args(form)
+        if form.media_dir:
+            args += ["--media-dir", wsl(form.media_dir)]
+        return args
     return ([MKMULTICARD, "plan"] + _image_args(form) + group_roll_args(form)
             + ["--layout", "store" if form_compact(form) else "auto"] + cache_dir_args())
 
 
+def _jjp_build_args(form):
+    """``mkjjpmulti.py build``: root A from image 0 with the menu staged, root
+    B from image 1 verbatim, the installer redirected - the JJP twin of
+    :func:`build_args`.  No layout, no bypass, no machine volume: none of
+    those exist on a JJP install (item 116)."""
+    be = JJP
+    titles, subtitles = [], []
+    for _i, path, ri, _mi in form_trees(form):
+        row = form.images[ri]
+        titles.append((row.title or "").strip() or suggest_title(path, be.key)[0])
+        subtitles.append((row.subtitle or "").strip())
+    args = [be.tool, "build"] + _image_args(form) + [
+        "--out", wsl(form.out.strip().strip('"')),
+        "--selector-dir", jjp_selector_dir(form.selector_dir),
+        # THE SCRATCH STAYS ON THE LINUX SIDE: the build loop-mounts a copy of
+        # root A, and a loop device over a file on the Windows drive (virtiofs)
+        # is the one place this tool must never put one; the output itself is
+        # a plain sequential write and goes where the box says
+        "--workdir", JJP_WORKDIR,
+        "--titles", ";".join(titles),
+        "--timeout", str(int(form.timeout)),
+        "--default", str(int(form.default)),
+        "--volume", str(int(form.volume)),
+    ] + heading_args(form) + theme_args(form)
+    if any(subtitles):
+        args += ["--subtitles", ";".join(subtitles)]
+    if form.media_dir:
+        args += ["--media-dir", wsl(form.media_dir)]
+    if form.force:
+        args.append("--force")
+    return args
+
+
 def build_args(form):
     """``mkmulticard.py build``.  ``--layout auto`` = today's p7 layout for
-    one extra image, the img1/img2/... partition for more."""
+    one extra image, the img1/img2/... partition for more.  A JJP form goes
+    to :func:`_jjp_build_args`."""
+    if backend_for(form).key == "jjp":
+        return _jjp_build_args(form)
     # --titles and --subtitles are ONE PER GAME, because images.conf's image=
     # lines are.  A group card's own title and subtitle do not go here: they
     # ride on its --group flag, and its members keep their own names so the
@@ -1992,7 +2099,14 @@ def build_args(form):
 def verify_args(form):
     """``mkmulticard.py verify``: every copied range against its source,
     every ext4 fsck'd, the injected files against the selector build, the
-    bypass state of every games tree."""
+    bypass state of every games tree.  (``mkjjpmulti.py verify --iso`` for
+    a JJP form: the cfg lines, the installer, every piece, root A restored
+    and its staged files checked against build.json.)"""
+    be = backend_for(form)
+    if be.key == "jjp":
+        # the deep check restores root A to scratch: the Linux side, as build
+        return ([be.tool, "verify", "--iso", wsl(form.out.strip().strip('"'))]
+                + _image_args(form) + ["--workdir", JJP_WORKDIR + "_verify"])
     args = [MKMULTICARD, "verify", "--card",
             wsl(form.out.strip().strip('"'))] + _image_args(form)
     if form.selector_dir:
@@ -2014,9 +2128,25 @@ def inject_args(form, card):
     EXISTING card's p2 in seconds.  Every field is spelled out (the tool
     keeps the card's own value for a flag left off, and here the form is the
     record) - subtitles included, so clearing them clears them."""
-    titles = [(r.title or "").strip() or suggest_title(r.path)[0]
+    be = backend_for(form)
+    titles = [(r.title or "").strip() or suggest_title(r.path, be.key)[0]
               for r in form.images]
     subtitles = [(r.subtitle or "").strip() for r in form.images]
+    if be.key == "jjp":
+        # mkjjpmulti.py inject --iso: root A restored, re-staged, re-imaged
+        # and spliced back into the ISO in place (item 116)
+        args = [be.tool, "inject",
+                "--iso", wsl(card.strip().strip('"')),
+                "--selector-dir", jjp_selector_dir(form.selector_dir),
+                "--workdir", JJP_WORKDIR,
+                "--titles", ";".join(titles),
+                "--subtitles", ";".join(subtitles),
+                "--timeout", str(int(form.timeout)),
+                "--default", str(int(form.default)),
+                "--volume", str(int(form.volume))] + heading_args(form) + theme_args(form)
+        if form.media_dir:
+            args += ["--media-dir", wsl(form.media_dir)]
+        return args
     args = [MKMULTICARD, "inject",
             "--card", wsl(card.strip().strip('"')),
             "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
@@ -2063,12 +2193,15 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
     return args
 
 
-def inspect_args(card, media_out=None, as_json=False):
+def inspect_args(card, media_out=None, as_json=False, platform="stern"):
     """``mkmulticard.py inspect --card``: what a card carries.  Plain it
     prints a table; ``--json`` prints one object for the tab to read, and
     ``--media-out DIR`` drops the card's media files there so the preview
-    can draw them and an inject can put them back."""
-    args = [MKMULTICARD, "inspect", "--card", wsl(card.strip().strip('"'))]
+    can draw them and an inject can put them back.  (``mkjjpmulti.py
+    inspect --iso`` for a JJP ISO: the same object, read off the ISO's own
+    copy of the menu without a mount.)"""
+    be = backend_for(platform)
+    args = [be.tool, "inspect", be.card_flag, wsl(card.strip().strip('"'))]
     if as_json:
         args.append("--json")
     if media_out:
@@ -2107,7 +2240,7 @@ QEMU_ARM = ["sh", "-c",
 
 def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
                           rootfs=DEFAULT_ROOTFS, frames=1, loading=None,
-                          roll_state=None):
+                          roll_state=None, platform="stern"):
     """``qemu-arm -L <rootfs> <codeselect> --snapshot <ppm> ...``:
     ONE menu frame as the machine would show it - the conf, the media,
     the CARD highlighted, the animation at frame N, the countdown as if just
@@ -2119,7 +2252,10 @@ def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
     alone - no ``--frames`` at all - because that is the byte-for-byte
     single-frame command line, and the one the selector treats the
     ``--snapshot`` value as a plain file NAME for."""
-    args = QEMU_ARM + ["-L", rootfs, binary,
+    # jjpselect is a native x86-64 binary (item 114): it draws the frame
+    # itself, no interpreter and no rootfs in front of it
+    head = [binary] if backend_for(platform).preview_native else QEMU_ARM + ["-L", rootfs, binary]
+    args = head + [
             "--snapshot", wsl(ppm), "--conf", wsl(conf),
             "--media", wsl(media_dir),
             # A CARD, not an image: see preview_highlight.  The two are the
@@ -2243,6 +2379,40 @@ def root_command(args, cwd=None, exe="python3"):
     return later
 
 
+def root_shell_line(line, cwd=None):
+    """The argv of a SHELL-LINE step that must run as root - the JJP
+    selector step, which mounts the ISO's root to build the menu program
+    against (item 118) - as :func:`root_command` shapes it: a callable
+    resolved just before the step, the desktop user's WSL home carried."""
+    if cwd is None:
+        cwd = wsl(repo_dir())
+    full = "cd %s && %s" % (_q(cwd), line)
+    if sys.platform != "win32":
+        return wsl_shell_root(full)
+
+    def later(_texts):
+        home = wsl_home()
+        if not home:
+            user, root_home = wsl_account()
+            if user != "root":
+                raise RuntimeError(
+                    "cannot find your WSL home (wsl.exe -e whoami / getent "
+                    "both failed) - this step runs as root and needs it; "
+                    "check that WSL starts, then try again")
+            home = root_home or None
+        return wsl_shell_root(full, home)
+    return later
+
+
+def step_command(label, args, form, cwd=None):
+    """One tool step as the form's platform runs it: as root when the
+    backend says that step needs it (a JJP build mounts things; a Stern
+    build loop-mounts the card's partitions), as the user otherwise."""
+    if label in backend_for(form).root_steps:
+        return root_command(args, cwd)
+    return wsl_command(args, cwd)
+
+
 def menu_card_image_path(drive):
     """Where the boot menu read off *drive* (a ``core.drives.PhysicalDrive``) lands: a
     sparse image named for the card, under the same TEMP directory the tools' caches use,
@@ -2280,7 +2450,7 @@ def cache_dir_args():
 
 
 def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
-                         rootfs=None, card=""):
+                         rootfs=None, card="", platform="stern"):
     """The shell line that ends with ``[preview] selector: <binary>``: build
     the selector from *src_dir* into *build_dir* (``make`` is incremental -
     a no-op once built, so the preview always draws with THIS checkout's
@@ -2291,6 +2461,11 @@ def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
     filesystem at all: see the comment below, where ensureselect.sh unpacks
     one and does install a selector, because nothing can be compiled until
     it has.  No ``$``: wsl.exe would eat it."""
+    if backend_for(platform).key == "jjp":
+        # ONE STEP SERVES BOTH on JJP: ensurejjpselect.sh builds jjpselect
+        # against the ISO's own root and installs it where the builder looks,
+        # and prints the preview's line as well as the card's (item 118).
+        return install_selector_line(selector_dir, card, platform=platform)
     rootfs = rootfs or rootfs_for(selector_dir)
     built = build_dir.rstrip("/") + "/codeselect"
     installed = (selector_dir or DEFAULT_SELECTOR_DIR).rstrip("/") \
@@ -2372,11 +2547,15 @@ def selector_card(form, loaded_card=""):
 
 
 def ensure_selector_args(form, cwd=None, card=""):
-    """The 'selector' step's argv (see :func:`ensure_selector_line`)."""
+    """The 'selector' step's argv (see :func:`ensure_selector_line`).  As
+    root on JJP: the menu program is built against the ISO's mounted root."""
     if cwd is None:
         cwd = wsl(repo_dir())
+    be = backend_for(form)
     line = ensure_selector_line(form.selector_dir, cwd + "/" + CODESELECT_SRC,
-                                card=wsl(card) if card else "")
+                                card=wsl(card) if card else "", platform=be.key)
+    if "selector" in be.root_steps:
+        return root_shell_line(line, cwd)
     return wsl_shell("cd %s && %s" % (_q(cwd), line))
 
 
@@ -2388,7 +2567,7 @@ def parse_selector_path(text):
     return ""
 
 
-def install_selector_line(selector_dir, card="", tool=ENSURESELECT):
+def install_selector_line(selector_dir, card="", tool=ENSURESELECT, platform="stern"):
     """THE CARD'S OWN SELECTOR STEP, and the first thing every writing run
     does: make sure the menu program is INSTALLED in the directory
     ``--selector-dir`` names, and build it there when it is not.
@@ -2411,7 +2590,21 @@ def install_selector_line(selector_dir, card="", tool=ENSURESELECT):
     A selector directory that is not a rootfs's own - only
     ``PAD_MULTIBOOT_SELECTOR`` can make one - is CHECKED and never written
     into: the app cannot know what somebody pointed that at.
+
+    JJP (item 118): ``ensurejjpselect.sh <primary ISO> <dir>`` builds
+    jjpselect against the ISO's own root (mounted the way the emulator
+    mounts it) and installs it in the card's own layout under *dir*; it
+    prints the same ready line, and the preview's, so one step serves both.
     """
+    be = backend_for(platform)
+    if be.key == "jjp":
+        sel = jjp_selector_dir(selector_dir)
+        if not card:
+            return ("echo %s; exit 1"
+                    % _q("%s the JJP menu program is built against the primary "
+                         "install ISO's own root, and no ISO is on this "
+                         "machine to build it from" % SELECTOR_ERROR))
+        return "bash %s %s %s" % (_q(be.ensure_tool), _q(card), _q(sel))
     sel = (selector_dir or DEFAULT_SELECTOR_DIR).strip().rstrip("/")
     rootfs = rootfs_for(sel)
     if sel != rootfs + SELECTOR_SUFFIX:
@@ -2433,9 +2626,12 @@ def install_selector_args(form, cwd=None):
     unpacked from on a machine that has never made one."""
     if cwd is None:
         cwd = wsl(repo_dir())
+    be = backend_for(form)
     card = (form.images[0].path.strip().strip('"') if form.images else "")
     line = install_selector_line(form.selector_dir,
-                                 wsl(card) if card else "")
+                                 wsl(card) if card else "", platform=be.key)
+    if "selector" in be.root_steps:
+        return root_shell_line(line, cwd)
     return wsl_shell("cd %s && %s" % (_q(cwd), line))
 
 
@@ -2527,6 +2723,7 @@ def write_preview_conf(form):
     # the member count mattered.  The media names are keyed by IMAGE, because
     # that is how prepare wrote them, and a group card borrows its first
     # member's - the same rule mkmulticard follows.
+    be = backend_for(form)
     trees = form_trees(form)
     names = card_media_names(form)
     per_row = {}
@@ -2551,20 +2748,20 @@ def write_preview_conf(form):
             if row.keep:
                 continue                      # its games are other rows'
         for img, path, mi in per_row.get(ri, []):
-            dev = "p3" if img == 0 else ("p7" if img == 1 else "p7:img%d" % img)
+            dev = be.device(img)
             if mi is None:
-                title = (row.title or "").strip() or suggest_title(path)[0]
+                title = (row.title or "").strip() or suggest_title(path, be.key)[0]
                 lines.append("image=%s|%s|%s|%s|%s|%s" % (
                     dev, title, (row.subtitle or "").strip(), art, anim, music))
             else:
                 m = row.members[mi]
-                title = (m.title or "").strip() or suggest_title(path)[0]
+                title = (m.title or "").strip() or suggest_title(path, be.key)[0]
                 lines.append("image=%s|%s||||" % (dev, title))
     lines += ["default=%d" % row_first_image(form, int(form.default)),
               "timeout=%d" % int(form.timeout),
               "heading=%s" % (form.heading or "").strip(),
               "volume=%d" % int(form.volume),
-              "font=" + CONF_FONT]
+              "font=" + be.conf_font]
     lines += theme_conf_lines(form)
     return "\n".join(lines) + "\n"
 
@@ -2672,9 +2869,9 @@ def build_commands(form, cwd=None, prepare=False):
     if prepare:
         cmds += prepare_commands(form, form.media_dir, cwd)
     return cmds + [
-        ("plan", wsl_command(plan_args(form), cwd)),
-        ("build", root_command(build_args(form), cwd)),
-        ("verify", wsl_command(verify_args(form), cwd))]
+        ("plan", step_command("plan", plan_args(form), form, cwd)),
+        ("build", step_command("build", build_args(form), form, cwd)),
+        ("verify", step_command("verify", verify_args(form), form, cwd))]
 
 
 #: The label of the size check's second step: ``update --dry-run`` on the
@@ -2706,14 +2903,14 @@ def update_commands(form, card, media_dir="", prepare=False, expect_bytes=None, 
 
 
 def prepare_commands(form, media_dir, cwd=None):
-    return [("prepare", wsl_command(prepare_args(form, media_dir), cwd))]
+    return [("prepare", step_command("prepare", prepare_args(form, media_dir), form, cwd))]
 
 
 def preview_prepare_commands(form, media_dir, cwd=None):
     """The preview's VIDEO step: the pictures, the animations and the
     music beds (``--visual-only``) - what the frame needs to be drawn."""
-    return [(VIDEO_LABEL, wsl_command(preview_prepare_args(form, media_dir),
-                                      cwd))]
+    return [(VIDEO_LABEL, step_command("prepare", preview_prepare_args(form, media_dir),
+                                       form, cwd))]
 
 
 def audio_prepare_commands(form, media_dir, cwd=None):
@@ -2721,7 +2918,7 @@ def audio_prepare_commands(form, media_dir, cwd=None):
     confirm sounds (pulled off the card through the emulator's params
     cache - the slow half, and the half that can be refused).  The same
     run as :func:`prepare_commands`, labelled for the strip."""
-    return [(AUDIO_LABEL, wsl_command(prepare_args(form, media_dir), cwd))]
+    return [(AUDIO_LABEL, step_command("prepare", prepare_args(form, media_dir), form, cwd))]
 
 
 def ensure_selector_commands(form, cwd=None, card=""):
@@ -2730,7 +2927,7 @@ def ensure_selector_commands(form, cwd=None, card=""):
 
 def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
                       rootfs=DEFAULT_ROOTFS, cwd=None, frames=1, loading=None,
-                      roll_state=None):
+                      roll_state=None, platform="stern"):
     """One snapshot step.  A run of frames is ONE step and is labelled
     :data:`ANIM_LABEL` - what a failure of it is named after, and what the
     finished step's own output is read back through."""
@@ -2738,7 +2935,8 @@ def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
     return [(label,
              wsl_command(preview_snapshot_args(binary, conf, media_dir, ppm,
                                                highlight, frame, rootfs,
-                                               frames, loading, roll_state),
+                                               frames, loading, roll_state,
+                                               platform=platform),
                          cwd, exe=None))]
 
 
@@ -2756,13 +2954,13 @@ def bypass_commands(card, cwd=None):
 INSPECT_JSON = "inspect json"
 
 
-def inspect_commands(card, media_out=None, cwd=None):
+def inspect_commands(card, media_out=None, cwd=None, platform="stern"):
     """The 'Load card…' run: the tool's own table into the pane, then the
     same read as JSON (with the media extracted, when asked) for the form.
     Two reads of a few small files - the card is never written."""
-    return [("inspect", wsl_command(inspect_args(card), cwd)),
+    return [("inspect", wsl_command(inspect_args(card, platform=platform), cwd)),
             (INSPECT_JSON, wsl_command(
-                inspect_args(card, media_out, as_json=True), cwd))]
+                inspect_args(card, media_out, as_json=True, platform=platform), cwd))]
 
 
 def extract_args(card, out_dir, media_out=None, indexes=()):
@@ -2919,7 +3117,7 @@ def media_file_errors(errs):
 
 
 def inject_commands(form, card, cwd=None):
-    return [("inject", wsl_command(inject_args(form, card), cwd))]
+    return [("inject", step_command("inject", inject_args(form, card), form, cwd))]
 
 
 def apply_commands(form, card, media_dir="", prepare=False, bypass=False,
@@ -2937,7 +3135,7 @@ def apply_commands(form, card, media_dir="", prepare=False, bypass=False,
     if bypass:
         cmds += bypass_commands(card, cwd)
     if refresh:
-        cmds += inspect_commands(card, cwd=cwd)
+        cmds += inspect_commands(card, cwd=cwd, platform=backend_for(form).key)
     return cmds
 
 
@@ -3258,10 +3456,11 @@ def group_rows(rows, groups):
     return out
 
 
-def form_from_inspect(info, card, media_dir="", selector_dir=None):
+def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="stern"):
     """The whole report as a :class:`MultibootForm`, plus its warnings:
     what 'Load card…' puts in the form and remembers as the baseline the
     live form is diffed against."""
+    be = backend_for(platform)
     rows, warnings = rows_from_inspect(info)
     warnings = list(info.get("warnings") or []) + warnings
     if any(on_card_fields(r) for r in rows):
@@ -3304,7 +3503,8 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
         theme=theme, colors=colors,
         media_dir=media_dir if (media_dir and os.path.isfile(
             os.path.join(media_dir, "media.json"))) else "",
-        selector_dir=selector_dir or DEFAULT_SELECTOR_DIR)
+        selector_dir=selector_dir or be.selector_default,
+        platform=be.key)
     return form, warnings
 
 
@@ -3739,7 +3939,7 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
 
 
 def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
-                    rebuild=()):
+                    rebuild=(), platform="stern"):
     """What the card path is pointing at, in one sentence:
     ``(kind, sentence, tone, can_read)`` - ``can_read`` being whether there
     is a card at this path that reading would make sense of.  It used to
@@ -3788,7 +3988,7 @@ def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
     if not field:
         if loaded_card:
             return ("strayed", strayed(), "fg", False)
-        return ("empty", EMPTY_PATH_TEXT, "gray", False)
+        return ("empty", backend_for(platform).empty_path_text, "gray", False)
     if under_library(field, resolve=False):
         return ("library",
                 "That path is in the card library, which nothing here may "
@@ -3983,7 +4183,7 @@ _VERSION_ROW_RE = re.compile(
     r"^\s*(\d+)\s+\S+\s+.*?\s(\d+\.\d+\.\d+|UNKNOWN)(?:\s|$)")
 
 
-def parse_plan(text):
+def parse_plan(text, platform="stern"):
     """What ``mkmulticard.py plan`` said: ``{"bytes": N or None, "fits":
     {"16G": (True, spare), ...}, "versions": {index: "1.59.0", ...},
     "sizes": [(index, device, bytes, source), ...], "overhead": N}``.
@@ -4003,6 +4203,8 @@ def parse_plan(text):
     column is not being populated for me when i load in images")."""
     info = {"bytes": None, "fits": {}, "versions": {}, "sizes": [],
             "overhead": None, "free": None, "shared": None}
+    be = backend_for(platform)
+    fits_re, total_re = be.fits_re, be.total_re
     for line in (text or "").splitlines():
         m = _SIZE_OVER_RE.match(line.strip())
         if m:
@@ -4023,10 +4225,10 @@ def parse_plan(text):
                                   None if size == "?" else int(size),
                                   m.group(4).strip()))
             continue
-        m = _FITS_RE.search(line)
+        m = fits_re.search(line)
         if m:
             info["fits"][m.group(1)] = (m.group(2) == "YES", int(m.group(3)))
-        m = _TOTAL_RE.match(line.strip())
+        m = total_re.match(line.strip())
         if m:
             info["bytes"] = int(m.group(1))
         m = _VERSION_ROW_RE.match(line)
@@ -4168,7 +4370,7 @@ def _gbytes(n):
 CARD_SIZES = (("8G", "8 GB"), ("16G", "16 GB"), ("32G", "32 GB"))
 
 
-def card_without_room(info, total, free, need):
+def card_without_room(info, total, free, need, platform="stern"):
     """``(label, bytes)`` of the card this build would need IF the games
     partitions kept no room for updates - but only when that is a smaller
     card than the one it does need.  ``None`` otherwise.
@@ -4183,7 +4385,7 @@ def card_without_room(info, total, free, need):
     ``total + spare``), never a table here: two places holding Stern's image
     sizes is one place for them to disagree."""
     fits = info.get("fits") or {}
-    for key, label in CARD_SIZES:
+    for key, label in backend_for(platform).sizes:
         if label == need:
             # the games alone want this card too, so the room is not what
             # pushed it up and there is nothing to explain
@@ -4197,7 +4399,7 @@ def card_without_room(info, total, free, need):
     return None
 
 
-def card_size_view(info):
+def card_size_view(info, platform="stern"):
     """WHAT THE SIZE STRIP SHOWS, from the plan's numbers and nothing else.
 
     ``{"known", "need", "over", "total", "scale", "cap", "spare", "bands",
@@ -4222,10 +4424,12 @@ def card_size_view(info):
             "why": ""}
     if not total:
         return view
-    biggest = fits.get(CARD_SIZES[-1][0])
+    be = backend_for(platform)
+    sizes = be.sizes
+    biggest = fits.get(sizes[-1][0])
     if biggest is not None:
         view["cap"] = total + biggest[1]
-    for key, label in CARD_SIZES:
+    for key, label in sizes:
         ok, spare = fits.get(key, (False, 0))
         if ok:
             view["need"], view["spare"] = label, spare
@@ -4247,14 +4451,14 @@ def card_size_view(info):
         view["bands"].append(("Free for updates", free, "free"))
     over = info.get("overhead")
     if over:
-        view["bands"].append(
-            ("Boot, rootfs, /data, /dump and metadata", over, "overhead"))
+        view["bands"].append((be.overhead_label, over, "overhead"))
     if view["over"]:
-        key, biggest = CARD_SIZES[-1]
+        key, biggest = sizes[-1]
         short = -(fits.get(key) or (False, 0))[1]
         view["head"] = "too big"
-        view["detail"] = ("%s of code - %s more than a %s card holds. Drop an "
-                          "image." % (_gbytes(total), _gbytes(short), biggest))
+        view["detail"] = ("%s of code - %s more than a %s %s. Drop an "
+                          "image." % (_gbytes(total), _gbytes(short), biggest,
+                                      be.medium_holds))
     elif free is not None and info.get("shared"):
         # the compact layout (items 95/100): the images' rows are what each
         # brings on its own; what they share is stored once - the saving,
@@ -4271,7 +4475,7 @@ def card_size_view(info):
         # room is what bought the bigger card: on every other list the two
         # numbers above are the whole story and a second clause about a card
         # nobody has to buy would be noise.
-        smaller = card_without_room(info, total, free, view["need"])
+        smaller = card_without_room(info, total, free, view["need"], platform)
         if smaller:
             label, cap = smaller
             view["detail"] = (
@@ -5244,10 +5448,13 @@ class MenuSettingsDialog(_Modal):
                     textvariable=panel._volume_var).pack(side=tk.LEFT)
         ttk.Label(vol, text="0-100", foreground=th["gray"]).pack(
             side=tk.LEFT, padx=(6, 0))
-        ttk.Checkbutton(g, text="On the machine, play at its own volume "
-                                "setting (recommended)",
-                        variable=panel._machine_vol_var).grid(
-            row=3, column=0, columnspan=4, sticky=tk.W, pady=(2, 0))
+        if panel._backend.machine_volume:
+            # the card's /data/nv mirror of the machine's own setting - a
+            # Stern card thing; a JJP install has no such store to read
+            ttk.Checkbutton(g, text="On the machine, play at its own volume "
+                                    "setting (recommended)",
+                            variable=panel._machine_vol_var).grid(
+                row=3, column=0, columnspan=4, sticky=tk.W, pady=(2, 0))
         # WHICH IMAGES IGNORE THE CONFIRM SOUND ABOVE (C FB, PAD-137: the two
         # confirm boxes "seem to not be in synch").  In the paragraph and
         # right after the sentence about that sound, not on a line of its
@@ -5406,7 +5613,7 @@ class BuildFlashDialog(_Modal):
         self._write_var = tk.BooleanVar(value=bool(plan["default_write"]))
         self._flash_var = tk.BooleanVar(value=False)
 
-        write = ttk.LabelFrame(b, text="Write the card")
+        write = ttk.LabelFrame(b, text="Write the %s" % panel._backend.out_noun)
         write.pack(fill=tk.X)
         gw = ttk.Frame(write)
         gw.pack(fill=tk.X, padx=8, pady=6)
@@ -5420,12 +5627,16 @@ class BuildFlashDialog(_Modal):
                                        justify=tk.LEFT, text=plan["write_detail"])
         self._write_detail.pack(anchor=tk.W, padx=(20, 0), pady=(2, 0))
 
-        flash = ttk.LabelFrame(b, text="Flash to an SD card")
+        # THE MEDIUM IS THE PLATFORM'S (item 118): an SD card for the Stern
+        # card, a FAT32 USB install stick for a JJP ISO - the frame, the tick
+        # and the paragraph under it are the backend's words.
+        be = panel._backend
+        flash = ttk.LabelFrame(b, text=be.flash_frame)
         flash.pack(fill=tk.X, pady=(10, 0))
         gf = ttk.Frame(flash)
         gf.pack(fill=tk.X, padx=8, pady=6)
         self._flash_chk = ttk.Checkbutton(
-            gf, text="Write the card onto an SD card", variable=self._flash_var,
+            gf, text=be.flash_tick, variable=self._flash_var,
             command=self._sync)
         self._flash_chk.pack(anchor=tk.W)
         # ...AND IT NAMES THE FAST PATH, because this is where someone
@@ -5434,16 +5645,7 @@ class BuildFlashDialog(_Modal):
         # menu-only write lives one dialog further on, and a fast option
         # nobody can find is a fast option nobody has.
         ttk.Label(gf, foreground=th["gray"], wraplength=460, justify=tk.LEFT,
-                  text="Flashing the whole image erases and replaces the "
-                       "whole SD card, and needs Administrator (approved "
-                       "when the write starts). Tick this with the write "
-                       "above to build and flash in one step.\n\n"
-                       "CHANGED ONLY THE MENU? The next dialog offers "
-                       "'Only the boot menu' - it writes the menu partition "
-                       "and nothing else, which is about a minute instead of "
-                       "the whole image, and the machine keeps its settings "
-                       "and scores. It checks the card first and refuses if "
-                       "this image was not the one flashed onto it.").pack(
+                  text=be.flash_detail).pack(
             anchor=tk.W, padx=(20, 0), pady=(2, 0))
         if not (plan["can_write"] or plan["have_card"]):
             self._flash_chk.configure(state=tk.DISABLED)
@@ -5655,6 +5857,21 @@ class MultibootPanel:
                  "image and shown in the Code column. Press ? for the whole "
                  "story.")
 
+    #: ...and what the same badge says on the JJP platform (item 118).
+    ABOUT_TIP_JJP = ("Builds ONE JJP install stick that carries two complete "
+                     "game installs and a menu at power-up: the flippers "
+                     "choose, START boots, a countdown boots the remembered "
+                     "choice - stock code and a custom build on the same "
+                     "machine without reinstalling. The first image is the "
+                     "primary: it goes into the machine's root A with the "
+                     "menu, the second into root B exactly as it is, and the "
+                     "machine falls back to the first. Both installs share "
+                     "one set of settings and scores; installing from the "
+                     "stick wipes them once, as every JJP install does. GIVE "
+                     "BOTH IMAGES THE SAME GAME CODE: the tool refuses "
+                     "otherwise. The ISO is made by the rig's tools under "
+                     "WSL; nothing here touches the ISOs you pick.")
+
     # USER-FACING COPY IS GENERIC.  Nothing the tab says names a title, a
     # build or a version as an example (David, 2026-09-02: most people
     # using this have never heard of the card it was written for) - what a
@@ -5724,8 +5941,12 @@ class MultibootPanel:
 
     def __init__(self, parent, log=None, theme_fn=None, badge_fn=None,
                  resize_fn=None, flash_fn=None, emulate_fn=None,
-                 phase_fn=None, status_fn=None):
+                 phase_fn=None, status_fn=None, platform="stern"):
         self._parent = parent
+        #: WHICH PLATFORM the tab builds for (item 118): Stern's SD card or a
+        #: JJP install ISO.  The app switches it with the manufacturer
+        #: (:meth:`set_platform`); a panel built on its own is a Stern one.
+        self._backend = backend_for(platform)
         self._log_sink = log or (lambda msg: None)
         self._theme_fn = theme_fn or (lambda: "dark")
         self._badge_fn = badge_fn
@@ -6219,6 +6440,101 @@ class MultibootPanel:
     # construction
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # the platform (item 118)
+    # ------------------------------------------------------------------
+
+    @property
+    def platform(self):
+        """``stern`` or ``jjp`` - which builder, which words, which medium."""
+        return self._backend.key
+
+    def _pk(self):
+        """The ``platform=`` keyword for the module functions - and NOTHING
+        on the Stern platform, so every call the Stern tests stub with the
+        functions' old signatures is made exactly as it always was."""
+        return {} if self._backend.key == "stern" else {"platform": self._backend.key}
+
+    def set_platform(self, key):
+        """Switch the tab to another manufacturer's multi-boot: the JJP install
+        ISO (mkjjpmulti.py) or back to the Stern card.  The form is the other
+        platform's, so it is cleared the way New card clears it; the words on
+        the tab and the controls that only one platform has follow.  Nothing
+        on disk is touched.  Returns True when the platform changed."""
+        be = backend_for(key)
+        if be.key == self._backend.key:
+            return False
+        if self._busy:
+            self._error("Wait for the current run to finish before switching "
+                        "the manufacturer.")
+            return False
+        self._backend = be
+        if getattr(self, "_rows", None) is not None and hasattr(self, "_out_var"):
+            self.new_card()
+        self._apply_platform_words()
+        return True
+
+    def _apply_platform_words(self):
+        """Every widget whose text or presence is the platform's: the label
+        beside the path box, the size strip's label, the green button, the
+        status checks, and the controls only the Stern card has (the reader,
+        Recover images…, the compact layout).  Safe before build() and on a
+        headless panel: a widget that is not there is skipped."""
+        be = self._backend
+        self.BUILD_FLASH_TEXT = be.build_flash_text
+        # the menu program's directory: the other platform's default is no
+        # place for this one's binary, so a default is swapped and a path
+        # somebody set (PAD_MULTIBOOT_SELECTOR, or typed) is left alone
+        sel = getattr(self, "_selector_var", None)
+        if sel is not None:
+            cur = sel.get().strip()
+            if be.key == "jjp" and (not cur or cur == DEFAULT_SELECTOR_DIR):
+                sel.set(be.selector_default)
+            elif be.key == "stern" and cur == JJP.selector_default:
+                sel.set(os.environ.get("PAD_MULTIBOOT_SELECTOR") or DEFAULT_SELECTOR_DIR)
+        about = getattr(getattr(self, "_about_badge", None), "icon_tip", None)
+        if about is not None:
+            about.text = self.ABOUT_TIP if be.key == "stern" else self.ABOUT_TIP_JJP
+        for attr, text in (("_src_lbl", be.out_label),
+                           ("_size_lbl", be.medium_needed)):
+            w = getattr(self, attr, None)
+            if w is not None:
+                try:
+                    w.configure(text=text)
+                except tk.TclError:                     # pragma: no cover
+                    pass
+        labels = dict(be.status_checks)
+        for key, lbl in (getattr(self, "_check_lbls", None) or {}).items():
+            try:
+                cur = lbl.cget("text")
+                mark = cur[:1] if cur else CHECK_MARKS["no"]
+                lbl.configure(text="%s %s" % (mark, labels.get(key, cur[2:])))
+            except tk.TclError:                         # pragma: no cover
+                pass
+
+        def show(attr, wanted, **pack):
+            w = getattr(self, attr, None)
+            if w is None:
+                return
+            try:
+                if wanted and not w.winfo_manager():
+                    w.pack(**pack)
+                elif not wanted and w.winfo_manager():
+                    w.pack_forget()
+            except tk.TclError:                         # pragma: no cover
+                pass
+        show("_from_card_btn", be.read_card, side=tk.RIGHT, padx=(0, 6))
+        menu_btn = getattr(self, "_menu_btn", None)
+        show("_recover_btn", be.extract, side=tk.LEFT, padx=(6, 0),
+             **({"after": menu_btn} if menu_btn is not None else {}))
+        need = getattr(self, "_size_need", None)
+        show("_compact_chk", be.compact, side=tk.LEFT, padx=(0, 8),
+             **({"after": need} if need is not None else {}))
+        if hasattr(self, "_buildflash_btn"):
+            self._sync_build_button()
+        if getattr(self, "_check_lbls", None):
+            self._draw_checks()
+
     def build(self, frame):
         """THE SHAPE OF THE TAB - ONE COLUMN, top to bottom, in the order a
         person works:
@@ -6273,6 +6589,9 @@ class MultibootPanel:
         # other half of "I have plugged the drive in now".
         outer.bind("<Map>", self._refresh_facts, add="+")
         self._out_entry.bind("<FocusIn>", self._refresh_facts, add="+")
+        # the words and the controls that are the platform's (item 118), now
+        # that every widget they touch exists
+        self._apply_platform_words()
         self._set_busy(False)
         self._sync_editor_states()
         self._update_menu_summary()
@@ -6349,8 +6668,8 @@ class MultibootPanel:
         # app has a card image too, and this one is a particular kind - the
         # one carrying several games and a menu (David: "let's also label the
         # thing multiboot card image").
-        ttk.Label(row, text="Multi-boot card image:").pack(
-            side=tk.LEFT, padx=(0, 6))
+        self._src_lbl = ttk.Label(row, text=self._backend.out_label)
+        self._src_lbl.pack(side=tk.LEFT, padx=(0, 6))
         # The tab's own "what is this" lives here rather than in a
         # paragraph across the top: the picture below is the subject, and
         # the ? button carries the rest.
@@ -7110,7 +7429,7 @@ class MultibootPanel:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=(6, 0))
         self._size_row = row
-        self._size_lbl = ttk.Label(row, text="SD card needed:")
+        self._size_lbl = ttk.Label(row, text=self._backend.medium_needed)
         self._size_lbl.pack(side=tk.LEFT)
         self._size_need = ttk.Label(row, text=self.SIZE_UNKNOWN, width=9,
                                     anchor=tk.W)
@@ -7168,7 +7487,8 @@ class MultibootPanel:
         canvas = getattr(self, "_size_canvas", None)
         if canvas is None:
             return
-        view = card_size_view(self._plan_info) if self._plan_info else None
+        view = (card_size_view(self._plan_info, **self._pk())
+                if self._plan_info else None)
         self._size_view = view
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
         try:
@@ -7602,7 +7922,7 @@ class MultibootPanel:
         self._status_wrap = wrap
         self._check_lbls = {}
         self._check_tips = {}
-        for key, label in STATUS_CHECKS:
+        for key, label in self._backend.status_checks:
             lbl = ttk.Label(wrap, text=CHECK_MARKS["no"] + " " + label,
                             anchor=tk.W)
             lbl.pack(side=tk.LEFT, padx=(0, 14))
@@ -7628,7 +7948,7 @@ class MultibootPanel:
             menu, rebuild = self._loaded_diff()
         facts = self._facts_now(field)
         state = card_path_state(field, facts, self._rows, self._loaded_card,
-                                menu, rebuild)
+                                menu, rebuild, **self._pk())
         built = None
         if self._built is not None and _plain(self._built[0]) == _plain(field):
             built = diff_forms(self._built[1], self.form())
@@ -7669,10 +7989,16 @@ class MultibootPanel:
         if not getattr(self, "_check_lbls", None):
             return
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
+        # THE PLATFORM'S WORDS for a check that wears its plain label ('Card
+        # image' -> 'Install ISO'); a check that says something of its own
+        # ('2 images', what was built) keeps it
+        words, plain = dict(self._backend.status_checks), dict(STATUS_CHECKS)
         for key, label, state, detail in self.checks():
             lbl = self._check_lbls.get(key)
             if lbl is None:                             # pragma: no cover
                 continue
+            if label == plain.get(key):
+                label = words.get(key, label)
             try:
                 lbl.configure(text="%s %s" % (CHECK_MARKS[state], label),
                               foreground=th[CHECK_TONES[state]])
@@ -8150,10 +8476,12 @@ class MultibootPanel:
         path = (path or "").strip().strip('"')
         if not path:
             return
-        if len(self._rows) >= MAX_IMAGES:
-            self._error("At most %d images fit one card." % MAX_IMAGES)
+        be = self._backend
+        if len(self._rows) >= min(MAX_IMAGES, be.max_cards):
+            self._error("At most %d images fit one %s."
+                        % (min(MAX_IMAGES, be.max_cards), be.out_noun))
             return
-        title, subtitle = suggest_title(path)
+        title, subtitle = suggest_title(path, be.key)
         self._rows.append(ImageRow(path=path, title=title, subtitle=subtitle))
         self._refresh_tree(select=len(self._rows) - 1)
         if len(self._rows) == 1:
@@ -8183,6 +8511,8 @@ class MultibootPanel:
         plain = sum(1 for r in self._rows if not is_group(r))
         out = []
         for label, attr in self.ADD_ROW_CHOICES:
+            if attr != "_add_image" and not self._backend.groups:
+                continue                  # a JJP install has no random cards
             why = ""
             if attr == "_add_random_over_existing" and plain < 2:
                 why = "add two images first"
@@ -8222,8 +8552,8 @@ class MultibootPanel:
 
     def _add_image(self):
         path = filedialog.askopenfilename(
-            title="Pick a Spike 2 card image for the card",
-            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+            title=self._backend.image_pick_title,
+            filetypes=list(self._backend.image_types))
         if path:
             self.add_image(path)
 
@@ -8407,7 +8737,7 @@ class MultibootPanel:
             return
         if not self._rows:
             return
-        new = default_output_path(self._rows[0].path)
+        new = default_output_path(self._rows[0].path, self._backend.key)
         self._out_auto_value = new
         self._out_var.set(new)
 
@@ -8783,12 +9113,13 @@ class MultibootPanel:
         Build.  The OS button says "Save" either way - the title carries the
         meaning, and the button cannot be renamed portably."""
         cur = self._out_var.get().strip()
+        be = self._backend
         path = filedialog.asksaveasfilename(
-            title="The card to read, or where to build a new one",
-            defaultextension=".raw", confirmoverwrite=False,
+            title="The %s to read, or where to build a new one" % be.out_noun,
+            defaultextension=be.out_ext, confirmoverwrite=False,
             initialdir=os.path.dirname(cur) if cur else None,
             initialfile=os.path.basename(cur) if cur else None,
-            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+            filetypes=list(be.image_types))
         if not path:
             return False
         # A card that EXISTS is one you meant to read, so read it - unless
@@ -9131,7 +9462,8 @@ class MultibootPanel:
             media_dir=media if (media and os.path.isfile(
                 os.path.join(media, "media.json"))) else "",
             selector_dir=self._selector_var.get().strip()
-            or DEFAULT_SELECTOR_DIR,
+            or self._backend.selector_default,
+            platform=self._backend.key,
             theme=theme, colors=colors)
 
     def _validated_form(self, sources=True):
@@ -9528,6 +9860,9 @@ class MultibootPanel:
                 # answer, kept by _update_step, not a failure.)
                 self._write("the size check failed (exit %d) - the sentence "
                             "beside the status line is left blank." % rc)
+        # an in-place update exists on the Stern card only (item 118)
+        if not self._backend.update:
+            card = None
         if not self._run_commands(measure_commands(form, card), on_step=step,
                                   on_done=done, preview=True, on_tick=tick):
             # The worker is busy.  Ask again in a moment rather than queue.
@@ -9549,7 +9884,7 @@ class MultibootPanel:
         if label != "plan":
             return
         if rc == 0:
-            self._plan_info = parse_plan(text)
+            self._plan_info = parse_plan(text, **self._pk())
             self._plan_failed = False
             self._plan_why = ""
             self._take_versions(self._plan_info.get("versions") or {})
@@ -9827,8 +10162,8 @@ class MultibootPanel:
                             "report - see the tool output." % path)
                 return
             self.load_inspect(info, path, media)
-        return self._run_commands(inspect_commands(path, media), on_step=step,
-                                  on_done=done, quiet=(INSPECT_JSON,))
+        return self._run_commands(inspect_commands(path, media, **self._pk()),
+                                  on_step=step, on_done=done, quiet=(INSPECT_JSON,))
 
     def load_inspect(self, info, card, media_dir=None):
         """Fill the whole form from an inspect report and go into EDITING
@@ -9839,7 +10174,7 @@ class MultibootPanel:
         media_dir = media_dir if media_dir is not None \
             else loaded_media_dir(card)
         form, warnings = form_from_inspect(
-            info, card, media_dir, self._selector_var.get().strip())
+            info, card, media_dir, self._selector_var.get().strip(), **self._pk())
         self._rows = list(form.images)
         # Before the fields are written: Default's trace moves Highlight only
         # while it has not been typed, and this card's default is the one to
@@ -10227,7 +10562,7 @@ class MultibootPanel:
             menu, rebuild = self._loaded_diff()
         kind, _text, _tone, can_read = card_path_state(
             field, self._facts_now(field), self._rows, self._loaded_card,
-            menu, rebuild)
+            menu, rebuild, **self._pk())
         # (The 'unticking the bypass cannot un-patch a card' note is gone
         # with the bypass tick itself - the bypass is always on now, so it
         # can never be untied.  The Apply-vs-Build decision that used to
@@ -10292,7 +10627,7 @@ class MultibootPanel:
         # resolved is still that card, and Apply must stay live on it.
         kind, _t, _tone, _cr = card_path_state(
             field, self._facts_now(field), self._rows, self._loaded_card,
-            menu, rebuild)
+            menu, rebuild, **self._pk())
         editing = kind == "loaded"
         have_card = bool(field and os.path.isfile(field))
         if editing and self._card_device and rebuild:
@@ -11209,7 +11544,8 @@ class MultibootPanel:
                                  preview_highlight(form, hl), 0,
                                  rootfs_for(form.selector_dir),
                                  loading=path,
-                                 roll_state=self._roll_state_path())
+                                 roll_state=self._roll_state_path(),
+                                 **self._pk())
 
         def done(rc, failed, texts):
             img = rolled_image(texts.get(cmds[0][0], "")) if rc == 0 else None
@@ -11969,7 +12305,8 @@ class MultibootPanel:
             return snapshot_commands(binary, conf, media, ppm,
                                      preview_highlight(form, hl), first,
                                      rootfs, frames=run,
-                                     loading=loading_path(pv, fp, hl))[0][1]
+                                     loading=loading_path(pv, fp, hl),
+                                     **self._pk())[0][1]
         draw = ANIM_LABEL if run > 1 else "frame %d" % first
         cmds.append((draw, argv))
 

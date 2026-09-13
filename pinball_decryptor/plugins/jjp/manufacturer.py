@@ -179,6 +179,13 @@ class JJPManufacturer(Manufacturer):
         # ISO intermediate).  Surfaces the "From ISO / From SSD"
         # radio on the Extract + Write tabs.
         direct_ssd=True,
+        # Multi-boot (item 118): the Multi-boot tab with its JJP backend -
+        # two install ISOs of the same game code become ONE install stick
+        # with a boot menu (tools/jjp_emu/mkjjpmulti.py; the menu is the
+        # same code selector the Stern card carries, built for the JJP
+        # root).  The tab hands the ISO to this plugin's own stick maker and
+        # to the Emulate JJP tab.
+        multiboot=True,
         # Dongle-decrypt: run the game under an LD_PRELOAD shim that drives
         # the game's OWN decryption via the plugged-in HASP dongle.  Surfaces
         # the advanced "Decrypt using the game's HASP dongle" checkbox on the

@@ -1220,8 +1220,16 @@ def make_plan(primary, extras, media_dir=None, cache_dir=None):
         info.check_stock_shape()
     idents = []
     for p in [primary] + list(extras):
+        # the rig's restores are root's (0400); a plan run as the user (the
+        # app's) still plans, it just cannot say what game code the root holds
         raw = cached_root_raw(p, cache_dir)
-        idents.append(root_identity(raw) if raw and shutil.which("debugfs") else None)
+        ident = None
+        if raw and shutil.which("debugfs") and os.access(raw, os.R_OK):
+            try:
+                ident = root_identity(raw)
+            except Refused:
+                ident = None
+        idents.append(ident)
     media = mkc.plan_media(media_dir, len(infos)) if media_dir else None
     c0 = infos[0].piece_bytes(ROOT_PART)
     c1 = infos[1].piece_bytes(ROOT_PART)

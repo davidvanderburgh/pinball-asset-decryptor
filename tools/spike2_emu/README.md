@@ -703,8 +703,12 @@ spinner rip as somebody playing (`HUMAN_TAGS`), and keeps ONE TIMER PER
 LAUNCHED BALL: the single slot it had meant a second launch overwrote the
 first, and that ball could never come home, so the game went on believing it
 was in play — a START that refuses and a LOCATING BALLS search that never
-ends. `plunge.py plunge` also stopped serving a ball into an empty lane when
-the trough says one is already out there.
+ends. `plunge.py plunge` is LAUNCH-ONLY now (David, the next day: "yes make
+plunge launch-only"): it launches the ball waiting in the shooter lane and
+never takes one from the trough, because with the feeder on by default the
+game's own eject has already put it there, and serving from a full trough in
+attract left the machine a ball short. `plunge.py serve` still ejects, and the
+TROUGH coil marker on the artwork runs it.
 **The actual Start-refusal root cause was DATA, not code, and does not ship
 in this repo**: DnD LE's factory ball count is **8** — 6 in the trough plus
 **2 captive in the dragon** — and the game disarms its own Start/Tournament

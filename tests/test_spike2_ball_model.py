@@ -598,13 +598,14 @@ def test_two_launched_balls_both_come_home_rather_than_one_being_forgotten(
     assert tr.anomaly(mrg) is None
 
 
-def test_a_plunge_does_not_serve_a_ball_while_one_is_already_in_play(
+def test_plunge_only_ever_launches_and_never_takes_a_ball_from_the_trough(
         tmp_path, monkeypatch, capsys):
     """The button half of the same fault: the game counts the balls it asked
     for, so a ball the rig adds is a ball the machine is short for ever, and
-    the next Start gets LOCATING PINBALLS. With ball save on it is one click
+    the next Start gets LOCATING PINBALLS. With ball save on it was one click
     away - the game auto-plunges the saved ball itself, leaving an empty lane
-    with a ball in play.
+    with a ball in play - and with every ball home it was one click away in
+    attract. David, 2026-09-13: "yes make plunge launch-only".
     """
     monkeypatch.setenv("PAD_ROOT", str(tmp_path))
     monkeypatch.setenv("PAD_SW_FILE", str(tmp_path / "padsw"))
@@ -618,16 +619,32 @@ def test_a_plunge_does_not_serve_a_ball_while_one_is_already_in_play(
     monkeypatch.setattr(plunge, "SHOOTER", 62)
     monkeypatch.setattr(plunge, "STEP_S", 0.0)
     monkeypatch.setattr(plunge, "LANE_S", 0.0)
+    trough = (71, 70, 69, 68, 67, 66)
+
+    def held(blk):
+        return [blk[padsw.OFF_SCR_HELD + i] for i in trough]
+
     out = _block(padsw, 71, 70, 69, 68, 67)        # one ball in play
     assert plunge.do_plunge(out) == 1
     said = capsys.readouterr().out
-    assert "already in play" in said
-    assert "drain" in said                         # how a ball in play ends
-    assert out[padsw.OFF_SCR_HELD + 66] == 0       # no second ball served
+    assert said.startswith("nothing in the shooter lane")
+    assert "a ball is in play" in said and "Drain" in said
+    assert held(out) == [1, 1, 1, 1, 1, 0]         # no second ball served
 
-    # The control, and it is the one David asked for twice: ball start with
-    # every ball home still does the whole story.
-    rest = _block(padsw, 71, 70, 69, 68, 67, 66)
-    assert plunge.do_plunge(rest) == 0
-    assert rest[padsw.OFF_SCR_HELD + 66] == 0      # the far end left
+    # Every ball home and the lane empty: attract, or a Start that did not
+    # take. This used to eject one, and that ball was one the game never
+    # asked for.
+    rest = _block(padsw, *trough)
+    assert plunge.do_plunge(rest) == 1
+    said = capsys.readouterr().out
+    assert said.startswith("nothing in the shooter lane")
+    assert "Start" in said                         # what does put one there
+    assert held(rest) == [1] * 6
+
+    # The one thing it does: a ball waiting in the lane is launched, and the
+    # trough is not touched.
+    lane = _block(padsw, 71, 70, 69, 68, 67, 62)
+    assert plunge.do_plunge(lane) == 0
+    assert lane[padsw.OFF_SCR_HELD + 62] == 0
+    assert held(lane) == [1, 1, 1, 1, 1, 0]
     assert "ball launched" in capsys.readouterr().out

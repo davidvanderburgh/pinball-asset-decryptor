@@ -176,3 +176,25 @@ def test_the_note_keeps_the_newest_three_and_folds_in_new_feeder_lines(
             "balls 5/6 trough   in play 1   fed 3"
     finally:
         root.destroy()
+
+
+def test_a_long_reply_keeps_its_opening_words_and_drops_older_messages(
+        playfield):
+    """The first note kept the newest ROWS, so a Plunge reply that wrapped
+    past three rows showed "launch   the game puts one there..." with the
+    outcome cut off the front."""
+    root, panel, dots = _panel(playfield, lambda w: None)
+    try:
+        width = panel._w - 2 * panel.PAD
+        panel.ball_say("an older message")
+        long_reply = "plunge: nothing in the shooter lane to launch " + \
+            " ".join(["because of a reason"] * 12)
+        assert len(playfield.wrap_rows(panel._f8, long_reply, width)) > 3
+        panel.ball_say(long_reply)
+        rows = panel.cv.itemcget(panel.ball_note, "text").splitlines()
+        assert len(rows) == 3
+        assert rows[0].startswith("plunge: nothing")
+        assert rows[-1].endswith("…")
+        assert "an older message" not in rows
+    finally:
+        root.destroy()

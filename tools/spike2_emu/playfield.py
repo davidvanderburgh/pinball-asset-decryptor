@@ -2058,14 +2058,32 @@ class KeyPanel:
             self.ball_say(*fresh)
 
     def ball_say(self, *lines):
-        """Add lines to the note, newest last, keeping the newest ROWS."""
+        """Add messages to the note, newest last, in at most NOTE_LINES rows.
+
+        WHOLE MESSAGES ARE DROPPED, OLDEST FIRST - never the head of one. The
+        first version kept the newest ROWS, and a Plunge reply that wrapped to
+        four rows lost its opening words: the shot read "launch   the game
+        puts one there..." with the outcome gone. A message that alone needs
+        more rows than there are keeps its FIRST rows, and the last one is
+        marked cut, because the start of a sentence is the part that says what
+        happened.
+        """
         if getattr(self, "ball_note", None) is None:
             return
-        width = self._w - 2 * self.PAD
-        for ln in lines:
-            self._note.extend(wrap_rows(self._f8, ln, width))
+        self._note.extend(lines)
         del self._note[:-self.NOTE_LINES]
-        self.cv.itemconfig(self.ball_note, text="\n".join(self._note))
+        width = self._w - 2 * self.PAD
+        rows = []
+        for msg in reversed(self._note):
+            wrapped = wrap_rows(self._f8, msg, width)
+            if not rows and len(wrapped) > self.NOTE_LINES:
+                rows = wrapped[:self.NOTE_LINES]
+                rows[-1] = rows[-1].rstrip() + " …"
+                break
+            if len(rows) + len(wrapped) > self.NOTE_LINES:
+                break
+            rows = wrapped + rows
+        self.cv.itemconfig(self.ball_note, text="\n".join(rows))
 
     def update(self, sw):
         """Repaint rows whose switch state moved; a still machine costs the

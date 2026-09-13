@@ -238,15 +238,15 @@ def main():
     p.terminate()
     p.wait(timeout=5)
 
-    # ---- what plunge does, both ways, 2026-08-11 ---------------------------
-    # David asked for two things that read as opposites and are not: a plunge
-    # must NOT eject a second ball when one is already in the lane, and at
-    # ball start with an EMPTY lane it must do the whole thing - eject, close
-    # the lane switch, then moments later open it. Both are checked here
-    # because the version that only did the first looked correct in isolation
-    # and turned the Plunge button into a no-op on the most ordinary press
-    # there is. With the feeder stopped, these run against the same fake
-    # machine and check the verbs apart from it.
+    # ---- what plunge does: LAUNCH, and only launch --------------------------
+    # 2026-08-11 made it serve a ball from the trough when the lane was empty,
+    # because no run had a feeder and nothing else ever put a ball there. The
+    # feeder is on by default now, and serving from a full trough handed the
+    # game a ball it never asked for - Plunge in attract left the machine a
+    # ball short. PAD-134's follow-up (David: "yes make plunge launch-only")
+    # made it a plunger again; `serve` is the verb that ejects. With the
+    # feeder stopped, these run against the same fake machine and check the
+    # verbs apart from it.
     def run(verb):
         r = subprocess.run([sys.executable, os.path.join(HERE, "plunge.py"),
                             verb], env=env, stdout=subprocess.PIPE,
@@ -258,11 +258,11 @@ def main():
     check("reset puts every ball home", shim.count(ids), len(ids))
     out_txt = run("plunge")
     time.sleep(0.3)
-    check("plunge with an EMPTY lane serves one (ball start)",
-          shim.count(ids), len(ids) - 1)
-    check("...closing the lane switch and then opening it",
-          ("closed" in out_txt and "launched" in out_txt), True)
-    check("...and it left the lane open", shim.merged(lane) if lane else 0, 0)
+    check("plunge with an EMPTY lane ejects nothing, even at rest",
+          shim.count(ids), len(ids))
+    check("...and says there was nothing to launch",
+          "nothing in the shooter lane" in out_txt, True)
+    check("...and left the lane open", shim.merged(lane) if lane else 0, 0)
 
     # A ball already waiting: the feeder's state. Plunge must launch it and
     # NOT take a second one out of the trough.
@@ -302,13 +302,7 @@ def main():
     check("plunge with a ball ALREADY IN PLAY ejects nothing",
           shim.count(ids), before)
     check("...and says why, naming how a ball in play ends",
-          ("already in play" in out_txt and "drain" in out_txt), True)
-    run("reset")
-    time.sleep(0.3)
-    run("plunge")
-    time.sleep(0.3)
-    check("...and a full trough still serves (ball start is unchanged)",
-          shim.count(ids), len(ids) - 1)
+          ("a ball is in play" in out_txt and "Drain" in out_txt), True)
 
     # ---- PAD-134: THE WAY HOME, which nothing here used to reach -----------
     # A launched ball that nobody is playing drains back to the trough, and

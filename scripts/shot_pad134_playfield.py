@@ -45,8 +45,15 @@ from ctypes import wintypes
 if sys.platform != "win32":
     sys.exit("Screenshot capture is Windows-only (PrintWindow/GDI).")
 
-OUT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1
-                      else "playfield-plunge.png")
+#: Two flags, added for the follow-up that made Plunge launch-only:
+#:   --rest   leave every ball home and the lane empty - attract, or a Start
+#:            that did not take - instead of putting a ball in play first
+#:   --panel  build the key panel (a hand-written padbinds) and press ITS
+#:            Plunge button, so the BALLS line and note are in the shot
+#: With neither, this reproduces the original PAD-134 plunge pair exactly.
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+FLAGS = {a for a in sys.argv[1:] if a.startswith("--")}
+OUT = os.path.abspath(ARGS[0] if ARGS else "playfield-plunge.png")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RIG = os.path.join(REPO, "tools", "spike2_emu")
 
@@ -74,6 +81,9 @@ os.environ["PAD_ROOT"] = STAGE
 os.environ["PAD_TABLES"] = os.path.join(STAGE, "dump", "tables")
 os.environ["PAD_GAME"] = GAME
 os.environ["PAD_SW_FILE"] = BLOCK
+BINDS = os.path.join(STAGE, "dump", "padbinds")
+if "--panel" in FLAGS:
+    os.environ["PAD_PF_BINDS"] = BINDS
 
 sys.path.insert(0, RIG)
 sys.argv = ["playfield.py", GAME]
@@ -123,6 +133,30 @@ def write_block(home):
         f.write(buf)
     log("block: trough %r (%s) with %d home, door %r, lane %r"
         % (TROUGH_IDS, HOW, home, DOOR, LANE))
+
+
+def write_binds():
+    """padglhost's compiled bind table in binds_export()'s tab-separated shape
+    (key, flags c=cabinet t=toggle, ids, label), with this title's trough and
+    door ids - enough for the key panel and its BALLS section to build."""
+    rows = [("Enter", "c", "25", "Service Select"),
+            ("=", "c", "26", "Service Plus"),
+            ("-", "c", "27", "Service Minus"),
+            ("Bksp", "c", "28", "Service Back"),
+            ("1", "c", "36", "Start Button"),
+            ("5", "c", "39", "Left Coin"),
+            ("Space", "c", "34", "Action Button"),
+            ("C", "ct", str(DOOR or 33), "Coin Door Closed"),
+            ("Left", "-", "60", "Left Flipper"),
+            ("Right", "-", "59", "Right Flipper"),
+            ("F", "-", "62", "Shooter Lane"),
+            ("D", "-", "53", "Right Scoop"),
+            ("B", "t", ",".join(str(i) for i in TROUGH_IDS),
+             "6 balls in trough")]
+    with open(BINDS, "w", encoding="utf8", newline="\n") as f:
+        f.write("# key\tflags\tids\tlabel  (shot rig, %s)\n" % GAME)
+        for row in rows:
+            f.write("\t".join(row) + "\n")
 
 
 def write_led_block():
@@ -227,6 +261,9 @@ def local_run(script, *args):
 playfield.wsl_run = local_run
 # No run to ask, and starting WSL to be told "nothing saved" is a 30 s wait.
 playfield.state_slots = lambda: {}
+# The key panel's keyboard pre-warms a persistent WSL helper; no keys are
+# pressed here, so it must not spawn one.
+playfield.SwitchPipe._ensure = lambda self: False
 
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
@@ -273,6 +310,8 @@ def snap(root, path):
 def main():
     write_block(len(TROUGH_IDS))          # a machine at rest, so six is seen
     write_led_block()
+    if "--panel" in FLAGS:
+        write_binds()
     root = tk.Tk()
     root.title("%s - virtual playfield" % GAME)
     root.geometry("+40+20")
@@ -289,12 +328,21 @@ def main():
             % (len(TROUGH_IDS) - 1, len(TROUGH_IDS)))
 
     def press_plunge():
-        btn = next(b for b in view._acts if b.cget("text") == "Plunge")
+        panel = view.key_panel
+        if "--panel" in FLAGS and getattr(panel, "ball_btns", None):
+            btn = panel.ball_btns[0]
+        else:
+            btn = next(b for b in view._acts if b.cget("text") == "Plunge")
+        log("pressing %r" % btn.cget("text"))
         btn.invoke()
 
     def report():
         log("status bar: %r" % view.status.cget("text"))
         log("trough line: %r" % playfield.trough_text(view.sw))
+        panel = view.key_panel
+        if getattr(panel, "ball_note", None) is not None:
+            log("balls line: %r" % panel.cv.itemcget(panel.ball_state, "text"))
+            log("balls note: %r" % panel.cv.itemcget(panel.ball_note, "text"))
 
     def go():
         try:
@@ -305,7 +353,8 @@ def main():
         finally:
             root.destroy()
 
-    root.after(1500, serve_a_ball)
+    if "--rest" not in FLAGS:
+        root.after(1500, serve_a_ball)
     root.after(2600, press_plunge)
     # Time for the helper to finish and for the next tick to rewrite the bar -
     # a status line that only survives one frame is not a fix.

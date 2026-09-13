@@ -6206,8 +6206,10 @@ These have each been violated at least once and each cost a run or a window:
       flipper brings the menu up. After 106, not before.
       — S3: friction. D3: one mechanism on two input paths, needs a run to see.
 
-- [ ] **114. `jjpselect`: the boot selector runs on a JJP rootfs (x86, X11,
-      the cabinet buttons off `/dev/jjpio`).** `S3 D3` ← WORKING ON *(Filed 2026-09-12 from
+- [x] **114. `jjpselect`: the boot selector runs on a JJP rootfs (x86, X11,
+      the cabinet buttons off `/dev/jjpio`).** `S3 D3` **DONE 2026-09-12 on
+      `item/114` (`cc2cd46`, `ca8fa4f`), awaiting /finish — see the DONE
+      block at the end of this entry.** *(Filed 2026-09-12 from
       `plans/jjp_multiboot_plan.md`, the JJP multi-boot plan — gitignored like
       the handoff, so it is local to David's machine and these six entries
       carry everything a fresh checkout needs; David has a GNR key, wants an
@@ -6238,6 +6240,39 @@ These have each been violated at least once and each cost a run or a window:
       — S3: a feature; flashing one image at a time is the workaround. D3: a
       known-shape port on a seam that already exists (`struct input_ops`),
       but it needs rig runs to see it draw and take keys.
+      **DONE 2026-09-12 (`cc2cd46`, `ca8fa4f` on item/114).** `make
+      PLATFORM=jjp` builds the SAME menu sources natively as `jjpselect`:
+      `egl_x11.c` (EGL/GLESv2 dlopen'd, never linked - the WSL host has no
+      libGLESv2 - with an XPutImage fallback, `PAD_SELECT_NO_EGL=1` to force
+      it), `input_jjpio.c` (jjpcrt's loop: read 64, write 64 zeros; LEFT 1.0,
+      RIGHT 1.2, START 3.0, active low; `key_*=` conf overrides; `--learn`),
+      `stubs_jjp.c` (codec/input_hw no-ops), `jjp_glibc.h` (the __isoc23
+      redirects off), `STBTT_fmod` local (glibc 2.38's fmod bump).
+      `check_elf_jjp.sh` (GLIBC <= 2.34, NEEDED whitelist, every STRONG
+      undefined symbol resolving against the GNR card's own libs) and its
+      selftest (refuses a host binary needing fmod@GLIBC_2.38). `make check
+      PLATFORM=jjp JJPROOT=/var/tmp/jjp_GunsNRoses-v03.03/root
+      BUILD=/var/tmp/jjp114/build-jjp` green: headless (every Stern case,
+      natively), padsw (14), jjpio (pty board: right/left/right/start ->
+      chose 1, every byte written back zero, remap, no board -> default).
+      **Rig proof twice**, in the GNR 3.03 jail on Xephyr 1920x1080 with CUSE
+      /dev/jjpio100 and shm pokes at jjpcrt's bits: `egl: up after 1
+      attempt(s)` on the card's own Mesa 21.2.6 (188 loops/s), key:
+      right/left/right/start, chose 1, choice=1, exit 0, 1935 frames read /
+      1935 zero frames written; then the XPutImage path (62 loops/s after a
+      60 Hz tick - the first fallback run spun a core at 20 M loops/s).
+      Teardown to cuse 0 / Xephyr 0 / jail mounts 0 / alive 0 both times.
+      **Stern unchanged**: input_jjpio.c rides along in the ARM build; `make
+      check` + `check-hw PLATFORM=stern` green (GLIBC_2.17, headless, padsw,
+      15 select.sh cases, fakebus). DESIGN.md "The JJP build (item 114)".
+      **Traps paid:** BUILD must be a Linux path (DrvFs has no FIFOs);
+      WSL's Ubuntu instance stops when idle and takes the rig's loop mounts
+      with it (a `wsl -e sleep 36000` keeps it up); the image mount is
+      root's, so JJPROOT builds run as root; objdump -T's *UND* column
+      shifts with the flags (the awk in build.sh sees only WEAK symbols).
+      **Not in scope, by design:** sound on the machine (audio_alsa opens
+      `default`; silent is acceptable), a native-resolution canvas (the quad
+      scales 1360x768), the hook (item 115).
 
 - [ ] **115. `padselect.sh`: the JJP hook binds the chosen image's game
       directory over the primary's, and refuses JJP's own updater.** `S3 D3`

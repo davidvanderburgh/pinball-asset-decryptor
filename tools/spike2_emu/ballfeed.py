@@ -149,10 +149,48 @@ GONE_S = 3.0
 TABLE_WAIT_S = _num("PAD_BALL_TABLE_WAIT_S", 300.0)
 
 
+#: THE WINDOW'S COPY OF WHAT THIS SAYS (PAD-134). The virtual playfield is a
+#: Windows process and ~/padball.log is a file inside WSL it never opens, so
+#: every sentence below reached the run log and nobody at the window. David,
+#: comparing with the JJP window: its BALLS section shows the keeper's count
+#: and its newest three messages right under Plunge and Drain, and ours showed
+#: six dots. So the feeder publishes the same two things into dump/ - `fed N`
+#: then its newest lines, oldest first - by tmp+rename, the padbinds rule, so
+#: a reader over \\wsl.localhost never parses half a file. watch.sh clears it
+#: at start so a window never shows the LAST run's lines. PAD_BALL_FILE points
+#: it somewhere else, which ballfeedtest.py does so it touches nothing real.
+STATUS_PATH = (os.environ.get("PAD_BALL_FILE")
+               or os.path.join(padpath.dump() or "", "padball"))
+STATUS_LINES = 3
+_recent = []
+_fed = 0
+
+
+def publish(fed=None):
+    """Rewrite the status file. Best-effort: a failed write costs the window
+    one stale line, never the feeder its loop."""
+    global _fed
+    if fed is not None:
+        _fed = fed
+    tmp = STATUS_PATH + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf8", newline="\n") as f:
+            f.write("fed %d\n" % _fed)
+            for line in _recent:
+                f.write(line + "\n")
+        os.replace(tmp, STATUS_PATH)
+    except OSError:
+        pass
+
+
 def say(msg):
-    """One line, flushed. watch.sh folds this into the run log."""
+    """One line, flushed. watch.sh folds this into the run log, and the
+    playfield window shows the newest few (publish)."""
     sys.stdout.write("[ball] %s\n" % msg)
     sys.stdout.flush()
+    _recent.append(msg)
+    del _recent[:-STATUS_LINES]
+    publish()
 
 
 def read_led():
@@ -322,6 +360,7 @@ class Feeder:
                 if self.run_plan(m, plan, "eject:"):
                     self.last_feed = time.monotonic()
                     self.fed += 1
+                    publish(self.fed)
                     fed = True
                     mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
                     say("trough %d/%d after the feed"
@@ -403,7 +442,7 @@ class Feeder:
             n = len(self.pending)
             self.pending = []
             say("somebody is playing - %d launched ball(s) stay in play "
-                "(the playfield window's trough dots end them)" % n)
+                "until Drain" % n)
             return
         if now - self.pending[0][0] < HOME_S:
             return

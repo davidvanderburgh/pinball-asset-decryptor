@@ -1306,6 +1306,10 @@ rm -f "$RING_HOST" "$SW_HOST"
 # game's switch ids for the seconds in between. Absent is the state the panel
 # expects and polls through; wrong is the state nothing would notice.
 rm -f "$ROOT/dump/padbinds"
+# And the ball feeder's status (PAD-134): the playfield's BALLS section shows
+# its count and newest lines, and the LAST run's would read as this one's
+# until the feeder says something.
+rm -f "$ROOT/dump/padball"
 # The guest opens the LED block O_RDWR and will NOT create it, so make it here.
 # TWO pages, zeroed: the shim stamps the magic once it maps it. It was one page
 # until version 4 (padled.h), whose `seen` plane crossed 4096. The shim takes

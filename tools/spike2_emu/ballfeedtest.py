@@ -169,6 +169,7 @@ def main():
     # With one timer per launched ball (PAD-134) it does, so the way home gets
     # its own section and its own feeder below rather than leaking into these.
     env = dict(os.environ, PAD_SW_FILE=sw, PAD_LED_FILE=led,
+               PAD_BALL_FILE=os.path.join(SCRATCH, "padball"),
                PAD_TABLES=padpath.tables() or "", PAD_GAME=game,
                PAD_BALL_HZ="50", PAD_BALL_LANE_MS="150",
                PAD_BALL_MIN_GAP_MS="300", PAD_BALL_HOME_MS="0")

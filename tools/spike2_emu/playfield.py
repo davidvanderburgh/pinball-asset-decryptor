@@ -304,6 +304,34 @@ DOOR_NODE, DOOR_BIT = 0, 23
 BINDS_PATH = (os.environ.get("PAD_PF_BINDS")
               or os.path.join(padpath.dump() or "", "padbinds"))
 
+#: The ball feeder's status (PAD-134): `fed N`, then its newest lines. Written
+#: by ballfeed.publish() inside WSL, read here for the key panel's BALLS
+#: section. PAD_PF_BALL is the offline hatch, the PAD_PF_BINDS shape.
+BALL_PATH = (os.environ.get("PAD_PF_BALL")
+             or os.path.join(padpath.dump() or "", "padball"))
+
+
+def read_ball_status(path=None):
+    """(fed, [lines]) from the feeder's status file, or (None, []) without one.
+
+    None and not 0, for the same reason trough.Balls has an unknown total: a
+    window whose run has no feeder yet - or PAD_BALL_FEED=0 - has not fed
+    nothing, it has nobody counting, and the line should not claim a zero.
+    """
+    try:
+        with open(path or BALL_PATH, encoding="utf8", errors="replace") as f:
+            lines = [ln.rstrip("\n") for ln in f]
+    except OSError:
+        return None, []
+    fed = None
+    if lines and lines[0].startswith("fed "):
+        try:
+            fed = int(lines[0][4:])
+        except ValueError:
+            fed = None
+        lines = lines[1:]
+    return fed, [ln for ln in lines if ln.strip()]
+
 #: This directory, as WSL sees it - the helpers below are run inside WSL through
 #: interop, so they cannot be handed the Windows path this file was loaded from.
 #: `wslpath -u` is asked instead of assuming the checkout is on C:.
@@ -523,6 +551,17 @@ def run_helper(view, script, arg=None):
                 view._flash(text)
             except (AttributeError, tk.TclError):       # pragma: no cover
                 pass
+            # A ball action's answer also lands in the BALLS note (PAD-134),
+            # beside the feeder's own lines and under the button that asked -
+            # the JJP window's run_plan logs its "drain:"/"plunge:" the same
+            # way. The status bar keeps it too; it is the one place every
+            # action reports.
+            panel = getattr(view, "key_panel", None)
+            if script == "plunge.py" and panel is not None:
+                try:
+                    panel.ball_say("%s: %s" % (arg, text) if arg else text)
+                except (AttributeError, tk.TclError):   # pragma: no cover
+                    pass
         try:
             view.status.after(0, show)
         except tk.TclError:                             # pragma: no cover
@@ -1226,6 +1265,17 @@ class SwitchWatch:
             if hit is not None:
                 self.door_id = hit["id"]
                 break
+        # The shooter lane, by NAME (ballmodel.LANE_NAME is the same words in
+        # every switch list on this disk). PAD-134: a ball waiting in the lane
+        # is neither home nor in play, and the BALLS line says so.
+        self.lane_id = None
+        for source in (rows or [], load_switch_list()):
+            hit = next((r for r in source
+                        if (r.get("name") or "").upper().strip()
+                        == "SHOOTER LANE"), None)
+            if hit is not None:
+                self.lane_id = hit["id"]
+                break
         return bool(self.positions)
 
     def poll(self):
@@ -1506,7 +1556,13 @@ def poll_switches(view):
         view._dot_drawn[dot] = made
         view.cv.itemconfig(dot, fill=SW_MADE if made else "")
     if view.trough_panel is not None:
-        view.trough_panel.update(view.sw.closed(), trough_text(view.sw))
+        # The key panel's dots are read-only (PAD-134) and say which end is
+        # which; the fallback strip's are still the control and say so.
+        on_panel = (view.key_panel is not None and view.trough_panel
+                    is getattr(view.key_panel, "ball_dots", None))
+        view.trough_panel.update(view.sw.closed(),
+                                 dots_caption(view.sw) if on_panel
+                                 else trough_text(view.sw))
     # The key panel (item 39) rides the same read. It can be missing at
     # window open - padbinds is written by padglhost, which may be seconds
     # behind - so keep asking for it on the switch table's cadence.
@@ -1538,6 +1594,13 @@ def poll_switches(view):
                 view.key_panel = attach_key_panel(view)
     if view.key_panel is not None:
         view.key_panel.update(view.sw)
+        # The BALLS section (PAD-134): the line off this same read, and the
+        # feeder's status file on its own slower cadence.
+        if time.monotonic() >= getattr(view, "_ball_next", 0.0):
+            view._ball_next = time.monotonic() + BALL_POLL_S
+            view._ball_status = read_ball_status()
+        fed, lines = getattr(view, "_ball_status", (None, []))
+        view.key_panel.show_balls(view.sw, fed, lines)
     return True
 
 
@@ -1568,6 +1631,89 @@ def trough_text(watch):
     # for exactly that during a multiball on 2026-08-11.
     txt = "%s   1 = eject end   click a ball: out / in" % watch.balls.text()
     return txt if watch.how == "named" else txt + "   (positions assumed)"
+
+
+#: How often the BALLS section re-reads the feeder's status file. Once a
+#: second: it is another 9p round trip, and the feeder's lines arrive at the
+#: pace a ball moves, not a flipper.
+BALL_POLL_S = 1.0
+
+
+def dots_caption(watch):
+    """The key panel's caption beside its READ-ONLY dots (PAD-134): which end
+    is which, and nothing about clicking - the buttons below do that now."""
+    txt = "1 = eject end"
+    return txt if watch.how == "named" else txt + "   (positions assumed)"
+
+
+def ball_line(watch, fed=None):
+    """The BALLS section's one line, in the JJP ball keeper's status() shape.
+
+    `balls 5/6 trough   lane 1   in play 1   fed 3`. The denominator is the
+    trough's POSITIONS, which is JJP's choice too, and not trough.Balls's
+    learned complement: that one only knows the most balls it has SEEN home,
+    so a window opened with a ball out read "0 in play" - the first thing
+    David's screenshot of this section showed. A ball waiting in the shooter
+    lane is counted on its own, because it is neither home nor in play and
+    "Plunge" is the button that moves it. `fed` is None when no feeder is
+    publishing, and then the line does not claim a zero.
+    """
+    if not watch.positions:
+        return "no trough found on this title"
+    if watch.mrg is None:
+        return "balls -   waiting for the switch block"
+    flags = watch.closed()
+    home = sum(1 for f in flags if f)
+    lane_id = getattr(watch, "lane_id", None)
+    lane = 1 if lane_id is not None and watch.is_made(lane_id) else 0
+    txt = "balls %d/%d trough" % (home, len(flags))
+    if lane:
+        txt += "   lane 1"
+    txt += "   in play %d" % max(0, len(flags) - home - lane)
+    if fed is not None:
+        txt += "   fed %d" % fed
+    return txt
+
+
+def new_lines(prev, cur):
+    """The lines in `cur` that `prev` had not seen.
+
+    The feeder's status file is a SLIDING WINDOW of its newest lines, so a
+    re-read overlaps the last one: what is new is whatever follows the longest
+    tail of `prev` that `cur` starts with. No overlap at all means the window
+    slid past everything - all of it is new.
+    """
+    for k in range(min(len(prev), len(cur)), 0, -1):
+        if list(prev[-k:]) == list(cur[:k]):
+            return list(cur[k:])
+    return list(cur)
+
+
+def wrap_rows(font, text, width):
+    """`text` as rows no wider than `width` px, broken at spaces where it can.
+
+    Rows rather than a Tk wrap width, because the note is pinned to a fixed
+    number of ROWS (so the panel never shuffles) and only a caller that knows
+    where the breaks fall can keep the newest ones.
+    """
+    rows, cur = [], ""
+    for word in text.split(" "):
+        cand = word if not cur else cur + " " + word
+        if font.measure(cand) <= width:
+            cur = cand
+            continue
+        if cur:
+            rows.append(cur)
+        while len(word) > 1 and font.measure(word) > width:
+            n = len(word) - 1
+            while n > 1 and font.measure(word[:n]) > width:
+                n -= 1
+            rows.append(word[:n])
+            word = word[n:]
+        cur = word
+    if cur:
+        rows.append(cur)
+    return rows or [""]
 
 
 class KeyPanel:
@@ -1807,12 +1953,47 @@ class KeyPanel:
         else:
             self.drv.press(self._door_id)
 
-    def add_trough(self, positions, how, on_ball):
-        """The ball controls, at the panel's bottom.
+    #: The JJP window's button colours (jjpsw.py BTN_BG/BTN_FG/BTN_ACTIVE), so
+    #: the two virtual playfields' ball controls read as one design.
+    BALL_BTN = ("#33507a", "#eaf2ff", "#456ba1")
+    NOTE_FG = "#8a93a2"
+    #: How many of the newest ball messages the section shows.
+    NOTE_LINES = 3
 
-        Returns the TroughPanel; the caller stores it as its own
+    def add_trough(self, positions, how, on_ball):
+        """The BALLS section, at the panel's bottom - in the JJP window's shape.
+
+        ★ PAD-134, DAVID: "i think our ball in and out feedback on the switch
+        matrix is a little confusing from the ui perspective too. what we did
+        on the jjp virtual playfield does look much better." What was here was
+        six dots that WERE the control: click a full one for a ball out, an
+        empty one for a ball in, with the stack rather than the dot deciding
+        which switch moved - so clicking dot 6 could empty dot 5, and the
+        caption had to explain the gesture. The JJP window says where the
+        balls are in ONE LINE, gives the two things a person actually wants
+        their own buttons, and shows what the ball keeper just did under them.
+        This is that, top to bottom:
+
+          * the line - `balls 5/6 trough   lane 1   in play 1   fed 3`. The
+            denominator is the trough's POSITIONS, as JJP's is: the learned
+            complement (trough.Balls) read "0 in play" whenever the window
+            opened with a ball out, which is exactly when someone looks.
+          * the dots, READ-ONLY. Which position is empty is still worth seeing
+            (item 20 was a wrong-end bug a count cannot show), it just stops
+            being a gesture.
+          * Plunge and Drain, equal halves of the panel. NO KEY SHORTCUTS,
+            unlike JJP's Space and D: on Spike 2 those are already the Action
+            Button and Right Scoop in padglhost's table, and the playfield
+            rows are re-derived per title, so no letter is safely free.
+          * the note - the feeder's newest lines (dump/padball, ballfeed.py)
+            and this window's own Plunge/Drain replies, newest last, pinned to
+            three one-line rows so the panel does not shuffle as they arrive.
+
+        Returns the dots' TroughPanel; the caller stores it as its
         `trough_panel`, so poll_switches() keeps ONE update path wherever the
-        trough is drawn - panel or fallback strip, never both.
+        trough is drawn. The artwork corner and the schematic strip - drawn
+        only when there are no padbinds to build this panel from - keep their
+        clickable dots, because there they are the only drain there is.
         """
         y = self._y + 14
         self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
@@ -1824,15 +2005,67 @@ class KeyPanel:
                                 fill=self.KEY_FG, font=self._f8,
                                 text="/".join(self._trough_row["keys"])
                                      + " = all six in / out")
-        y += 10
-        t = TroughPanel(self.cv, positions, how, self.PAD - 4, y, anchor="nw",
-                        on_ball=on_ball, label_below=True,
-                        wrap=self._w - 2 * self.PAD)
-        # Balls and numbers are ~40 px; the wrapped caption below runs to
-        # three short lines.
-        self._y = y + 40 + 40
+        y += 18
+        self._f10 = tkfont.Font(family="Consolas", size=10)
+        self.ball_state = self.cv.create_text(self.PAD, y, anchor="w",
+                                              fill="#e8e8ea", font=self._f10,
+                                              text="")
+        y += 12
+        t = TroughPanel(self.cv, positions, how, self.PAD - 4, y, anchor="nw")
+        y += 2 * TroughPanel.PAD + 2 * TroughPanel.R + TroughPanel.NUM_H + 8
+        bg, fg, active = self.BALL_BTN
+        gap = 6
+        bw = (self._w - 2 * self.PAD - gap) // 2
+        self.ball_btns = []
+        for k, (label, what) in enumerate((("Plunge", "plunge"),
+                                           ("Drain", "drain"))):
+            b = tk.Button(self.cv, text=label, font=("Segoe UI", 9, "bold"),
+                          pady=3, bg=bg, fg=fg, activebackground=active,
+                          activeforeground=fg, relief="raised", bd=1,
+                          highlightthickness=0,
+                          command=lambda w=what: on_ball(w))
+            self.cv.create_window(self.PAD + k * (bw + gap), y, anchor="nw",
+                                  window=b, width=bw)
+            self.ball_btns.append(b)
+        y += 34
+        self.ball_note = self.cv.create_text(self.PAD, y, anchor="nw",
+                                             fill=self.NOTE_FG, font=self._f8,
+                                             text="")
+        self._note = []                # what the note shows, oldest first
+        self._feed_seen = []           # the feeder's lines as last read
+        self._ball_drawn = None
+        self.ball_dots = t
+        self._y = y + self.NOTE_LINES * self._f8.metrics("linespace") + 4
         self.cv.config(height=self._y + 12)
         return t
+
+    def show_balls(self, sw, fed, feeder_lines):
+        """Repaint the line and fold any NEW feeder lines into the note.
+
+        Change-gated like every other draw on this panel. The feeder's file is
+        a sliding window of its newest lines, so what is new is whatever
+        follows the longest overlap with the last read (new_lines()).
+        """
+        if getattr(self, "ball_state", None) is None:
+            return
+        text = ball_line(sw, fed)
+        if text != self._ball_drawn:
+            self._ball_drawn = text
+            self.cv.itemconfig(self.ball_state, text=text)
+        fresh = new_lines(self._feed_seen, feeder_lines)
+        self._feed_seen = list(feeder_lines)
+        if fresh:
+            self.ball_say(*fresh)
+
+    def ball_say(self, *lines):
+        """Add lines to the note, newest last, keeping the newest ROWS."""
+        if getattr(self, "ball_note", None) is None:
+            return
+        width = self._w - 2 * self.PAD
+        for ln in lines:
+            self._note.extend(wrap_rows(self._f8, ln, width))
+        del self._note[:-self.NOTE_LINES]
+        self.cv.itemconfig(self.ball_note, text="\n".join(self._note))
 
     def update(self, sw):
         """Repaint rows whose switch state moved; a still machine costs the

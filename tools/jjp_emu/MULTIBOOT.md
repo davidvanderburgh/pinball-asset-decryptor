@@ -54,8 +54,10 @@ matrix): the menu appears on the Xephyr window, LEFT / RIGHT move, START
 confirms, the timeout boots the highlighted image.
 
 **The menu's buttons are the switch matrix's keys**, the same ones a game
-uses: click the matrix window, then Left / Right (or a / ') for the flippers
-and 1 for Start. The matrix therefore opens BEFORE the game step on a
+uses: with the matrix window OR the game window focused, Left / Right (or
+a / ') for the flippers and 1 for Start. The game window takes them because
+the matrix runs `jjpkeys.py`, which grabs those keys on the nested display
+the game and the menu draw into and reports each press back to the matrix. The matrix therefore opens BEFORE the game step on a
 multi-boot image (`jjpsw_launch.sh --menu`), not after it: it used to need a
 running game, so the menu came and went with nothing to press (David,
 2026-09-13). It opens from this title's saved device tables, which are right

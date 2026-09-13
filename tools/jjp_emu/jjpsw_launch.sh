@@ -107,21 +107,36 @@ matrix_count() {
 # Read the RUNNING game's tables into $DUMP.  0 = they are there (full, or
 # sparse but this title's); otherwise the reason is printed and returned.
 read_tables() {
-    local ok=0 title
+    # Each read goes to a SIDE file and replaces $DUMP only when it is good.
+    # $DUMP is what the boot menu's matrix opens from before the next game
+    # exists, so a read that never completed must not stand in for tables that
+    # did: a Stop that landed mid-read left a 23-name, uncalibrated dump over
+    # good saved ones (2026-09-13), and the next menu opened cabinet-only.
+    local ok=0 title tmp="$DUMP.reading"
+    rm -f "$tmp"
     for _ in $(seq 1 16); do
         # --pf is the PHOTO'S SIZE, not the photo: calibrate() needs it to tell
         # an impossible inches->pixels scale from a possible one (a scale whose
         # playfield would be taller than the picture of it is wrong).  Without
         # it the calibration still works, just without that check.
-        if python3 "$HERE/swdump.py" --out "$DUMP" --quiet \
+        if python3 "$HERE/swdump.py" --out "$tmp" --quiet \
                 ${PF:+--pf "$PF"} 2>/dev/null \
-                && dump_ok "$DUMP"; then
+                && dump_ok "$tmp"; then
             ok=1; break
         fi
         sleep 2
     done
-    [ "$ok" = "1" ] && return 0
     title=$(jjp_title)
+    if [ "$ok" = "1" ]; then
+        mv -f "$tmp" "$DUMP"
+        return 0
+    fi
+    if [ -s "$DUMP" ] && dump_is_this_title "$DUMP" "$title" && dump_ok "$DUMP"; then
+        rm -f "$tmp"
+        echo "jjpsw_launch.sh: the game's tables were not complete yet - keeping $title's saved ones" >&2
+        return 0
+    fi
+    [ -s "$tmp" ] && mv -f "$tmp" "$DUMP"
     if [ ! -s "$DUMP" ]; then
         echo "jjpsw_launch.sh: could not read the device tables" >&2; return 4
     fi
@@ -149,8 +164,11 @@ open_matrix() {
     chmod 666 /dev/shm${JJP_SHM_NAME:-/jjp_switches} 2>/dev/null
     # Backgrounded, not exec'd: this is one of watch.sh's steps and must RETURN.
     # setsid so the window outlives the WSL session that started it.
+    # --game-display: the game's own window takes the matrix keys too
+    # (jjpkeys.py grabs them on the nested display), so either window works.
     setsid sudo -u "$USER_NAME" env DISPLAY="${JJP_UI_DISPLAY:-:0}" \
         python3 "$HERE/jjpsw.py" --devices "$1" ${PF:+--pf "$PF"} \
+        --game-display "${JJP_NESTED:-:1}" \
         >>/var/tmp/jjp_ui.log 2>&1 </dev/null &
     sleep 2
     local ui
@@ -213,11 +231,11 @@ open_for_menu() {
     fi
     if [ -s "$DUMP" ] && dump_is_this_title "$DUMP" "$(jjp_title)" && dump_ok "$DUMP"; then
         open_matrix "$DUMP" cached \
-            "the flippers and Start work in it now (click it, then Left / Right / 1)"
+            "the flippers and Start work now (Left / Right / 1, in it or in the game window)"
     else
         write_cabinet_dump || { echo "jjpsw_launch.sh: could not write $CAB" >&2; return 4; }
         open_matrix "$CAB" cabinet \
-            "the flippers and Start only (Left / Right / 1) - the playfield opens once the game is up"
+            "the flippers and Start only (Left / Right / 1, in it or in the game window) - the playfield opens once the game is up"
     fi
 }
 
@@ -302,4 +320,4 @@ python3 "$HERE/swdump.py" --out "$DUMP" --quiet || {
     echo "jjpsw_launch.sh: cannot read the game's tables as $(id -un);" >&2
     echo "  run this as root - it drops to the desktop user for the UI." >&2
     exit 4; }
-exec python3 "$HERE/jjpsw.py" --devices "$DUMP" ${PF:+--pf "$PF"}
+exec python3 "$HERE/jjpsw.py" --devices "$DUMP" ${PF:+--pf "$PF"} --game-display "${JJP_NESTED:-:1}"

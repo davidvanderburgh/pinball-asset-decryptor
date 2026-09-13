@@ -6771,6 +6771,40 @@ These have each been violated at least once and each cost a run or a window:
       3 new in test_jjp_emulate_tab.py (62 total), GUI smoke 143. NOTE: the
       shared audio_ctl.json on David's machine says Mute on at 49 %, so JJP
       runs from the app start muted until he unticks it.
+      **His fifth look: "still not letting me use the left right arrows" -
+      then "that was the fix, i had to focus on the switch matrix window. i
+      should be able to focus either window".** The matrix keys are Tk
+      bindings on the matrix window; the game and the menu draw into the
+      nested Xephyr display, where a key pressed with the game window focused
+      went unheard. Fixed: the matrix starts `tools/jjp_emu/jjpkeys.py` (a
+      child process, ctypes over libX11, `--game-display :1` from
+      jjpsw_launch.sh) which takes a passive grab on the nested display's root
+      for exactly the matrix's keys and prints one line per press; the matrix
+      applies each with its own handlers (press = pulse, Shift = latch, Space /
+      D = the ball feeder) - one keymap, two windows. A separate process
+      because Xlib exits the process when Xephyr goes away; the matrix restarts
+      a helper that had been working and gives up after three failures to
+      reach the display; stop.sh ends it. **Proven on the rig (muted, scratch
+      proof118keys.sh):** keys typed INTO :1 with XTEST during the menu -
+      Right, Right, 1 - reached the selector (`key: right` twice, `key: start`,
+      chose 0: the highlight wrapped), and with the game running Shift+Left
+      on :1 latched the left flipper (byte 1 ff -> fe -> ff); helper 1 while
+      the game ran, 0 after Stop. The Left sent to the matrix window with
+      `xdotool key --window` in that proof did NOT register: `search --name`
+      returned a 1x1 Tk leader window carrying the same title (a second check
+      found only that one), so that was a bad proof target, not a regression -
+      the matrix window's Tk bindings are unchanged, and David's own presses
+      in it at 19:02 logged six `key: left`. **Also fixed:** the post-game
+      table read wrote straight over `/var/tmp/jjp_devices.json`, so a Stop
+      that landed mid-read left a 23-name, uncalibrated dump over good saved
+      tables and the next menu opened cabinet-only; each read now goes to
+      `<dump>.reading` and replaces the saved tables only when it is complete
+      (or keeps them when it never completes). **Ghost windows:** after a Stop
+      the game window and the matrix window stayed on the desktop with no
+      process behind them (both owned only by msrdc); cause not established -
+      David's 19:02 matrix was the pre-helper code, and exactly two ghosts
+      remained, so one teardown (his 19:08 Stop or the proof's 19:10 one)
+      left them. Closed without touching msrdc.
       **Owed (hardware, David):** (a) the green button's stick tick on a real
       USB stick (the JJP flash dialog's FAT32 copy of the 12.97 GB ISO); (b)
       'Run in emulator' from the tab → the Emulate JJP tab's watch.sh, which

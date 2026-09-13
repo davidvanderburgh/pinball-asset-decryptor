@@ -6830,7 +6830,7 @@ These have each been violated at least once and each cost a run or a window:
       Merged into `feature/jjp-multiboot` (a fast-forward: item/118 holds
       item/117's close).
 
-- [ ] **119. First GNR machine boot of a multi-boot install.** `S3 D3` *(Plan
+- [ ] **119. First GNR machine boot of a multi-boot install.** ← WORKING ON `S3 D3` *(Plan
       §2.9. After 118. David's hardware; whatever it finds is fixed on the
       spot. Branch from and merge into `feature/jjp-multiboot` — the rule is
       in 115 — and this is the item whose close is followed by the ONE

@@ -6723,6 +6723,18 @@ These have each been violated at least once and each cost a run or a window:
       `sdaN: NN%` lines as its percent, jail/key/audio/boards/display → Boot,
       `== game` → Game) and from the poll (game up → Ready, the boot menu up
       → Game, nothing → idle).
+      **His third Start (16:17): "i don't see any of the display windows
+      ... i just hear my cpu go crazy"** - the launch was perfect (3 game
+      procs, matrix up) and NOTHING could show: WSLg's one RDP client
+      (`msrdc.exe`) had been killed in the morning to close a ghost window
+      (my doing), so every Linux window was invisible from then on and
+      PulseAudio's RDP sink went with it - the dead pulse above was the SAME
+      cause. His Fix stuck state (`wsl --shutdown`) at 16:20 brought both
+      back (pulse answers, a fresh msrdc). The tab now asks tasklist for
+      msrdc.exe after a good launch and, when there is none, says the
+      windows cannot appear and names Fix stuck state (`rdp_client_running`).
+      Memory: feedback_never_kill_msrdc. The CPU is the game on llvmpipe
+      (software GL), as in every run of this rig.
       **Owed (hardware, David):** (a) the green button's stick tick on a real
       USB stick (the JJP flash dialog's FAT32 copy of the 12.97 GB ISO); (b)
       'Run in emulator' from the tab → the Emulate JJP tab's watch.sh, which

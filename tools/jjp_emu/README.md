@@ -376,6 +376,64 @@ With real CUSE devices present the game opens them **immediately** -
 40 s (it polls at ~1 kHz). The boards were never gated behind anything. They
 simply did not exist.
 
+## Building a multi-boot install ISO (item 116)
+
+`mkjjpmulti.py` turns two JJP install ISOs of the SAME game code into one
+install stick with a boot menu. Image 0 goes into root A with the menu staged
+(`/jjpe/gen1/padselect/` with `jjpselect`, `/jjpe/gen1/scripts/padselect.sh`,
+one guarded line in `rungame.sh` after `runonce.sh`); image 1 goes into root B
+byte for byte; a copy of JJP's own installer on the stick, `/jjp/pad_install.sh`,
+restores root B from the second image's pieces (`sda5.ext4-ptcl-img.gz.a?`)
+instead of from a second copy of the first, and both boot configs name that
+copy. Perm A is shared, so settings and scores are one set. The design and its
+invariants are `plans/jjp_multiboot_plan.md`; the mechanics are in the tool's
+own docstring; the hook is `tools/spike2_emu/codeselect/padselect.sh` (item
+115) and the selector `make PLATFORM=jjp` there (item 114).
+
+Everything but `inspect` runs as root inside WSL: the ISOs are loop-mounted,
+the roots are restored into the emulator's own cache
+(`/var/tmp/jjp_<slug>/sda3.raw`, the directory `mount.sh` uses, so a title
+the emulator has run needs no second restore and one the builder restored
+mounts instantly in the emulator) and a scratch copy of image 0's root is
+loop-mounted read-write for the staging.
+
+```
+wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py plan    --primary GNR.iso --extra CHAKA.iso
+wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py media   --primary GNR.iso --extra CHAKA.iso --out /var/tmp/m --art 0=auto --art 1=auto
+wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py build   --primary GNR.iso --extra CHAKA.iso --out /var/tmp/GNR.multi.iso \
+                   --selector-dir SEL --media-dir /var/tmp/m --titles "GUNS N' ROSES 3.03;CHAKA'S LOTLJ"
+wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py verify  --iso /var/tmp/GNR.multi.iso --primary GNR.iso --extra CHAKA.iso
+wsl -e         python3 tools/jjp_emu/mkjjpmulti.py inspect --iso /var/tmp/GNR.multi.iso [--json] [--media-out DIR]
+wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py inject  --iso /var/tmp/GNR.multi.iso --selector-dir SEL --titles "A;B"
+wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py selftest /var/tmp/jjpmulti_selftest
+```
+
+`SEL` is a flat directory holding `jjpselect`, `padselect.sh` and `font.ttf`,
+or the tree `make install PLATFORM=jjp DESTDIR=SEL` leaves. `--art N=auto` is
+the image's own plaintext `miscfiles/graphics/JJP_logo_message.png` (1360x768);
+any still or `VIDEO@T` works too, and an animation is a video file (the
+attract clip sits encrypted in `edata`, so that seam belongs to the app, which
+has the Extract output). The CLI protocol is `mkmulticard.py`'s (`[card]
+progress`, `image-size` rows, `[card] error:`, `verify: PASS|FAIL`,
+`inspect --json`), so the Multi-boot tab can drive it (item 118).
+
+The same-version gate compares `version_info.txt`'s Name and Version on both
+ISOs, `setenv.sh`'s GAMENAME and the sha256 of `/jjpe/gen1/<Game>/game` and
+its `fl.dat`. A retheme this app wrote passes: it keeps the game binary and
+forges its asset CRCs to the shipped list. `verify` checks the cfg lines, the
+installer against a patch of the ISO's own squashfs copy, every piece (present,
+`gunzip -t`, under 4 GiB for the FAT32 stick), `sda5` against the second ISO's
+`sda3` by sha, the untouched pieces against the first, and then restores root A
+to scratch and compares every staged file with the shas `build.json` recorded.
+
+Measured on the Guns N' Roses pair (stock 3.03 + the Chaka retheme, 2026-09-13):
+5.80 GB + 6.52 GB of root pieces plus 0.64 GB of installer make a 13.0 GB ISO,
+so a 16 GB FAT32 stick. Two traps paid: Clonezilla evals `ocs_live_run`, so the
+cfg line is `bash /lib/live/mount/medium/jjp/pad_install.sh` and no exec bit is
+needed on a FAT copy; and a global `sync()` under WSL2 waits on the virtiofs
+Windows drives and never came back, so the tool only ever `syncfs`es the one
+mount it wrote (`sync -f`). Booting the result in the emulator is item 117.
+
 ## See also
 
 `plans/jjp_pc_emulation_plan.md` — the full architecture and phased plan,

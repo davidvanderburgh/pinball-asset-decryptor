@@ -6417,6 +6417,52 @@ These have each been violated at least once and each cost a run or a window:
       — S3: feature. D3: the largest desk item of the six, over proven
       pieces (partclone/xorriso/selectmedia), with `verify` and one rig boot
       as the run.
+      **IN PROGRESS 2026-09-13 (item/116 from feature/jjp-multiboot, `6b60b1e`).**
+      **Established:** `tools/jjp_emu/mkjjpmulti.py` (imports mkmulticard.py
+      for the shared pure parts: Refused/say/PROGRESS, media.json planning,
+      themes, the library-path refusal) with `plan / build / inject / verify /
+      inspect / media / selftest`. Root A = image 0's sda3 restored into the
+      rig's cache (`/var/tmp/jjp_<slug>/sda3.raw`, padpath's slug, `.part`
+      until complete), sparse-copied to the workdir, loop-mounted rw, staged
+      (`/jjpe/gen1/padselect/{jjpselect,font.ttf,images.conf,build.json,
+      media.json,media/}`, `scripts/padselect.sh`, ONE hook line after
+      runonce.sh - executed, not sourced), e2fsck -fy, `partclone.ext4 -c |
+      pigz --fast -b 1024 --rsyncable | split -b <the stock's piece size>`;
+      root B = image 1's sda3 pieces mapped in VERBATIM as `sda5.…`; the
+      stick's own installer unsquashed at build time and patched on exactly
+      two lines into `/jjp/pad_install.sh` (a header comment says so); both
+      cfgs get `ocs_live_run="bash /lib/live/mount/medium/jjp/pad_install.sh"`
+      - `bash` because ocs-live-run-menu evals the string, so neither a FAT
+      copy's exec bit nor a noexec medium can matter; `/jjp/padselect/` on
+      the ISO mirrors the staging so `inspect` needs no root and no restore;
+      xorriso `-indev/-outdev -boot_image any replay` (replay only when the
+      input has El Torito records - the selftest's synthetic ISOs have none).
+      The gate: version_info Name+Version, GAMENAME, game and fl.dat sha256 -
+      **the Chaka image PASSES it** (identical game + fl.dat, the retheme
+      forged its CRCs to the shipped list). `verify`: cfg lines, installer =
+      patch(own squashfs copy) byte for byte, every piece present + gunzip -t,
+      every file < 4 GiB (FAT32 stick), sda5 == ISO1's sda3 by sha, sda1/2/4
+      untouched, then root A restored to scratch and every staged file's sha
+      checked against build.json, the hook exactly once. 22 pure tests
+      (`tests/test_mkjjpmulti.py`, Windows) + the root selftest (two synthetic
+      ISOs: build -> inspect -> verify 22/22 -> inject -> verify --quick ->
+      the mismatch refusal -> --allow-version-mismatch) green in 53 s.
+      **Trap paid:** `os.sync()` after staging parked the process in D state
+      for good - under WSL2 a global sync flushes the virtiofs (FUSE) mounts
+      of the Windows drives (`fuse_sync_fs -> request_wait_answer`). Every
+      sync is now `syncfs` (`sync -f <mount>`); mkmulticard.py still has the
+      global one (loose end below).
+      **Scope, honestly:** the art seam is the plaintext
+      `miscfiles/graphics/JJP_logo_message.png` (1360x768) for `--art N=auto`
+      plus any still/video file; the game's fl.dat is ENCRYPTED on disk, so
+      "a PNG decrypted out of edata" and an attract webm need the plugin's
+      Extract output (the tab's job in 118), not this CLI. "The app's stick
+      flow writes it" is exercised in 118 as well; here `verify` proves the
+      FAT32 precondition.
+      **Resume:** the real GNR build is running (scratch build116.sh: media ->
+      plan -> build -> inspect -> verify, ~25 min, output /var/tmp/jjp116/
+      GunsNRoses-v03.03.multi.iso); record its numbers, README section, close,
+      merge into feature/jjp-multiboot, then 117.
 
 - [ ] **117. The JJP rig boots a multi-boot install ISO and proves the
       choice.** `S3 D3` *(Plan §2.8. After 115; 116 and this land together —
@@ -6523,6 +6569,13 @@ These have each been violated at least once and each cost a run or a window:
   this machine. The deep detail behind every numbered item above.
 
 ## Loose ends worth a look, not yet worth a queue slot
+
+- **`mkmulticard.py` still calls the global `os.sync()`** (`LoopMount._detach`,
+  `drop_page_cache` - the Stern `update` / `inject` / `extract` paths). Under
+  WSL2 a global sync also flushes the virtiofs mounts of the Windows drives,
+  and on 2026-09-13 that wait (`fuse_sync_fs -> request_wait_answer`) parked
+  item 116's builder in D state for good; it switched to `sync -f <mount>`
+  (syncfs). No Stern run has hit it yet; the fix is the same three-line helper.
 
 - **NOT EXPLAINED: `[dev] --- ball devices: count=1119174656 ---`** on both
   james_bond_60th runs, 2026-08-14. 1.1 billion is a misparse of something. The

@@ -3535,9 +3535,49 @@ These have each been violated at least once and each cost a run or a window:
       captures, godzilla 117.3 s against that run's own 118.2 s, turtles
       182.4 s, DnD 31.6 s. `PAD_AUTO_GAP` 45 → 75 s because the surviving
       signal can lag the press that earned it by 57.8 s (batman run3), and 45
-      sat inside that. **OWED: a live Home Edition run** — the press has never
-      been made on one of these titles, so "and then its attract show cycles"
-      is inference from every other title, not measurement.
+      sat inside that.
+      **★ THE LIVE RUN IS DONE, 2026-09-13, and it both CONFIRMS the fix and
+      finds the layer under it.** Three runs on the real card on this box:
+      | run | what happened |
+      |---|---|
+      | control (shipped shim) | `[led] light show running ... 12380 ms`, `[auto] already past Tech Alerts; nothing to do`, **no press**, window reads **9 of 50 inserts lit, LED 0.0 Hz, data 2.0 Hz** |
+      | with the gate fix | `[led] lamp traffic with a STILL picture ... 12414 ms`, `[auto] bus quiet after 14s; pressing Service Back once (2000ms)` → `past Tech Alerts after 1 press(es)`, then `[led] light show running ... and the picture is moving` at 47.8 s |
+      The LCD settles it independently: the control changed video clip **4
+      times in 362 s** (all before 12.1 s) and then looped one 11 s clip; the
+      fixed run changed clip **57 times in 160 s**. The machine is in attract.
+      **★ AND THE INSERTS STILL DO NOT CYCLE, because their show is a command
+      this shim refuses on an insert board.** In real attract, node 8 takes
+      2320 `cmd 70` writes that change NOTHING (the same nine held levels) —
+      and 329 `cmd 86` frames that the swelf grammar parses **329 of 329
+      exactly**, addressing **54 distinct lamps, which is exactly the 54 that
+      board enumerated at boot**, carrying **11169 level changes**. Node 12,
+      the half already decoded, is the control at 328 frames / 27 lamps.
+      `led_publish`'s `cmd != 0x97 && …` filter returns before the swelf
+      attempt, so on nodes 1/8/9 that family has no decoder at all.
+      **TRIED, MEASURED, AND BACKED OUT — do not just widen that gate.** A
+      one-line widening (offer non-godzilla commands to the swelf grammar on
+      insert boards too) was built and run: the window went **9 of 50 lit,
+      LED 0.0 Hz → 23 of 50, LED 4.3 Hz**, 3429 level changes across 75 lamps
+      in 12 s, exactly the reported fault fixed. It was reverted because the
+      same frames exist on titles that already work: replayed over every
+      capture here, the non-godzilla `0x8x` frames on nodes 1/8/9 parse
+      exactly and address **100% of each board's enumerated list** on
+      godzilla_pro (56/56 and 71/71), turtles_pro (64/64, 58/58, 19116
+      changes) and dungeons_and_dragons_le (90/90, 78/78) as well. Two
+      consequences: those titles' verified-good pictures would gain a second
+      writer into the same `val[]`, and — worse — the movement would reach
+      PAD-129's own show gate during Tech Alerts (godzilla's first such frame
+      lands at 75.1 s against its first godzilla-generation lamp command at
+      117.2 s, and its press at 116.6 s), putting back the exact bug this
+      ticket fixed. **No online discriminator survives the evidence**: "this
+      board has spoken no godzilla-generation command yet" is true of
+      godzilla's own node 8 for the first 120 s, and the per-run dialect gate
+      accepts turtles at 100%. So the real question is the one nobody has
+      asked: **what IS the 86/8a family on a board that also speaks the
+      godzilla shapes** — the same bytes cannot be both, and one of the two
+      readings of godzilla's node 8 is wrong. That wants a run against the
+      glass (the Single LED Test oracle item 50 used), not another parse.
+      The reverted diff is kept at `c:\tmp\pad129\hwshim_with_widening.c`.
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the

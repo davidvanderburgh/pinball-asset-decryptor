@@ -175,14 +175,18 @@ check: $(BIN) capbin
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > $(PYTHON) test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
 > $(PYTHON) test/jjpio_test.py "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> bash -n padselect.sh && bash test/padselect_sh_test.sh
 > @echo "check: OK (jjp)"
 
 check-hw:
 > @echo "check-hw: the node-bus test is Stern's; the JJP board test is part of make check"
 
+# the hook lives with JJP's own scripts, where rungame.sh looks for it
+HOOKDIR  ?= /jjpe/gen1/scripts
 install: $(BIN)
-> install -d "$(DESTDIR)$(PREFIX)"
+> install -d "$(DESTDIR)$(PREFIX)" "$(DESTDIR)$(HOOKDIR)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/jjpselect"
+> install -m 755 padselect.sh "$(DESTDIR)$(HOOKDIR)/padselect.sh"
 > install -m 644 images.conf.example "$(DESTDIR)$(PREFIX)/images.conf.example"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the card's DejaVuSans-Bold.ttf will be used"; fi
 > if [ -d media ]; then install -d "$(DESTDIR)$(PREFIX)/media"; for f in media/*; do if [ -f "$$f" ]; then install -m 644 "$$f" "$(DESTDIR)$(PREFIX)/media/"; fi; done; fi

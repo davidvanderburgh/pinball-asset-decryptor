@@ -9769,6 +9769,22 @@ static unsigned char led_count[16];
 
 static int led_insert_node(unsigned node) { return node == 1 || node == 8 || node == 9; }
 
+/* THE COMMANDS THE GODZILLA-GENERATION SHAPES OWN, stated once. led_publish
+ * tested this set in one place and the swelf dialect had to infer it in
+ * another, which is how `cmd 86` on an insert board came to have no decoder at
+ * all (PAD-129): the list said "not mine" and the return that followed was
+ * read as "nobody's". */
+static int led_gz_cmd(unsigned cmd)
+{
+    return cmd == 0x97 || (cmd >= 0xa2 && cmd <= 0xa6) ||
+           cmd == 0xb4 || cmd == 0xb5;
+}
+
+/* Lamps the swelf layer has published. A base-layer `cmd 70` write no longer
+ * overwrites one - see led_publish's cmd 70 branch for what that costs and
+ * why it is not a preference. */
+static unsigned char led_wide_owns[16][96];
+
 /* DECLARED, because GCC 14 STOPPED GUESSING. `open` and `close` were called
  * here with no declaration in sight, which every compiler up to GCC 13 assumed
  * meant `int open()` and warned about. GCC 14 made that an ERROR by default,
@@ -9861,20 +9877,60 @@ static void led_seen(unsigned node, unsigned idx)
  *
  * On a 4096-byte mapping there is no `seen` plane to ask (an old watch.sh),
  * so every value change counts - the pre-PAD-129 behaviour, which is the right
- * thing to degrade to. */
-static unsigned long led_move_ms;
-static int led_move_any;
+ * thing to degrade to.
+ *
+ * ★ AND IT IS A RATE, NOT A FLAG, once the insert boards are decoded too.
+ * "Has anything moved recently" was enough while the only decoded layer on a
+ * Home Edition was a base refresh that never moved at all; with the show
+ * itself decoded, both states move and only the RATE separates them. Measured
+ * per lamp write, which is what this function counts:
+ *
+ *   parked on Tech Alerts   jurassic_park_the_pin  54 moves in the WHOLE run,
+ *   (six minutes, no press) star_wars_elg         114, all of them in one
+ *                                                 boot burst; zero afterwards
+ *   in attract              the same card         ~1900 per 10 s, and the
+ *                                                 busiest 3 s windows across
+ *                                                 godzilla, turtles, batman
+ *                                                 and DnD run 508..1278
+ *
+ * So the busiest three seconds an alerts screen ever produced here is 114 and
+ * the quietest attract is 508. MOVE_BURST sits in that gap with a margin
+ * either side rather than on one edge of it. */
+#define LED_MOVE_RING 200                /* = MOVE_BURST; see led_show_gate */
+static unsigned long led_move_at[LED_MOVE_RING];
+static unsigned led_moves;               /* moving lamp writes, ever */
 
 static void led_val(unsigned node, unsigned idx, unsigned char v)
 {
     if (!led_shm || node >= 16 || idx >= 96) return;
     if (led_shm->val[node][idx] != v
             && (led_shm_len < 8192 || led_shm->seen[node][idx])) {
-        led_move_ms = pad_ms();
-        led_move_any = 1;
+        led_move_at[led_moves % LED_MOVE_RING] = pad_ms();
+        led_moves++;
     }
     led_shm->val[node][idx] = v;
     led_seen(node, idx);
+}
+
+/* Is the picture moving at show rate right now: LED_MOVE_RING lamp writes
+ * that CHANGED something, inside the last three seconds. */
+static int led_moving(unsigned long now)
+{
+    return led_moves >= LED_MOVE_RING
+        && now - led_move_at[led_moves % LED_MOVE_RING] <= 3000;
+}
+
+/* Has anything moved at all in the last three seconds - the weaker question,
+ * asked only to tell "a board refresh" apart from "a show we are not counting
+ * fast enough", which are different things to say in a log. */
+static int led_moved_recently(unsigned long now)
+{
+    unsigned n = led_moves < LED_MOVE_RING ? led_moves : LED_MOVE_RING;
+    unsigned i;
+    for (i = 1; i <= n; i++)
+        if (now - led_move_at[(led_moves - i) % LED_MOVE_RING] <= 3000)
+            return 1;
+    return 0;
 }
 
 /* ---- COILS (padled.h, and the C twin of coildecode.py) ------------------
@@ -10375,11 +10431,14 @@ static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
  *
  * PAD_LED_WIDE=2 forces it on, for a title whose rate sits somewhere nobody
  * has seen yet; PAD_LED_WIDE=0 turns the whole decoder off. */
+/* The verdict, once it exists, WITHOUT feeding the sample - see
+ * led_wide_settled() below for why that distinction is load-bearing. */
+static int led_wide_verdict = -1;             /* -1 undecided, 0 no, 1 yes   */
+
 static int led_wide_dialect(int accepted)
 {
     enum { SAMPLE = 200 };
     static unsigned seen, ok;
-    static int verdict = -1;                  /* -1 undecided, 0 no, 1 yes   */
     static int forced = -1;
 
     if (forced < 0) {
@@ -10387,23 +10446,40 @@ static int led_wide_dialect(int accepted)
         forced = (e && *e == '2') ? 1 : 0;
     }
     if (forced) return 1;
-    if (verdict >= 0) return verdict;
+    if (led_wide_verdict >= 0) return led_wide_verdict;
 
     seen++;
     ok += (unsigned)(accepted != 0);
     if (seen < SAMPLE) return 0;
 
-    verdict = (ok * 100 >= seen * 50);
+    led_wide_verdict = (ok * 100 >= seen * 50);
     {
         char m[160];
         snprintf(m, sizeof m,
                  "[ledwide] dialect %s: %u of %u frames parsed exactly\n",
-                 verdict ? "ACCEPTED - publishing lamps"
+                 led_wide_verdict ? "ACCEPTED - publishing lamps"
                          : "REFUSED - this title is not the swelf generation",
                  ok, seen);
         logmsg(m);
     }
-    return verdict;
+    return led_wide_verdict;
+}
+
+/* ★ THE VERDICT WITHOUT VOTING ON IT (PAD-129). The insert boards' other
+ * commands are offered to this grammar only once the answer is already in,
+ * and asking through here is what keeps that true: the sample is still drawn
+ * from exactly the frames it was drawn from before - the non-insert boards
+ * and the godzilla commands that fall through - so every title's verdict is
+ * the one it has today, and widening what gets DECODED cannot quietly change
+ * what gets BELIEVED. */
+static int led_wide_settled(void)
+{
+    static int forced = -1;
+    if (forced < 0) {
+        const char *e = getenv("PAD_LED_WIDE");
+        forced = (e && *e == '2') ? 1 : 0;
+    }
+    return forced ? 1 : led_wide_verdict == 1;
 }
 
 /* Returns 1 ONLY when the frame was actually published. A refusal returns 0, so
@@ -10467,8 +10543,10 @@ static int led_wide_publish(unsigned node, unsigned cmd,
 
     led_map();
     if (!led_shm) return 0;
-    for (i = 0; i < cnt; i++)
+    for (i = 0; i < cnt; i++) {
+        if (node < 16 && idx[i] < 96) led_wide_owns[node][idx[i]] = 1;
         led_val(node, idx[i], val[i]);
+    }
     led_shm->decoded += cnt;
     led_shm->gen++;
     if (led_shm_len >= 8192) led_shm->wide_decoded++;
@@ -10535,11 +10613,23 @@ static unsigned char led_level70(unsigned lo, unsigned hi)
     return (unsigned char)(v * 255u / FULL);
 }
 
-/* THE SHOW GATE: 30 lamp commands inside 3 seconds AND a picture that has
- * moved inside the same 3 seconds. Returns 1 on the one frame that proves a
- * show is running, 2 on the one frame that proves the rate is there and the
- * picture is NOT moving, and 0 otherwise. `window` takes the age of the
+/* THE SHOW GATE: 30 lamp commands inside 3 seconds AND a picture MOVING at
+ * show rate inside the same 3 seconds. Returns 1 on the one frame that proves
+ * a show is running, 2 on the one frame that proves the rate is there and the
+ * picture is not moving, and 0 otherwise. `window` takes the age of the
  * 30th-oldest command, for the message.
+ *
+ * ★ "MOVING" IS A RATE (led_moving, 200 changed lamp writes in 3 s) AND NOT
+ * "anything moved", and that is PAD-129's second pass rather than its first.
+ * While the insert boards went undecoded a Home Edition's picture never moved
+ * at all on the alerts screen, so one change was proof enough; with the show
+ * itself decoded both states move and the amount is the whole difference.
+ * Measured per lamp write: parked on the alerts screen for six minutes,
+ * jurassic_park_the_pin produced 54 changes and star_wars_elg 114, all of
+ * them in one burst as the boards came up, then nothing; in attract the same
+ * card runs about 1900 per 10 s, and the busiest 3 s window across godzilla,
+ * turtles, batman and DnD is 508 to 1278. 200 is between 114 and 508 with a
+ * margin on both sides.
  *
  * ITS OWN FUNCTION SO IT CAN BE TESTED. Everything it needs is an argument -
  * the clock and whether the picture moved recently - so tests/test_spike2_
@@ -10555,20 +10645,23 @@ static unsigned char led_level70(unsigned lo, unsigned hi)
  * neither title ever reached attract at all. Replayed over every capture on
  * this disk that contains a boot:
  *
- *   title                    rate alone     this gate
- *   jurassic_park_the_pin    12.3 s         NEVER     (both correct: neither
- *   star_wars_elg            15.2 s         NEVER      ever left the alerts)
- *   batman, 3 captures       20.7/35.7/     32.3/51.5/85.6 s
- *                            71.9 s
- *   godzilla_pro (x1_gz)     75.1 s         117.3 s
- *   turtles_pro (i50 run1)  129.0 s         182.4 s
- *   dungeons_and_dragons_le  16.2 s          31.6 s
+ *   title                    rate alone   this gate   press that cleared it
+ *   jurassic_park_the_pin    12.3 s       NEVER       none: it never left
+ *   star_wars_elg            15.2 s       NEVER       none: it never left
+ *   godzilla_pro (x1_gz)     75.1 s       120.0 s     116.6 s
+ *   turtles_pro (i50 run1)  129.0 s       168.7 s     167 s
+ *   batman (item82 run2)     35.7 s        36.2 s      27.8 s
+ *   batman (item82 run3)     71.9 s        72.4 s      27.8 s
+ *   dungeons_and_dragons_le  16.2 s        17.8 s     none in that log
+ *
+ * Every one of those lands AFTER the press that cleared the screen and within
+ * seconds of it, and the two titles that never got a press never announce.
  *
  * x1_gz is the one run with an independent answer, and it is the reason to
  * believe this ordering rather than the old one: autoattract pressed Service
  * Back three times (21.6 s, 69.0 s, 116.6 s), the third took, and that run's
  * OWN announcement - made by the pre-item-79 detector, which did not count
- * cmd 70 - landed at 118.2 s. This gate says 117.3 s. The rate alone says
+ * cmd 70 - landed at 118.2 s. This gate says 120.0 s. The rate alone says
  * 75.1 s, 41 s before the press that actually cleared the screen, so it would
  * have cancelled the press that worked. */
 static int led_show_gate(unsigned long now, int moving, unsigned long *window)
@@ -10661,11 +10754,11 @@ static void led_publish(const unsigned char *p, int n)
          * is being TALKED TO; it does not say the game is drawing anything.
          * See led_show_gate() above for the measurement and for what it cost
          * the two Home Editions. The second half of the test is that the
-         * published picture moved inside the same three seconds, which is
-         * `led_val` above keeping one timestamp. */
+         * published picture is MOVING AT SHOW RATE inside the same three
+         * seconds, which is `led_val` above keeping the last 200 change
+         * times. */
         unsigned long now = pad_ms(), window = 0;
-        int moving = led_move_any && now - led_move_ms <= 3000;
-        int verdict = led_show_gate(now, moving, &window);
+        int verdict = led_show_gate(now, led_moving(now), &window);
         if (verdict == 1) {
             char m[144];
             snprintf(m, sizeof m,
@@ -10674,16 +10767,21 @@ static void led_publish(const unsigned char *p, int n)
                      "%lu ms)\n", window, node, cmd, now);
             logmsg(m);
         } else if (verdict == 2) {
-            /* SAYS SO ONCE, because "the rate is there and nothing is
-             * changing" is the exact shape of a machine parked on Tech
+            /* SAYS SO ONCE, because "the rate is there and the picture is
+             * not moving" is the exact shape of a machine parked on Tech
              * Alerts, and a run that ends that way should not be silent
-             * about it. */
-            char m[192];
+             * about it. It also separates the two ways of not announcing:
+             * nothing has changed at all, or things are changing but far
+             * below show rate. */
+            char m[224];
             snprintf(m, sizeof m,
                      "[led] lamp traffic with a STILL picture: 30 commands "
-                     "in %lu ms and no lamp has changed value - a board "
-                     "refresh, not a show (node=%u cmd=%02x, %lu ms)\n",
-                     window, node, cmd, now);
+                     "in %lu ms and %s - a board refresh, not a show "
+                     "(node=%u cmd=%02x, %lu ms)\n", window,
+                     led_moved_recently(now)
+                         ? "the picture is changing below show rate"
+                         : "no lamp has changed value",
+                     node, cmd, now);
             logmsg(m);
         }
     }
@@ -10734,15 +10832,40 @@ static void led_publish(const unsigned char *p, int n)
      * makes this change a no-op for every title that already worked.
      *
      * PAD_LED_WIDE=0 turns it off and =2 forces it past the dialect gate,
-     * which is the one-flag A/B in either direction. */
+     * which is the one-flag A/B in either direction.
+     *
+     * ★ AND THE INSERT BOARDS GET IT TOO, ONCE THE VERDICT IS IN, FOR THE
+     * COMMANDS THE GODZILLA SHAPES DO NOT OWN (PAD-129). "Tried second on
+     * nodes 1/8/9" was not what the code did: the godzilla-command filter
+     * below returns for anything outside 97/a2..a6/b4/b5, so on an insert
+     * board this decoder never saw `cmd 86` at all - and on a Home Edition
+     * `cmd 86` on node 8 IS the insert light show. Measured in real attract
+     * on jurassic_park_the_pin: 329 node-8 cmd-86 frames, 329 parsed EXACTLY,
+     * addressing 54 distinct lamps, which is exactly the 54 that board
+     * enumerated at boot, carrying 11169 level changes - while its `cmd 70`
+     * wrote 2320 times and changed nothing.
+     *
+     * ★ AND IT IS THE SAME LAMP STATE, CHECKED AGAINST THE RIG'S OWN ORACLE
+     * RATHER THAN ASSUMED. turtles_pro's LED Tests name the lit fixture on
+     * the wire (the 94/95 pair item 50 walked against the glass). Replaying
+     * both of those runs and asking this grammar about the same board at the
+     * same moment: the stepped lamp agrees 657 of 657 and 1522 of 1522. So
+     * this family is the lamp picture seen another way, on a title of the
+     * OTHER generation - which is why it is decoded rather than guessed at.
+     *
+     * `led_wide_settled()` and not `led_wide_dialect()`: these frames must
+     * not vote on the verdict, only obey it, or widening what is decoded
+     * would quietly change which titles are believed. */
     {
         static int wide = -1;
         if (wide < 0) {
             const char *e = getenv("PAD_LED_WIDE");
             wide = (e && *e == '0') ? 0 : 1;
         }
-        if (wide && !led_insert_node(node) && n >= 6 &&
-            led_wide_publish(node, cmd, p + 3, (unsigned)n - 5))
+        if (wide && n >= 6
+            && (!led_insert_node(node)
+                || (!led_gz_cmd(cmd) && led_wide_settled()))
+            && led_wide_publish(node, cmd, p + 3, (unsigned)n - 5))
             return;
     }
 
@@ -10812,6 +10935,24 @@ static void led_publish(const unsigned char *p, int n)
         if (p[3] < 96) {
             led_map();
             if (!led_shm) return;
+            /* ★ NOT OVER A LAMP THE SWELF LAYER IS DRIVING (PAD-129). Both
+             * write val[], and on a Home Edition both address the same lamps:
+             * the show sets one to 0x00/0xff and this refresh puts its own
+             * held level back about every 1.8 s. That is two decoders
+             * arguing, and it is measurable - on the six-minute parked
+             * capture it manufactured 1908 "changes" out of 4260 writes where
+             * the wire carried none at all, which is noise in the window and
+             * a false show in the announcer.
+             *
+             * The show wins because it is the layer that MOVES, and because
+             * what this one carries looks like a per-lamp intensity trim
+             * (The Pin holds nine lamps at 4/8, 5/8, 7/8, 3/8 and full) that
+             * the wire gives no rule for combining. Dropping the trim is a
+             * known cost and the honest one: a lamp at the wrong brightness
+             * is a smaller lie than a lamp that flickers between two
+             * decoders' opinions. A board the swelf layer never touches -
+             * every godzilla-generation title - is unaffected. */
+            if (led_wide_owns[node][p[3]]) return;
             led_val(node, p[3], led_level70(p[4], p[5]));
             led_shm->decoded++;
             led_shm->gen++;

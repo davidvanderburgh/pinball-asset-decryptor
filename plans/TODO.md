@@ -3554,30 +3554,53 @@ These have each been violated at least once and each cost a run or a window:
       the half already decoded, is the control at 328 frames / 27 lamps.
       `led_publish`'s `cmd != 0x97 && …` filter returns before the swelf
       attempt, so on nodes 1/8/9 that family has no decoder at all.
-      **TRIED, MEASURED, AND BACKED OUT — do not just widen that gate.** A
-      one-line widening (offer non-godzilla commands to the swelf grammar on
-      insert boards too) was built and run: the window went **9 of 50 lit,
-      LED 0.0 Hz → 23 of 50, LED 4.3 Hz**, 3429 level changes across 75 lamps
-      in 12 s, exactly the reported fault fixed. It was reverted because the
-      same frames exist on titles that already work: replayed over every
-      capture here, the non-godzilla `0x8x` frames on nodes 1/8/9 parse
-      exactly and address **100% of each board's enumerated list** on
-      godzilla_pro (56/56 and 71/71), turtles_pro (64/64, 58/58, 19116
-      changes) and dungeons_and_dragons_le (90/90, 78/78) as well. Two
-      consequences: those titles' verified-good pictures would gain a second
-      writer into the same `val[]`, and — worse — the movement would reach
-      PAD-129's own show gate during Tech Alerts (godzilla's first such frame
-      lands at 75.1 s against its first godzilla-generation lamp command at
-      117.2 s, and its press at 116.6 s), putting back the exact bug this
-      ticket fixed. **No online discriminator survives the evidence**: "this
-      board has spoken no godzilla-generation command yet" is true of
-      godzilla's own node 8 for the first 120 s, and the per-run dialect gate
-      accepts turtles at 100%. So the real question is the one nobody has
-      asked: **what IS the 86/8a family on a board that also speaks the
-      godzilla shapes** — the same bytes cannot be both, and one of the two
-      readings of godzilla's node 8 is wrong. That wants a run against the
-      glass (the Single LED Test oracle item 50 used), not another parse.
-      The reverted diff is kept at `c:\tmp\pad129\hwshim_with_widening.c`.
+      **A FIRST ATTEMPT AT WIDENING THAT GATE WAS BUILT, RUN AND BACKED OUT,
+      and what it ran into is why the shipped version has three parts.** The
+      same `0x8x` frames exist on the titles that already work — replayed over
+      every capture here they parse exactly and address **100% of each board's
+      enumerated list** on godzilla_pro (56/56, 71/71), turtles_pro (64/64,
+      58/58, 19116 changes) and DnD (90/90, 78/78) — so a bare widening gives
+      those titles a second writer into `val[]`, and their movement reaches
+      this ticket's own show gate during Tech Alerts.
+      **★ THE ORACLE SETTLES WHAT THE FAMILY IS, and the answer is: the lamp
+      state.** turtles_pro's LED Tests name the lit fixture on the wire — the
+      `94/95` pair item 50 walked against the glass — so replaying both of
+      those runs and asking the swelf grammar about the same board at the same
+      moment is a check against something already trusted. **The stepped lamp
+      agrees 657 of 657 and 1522 of 1522.** It is not a coincidental parse and
+      it is not another board's data; it is the picture, seen another way, on
+      a title of the OTHER generation.
+      **★ SHIPPED, three parts, because each one is load-bearing:**
+      (1) the swelf grammar is offered an insert board's non-godzilla commands
+      **once the dialect verdict is already in** — `led_wide_settled()`, not
+      `led_wide_dialect()`, so these frames obey the verdict without voting on
+      it and every title's verdict is the one it has today;
+      (2) **the swelf layer OWNS the lamps it addresses** and `cmd 70` no
+      longer writes over one. Both layers address the same lamps on a Home
+      Edition, and on the six-minute parked capture that argument manufactured
+      **1908 "changes" out of 4260 writes** where the wire carried none. The
+      cost is the per-lamp intensity trim `cmd 70` seems to carry (The Pin
+      holds nine lamps at 4/8, 5/8, 7/8, 3/8 and full), which no rule on the
+      wire says how to combine — a lamp at the wrong brightness beats a lamp
+      flickering between two decoders;
+      (3) **the gate's movement half becomes a RATE** (`led_moving()`, 200
+      changed lamp writes in 3 s). With the show decoded, both states move:
+      parked on the alerts screen for six minutes The Pin changes **54** lamp
+      values and star_wars_elg **114**, all in one burst as the boards come
+      up, then none; in attract the same card runs **~1900 per 10 s**, and the
+      busiest 3 s window across godzilla, turtles, batman and DnD is
+      **508..1278**. 200 sits in that gap with margin on both sides.
+      **LIVE, both directions.** jurassic_park_the_pin: one press at 14 s,
+      "the picture is moving" at 48.9 s, and the window reads **23 of 50
+      inserts lit, LED 3.7 Hz** where it read 9 and 0.0 Hz. godzilla_pro as
+      the control: dialect **REFUSED (0 of 200)**, so none of (1) or (2)
+      applies to it at all, one press at 12 s, announce at 27.3 s via node 14
+      `cmd a6`, window **64 of 81 lit, LED 2.7 Hz**.
+      **STILL OPEN:** what `cmd 70`'s fractional levels mean when the swelf
+      layer is driving the same lamp. The reading that fits is a per-lamp
+      intensity trim under an on/off show, which would make the right answer
+      `trim x show` rather than either alone; nothing on the wire proves it,
+      and the LED Tests oracle can be pointed at that question too.
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the

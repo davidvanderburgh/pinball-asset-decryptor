@@ -23,6 +23,27 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ "$(id -u)" = "0" ] || { echo "audio.sh: must run as root" >&2; exit 2; }
 mountpoint -q "$JJP_JAIL" || { echo "audio.sh: jail not mounted; run jail.sh" >&2; exit 3; }
 
+# 0. MUTED, when asked.  PAD_AUDIO=0 is the Spike 2 rig's knob and the rule
+#    every run here follows unless somebody wants sound (David works beside
+#    the runs): ALSA's default becomes the null device, so the game plays
+#    into nothing, and the pulse cookie is not handed in.  The rest of this
+#    script is skipped - there is no path to prove.
+if [ "${PAD_AUDIO:-1}" = "0" ]; then
+    cat > "$JJP_JAIL/etc/asound.conf" <<'ASOUND'
+# Written by tools/jjp_emu/audio.sh with PAD_AUDIO=0 - the game is MUTED:
+# every ALSA client plays into the null device.
+pcm.!default {
+    type null
+}
+ctl.!default {
+    type null
+}
+ASOUND
+    rm -f "$JJP_JAIL$JJPEDIR/$(jjp_title)/allegro5.cfg"
+    echo "audio: muted (PAD_AUDIO=0) - ALSA default is the null device"
+    exit 0
+fi
+
 # 1. ALSA -> pulse.  `fallback` keeps a bare `aplay` from hard-failing if the
 #    server ever goes away mid-run.
 cat > "$JJP_JAIL/etc/asound.conf" <<'ASOUND'

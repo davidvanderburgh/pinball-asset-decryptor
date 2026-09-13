@@ -925,8 +925,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    ones — sort by the **Replacement** column first and everything you
    have picked sits together) and right-click the selection, or press
    **Clear replacements…** beside the project folder to drop every pick
-   on that tab. Clearing a pick only drops the pick — nothing of yours
-   is deleted and an already-built slot keeps its bytes, which is what
+   on that tab. Clearing takes the replacement back out: a pick nothing
+   has applied yet is simply dropped, and from v0.212.5 a slot a build
+   or an emulator Start already wrote into the project folder gets the
+   card's original file put back too. Nothing of yours is deleted; a
+   slot changed some other way (copied over by hand, or built before the
+   app kept a saved original) keeps its bytes, which is what
    *Revert all changes…* is for.
 8. **Mod Pack tab** — share just your changed files as a zip, or apply
    someone else's mod pack on top of an extracted folder. A pack holds

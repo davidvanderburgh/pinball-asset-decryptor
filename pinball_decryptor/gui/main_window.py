@@ -7889,7 +7889,7 @@ class MainWindow:
     # does Start on the Emulate tab with "Apply my replaced assets" ticked
     # (PAD-121) — and dropping just the pick then left the slot holding the
     # replacement's bytes: still "changed on disk", still in the preview, and
-    # still in the next build and the next emulator run.  ★ DragonRR,
+    # still in the next build and the next emulator run.  ★ Field report,
     # 2026-09-13: *"I HAVE cleared all replacements but note that the
     # replacement is still showing in the list … when I first did this it
     # didn't seem to 'take'. The replacement was still in."*  So a slot this

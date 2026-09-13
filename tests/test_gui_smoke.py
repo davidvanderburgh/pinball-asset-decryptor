@@ -5310,7 +5310,7 @@ def _apply_image_pick(assets, rel, mine=b"\x89PNG-mine"):
 
 def test_clearing_a_pick_start_already_applied_puts_the_cards_file_back(
         app, manufacturers_by_key, tmp_path, monkeypatch):
-    """PAD-142, DragonRR: "I HAVE cleared all replacements but note that the
+    """PAD-142, a field report: "I HAVE cleared all replacements but note that the
     replacement is still showing in the list."  Start with the overlay box
     ticked had applied his pick into the project folder, and a clear dropped
     only the pick: the slot kept his bytes, stayed "changed on disk", and the

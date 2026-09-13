@@ -2,7 +2,7 @@
 
     python scripts/shot_pad142.py <out.png>
 
-DragonRR, 2026-09-13, on v0.212.3: *"I HAVE cleared all replacements but note
+Field report, 2026-09-13, on v0.212.3: *"I HAVE cleared all replacements but note
 that the replacement is still showing in the list. I also noticed that when I
 first did this it didn't seem to 'take'. The replacement was still in."*
 

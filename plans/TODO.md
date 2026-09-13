@@ -6242,7 +6242,18 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **115. `padselect.sh`: the JJP hook binds the chosen image's game
       directory over the primary's, and refuses JJP's own updater.** `S3 D3`
       *(Plan §2.2 and §2.5. After 114, not before — its rig gates need the
-      selector, though the shell tests do not.)* One guarded line in root A's
+      selector, though the shell tests do not.)*
+      **THE JJP CHAIN'S BRANCH RULE (David, 2026-09-13: "not to release until
+      we finish all of the related items for JJP multiboot"). Items 115-119
+      live on ONE integration branch, `feature/jjp-multiboot`, which starts
+      at item 114's closed tip. Each of them: `git worktree add -b item/<N>
+      ../pinball-asset-decryptor-wt/item-<N> feature/jjp-multiboot` — FROM
+      THE FEATURE BRANCH, NOT MAIN — and at close its branch is merged into
+      `feature/jjp-multiboot` (a fast-forward when the chain is linear) and
+      pushed, so the next item sees it. NO `/finish` and NO release for any
+      of 114-119 on its own: `/finish` runs ONCE, on `feature/jjp-multiboot`,
+      after 119 closes — one merge to main, one release for the family.
+      116-119 point here rather than restate this.** One guarded line in root A's
       `rungame.sh` right after `runonce.sh`: `[ -x $JJPEDIR/scripts/padselect.sh
       ] && . $JJPEDIR/scripts/padselect.sh`. The script (dash): read
       `$JJPEDIR/padselect/images.conf` (< 2 images → return); run `jjpselect
@@ -6276,7 +6287,8 @@ These have each been violated at least once and each cost a run or a window:
       real rw slot mount.
 
 - [ ] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
-      ISO out.** `S3 D3` *(Plan §2.4. After 115, not before; lands with 117.)*
+      ISO out.** `S3 D3` *(Plan §2.4. After 115, not before; lands with 117.
+      Branch from and merge into `feature/jjp-multiboot` — the rule is in 115.)*
       Same CLI protocol as `mkmulticard.py` so the tab's parsers hold: `plan /
       build / inject / verify / inspect`, `[card] progress a/b p% what`,
       `image-size` rows, `[card] error:` refusals, the `images.conf` writer,
@@ -6317,7 +6329,8 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **117. The JJP rig boots a multi-boot install ISO and proves the
       choice.** `S3 D3` *(Plan §2.8. After 115; 116 and this land together —
       the rig can start from a hand-staged `sda5.raw` before the builder
-      exists.)* `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO
+      exists. Branch from and merge into `feature/jjp-multiboot` — the rule
+      is in 115.)* `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO
       carries, so `JJP_ISO=<multi.iso>` yields `sda3.raw` (root) and
       `sda5.raw` (image 1); `jail.sh` overlays `sda5.raw` with its own tmpfs
       upper (rw, as root B is on the machine) at `$JJP_JAIL/jjpe/multi/b`;
@@ -6339,7 +6352,8 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **118. The Multi-boot tab learns a second platform: JJP declares
       `multiboot=True` and the tab stops hard-coding Stern.** `S3 D3` *(Plan
-      §2.7. After 116 and 117, not before.)* A `MultibootBackend` object
+      §2.7. After 116 and 117, not before. Branch from and merge into
+      `feature/jjp-multiboot` — the rule is in 115.)* A `MultibootBackend` object
       (Stern today, JJP added) holding everything the 2026-09-12 audit found
       hard-coded in `gui/multiboot_tab.py`: `TOOL_DIR`/`MKMULTICARD`/
       `SELECTMEDIA`/`CODESELECT_SRC` (216–223), `SELECTOR_SUFFIX`/
@@ -6363,7 +6377,9 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **119. First GNR machine boot of a multi-boot install.** `S3 D3` *(Plan
       §2.9. After 118. David's hardware; whatever it finds is fixed on the
-      spot.)* Stick from 118, key in the machine, install (settings/scores
+      spot. Branch from and merge into `feature/jjp-multiboot` — the rule is
+      in 115 — and this is the item whose close is followed by the ONE
+      `/finish` of the whole family.)* Stick from 118, key in the machine, install (settings/scores
       are wiped — JJP's installer always does), first boot with the coin door
       OPEN. Expected: the menu on the backglass, flippers move, START
       confirms, 15 s timeout boots image 0, both images play, the key is

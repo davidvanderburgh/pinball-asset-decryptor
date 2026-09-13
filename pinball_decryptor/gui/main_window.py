@@ -7883,10 +7883,23 @@ class MainWindow:
     # was showing the cleared slot, and re-state the button.  The three
     # per-row versions each did their own four-fifths of that.
     #
-    # A PICK IS ALL THIS TOUCHES, which is what the confirm says out loud: no
-    # file of the user's is deleted, and a slot already built into the project
-    # folder keeps the bytes it has — "Revert all changes…" on the Write tab
-    # is the tool for those, and it is a different question.
+    # A CLEAR TAKES THE REPLACEMENT BACK OUT, wherever it has got to (PAD-142).
+    # A pick nothing has applied yet is only a pick, and dropping it is the
+    # whole job.  But a build applies picks INTO the project folder, and so
+    # does Start on the Emulate tab with "Apply my replaced assets" ticked
+    # (PAD-121) — and dropping just the pick then left the slot holding the
+    # replacement's bytes: still "changed on disk", still in the preview, and
+    # still in the next build and the next emulator run.  ★ DragonRR,
+    # 2026-09-13: *"I HAVE cleared all replacements but note that the
+    # replacement is still showing in the list … when I first did this it
+    # didn't seem to 'take'. The replacement was still in."*  So a slot this
+    # app applied a replacement to — it holds a ``.orig`` snapshot of the
+    # extract's own file — gets that file put back too, and it still counts
+    # as a replacement to clear once its pick is gone, which is the state his
+    # folder was left in.  No file of the user's is ever deleted, and a slot
+    # changed with no snapshot (copied over by hand, or built before
+    # snapshots existed) is not this tool's to guess at: "Revert all
+    # changes…" on the Write tab re-derives those from the card.
     #
     # ONE LOG LINE FOR A BULK CLEAR, not 48.  Every pick dropped is already
     # recorded individually in the folder's own .history.log by
@@ -7931,25 +7944,99 @@ class MainWindow:
         except tk.TclError:
             pass
 
+    def _applied_replacement_rels(self, kind, rels=None):
+        """Slots on one Replace tab whose project-folder file holds a
+        replacement this app applied and can take back out: a ``.orig``
+        snapshot of the extract's own file is on hand.  *rels* narrows the
+        answer (in its own order); ``None`` asks about the whole tab."""
+        from ..core import staged_originals
+        slots = getattr(self, "_%s_slots_by_rel" % kind, None) or {}
+        snaps = staged_originals.snapshot_rels(
+            getattr(self, "_%s_scan_dir" % kind, None))
+        if rels is None:
+            return sorted(rel for rel in snaps if rel in slots)
+        return [rel for rel in dict.fromkeys(rels)
+                if rel in snaps and rel in slots]
+
+    def _replacement_targets(self, kind, rels=None):
+        """What clearing *rels* acts on (``None`` = the whole tab): every
+        slot with a pick, and every slot a pick was already applied to."""
+        assigns = self._replace_assignments(kind) or {}
+        if rels is None:
+            rels = list(assigns) + self._applied_replacement_rels(kind)
+        applied = set(self._applied_replacement_rels(kind, rels))
+        return [rel for rel in dict.fromkeys(rels)
+                if assigns.get(rel) or rel in applied]
+
+    def _put_back_originals(self, kind, rels):
+        """Restore the extract's own file in each of *rels* from its ``.orig``
+        snapshot, and return the rels that were put back.
+
+        The name the folder remembered each one was replaced WITH goes too:
+        it is what the Replacement column prints for a changed slot, and a
+        mod pack exported later would carry it for a change that is gone."""
+        from ..core import history_log, staged_changes, staged_originals
+        scan_dir = getattr(self, "_%s_scan_dir" % kind, None)
+        done = [rel for rel in rels if staged_originals.revert(scan_dir, rel)]
+        if not done:
+            return []
+        getattr(self, "_%s_changed_on_disk" % kind).difference_update(done)
+        data = staged_changes.load(scan_dir)
+        names = data.get("replacement_names") or {}
+        if any(rel in names for rel in done):
+            for rel in done:
+                names.pop(rel, None)
+            data["replacement_names"] = names
+            staged_changes.save(scan_dir, data)
+        for rel in done:
+            (getattr(self, "_rep_names", None) or {}).pop(rel, None)
+        history_log.record(scan_dir, [
+            "%s  %s  put back to the extract's original (its replacement "
+            "was cleared)" % (kind, rel) for rel in done])
+        return done
+
     def _clear_replacement_picks(self, kind, rels, reselect=True):
-        """Drop the pending replacement picks for *rels*.  Returns how many
-        actually went (a row with no pick is not an error — a range selection
-        normally spans some)."""
+        """Take the replacements out of *rels*: drop each pick, and put the
+        extract's own file back in every slot one was already applied to.
+        Returns how many slots that touched (a row with neither is not an
+        error — a range selection normally spans some)."""
         assigns = self._replace_assignments(kind)
         if assigns is None:
             return 0
-        gone = [rel for rel in dict.fromkeys(rels) if rel in assigns]
-        if not gone:
+        rels = list(dict.fromkeys(rels))
+        picks = [rel for rel in rels if rel in assigns]
+        # Never under a running build: it is reading these very files.
+        applied = ([] if self._is_running()
+                   else self._applied_replacement_rels(kind, rels))
+        if not picks and not applied:
             return 0
-        for rel in gone:
+        for rel in picks:
             del assigns[rel]
+        restored = self._put_back_originals(kind, applied)
         self._save_staged_changes()
+        gone = list(dict.fromkeys(picks + restored))
         label = self._REPLACE_LABELS.get(kind, kind)
-        self.append_log(
-            "%s: cleared replacement for %s" % (label, gone[0])
-            if len(gone) == 1 else
-            "%s: cleared %d replacements (the folder's history log names "
-            "each one)" % (label, len(gone)), "info")
+        if len(gone) == 1:
+            msg = "%s: cleared replacement for %s" % (label, gone[0])
+            if restored:
+                msg += (" and put the card's original file back in the "
+                        "project folder")
+        else:
+            msg = ("%s: cleared %d replacements (the folder's history log "
+                   "names each one)" % (label, len(gone)))
+            if restored:
+                msg += ("; %d of them had already been applied to the "
+                        "project folder and have the card's original file "
+                        "back" % len(restored))
+        self.append_log(msg, "info")
+        stuck = [rel for rel in applied if rel not in restored]
+        if stuck:
+            self.append_log(
+                "%s: could not put the card's original file back in %s — is "
+                "it open in another program? Clear it again once it is "
+                "closed." % (label, ", ".join(stuck[:3])
+                             + (" and %d more" % (len(stuck) - 3)
+                                if len(stuck) > 3 else "")), "warning")
         refresh = getattr(self, "_refresh_%s_list" % kind, None)
         if refresh is not None:
             try:
@@ -7997,9 +8084,8 @@ class MainWindow:
         properties) each act on ONE slot, and offering them over a selection
         of forty would leave which one they meant up to the user to guess."""
         slots = getattr(self, "_%s_slots_by_rel" % kind, None) or {}
-        assigns = self._replace_assignments(kind) or {}
         rows = [rel for rel in sel if rel in slots]
-        picked = [rel for rel in rows if assigns.get(rel)]
+        picked = self._replacement_targets(kind, rows)
         menu.add_command(label="%d slot%s selected"
                                % (len(rows), "" if len(rows) == 1 else "s"),
                          state=tk.DISABLED)
@@ -8026,25 +8112,43 @@ class MainWindow:
             menu.grab_release()
         return True
 
+    def _clear_confirm_text(self, kind, targets, question):
+        """A bulk clear's confirm: *question*, then what happens to files.
+
+        The slots a build or an emulator Start already applied are counted
+        out loud, because clearing those CHANGES THE PROJECT FOLDER, and a
+        confirm that only promised to drop picks would not be telling the
+        user what Yes does."""
+        applied = len(self._applied_replacement_rels(kind, targets))
+        if not applied:
+            return ("%s\n\nThis only drops the picks: none of your own files "
+                    "are touched." % question)
+        one = applied == 1
+        return ("%s\n\n%d of these %s already applied to the project folder "
+                "(by a build, or by Start on the Emulate tab), and %s back "
+                "to the card's original file. None of your own files are "
+                "touched."
+                % (question, applied, "is" if one else "are",
+                   "it goes" if one else "they go"))
+
     def _clear_selected_replacements(self, kind):
         """The row menu's "Clear replacement(s)": the whole selection."""
         rels = self._selected_replace_rels(kind)
-        picked = [rel for rel in rels
-                  if (self._replace_assignments(kind) or {}).get(rel)]
-        if len(picked) > 1 and not messagebox.askyesno(
+        targets = self._replacement_targets(kind, rels)
+        if len(targets) > 1 and not messagebox.askyesno(
                 "Clear replacements",
-                "Clear the replacements picked for these %d slots?\n\n"
-                "This only drops the picks — your own files are untouched."
-                % len(picked)):
+                self._clear_confirm_text(
+                    kind, targets, "Clear the replacements for these %d "
+                                   "slots?" % len(targets))):
             return
         self._clear_replacement_picks(kind, rels)
 
     def _clear_all_replacements(self, kind):
-        """The Clear replacements… button: every pick on this tab."""
+        """The Clear replacements… button: every replacement on this tab."""
         if self._is_running():
             return
-        assigns = self._replace_assignments(kind) or {}
-        n = len(assigns)
+        targets = self._replacement_targets(kind)
+        n = len(targets)
         if not n:
             messagebox.showinfo(
                 "Clear replacements",
@@ -8053,14 +8157,11 @@ class MainWindow:
             return
         if not messagebox.askyesno(
                 "Clear replacements",
-                "Clear all %d replacement%s picked on this tab?\n\n"
-                "This only drops the picks: none of your own files are "
-                "touched, and any slot already built into the project folder "
-                "keeps the bytes it has — “Revert all changes…” "
-                "on the Write tab is what restores those."
-                % (n, "" if n == 1 else "s")):
+                self._clear_confirm_text(
+                    kind, targets, "Clear all %d replacement%s on this tab?"
+                                   % (n, "" if n == 1 else "s"))):
             return
-        self._clear_replacement_picks(kind, list(assigns), reselect=False)
+        self._clear_replacement_picks(kind, targets, reselect=False)
 
     def _update_clear_all_btn(self, kind):
         """Grey the Clear replacements… button when there is nothing to clear
@@ -8069,7 +8170,8 @@ class MainWindow:
         btn = getattr(self, "_clear_all_btns", {}).get(kind)
         if btn is None:
             return
-        live = bool(self._replace_assignments(kind)) and not self._is_running()
+        live = (not self._is_running()
+                and bool(self._replacement_targets(kind)))
         try:
             btn.configure(state=tk.NORMAL if live else tk.DISABLED)
         except tk.TclError:
@@ -8313,6 +8415,9 @@ class MainWindow:
         if self._video_assignments.get(row):
             menu.add_command(label="▶  Play replacement",
                              command=self._video_play_replacement)
+        # A clip Start or a build already applied is still a replacement to
+        # clear once its pick is gone (PAD-142).
+        if self._replacement_targets("video", [row]):
             menu.add_separator()
             menu.add_command(label="Clear replacement",
                              command=self._video_clear_selected)
@@ -9677,7 +9782,7 @@ class MainWindow:
             menu.add_command(
                 label="Blank all %d image%s (transparent)…" % (n, plural),
                 command=lambda g=row, k=kids: self._image_group_blank(g, k))
-            if any(k in self._image_assignments for k in kids):
+            if self._replacement_targets("image", kids):
                 menu.add_separator()
                 menu.add_command(
                     label="Clear replacements in group",
@@ -9690,7 +9795,9 @@ class MainWindow:
         else:
             menu.add_command(label="Choose replacement…",
                              command=lambda r=row: self._image_assign_rel(r))
-            if self._image_assignments.get(row):
+            # An image Start or a build already applied is still a
+            # replacement to clear once its pick is gone (PAD-142).
+            if self._replacement_targets("image", [row]):
                 menu.add_separator()
                 menu.add_command(label="Clear replacement",
                                  command=self._image_clear_selected)
@@ -9957,27 +10064,25 @@ class MainWindow:
         selection back on the group row.  Pure assignment plumbing — the
         actual pixel scaling/re-encode happens at Write, per slot, exactly
         like a single-row assignment."""
-        changed_any = False
-        for rel in rels:
-            if rel not in self._image_slots_by_rel:
-                continue
-            if rep_path is None:
-                changed_any |= (
-                    self._image_assignments.pop(rel, None) is not None)
-            else:
+        rels = [rel for rel in rels if rel in self._image_slots_by_rel]
+        if rep_path is None:
+            # The one shared clear, so a group's takes out what Start or a
+            # build already applied to the folder as well (PAD-142).
+            if not self._clear_replacement_picks("image", rels,
+                                                 reselect=False):
+                return
+        else:
+            if not rels:
+                return
+            for rel in rels:
                 self._image_assignments[rel] = rep_path
-                changed_any = True
-        if not changed_any:
-            return
-        self._save_staged_changes()
-        self.append_log(
-            "Replace Images: %s %d slot(s) in group"
-            % ("cleared" if rep_path is None
-               else "assigned %s to" % os.path.basename(rep_path),
-               len(rels)), "info")
-        self._refresh_image_list()
-        if self._image_current_rel in set(rels):
-            self._image_render_preview(self._image_current_rel)
+            self._save_staged_changes()
+            self.append_log(
+                "Replace Images: assigned %s to %d slot(s) in group"
+                % (os.path.basename(rep_path), len(rels)), "info")
+            self._refresh_image_list()
+            if self._image_current_rel in set(rels):
+                self._image_render_preview(self._image_current_rel)
         try:
             self._image_tree.selection_set(group_iid)
             self._image_tree.see(group_iid)

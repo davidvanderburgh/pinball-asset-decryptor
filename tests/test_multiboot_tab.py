@@ -263,7 +263,10 @@ def test_two_image_form_builds_plan_build_verify(monkeypatch, tmp_path):
                                             "verify"]
     for label, argv in cmds:
         if label == "selector":
-            assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"], argv
+            # root too (PAD-140): it installs into a filesystem that is
+            # usually root's
+            assert callable(argv)
+            assert argv({})[:3] == ["wsl.exe", "-u", "root"], argv({})
             continue
         if label == "build":
             # the build runs AS ROOT (item 93: it records the card the way
@@ -622,15 +625,19 @@ def test_the_card_run_installs_the_menu_program_first(monkeypatch,
     the guest filesystem from the card when there is none, build the menu
     program when it is missing, rebuild it when these sources are newer).
 
-    It runs AS THE USER, carries the primary image (what a first-run rootfs
-    is built from) and names the rootfs the selector directory sits in.  No
-    ``$`` anywhere and ``~/`` outside the quotes, like every other line this
-    tab hands to wsl.exe.
+    It runs AS ROOT with the desktop HOME (PAD-140 - see the test below),
+    carries the primary image (what a first-run rootfs is built from) and
+    names the rootfs the selector directory sits in.  No ``$`` anywhere and
+    ``~/`` outside the quotes, like every other line this tab hands to
+    wsl.exe.
     """
     _win(monkeypatch)
     form = _form(tmp_path, 2)
-    argv = install_selector_args(form, cwd="/mnt/c/repo")
-    assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"]      # never root
+    step = install_selector_args(form, cwd="/mnt/c/repo")
+    assert callable(step)            # resolved on the worker, like build
+    argv = step({})
+    assert argv[:8] == ["wsl.exe", "-u", "root", "-e", "env",
+                        "HOME=/home/x", "bash", "-lc"], argv
     line = _line(argv)
     assert line == ("cd /mnt/c/repo && PAD_ROOT=~/spike2root bash "
                     "tools/spike2_emu/ensureselect.sh %s"
@@ -640,6 +647,41 @@ def test_the_card_run_installs_the_menu_program_first(monkeypatch,
     form.selector_dir = "~/my root/usr/local/codeselect"
     assert "PAD_ROOT=~/'my root' bash" in _line(install_selector_args(
         form, cwd="/mnt/c/repo"))
+
+
+def test_the_menu_program_installs_as_root_into_roots_filesystem(
+        monkeypatch, tmp_path):
+    """★ PAD-140.  The Emulate tab's Start is ``wsl -u root`` and unpacks
+    ~/spike2root as root, so on a machine that had run a game the selector
+    step - then a USER step - could not create /usr/local/codeselect, and a
+    first multi-boot build stopped on coreutils' words for that:
+
+        install: cannot change permissions of
+        '/home/home/spike2root/usr/local/codeselect': No such file or directory
+
+    It installs as root now, with the desktop HOME so ``~`` is still the
+    user's rootfs (buildselect.sh hands the tree back).  The shapes a root
+    step has to get right, one each:"""
+    _win(monkeypatch)
+    form = _form(tmp_path, 2)
+    user_line = _line(install_selector_args(form, cwd="/mnt/c/repo"))
+    # WSL will not say who it logs in as: the user step it used to be, not a
+    # refusal - the build step right after it says the sentence.
+    monkeypatch.setattr(multiboot_tab, "wsl_home", lambda: None)
+    monkeypatch.setattr(multiboot_tab, "wsl_account", lambda: ("", ""))
+    argv = install_selector_args(form, cwd="/mnt/c/repo")({})
+    assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"], argv
+    assert argv[-1] == user_line
+    # a root-default distro (PAD-114): root's own home, like the build
+    monkeypatch.setattr(multiboot_tab, "wsl_account", lambda: ("root", "/root"))
+    argv = install_selector_args(form, cwd="/mnt/c/repo")({})
+    assert argv[:6] == ["wsl.exe", "-u", "root", "-e", "env", "HOME=/root"]
+    assert argv[-1] == user_line
+    # Linux: nothing there unpacks the filesystem as root, and `sudo -n`
+    # would refuse a machine that builds today
+    monkeypatch.setattr(multiboot_tab.sys, "platform", "linux")
+    argv = install_selector_args(form, cwd="/mnt/c/repo")
+    assert not callable(argv) and argv[:2] == ["bash", "-lc"], argv
 
 
 def test_a_selector_dir_of_somebody_elses_is_checked_never_written():

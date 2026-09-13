@@ -68,6 +68,17 @@ if ! command -v make >/dev/null 2>&1; then
     echo "(on Debian/Ubuntu: apt install make). Nothing else about the emulator needs it." >&2
     exit 1
 fi
+# ...AND SOMEWHERE THIS ACCOUNT MAY PUT WHAT IT BUILDS (PAD-140). Asked before
+# a source is staged, like the two questions above: `install -d` reports a
+# directory it may not create as a stat that found nothing, and that line was
+# the only word a user got about why his menu program was not built. Root is
+# never refused here - give_back() hands the tree to the owner of HOME - and
+# that is why the Multi-boot tab runs this as root.
+if blocker=$(pad_select_blocker); then
+    echo "cannot install the boot menu program at $R/usr/local/codeselect: $blocker belongs to $(stat -c %U "$blocker" 2>/dev/null || echo another account) and $(id -un 2>/dev/null || id -u) may not write into it (Permission denied)." >&2
+    echo "An emulator run as root unpacks the guest filesystem as root; run this as root (sudo) and what it installs is handed back to you." >&2
+    exit 1
+fi
 
 # The staging directory the sources are copied into, for the reason build.sh
 # records: compiling from /mnt/c is slow, and Program Files is read-only.

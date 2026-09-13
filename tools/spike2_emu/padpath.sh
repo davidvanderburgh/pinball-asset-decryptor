@@ -608,6 +608,29 @@ PAD_SELECT_STAMP=$ROOT/usr/local/codeselect/codeselect.srcs
 export PAD_SELECT_BIN PAD_SELECT_STAMP
 pad_select_hash() { pad_src_hash "${1:-$RIG}" $PAD_SELECT_SRCS; }
 
+#: WHAT STOPS THIS ACCOUNT INSTALLING THE MENU PROGRAM, if anything (PAD-140):
+#: the directory the install would have to create or write into, printed, and
+#: 0 - or nothing, and 1, when the way is clear. The nearest part of the
+#: install directory that EXISTS is the one asked, because that is the one
+#: `install -d` has to write into.
+#:
+#: coreutils cannot say this itself. When the mkdir fails for want of
+#: permission it stats the directory it did not make and reports the stat:
+#:
+#:   install: cannot change permissions of '/home/home/spike2root/usr/local/codeselect': No such file or directory
+#:
+#: which is all a user got from his first multi-boot build (2026-09-12), on a
+#: guest filesystem the app's own emulator Start had unpacked as root.
+pad_select_blocker() {
+    local d=${PAD_SELECT_BIN%/*}
+    while [ ! -e "$d" ] && [ ! -L "$d" ]; do
+        case "$d" in */*) d=${d%/*} ;; *) return 1 ;; esac
+        [ -n "$d" ] || return 1
+    done
+    [ -d "$d" ] && [ -w "$d" ] && [ -x "$d" ] && return 1
+    printf '%s\n' "$d"
+}
+
 #: WHERE THE CHOICE LANDS, as the GUEST spells it: /dump is $ROOT/dump
 #: self-bound, so the host reads the same file at "$ROOT$PAD_SELECT_CHOICE".
 #: One line, '<index>\n', written by codeselect on a confirmed choice and

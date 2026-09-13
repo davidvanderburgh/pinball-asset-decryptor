@@ -660,6 +660,52 @@ def test_footer_ladder_follows_the_launch_and_the_poll(root):
         frame.destroy()
 
 
+# ------------------------------------------------------ ghost windows (item 118) --
+
+def test_rig_ghosts_are_only_the_rigs_visible_wslg_windows():
+    wins = [(1, "JJP GunsNRoses - emulated (Ubuntu)", "msrdc.exe", True),
+            (2, "JJP switch matrix (Ubuntu)", "MSRDC.EXE", True),
+            (3, "JJP switch matrix (Ubuntu)", "msrdc.exe", False),     # already hidden
+            (4, "JJP GunsNRoses - emulated", "Xephyr.exe", True),      # not WSLg's
+            (5, "Pinball Asset Decryptor", "msrdc.exe", True),
+            (6, "JJP Wonka - emulated", "msrdc.exe", True)]
+    assert jjp_emulate_tab.rig_ghosts(wins) == [1, 2, 6]
+
+
+def test_only_a_stop_that_left_nothing_running_hides_windows():
+    assert jjp_emulate_tab.stop_left_nothing("killed 3\ngame=0 matrix=0 xephyr=0 cuse=0")
+    assert not jjp_emulate_tab.stop_left_nothing("game=0 matrix=1 xephyr=0 cuse=0")
+    assert not jjp_emulate_tab.stop_left_nothing("game=0 matrix=0 xephyr=1 cuse=0")
+    assert not jjp_emulate_tab.stop_left_nothing("")
+
+
+def test_hide_rig_ghosts_hides_what_it_found(monkeypatch):
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+    hidden = []
+    wins = [(7, "JJP switch matrix (Ubuntu)", "msrdc.exe", True),
+            (8, "Notepad", "notepad.exe", True)]
+    assert jjp_emulate_tab.hide_rig_ghosts(windows=wins, hide=hidden.append) == 1
+    assert hidden == [7]
+
+
+def test_stop_hides_the_frames_a_clean_stop_left(panel, monkeypatch):
+    """Right after Stop says the display and the matrix are gone."""
+    import time as _t
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+    calls = []
+    monkeypatch.setattr(jjp_emulate_tab, "hide_rig_ghosts", lambda: calls.append(1) or 2)
+
+    class _Done:
+        stdout = b"killed 3; still running: 0\ngame=0 matrix=0 xephyr=0 cuse=0\n"
+    monkeypatch.setattr(jjp_emulate_tab.subprocess, "run", lambda *a, **k: _Done())
+    panel._stop_async()
+    for _ in range(60):
+        if calls:
+            break
+        _t.sleep(0.05)
+    assert calls == [1]
+
+
 # ------------------------------------------------- key present but not shared --
 
 def test_a_key_in_the_pc_is_not_the_same_as_no_key():

@@ -117,6 +117,104 @@ def rdp_client_running():
     return b"msrdc.exe" in out.stdout.lower()
 
 
+#: The titles the JJP rig's own windows carry on the Windows desktop: the
+#: nested display (display.sh: "JJP <Title> - emulated") and the switch matrix
+#: (jjpsw.py), each with the distro name WSLg appends ("... (Ubuntu)").
+_RIG_WINDOW_RE = re.compile(r"^JJP (?:.+ - emulated|switch matrix)(?: \(.*\))?$")
+
+
+def rig_ghosts(windows):
+    """The rig's windows WSLg is still showing, from ``[(hwnd, title, exe,
+    visible)]``: VISIBLE, one of the rig's titles, and owned by msrdc.exe.
+    Only asked right after a Stop that reported no display and no matrix
+    running, so nothing named here has a live program behind it."""
+    return [h for h, title, exe, visible in windows
+            if visible and (exe or "").lower() == "msrdc.exe"
+            and _RIG_WINDOW_RE.match(title or "")]
+
+
+def stop_left_nothing(text):
+    """Did stop.sh report the display AND the matrix gone?  Its last line reads
+    ``game=0 matrix=0 xephyr=0 cuse=0``; anything else leaves windows alone."""
+    return bool(re.search(r"\bmatrix=0\b", text or "")
+                and re.search(r"\bxephyr=0\b", text or ""))
+
+
+def _desktop_windows():
+    """``[(hwnd, title, exe, visible)]`` for every top-level window (Windows)."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    exe_of = {}
+
+    def exe(pid):
+        if pid not in exe_of:
+            name = ""
+            h = kernel32.OpenProcess(0x1000, False, pid)   # QUERY_LIMITED_INFORMATION
+            if h:
+                buf = ctypes.create_unicode_buffer(1024)
+                size = wintypes.DWORD(1024)
+                if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                    name = os.path.basename(buf.value)
+                kernel32.CloseHandle(h)
+            exe_of[pid] = name
+        return exe_of[pid]
+
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd, _lparam):
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n > 0:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, buf, n + 1)
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            found.append((int(hwnd), buf.value, exe(pid.value),
+                          bool(user32.IsWindowVisible(hwnd))))
+        return True
+
+    user32.EnumWindows(each, 0)
+    return found
+
+
+def hide_rig_ghosts(windows=None, hide=None):
+    """Hide the windows a stopped rig left on the desktop; how many.
+
+    WSLg sometimes keeps the frame of a Linux window whose program has exited:
+    the game display and the switch matrix stayed on David's desktop after a
+    Stop with nothing running behind them (2026-09-13: "the windows are hanging
+    forever").  A close request does nothing to such a frame - measured, both
+    ignored WM_CLOSE - and ending msrdc.exe, the process that holds it, takes
+    every Linux window and PulseAudio down with it.  Hiding is the one safe
+    thing; the frames go for good at the next WSL restart."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        hwnds = rig_ghosts(_desktop_windows() if windows is None else windows)
+        if hide is None:
+            import ctypes
+            user32 = ctypes.WinDLL("user32")
+
+            def hide(h):
+                user32.ShowWindowAsync(ctypes.c_void_p(h), 0)   # SW_HIDE
+        for h in hwnds:
+            hide(h)
+        return len(hwnds)
+    except Exception:                                      # noqa: BLE001
+        return 0
+
+
 def attach_dongle_cmd():
     """Hand the Sentinel key to WSL.
 
@@ -826,7 +924,20 @@ class JJPEmulatePanel:
                     rig_cmd_root("stop.sh"),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     timeout=180, creationflags=_rig.CREATE_FLAGS)
-                self._log("JJP: " + out.stdout.decode("utf-8", "replace").strip())
+                text = out.stdout.decode("utf-8", "replace").strip()
+                self._log("JJP: " + text)
+                # A clean stop can still leave frames on the desktop (see
+                # hide_rig_ghosts).  Only when the rig said the display and
+                # the matrix are gone, and after a moment for WSLg to close
+                # the windows that ARE closing.
+                if stop_left_nothing(text):
+                    import time as _time
+                    _time.sleep(1.0)
+                    n = hide_rig_ghosts()
+                    if n:
+                        self._log("JJP: hid %d window(s) the stopped rig left on "
+                                  "the desktop - WSLg kept their frames after "
+                                  "the programs had exited." % n)
             except Exception as exc:                       # noqa: BLE001
                 self._log("JJP: stop failed: %s" % exc)
             finally:

@@ -6804,7 +6804,14 @@ These have each been violated at least once and each cost a run or a window:
       process behind them (both owned only by msrdc); cause not established -
       David's 19:02 matrix was the pre-helper code, and exactly two ghosts
       remained, so one teardown (his 19:08 Stop or the proof's 19:10 one)
-      left them. Closed without touching msrdc.
+      left them. Both IGNORED WM_CLOSE; hidden with ShowWindowAsync(SW_HIDE),
+      msrdc untouched. So the tab now does that itself: right after a Stop
+      whose output says `matrix=0` and `xephyr=0`, it waits a second and hides
+      every VISIBLE msrdc-owned window titled `JJP <Title> - emulated` or `JJP
+      switch matrix` (`hide_rig_ghosts`, ctypes EnumWindows +
+      QueryFullProcessImageNameW), and logs how many. Run on the real desktop
+      it listed both hidden ghosts as msrdc.exe windows and chose nothing
+      more to hide. The frames only go for good at a WSL restart.
       **Owed (hardware, David):** (a) the green button's stick tick on a real
       USB stick (the JJP flash dialog's FAT32 copy of the 12.97 GB ISO); (b)
       'Run in emulator' from the tab → the Emulate JJP tab's watch.sh, which

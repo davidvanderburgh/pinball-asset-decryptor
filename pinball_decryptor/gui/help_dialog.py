@@ -162,10 +162,14 @@ HELP_CONTENT = {
          "selection. Sort by the Replacement column first and everything you "
          "have picked sits together. \"Clear replacements…\" beside the "
          "project folder drops every pick on this tab at once.\n\n"
-         "Clearing a pick only drops the pick: none of your own files are "
-         "touched, and a slot an earlier build already wrote into the project "
-         "folder keeps the bytes it has — \"Revert all changes…\" on the "
-         "Write tab is what restores those."),
+         "Clearing takes the replacement back out. A pick nothing has applied "
+         "yet is simply dropped; a slot that a build, or Start on the Emulate "
+         "tab, already wrote into the project folder gets the card's own file "
+         "put back as well, so the list, the next build and the next emulator "
+         "run all agree. None of your own files are touched. A slot changed "
+         "some other way (a file copied over it by hand, or a build from "
+         "before the app kept a saved original) keeps what it has — "
+         "\"Revert all changes…\" on the Write tab is what restores those."),
         ("Change markers",
          "Green = assigned this session (staged when you build). "
          "\"✓ changed on disk\" = the file sitting in your PROJECT FOLDER no "
@@ -315,10 +319,14 @@ HELP_CONTENT = {
          "selection. Sort by the Replacement column first and everything you "
          "have picked sits together. \"Clear replacements…\" beside the "
          "project folder drops every pick on this tab at once.\n\n"
-         "Clearing a pick only drops the pick: none of your own files are "
-         "touched, and a slot an earlier build already wrote into the project "
-         "folder keeps the bytes it has — \"Revert all changes…\" on the "
-         "Write tab is what restores those."),
+         "Clearing takes the replacement back out. A pick nothing has applied "
+         "yet is simply dropped; a slot that a build, or Start on the Emulate "
+         "tab, already wrote into the project folder gets the card's own file "
+         "put back as well, so the list, the next build and the next emulator "
+         "run all agree. None of your own files are touched. A slot changed "
+         "some other way (a file copied over it by hand, or a build from "
+         "before the app kept a saved original) keeps what it has — "
+         "\"Revert all changes…\" on the Write tab is what restores those."),
         ("Size limits",
          "Patching is size-neutral: a same-or-smaller replacement fits "
          "as-is, a larger one is re-encoded down to the slot's byte budget. "
@@ -442,10 +450,14 @@ HELP_CONTENT = {
          "have picked sits together. \"Clear replacements…\" beside the "
          "project folder drops every pick on this tab at once, and a scene "
          "group's own right-click menu clears just that animation.\n\n"
-         "Clearing a pick only drops the pick: none of your own files are "
-         "touched, and a slot an earlier build already wrote into the project "
-         "folder keeps the bytes it has — \"Revert all changes…\" on the "
-         "Write tab is what restores those."),
+         "Clearing takes the replacement back out. A pick nothing has applied "
+         "yet is simply dropped; a slot that a build, or Start on the Emulate "
+         "tab, already wrote into the project folder gets the card's own file "
+         "put back as well, so the list, the next build and the next emulator "
+         "run all agree. None of your own files are touched. A slot changed "
+         "some other way (a file copied over it by hand, or a build from "
+         "before the app kept a saved original) keeps what it has — "
+         "\"Revert all changes…\" on the Write tab is what restores those."),
         ("Where images come from",
          "The Source column tells the four stores apart. \"File\" = a "
          "plain image file on the card (menus, apron/test art). \"Scene "

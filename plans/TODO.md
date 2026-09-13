@@ -6207,7 +6207,7 @@ These have each been violated at least once and each cost a run or a window:
       — S3: friction. D3: one mechanism on two input paths, needs a run to see.
 
 - [ ] **114. `jjpselect`: the boot selector runs on a JJP rootfs (x86, X11,
-      the cabinet buttons off `/dev/jjpio`).** `S3 D3` *(Filed 2026-09-12 from
+      the cabinet buttons off `/dev/jjpio`).** `S3 D3` ← WORKING ON *(Filed 2026-09-12 from
       `plans/jjp_multiboot_plan.md`, the JJP multi-boot plan — gitignored like
       the handoff, so it is local to David's machine and these six entries
       carry everything a fresh checkout needs; David has a GNR key, wants an

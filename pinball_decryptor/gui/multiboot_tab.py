@@ -9759,7 +9759,9 @@ class MultibootPanel:
             return None
         return out
 
-    def _flash(self):
+    def _flash(self, fresh=False):
+        # *fresh*: the card was only just built or updated, so no SD card
+        # holds it yet and the flash dialog writes it whole (PAD-144).
         out = self._finished_card("flash")
         if out is None:
             return
@@ -9767,7 +9769,7 @@ class MultibootPanel:
             self._error("Flashing is not available from a standalone panel.")
             return
         self._ok("Flashing %s…" % out)
-        self._flash_fn(out)
+        self._flash_fn(out, fresh=fresh)
 
     def _run_emulator(self):
         out = self._finished_card("run it")
@@ -10509,17 +10511,23 @@ class MultibootPanel:
         card; a flash asked for WITH one is chained through the write's
         ``after`` hook, so a failed build never reaches an SD card."""
         self._forget_build_flash()
-        after = (lambda: self._flash()) if do_flash else None
-        if do_write:
-            action = self._write_plan()["action"]
-            if action == "apply":
-                self.apply_to_card(after=after)
-            elif action == "update":
-                self.update_card(after=after)
-            else:
-                self._build_card(after=after)
-        elif do_flash:
-            self._flash()
+        if not do_write:
+            if do_flash:
+                self._flash()
+            return
+        action = self._write_plan()["action"]
+        # A card just BUILT, or UPDATED (game files rewritten inside it), is
+        # on no SD card yet, so it reaches the flash dialog as fresh and is
+        # written whole.  An APPLY changes only the menu, which is exactly
+        # what that dialog's menu-only write is for.
+        after = ((lambda: self._flash(fresh=action != "apply"))
+                 if do_flash else None)
+        if action == "apply":
+            self.apply_to_card(after=after)
+        elif action == "update":
+            self.update_card(after=after)
+        else:
+            self._build_card(after=after)
 
     # ------------------------------------------------------------------
     # the preview

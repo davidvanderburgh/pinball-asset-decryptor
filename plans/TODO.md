@@ -6276,8 +6276,12 @@ These have each been violated at least once and each cost a run or a window:
       `default`; silent is acceptable), a native-resolution canvas (the quad
       scales 1360x768), the hook (item 115).
 
-- [ ] **115. `padselect.sh`: the JJP hook binds the chosen image's game
-      directory over the primary's, and refuses JJP's own updater.** `S3 D3` ← WORKING ON
+- [x] **115. `padselect.sh`: the JJP hook binds the chosen image's game
+      directory over the primary's, and refuses JJP's own updater.** `S3 D3`
+      **DONE 2026-09-13 on `item/115` (`0ff0d55`, `2d8e944`, plus the closing
+      commit) — NOT released on its own: merged into `feature/jjp-multiboot`,
+      and the family's ONE `/finish` runs after 119 closes. Emulator-proven;
+      see the DONE block at the end of this entry.**
       *(Plan §2.2 and §2.5. After 114, not before — its rig gates need the
       selector, though the shell tests do not.)*
       **THE JJP CHAIN'S BRANCH RULE (David, 2026-09-13: "not to release until
@@ -6322,31 +6326,57 @@ These have each been violated at least once and each cost a run or a window:
       `alive.sh` 0 after each.
       — S3: feature. D3: a small script, but the proof is four rig runs and a
       real rw slot mount.
-      **IN PROGRESS 2026-09-13 (item/115 from feature/jjp-multiboot, `0ff0d55`).**
-      **Established:** `tools/spike2_emu/codeselect/padselect.sh` (dash) is
-      EXECUTED by rungame.sh, not sourced — an `exit` in a sourced file would
-      take rungame.sh down and loop jjp.service — so the line is `[ -x
-      $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh`. Order:
-      <2 images → silent; mask updater.sh (bind of a tmpfs script that writes
-      rprogress/pcprogress and exits 1; `jjp_update=allow` lifts it); run
-      jjpselect; token `rootA` / `rootB` / `rootB:<sub>`; root B by
-      `FS_UUID_ROOTB` from the card's fs_uuids.sh at /jjpe/multi/b unless the
-      tree is already there; bind; vf link + chown + chmod; every failure
+      **DONE 2026-09-13 (`0ff0d55`, `2d8e944` on item/115, from
+      feature/jjp-multiboot).** `tools/spike2_emu/codeselect/padselect.sh`
+      (dash) is EXECUTED by rungame.sh, not sourced — an `exit` in a sourced
+      file would take rungame.sh down and loop jjp.service — so the line is
+      `[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh`.
+      Order: <2 images → silent; mask updater.sh (bind of a tmpfs script that
+      writes rprogress/pcprogress and exits 1; `jjp_update=allow` lifts it);
+      run jjpselect; token `rootA` / `rootB` / `rootB:<sub>`; root B by
+      `FS_UUID_ROOTB` from the card's OWN fs_uuids.sh at /jjpe/multi/b unless
+      the tree is already there; bind; vf link + chown + chmod; every failure
       unwinds to image 0 with one line in /jjpe/temp/padselect.log (rotated
       past 1 MiB). `test/padselect_sh_test.sh`: 16 cases under dash AND sh,
-      green; in `make check PLATFORM=jjp`; `make install PLATFORM=jjp` puts the
-      hook under /jjpe/gen1/scripts.
-      **Scope, honestly:** this pass proves the hook at the MOUNT level in
-      the rig (the Chaka tree pre-mounted as root B, the real selector, real
-      pokes, `findmnt` + edata counts as the oracle, the masked updater
-      refusing); "the game boots the bound tree" is item 117's R3 (the rig's
-      run_game.sh does not call the hook yet). Rows R1/R2/R4/R6 as written
-      above assume that wiring, so the acceptance is restated: the shell
-      suite + a real-selector rig run with the bind landing on Chaka's tree
-      and one run with no root B booting image 0.
-      **Resume:** the Chaka sda3 is restoring into /var/tmp/jjp_chaka (scratch
-      restore_chaka.sh); then run scratchpad rig115.sh (root, under the lock);
-      record; close; merge into feature/jjp-multiboot.
+      green; in `make check PLATFORM=jjp`; `make install PLATFORM=jjp` puts
+      the hook under /jjpe/gen1/scripts. DESIGN.md "The hook: padselect.sh".
+      **Rig proof, three runs in the GNR 3.03 jail** (Xephyr 1920x1080, CUSE
+      /dev/jjpio100, shm pokes at jjpcrt's bits, the REAL hook run from a
+      chroot exactly as rungame.sh runs it, the Chaka ISO's sda3 restored to a
+      rw loop and bound at /jjpe/multi/b the way the rig will pre-mount root
+      B): (1) RIGHT + START → `chose 1 CHAKA'S LOTLJ`; `findmnt
+      /jjpe/gen1/GunsNRoses` = `/dev/loop5[/jjpe/gen1/GunsNRoses]` (the Chaka
+      loop, not the jail's overlay); `vf -> /jjpe/perm/vf`; `game` 0755 root;
+      edata 5398 files at 5.16 GB where stock is 4.45 GB (same file count in
+      both trees — the BYTES are the oracle); `updater.sh` =
+      `overlay[/run/padselect/updater.sh]`, running it → rc 1 and rprogress
+      `update refused: multi-boot install (PAD)`; hook rc 0, two log lines
+      ("updater masked", "image 1: rootB - … bound over … (root B was already
+      at /jjpe/multi/b)"). Unwound → stock edata back. (2) RIGHT + START with
+      the highlight remembered on 1 → wrapped to 0 → "image 0 chosen: the
+      primary, already in place", no bind. (3) START alone on the remembered
+      image 1 with NOTHING at /jjpe/multi/b and no by-uuid node → `no
+      /dev/disk/by-uuid/e1a1fecc-… (root B): booting image 0`, no bind, stock
+      edata, hook rc 0 — the R4 fallback with the real selector. Teardown to
+      cuse 0 / Xephyr 0 / jail mounts 0 / alive 0 after every run; the selector
+      wrote 18763 / 5711 / 5713 zero frames for as many read (no coil
+      driven). Scratch: rig115.sh, rig115b.sh, restore_chaka.sh, chaka_rw.sh.
+      **Traps paid:** the restore attached the Chaka loop READ-ONLY, so
+      `mount -o remount,rw` fails "write-protected" — detach and re-attach the
+      loop rw (chaka_rw.sh); the hook then chowns and links INSIDE the bound
+      tree, so the scratch Chaka restore now carries a `vf` symlink and
+      root:root ownership, exactly as root B will on the machine. `du -sb`
+      inside the jail (the card's coreutils) counts 315 directory inodes the
+      host's does not (+1290240 bytes) — compare file counts and gigabytes,
+      never exact bytes across the two. `--last` remembers the choice in
+      /jjpe/perm, so a second run's RIGHT wraps off 1 onto 0: script the
+      fallback run with START alone.
+      **Scope, honestly:** this proves the hook at the MOUNT level; "the game
+      boots the bound tree" (R2/R3 with the GNR key) is item 117's, because
+      the rig's run_game.sh does not call the hook yet. R1 (one image = stock)
+      is the `<2 images → exit 0` path, shell-tested (single); R6 is the
+      masked-updater check above. Left on the plan: a REAL `updater.sh` run
+      against a fake /mnt/usb delta lands with 117's unshare wiring.
 
 - [ ] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
       ISO out.** `S3 D3` *(Plan §2.4. After 115, not before; lands with 117.

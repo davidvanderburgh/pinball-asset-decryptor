@@ -1120,7 +1120,9 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         snprintf(widest, sizeof widest, "%s%s", action ? PRESS_ACTION : PRESS_START,
                  conf_card_face(c, hl)->title);
         if (remain >= 0)
-            snprintf(buf, sizeof buf, "booting %s in %d s", conf_card_face(c, hl)->title, remain);
+            /* "starting", not "booting" (PAD-141): the machine is already
+             * up, and what the countdown ends in is the game starting */
+            snprintf(buf, sizeof buf, "starting %s in %d s", conf_card_face(c, hl)->title, remain);
         else
             snprintf(buf, sizeof buf, "%s", widest);
         cpx = gfx_fit_px(f, widest, wmax, 38 * s, 24 * s);
@@ -1382,6 +1384,7 @@ int main(int argc, char **argv)
     int audio_up = 0;         /* the bridge brought the audio section up (hw only) */
     int action;                       /* this title has a lockdown-bar ACTION button */
     int music_voice = -1;
+    int move_voice = -1;              /* the last move sound's voice (PAD-141) */
     const struct audio_clip *music_clip = NULL;
     const char *how, *fmt_path;
     long long start, deadline, last_key;   /* sel_now_ms() values: long long, see log.h */
@@ -1696,15 +1699,25 @@ int main(int argc, char **argv)
         while ((ev = input_poll(in, now)) != EV_NONE) {
             sel_say("key: %s", input_event_name(ev));
             switch (ev) {
+            /* THE MOVE SOUND NEVER PLAYS OVER ITSELF (PAD-141).  audio_play
+             * takes a free voice and MIXES, so a clip longer than a click
+             * stacked a copy per press: three quick flips of a 2 s sample
+             * were three samples at once.  A press while it is still playing
+             * moves the highlight and leaves the sound alone.  The presses
+             * are never ignored - a menu that eats a flipper is worse than
+             * one that is quiet for it - and a click is over long before the
+             * next press anyway. */
             case EV_LEFT: case EV_MINUS:
                 hl = (hl + n - 1) % n;
                 dirty = 1;
-                audio_play(au, media.move, 0);
+                if (!audio_playing_clip(au, move_voice, media.move))
+                    move_voice = audio_play(au, media.move, 0);
                 break;
             case EV_RIGHT: case EV_PLUS:
                 hl = (hl + 1) % n;
                 dirty = 1;
-                audio_play(au, media.move, 0);
+                if (!audio_playing_clip(au, move_voice, media.move))
+                    move_voice = audio_play(au, media.move, 0);
                 break;
             case EV_START: case EV_ACTION: case EV_SELECT:
                 chosen = hl;                        /* ACTION = the lockdown-bar button */

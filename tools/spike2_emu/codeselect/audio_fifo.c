@@ -8,7 +8,10 @@
  *      every ~100 ms from the loop; F_SETPIPE_SZ 1 MB once open
  *   3. pace to the wall clock, 200 ms ahead; writes in PIPE_BUF-sized
  *      chunks (atomic: all or EAGAIN, so the stereo frames never desync);
- *      EAGAIN = drop and count; EPIPE = the reader went away, reopen
+ *      EAGAIN = drop and count; EPIPE = the reader went away, reopen;
+ *      and NEVER LATE (PAD-141): past PIPE_MAX_MS unread in the pipe, or
+ *      after the loop was away past SKIP_MS, the time is let go (skip())
+ *      instead of written behind the clock, where it would stay behind
  *   4. silence keeps streaming while nothing plays (padplay's 25 s no-data
  *      watchdog would otherwise restart the player); SIGPIPE is ignored by
  *      main() before the first write
@@ -37,11 +40,15 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include "audio.h"
 #include "log.h"
 
 #ifndef F_SETPIPE_SZ
 #define F_SETPIPE_SZ 1031
+#endif
+#ifndef FIONREAD
+#define FIONREAD 0x541B
 #endif
 
 #define LEAD_MS      200
@@ -51,6 +58,8 @@
 #define NO_READER_LOG_MS 3000       /* no reader this long: say so, once */
 #define CHUNK_FRAMES 1024           /* 4096 bytes = PIPE_BUF: atomic non-blocking writes */
 #define PIPE_BYTES   (1 << 20)
+#define SKIP_MS      400            /* a loop away longer than this is not caught up */
+#define PIPE_MAX_MS  400            /* more than this unread in the pipe: feed it nothing */
 
 struct fifo {
     struct audio_sink base;
@@ -58,10 +67,32 @@ struct fifo {
     int fd;
     long long t0, clock, now, next_open, next_fmt_check;
     long long no_reader_since;      /* valid while waiting */
+    long long skipped;              /* frames let go by skip() */
     int waiting;                    /* 1 = space() has seen us without a reader */
     int lost;                       /* 1 = had a reader and lost it (EPIPE) */
     int missing_logged, eagain_logged, err_logged, no_reader_logged;
+    int stall_logged, behind_logged;
 };
+
+/* LET THE TIME GO rather than write it late (PAD-141).  The producer here and
+ * the player at the far end both run at 1x, so audio that goes into the FIFO
+ * behind the wall clock is never caught up: it plays that late for the rest
+ * of the run.  C FB's emulator menu answered a flipper 6.5 s after the press.
+ * Two ways in, both measured on this protocol with a real selector: a reader
+ * that stops reading lets the 1 MB pipe fill (4.2 s standing), and a loop
+ * that hitches is caught up in one burst after the player has already played
+ * silence for it (3.0 s standing after a 3 s hitch).  The mixer does not run
+ * for skipped time, so a sound picks up where it was. */
+static void skip(struct fifo *f, long long frames, int *logged, const char *why)
+{
+    f->clock += frames;
+    f->skipped += frames;
+    if (!*logged) {
+        *logged = 1;
+        sel_log("audio: %s: %lld ms let go rather than played late (said once)",
+                why, frames * 1000 / AUDIO_RATE);
+    }
+}
 
 static void fmt_write(struct fifo *f, const char *why)
 {
@@ -132,12 +163,25 @@ static void try_open(struct fifo *f, long long now)
 static int fifo_space(struct audio_sink *s, long long now)
 {
     struct fifo *f = (struct fifo *)s;
-    long long due;
+    long long due, lead = (long long)LEAD_MS * AUDIO_RATE / 1000;
+    int unread = 0;
     f->now = now;
     if (!f->t0) f->t0 = now;
     try_open(f, now);
     if (f->fd < 0) no_reader(f, now);
-    due = (now - f->t0) * AUDIO_RATE / 1000 + (long long)LEAD_MS * AUDIO_RATE / 1000 - f->clock;
+    due = (now - f->t0) * AUDIO_RATE / 1000 + lead - f->clock;
+    /* THE READER IS BEHIND: nothing more goes in until it has had what is
+     * there. FIONREAD counts the unread bytes from either end of a pipe. */
+    if (f->fd >= 0 && ioctl(f->fd, FIONREAD, &unread) == 0
+        && unread / (AUDIO_CH * 2) > (long long)PIPE_MAX_MS * AUDIO_RATE / 1000) {
+        if (due > 0) skip(f, due, &f->behind_logged, "the fifo reader is behind");
+        return 0;
+    }
+    /* THE LOOP WAS AWAY: put the lead back, not the whole absence */
+    if (due > (long long)SKIP_MS * AUDIO_RATE / 1000) {
+        skip(f, due - lead, &f->stall_logged, "the menu loop was away");
+        due = lead;
+    }
     return due > 0 ? (int)due : 0;
 }
 
@@ -180,6 +224,8 @@ static int fifo_write(struct audio_sink *s, const short *pcm, int frames)
 static void fifo_close(struct audio_sink *s)
 {
     struct fifo *f = (struct fifo *)s;
+    if (f->skipped)
+        sel_log("audio: fifo let %lld ms go in all rather than play it late", f->skipped * 1000 / AUDIO_RATE);
     if (f->fd >= 0)
         close(f->fd);
     else if (f->waiting)

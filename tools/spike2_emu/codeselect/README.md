@@ -138,7 +138,7 @@ apart (`key: action` vs `key: start`). In the rig it is the Space key
 A dark 1360x768 (or whatever `fbGetDisplayGeometry` says) menu: `SELECT GAME
 CODE`, one card per image, the highlighted card framed amber on a lighter
 fill, a footer `LEFT / RIGHT FLIPPER: choose   START or ACTION: boot` and
-`booting <title> in N s` (or `press START or ACTION to boot <title>` with
+`starting <title> in N s` (or `press START or ACTION to boot <title>` with
 timeout 0).
 
 The footer names the buttons that EXIST. With no Action button resolved -

@@ -468,6 +468,25 @@ def test_sounddevice_backend_mixes_the_click_over_the_music(tmp_path):
     assert [int(v[0]) for v in out] == [105] * 4
 
 
+def test_sounddevice_backend_never_plays_the_click_over_itself(tmp_path):
+    """PAD-141, the card's rule (codeselect.c): a press while the move sound
+    is still playing does not start a second copy on top of it, and a press
+    after it has ended plays it again."""
+    sd = FakeSD()
+    be = pa.SoundDeviceBackend(sd, volume=100)
+    be.start()
+    move = _tone(tmp_path / "move.wav", frames=6, value=5)
+    assert be.play(move) == "" and be.play(move) == ""
+    out = np.zeros((4, 2), dtype=np.int16)
+    sd.streams[0].callback(out, 4, None, None)
+    assert [int(v[0]) for v in out] == [5] * 4, "two copies would sum to 10"
+    sd.streams[0].callback(out, 4, None, None)          # the last 2 frames, then it ends
+    assert be.play(move) == ""
+    out = np.zeros((4, 2), dtype=np.int16)
+    sd.streams[0].callback(out, 4, None, None)
+    assert int(out[0][0]) == 5, "a press after the sound ended plays it again"
+
+
 def test_sounddevice_backend_replaces_the_loop_and_fades_the_old_one(tmp_path):
     sd = FakeSD()
     be = pa.SoundDeviceBackend(sd, volume=100)

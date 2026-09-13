@@ -602,6 +602,18 @@ been all along. The build now runs there. (The emulator is the one thing
 that still wants an ordinary account: a root run can't attach to the
 WSLg X server, so the game window opens black.)
 
+If a multi-boot **Build** stopped on its first step with *"install:
+cannot change permissions of '…/spike2root/usr/local/codeselect': No
+such file or directory"*, that line misleads: it is coreutils' account
+of a folder it was not allowed to create. Pressing **Start** on the
+Emulate tab unpacks the game's filesystem as root, and the step that
+installs the menu program ran as your own account, so on any PC that had
+run a game first the menu program had nowhere to go — while the menu
+preview, which only reads that filesystem, kept working. From v0.212.2
+that step runs as root on Windows, the way the card build itself does,
+and hands what it installs back to you. Run by hand as an account that
+cannot install there, it now names the folder in the way and who owns it.
+
 If a multi-boot **Build** or menu preview stops with **`make: command
 not found`**, that is the one build tool nobody had put on a
 prerequisite list. The menu a multi-game card starts up into is an ARM

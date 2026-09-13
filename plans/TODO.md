@@ -6488,7 +6488,7 @@ These have each been violated at least once and each cost a run or a window:
       README "Building a multi-boot install ISO (item 116)".
 
 - [ ] **117. The JJP rig boots a multi-boot install ISO and proves the
-      choice.** `S3 D3` ← WORKING ON *(Plan §2.8. After 115; 116 and this land together —
+      choice.** `S3 D3` *(Plan §2.8. After 115; 116 and this land together —
       the rig can start from a hand-staged `sda5.raw` before the builder
       exists. Branch from and merge into `feature/jjp-multiboot` — the rule
       is in 115.)* `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO
@@ -6581,6 +6581,76 @@ These have each been violated at least once and each cost a run or a window:
       launch the rig from the tab and see the menu.
       — S3: feature. D3: a refactor across a 12.8k-line tab plus the JJP
       wiring, with one app-driven build + launch as the run.
+      **IN PROGRESS 2026-09-13 (item/118, branched from item/117's tip
+      `9ca367e` because it needs 117's rig wiring; NOT from the feature
+      branch).** ~80%: the tab builds the ISO; the stick and the launch wait
+      on hardware.
+      **Established:** `gui/multiboot_backend.py` - a frozen `MultibootBackend`
+      per platform (`STERN`, `JJP`, `backend_for()`): the builder and media
+      tool, `--card`/`--iso`, image extensions and dialog filters, the output
+      suffix (`.multi.raw`/`.multi.iso`), every "SD card"/"USB stick" word
+      (path label, size label, flash frame/tick/paragraph, the green button
+      `Build / flash card…`/`Build / make stick…`, the empty-path sentence,
+      the status-check labels `Install ISO`/`Ready for the stick`), the size
+      table (JJP adds 64G), the plan's `fits USB <N>G stick size` and
+      `iso-size` regexes, `rootA/rootB` device tokens, the selector's home
+      (`/var/tmp/jjpselect`, `make install` layout) and a NATIVE preview
+      (jjpselect draws its own `--snapshot`, no qemu, the font beside it),
+      max 2 images, no groups/compact/machine-volume/update/bypass/extract/
+      reader, root steps {selector, prepare, build, verify, inject}.
+      `MultibootForm.platform` (default `stern`) picks it in every builder;
+      `MultibootPanel(platform=)` + `set_platform()` (called from
+      `apply_manufacturer` right after the tab gate) clears the form and
+      swaps the words and the Stern-only controls (`_apply_platform_words`,
+      also at the end of `build()`); `_pk()` passes `platform=` ONLY off
+      Stern, so every Stern call the tests stub keeps its old signature -
+      the 391-test Stern tab suite is green byte for byte (one test renamed:
+      multi-boot is Spike 2 AND JJP now). `plugins/jjp/manufacturer.py`
+      `multiboot=True`; `JJPEmulatePanel.launch_iso()` is 'Run in emulator'
+      for a JJP ISO (the rig shows the menu by itself); the existing flash
+      dialog already makes a FAT32 stick from an ISO for JJP, so `flash_fn`
+      is unchanged. `tools/jjp_emu/ensurejjpselect.sh` (root) builds
+      jjpselect against the ISO's mounted root and installs it in the card
+      layout, printing both the card's and the preview's ready lines.
+      mkjjpmulti: `plan` tolerates root-owned caches (the app's plan runs as
+      the user), the installer comes out of the squashfs by a LOOP MOUNT
+      when unsquashfs is absent, the logo's ISO mount is on the Linux side.
+      Tests: `tests/test_multiboot_jjp.py` (16 pure: argv of every step,
+      the media seams auto→logo / anim auto→none / sounds auto→synth, root
+      vs user steps, the native preview, the conf tokens, the plan rows and
+      the size strip, the two-image/no-group validation, form_from_inspect
+      on the real inspect JSON), `tests/test_multiboot_jjp_panel.py` (2 Tk:
+      a JJP panel's words and hidden controls; switching both ways clears
+      the form); gui smoke 143 green; jjp emulate tab 51 green.
+      **The proof, headless through the REAL tab code (scratch
+      tab118_build.py, a JJP `MultibootPanel` on an invisible root, the two
+      GNR ISOs added by `add_image`, the default output
+      `D:\Pinball\multi\GunsNRoses-v03.03.multi.iso`, then `_build_card`):**
+      selector step `ensurejjpselect.sh` built and installed jjpselect in
+      **17 s**; media (auto art = the JJP logo of each image, synth sounds,
+      445.6 KB); plan (`stick: 16G`); build **585 s** (12.97 GB written to
+      D:); verify **PASS 33/33** (15 min - gunzip and shas of 13 GB on the
+      Windows drive); "Card built and verified", every status check ok; the
+      whole run 1501 s. **The tab's tools run in the app's own distro
+      PAD-Runtime** (`runtime.wsl_head`), not the default Ubuntu: separate
+      /var/tmp, so the first tab build restored both roots again (4 + 4 min)
+      into ITS caches; PAD-Runtime v6 has partclone/xorriso/pigz/e2fsprogs/
+      make/gcc/libc6-dev/ffmpeg but no squashfs-tools (hence the loop mount)
+      and no PIL. Memory: reference_app_runs_tools_in_pad_runtime_distro.
+      **Owed (hardware, David):** (a) the green button's stick tick on a real
+      USB stick (the JJP flash dialog's FAT32 copy of the 12.97 GB ISO); (b)
+      'Run in emulator' from the tab → the Emulate JJP tab's watch.sh, which
+      needs the GNR key (its dongle step is fatal without one; no Sentinel
+      key was connected all day); (c) a look at the tab itself in the app
+      with JJP selected (the words, the two-row list, the preview drawn by
+      the native jjpselect - not seen on a screen this pass).
+      **Resume:** open the app, pick Jersey Jack, Multi-boot: add the two
+      ISOs (or Browse… to `D:\Pinball\multi\GunsNRoses-v03.03.multi.iso`,
+      which loads it), Build / make stick… with the stick tick on a 16 GB
+      stick; plug the GNR key in and press Run in emulator (the Emulate JJP
+      tab starts the rig; the menu appears on the game window); then close
+      117 and this, merge item/118 (it carries item/117) into
+      feature/jjp-multiboot, and 119 is the machine.
 
 - [ ] **119. First GNR machine boot of a multi-boot install.** `S3 D3` *(Plan
       §2.9. After 118. David's hardware; whatever it finds is fixed on the

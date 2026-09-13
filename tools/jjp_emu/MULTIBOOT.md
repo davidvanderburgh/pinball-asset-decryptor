@@ -87,3 +87,27 @@ log's `Loaded N files (bytes)` line (the two images differ: 8.206 vs 8.864 GiB
 used), `status.sh`'s `bound_lower` ending in `/rootb`, and `grab.sh` of attract
 showing the Chaka art; then choose 0 and see stock attract. The command is
 `watch.sh` with `JJP_ISO` pointing at the multi ISO; nothing else changes.
+
+## From the app (item 118)
+
+The Multi-boot tab builds this ISO too. Pick Jersey Jack and the tab switches
+to its JJP backend (`gui/multiboot_backend.py`): the path box says
+"Multi-boot install ISO", the list takes two install ISOs (root A, root B; no
+random groups), the size strip says which USB stick they need, and the green
+button is "Build / make stick…". Its run is the selector step
+(`tools/jjp_emu/ensurejjpselect.sh` builds `jjpselect` against the first ISO's
+own root and installs it under `/var/tmp/jjpselect` in the card's layout),
+the media (`mkjjpmulti.py media`: 'auto' art is each image's own JJP logo,
+'auto' sounds are the built-in click and chime), `plan`, `build` and `verify`,
+all `mkjjpmulti.py`, the writing steps as root. The dialog's stick tick hands
+the ISO to the plugin's own FAT32 stick maker; 'Run in emulator' hands it to
+the Emulate JJP tab, whose rig shows the menu by itself.
+
+**The tab's tools run in the app's own distro, PAD-Runtime**, not the default
+one: its `/var/tmp` holds its own restores (`jjp_<slug>`), its own
+`/var/tmp/jjpselect`, its own scratch (`/var/tmp/pad_jjpmulti_work`), and it
+has no squashfs-tools, so the builder reads JJP's installer out of the live
+squashfs with a loop mount there. Proven 2026-09-13 through the real tab code
+on the GNR pair: selector 17 s, build 585 s (12.97 GB to `D:\Pinball\multi`),
+verify 33/33, "Card built and verified". The stick and the emulator launch
+from the tab wait on a USB stick and the GNR key.

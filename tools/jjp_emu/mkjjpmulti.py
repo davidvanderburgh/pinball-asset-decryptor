@@ -843,10 +843,34 @@ def patch_cfg(text):
 
 
 def unsquash_installer(squashfs, dest_dir):
-    """The stock installer out of the live squashfs -> its text."""
-    need_tools("unsquashfs")
-    _run(["unsquashfs", "-q", "-n", "-f", "-d", dest_dir, squashfs, SQ_INSTALLER])
+    """The stock installer out of the live squashfs -> its text.  unsquashfs
+    where squashfs-tools is installed; a read-only loop mount of the squashfs
+    otherwise - root, which a build is anyway - because the app's own runtime
+    distro (PAD-Runtime) ships no squashfs-tools and every JJP install ISO's
+    live system is a squashfs the kernel can mount."""
     p = os.path.join(dest_dir, SQ_INSTALLER)
+    if shutil.which("unsquashfs"):
+        _run(["unsquashfs", "-q", "-n", "-f", "-d", dest_dir, squashfs, SQ_INSTALLER])
+    elif is_root() and shutil.which("mount"):
+        mnt = tempfile.mkdtemp(prefix="mkjjpmulti_sq_")
+        try:
+            _run(["mount", "-t", "squashfs", "-o", "loop,ro", squashfs, mnt])
+            try:
+                src = os.path.join(mnt, SQ_INSTALLER)
+                if not os.path.isfile(src):
+                    raise Refused("%s carries no /%s" % (squashfs, SQ_INSTALLER))
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                shutil.copyfile(src, p)
+            finally:
+                subprocess.run(["umount", mnt], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        finally:
+            try:
+                os.rmdir(mnt)
+            except OSError:
+                pass
+    else:
+        raise Refused("no unsquashfs (apt-get install squashfs-tools) and not root, so %s cannot be "
+                      "read out of %s" % (SQ_INSTALLER, squashfs))
     if not os.path.isfile(p):
         raise Refused("%s carries no /%s" % (squashfs, SQ_INSTALLER))
     with open(p, "r", encoding="utf-8", errors="replace") as f:
@@ -1282,7 +1306,7 @@ def _budget(infos, cached1, media, used0):
 def build_iso(a):
     require_root("build")
     need_tools("partclone.ext4", "partclone.restore", "gunzip", "split", "e2fsck", "losetup", "mount", "umount",
-               "debugfs", "xorriso", "unsquashfs", "cp")
+               "debugfs", "xorriso", "cp")
     primary = os.path.abspath(a.primary)
     extras = [os.path.abspath(e) for e in a.extra]
     if len(extras) != 1:
@@ -1515,7 +1539,7 @@ def print_inspect(rep):
 # ============================================================================= verify
 def verify_iso(iso, primary=None, extra=None, quick=False, workdir=None):
     require_root("verify")
-    need_tools("mount", "umount", "gunzip", "unsquashfs", "debugfs", "xorriso")
+    need_tools("mount", "umount", "gunzip", "debugfs", "xorriso")
     iso = os.path.abspath(iso)
     if not os.path.isfile(iso):
         raise Refused("%s does not exist" % iso)
@@ -1744,7 +1768,9 @@ def jjp_logo_png(iso, out_png, cache_dir=None, work=None):
         if not is_root():
             raise Refused("%s has no restored root at %s; restore it first (a build, or tools/jjp_emu/mount.sh, "
                           "both under wsl -u root)" % (os.path.basename(iso), cache_base(iso, cache_dir)))
-        with IsoMount(iso, os.path.join(work or tempfile.gettempdir(), "mkjjpmulti_logo_iso")) as m:
+        # the ISO is mounted on the Linux side, never under the media directory
+        # (a Windows drive, on the app's runs)
+        with IsoMount(iso, tempfile.mkdtemp(prefix="mkjjpmulti_logo_")) as m:
             info = iso_info(iso, m)
             info.check_stock_shape()
             raw = cached_root_raw(iso, cache_dir, m, info)

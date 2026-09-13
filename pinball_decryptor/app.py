@@ -371,6 +371,8 @@ class App:
             on_default_presets_change=self._on_default_presets_change,
             initial_flash_choices=self._settings.get("flash_choices", {}),
             on_flash_choices_change=self._on_flash_choices_change,
+            initial_flashed_images=self._settings.get("flashed_images", []),
+            on_flashed_images_change=self._on_flashed_images_change,
         )
         # Per-picker-type last-used folders (see MainWindow.last_browse_dir).
         saved_dirs = self._settings.get("browse_dirs")
@@ -2090,6 +2092,22 @@ class App:
         self.window.reset_steps(mode="write")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        # A flash that FINISHES is recorded, so the next flash dialog knows an
+        # SD card has this image on it and ticks "Only the boot menu" for it -
+        # and for no image that never got there (PAD-145).  The identity is
+        # read now, before the write, while nothing else can change the file.
+        from .core.rawdevice import menu_identity_digest
+        try:
+            digest = menu_identity_digest(image_path)
+        except Exception:
+            digest = None       # no menu partition: nothing worth recording
+        if digest is not None:
+            def done_cb(success, summary, _done=done_cb):
+                if success and not self._cancel_requested:
+                    self.msg_queue.put(UiCallMsg(
+                        lambda: self.window._remember_flashed_image(
+                            image_path, digest=digest)))
+                _done(success, summary)
         # ``menu_only`` goes only where it was asked for: Stern's is the one
         # factory that takes it, and handed to every brand's it was a
         # TypeError out of a plain JJP USB stick (PAD-138).
@@ -5107,6 +5125,14 @@ class App:
         immediately: the dialog is opened and used between runs, so there is
         no run-completion _save_settings() for it to ride on."""
         self._settings["flash_choices"] = blob
+        self._save_settings()
+
+    def _on_flashed_images_change(self, digests):
+        """Persist the identities of the images a flash has finished writing
+        onto an SD card (PAD-145), so "Only the boot menu" is ticked for them
+        after a restart too - an hour-long flash is usually the last thing
+        done before the app is closed."""
+        self._settings["flashed_images"] = digests
         self._save_settings()
 
     def _on_default_presets_change(self, blob):

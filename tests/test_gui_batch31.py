@@ -458,14 +458,14 @@ def test_the_flash_dialog_offers_the_menu_only_write(app, monkeypatch,
                                                      tmp_path):
     """A 14.7 GB image on an ordinary card is forty minutes; its MENU is one
     partition and about a minute.  The option defaults ON for an image that
-    has one, because the run refuses a card this image was not flashed onto
-    - a wrong default costs one refusal, the other way costs the hour (David,
-    twice: "flashing the whole thing takes over an hour with my slow sd
-    card")."""
+    has one and that a flash has already put onto an SD card (David, twice:
+    "flashing the whole thing takes over an hour with my slow sd card"; the
+    never-flashed case is PAD-145's test below)."""
     _pick(app, "stern")
     img = _spike_image_for(tmp_path)
     dlg = _make_dialog(app, monkeypatch,
-                       initial_choices={"build": False, "write": True})
+                       initial_choices={"build": False, "write": True},
+                       flashed_fn=lambda i: True)
     try:
         dlg._image_var.set(img)
         dlg._sync_sections()
@@ -622,11 +622,13 @@ def test_a_card_just_built_is_written_whole(app, monkeypatch, tmp_path):
     already flashed onto, so on a fresh card the default could only cost a
     refusal - and after an update, which rewrites game files inside the
     card, it would pass its check and leave the old games on the SD card.
-    Any OTHER image picked in the box is offered it as before."""
+    Any OTHER image picked in the box is offered it as before.  (Every image
+    is "flashed" here, so the fresh card is kept off even against that.)"""
     _pick(app, "stern")
     img = _spike_image_for(tmp_path)
     dlg = _make_dialog(app, monkeypatch, initial_image=img,
-                       handed_in="Multi-boot", fresh_image=True)
+                       handed_in="Multi-boot", fresh_image=True,
+                       flashed_fn=lambda i: True)
     try:
         assert dlg._menu_var.get() is False
         assert "disabled" in dlg._menu_chk.state()
@@ -638,6 +640,121 @@ def test_a_card_just_built_is_written_whole(app, monkeypatch, tmp_path):
         assert "disabled" not in dlg._menu_chk.state()
     finally:
         dlg._dlg.destroy()
+
+
+# ---- ...and only a card an SD card already has is ticked for it (PAD-145) ---
+@pytest.mark.gui
+@gui_only
+def test_a_card_no_sd_card_has_had_is_not_ticked_for_the_menu(app, monkeypatch,
+                                                              tmp_path):
+    """"I found that 'only boot menu' was still checked off" - on a card
+    built in an EARLIER run and flashed on its own, which PAD-144's fresh
+    flag never sees (it is only set when the build runs in the same Start).
+    The tick now waits for a flash of that image to have finished; until
+    then it is offered, unticked, with a note saying why."""
+    _pick(app, "stern")
+    img = _spike_image_for(tmp_path)
+    flashed = set()
+    kw = dict(initial_image=img, handed_in="Multi-boot",
+              flashed_fn=lambda i: i in flashed)
+    dlg = _make_dialog(app, monkeypatch, **kw)
+    try:
+        assert dlg._menu_var.get() is False
+        assert "disabled" not in dlg._menu_chk.state(), "still one tick away"
+        assert "not been flashed onto an SD card" in dlg._menu_note.cget("text")
+        dlg._menu_var.set(True)
+        dlg._sync_sections()
+        assert "menu partition only" in dlg._menu_note.cget("text")
+    finally:
+        dlg._dlg.destroy()
+    # once a flash of it has finished, the next dialog ticks it again
+    flashed.add(img)
+    dlg = _make_dialog(app, monkeypatch, **kw)
+    try:
+        assert dlg._menu_var.get() is True
+        dlg._menu_var.set(False)
+        dlg._sync_sections()
+        assert "first time this image goes onto it" in \
+            dlg._menu_note.cget("text")
+    finally:
+        dlg._dlg.destroy()
+
+
+@pytest.mark.gui
+@gui_only
+def test_the_window_remembers_a_flashed_image_by_what_is_in_it(app,
+                                                              monkeypatch,
+                                                              tmp_path):
+    """The record the dialog asks: an image's identity, not its path, so a
+    menu edit keeps it and a games tree written into loses it by itself."""
+    win = app.window
+    img = _spike_image_for(tmp_path)
+    saved = []
+    monkeypatch.setattr(win, "_flashed_images", [])
+    monkeypatch.setattr(win, "_on_flashed_images_change", saved.append)
+    assert win._image_was_flashed(img) is False
+    win._remember_flashed_image(img)
+    assert win._image_was_flashed(img) is True
+    assert len(saved) == 1 and len(saved[0]) == 1
+    win._remember_flashed_image(img)
+    assert len(saved) == 1, "the same image again changes nothing"
+    raw = bytearray(open(img, "rb").read())
+    raw[16 * 512 + 100:16 * 512 + 116] = b"A DIFFERENT MENU"      # p2
+    with open(img, "wb") as f:
+        f.write(bytes(raw))
+    assert win._image_was_flashed(img) is True
+    raw[32 * 512 + 1024 + 0x30] ^= 0xFF                 # p3's s_wtime
+    with open(img, "wb") as f:
+        f.write(bytes(raw))
+    assert win._image_was_flashed(img) is False
+    # not a card with a menu: nothing to record, and no error
+    plain = tmp_path / "plain.raw"
+    plain.write_bytes(b"\x00" * 4096)
+    win._remember_flashed_image(str(plain))
+    assert len(saved) == 1
+    assert win._image_was_flashed(str(plain)) is False
+
+
+@pytest.mark.gui
+@gui_only
+def test_only_a_flash_that_finishes_is_recorded(app, monkeypatch, tmp_path):
+    """The app's side: a failed flash leaves no SD card holding the image,
+    so it must not tick the menu write next time; a finished one is saved
+    in settings, since the flash is often the last thing before closing."""
+    import queue
+    from pinball_decryptor.core.messages import UiCallMsg
+    _pick(app, "stern")
+    img = _spike_image_for(tmp_path)
+    win = app.window
+    dones = []
+
+    class _Idle:
+        def run(self):
+            pass
+    monkeypatch.setattr(
+        app._current_mfr, "make_flash_pipeline",
+        lambda i, d, log, phase, prog, done, **kw: dones.append(done)
+        or _Idle())
+    monkeypatch.setattr(win, "_flashed_images", [])
+
+    def finish(success):
+        app._start_flash_image(img, r"\\.\PHYSICALDRIVE9")
+        dones[-1](success, "summary")
+        while True:
+            try:
+                msg = app.msg_queue.get_nowait()
+            except queue.Empty:
+                break
+            if isinstance(msg, UiCallMsg):
+                msg.fn()
+        win.set_running(False, mode="write")
+        app.pipeline, app._active_mode = None, None
+
+    finish(False)
+    assert win._image_was_flashed(img) is False
+    finish(True)
+    assert win._image_was_flashed(img) is True
+    assert app._settings["flashed_images"] == win._flashed_images
 
 
 @pytest.mark.gui

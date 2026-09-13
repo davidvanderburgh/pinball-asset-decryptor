@@ -1537,6 +1537,8 @@ class MainWindow:
                  on_default_presets_change=None,
                  initial_flash_choices=None,
                  on_flash_choices_change=None,
+                 initial_flashed_images=None,
+                 on_flashed_images_change=None,
                  on_build_flash=None,
                  on_save_project=None,
                  on_load_project=None,
@@ -1617,6 +1619,14 @@ class MainWindow:
         # across plugins (Stern writes a raw SD image, JJP formats a stick).
         self._saved_flash_choices = dict(initial_flash_choices or {})
         self._on_flash_choices_change = on_flash_choices_change
+        # The images a flash has FINISHED writing onto an SD card from here,
+        # as identity digests, most recent first (see
+        # _remember_flashed_image), persisted via
+        # ``on_flashed_images_change``.  The flash dialog ticks "Only the boot
+        # menu" by default only for one of these (PAD-145).
+        self._flashed_images = [d for d in (initial_flashed_images or [])
+                                if isinstance(d, str)]
+        self._on_flashed_images_change = on_flashed_images_change
         # Recent paths per field (``{field_key: [paths, most recent first]}``)
         # backing the path boxes' dropdown history (a tester: "any text box
         # showing a file path should have a history").  Owned + persisted by
@@ -21346,7 +21356,8 @@ class MainWindow:
             initial_choices=choices,
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(k, c),
             handed_in=handed_in,
-            fresh_image=bool(handed_in and fresh))
+            fresh_image=bool(handed_in and fresh),
+            flashed_fn=self._image_was_flashed)
 
     def _open_read_card_dialog(self):
         """Open the "Save card as image…" modal (card → .raw file).
@@ -21399,6 +21410,45 @@ class MainWindow:
                 self._on_flash_choices_change(dict(self._saved_flash_choices))
             except Exception:
                 pass
+
+    #: How many flashed images are remembered: each is an SD card someone may
+    #: still write a menu onto, and a few dozen covers a drawer of them.
+    _FLASHED_IMAGES_KEPT = 32
+
+    def _remember_flashed_image(self, image_path, digest=None):
+        """Record that a flash of *image_path* finished onto an SD card.
+
+        What is kept is the image's IDENTITY (the bytes the menu-only write
+        checks the card against, :func:`core.rawdevice.menu_identity_digest`),
+        not its path.  A rebuild or an in-place update of that file changes
+        them, so a card rewritten since its flash drops out of the record by
+        itself; a menu-only change does not, and that is exactly the card the
+        menu-only write is for.  *digest* is the one read when the flash
+        started, before anything could change the file."""
+        if digest is None:
+            from ..core.rawdevice import menu_identity_digest
+            try:
+                digest = menu_identity_digest(image_path)
+            except Exception:
+                return          # no menu to write: nothing worth knowing
+        kept = [digest] + [d for d in self._flashed_images if d != digest]
+        kept = kept[:self._FLASHED_IMAGES_KEPT]
+        if kept == self._flashed_images:
+            return
+        self._flashed_images = kept
+        if self._on_flashed_images_change:
+            try:
+                self._on_flashed_images_change(list(kept))
+            except Exception:
+                pass
+
+    def _image_was_flashed(self, image_path):
+        """Has a flash of this image, as it is now, finished from here?"""
+        from ..core.rawdevice import menu_identity_digest
+        try:
+            return menu_identity_digest(image_path) in self._flashed_images
+        except Exception:
+            return False
 
     def _open_diagnose_dialog(self):
         """Open the read-only card-diagnostics modal (mfr.diagnose_card).

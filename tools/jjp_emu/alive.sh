@@ -30,15 +30,20 @@ fi
 
 # `pgrep -c` prints 0 AND exits 1 when nothing matches - capture, then default.
 GAMES=$(jjp_game_count)
+# The boot menu (jjpselect, a multi-boot image; item 117) is part of the run:
+# a rig sitting in the menu is as live as one in attract.
+SELECT=$(jjp_select_count)
 HASPLMD=$(pgrep -c -x hasplmd_x86_64 2>/dev/null); HASPLMD=${HASPLMD:-0}
 AKSUSBD=$(pgrep -c -x aksusbd_x86_64 2>/dev/null); AKSUSBD=${AKSUSBD:-0}
+LIVE=$(( GAMES + SELECT ))
 
 if [ "${1:-}" = "--total" ]; then
-    echo $(( GAMES ))
+    echo $(( LIVE ))
     exit 0
 fi
 
 echo "game            : $GAMES"
+echo "jjpselect       : $SELECT"
 echo "hasplmd         : $HASPLMD"
 echo "aksusbd         : $AKSUSBD"
 if [ "$GAMES" -gt 0 ]; then
@@ -46,4 +51,4 @@ if [ "$GAMES" -gt 0 ]; then
     ps -o pid,pgid,rss,etime,comm -C game 2>/dev/null
 fi
 echo
-echo "TOTAL GAME PROCS: $GAMES  $([ "$GAMES" = "0" ] && echo '(clean)' || echo '(LIVE)')"
+echo "TOTAL GAME PROCS: $LIVE  $([ "$LIVE" = "0" ] && echo '(clean)' || echo '(LIVE)')"

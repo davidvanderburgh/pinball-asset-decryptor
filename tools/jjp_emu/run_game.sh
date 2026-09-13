@@ -62,14 +62,43 @@ if [ "${JJP_SHIM:-0}" = "1" ]; then
     [ -n "${JJP_SHIM_DEBUG:-}" ] && SHIM_ENV="$SHIM_ENV; export JJP_SHIM_DEBUG=1"
 fi
 
+# PAD multi-boot (item 117).  JJP_SELECT is the three-way switch padpath.sh
+# documents; it rides into the chroot as an export so the RUN can read it.
+# JJP_SELECT_LOG=1 makes the hook hand the selector `--log /jjpe/temp/jjpselect.log`
+# (PADSELECT_SELECT_LOG, the same knob the hook's tests use): a scripted run
+# waits for that log's `menu:` line before it pokes a button, because a poke
+# that lands while the menu is still starting is simply lost - the first run
+# of 2026-09-13 recorded no choice for exactly that reason.
+SELECT_ENV="export JJP_SELECT='${JJP_SELECT:-}'"
+if [ -n "${JJP_SELECT_LOG:-}" ]; then
+    SELECT_ENV="$SELECT_ENV; export PADSELECT_SELECT_LOG=/jjpe/temp/jjpselect.log"
+    rm -f "$JJP_JAIL/jjpe/temp/jjpselect.log"
+fi
+
 RUN='
   export JJPEDIR='"$JJPEDIR"'
   . $JJPEDIR/setenv.sh
+  export GAMENAME
   export GAMEDIR=$JJPEDIR/$GAMENAME
   export DISPLAY='"$JJP_DISPLAY"'
   export PULSE_SERVER='"$JJP_PULSE"'
   export HOME=/root
   '"$SHIM_ENV"'
+  '"$SELECT_ENV"'
+  # PAD multi-boot (item 117): the hook root A carries on a multi-boot install
+  # (padselect.sh, item 115), run at the point the machine'"'"'s rungame.sh runs it -
+  # display up, before ./game - and in the mount namespace of THIS run (the
+  # unshare -m below), so its binds die with the run.  BEFORE the cd: a shell
+  # already sitting in $GAMEDIR would keep the old directory under the bind and
+  # ./game would be image 0 whatever the menu said.  JJP_SELECT: unset = ask the
+  # image, 1 = insist on the menu, 0 = skip it.
+  if [ "${JJP_SELECT:-}" != "0" ] && [ -x $JJPEDIR/scripts/padselect.sh ]; then
+    $JJPEDIR/scripts/padselect.sh
+  elif [ "${JJP_SELECT:-}" = "1" ]; then
+    echo "[rig] JJP_SELECT=1 but this image carries no $JJPEDIR/scripts/padselect.sh"
+    exit 9
+  fi
+  echo "[rig] game tree: $(findmnt -n -o SOURCE,OPTIONS $GAMEDIR 2>/dev/null || echo "$GAMEDIR (no bind: image 0)")"
   cd $GAMEDIR
   n=0
   while [ $n -lt '"${JJP_MAX_RESTARTS:-6}"' ]; do
@@ -137,9 +166,18 @@ report_wrong_key() {
     return 0
 }
 
+# The run gets a mount namespace of its OWN (unshare -m, private propagation):
+# the multi-boot hook bind-mounts the chosen game tree over root A's and masks
+# JJP's updater, and those mounts must vanish with the run instead of piling up
+# in the host's table where unjail.sh would have to hunt them down.  Nothing the
+# rig does from outside changes: the jail's own mounts were made in the host
+# namespace and are inherited; only what the run adds is private.  status.sh
+# asks about the bind from INSIDE the namespace (nsenter on the leader's pid).
+NS="unshare -m --propagation private"
+
 : > "$JJP_GAME_LOG"
 if [ "$DETACH" = "1" ]; then
-    setsid chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1 &
+    setsid $NS chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1 &
     echo $! > "$JJP_PID_FILE"
 
     # WATCH the first few seconds instead of a flat `sleep 3` then one check.
@@ -164,7 +202,9 @@ if [ "$DETACH" = "1" ]; then
         if report_wrong_key; then
             exit 7
         fi
-        if [ "$(jjp_game_count)" != "0" ]; then
+        # A live MENU counts as up: on a multi-boot image the run sits in
+        # jjpselect for up to the conf's timeout before a game process exists.
+        if [ "$(jjp_game_count)" != "0" ] || [ "$(jjp_select_count)" != "0" ]; then
             up=$((up + 1))
             [ "$up" -ge 2 ] && break
         else
@@ -179,13 +219,13 @@ if [ "$DETACH" = "1" ]; then
         tail -n 6 "$JJP_GAME_LOG" 2>/dev/null | sed 's/^/  game: /'
         exit 8
     fi
-    echo "launched detached; pid=$(cat "$JJP_PID_FILE") procs=$(jjp_game_count)"
+    echo "launched detached; pid=$(cat "$JJP_PID_FILE") procs=$(jjp_game_count) selector=$(jjp_select_count)"
     echo "log: $JJP_GAME_LOG"
 else
     if [ -n "$CAP" ]; then
-        setsid timeout -s KILL "$CAP" chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1
+        setsid timeout -s KILL "$CAP" $NS chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1
     else
-        setsid chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1
+        setsid $NS chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1
     fi
     rc=$?
     report_wrong_key || true

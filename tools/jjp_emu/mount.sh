@@ -56,8 +56,16 @@ mkdir -p "$BASE"
 # this can only ever be true for the one actually asked for.
 if mountpoint -q "$JJP_ROOT"; then
     echo "already mounted: $JJP_ROOT"
+    # root B of a multi-boot ISO (item 117) may have been unmounted on its own
+    # (a lazy teardown, a WSL idle-out); put it back so jail.sh finds it
+    if [ -s "$JJP_ROOTB_RAW" ] && ! mountpoint -q "$JJP_ROOTB" 2>/dev/null; then
+        mkdir -p "$JJP_ROOTB"
+        mount -o ro,loop "$JJP_ROOTB_RAW" "$JJP_ROOTB" 2>/dev/null && echo "re-mounted root B at $JJP_ROOTB"
+    fi
     echo "$JJP_BASE" > "$JJP_CURRENT"
     echo "game=$(jjp_title)"
+    echo "multiboot=$(jjp_multiboot && echo 1 || echo 0)"
+    echo "rootb=$(mountpoint -q "$JJP_ROOTB" 2>/dev/null && echo "$JJP_ROOTB" || echo none)"
     exit 0
 fi
 
@@ -70,7 +78,7 @@ if [ -r "$JJP_CURRENT" ]; then
         echo "switching image: $PREV -> $JJP_BASE"
         bash "$HERE/stop.sh" >/dev/null 2>&1
         JJP_BASE="$PREV" JJP_ROOT="$PREV/root" bash "$HERE/unjail.sh" >/dev/null 2>&1
-        for m in "$PREV/root" "$PREV/boot" "$PREV/perm" "$PREV/iso"; do
+        for m in "$PREV/root" "$PREV/rootb" "$PREV/boot" "$PREV/perm" "$PREV/iso"; do
             mountpoint -q "$m" && umount -l "$m" 2>/dev/null
         done
     fi
@@ -135,14 +143,29 @@ PY
 }
 
 restore_one sda3 "$BASE/sda3.raw" || { echo "mount.sh: sda3 is required" >&2; exit 7; }
-restore_one sda2 "$BASE/sda2.raw" || true
-restore_one sda4 "$BASE/sda4.raw" || true
+# EVERY other ext4 set the ISO carries: sda2 (/boot) and sda4 (perm) on a stock
+# ISO, and sda5 - root B, the second image - on a multi-boot install ISO
+# (mkjjpmulti.py, item 116).  Read off the image directory, not from a list, so
+# an ISO with a set this script has never seen still restores it.
+for f in "$IMG"/sda*.ext4-ptcl-img.gz.aa; do
+    [ -e "$f" ] || continue
+    part=$(basename "$f"); part=${part%%.*}
+    [ "$part" = "sda3" ] && continue
+    restore_one "$part" "$BASE/$part.raw" || true
+done
 
 mkdir -p "$JJP_ROOT" "$JJP_BOOTP" "$JJP_PERM"
 mountpoint -q "$JJP_ROOT"  || mount -o ro,loop "$BASE/sda3.raw" "$JJP_ROOT"
 [ -s "$BASE/sda2.raw" ] && { mountpoint -q "$JJP_BOOTP" || mount -o ro,loop "$BASE/sda2.raw" "$JJP_BOOTP" 2>/dev/null; }
 [ -s "$BASE/sda4.raw" ] && { mountpoint -q "$JJP_PERM"  || mount -o ro,loop "$BASE/sda4.raw" "$JJP_PERM" 2>/dev/null; }
+# Root B, read-only here too; jail.sh lays a tmpfs over it inside the jail.
+if [ -s "$JJP_ROOTB_RAW" ]; then
+    mkdir -p "$JJP_ROOTB"
+    mountpoint -q "$JJP_ROOTB" || mount -o ro,loop "$JJP_ROOTB_RAW" "$JJP_ROOTB" 2>/dev/null
+fi
 
 echo "$JJP_BASE" > "$JJP_CURRENT"
 echo "mounted: $(mount | grep -c "$JJP_BASE") filesystem(s) under $JJP_BASE"
 echo "game=$(jjp_title)"
+echo "multiboot=$(jjp_multiboot && echo 1 || echo 0)"
+echo "rootb=$(mountpoint -q "$JJP_ROOTB" 2>/dev/null && echo "$JJP_ROOTB" || echo none)"

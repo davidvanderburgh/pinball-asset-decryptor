@@ -74,3 +74,28 @@ if mountpoint -q "$JJP_ROOT"; then
     done
 fi
 echo "game=${TITLE:-${JJP_GAME}}"
+
+# PAD multi-boot (item 117): does root A carry the menu, is root B in the jail,
+# what did the menu choose, and which tree does the RUNNING game see.  The
+# hook's bind lives in the run's own mount namespace, so it is asked from inside
+# that namespace (nsenter on the leader's pid); empty = no run, or no bind =
+# image 0's own tree.
+echo "multiboot=$(jjp_multiboot && echo 1 || echo 0)"
+echo "rootb_mounted=$(mountpoint -q "$JJP_JAIL$JJP_MULTI_B" 2>/dev/null && echo 1 || echo 0)"
+echo "selector_procs=$(jjp_select_count)"
+CH=""
+[ -r "$JJP_JAIL/jjpe/temp/padselect.choice" ] && CH=$(head -c 8 "$JJP_JAIL/jjpe/temp/padselect.choice" 2>/dev/null | tr -cd '0-9')
+echo "choice=$CH"
+BOUND=""; LOWER=""
+if [ -n "$TITLE" ] && [ -r "$JJP_PID_FILE" ]; then
+    L=$(cat "$JJP_PID_FILE" 2>/dev/null)
+    if [ -n "$L" ] && [ -d "/proc/$L" ]; then
+        BOUND=$(nsenter -t "$L" -m findmnt -n -o SOURCE "$JJP_JAIL/jjpe/gen1/$TITLE" 2>/dev/null | head -1)
+        # both roots are overlays here, so the SOURCE alone reads the same for
+        # either; the lower directory names which one (…/rootb = image 1)
+        LOWER=$(nsenter -t "$L" -m findmnt -n -o OPTIONS "$JJP_JAIL/jjpe/gen1/$TITLE" 2>/dev/null | head -1 \
+                | tr ',' '\n' | sed -n 's/^lowerdir=//p' | head -1)
+    fi
+fi
+echo "bound=$BOUND"
+echo "bound_lower=$LOWER"

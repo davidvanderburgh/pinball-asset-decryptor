@@ -30,16 +30,21 @@ if [ -r "${JJP_PID_FILE:-/var/tmp/jjp_game.pid}" ]; then
 fi
 # 2. Any supervising bash that still holds a ./game loop, matched on its body.
 pkill -9 -f 'while \[ \$n -lt' 2>/dev/null
-# 3. The game processes themselves.
+# 3. The game processes themselves - and the boot menu, which on a multi-boot
+#    image is what the run is sitting in before any game process exists (item
+#    117).  It is a client of the nested Xephyr, not of WSLg, so SIGKILL leaves
+#    no ghost.
 pkill -9 -x game 2>/dev/null
+pkill -9 -x jjpselect 2>/dev/null
 sleep 1
-AFTER=$(jjp_game_count)
+AFTER=$(( $(jjp_game_count) + $(jjp_select_count) ))
 
 # Second pass for anything that was mid-fork on the first sweep.
 if [ "$AFTER" != "0" ]; then
     pkill -9 -x game 2>/dev/null
+    pkill -9 -x jjpselect 2>/dev/null
     sleep 1
-    AFTER=$(jjp_game_count)
+    AFTER=$(( $(jjp_game_count) + $(jjp_select_count) ))
 fi
 
 echo "killed $(( BEFORE - AFTER )); still running: $AFTER"

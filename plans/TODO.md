@@ -6510,6 +6510,52 @@ These have each been violated at least once and each cost a run or a window:
       JJP twin of `codeselect/DESIGN.md`), `alive.sh` 0 after.
       — S3: feature. D3: rig plumbing over known pieces, but the acceptance
       is a real two-image boot with the GNR key.
+      **IN PROGRESS 2026-09-13 (item/117 from feature/jjp-multiboot at 116's
+      close, `868cbaa`).** ~85%: everything but the key.
+      **Established (rig-proven, `tools/jjp_emu/MULTIBOOT.md` has the table):**
+      `padpath.sh` gains `JJP_ROOTB_RAW`/`JJP_ROOTB`/`JJP_OVLB`/`JJP_MULTI_B`
+      (`/jjpe/multi/b`), `JJP_SELECT`, `jjp_multiboot()`, `jjp_select_count()`;
+      `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO carries (read
+      off the image dir, not a list) and mounts root B ro at `<base>/rootb`,
+      also on its "already mounted" path; `jail.sh` overlays root B (tmpfs
+      upper `/var/tmp/jjp_ovlb`) at `$JJP_JAIL/jjpe/multi/b`, the path the hook
+      checks first; `run_game.sh` runs the RUN under `unshare -m --propagation
+      private`, executes `$JJPEDIR/scripts/padselect.sh` at rungame.sh's point
+      (display up, before ./game, BEFORE the `cd $GAMEDIR` - a shell already
+      inside the directory keeps the old one under the bind), honours
+      `JJP_SELECT` (unset ask / 1 insist, exit 9 without a hook / 0 skip), logs
+      `[rig] game tree: <findmnt SOURCE,OPTIONS>` before ./game, counts a live
+      `jjpselect` as up, and `JJP_SELECT_LOG=1` hands the selector its own log;
+      `status.sh` adds `multiboot= rootb_mounted= selector_procs= choice=
+      bound= bound_lower=` (the bind asked INSIDE the run's namespace with
+      `nsenter -t <leader> -m findmnt`); `alive.sh` counts `jjpselect`;
+      `killgame.sh` kills it; `unjail.sh` takes root B's overlay down first.
+      **The run (no key):** `mount.sh` on the 12.97 GB multi ISO restored
+      sda3+sda2+sda4+sda5 in 2 min 28 s (`multiboot=1`); root A carries the
+      menu, root B Chaka's tree (edata 5.16 GB vs 4.45 GB); choose 1 → selector
+      `chose 1`, hook `image 1: rootB - … bound over … (root B was already at
+      /jjpe/multi/b)`, game log `[rig] game tree: overlay[…]
+      lowerdir=<base>/rootb,…`, `choice=1`; choose 0 → `image 0 chosen`, `no
+      bind: image 0`; `JJP_SELECT=0` → no menu, no bind; `JJP_SELECT=1` → the
+      menu ran; the updater masked every time; the game H0007'd in every run
+      (no Sentinel key attached: `usbipd list` shows four persisted keys, none
+      connected); teardown 0 mounts, alive 0. Two overlays read alike as
+      `overlay[/jjpe/gen1/GunsNRoses]`, so the OPTIONS' `lowerdir=` is the
+      oracle (on the machine it is `/dev/sda5[...]`, unambiguous).
+      **Trap paid:** a poke that lands before the menu listens is LOST - the
+      first attempt's first run recorded no choice; scripted runs now wait for
+      the selector log's `menu:` line (`JJP_SELECT_LOG=1`).
+      **Owed - the acceptance's other half, David's hardware:** R3 WITH the GNR
+      key. **Resume:** plug the GNR key in, `usbipd attach --wsl --hardware-id
+      0529:0001`, then from the item-117 worktree `wsl -u root -- env
+      JJP_ISO=/var/tmp/jjp116/GunsNRoses-v03.03.multi.iso PAD_AUDIO=0 bash
+      tools/jjp_emu/watch.sh`; choose 1 (RIGHT, START) and read `status.sh`
+      (`bound_lower=…/rootb`), the game log's `Loaded N files` line (8.864 GiB
+      = Chaka vs 8.206), `grab.sh` of attract (Chaka art); then choose 0 →
+      stock. Record in MULTIBOOT.md, close, merge into feature/jjp-multiboot.
+      Item 118 branched from THIS branch's tip (`item/117`), not from the
+      feature branch, because 118 needs this rig wiring; when 117 closes the
+      feature branch takes both.
 
 - [ ] **118. The Multi-boot tab learns a second platform: JJP declares
       `multiboot=True` and the tab stops hard-coding Stern.** `S3 D3` *(Plan

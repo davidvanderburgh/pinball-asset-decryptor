@@ -5601,6 +5601,36 @@ def test_the_build_flash_modal_can_build_then_flash(tmp_path):
         root.destroy()
 
 
+def test_the_build_flash_modal_says_where_the_sd_card_is_picked(tmp_path):
+    """PAD-143: the flash tick names no drive, because it has none to name -
+    Start hands the card to the app's flash dialog, which is where the SD
+    card is chosen and the erase confirmed.  Said nowhere, the tick read as
+    'it will write somewhere', so the modal says it on the tick and under
+    it."""
+    root, panel, card, media = _loaded(tmp_path)
+    panel._flash_fn = lambda p: None
+    try:
+        dlg = panel._open_build_flash()
+        root.update()
+        assert "you pick which card next" in dlg._flash_chk.cget("text")
+        texts = []
+
+        def walk(w):
+            try:
+                texts.append(str(w.cget("text")))
+            except Exception:                           # noqa: BLE001
+                pass
+            for child in w.winfo_children():
+                walk(child)
+        walk(dlg.top)
+        said = " ".join(texts)
+        assert "WHICH SD CARD? You pick it in the next dialog" in said
+        assert "nothing is written to any card until" in said
+        dlg.cancel()
+    finally:
+        root.destroy()
+
+
 def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
     root, panel, card, media = _loaded(tmp_path)
     calls = _recorder(panel)

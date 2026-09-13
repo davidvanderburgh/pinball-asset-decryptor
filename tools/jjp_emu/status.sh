@@ -25,9 +25,12 @@ done
 echo "dongle_present=$KEY"
 echo "hasp_port_1947=$(bash -c 'echo > /dev/tcp/127.0.0.1/1947' 2>/dev/null && echo 1 || echo 0)"
 
-RSS=$(ps -o rss= -C game 2>/dev/null | sort -rn | head -1 | tr -d ' ')
+# LIVE games only.  A game killed by a detached run's group kill can stay a
+# zombie under WSL's relay process for hours, and `-C game` counts it: the
+# tab showed "Uptime 249:28" over a rig with no game (David, 2026-09-13).
+RSS=$(ps -o rss=,stat= -C game 2>/dev/null | awk '$2 !~ /Z/ {print $1}' | sort -rn | head -1)
 echo "game_rss_kb=${RSS:-0}"
-ET=$(ps -o etimes= -C game 2>/dev/null | sort -rn | head -1 | tr -d ' ')
+ET=$(ps -o etimes=,stat= -C game 2>/dev/null | awk '$2 !~ /Z/ {print $1}' | sort -rn | head -1)
 echo "game_uptime_s=${ET:-0}"
 echo "display=$JJP_DISPLAY"
 

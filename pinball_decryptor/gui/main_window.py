@@ -14605,7 +14605,11 @@ class MainWindow:
             iso_var=self.jjp_emulate_iso_var,
             theme_fn=lambda: self._current_theme,
             badge_fn=self._make_round_icon,
-            resize_fn=self._resize_notebook_to_current_tab)
+            resize_fn=self._resize_notebook_to_current_tab,
+            # the footer's ladder (EMULATE_PHASES_JJP), driven by the
+            # launch's own step lines and the status poll - item 118
+            footer_cb=lambda k, p=None, t="": self.set_emulate_progress(
+                k, p, t, tab="Emulate JJP"))
         self._jjp_emulate_panel.build(self._tab_jjp_emulate)
 
     def _build_spike1_emulate_tab(self):
@@ -16479,6 +16483,15 @@ class MainWindow:
     #: user's answer ("can I play now?"), not the machine's word for the
     #: screen it happens to be showing.
     EMULATE_PHASES = ("Copy card", "Boot", "Node boards", "Ready")
+    #: ...and the JJP rig's ladder (item 118).  A JJP machine has no node
+    #: bus: the rig restores the ISO's partitions, boots the jail (the key,
+    #: the boards, the display), starts the game - the multi-boot menu
+    #: first, when the image carries one - and is ready when the game is up.
+    #: David, 2026-09-13: "it's talking about node boards on a jjp screen
+    #: which isn't a thing".  Same four slots as the Stern ladder, so
+    #: set_emulate_progress's kinds (copy / boot / techalerts / run) map
+    #: onto it unchanged: the JJP panel sends them by their SLOT.
+    EMULATE_PHASES_JJP = ("Restore image", "Boot", "Game", "Ready")
 
     #: The Multi-boot tab's own stages, named so BOTH of its writing buttons
     #: read honestly on them: Build & verify walks all four (render the
@@ -16609,8 +16622,11 @@ class MainWindow:
             self._write_phases_frame.pack_forget()
             # Spike 1 EXTRACTS the game rather than copying a card, so its first
             # chip reads "Extract"; the other eras keep the default ladder.
+            # ...and the JJP rig has no node bus at all: its own ladder.
             phases = (("Extract", "Boot", "Node boards", "Ready")
-                      if text == "Emulate Spike1" else self.EMULATE_PHASES)
+                      if text == "Emulate Spike1"
+                      else self.EMULATE_PHASES_JJP if text == "Emulate JJP"
+                      else self.EMULATE_PHASES)
             if getattr(self, "_emulate_phases", None) != phases:
                 self._emulate_phases = phases
                 for w in self._emulate_phases_frame.winfo_children():

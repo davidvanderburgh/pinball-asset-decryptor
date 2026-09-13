@@ -117,7 +117,10 @@ RUN='
       # error), which falls through to the "*" case and stops - and even a true
       # loop is capped by JJP_MAX_RESTARTS.
       43|44|68) n=$((n+1)); echo "[rig] game exit $rc - restarting ($n)" ;;
-      *) exit $rc ;;
+      # SAY THE CODE.  This used to exit silently, so a game that died the
+      # moment it started left a log ending at "[rig] game tree:" and a tab
+      # saying Stopped, with nothing anywhere to say why (David, 2026-09-13).
+      *) echo "[rig] game exit $rc - not a restart code, stopping"; exit $rc ;;
     esac
   done
   echo "[rig] too many restarts; giving up"

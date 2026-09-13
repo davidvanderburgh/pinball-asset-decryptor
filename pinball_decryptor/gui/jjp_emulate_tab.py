@@ -39,6 +39,7 @@ exactly the part that was learned the hard way.
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import threading
@@ -218,14 +219,33 @@ class JJPEmulatePanel:
     #: quickly instead of showing "Checking…" for ten seconds.
     POLL_FIRST_MS = 700
 
+    #: The launch's section headers (watch.sh prints one per step) -> the
+    #: footer ladder's slot, as MainWindow.set_emulate_progress names them:
+    #: copy = the first chip (Restore image), boot = the second, techalerts =
+    #: the third (Game: the game, or the multi-boot menu before it), run =
+    #: Ready.  Item 118, David 2026-09-13: the JJP tab showed Stern's ladder
+    #: and never moved it.
+    _FOOTER_STEPS = (("== mount image ==", "copy", 0, "Restoring the image…"),
+                     ("== jail ==", "boot", None, "Booting: the jail…"),
+                     ("== dongle ==", "boot", None, "Booting: the security key…"),
+                     ("== audio ==", "boot", None, "Booting: audio…"),
+                     ("== boards ==", "boot", None, "Booting: the boards…"),
+                     ("== display ==", "boot", None, "Booting: the display…"),
+                     ("== game", "techalerts", None, "Starting the game…"))
+    #: mount.sh's restore progress: "  sda3: 40%".
+    _RESTORE_PCT = re.compile(r"^\s*(sda\d+): (\d+)%$")
+
     def __init__(self, parent, log=None, iso_var=None, theme_fn=None,
-                 badge_fn=None, resize_fn=None):
+                 badge_fn=None, resize_fn=None, footer_cb=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
         self._iso_var = iso_var
         self._theme_fn = theme_fn or (lambda: "dark")
         self._badge_fn = badge_fn
         self._resize_fn = resize_fn or (lambda: None)
+        #: MainWindow.set_emulate_progress for THIS tab, injected like the
+        #: log; None on a panel built alone (every test).
+        self._footer_cb = footer_cb
 
         self._poll_job = None
         self._poll_busy = False
@@ -268,6 +288,37 @@ class JJPEmulatePanel:
             self._timer().after(0, lambda: self._log_sink(msg))
         except (tk.TclError, RuntimeError):
             pass
+
+    def _footer(self, kind, pct=None, text=""):
+        """Move the footer's ladder, from ANY thread (the launch streams
+        from a worker; the poll applies on the main loop).  Nothing on a
+        panel built alone."""
+        cb = self._footer_cb
+        if cb is None:
+            return
+
+        def go():
+            try:
+                cb(kind, pct, text)
+            except Exception:                              # noqa: BLE001
+                pass
+        try:
+            self._timer().after(0, go)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _footer_line(self, line):
+        """One streamed launch line -> the ladder: watch.sh's step headers
+        name the slot, mount.sh's ``sdaN: 40%`` lines fill the restore's
+        bar."""
+        for head, kind, pct, text in self._FOOTER_STEPS:
+            if line.startswith(head):
+                self._footer(kind, pct, text)
+                return
+        m = self._RESTORE_PCT.match(line)
+        if m:
+            self._footer("copy", int(m.group(2)),
+                         "Restoring the image… %s %s%%" % (m.group(1), m.group(2)))
 
     def iso_path(self):
         return (self._iso_var.get() if self._iso_var is not None else "").strip()
@@ -512,6 +563,7 @@ class JJPEmulatePanel:
                 if not line:
                     continue
                 self._log("JJP: " + line)
+                self._footer_line(line)
                 verdict = key_failure(line)
                 if verdict and not saw_wrong["v"]:
                     saw_wrong["v"] = True
@@ -908,6 +960,15 @@ class JJPEmulatePanel:
             self._hint_lbl.configure(text=hint)
             if not self._busy:
                 self._go_btn.configure(text="Stop" if self._last_up else "Start")
+                # the footer's ladder follows the rig once no launch is in
+                # flight: a game up is Ready, the boot menu (a multi-boot
+                # image, item 117) is the Game slot, nothing running is idle
+                if self._last_up:
+                    self._footer("run", None, "Game running")
+                elif int(info.get("selector_procs") or 0) > 0:
+                    self._footer("techalerts", None, "Boot menu showing…")
+                else:
+                    self._footer("idle")
 
 
             def yn(k):

@@ -6699,6 +6699,30 @@ These have each been violated at least once and each cost a run or a window:
       a refusal's tail said nothing; now `-f 5 -B`. Proven on the Pirates ISO
       (3.4 GB) restored for real in the app's distro, and `restore_pieces` on
       its sda2. Memory: reference_partclone_N_is_ncurses.
+      **His second Start (15:40): "i still can't get the emulator to start
+      it"** - the launch streamed every step, the menu came up, the countdown
+      chose 0, and the log ENDED at `[rig] game tree:` with the tab saying
+      Stopped. Reproduced on the rig as he left it: `./game` exits **255 the
+      instant it starts** when `allegro5.cfg` says `driver=pulseaudio` and
+      WSLg's PulseAudio is dead ("Connection refused" on
+      `/mnt/wslg/PulseServer`; the socket file stays, `pactl info` refuses from
+      the host too - it died some time after his 12:27 run, which had played
+      on the same config). Muted (null ALSA device, no allegro5.cfg) the same
+      launch starts and runs. Fixed three ways: `audio.sh` now ASKS the
+      server from inside the jail before telling Allegro to use it, and a
+      dead one means a muted run that starts, said in two log lines (sound
+      returns after `wsl --shutdown` restarts WSLg); `run_game.sh` logs
+      `[rig] game exit N - not a restart code, stopping` instead of exiting
+      silently; `status.sh` counts only LIVE games for rss/uptime (zombies
+      under WSL's relay process gave the tab "Uptime 249:28" with no game).
+      **And the footer ladder** said Copy card / Boot / Node boards / Ready on
+      the JJP tab and never moved ("node boards on a jjp screen which isn't a
+      thing"): `EMULATE_PHASES_JJP` = Restore image / Boot / Game / Ready,
+      the JJP panel takes `footer_cb` like the other two and drives it from
+      the streamed step headers (`== mount image ==` → Restore image with the
+      `sdaN: NN%` lines as its percent, jail/key/audio/boards/display → Boot,
+      `== game` → Game) and from the poll (game up → Ready, the boot menu up
+      → Game, nothing → idle).
       **Owed (hardware, David):** (a) the green button's stick tick on a real
       USB stick (the JJP flash dialog's FAT32 copy of the 12.97 GB ISO); (b)
       'Run in emulator' from the tab → the Emulate JJP tab's watch.sh, which

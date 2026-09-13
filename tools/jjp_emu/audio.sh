@@ -69,12 +69,42 @@ else
     echo "warning: no pulse cookie at $JJP_PULSE_COOKIE - audio will be denied" >&2
 fi
 
-# 3. Tell Allegro to use PulseAudio directly rather than discovering ALSA first.
+# 3. ASK THE SERVER FIRST, from inside the jail, the way the game will.
+#    Allegro told `driver=pulseaudio` with no PulseAudio behind it does NOT
+#    fall back: the game exits 255 the instant it starts, with nothing in any
+#    log - which is how David's Start from the tab read "Stopped" for no
+#    visible reason on 2026-09-13, after WSLg's PulseAudio had died
+#    ("Connection refused" on /mnt/wslg/PulseServer; the socket file stays).
+#    A dead server therefore means a MUTED run that starts, said plainly,
+#    never a silent one that does not.
+GAMEDIR="$JJP_JAIL$JJPEDIR/$(jjp_title)"
+PROBE=$(chroot "$JJP_JAIL" /bin/bash -c "export PULSE_SERVER=$JJP_PULSE HOME=/root; pactl info 2>&1 | head -12")
+case "$PROBE" in
+    *"Server String"*) ;;                       # answered
+    *"command not found"*) echo "(no pactl inside the image - the server is not checked)" ;;
+    *)
+        cat > "$JJP_JAIL/etc/asound.conf" <<'ASOUND'
+# Written by tools/jjp_emu/audio.sh - PulseAudio did not answer, so the game
+# is MUTED: every ALSA client plays into the null device.
+pcm.!default {
+    type null
+}
+ctl.!default {
+    type null
+}
+ASOUND
+        rm -f "$GAMEDIR/allegro5.cfg"
+        echo "audio: PulseAudio is not answering at $JJP_PULSE ($(printf '%s' "$PROBE" | head -1))"
+        echo "audio: the game runs MUTED so that it starts at all; sound comes back once WSLg's"
+        echo "audio: PulseAudio is up again (wsl --shutdown from Windows restarts it - it takes the rig down too)"
+        exit 0 ;;
+esac
+
+# 4. Tell Allegro to use PulseAudio directly rather than discovering ALSA first.
 #    Allegro reads allegro5.cfg from the executable's directory.  Use the title
 #    actually mounted (jjp_title), not the JJP_GAME default - otherwise for any
 #    title but Wonka this wrote into a directory that does not exist and the
 #    audio config was silently never applied.
-GAMEDIR="$JJP_JAIL$JJPEDIR/$(jjp_title)"
 if [ -d "$GAMEDIR" ]; then
     cat > "$GAMEDIR/allegro5.cfg" <<'ACFG'
 # Written by tools/jjp_emu/audio.sh
@@ -83,9 +113,8 @@ driver=pulseaudio
 ACFG
 fi
 
-# 4. Prove it end to end rather than declaring success.
+# 5. Prove it end to end rather than declaring success.
 echo "--- pulse server, as seen from inside the jail ---"
-chroot "$JJP_JAIL" /bin/bash -c "export PULSE_SERVER=$JJP_PULSE HOME=/root; pactl info 2>&1 | head -4" \
-    || echo "(no pactl inside the image - not fatal)"
+printf '%s\n' "$PROBE" | head -4
 echo "--- aplay -l inside the jail ---"
 chroot "$JJP_JAIL" /bin/bash -c 'aplay -l 2>&1 | head -4'

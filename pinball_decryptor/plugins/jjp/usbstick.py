@@ -103,7 +103,14 @@ def _ps_elevated(script, timeout=300):
     (returncode, output) like :func:`_ps` — returncode 1 with the last
     output when the child never produced a result (declined UAC, crash).
     """
-    ipc = tempfile.mkdtemp(prefix="pad_jjp_usb_")
+    # THE CHILD'S RESULT MUST BE READABLE BY THIS (unelevated) PROCESS.  A
+    # plain mkdtemp is owner-only, and a file the ELEVATED child creates in
+    # it is owned by Administrators - so an unelevated source run formatted
+    # the stick and then died on PermissionError reading result.txt (item
+    # 119, 2026-09-13).  The Stern flash helper paid for this first; its
+    # _ipc_dir grants the user an inheritable ACE before the child exists.
+    from ...core.elevated_flash import _ipc_dir
+    ipc = _ipc_dir("pad_jjp_usb_")
     result_path = os.path.join(ipc, "result.txt")
     script_path = os.path.join(ipc, "job.ps1")
     # The elevated child's stdout is invisible to us, so the wrapper pipes
@@ -135,9 +142,16 @@ def _ps_elevated(script, timeout=300):
             time.sleep(0.2)
         if not os.path.isfile(result_path):
             return 1, "The elevated helper produced no result."
-        with open(result_path, "r", encoding="utf-8-sig",
-                  errors="replace") as f:
-            body = f.read()
+        try:
+            with open(result_path, "r", encoding="utf-8-sig",
+                      errors="replace") as f:
+                body = f.read()
+        except OSError as exc:
+            # The step may well have run: say that, rather than crash the
+            # pipeline with a traceback the person cannot act on.
+            return 1, ("The elevated helper finished, but its result could "
+                       "not be read (%s), so whether this step worked is "
+                       "unknown." % exc)
         rc = 0 if re.search(r"^RC=0\s*$", body, re.M) else 1
         body = re.sub(r"^RC=[01]\s*$", "", body, flags=re.M).strip()
         return rc, body

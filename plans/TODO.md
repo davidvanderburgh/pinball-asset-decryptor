@@ -6905,9 +6905,21 @@ These have each been violated at least once and each cost a run or a window:
       The multi ISO was re-mastered with a Joliet tree and no file changed
       (scratch remaster119.sh: file list, El Torito images and three shas
       compared; the old image kept as `GunsNRoses-v03.03.multi.nojoliet.iso`),
-      and the stick is being remade by an ELEVATED run of the pipeline (one
-      UAC prompt; scratch stickjob119.py checks exact-case names, the loader,
-      the active flag and the cfg lines on the stick).
+      and the stick was remade by an ELEVATED run of the pipeline (scratch
+      stickjob119.py, 21:13-21:38): format 7 s, 637 files / 13.0 GB copied
+      in 24 min, sizes verified, boot code installed by syslinux64 in 3 s,
+      then on the stick: `home/partimag/img/sda3.ext4-ptcl-img.gz.aa`,
+      `sda5.ext4-ptcl-img.gz.aa`/`.ag`, `live/filesystem.squashfs`,
+      `live/vmlinuz`, `jjp/pad_install.sh`, `syslinux/syslinux.cfg`,
+      `boot/grub/grub.cfg` all present with their EXACT names,
+      `syslinux/ldlinux.sys` and `EFI/boot/bootx64.efi` present, the
+      partition active, both cfgs naming pad_install.sh only; ejected.
+      RESULT ok. (The re-master's own checks cried wolf twice before that -
+      the El Torito catalog/boot LBAs move 41 sectors when Joliet is added,
+      and isolinux.bin's boot info table (bytes 8..63) is re-patched - both
+      expected; remaster119b.sh compares kinds, sizes, paths and shas
+      instead: efi.img, bootx64.efi, pad_install.sh, both cfgs and a root B
+      piece identical.)
       Memory: reference_jjp_stick_joliet_and_bootcode.
       **Resume (David, at the machine):** the remade stick and the GNR key in
       the cabinet (GNR: the USB extension cable at the front, per JJP's PDF),

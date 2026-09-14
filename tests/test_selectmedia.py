@@ -673,6 +673,10 @@ def test_art_specs_parse_stills_videos_and_frames(sm):
     assert sm.parse_art_spec("none") == {"kind": "none", "spec": "none"}
     assert sm.parse_art_spec("/x/Clip.MOV")["at"] == 0.0, "a bare video is its first frame"
     assert sm.parse_art_spec("/x/clip.mkv@0.5")["at"] == 0.5
+    # the clips PAD extracts from a JJP game (item 120): GNR's are VP9 .webm, a few .flv
+    assert sm.parse_art_spec("/v/Attract_Montage_1.webm@1") == {
+        "kind": "video", "source": "/v/Attract_Montage_1.webm", "at": 1.0, "spec": "/v/Attract_Montage_1.webm@1"}
+    assert sm.parse_art_spec("/v/intro.FLV")["kind"] == "video" and sm.is_video_path("/v/a.webm")
     assert sm.parse_art_spec("/x/logo@2x.png") == {"kind": "file", "source": "/x/logo@2x.png", "spec": "/x/logo@2x.png"}
     for bad in ("/y/still.png@3", "/x/clip.mp4@", "/x/clip.mp4@1:2", "", "@3"):
         with pytest.raises(sm.Refused):

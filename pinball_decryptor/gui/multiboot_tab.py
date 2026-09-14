@@ -319,7 +319,10 @@ _WORDS = frozenset(("auto", "none", "synth", "video frame", "menu"))
 _AUTO_IDX_RE = re.compile(r"(?i)^auto@\d+$")
 
 #: A picture taken from a video: ``--art N=<video>@<seconds>``.
-VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi")
+#: .webm and .flv (item 120): what PAD extracts from a JJP game - 629 of GNR's
+#: 648 clips are VP9 .webm - so a JJP image can play one of its own game's
+#: clips; ffmpeg reads both, and selectmedia.VIDEO_EXTS must match this.
+VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv")
 
 #: What a loop plays at until its GIF is there to read - selectmedia.py's
 #: GIF_MAX_NATIVE_FPS, the most a source's own rate is rendered at.  The
@@ -5307,7 +5310,7 @@ class ImageEditorDialog(_Modal):
 
     #: What the two file rows browse for.
     FILETYPES = {"picture": [("Pictures", "*.png *.jpg *.jpeg")],
-                 "video": [("Videos", "*.mp4 *.mov *.mkv *.avi *.gif")]}
+                 "video": [("Videos", "*.mp4 *.mov *.mkv *.avi *.webm *.flv *.gif")]}
 
     #: What a video shows, STATED rather than offered as controls (David:
     #: "remove the 'start', 'Length' and 'FPS' controls... just state [the

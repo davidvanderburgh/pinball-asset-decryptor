@@ -187,7 +187,9 @@ LOGO_CANDIDATES = ("assets/lcd/GameLogo.png",
 FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\Pinball\\images")
 PARAMS_CACHE_DIRNAME = "pinball_spike2_params"
 PARAMS_REV_TAG = ".r2"
-VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi")          # an art spec 'PATH@T' grabs a frame of these
+# an art spec 'PATH@T' grabs a frame of these.  .webm and .flv (item 120): what PAD
+# extracts from a JJP game (GNR's clips are VP9 .webm); the tab's VIDEO_EXTS matches.
+VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv")
 SIDECAR_SUFFIX = ".src.json"                            # art<N>.png.src.json / anim<N>.gif.src.json
 STILL_SIGNATURES = ((b"\x89PNG\r\n\x1a\n", "PNG"), (b"\xff\xd8\xff", "JPEG"), (b"GIF87a", "GIF"),
                     (b"GIF89a", "GIF"), (b"BM", "BMP"), (b"II*\x00", "TIFF"), (b"MM\x00*", "TIFF"))
@@ -2932,7 +2934,7 @@ def main(argv=None):
     s.add_argument("--extra", action="append", default=[])
     s.add_argument("--out", required=True)
     s.add_argument("--art", action="append", default=[], metavar="N=PATH|VIDEO@T|auto|none",
-                   help="still art per image; VIDEO@T = the frame T seconds into an mp4/mov/mkv/avi")
+                   help="still art per image; VIDEO@T = the frame T seconds into an mp4/mov/mkv/avi/webm/flv")
     s.add_argument("--anim", action="append", default=[], metavar="N=PATH|auto|none[@START[:SECONDS[:FPS]]]",
                    help="animation per image; '@START[:SECONDS[:FPS]]' overrides --start/--seconds/--fps for it")
     s.add_argument("--music", action="append", default=[],

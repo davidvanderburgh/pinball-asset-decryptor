@@ -66,6 +66,9 @@ def test_a_jjp_image_plays_a_video_file_not_an_attract_clip():
     file is a JJP image's animation.  Stern keeps every choice."""
     assert JJP.attract_clip is False and STERN.attract_clip is True
     assert [k for k, _l in mt.ImageEditorDialog.kinds_for(JJP)] == ["logo", "picture", "video", "none"]
+    # the clips PAD extracts from a JJP game are .webm (GNR: 629 of 648) - they are videos
+    assert mt.is_video(r"D:\Pinball\videos\Guns N Roses\Attract_Montage_1.webm") and mt.is_video("x.FLV")
+    assert "*.webm" in mt.ImageEditorDialog.FILETYPES["video"][0][1]
     assert mt.ImageEditorDialog.kinds_for(STERN) == mt.ImageEditorDialog.KINDS
     form = jjp_form()
     form.images[1].anim = "auto"

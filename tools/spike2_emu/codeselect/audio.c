@@ -290,6 +290,14 @@ int audio_playing(const struct audio *a, int voice)
     return a->v[voice].active;
 }
 
+int audio_playing_clip(const struct audio *a, int voice, const struct audio_clip *c)
+{
+    if (!a || !c || voice < 0 || voice >= VOICES) return 0;
+    /* a voice fading out was stopped, and one stolen since belongs to
+     * whatever clip took it */
+    return a->v[voice].active && !a->v[voice].fade_left && a->v[voice].clip == c;
+}
+
 static void mix(struct audio *a, short *out, int frames)
 {
     int i, k;

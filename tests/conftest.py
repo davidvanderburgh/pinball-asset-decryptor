@@ -264,6 +264,11 @@ def pytest_collection_modifyitems(config, items):
     # time there to take.  The lane is 4x slower on Windows than on macOS
     # because of what Windows charges per window, and the only lever left is
     # opening fewer of them -- a fixture-scope change, not a scheduling one.
+    #
+    # 2026-09-13: the Windows leg is gone from test.yml (its header says
+    # why), so CI is ubuntu + macOS.  One group stays because it has not
+    # been measured otherwise on THOSE runners; the numbers above are
+    # Windows numbers and must not be read as a macOS result.
     single_group = bool(os.environ.get("CI"))
     for item in items:
         if _touches_tk(item.path):

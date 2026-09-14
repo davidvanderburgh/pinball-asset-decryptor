@@ -1306,6 +1306,10 @@ rm -f "$RING_HOST" "$SW_HOST"
 # game's switch ids for the seconds in between. Absent is the state the panel
 # expects and polls through; wrong is the state nothing would notice.
 rm -f "$ROOT/dump/padbinds"
+# And the ball feeder's status (PAD-134): the playfield's BALLS section shows
+# its count and newest lines, and the LAST run's would read as this one's
+# until the feeder says something.
+rm -f "$ROOT/dump/padball"
 # The guest opens the LED block O_RDWR and will NOT create it, so make it here.
 # TWO pages, zeroed: the shim stamps the magic once it maps it. It was one page
 # until version 4 (padled.h), whose `seen` plane crossed 4096. The shim takes
@@ -2251,7 +2255,7 @@ fi
 # ★ OPT-IN as of 2026-08-22, off by default - David: "we no longer need the
 # 'clear alerts' function to automatically run every start up." The CHECK
 # SWITCH rows are cosmetic (autoattract walks past them regardless), the
-# playfield window's own "Clear alerts" button covers the case where they
+# playfield window's own "Clear switch alerts" button covers the case where they
 # matter, and the boot-time pass costs every run ~100 tagged edges and a
 # 12 s burst of switch pokes that lands mid-play on an attended boot -
 # autoattract stands down for an operator, this could not. PAD_SW_EXERCISE=1

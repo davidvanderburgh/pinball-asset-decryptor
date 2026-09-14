@@ -210,7 +210,7 @@ full CLI, the log lines and the test list). What it is:
   the title (shrunk to fit, wrapped to two lines when it must) and the
   subtitle (wrapped to four), the highlighted card framed amber on a lighter
   fill, a footer `LEFT / RIGHT FLIPPER: choose   START or ACTION: boot` and
-  `booting <title> in N s` (or `press START or ACTION to boot <title>` with
+  `starting <title> in N s` (or `press START or ACTION to boot <title>` with
   timeout 0) — both drop the ACTION half wherever no Action button resolved,
   and the log line quotes whichever was drawn. Every line shrinks to fit and
   is then ellipsised: `gfx_fit_px()` floors at its minimum size and returns

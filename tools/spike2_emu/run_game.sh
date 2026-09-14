@@ -273,10 +273,17 @@ if [ -n "${PAD_CARD:-}" ]; then
                     | head -1
             fi
             echo "timeout=$SEL_TIMEOUT"
-            # the card's sound and volume keys, verbatim (media= is NOT
-            # copied: the media directory is handed over with --media below).
+            # the card's sound, volume and LOOK keys, verbatim (media= and
+            # font= are NOT copied: both are paths on the card's own rootfs,
+            # and the media directory is handed over with --media below).
             # Spacing tolerated on the same rule as the image lines above.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume)[[:space:]]*=' || true
+            # ★ heading=, theme= and color_*= were missing until PAD-141: the
+            # Multi-boot tab wrote the owner's heading onto the card and this
+            # menu still read SELECT GAME CODE in the default colours, so the
+            # one place to try a card before flashing it showed a different
+            # menu from the card. An empty heading= rides along too - it is a
+            # card that asked for no line across the top at all.
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|theme|color_[a-z_]+)[[:space:]]*=' || true
         } > "$R/dump/codeselect.conf"
         echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after $SEL_TIMEOUT s"
         # THE MEDIA (item 90 v2): the card's /usr/local/codeselect/media,

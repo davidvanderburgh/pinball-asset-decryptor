@@ -141,11 +141,18 @@ STERN = MultibootBackend(
                      "itself in from the first one - or type where the card "
                      "should be written."),
     medium="SD card", medium_needed="SD card needed:", medium_holds="card holds",
-    flash_frame="Flash to an SD card", flash_tick="Write the card onto an SD card",
-    flash_detail=("Flashing the whole image erases and replaces the "
+    flash_frame="Flash to an SD card",
+    # main's words (PAD-143): the tick says where the SD card is picked
+    flash_tick="Write the card onto an SD card (you pick which card next)",
+    flash_detail=("WHICH SD CARD? You pick it in the next dialog: "
+                  "Start opens the SD-card picker the Write tab uses, "
+                  "and nothing is written to any card until you have "
+                  "chosen one there and confirmed. Tick this with the "
+                  "write above and the picker opens once that write has "
+                  "finished, so building and flashing is one step.\n\n"
+                  "Flashing the whole image erases and replaces the "
                   "whole SD card, and needs Administrator (approved "
-                  "when the write starts). Tick this with the write "
-                  "above to build and flash in one step.\n\n"
+                  "when the write starts).\n\n"
                   "CHANGED ONLY THE MENU? The next dialog offers "
                   "'Only the boot menu' - it writes the menu partition "
                   "and nothing else, which is about a minute instead of "

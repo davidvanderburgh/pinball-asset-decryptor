@@ -118,7 +118,8 @@ are those - they move the highlight and WRAP, exactly as codeselect.c's
 EV_LEFT / EV_RIGHT do (``hl = (hl + n - 1) % n`` / ``hl = (hl + 1) % n``),
 and the arrow keys do the same while the picture has the focus.  'Sound'
 plays what the menu plays, through :mod:`.preview_audio`: the highlighted
-image's music bed, the move click on every flipper press, and - from the
+image's music bed, the move click on a flipper press (never over itself,
+as on the card), and - from the
 picture's right-click menu - that image's own confirm sound, the one
 sound with no other way of being heard before a card is written.  Every
 WAV is the one media.json names, so what is heard is what the card will
@@ -2379,19 +2380,7 @@ def root_command(args, cwd=None, exe="python3"):
         return wsl_command_root(args, cwd, exe)
 
     def later(_texts):
-        home = wsl_home()
-        if not home:
-            user, root_home = wsl_account()
-            if user != "root":
-                raise RuntimeError(
-                    "cannot find your WSL home (wsl.exe -e whoami / getent "
-                    "both failed) - the card is written as root and needs it "
-                    "to find ~/spike2root; check that WSL starts, then try "
-                    "again")
-            # No override when the probe could not read root's passwd row:
-            # `wsl -u root` sets HOME itself, and that is the same account.
-            home = root_home or None
-        return wsl_command_root(args, cwd, exe, home=home)
+        return wsl_command_root(args, cwd, exe, home=_root_step_home())
     return later
 
 
@@ -2427,6 +2416,25 @@ def step_command(label, args, form, cwd=None):
     if label in backend_for(form).root_steps:
         return root_command(args, cwd)
     return wsl_command(args, cwd)
+
+
+def _root_step_home():
+    """The HOME a root step carries (see :func:`root_command`): the desktop
+    user's, or root's own on a root-default distro - ``None`` when root's
+    passwd row could not be read, because ``wsl -u root`` sets that one
+    itself.  Raises RuntimeError, in a sentence, when WSL would not say who
+    it logs in as.  On the worker only: it is two ``wsl.exe`` probes."""
+    home = wsl_home()
+    if home:
+        return home
+    user, root_home = wsl_account()
+    if user != "root":
+        raise RuntimeError(
+            "cannot find your WSL home (wsl.exe -e whoami / getent "
+            "both failed) - the card is written as root and needs it "
+            "to find ~/spike2root; check that WSL starts, then try "
+            "again")
+    return root_home or None
 
 
 def menu_card_image_path(drive):
@@ -2599,9 +2607,10 @@ def install_selector_line(selector_dir, card="", tool=ENSURESELECT, platform="st
     a second copy of it: ensurebuild.sh unpacks the guest filesystem from
     *card* when the machine has none, builds the menu program when it is
     missing, rebuilds it when this app ships newer sources, and leaves what
-    is installed alone when a rebuild is not possible.  It runs AS THE USER
-    (the build itself needs root; an installed tree owned by root is the
-    next rebuild's permission error), and it writes no card.
+    is installed alone when a rebuild is not possible.  On Windows it runs
+    AS ROOT with the desktop user's HOME (:func:`install_selector_args`,
+    PAD-140) and buildselect.sh hands what it installs back to that user,
+    so the next rebuild as the user still can.  It writes no card.
 
     A selector directory that is not a rootfs's own - only
     ``PAD_MULTIBOOT_SELECTOR`` can make one - is CHECKED and never written
@@ -2639,7 +2648,24 @@ def install_selector_line(selector_dir, card="", tool=ENSURESELECT, platform="st
 def install_selector_args(form, cwd=None):
     """The card's 'selector' step argv (see :func:`install_selector_line`).
     The primary image rides along: it is what the guest filesystem is
-    unpacked from on a machine that has never made one."""
+    unpacked from on a machine that has never made one.
+
+    AS ROOT ON WINDOWS, with the desktop user's HOME - a callable the worker
+    resolves, for :func:`root_command`'s reason (PAD-140).  This step
+    INSTALLS into the guest filesystem, and on Windows that filesystem is
+    usually root's: the Emulate tab's Start is ``wsl -u root`` and debugfs
+    unpacks as root, so anybody who had run a game once could never create
+    ``/usr/local/codeselect`` in it, and their first multi-boot build
+    stopped on coreutils' account of that failed mkdir -
+
+        install: cannot change permissions of
+        '/home/home/spike2root/usr/local/codeselect': No such file or directory
+
+    buildselect.sh hands everything it installs back to the owner of HOME,
+    so the menu program is the user's either way.  A probe that cannot say
+    who WSL logs in as degrades to the user step this used to be (the build
+    step after it says the sentence).  Linux keeps the user: nothing there
+    unpacks the filesystem as root."""
     if cwd is None:
         cwd = wsl(repo_dir())
     be = backend_for(form)
@@ -2648,7 +2674,20 @@ def install_selector_args(form, cwd=None):
                                  wsl(card) if card else "", platform=be.key)
     if "selector" in be.root_steps:
         return root_shell_line(line, cwd)
-    return wsl_shell("cd %s && %s" % (_q(cwd), line))
+    # THE STERN CARD'S STEP exactly as main runs it (PAD-140): root with the
+    # desktop user's HOME, the user step when WSL would not say who it logs
+    # in as.  install_selector_line's Stern branch is main's line unchanged.
+    line = "cd %s && %s" % (_q(cwd), line)
+    if sys.platform != "win32":
+        return wsl_shell(line)
+
+    def later(_texts):
+        try:
+            home = _root_step_home()
+        except RuntimeError:
+            return wsl_shell(line)
+        return wsl_shell_root(line, home)
+    return later
 
 
 def install_selector_commands(form, cwd=None):
@@ -5497,7 +5536,8 @@ class MenuSettingsDialog(_Modal):
         ttk.Label(g, foreground=th["gray"], wraplength=560, justify=tk.LEFT,
                   text="auto = a click and a stinger pulled from the primary "
                        "image; synth = generated tones. The move sound plays "
-                       "on every flipper press; the confirm sound plays to "
+                       "on a flipper press, never over itself, and a file is "
+                       "cut to 3 s; the confirm sound plays to "
                        "the end after START, before the game loads. "
                        + (own + " " if own else "") +
                        "Under those words, each list offers every sound "
@@ -5670,6 +5710,14 @@ class BuildFlashDialog(_Modal):
             gf, text=be.flash_tick, variable=self._flash_var,
             command=self._sync)
         self._flash_chk.pack(anchor=tk.W)
+        # IT SAYS WHERE THE CARD IS PICKED.  This tick names no drive
+        # because it has none to name: Start hands the finished card to the
+        # app's own flash dialog, and THAT is where the SD card is chosen and
+        # the erase confirmed.  A tick that said nothing about it read as
+        # 'it will write somewhere' (PAD-143: "I don't see the option to pick
+        # which drive letter so I am not sure where its actually going to
+        # end up").
+        #
         # ...AND IT NAMES THE FAST PATH, because this is where someone
         # about to wait an hour is standing (David, twice: "flashing the
         # whole thing takes over an hour with my slow sd card").  The
@@ -10132,7 +10180,9 @@ class MultibootPanel:
             return None
         return out
 
-    def _flash(self):
+    def _flash(self, fresh=False):
+        # *fresh*: the card was only just built or updated, so no SD card
+        # holds it yet and the flash dialog writes it whole (PAD-144).
         out = self._finished_card("flash")
         if out is None:
             return
@@ -10140,7 +10190,7 @@ class MultibootPanel:
             self._error("Flashing is not available from a standalone panel.")
             return
         self._ok("Flashing %s…" % out)
-        self._flash_fn(out)
+        self._flash_fn(out, fresh=fresh)
 
     def _run_emulator(self):
         out = self._finished_card("run it")
@@ -10882,17 +10932,23 @@ class MultibootPanel:
         card; a flash asked for WITH one is chained through the write's
         ``after`` hook, so a failed build never reaches an SD card."""
         self._forget_build_flash()
-        after = (lambda: self._flash()) if do_flash else None
-        if do_write:
-            action = self._write_plan()["action"]
-            if action == "apply":
-                self.apply_to_card(after=after)
-            elif action == "update":
-                self.update_card(after=after)
-            else:
-                self._build_card(after=after)
-        elif do_flash:
-            self._flash()
+        if not do_write:
+            if do_flash:
+                self._flash()
+            return
+        action = self._write_plan()["action"]
+        # A card just BUILT, or UPDATED (game files rewritten inside it), is
+        # on no SD card yet, so it reaches the flash dialog as fresh and is
+        # written whole.  An APPLY changes only the menu, which is exactly
+        # what that dialog's menu-only write is for.
+        after = ((lambda: self._flash(fresh=action != "apply"))
+                 if do_flash else None)
+        if action == "apply":
+            self.apply_to_card(after=after)
+        elif action == "update":
+            self.update_card(after=after)
+        else:
+            self._build_card(after=after)
 
     # ------------------------------------------------------------------
     # the preview

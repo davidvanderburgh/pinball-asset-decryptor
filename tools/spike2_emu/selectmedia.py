@@ -156,6 +156,13 @@ DEFAULT_VOLUME = 50
 # Where the sound defaults come from (turtles_pro 1.59 catalog; the art report):
 MOVE_IDX = 1717                 # 0.079 s stereo transient
 MOVE_MAX_SECONDS = 0.5
+#: ...and a move sound from a FILE, which had no limit at all (PAD-141: "maybe
+#: put in a physical cap on the audio so people don't shoot themselves in the
+#: foot by putting in a 30 second sample").  The selector never plays a move
+#: sound over itself, so a long one is not a pile-up any more - it is a flipper
+#: that goes quiet until the sample ends.  3 s keeps a short sting whole.
+MOVE_FILE_MAX_SECONDS = 3.0
+MOVE_FILE_FADE_MS = 150
 
 #: HOW LONG A MUSIC BED MAY BE, and why it has a limit at all.  The selector
 #: LOOPS this under a menu somebody looks at for a few seconds before pressing
@@ -1849,10 +1856,13 @@ def _card_sound(card, idx, out, max_seconds, fade_ms, synth_kind, sources, name,
     return True
 
 
-def _sound_default(spec, sources, primary, idx, max_seconds, fade_ms, synth_kind, out, log):
+def _sound_default(spec, sources, primary, idx, max_seconds, fade_ms, synth_kind, out, log,
+                   file_seconds=None, file_fade_ms=0):
     """Resolve PATH|auto|auto@IDX|synth|none for a MENU-WIDE sound into *out*; returns
     the name or None.  'auto' takes it off the primary card - the menu-wide sound is the
-    whole menu's, so it is the primary's catalog that names it."""
+    whole menu's, so it is the primary's catalog that names it.  *max_seconds* and
+    *fade_ms* shape only that card sound; *file_seconds* cuts a PATH to that long and
+    fades the cut by *file_fade_ms* (None = the file as it is)."""
     p = parse_sound_spec(spec, idx)
     name = os.path.basename(out)
     if p["kind"] == "none":
@@ -1866,8 +1876,16 @@ def _sound_default(spec, sources, primary, idx, max_seconds, fade_ms, synth_kind
         return name
     if not os.path.isfile(p["source"]):
         raise Refused("%s: %s is not a file" % (name, p["source"]))
-    normalise_wav(p["source"], out)
-    log("  %s: %s" % (name, p["source"]))
+    whole = _duration_of(p["source"]) if file_seconds else None
+    if whole and whole > file_seconds + 0.05:
+        normalise_wav(p["source"], out, file_seconds, file_fade_ms)
+        log("  %s: %s (the first %.4g s of %.4g s, faded out)"
+            % (name, p["source"], file_seconds, whole))
+    else:
+        # a length nobody could read is still cut, just not faded: a fade on
+        # a clip that was short all along would take the end off a click
+        normalise_wav(p["source"], out, file_seconds)
+        log("  %s: %s" % (name, p["source"]))
     return name
 
 
@@ -2809,7 +2827,8 @@ def cmd_prepare(a):
             say("  sounds: skipped (--visual-only)")
         else:
             move = _sound_default(a.sound_move, sources, a.primary, MOVE_IDX, MOVE_MAX_SECONDS, 0,
-                                  "click", os.path.join(out, "move.wav"), say)
+                                  "click", os.path.join(out, "move.wav"), say,
+                                  MOVE_FILE_MAX_SECONDS, MOVE_FILE_FADE_MS)
             confirm = _sound_default(confirm_wide, sources, a.primary, CONFIRM_IDX, CONFIRM_SECONDS,
                                      CONFIRM_FADE_MS, "chime", os.path.join(out, "confirm.wav"), say)
             for i, img in enumerate(images):

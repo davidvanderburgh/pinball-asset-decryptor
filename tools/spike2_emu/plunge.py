@@ -12,12 +12,13 @@ plunge tells:
           IGNORES the Start button, silently - see do_coin().
   game    coin, start, plunge, in the order that actually works. Use this.
   start   pulse the Start button (36). The game then fires the trough eject
-          itself, so run `plunge` a moment later to give it the ball. On its
-          own this does NOT start a game unless there are credits.
-  plunge  launch the ball in the shooter lane. If the lane is EMPTY it serves
-          one first (below), so at ball start it does the whole thing; if a
-          ball is already waiting - which is what ballfeed.py leaves - it only
-          launches, and never ejects a second ball the game did not ask for.
+          itself and ballfeed.py lands the ball in the shooter lane, so run
+          `plunge` a moment later to launch it. On its own this does NOT start
+          a game unless there are credits.
+  plunge  launch the ball in the shooter lane, and ONLY that (PAD-134). With
+          the lane empty it moves nothing and says why - it never takes a ball
+          out of the trough, because a ball the game did not ask for leaves the
+          machine a ball short. `serve` is the verb that ejects.
   serve   eject a ball, land it in the lane, launch it, always. What the
           TROUGH coil marker plays, because that marker IS the eject. The
           switch it OPENS is the one at the FAR end of the trough, not the
@@ -29,8 +30,9 @@ plunge tells:
   take    one ball OUT of the trough and nowhere else - the trough half of a
           plunge with no shooter lane and no launch.
 
-`drain` and `take` are what the six ball dots on the virtual playfield's
-trough panel call when you click one. Pressing the trough SWITCH cannot do
+`drain` is the virtual playfield's Drain button, and `drain` and `take` are
+what the six ball dots call on the fallback trough panel - the one drawn when
+there is no key panel to hold the buttons. Pressing the trough SWITCH cannot do
 this and never could: a press is momentary and a ball in a trough holds its
 switch closed for as long as it sits there.
   reset   put six balls back in the trough and shut the coin door - the
@@ -227,30 +229,32 @@ def _mrg(m):
 
 
 def do_plunge(m):
-    """Launch the ball in the shooter lane, serving one first if it is empty.
+    """Launch the ball in the shooter lane - and nothing else, ever.
 
-    ★ DAVID SAID TWO THINGS ON 2026-08-11 AND THEY ARE NOT IN CONFLICT; the
-    version between them was, and it is worth writing down because the middle
-    version looked like it was doing what he asked.
+    ★ LAUNCH-ONLY SINCE PAD-134's FOLLOW-UP. David, 2026-09-13: "does 'plunge'
+    feed a ball from the trough too? i can see that being confusing because it
+    does alot of things", then "yes make plunge launch-only". It had grown
+    three behaviours keyed on state nobody at the window could see: launch
+    the ball in the lane; refuse when a ball was already out; and, with every
+    ball home, eject one from the trough, land it in the lane and launch it.
 
-    First: "plunge should not be auto-ejecting a ball either (it should just
-    get the ball out of the shooter lane)." Then, on the build that took that
-    literally: "the plunge button isn't quite working as expected. it doesn't
-    seem to be doing anything now. at ball start, plunge should: eject a ball
-    into the shooter lane closing the shooter lane switch, then moments later
-    it opens the shooter lane switch."
+    That third one was the 2026-08-11 ask - "at ball start, plunge should:
+    eject a ball into the shooter lane closing the shooter lane switch, then
+    moments later it opens the shooter lane switch" - and it was right for its
+    day: no run had a ball feeder, so nothing else ever put a ball in the lane.
+    ballfeed.py is on by default now and answers the game's OWN trough eject,
+    so at ball start the ball is already waiting and this only has to launch
+    it. What serving from a full trough did instead was hand the game a ball
+    it never asked for: press Plunge in attract, or after a Start that did not
+    take for want of credits, and the machine is a ball short for ever -
+    LOCATING PINBALLS on the next Start. That is the fault the TODO records
+    against `plunge.py game`, and the PAD-134 report reached it from the
+    ball-save side (the refusal that bridged the two is folded in below).
 
-    The complaint was never "never eject". It was that a plunge with a ball
-    ALREADY in the lane ejected a SECOND one - a ball the game never asked for,
-    which is easy to do now that ballfeed.py answers the game's own eject.
-    Making it unconditional the other way turned Plunge into a button that
-    does nothing on the most ordinary press there is: ball start, empty lane,
-    no feeder running (a run from a checkout without ballfeed.py never has one
-    in the lane, and that is most runs today).
-
-    So it is conditional, which is also what the real button does: a plunger
-    launches the ball that is there, and at ball start the machine has just
-    put one there.
+    So a real plunger's rule: it launches the ball that is there. With the lane
+    empty it moves nothing and says why, and names what does put a ball there.
+    `serve` keeps the whole eject-arrive-launch story for a run with
+    PAD_BALL_FEED=0; the TROUGH coil marker on the artwork runs it.
     """
     if _held(m, SHOOTER):
         padsw.take(m, (SHOOTER,))
@@ -258,7 +262,20 @@ def do_plunge(m):
             _set(m, sw, val)
         print("shooter lane opened (ball launched)")
         return 0
-    return do_serve(m)
+    # SHORT FIRST LINE, and that is measured rather than tidy: the playfield
+    # window joins both lines into a status bar as wide as the ARTWORK (559 px
+    # on David's desk) and whatever is at the end is what gets clipped
+    # (PAD-128). So what happened leads, and why follows.
+    print("nothing in the shooter lane to launch")
+    tr = _model()
+    mrg = _mrg(m)
+    if tr.positions and not tr.full(mrg):
+        print("  trough %d/%d - a ball is in play; Drain ends it"
+              % (tr.count(mrg), len(tr.positions)))
+    else:
+        print("  the game puts one there when a ball starts (Insert coin,"
+              " Start); the TROUGH coil marker serves one by hand")
+    return 1
 
 
 def do_serve(m):
@@ -370,10 +387,11 @@ def main():
         do_coin(m, int(sys.argv[2]) if len(sys.argv) > 2 else 1)
     elif what == "game":
         # The whole "put a ball into play" story, in the order that works.
-        # PLUNGE, which is conditional: with the feeder off it serves a ball,
-        # and with the feeder on it finds the fed one already in the lane and
-        # only launches it. Either way `game` ends with one ball in play,
-        # which is the whole point of the verb.
+        # PLUNGE IS LAUNCH-ONLY (PAD-134): with the feeder on - the default -
+        # the game's own eject has landed the ball in the lane by now and this
+        # launches it; with PAD_BALL_FEED=0 nothing has, and it says so rather
+        # than inventing a ball. So a Start that did not take no longer costs
+        # the machine a ball, which was this verb's recorded fault.
         do_coin(m)
         time.sleep(1.5)
         do_start(m)

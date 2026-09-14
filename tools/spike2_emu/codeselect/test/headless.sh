@@ -282,7 +282,7 @@ snap "$T/snap_1_2.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --anim-f
 [ ! -f "$T/snap_1_2.ppm.loading.ppm" ] || { echo "headless: FAIL the snapshot wrote a LOADING frame"; exit 1; }
 pix "$T/snap_1_2.ppm" 361 262 C03040                 # card 0: its still
 pix "$T/snap_1_2.ppm" 999 262 0000FF                 # card 1 (highlighted): GIF frame 2
-band "$T/snap_1_2.ppm" 300 684 1060 722 FFC42D       # 'booting TMNT 1987 in 1 s'
+band "$T/snap_1_2.ppm" 300 684 1060 722 FFC42D       # 'starting TMNT 1987 in 1 s'
 grep -qF "snapshot: $T/snap_1_2.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 1 s, invert 0, font $FONT, media $T/media" "$T/snap.out" || {
     echo "headless: FAIL snapshot stdout line"; cat "$T/snap.out"; exit 1; }
 grep -qF ", pictures 1:899,255,200,112" "$T/snap.out" || {

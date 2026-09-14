@@ -30,11 +30,11 @@
 # that clears them. That is the honest trade: the audit persists (measured
 # godzilla run 3 -> run 4, active=0 on all 16 dumps of a boot with the
 # exerciser off), autoattract walks past the screen in ~20 s anyway, and the
-# window's own "Clear alerts" button is there for the impatient case.
+# window's own "Clear switch alerts" button is there for the impatient case.
 #
 # ★ OPT-IN as of 2026-08-22 (PAD_SW_EXERCISE=1). watch.sh no longer starts
 # this on every boot - David asked for the automatic pass to stop - so the
-# playfield window's "Clear alerts" button is the normal path now, and this
+# playfield window's "Clear switch alerts" button is the normal path now, and this
 # script's careful WHEN only matters to a run that opted back in.
 #
 # WHY IT CANNOT DISTURB autoattract.sh, checked rather than assumed - all three

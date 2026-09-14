@@ -3500,6 +3500,107 @@ These have each been violated at least once and each cost a run or a window:
       `led_insert_node()` still refuses everything outside 1/8/9, so the topper
       lamps stay dark; nobody has reported them and the artwork view does not
       draw them.
+      **★ 2026-09-11, TICKET PAD-129 — THE NINE LAMPS ARE RIGHT AND THE GAME
+      WAS NEVER IN ATTRACT.** Same reporter, next run: "I see the 9 LEDs in
+      attract mode on Jurassic Park Home Edition, but they are static and
+      don't cycle." They are static because the wire is static, and the wire
+      is static because **the machine is still on its Tech Alerts screen**.
+      Replayed off the PAD-125 captures: node 8 takes **4260 `cmd 70` writes,
+      20 indices, and not one value ever changes** after the first sweep at
+      12.6 s (`star_wars_elg`: 14241 writes, 44 indices, no change); node 12's
+      strip frames are 212 byte-identical copies; the LCD stops changing clip
+      at 12.1 s and loops one 11 s clip for the remaining 350 s; and **no
+      Service Back press happens in any of the six Home Edition runs on this
+      disk.** The clip it loops belongs to `auto_loaded/60ed7e50…`, a bundle
+      `turtles_pro` and `godzilla_pro` load too — a platform screen, not title
+      art.
+      **THE CAUSE IS OUR OWN "PAST TECH ALERTS" TEST.** `gs_past_alerts` reads
+      one line the shim prints at 30 lamp commands in 3 s, and item 79 added
+      `cmd 70` to that set for batman. A Home Edition's boot sweep and its
+      ~11/s refresh of the same twenty levels satisfy it **while the alerts
+      screen is up** — announced at 12.3 s (The Pin) and 15.2 s (SW HE) — so
+      `autoattract.sh` printed "already past Tech Alerts; nothing to do" and
+      never pressed. **It is not only the Home Editions**: replaying
+      `x1_gz.log` (godzilla_pro, three presses at 21.6/69.0/116.6 s, the third
+      one the one that took) the rate-only rule fires at **75.1 s**, 41 s
+      before the press that cleared the screen.
+      **Fixed on `ticket/PAD-129`:** the shim's announcer keeps the 30-in-3s
+      rate and adds "and a lamp changed value in the same 3 s"
+      (`led_show_gate`, `led_val`), judged against the version-4 `seen` plane
+      so a boot sweep's first write does not count as movement; a run whose
+      traffic never moves says `[led] lamp traffic with a STILL picture` once,
+      which is the Tech Alerts fingerprint. Replayed through the REAL C
+      function over every capture here that contains a boot: The Pin and SW HE
+      **never** announce (correct), batman 32.3/51.5/85.6 s across three
+      captures, godzilla 117.3 s against that run's own 118.2 s, turtles
+      182.4 s, DnD 31.6 s. `PAD_AUTO_GAP` 45 → 75 s because the surviving
+      signal can lag the press that earned it by 57.8 s (batman run3), and 45
+      sat inside that.
+      **★ THE LIVE RUN IS DONE, 2026-09-13, and it both CONFIRMS the fix and
+      finds the layer under it.** Three runs on the real card on this box:
+      | run | what happened |
+      |---|---|
+      | control (shipped shim) | `[led] light show running ... 12380 ms`, `[auto] already past Tech Alerts; nothing to do`, **no press**, window reads **9 of 50 inserts lit, LED 0.0 Hz, data 2.0 Hz** |
+      | with the gate fix | `[led] lamp traffic with a STILL picture ... 12414 ms`, `[auto] bus quiet after 14s; pressing Service Back once (2000ms)` → `past Tech Alerts after 1 press(es)`, then `[led] light show running ... and the picture is moving` at 47.8 s |
+      The LCD settles it independently: the control changed video clip **4
+      times in 362 s** (all before 12.1 s) and then looped one 11 s clip; the
+      fixed run changed clip **57 times in 160 s**. The machine is in attract.
+      **★ AND THE INSERTS STILL DO NOT CYCLE, because their show is a command
+      this shim refuses on an insert board.** In real attract, node 8 takes
+      2320 `cmd 70` writes that change NOTHING (the same nine held levels) —
+      and 329 `cmd 86` frames that the swelf grammar parses **329 of 329
+      exactly**, addressing **54 distinct lamps, which is exactly the 54 that
+      board enumerated at boot**, carrying **11169 level changes**. Node 12,
+      the half already decoded, is the control at 328 frames / 27 lamps.
+      `led_publish`'s `cmd != 0x97 && …` filter returns before the swelf
+      attempt, so on nodes 1/8/9 that family has no decoder at all.
+      **A FIRST ATTEMPT AT WIDENING THAT GATE WAS BUILT, RUN AND BACKED OUT,
+      and what it ran into is why the shipped version has three parts.** The
+      same `0x8x` frames exist on the titles that already work — replayed over
+      every capture here they parse exactly and address **100% of each board's
+      enumerated list** on godzilla_pro (56/56, 71/71), turtles_pro (64/64,
+      58/58, 19116 changes) and DnD (90/90, 78/78) — so a bare widening gives
+      those titles a second writer into `val[]`, and their movement reaches
+      this ticket's own show gate during Tech Alerts.
+      **★ THE ORACLE SETTLES WHAT THE FAMILY IS, and the answer is: the lamp
+      state.** turtles_pro's LED Tests name the lit fixture on the wire — the
+      `94/95` pair item 50 walked against the glass — so replaying both of
+      those runs and asking the swelf grammar about the same board at the same
+      moment is a check against something already trusted. **The stepped lamp
+      agrees 657 of 657 and 1522 of 1522.** It is not a coincidental parse and
+      it is not another board's data; it is the picture, seen another way, on
+      a title of the OTHER generation.
+      **★ SHIPPED, three parts, because each one is load-bearing:**
+      (1) the swelf grammar is offered an insert board's non-godzilla commands
+      **once the dialect verdict is already in** — `led_wide_settled()`, not
+      `led_wide_dialect()`, so these frames obey the verdict without voting on
+      it and every title's verdict is the one it has today;
+      (2) **the swelf layer OWNS the lamps it addresses** and `cmd 70` no
+      longer writes over one. Both layers address the same lamps on a Home
+      Edition, and on the six-minute parked capture that argument manufactured
+      **1908 "changes" out of 4260 writes** where the wire carried none. The
+      cost is the per-lamp intensity trim `cmd 70` seems to carry (The Pin
+      holds nine lamps at 4/8, 5/8, 7/8, 3/8 and full), which no rule on the
+      wire says how to combine — a lamp at the wrong brightness beats a lamp
+      flickering between two decoders;
+      (3) **the gate's movement half becomes a RATE** (`led_moving()`, 200
+      changed lamp writes in 3 s). With the show decoded, both states move:
+      parked on the alerts screen for six minutes The Pin changes **54** lamp
+      values and star_wars_elg **114**, all in one burst as the boards come
+      up, then none; in attract the same card runs **~1900 per 10 s**, and the
+      busiest 3 s window across godzilla, turtles, batman and DnD is
+      **508..1278**. 200 sits in that gap with margin on both sides.
+      **LIVE, both directions.** jurassic_park_the_pin: one press at 14 s,
+      "the picture is moving" at 48.9 s, and the window reads **23 of 50
+      inserts lit, LED 3.7 Hz** where it read 9 and 0.0 Hz. godzilla_pro as
+      the control: dialect **REFUSED (0 of 200)**, so none of (1) or (2)
+      applies to it at all, one press at 12 s, announce at 27.3 s via node 14
+      `cmd a6`, window **64 of 81 lit, LED 2.7 Hz**.
+      **STILL OPEN:** what `cmd 70`'s fractional levels mean when the swelf
+      layer is driving the same lamp. The reading that fits is a per-lamp
+      intensity trim under an on/off show, which would make the right answer
+      `trim x show` rather than either alone; nothing on the wire proves it,
+      and the LED Tests oracle can be pointed at that question too.
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the
@@ -6979,6 +7080,83 @@ These have each been violated at least once and each cost a run or a window:
       with the indicator up and gone, the mix dump's click peaks, the remembered level on
       the second launch). Then the Stern `make check` once more (the icfg fix touched
       shared code), MULTIBOOT.md's proof table, and David's GNR check.
+      *(Found on the first GNR machine boot, item 119. Branch from and merge
+      into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
+      `/finish` now follows this item, not 119.)* On David's GNR
+      (2026-09-14) the menu's move sound came a noticeable moment late and the
+      volume was very high. **Why it is loud** (read from the installed image
+      and the selector source): the menu has its OWN level - images.conf
+      `volume=` (the Multi-boot tab's default 50, range 0-100) is a software
+      gain on the mixed samples (50 = 128/256, about -6 dB) - and it plays
+      through ALSA's `default` before the game starts. JJP runs the hardware
+      chain at full (root A's `/var/lib/alsa/asound.state` holds Front,
+      Surround, Center and LFE Playback Volume 87 = 0 dB; `scripts/audio/
+      mute.pl` sets Master, PCM and Speaker to 100%) and the game turns only
+      its OWN stream down to the operator volume, so the operator setting
+      never reaches the menu. The JJP build touches no mixer (`codec_*` are
+      stubs in `stubs_jjp.c`; the Stern ctl names `backbox`/`cabinet` do not
+      exist - the rig logs `attach: No such file or directory`), and
+      `volume=machine` is Stern-only (`MultibootBackend.machine_volume` is
+      False for JJP). `selectmedia.normalise_wav` changes format, length and
+      fade but never GAIN, so a music bed peaking near 0 dBFS would reach the
+      amplifier at about -6 dBFS continuous at volume 50 and full scale at
+      100 - loud enough to annoy and to stress the speakers; the synth click
+      is written at half scale (about -12 dBFS after the gain). **Why it
+      lags:** `audio_alsa.c` opens the device with `LATENCY_US 500000` and
+      `audio_pump` keeps that buffer topped up, so a new sound joins behind up
+      to 500 ms of queued audio - a value from the Stern card's sink.
+      **To do, in one rebuild:** (1) the JJP build's ALSA buffer and lead
+      under 100 ms (a `PLATFORM=jjp` value; Stern's untouched); (2) the tab's
+      JJP default volume quiet (15-20) and a JJP cap (40), refused beyond it
+      by `mkjjpmulti.py` too; (3) every menu sound and music bed the media
+      step writes for JJP peak-levelled to one fixed target (for example -12
+      dBFS), so no source file arrives louder than planned. **Not in scope
+      unless David asks:** following the machine's own volume setting - where
+      JJP keeps it is unknown (the image's perm partition is empty until the
+      game saves) and needs a machine with saved settings to read.
+      **Added by David (2026-09-14): the menu must also follow the machine's
+      own VOLUME BUTTONS on the front, and show on screen that they react.**
+      GNR's device table names them `dswitch_plus` "Up / Volume+ Button" at
+      frame byte 1 bit 0x20 and `dswitch_minus` "Down / Volume- Button" at
+      byte 1 bit 0x40 - cabinet bytes, active low, beside the flippers
+      (`dswitch_enter` 0x10 and `dswitch_cancel` 0x80 share the byte); check
+      another title's dump before calling that platform-wide, as LEFT/RIGHT/
+      START were. The input layer already has `EV_PLUS`/`EV_MINUS` (Stern's
+      service buttons, `input_hw.c`), but `input_jjpio.c` maps only LEFT,
+      RIGHT and START, and `codeselect.c` treats PLUS/MINUS as a second
+      LEFT/RIGHT (they move the highlight) - so JJP needs its own meaning
+      without changing Stern's. **To do:** (4) `input_jjpio.c` reads the two
+      buttons (defaults from the table above, `key_plus=`/`key_minus=`
+      overrides and `--learn` like the others); (5) on JJP they step the
+      menu's volume, live, between 0 and the cap, and play the move sound at
+      the new level so each step is heard; (6) each press draws a volume
+      indicator over the menu - a bar and the number, gone about two seconds
+      after the last press - so it is obvious the buttons work even at 0;
+      (7) the level the operator sets is remembered on perm beside
+      `padselect.last` (for example `/jjpe/perm/padselect.volume`) and used at
+      the next boot, never above the cap. Assumption to confirm when this is
+      picked up: the buttons change the MENU's own remembered level, not the
+      game's operator volume (JJP's setting is still unread). The rig can
+      drive it already: the switch matrix's Up/= and Down/- keys are
+      `dswitch_plus`/`dswitch_minus`.
+      **Acceptance:** the selector's log on the rig shows the JJP ALSA
+      latency and lead under 100 ms; the tab's JJP default and cap hold
+      (tests); a media set built for JJP measures at the target peak with
+      selectmedia's own peak probe; in the rig, Up and Down during the menu
+      log each volume step, the indicator appears in a `grab.sh` capture and
+      goes away, the move sound's level follows (the selector's audio dump),
+      and the next launch starts at the remembered level; Stern's PLUS/MINUS
+      still move the highlight (tests); then on the GNR, after a reinstall
+      (which wipes settings and scores), David hears the move sound with no
+      noticeable lag at a comfortable level, and the front volume buttons
+      change it with the indicator on screen.
+      — S2: a quality defect with a speaker risk once music is used, not a
+      malfunction. D4: changes across the selector's input, drawing and audio,
+      the tab, the builder and the media step, several rig runs to prove
+      them, and the final judgement needs the machine.
+
+- [ ] **120. The JJP boot menu's sound: a safe level, no lag, and the
+      machine's own volume buttons with feedback on screen.** `S2 D4`
       *(Found on the first GNR machine boot, item 119. Branch from and merge
       into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
       `/finish` now follows this item, not 119.)* On David's GNR

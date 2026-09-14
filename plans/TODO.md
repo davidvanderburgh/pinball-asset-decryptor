@@ -7197,6 +7197,33 @@ These have each been violated at least once and each cost a run or a window:
       the tab, the builder and the media step, several rig runs to prove
       them, and the final judgement needs the machine.
 
+- [ ] **121. A JJP install stick made by the app froze on the machine at syslinux's
+      "Automatic boot in 1 second...": the stick maker installs a MIXED-build boot
+      loader.** `S1 D3` *(Found 2026-09-14 on David's GNR with item 120's stick; part of
+      the JJP multi-boot family - its `/finish` should wait on this.)* The stick sat 2+
+      minutes on the Restore menu; the item 119 stick with the same boot bytes left it in
+      a few seconds. **Established:** all 639 stick files equal the ISO's except
+      `syslinux/ldlinux.c32`; `usbstick.make_bootable_windows` runs the ISO's
+      `utils/win64/syslinux64.exe`, which embeds an upstream SYSLINUX 6.03 built with
+      Red Hat GCC 4.8.3, while the ISO's `ldlinux.c32`/`vesamenu.c32`/`libcom32.c32`/
+      `libutil.c32` are Debian GCC 6.3.0 builds - a mixed loader; the ISO's
+      `utils/linux/x64/extlinux` (and `syslinux`, which needs mtools) carry the matching
+      build. A legacy-BIOS VM (qemu, the real stick over usbipd, read-only snapshot)
+      boots BOTH the mixed and the matched stick to JJP's installer screen in 28-34 s at
+      2/4/8 GB on xHCI and EHCI, so the VM cannot reproduce the machine's hang. David's
+      stick was re-done with the matched build (`extlinux --install`, Clonezilla's
+      `mbr.bin`; backups in `C:\tmp\jjp120\bootcode_backup`). **Resume:** David boots that
+      stick on the GNR. If it leaves the menu at once, the mix is the cause: make the stick
+      maker install the ISO's own build (Rufus matches builds too) - e.g. the ISO's
+      extlinux run in WSL against the mounted stick, or no com32 module on the stick's
+      boot path - with a test that the stick's `ldlinux.c32` equals the ISO's. If it still
+      freezes, the cause is elsewhere (USB port, boot mode, the machine's firmware), and
+      the stick maker's copy order - every boot file lands after 13 GB of image pieces,
+      at ~13.2 GB - is the next thing to change. **Acceptance:** a stick made by the app's
+      own Build / make stick boots the GNR from the Restore menu to JJP's installer with
+      no stall, and the stick maker's test pins the matching build. Scripts:
+      [[reference_jjp_stick_syslinux_build_mismatch]] (memory).
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

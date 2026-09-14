@@ -4691,21 +4691,55 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 "scrap remains)." % e, "warning")
                     elif audio_patches:
                         pathA_why = _BLIP_FREE_OFF_REASON
+                    # The restore, the integrity derive and the final decode
+                    # below run over the WHOLE replaced set, changed or not,
+                    # and on a big mod they are the build's slowest stretch.
+                    # Their result depends only on the card and the exact
+                    # encoded set going in, so a set the last build already
+                    # restored and verified is replayed (_FinalAudioCache).
+                    final_cache = final_key = replayed = None
                     if (audio_patches and not pathA_applied
                             and os.environ.get(
                                 "PAD_STERN_SKIP_MASTERDIR_FIX") != "1"):
-                        t0 = time.monotonic()
-                        audio_patches = _restore_masterdir_consumed(
-                            gr_path, img_path, audio_patches, log, progress,
-                            cancel,
-                            skip_offsets=_appended_body_offsets(
-                                audio_patches, grow_places, last_only=True))
-                        if audio_patches is None:
-                            return None, None, None, None
-                        _assert_param_integrity(gr_path, img_path, audio_patches,
-                                                params, np, log, work, progress)
-                        _stage_done(log, "the master-directory restore and "
-                                    "firmware integrity check", t0)
+                        if (assets_dir and grow_places is None
+                                and os.environ.get(
+                                    "PAD_STERN_AUDIO_CACHE") != "0"):
+                            try:
+                                final_cache = _FinalAudioCache(
+                                    assets_dir, gr_path, stock_ident)
+                                final_key = final_cache.key_for(audio_patches)
+                                replayed = final_cache.load(final_key)
+                            except Exception as e:
+                                log("Audio verification cache unavailable "
+                                    "(%s); checking everything again." % e,
+                                    "info")
+                                final_cache = final_key = replayed = None
+                        if replayed is not None:
+                            audio_patches = replayed
+                            log("Audio checks: these %d re-encoded sound(s) "
+                                "are exactly the set the last build restored "
+                                "and verified, so that result is reused and "
+                                "the master-directory restore, the firmware "
+                                "integrity check and the final decode are "
+                                "skipped (PAD_STERN_AUDIO_CACHE=0 runs them "
+                                "again)." % len(replayed), "info")
+                        else:
+                            t0 = time.monotonic()
+                            audio_patches = _restore_masterdir_consumed(
+                                gr_path, img_path, audio_patches, log,
+                                progress, cancel,
+                                skip_offsets=_appended_body_offsets(
+                                    audio_patches, grow_places,
+                                    last_only=True))
+                            if audio_patches is None:
+                                return None, None, None, None
+                            _assert_param_integrity(gr_path, img_path,
+                                                    audio_patches, params, np,
+                                                    log, work, progress)
+                            _stage_done(log, "the master-directory restore "
+                                        "and firmware integrity check", t0)
+                            if final_cache is not None and not cancel():
+                                final_cache.store(final_key, audio_patches)
                     if audio_patches:
                         why = pathA_why or "see the build log"
                         if os.environ.get(
@@ -4722,8 +4756,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         # it; on by default because it's the only check that
                         # sees the restore's effect (the silent-replacement
                         # scrap).
-                        if os.environ.get(
-                                "PAD_STERN_SKIP_FINAL_VERIFY") != "1":
+                        if (replayed is None and os.environ.get(
+                                "PAD_STERN_SKIP_FINAL_VERIFY") != "1"):
                             t0 = time.monotonic()
                             try:
                                 _verify_final_patches(
@@ -5086,15 +5120,591 @@ def _apply_writes(out, writes):
         out.write(b)
 
 
+# --------------------------------------------------------------------------
+# The build record, and updating the last build in place
+# --------------------------------------------------------------------------
+#: Beside every card image a Build writes: what that build put on the card,
+#: so the next Build of the same project onto the same file can write only
+#: what changed since instead of starting over from the stock card
+#: (:func:`write_image`).  A build with no usable record beside it is built
+#: whole, as every build was before the record existed.
+BUILD_MANIFEST_SUFFIX = ".pad-build.json"
+#: Bumped when the record's shape changes; an older record is not trusted.
+BUILD_MANIFEST_VERSION = 1
+
+
+class _CannotUpdate(Exception):
+    """The build at the output can't be updated in place safely; build whole.
+    The message is the reason, in a form the log can print."""
+
+
+def build_manifest_path(output_path):
+    """Where :func:`write_image` keeps its record of the build at
+    *output_path*."""
+    return str(output_path) + BUILD_MANIFEST_SUFFIX
+
+
+def read_build_manifest(output_path):
+    """The record of the build at *output_path*, or ``{}`` — a missing,
+    half-written or unreadable record means "there is no build here to
+    update", which every caller treats as "build whole", never as an error."""
+    import json
+    try:
+        with open(_lp(build_manifest_path(output_path)),
+                  encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_build_manifest(output_path, data):
+    import json
+    path = build_manifest_path(output_path)
+    tmp = path + ".tmp"
+    with open(_lp(tmp), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(_lp(tmp), _lp(path))
+
+
+def _mark_building(output_path):
+    """Lay the stub record down before the first byte is written, so a build
+    that dies half way leaves a record that refuses to be updated over.
+    ``False`` when it couldn't be written — any old record is removed too, so
+    nothing stale can vouch for the file about to be modified."""
+    try:
+        _write_build_manifest(output_path,
+                              {"version": BUILD_MANIFEST_VERSION,
+                               "building": True})
+        return True
+    except OSError:
+        _safe_remove(build_manifest_path(output_path))
+        return False
+
+
+def _discard_output(output_path):
+    """Remove a half-prepared output and its record together."""
+    _safe_remove(output_path)
+    _safe_remove(build_manifest_path(output_path))
+
+
+def _file_stamp(path):
+    """A file's identity for the record: path, size and mtime.  Size+mtime is
+    the identity every other cache in this app keys on (the emulator's card
+    cache, the override set's card stamp)."""
+    st = os.stat(_lp(path))
+    return {"path": os.path.abspath(str(path)), "size": st.st_size,
+            "mtime_ns": st.st_mtime_ns}
+
+
+def _stamp_matches(stamp, path):
+    try:
+        cur = _file_stamp(path)
+    except OSError:
+        return False
+    stamp = stamp or {}
+    return (stamp.get("size") == cur["size"]
+            and int(stamp.get("mtime_ns") or -1) == cur["mtime_ns"])
+
+
+def build_update_reason(prev, original_path, output_path, assets_dir):
+    """``None`` when the build recorded by *prev* (the record beside
+    *output_path*, see :func:`read_build_manifest`) may be UPDATED in place
+    with this project's current edits; otherwise one sentence saying why it
+    has to be built whole instead.
+
+    All-or-nothing on purpose, like the override set's reuse test: a build is
+    only worth patching because nothing has touched it since it was written,
+    and the moment anything disagrees — the original, the project, the file,
+    the app version that wrote the record, a copy that never landed — the
+    honest answer is to start from the stock card again.
+    """
+    from ... import __version__
+    if not prev:
+        return "there is no record of a build here"
+    if prev.get("building"):
+        return "the last build here did not finish"
+    if (int(prev.get("version") or 0) != BUILD_MANIFEST_VERSION
+            or prev.get("app") != __version__):
+        return ("it was built by a different version of this app (%s)"
+                % (prev.get("app") or "unknown"))
+    if not prev.get("complete"):
+        return "the last build did not land every file"
+    stock = prev.get("stock") or {}
+    if (os.path.normcase(str(stock.get("path") or ""))
+            != os.path.normcase(os.path.abspath(str(original_path)))
+            or not _stamp_matches(stock, original_path)):
+        return ("it was built from a different original, or the original "
+                "has changed since")
+    if (os.path.normcase(os.path.abspath(str(prev.get("assets") or "")))
+            != os.path.normcase(os.path.abspath(str(assets_dir)))):
+        return "it was built from a different project folder"
+    if not _stamp_matches(prev.get("output") or {}, output_path):
+        return "the file has changed since it was built"
+    try:
+        from .multiimage import images_for_path
+        if len(images_for_path(original_path)) > 1:
+            return "a multi-boot card is built whole"
+    except Exception:
+        pass
+    return None
+
+
+def _source_digest(assets_dir, path, scratch=None):
+    """MD5 of a file a build copies onto the card whole.  Through the
+    project's size+mtime hash cache for a file that will still be there next
+    time (a staged replacement, the user's own clip on another drive); a
+    plain hash for one in this build's *scratch* space, which is gone before
+    the next build and would only litter the cache.  ``None`` when
+    unreadable."""
+    from ...core import hashcache
+    from ...core.checksums import md5_file
+    abs_path = os.path.abspath(str(path))
+    if scratch:
+        root = os.path.normcase(os.path.abspath(str(scratch))).rstrip(os.sep)
+        if os.path.normcase(abs_path).startswith(root + os.sep):
+            try:
+                return md5_file(_lp(abs_path))
+            except OSError:
+                return None
+    hc = _HASHCACHES.get(assets_dir)
+    if hc is None:
+        hc = _HASHCACHES[assets_dir] = hashcache.load(assets_dir)
+    try:
+        rel = os.path.relpath(abs_path, assets_dir).replace(os.sep, "/")
+    except ValueError:                        # another drive
+        rel = None
+    if rel is None or rel == ".." or rel.startswith("../"):
+        rel = "abs:" + os.path.normcase(abs_path).replace(os.sep, "/")
+    return hashcache.md5_for(abs_path, rel, hc)
+
+
+def _open_readers(disk_f, parts):
+    """``[(part_off, Ext4Reader), ...]`` for every ext partition in *parts*
+    that can be read, in *parts*' order (largest first, so the games
+    partition leads).  A partition the reader can't open is simply not there
+    to map."""
+    from .ext4 import Ext4Reader
+    out = []
+    for off, size in parts:
+        try:
+            out.append((int(off), Ext4Reader(disk_f, off, size)))
+        except Exception:
+            continue
+    return out
+
+
+def _file_key(part_off, path):
+    """How the record names a card file: ``"<partition offset>:/<path>"``.
+    The partition is part of the name because the boot screen lives on the
+    OS partition and the game on the games partition, at paths that could
+    coincide."""
+    return "%d:/%s" % (int(part_off), str(path).lstrip("/"))
+
+
+def _key_path(key):
+    return key.split(":", 1)[1] if ":" in key else key
+
+
+def _file_extents(reader, node):
+    """The disk ranges holding a file, ``[]`` for an empty one, ``None`` when
+    they can't be mapped (a hole, an inode the reader can't follow)."""
+    size = int(node.get("size") or 0)
+    if not size:
+        return []
+    try:
+        return [(int(d), int(n)) for d, n in reader.disk_ranges(node, 0, size)]
+    except Exception:
+        return None
+
+
+class _CardIndex:
+    """The regular files of a card, by :func:`_file_key`, walked one
+    partition at a time and only when asked: the games partition holds a few
+    hundred files and every write but a boot-screen edit; the OS partition
+    holds thousands and is walked only when something lands on it."""
+
+    def __init__(self, disk_f, parts):
+        self.parts = [(int(o), int(s)) for o, s in parts]
+        self._readers = dict(_open_readers(disk_f, self.parts))
+        self._files = {}                   # part_off -> {key: (reader, node)}
+
+    def part_files(self, part_off):
+        part_off = int(part_off)
+        if part_off not in self._files:
+            r = self._readers.get(part_off)
+            files = {}
+            if r is not None:
+                for path, _ino, node in r.iter_regular_files(min_size=1):
+                    files[_file_key(part_off, path)] = (r, node)
+            self._files[part_off] = files
+        return self._files[part_off]
+
+    def lookup(self, key):
+        """``(reader, node)`` for *key*, or ``None``."""
+        try:
+            part_off = int(key.split(":", 1)[0])
+        except (ValueError, AttributeError):
+            return None
+        return self.part_files(part_off).get(key)
+
+    def map_writes(self, writes):
+        """Group absolute-disk *writes* by the card file each lands in:
+        ``({key: (reader, node, [(file_off, bytes), ...])}, unmapped)`` —
+        *unmapped* the writes no file's extents cover.  The whole-card twin
+        of :func:`_writes_by_file`, which does one partition."""
+        by_file, unmapped = {}, list(writes)
+        for part_off, _size in self.parts:
+            if not unmapped:
+                break
+            found, unmapped = _map_writes(self.part_files(part_off), unmapped)
+            by_file.update(found)
+        return by_file, unmapped
+
+
+def _map_writes(files, writes):
+    import bisect
+    index = []
+    for key, (reader, node) in files.items():
+        runs = _file_extents(reader, node)
+        if not runs:
+            continue
+        f_off = 0
+        for disk, n in runs:
+            index.append((disk, disk + n, key, reader, node, f_off))
+            f_off += n
+    index.sort(key=lambda e: (e[0], e[1]))
+    starts = [e[0] for e in index]
+    by_file, unmapped = {}, []
+    for disk, buf in writes:
+        pos = 0
+        while pos < len(buf):
+            here = disk + pos
+            i = bisect.bisect_right(starts, here) - 1
+            if i < 0 or not (index[i][0] <= here < index[i][1]):
+                unmapped.append((disk, buf))
+                break
+            d_start, d_end, key, reader, node, f_off = index[i]
+            take = min(d_end - here, len(buf) - pos)
+            ent = by_file.setdefault(key, (reader, node, []))
+            ent[2].append((f_off + (here - d_start), buf[pos:pos + take]))
+            pos += take
+    return by_file, unmapped
+
+
+def _as_write_list(writes):
+    """The write list as ``[(disk_offset, bytes), ...]`` (a dict is accepted
+    for the stubbed tests that hand one in)."""
+    if isinstance(writes, dict):
+        return sorted(writes.items())
+    return list(writes)
+
+
+def _inplace_record(by_file):
+    """The record's in-place half: ``{key: [[file_off, n], ...]}``, ranges
+    merged, for every file this build patched in place."""
+    return {key: [[int(o), int(n)] for o, n in _merge_ranges(
+                [(off, len(buf)) for off, buf in fw])]
+            for key, (_r, _n, fw) in by_file.items()}
+
+
+def _whole_jobs(grow_plan):
+    """Every file a build copies onto the card whole, as
+    ``[(key, part_off, card_rel, source, kind), ...]`` in the order the build
+    copies them — *kind* ``"video"``, ``"bank"`` (the grown sound bank) or
+    ``"other"`` (a rebuilt game program, a re-serialised scene) on the games
+    partition, ``"boot"`` on the OS partition."""
+    out = []
+    if not grow_plan:
+        return out
+    off = grow_plan.get("offset")
+    jobs = grow_plan.get("jobs") or []
+    n_video = grow_plan.get("n_video", len(jobs))
+    audio_job = grow_plan.get("audio_job")
+    for i, (rel, src) in enumerate(jobs):
+        kind = ("video" if i < n_video
+                else "bank" if i == audio_job else "other")
+        out.append((_file_key(off, rel), int(off), rel.lstrip("/"), src,
+                    kind))
+    boot = grow_plan.get("boot") or {}
+    for rel, src in boot.get("jobs") or []:
+        out.append((_file_key(boot["offset"], rel), int(boot["offset"]),
+                    rel.lstrip("/"), src, "boot"))
+    return out
+
+
+def _whole_digests(whole, assets_dir, scratch):
+    """``{key: (digest, size)}`` for :func:`_whole_jobs`' sources — taken
+    BEFORE the copies run, since a scratch source is gone afterwards.  An
+    unreadable source maps to ``None``."""
+    out = {}
+    for key, _off, _rel, src, _kind in whole:
+        d = _source_digest(assets_dir, src, scratch)
+        try:
+            size = os.path.getsize(_lp(src))
+        except OSError:
+            size = None
+        out[key] = (d, size) if d is not None and size is not None else None
+    return out
+
+
+def _build_record(original_path, output_path, assets_dir, parts, by_file,
+                  whole_record, complete):
+    """The record :func:`write_image` leaves beside its output.  Taken LAST,
+    after every byte is on the card, because the output's stamp is what the
+    next build checks before trusting any of it."""
+    from ... import __version__
+    return {
+        "version": BUILD_MANIFEST_VERSION,
+        "app": __version__,
+        "building": False,
+        "complete": bool(complete),
+        "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "stock": _file_stamp(original_path),
+        "assets": os.path.abspath(str(assets_dir)),
+        "partitions": [[int(o), int(s)] for o, s in parts],
+        "inplace": _inplace_record(by_file),
+        "whole": dict(whole_record),
+        "output": _file_stamp(output_path),
+    }
+
+
+def _update_plan(index, parts, output_path, prev, writes, whole, digests):
+    """How the build at *output_path* (recorded in *prev*) becomes this one.
+
+    Returns ``{"by_file", "restore", "copy", "keep", "back"}``: this build's
+    in-place writes by file; the last build's in-place ranges that get the
+    stock bytes back first; the whole-file copies whose source changed (or
+    is new); the ones already on the card as they are; and the files the
+    last build replaced whole that this build does not, which get the stock
+    file back.  Raises :class:`_CannotUpdate` with the reason whenever the
+    record can't vouch for the result — the caller builds whole.
+
+    THE ONE RULE THAT MAKES IT SAFE: every in-place patch was resolved
+    through the STOCK card's extent maps, so a file patched in place — by the
+    last build or by this one — must still sit in exactly the blocks it had
+    on the stock card.  A file the last build copied whole was reallocated by
+    the filesystem driver; patching "its" stock blocks now would write into
+    whatever lives there today.
+    """
+    prev_parts = [(int(o), int(s)) for o, s in _linux_partitions(output_path)]
+    if prev_parts != [(int(o), int(s)) for o, s in parts]:
+        raise _CannotUpdate("its partition table differs from the original's")
+    by_file, unmapped = index.map_writes(writes)
+    if unmapped:
+        raise _CannotUpdate(
+            "%d of this build's patches could not be traced to a file on the "
+            "card" % len(unmapped))
+    now_whole = {}
+    for key, off, rel, src, kind in whole:
+        ent = digests.get(key)
+        if ent is None:
+            raise _CannotUpdate(
+                "%s could not be read to compare with the last build" % rel)
+        now_whole[key] = (off, rel, src, kind) + tuple(ent)
+    prev_whole = prev.get("whole") or {}
+    prev_inplace = prev.get("inplace") or {}
+    for key in by_file:
+        if key in prev_whole:
+            raise _CannotUpdate(
+                "%s was rewritten whole by the last build and is patched in "
+                "place by this one" % _key_path(key))
+    check = set(by_file) | {k for k in prev_inplace if k not in now_whole}
+    with open(_lp(output_path), "rb") as prev_f:
+        prev_index = _CardIndex(prev_f, parts)
+        for key in sorted(check):
+            stock = index.lookup(key)
+            if stock is None:
+                raise _CannotUpdate("%s is not on the original card"
+                                    % _key_path(key))
+            built = prev_index.lookup(key)
+            if built is None:
+                raise _CannotUpdate("%s is missing from the last build"
+                                    % _key_path(key))
+            s_ext = _file_extents(*stock)
+            b_ext = _file_extents(*built)
+            if (s_ext is None or b_ext is None or s_ext != b_ext
+                    or stock[1].get("size") != built[1].get("size")):
+                raise _CannotUpdate(
+                    "%s no longer sits in the blocks it had on the original "
+                    "card (the last build rewrote it whole)" % _key_path(key))
+    restore = []
+    for key, ranges in prev_inplace.items():
+        if key in now_whole:
+            continue                   # copied whole below; nothing to put back
+        restore.append((key, [(int(o), int(n)) for o, n in ranges]))
+    copy, keep = [], {}
+    for key, (off, rel, src, kind, digest, size) in now_whole.items():
+        rec = prev_whole.get(key) or {}
+        if rec.get("digest") == digest and rec.get("size") == size:
+            keep[key] = {"digest": digest, "size": size}
+        else:
+            copy.append((key, off, rel, src, kind, digest, size))
+    back = []
+    for key in sorted(prev_whole):
+        if key in now_whole:
+            continue
+        if index.lookup(key) is None:
+            raise _CannotUpdate("%s is not on the original card, so its stock "
+                                "content can't be put back" % _key_path(key))
+        back.append(key)
+    return {"by_file": by_file, "restore": restore, "copy": copy,
+            "keep": keep, "back": back}
+
+
+def _apply_update(disk_f, index, output_path, plan, writes, log, label=None):
+    """Turn the last build into this one: the last build's in-place edits
+    come out (stock bytes back over every range it patched), this build's go
+    in, then the whole-file copies whose source changed, and the stock file
+    back for anything the last build replaced whole that this one doesn't.
+
+    Returns ``(whole_record, failed)`` — the record's whole-file half as it
+    stands after the copies, and ``[(key, card_rel, kind), ...]`` for copies
+    that did not land (the caller adjusts its counts and marks the record
+    incomplete, so the next build starts from the original)."""
+    t0 = time.monotonic()
+    n_back = 0
+    with open(_lp(output_path), "r+b") as out:
+        for key, ranges in plan["restore"]:
+            reader, node = index.lookup(key)
+            for off, n in ranges:
+                for disk, m in reader.disk_ranges(node, off, n):
+                    disk_f.seek(disk)
+                    buf = disk_f.read(m)
+                    if len(buf) != m:
+                        raise OSError("the card image ended early at 0x%x"
+                                      % disk)
+                    out.seek(disk)
+                    out.write(buf)
+                    n_back += m
+        _apply_writes(out, writes)
+        out.flush()
+        os.fsync(out.fileno())
+    _stage_done(log, "writing the patched bytes into the build", t0)
+    log("Patched %.1f MB in place (%.1f MB of the last build's edits were "
+        "put back to stock first)."
+        % (sum(len(b) for _d, b in _as_write_list(writes)) / 1e6,
+           n_back / 1e6), "info")
+
+    record = dict(plan["keep"])
+    failed = []
+    if plan["keep"]:
+        log("%d file(s) copied whole by the last build are unchanged since "
+            "and stay as they are." % len(plan["keep"]), "info")
+    groups = {}            # part_off -> [(key, rel, src, kind, digest, size)]
+    for key, off, rel, src, kind, digest, size in plan["copy"]:
+        groups.setdefault(off, []).append((key, rel, src, kind, digest, size))
+    scratch = None
+    try:
+        if plan["back"]:
+            scratch = _work_dir(label, base="spike2_update_")
+            for i, key in enumerate(plan["back"]):
+                reader, node = index.lookup(key)
+                rel = _key_path(key).lstrip("/")
+                dest = os.path.join(scratch,
+                                    "%03d_%s" % (i, os.path.basename(rel)))
+                reader.extract_file(node, _lp(dest))
+                groups.setdefault(int(key.split(":", 1)[0]), []).append(
+                    (key, rel, dest, "stock", None, int(node.get("size") or 0)))
+            log("%d file(s) the last build replaced whole are no longer "
+                "replaced; the stock file goes back." % len(plan["back"]),
+                "info")
+        for off in sorted(groups):
+            jobs = groups[off]
+            t0 = time.monotonic()
+            n_ok = _grow_whole(output_path, off,
+                               [(rel, src) for _k, rel, src, *_ in jobs], log)
+            _stage_done(log, "copying %d file(s) whole onto the card"
+                        % len(jobs), t0)
+            for i, (key, rel, src, kind, digest, size) in enumerate(jobs):
+                if i < n_ok:
+                    if kind == "stock":
+                        record.pop(key, None)
+                    else:
+                        record[key] = {"digest": digest, "size": size}
+                else:
+                    failed.append((key, rel, kind))
+    finally:
+        if scratch:
+            _rmtree(scratch)
+    return record, failed
+
+
+def _report_failed_copies(failed, counts, audio_mode, log):
+    """Say which whole-file copies of an update did not land, and take them
+    out of the completion counts so the summary never claims a file the card
+    doesn't have — the full build's accounting, per kind."""
+    n_audio, n_video, n_image, n_text = counts
+    vids = [rel for _k, rel, kind in failed if kind == "video"]
+    boots = [rel for _k, rel, kind in failed if kind == "boot"]
+    stocks = [rel for _k, rel, kind in failed if kind == "stock"]
+    others = [(rel, kind) for _k, rel, kind in failed
+              if kind in ("bank", "other")]
+    if vids:
+        n_video -= len(vids)
+        log("%d replaced video(s) could NOT be written — those slots still "
+            "hold what the last build put there. Fix the issue above and run "
+            "the Write again: %s" % (len(vids), ", ".join(vids)), "error")
+    if boots:
+        n_image -= len(boots)
+        log("The replaced boot screen could NOT be copied onto the card, so "
+            "it still shows what the last build put there. Fix the issue "
+            "above and run the Write again.", "error")
+    if others:
+        log("A rebuilt game file (the game program with longer text or the "
+            "blip-free cave, a re-serialised scene, or a sound bank grown to "
+            "hold a longer callout) could NOT be written to the card: %s. Its "
+            "SD-validation record was already updated to match, so this card "
+            "will fail validation — re-run the Write."
+            % ", ".join(rel for rel, _k in others), "error")
+        if any(kind == "bank" for _r, kind in others):
+            log("The grown sound bank was one of them, so NONE of the "
+                "re-encoded sounds are on this card.", "error")
+            n_audio = 0
+        if audio_mode and audio_mode[0] == "blip-free":
+            audio_mode = ("standard", "the rebuilt blip-free firmware could "
+                          "not be copied onto the card (see the build log; "
+                          "this image will fail SD validation until rebuilt)")
+    if stocks:
+        log("%d file(s) could NOT be put back to stock and still hold what "
+            "the last build put there: %s" % (len(stocks), ", ".join(stocks)),
+            "error")
+    log("Because a copy failed, this build's record is marked incomplete and "
+        "the next build starts from the original.", "warning")
+    return (n_audio, n_video, n_image, n_text), audio_mode
+
+
 def write_image(original_path, assets_dir, output_path, log=None, progress=None,
-                cancel=None, label=None):
+                cancel=None, label=None, update=None):
     """Patch a copy of the card image at ``output_path`` with the user's edits
     (size-neutral, in place): re-encoded cat-0 audio bodies inside ``image.bin``,
     re-encoded per-song music bodies inside their ``image-scNN.bin`` banks,
     replaced LCD videos written over their original ``.asset`` files, and
     replaced UI images written over their original ``.png`` files.  Any kind of
     edit may be absent — a video/image-only write skips the firmware emulator
-    entirely."""
+    entirely.
+
+    OR UPDATE THE BUILD ALREADY THERE.  Every build leaves a record beside
+    its output (:func:`build_manifest_path`) of what it put on the card.
+    When the file at ``output_path`` is that build, untouched since, from
+    this same original and project (:func:`build_update_reason`), the card
+    image is not copied again and only what changed since goes in: the last
+    build's in-place edits are put back to the stock bytes and this build's
+    go in over them, a file copied whole last time is copied again only when
+    its source changed, and one no longer replaced gets the stock file back.
+    A modder iterating on a retheme with hundreds of replaced videos used to
+    pay for every one of them on every build (Godzilla Heisei: about two and
+    a half hours per build on the modder's machine for a few changed clips);
+    an update costs the changed clips.
+
+    ``update``: ``None`` updates when it can and builds whole otherwise (a
+    log line says which); ``True`` is the user's explicit choice to update
+    (it still falls back, loudly, when the record disagrees); ``False``
+    always builds whole.  Anything the record can't vouch for — a file the
+    last build rewrote whole that this build patches in place, a copy that
+    did not land, a partition table that moved — makes the build start over
+    from the original rather than guess (:func:`_update_plan`).
+    """
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     t_write = time.monotonic()
@@ -5111,6 +5721,19 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     dest_err = build_output.ensure_dir_for(output_path)
     if dest_err:
         raise OSError(dest_err)
+
+    # UPDATE THE LAST BUILD, OR BUILD WHOLE?  Settled before the copy starts,
+    # because the copy is the first thing an update saves.
+    prev, updating = {}, False
+    if update is not False:
+        prev = read_build_manifest(output_path)
+        why = build_update_reason(prev, original_path, output_path, assets_dir)
+        if why is None:
+            updating = True
+        elif update or prev:
+            log("Building from the original rather than updating the build "
+                "already at %s: %s." % (output_path, why),
+                "warning" if update else "info")
 
     # Copy the (unpatched) card image to the output in a BACKGROUND THREAD while
     # we compute the patches.  Computing them is CPU-bound -- the parallel cat-0
@@ -5131,121 +5754,218 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         except BaseException as e:          # surfaced to the caller after join
             copy_err.append(e)
 
-    log("Copying card image to output (in parallel with computing edits)...",
-        "info")
-    copier = threading.Thread(target=_bg_copy, name="spike2-image-copy",
-                              daemon=True)
-    copier.start()
+    def _start_copy():
+        # The stub record goes down first: from here on the file at the
+        # output is being rewritten, and nothing may take it for a build.
+        _mark_building(output_path)
+        t = threading.Thread(target=_bg_copy, name="spike2-image-copy",
+                             daemon=True)
+        t.start()
+        return t
+
+    copier = None
+    if updating:
+        log("Updating the build already at %s: the card image is not copied "
+            "again, and only what changed since it was built is written."
+            % output_path, "info")
+    else:
+        log("Copying card image to output (in parallel with computing "
+            "edits)...", "info")
+        copier = _start_copy()
 
     parts = _linux_partitions(original_path)
     disk_f = open(_lp(original_path), "rb")
+    grow_plan = None
     try:
-        writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
-            disk_f, parts, assets_dir, log, progress, cancel, label=label)
-    except BaseException:
-        copier.join()                       # let the copy finish before unlinking
-        _safe_remove(output_path)
-        raise
+        try:
+            writes, counts, grow_plan, audio_mode, valpatch_mode = \
+                _compute_patches(disk_f, parts, assets_dir, log, progress,
+                                 cancel, label=label)
+        except BaseException:
+            if copier is not None:
+                copier.join()               # let the copy finish before unlinking
+                _discard_output(output_path)
+            raise
+        if writes is None:                  # cancelled mid-compute
+            if copier is not None:
+                copier.join()
+                _discard_output(output_path)
+            return (0, 0, 0, 0), None, None
+        wlist = _as_write_list(writes)
+
+        # What this build puts on the card whole, digested BEFORE any copy
+        # runs (a scratch source is gone afterwards) and before the plan
+        # below compares it with the last build's.
+        index = _CardIndex(disk_f, parts)
+        whole = _whole_jobs(grow_plan)
+        digests = _whole_digests(whole, assets_dir,
+                                 (grow_plan or {}).get("cleanup"))
+        _save_hashcache(assets_dir)
+
+        plan = None
+        if updating:
+            try:
+                plan = _update_plan(index, parts, output_path, prev, wlist,
+                                    whole, digests)
+                if not _mark_building(output_path):
+                    raise _CannotUpdate("the build record beside the output "
+                                        "can't be written")
+            except _CannotUpdate as e:
+                log("This build can't update the last one in place (%s); "
+                    "building from the original instead." % e, "warning")
+                updating = False
+                t0 = time.monotonic()
+                log("Copying card image to output...", "info")
+                copier = _start_copy()
+                copier.join()
+                _stage_done(log, "copying the card image to the output", t0)
+        if copier is not None:
+            t0 = time.monotonic()
+            copier.join()
+            _stage_done(log, "waiting for the card-image copy to finish (the "
+                        "copy outlived the edit computation - a faster build "
+                        "drive would shorten this)", t0)
+            if copy_err:                    # the background copy itself failed
+                _discard_output(output_path)
+                # Say what was being done and where — the raw error is an errno
+                # and a path, which read as the app losing the user's card image.
+                raise OSError("Could not copy the card image to the build's "
+                              "destination:\n\n    %s\n\n%s"
+                              % (output_path, copy_err[0])) from copy_err[0]
+
+        whole_record, complete = {}, True
+        if updating:
+            whole_record, failed = _apply_update(disk_f, index, output_path,
+                                                 plan, writes, log, label=label)
+            by_file = plan["by_file"]
+            if failed:
+                complete = False
+                counts, audio_mode = _report_failed_copies(
+                    failed, counts, audio_mode, log)
+            n_audio, n_video, n_image, n_text = counts
+        else:
+            # the copy is already on disk; patch the changed bytes in place
+            t0 = time.monotonic()
+            with open(_lp(output_path), "r+b") as out:
+                _apply_writes(out, writes)
+                out.flush()
+                os.fsync(out.fileno())
+            _stage_done(log, "writing the patched bytes into the image", t0)
+            # Grow the files that outgrew their slots (oversized videos kept at
+            # full quality, and the rebuilt firmware when a blip-free build is
+            # on) by copying them in through the ext4 driver — done AFTER the
+            # in-place writes so the filesystem it mounts is already consistent.
+            t0 = time.monotonic()
+            n_grown = _grow_video_slots(output_path, grow_plan, log)
+            _stage_done(log, "copying the full-size (grown) videos into the "
+                        "card", t0)
+            n_boot_grown = _grow_boot_screen(output_path, grow_plan, log)
+            n_audio, n_video, n_image, n_text = counts
+            n_boot_jobs = len(((grow_plan or {}).get("boot") or {}).get("jobs") or ())
+            if n_boot_grown < n_boot_jobs:
+                n_image -= n_boot_jobs - n_boot_grown
+                counts = (n_audio, n_video, n_image, n_text)
+                log("The replaced boot screen could NOT be copied onto the card, so "
+                    "it still shows Stern's own. Fix the issue above and run the "
+                    "Write again.", "error")
+            n_planned = len(grow_plan["jobs"]) if grow_plan else 0
+            # The firmware job is queued last, so jobs fail from the end: anything short
+            # of the full count means the firmware didn't land, and only the remainder
+            # comes out of the video tally.
+            n_vid_jobs = grow_plan.get("n_video", n_planned) if grow_plan else 0
+            if n_grown < n_planned:
+                if n_planned > n_vid_jobs:
+                    # Serious: the .sidx record already describes the rebuilt firmware
+                    # (or re-serialised scene), so the card now claims a file it
+                    # doesn't have.
+                    log("A rebuilt game file (the game program with longer text or "
+                        "the blip-free cave, a re-serialised scene, or a sound bank "
+                        "grown to hold a longer callout) could NOT be "
+                        "written to the card. Its SD-validation record was already "
+                        "updated to match, so this card will fail validation — re-run "
+                        "the Write, or build with PAD_STERN_TEXT_GROW=0 (and "
+                        "PAD_STERN_SKIP_KEYPATCH=1 for the cave, "
+                        "PAD_STERN_AUDIO_GROW=0 for the bank) for a standard "
+                        "(size-neutral) build.", "error")
+                    aj = grow_plan.get("audio_job")
+                    if aj is not None and n_grown <= aj:
+                        log("The grown sound bank was one of them, so NONE of the "
+                            "re-encoded sounds are on this card.", "error")
+                        n_audio = 0
+                        counts = (n_audio, n_video, n_image, n_text)
+                    # The completion dialog must not claim a blip-free card either.
+                    if audio_mode and audio_mode[0] == "blip-free":
+                        audio_mode = ("standard", "the rebuilt blip-free firmware "
+                                      "could not be copied onto the card (see the "
+                                      "build log; this image will fail SD validation "
+                                      "until rebuilt)")
+                n_vid_failed = max(0, n_vid_jobs - n_grown)
+                if n_vid_failed:
+                    # The summary must not claim videos that never landed: every grow
+                    # job that failed left its slot with the STOCK content.
+                    n_video -= n_vid_failed
+                    counts = (n_audio, n_video, n_image, n_text)
+                    log("%d of %d replaced video(s) could NOT be written — those slots "
+                        "still hold the game's stock videos. Fix the issue above and "
+                        "run the Write again." % (n_vid_failed, n_vid_jobs), "error")
+            # The record of what this build put on the card, for the next one
+            # to update: every in-place write traced back to its file, every
+            # whole-file copy that landed (they land in order) with its
+            # source's digest.  A write no file covers, or a copy that did not
+            # land, leaves the record incomplete, and the next build is whole.
+            by_file, unmapped = index.map_writes(wlist)
+            games = [w for w in whole if w[4] != "boot"]
+            boots = [w for w in whole if w[4] == "boot"]
+            for key in ([w[0] for w in games[:n_grown]]
+                        + [w[0] for w in boots[:n_boot_grown]]):
+                ent = digests.get(key)
+                if ent is None:
+                    complete = False
+                else:
+                    whole_record[key] = {"digest": ent[0], "size": ent[1]}
+            complete = (complete and not unmapped
+                        and n_grown >= len(games)
+                        and n_boot_grown >= len(boots))
+        # Every write to the output is done; the driver's copies went through
+        # WSL and the timestamp they leave is theirs, so stamp the file from
+        # this side (a handle closed here guarantees the time it records)
+        # and only then take the record's stamp of it.
+        try:
+            os.utime(_lp(output_path), None)
+        except OSError:
+            pass
+        try:
+            _write_build_manifest(
+                output_path,
+                _build_record(original_path, output_path, assets_dir, parts,
+                              by_file, whole_record, complete))
+        except OSError as e:
+            log("The build's record could not be written beside it (%s), so "
+                "the next build starts from the original." % e, "info")
+        if updating:
+            log("Updated the build in %s: %s (%d sound(s), %d video(s), "
+                "%d image(s), %d display string(s)); %d file(s) copied whole, "
+                "%d unchanged since the last build, %d put back to stock."
+                % (_fmt_dur(time.monotonic() - t_write), output_path,
+                   n_audio, n_video, n_image, n_text, len(plan["copy"]),
+                   len(plan["keep"]), len(plan["back"])), "success")
+        else:
+            log("Wrote patched image in %s: %s (%d sound(s), %d video(s), "
+                "%d image(s), %d display string(s))."
+                % (_fmt_dur(time.monotonic() - t_write), output_path,
+                   n_audio, n_video, n_image, n_text), "success")
+        # Return the per-type breakdown (not just the total) so the completion
+        # dialog can name what actually changed instead of always saying
+        # "sound(s)", plus the audio build mode so it can say whether the card
+        # is blip-free or keeps the original-sound scrap (a fallback was
+        # invisible outside the log), and the validator status so it can say
+        # when the card will fail Stern's SD-card validation on the machine.
+        return counts, audio_mode, valpatch_mode
     finally:
         disk_f.close()
-
-    t0 = time.monotonic()
-    copier.join()
-    _stage_done(log, "waiting for the card-image copy to finish (the copy "
-                "outlived the edit computation - a faster build drive would "
-                "shorten this)", t0)
-    if copy_err:                            # the background copy itself failed
-        _safe_remove(output_path)
-        # Say what was being done and where — the raw error is an errno and a
-        # path, which read as the app losing the user's card image.
-        raise OSError("Could not copy the card image to the build's "
-                      "destination:\n\n    %s\n\n%s"
-                      % (output_path, copy_err[0])) from copy_err[0]
-    if writes is None:                      # cancelled mid-compute
-        _safe_remove(output_path)
-        _rmtree_grow_plan(grow_plan)
-        return (0, 0, 0, 0), None, None
-
-    try:
-        # the copy is already on disk; patch the changed bytes in place
-        t0 = time.monotonic()
-        with open(_lp(output_path), "r+b") as out:
-            _apply_writes(out, writes)
-            out.flush()
-            os.fsync(out.fileno())
-        _stage_done(log, "writing the patched bytes into the image", t0)
-        # Grow the files that outgrew their slots (oversized videos kept at full
-        # quality, and the rebuilt firmware when a blip-free build is on) by
-        # copying them in through the ext4 driver — done AFTER the in-place
-        # writes so the filesystem it mounts is already consistent.
-        t0 = time.monotonic()
-        n_grown = _grow_video_slots(output_path, grow_plan, log)
-        _stage_done(log, "copying the full-size (grown) videos into the card",
-                    t0)
-        n_boot_grown = _grow_boot_screen(output_path, grow_plan, log)
-    finally:
         # The rebuilt firmware has been copied onto the card (or has failed to
         # be); either way its scratch dir is ours to remove now.
         _rmtree_grow_plan(grow_plan)
-    n_audio, n_video, n_image, n_text = counts
-    n_boot_jobs = len(((grow_plan or {}).get("boot") or {}).get("jobs") or ())
-    if n_boot_grown < n_boot_jobs:
-        n_image -= n_boot_jobs - n_boot_grown
-        counts = (n_audio, n_video, n_image, n_text)
-        log("The replaced boot screen could NOT be copied onto the card, so "
-            "it still shows Stern's own. Fix the issue above and run the "
-            "Write again.", "error")
-    n_planned = len(grow_plan["jobs"]) if grow_plan else 0
-    # The firmware job is queued last, so jobs fail from the end: anything short
-    # of the full count means the firmware didn't land, and only the remainder
-    # comes out of the video tally.
-    n_vid_jobs = grow_plan.get("n_video", n_planned) if grow_plan else 0
-    if n_grown < n_planned:
-        if n_planned > n_vid_jobs:
-            # Serious: the .sidx record already describes the rebuilt firmware
-            # (or re-serialised scene), so the card now claims a file it
-            # doesn't have.
-            log("A rebuilt game file (the game program with longer text or "
-                "the blip-free cave, a re-serialised scene, or a sound bank "
-                "grown to hold a longer callout) could NOT be "
-                "written to the card. Its SD-validation record was already "
-                "updated to match, so this card will fail validation — re-run "
-                "the Write, or build with PAD_STERN_TEXT_GROW=0 (and "
-                "PAD_STERN_SKIP_KEYPATCH=1 for the cave, "
-                "PAD_STERN_AUDIO_GROW=0 for the bank) for a standard "
-                "(size-neutral) build.", "error")
-            aj = grow_plan.get("audio_job")
-            if aj is not None and n_grown <= aj:
-                log("The grown sound bank was one of them, so NONE of the "
-                    "re-encoded sounds are on this card.", "error")
-                n_audio = 0
-                counts = (n_audio, n_video, n_image, n_text)
-            # The completion dialog must not claim a blip-free card either.
-            if audio_mode and audio_mode[0] == "blip-free":
-                audio_mode = ("standard", "the rebuilt blip-free firmware "
-                              "could not be copied onto the card (see the "
-                              "build log; this image will fail SD validation "
-                              "until rebuilt)")
-        n_vid_failed = max(0, n_vid_jobs - n_grown)
-        if n_vid_failed:
-            # The summary must not claim videos that never landed: every grow
-            # job that failed left its slot with the STOCK content.
-            n_video -= n_vid_failed
-            counts = (n_audio, n_video, n_image, n_text)
-            log("%d of %d replaced video(s) could NOT be written — those slots "
-                "still hold the game's stock videos. Fix the issue above and "
-                "run the Write again." % (n_vid_failed, n_vid_jobs), "error")
-    log("Wrote patched image in %s: %s (%d sound(s), %d video(s), "
-        "%d image(s), %d display string(s))."
-        % (_fmt_dur(time.monotonic() - t_write), output_path,
-           n_audio, n_video, n_image, n_text), "success")
-    # Return the per-type breakdown (not just the total) so the completion
-    # dialog can name what actually changed instead of always saying "sound(s)",
-    # plus the audio build mode so it can say whether the card is blip-free or
-    # keeps the original-sound scrap (a fallback was invisible outside the log),
-    # and the validator status so it can say when the card will fail Stern's
-    # SD-card validation on the machine.
-    return counts, audio_mode, valpatch_mode
 
 
 #: The file that makes a folder an override set rather than somebody's
@@ -5833,8 +6553,16 @@ def _grow_video_slots(image_or_device, grow_plan, log):
     Returns how many actually landed so the caller can report honest counts."""
     if not grow_plan or not grow_plan.get("jobs"):
         return 0
+    return _grow_whole(image_or_device, grow_plan["offset"],
+                       grow_plan["jobs"], log)
+
+
+def _grow_whole(image_or_device, part_offset, jobs, log):
+    """Copy ``[(card_rel, source), ...]`` whole onto the partition at
+    *part_offset* through the ext4 driver and return how many landed (they
+    land in order, so it is the first N).  Failures are logged, never
+    raised — the caller reports honest counts."""
     from ...core import ext4_grow
-    jobs = grow_plan["jobs"]
     # The default 1800 s is generous for a handful of videos and thin for a
     # 1-2 GB sound bank on a slow disk (macOS writes it through debugfs).
     # Scale by the bytes actually being copied, and never go below the default.
@@ -5846,8 +6574,8 @@ def _grow_video_slots(image_or_device, grow_plan, log):
             pass
     timeout = max(1800, int(total / (2 << 20)) + 600)   # ~2 MB/s plus slack
     try:
-        return ext4_grow.grow_files(image_or_device, grow_plan["offset"],
-                                    jobs, log=log, timeout=timeout)
+        return ext4_grow.grow_files(image_or_device, part_offset, jobs,
+                                    log=log, timeout=timeout)
     except ext4_grow.Ext4GrowUnavailable as e:
         log("Could not write the full-size file(s): %s" % e, "warning")
         return 0
@@ -7519,6 +8247,27 @@ def _image_identity(img_path):
     return h.digest()
 
 
+def _audio_cache_base_key(gr_path, img_ident):
+    """What every cached audio result depends on besides the sound itself:
+    the card's identity (md5 of ``game_real`` plus the sound bank's
+    :func:`_image_identity`), every ``PAD_STERN_*`` env var that shapes an
+    encode (toggles that only pick a path through the write are excluded,
+    see :attr:`_AudioBodyCache._PATH_ONLY`), and the app version.  Shared by
+    the per-sound body cache and the verified-set cache so the two can never
+    disagree about what "the same build" means."""
+    from ... import __version__
+    h = hashlib.md5()
+    with open(_lp(gr_path), "rb") as f:
+        h.update(f.read())
+    h.update(img_ident)
+    env = sorted((k, v) for k, v in os.environ.items()
+                 if k.startswith("PAD_STERN_")
+                 and k not in _AudioBodyCache._PATH_ONLY)
+    h.update(repr(env).encode())
+    h.update(__version__.encode())
+    return h.hexdigest()
+
+
 class _AudioBodyCache:
     """Persistent per-sound encode-result cache under
     ``<assets>/.write_cache/audio``.
@@ -7563,24 +8312,15 @@ class _AudioBodyCache:
 
     def __init__(self, assets_dir, gr_path, img_path, byidx, ends, gains=None,
                  img_ident=None):
-        from ... import __version__
         self.assets_dir = assets_dir
         self.dir = os.path.join(assets_dir, ".write_cache", "audio")
         os.makedirs(self.dir, exist_ok=True)
         self.byidx = byidx
         self.ends = ends
         self.gains = gains or {}
-        h = hashlib.md5()
-        with open(_lp(gr_path), "rb") as f:
-            h.update(f.read())
-        h.update(img_ident if img_ident is not None
-                 else _image_identity(img_path))
-        env = sorted((k, v) for k, v in os.environ.items()
-                     if k.startswith("PAD_STERN_")
-                     and k not in self._PATH_ONLY)
-        h.update(repr(env).encode())
-        h.update(__version__.encode())
-        self.base_key = h.hexdigest()
+        self.base_key = _audio_cache_base_key(
+            gr_path, img_ident if img_ident is not None
+            else _image_identity(img_path))
 
     @staticmethod
     def _fp_param(p):
@@ -7649,6 +8389,70 @@ class _AudioBodyCache:
             os.replace(tmp, target)
         except OSError:
             pass                       # advisory, like the hash cache
+
+
+class _FinalAudioCache:
+    """The last VERIFIED set of re-encoded bodies, under
+    ``<assets>/.write_cache/audio_final.bin``.
+
+    The per-sound cache above spares a build the encodes, but three stages
+    still ran on every build over the WHOLE replaced set, changed or not:
+    the master-directory restore, the firmware integrity derive (a
+    multi-minute emulator pass even on a fast machine) and the final decode
+    of every replaced sound.  Their result depends on nothing but the card,
+    the encode environment and the exact set of encoded bodies going in — so
+    when this build's encoded set is byte-for-byte the set the last build
+    restored and verified, the restored bodies are replayed and the three
+    stages are skipped.  One entry, keyed by :func:`_audio_cache_base_key`
+    plus a digest over every ``(offset, body)``; a build that grows the sound
+    bank or applies the blip-free cave never uses it (their restore rules
+    differ).  ``PAD_STERN_AUDIO_CACHE=0`` disables it with the body cache.
+    """
+
+    _MAGIC = b"PADAF1\n"
+
+    def __init__(self, assets_dir, gr_path, img_ident):
+        self.dir = os.path.join(assets_dir, ".write_cache")
+        os.makedirs(self.dir, exist_ok=True)
+        self.path = os.path.join(self.dir, "audio_final.bin")
+        self.base_key = _audio_cache_base_key(gr_path, img_ident)
+
+    def key_for(self, patches):
+        """The digest of an encoded set ``{body_off: body}``."""
+        h = hashlib.md5()
+        h.update(self.base_key.encode())
+        for off in sorted(patches):
+            body = patches[off]
+            h.update(b"%d:%d:" % (off, len(body)))
+            h.update(hashlib.md5(body).digest())
+        return h.hexdigest()
+
+    def load(self, key):
+        """The verified ``{body_off: body}`` stored under *key*, else None."""
+        try:
+            with open(self.path, "rb") as f:
+                if f.read(len(self._MAGIC)) != self._MAGIC:
+                    return None
+                if f.readline().strip() != key.encode():
+                    return None
+                data = pickle.load(f)
+        except (OSError, EOFError, ValueError, pickle.UnpicklingError):
+            return None
+        if not isinstance(data, dict) or not data:
+            return None
+        return {int(k): bytes(v) for k, v in data.items()}
+
+    def store(self, key, patches):
+        """Record *patches* as the verified set for *key* (advisory)."""
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "wb") as f:
+                f.write(self._MAGIC)
+                f.write(key.encode() + b"\n")
+                pickle.dump(dict(patches), f, 4)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
 
 
 def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,

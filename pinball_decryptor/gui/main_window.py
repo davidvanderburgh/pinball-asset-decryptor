@@ -20830,10 +20830,12 @@ class MainWindow:
     def _on_write_clicked(self):
         """Build-button click.  Warn (but allow) when the preview shows no
         changes — building an unmodified card just makes a copy of the
-        original, which a tester flagged as easy to do by accident — and
-        confirm an overwrite of an existing output file at the moment it
-        matters instead of only a passive red label (feedback batch 14),
-        then defer to the app's write callback."""
+        original, which a tester flagged as easy to do by accident — then
+        defer to the app's write callback.  The existing-output prompt
+        (feedback batch 14) is the app's: ``WriteApp._start_write`` asks it
+        once, at the resolved destination, and offers to update a build in
+        place when the plugin's build record allows; asking it here as well
+        put the same question to the user twice on every rebuild."""
         if (not self._is_running()
                 and not self._has_pending_write_changes()):
             if not messagebox.askyesno(
@@ -20842,18 +20844,6 @@ class MainWindow:
                 "of the original image with no changes.\n\nBuild anyway?",
                 icon="warning"):
                 return
-        if not self._is_running():
-            target = self._target_write_path()
-            original = (self.write_upd_var.get() or "").strip()
-            if (target and os.path.exists(target)
-                    and not (original
-                             and os.path.abspath(original) == target)):
-                if not messagebox.askyesno(
-                    "File exists",
-                    "%s already exists in the output folder.\n\n"
-                    "Overwrite it?" % os.path.basename(target),
-                    icon="warning"):
-                    return
         if self._on_write is not None:
             self._on_write()
 

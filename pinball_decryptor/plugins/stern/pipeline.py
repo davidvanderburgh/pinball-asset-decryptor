@@ -231,11 +231,17 @@ class SternWritePipeline(BasePipeline):
     """Re-encode edited WAVs back into a copy of the card image (size-neutral)."""
 
     def __init__(self, original_path, assets_dir, output_path,
-                 log_cb, phase_cb, progress_cb, done_cb):
+                 log_cb, phase_cb, progress_cb, done_cb, update=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.original_path = original_path
         self.assets_dir = assets_dir
         self.output_path = output_path
+        # Whether to UPDATE the build already at output_path in place (only
+        # what changed since it was built is written) rather than build it
+        # whole: the user's answer to the Build button's prompt, or None to
+        # let the engine decide from the record beside the file
+        # (engine.write_image).
+        self.update = update
 
     def _run(self):
         self._set_phase(0)  # Detect
@@ -253,7 +259,8 @@ class SternWritePipeline(BasePipeline):
         counts, audio_mode, valpatch_mode = engine.write_image(
             self.original_path, self.assets_dir, self.output_path,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
-            label=display_for_key(key, self.original_path))
+            label=display_for_key(key, self.original_path),
+            update=self.update)
         self._set_phase(3)  # Patch image
         self._done(True, "Wrote %s to %s%s%s"
                    % (_write_summary(counts), self.output_path,

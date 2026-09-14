@@ -471,6 +471,22 @@ class Manufacturer(ABC):
     def write_output_ext(self):
         return ""
 
+    # Updating a build in place.  A plugin that keeps a record of what a build
+    # put on the card (Stern Spike 2: engine.write_image's build record) can
+    # patch the file already at the output with only what changed since it
+    # was built instead of building it whole again.  The Build button asks
+    # these two before its overwrite prompt: when the first is True and the
+    # second answers None, the prompt offers the update, and the answer rides
+    # into make_write_pipeline as ``update=``.  Every other plugin builds
+    # whole, as before, and never sees the keyword.
+    def supports_build_update(self):
+        return False
+
+    def build_update_reason(self, original_path, assets_dir, output_path):
+        """``None`` when the build at *output_path* can be updated in place
+        with the project's current edits, else one sentence saying why not."""
+        return "this game's builds always start from the original"
+
     def force_write_ext(self, name):
         """Return *name* guaranteed to end with :meth:`write_output_ext`.
 

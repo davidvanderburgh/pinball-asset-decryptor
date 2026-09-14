@@ -667,14 +667,33 @@ class SternManufacturer(Manufacturer):
             capture_ready_cb=None)
 
     def make_write_pipeline(self, original_path, assets_dir, output_path,
-                            log_cb, phase_cb, progress_cb, done_cb):
+                            log_cb, phase_cb, progress_cb, done_cb,
+                            update=None):
         if self._era == "spike1":
             return Spike1WritePipeline(
                 original_path, assets_dir, output_path,
                 log_cb, phase_cb, progress_cb, done_cb)
         return SternWritePipeline(
             original_path, assets_dir, output_path,
-            log_cb, phase_cb, progress_cb, done_cb)
+            log_cb, phase_cb, progress_cb, done_cb, update=update)
+
+    # A Spike 2 build leaves a record beside its output of what it put on the
+    # card, and the next build of the same project onto the same file can
+    # patch only what changed since (engine.write_image).  The Build button
+    # asks these two before its overwrite prompt.
+    def supports_build_update(self):
+        return self._era == "spike2"
+
+    def build_update_reason(self, original_path, assets_dir, output_path):
+        if self._era != "spike2":
+            return super().build_update_reason(original_path, assets_dir,
+                                               output_path)
+        from . import pipeline as _pipeline
+        if _pipeline.engine is None:
+            return "the Spike 2 engine is unavailable"
+        return _pipeline.engine.build_update_reason(
+            _pipeline.engine.read_build_manifest(output_path),
+            original_path, output_path, assets_dir)
 
     def make_direct_ssd_extract_pipeline(
             self, device_path, output_dir,

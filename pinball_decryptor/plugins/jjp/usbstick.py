@@ -14,7 +14,10 @@ Select proper Boot device" on a machine that boots USB in legacy mode (item 119,
   1. Check    — sanity: real device (or test dir), ISO present, rough fit.
   2. Format   — one FAT32 primary partition in an MBR table, label JJPUSB
                 (the label JJP's own Mac instructions use).
-  3. Copy     — mount the ISO read-only and copy every file onto the stick.
+  3. Copy     — mount the ISO read-only and copy every file onto the stick,
+                the boot files first so the firmware's reads (loader,
+                kernel, initrd) sit at the start of the volume, not behind
+                13 GB of image pieces (item 121).
   4. Verify   — re-walk the stick: every source file present, same size.
   5. Eject    — flush + OS-eject so it's safe to pull immediately.
 
@@ -193,6 +196,37 @@ def _iter_files(root):
     for dirpath, _dirs, files in os.walk(root):
         for name in files:
             yield os.path.join(dirpath, name)
+
+
+def _copy_rank(rel):
+    """Where a file goes in the copy: the BOOT FILES FIRST.
+
+    The machine's firmware reads the loader, its modules, the kernel and the
+    initrd through the BIOS before Linux is up, and a fresh FAT32 volume
+    hands out clusters in copy order - so a plain sorted() copy put every one
+    of those files behind 13 GB of ``home/partimag`` image pieces on the GNR
+    multi-boot stick, and the machine sat on syslinux's "Automatic boot in 1
+    second..." (the moment it reads the kernel) instead of booting (item 121,
+    2026-09-14).  A stock JJP stick never has that shape: its images are
+    small.  Clonezilla sorts its own ISO the same way (syslinux/iso_sort.txt).
+    0: syslinux/ (loader, modules, menu background, config); 1: the kernel
+    and initrd; 2: the rest of the boot trees (UEFI, grub, the squashfs);
+    3: everything else."""
+    rel = rel.replace("\\", "/").lower()
+    top = rel.split("/", 1)[0]
+    if top in ("syslinux", "isolinux"):
+        return 0
+    if rel in ("live/vmlinuz", "live/initrd.img"):
+        return 1
+    if top in ("efi", "boot", "live"):
+        return 2
+    return 3
+
+
+def _copy_order(src_root, paths):
+    """*paths* (under *src_root*) in the order they go onto the stick: boot
+    files first (see _copy_rank), alphabetical within a rank."""
+    return sorted(paths, key=lambda p: (_copy_rank(os.path.relpath(p, src_root)), p))
 
 
 def iso_has_joliet(path):
@@ -784,10 +818,10 @@ class UsbStickPreparePipeline(BasePipeline):
             self._log("Mounting the ISO to read its files...", "info")
             src_root, unmount = self._mount_iso()
         try:
-            files = sorted(_iter_files(src_root))
+            files = _copy_order(src_root, _iter_files(src_root))
             total = sum(os.path.getsize(p) for p in files)
-            self._log("Copying %d files (%.1f GB) onto the stick..."
-                      % (len(files), total / 1e9), "info")
+            self._log("Copying %d files (%.1f GB) onto the stick, the boot "
+                      "files first..." % (len(files), total / 1e9), "info")
             self._set_band(10, 90)
             copied = 0
             for src in files:

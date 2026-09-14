@@ -7198,8 +7198,8 @@ These have each been violated at least once and each cost a run or a window:
       them, and the final judgement needs the machine.
 
 - [ ] **121. A JJP install stick made by the app froze on the machine at syslinux's
-      "Automatic boot in 1 second...": the stick maker installs a MIXED-build boot
-      loader.** `S1 D3` *(Found 2026-09-14 on David's GNR with item 120's stick; part of
+      "Automatic boot in 1 second...": the stick maker put every boot file behind
+      13 GB of image pieces.** `S1 D3` *(Found 2026-09-14 on David's GNR with item 120's stick; part of
       the JJP multi-boot family - its `/finish` should wait on this.)* The stick sat 2+
       minutes on the Restore menu; the item 119 stick with the same boot bytes left it in
       a few seconds. **Established:** all 639 stick files equal the ISO's except
@@ -7210,19 +7210,30 @@ These have each been violated at least once and each cost a run or a window:
       `utils/linux/x64/extlinux` (and `syslinux`, which needs mtools) carry the matching
       build. A legacy-BIOS VM (qemu, the real stick over usbipd, read-only snapshot)
       boots BOTH the mixed and the matched stick to JJP's installer screen in 28-34 s at
-      2/4/8 GB on xHCI and EHCI, so the VM cannot reproduce the machine's hang. David's
-      stick was re-done with the matched build (`extlinux --install`, Clonezilla's
-      `mbr.bin`; backups in `C:\tmp\jjp120\bootcode_backup`). **Resume:** David boots that
-      stick on the GNR. If it leaves the menu at once, the mix is the cause: make the stick
-      maker install the ISO's own build (Rufus matches builds too) - e.g. the ISO's
-      extlinux run in WSL against the mounted stick, or no com32 module on the stick's
-      boot path - with a test that the stick's `ldlinux.c32` equals the ISO's. If it still
-      freezes, the cause is elsewhere (USB port, boot mode, the machine's firmware), and
-      the stick maker's copy order - every boot file lands after 13 GB of image pieces,
-      at ~13.2 GB - is the next thing to change. **Acceptance:** a stick made by the app's
-      own Build / make stick boots the GNR from the Restore menu to JJP's installer with
-      no stall, and the stick maker's test pins the matching build. Scripts:
-      [[reference_jjp_stick_syslinux_build_mismatch]] (memory).
+      2/4/8 GB on xHCI and EHCI, so the VM cannot reproduce the machine's hang. **Ruled
+      out:** the build mix - David's stick re-done with the matched build (`extlinux
+      --install`, Clonezilla's `mbr.bin`; backups in `C:\tmp\jjp120\bootcode_backup`)
+      froze in the same place; and `ldlinux.sys` placement - it sat at 13.28 GB (win64)
+      and at 2.1 GB (extlinux) and both froze. The VM's frames show what the frozen
+      screen IS: "Automatic boot in 1 second..." at 10 s, the kernel's black screen at
+      12 s, no "Loading" text between - so the machine stalls exactly while the loader
+      reads `live/vmlinuz` (15 MB) and `live/initrd.img` (63 MB) through the BIOS, and
+      those two sit at ~13.2 GB (LCN 0xc58c5 / 0xc4922, 16 KB clusters): the pipeline's
+      `sorted()` copy order puts every boot file behind 13 GB of `home/partimag` pieces,
+      a shape no stock JJP stick has. The maker now copies the boot files first
+      (`_copy_rank`/`_copy_order`: syslinux/, then vmlinuz + initrd, then EFI/boot/live,
+      then the rest; `tests/test_jjp_usbstick_copy_order.py`), and David's stick was
+      re-made that way (scratchpad `stickjob120b.py`, the same win64 boot code last
+      night's working stick booted with; every BIOS-read file in the first ~100 MB).
+      **Resume:** David boots the boot-files-first stick on the GNR. If it leaves the
+      menu at once: close, and add the placement check to the maker's post-copy checks.
+      If it still freezes, the stick's content and layout are exhausted: make a stick
+      from the STOCK GNR ISO (6.4 GB) - if that freezes too the machine side changed
+      (port, boot mode, firmware state), if it boots, diff what the 13 GB stick still
+      does differently (partition size, FAT size, cluster count). **Acceptance:** a stick
+      made by the app's own Build / make stick boots the GNR from the Restore menu to
+      JJP's installer with no stall. Scripts: [[reference_jjp_stick_syslinux_build_mismatch]]
+      (memory).
 
 ## Reference material that is NOT in this repo
 

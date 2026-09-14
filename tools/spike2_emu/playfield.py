@@ -468,7 +468,9 @@ GONE_POLLS = 2 * TARGET_FPS
 #: running a different helper could not be expressed without either a second
 #: list or a special case - and a second list is the thing item 60 collapsed.
 #:
-#: "Clear alerts" is David's ask (2026-08-21, watching turtles_pro still list
+#: "Clear switch alerts" (first "Clear alerts"; renamed PAD-134, when it moved
+#: under the key panel's SERVICE buttons) is David's ask (2026-08-21, watching
+#: turtles_pro still list
 #: twelve CHECK SWITCH rows after a boot-time exercise had already run: "maybe
 #: we need an 'opt-in' button that clears them?"). It works every safe switch
 #: once so the game's own no-usage audit sees usage. swexercise.py's header has
@@ -487,7 +489,7 @@ WINDOW_ACTIONS = (("Insert coin", "plunge.py", "coin"),
                   ("Start", "plunge.py", "start"),
                   ("Plunge", "plunge.py", "plunge"),
                   ("Reset balls", "plunge.py", "reset"),
-                  ("Clear alerts", "swexercise.py", None))
+                  ("Clear switch alerts", "swexercise.py", None))
 
 #: How much of a helper's own answer the status bar carries. Long enough for
 #: plunge.py's longest real reply (Start's two lines, ~100 chars) and short
@@ -539,7 +541,8 @@ def run_helper(view, script, arg=None):
     `arg` is None for a helper that takes none, which is what keeps
     WINDOW_ACTIONS a plain table rather than a table with a special case in it.
     The driver runs these on their own thread because they take seconds -
-    "Clear alerts" takes about twelve - so the reply arrives on that thread and
+    "Clear switch alerts" takes about twelve - so the reply arrives on that
+    thread and
     hops back through `after(0)`; a TclError there is a window that closed
     while its helper was still running.
     """
@@ -1782,9 +1785,18 @@ class KeyPanel:
     #: carries; the C table never renames its platform rows.
     SVC_ORDER = ("Service Back", "Service Minus", "Service Plus",
                  "Service Select")
+    #: The key-list rows a MOUSE can press too (PAD-134). They are the two the
+    #: bottom action row's Insert coin and Start stood in for, and without
+    #: them a mouse-only player - DragonRR's whole session - could not get a
+    #: game going once that row went. Press-and-hold, like the service
+    #: buttons: the mouse button's length is the closure.
+    CLICK_ROWS = ("Start Button", "Left Coin")
     DOOR_LABEL = "Coin Door Closed"
 
-    def __init__(self, parent, rows, drv):
+    def __init__(self, parent, rows, drv, on_action=None):
+        """`on_action(script, arg)` runs a WINDOW_ACTIONS helper - the view's
+        run_action - and is what the SERVICE section's Clear switch alerts
+        calls. None (a panel built without a view) leaves that button out."""
         self.drv = drv
         f9 = tkfont.Font(family="Consolas", size=9)
         f9b = tkfont.Font(family="Consolas", size=9, weight="bold")
@@ -1810,6 +1822,10 @@ class KeyPanel:
             need = max(f8.measure("/".join(r["keys"])) + 14
                        for r in self._svc_rows.values())
             w = max(w, 2 * self.PAD + 4 * max(need, 66))
+        # The BALLS section's three buttons (PAD-134) share the width in
+        # thirds, and a short key list must not make "Reset balls" clip.
+        bf = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        w = max(w, 2 * self.PAD + 3 * (bf.measure("Reset balls") + 24) + 12)
         self._w = w
         # Two section headers at most (cabinet first in the file, playfield
         # after), a title line and a hint line under the rows.
@@ -1818,6 +1834,9 @@ class KeyPanel:
         self.cv = tk.Canvas(parent, width=w, height=h, bg=self.BG,
                             highlightthickness=0)
         self._items, self._drawn = [], []
+        self._idle_fill = {}           # row index -> resting box fill
+        self._clickable = False
+        self._row_held = None
 
         x_dot = self.PAD + 3
         x_key = self.PAD + 10 + keyw            # right edge of the key column
@@ -1852,12 +1871,26 @@ class KeyPanel:
             suf = self.cv.create_text(x_suf, y + 1, anchor="e",
                                       fill=self.DIM, font=f9,
                                       text="n/a" if r["na"] else "")
+            if r["label"] in self.CLICK_ROWS and not r["na"] and r["ids"]:
+                # The whole row is the target, so its box is filled with the
+                # panel's own colour: a fill="" item is hittable only on its
+                # outline, which is the TroughPanel hover lesson again.
+                self._idle_fill[len(self._items)] = self.BG
+                self.cv.itemconfig(box, fill=self.BG)
+                self._bind_row(r["ids"][0], (box, dot, key, lab, suf))
+                self._clickable = True
             self._items.append((box, dot, key, lab, suf))
             self._drawn.append(None)
             y += self.ROW_H
         self.cv.create_text(self.PAD, y + 10, anchor="w", fill="#777", font=f8,
                             text="green dot = switch made")
         y += 24
+        if self._clickable:
+            self.cv.create_text(self.PAD, y - 1, anchor="w", fill="#777",
+                                font=f8,
+                                text="click Start Button or Left Coin to "
+                                     "press it")
+            y += 13
 
         # ---- THE SERVICE CLUSTER, drawn as the real coin-door panel -------
         # ONE control per action: each button wears its own key label in the
@@ -1898,6 +1931,35 @@ class KeyPanel:
             self.cv.create_text(self.PAD, y, anchor="w", fill="#777", font=f8,
                                 text="press SELECT for the service menu")
             y += 8
+
+        # ---- CLEAR SWITCH ALERTS, under SERVICE (PAD-134) ----------------
+        # It was the last button on the bottom action row as "Clear alerts",
+        # and the one that row had that nothing else in the window does: it
+        # works every safe switch once so the game's no-usage audit stops
+        # listing CHECK SWITCH rows. It belongs with the service controls
+        # because that is the screen it clears, and David named it.
+        self.clear_btn = None
+        if on_action is not None:
+            label, script, arg = next(a for a in WINDOW_ACTIONS
+                                      if a[1] == "swexercise.py")
+            if len(self._svc_rows) != 4:
+                y += 12
+                self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
+                                    font=f8, text="SERVICE")
+            y += 12
+            bg, fg, active = self.BALL_BTN
+            self.clear_btn = tk.Button(
+                self.cv, text=label, font=("Segoe UI", 9, "bold"), pady=3,
+                bg=bg, fg=fg, activebackground=active, activeforeground=fg,
+                relief="raised", bd=1, highlightthickness=0,
+                command=lambda: on_action(script, arg))
+            self.cv.create_window(self.PAD, y, anchor="nw",
+                                  window=self.clear_btn, width=w - 2 * self.PAD)
+            y += 36
+            self.cv.create_text(self.PAD, y, anchor="w", fill="#777", font=f8,
+                                text="presses every safe switch once, about "
+                                     "12 s")
+            y += 6
 
         # ---- THE COIN DOOR, a toggle because the real door STAYS ----------
         self._door_id = self._door_row["ids"][0] if self._door_row else None
@@ -1943,6 +2005,33 @@ class KeyPanel:
         self.cv.itemconfig(btn, width=3)
         self.drv.release(sw_id)
 
+    # ---- Start Button / Left Coin rows: press-and-hold (PAD-134) ----------
+    def _bind_row(self, sw_id, items):
+        for it in items:
+            self.cv.tag_bind(it, "<ButtonPress-1>",
+                             lambda e, s=sw_id: self._row_press(s))
+            self.cv.tag_bind(it, "<ButtonRelease-1>",
+                             lambda e: self._row_release())
+            self.cv.tag_bind(it, "<Enter>",
+                             lambda e: self.cv.configure(cursor="hand2"))
+            self.cv.tag_bind(it, "<Leave>",
+                             lambda e: self.cv.configure(cursor=""))
+
+    def _row_press(self, sw_id):
+        if self._row_held is not None:
+            return
+        self._row_held = sw_id
+        self.drv.press(sw_id)
+
+    def _row_release(self):
+        """Open what the press closed, by what was HELD - the service
+        buttons' rule, for the same reason (the canvas freezes its current
+        item for the length of a click)."""
+        if self._row_held is None:
+            return
+        sw_id, self._row_held = self._row_held, None
+        self.drv.release(sw_id)
+
     def _door_click(self):
         """Toggle off the last DRAWN state, the TroughPanel._click rule: the
         decision is the one the user could see when they clicked."""
@@ -1981,7 +2070,9 @@ class KeyPanel:
           * the dots, READ-ONLY. Which position is empty is still worth seeing
             (item 20 was a wrong-end bug a count cannot show), it just stops
             being a gesture.
-          * Plunge and Drain, equal halves of the panel. NO KEY SHORTCUTS,
+          * Plunge, Drain and Reset balls, equal thirds of the panel (Reset
+            moved in from the bottom action row, which the panel retires -
+            see Field._layout_actions). NO KEY SHORTCUTS for the first two,
             unlike JJP's Space and D: on Spike 2 those are already the Action
             Button and Right Scoop in padglhost's table, and the playfield
             rows are re-derived per title, so no letter is safely free.
@@ -2015,10 +2106,11 @@ class KeyPanel:
         y += 2 * TroughPanel.PAD + 2 * TroughPanel.R + TroughPanel.NUM_H + 8
         bg, fg, active = self.BALL_BTN
         gap = 6
-        bw = (self._w - 2 * self.PAD - gap) // 2
+        verbs = (("Plunge", "plunge"), ("Drain", "drain"),
+                 ("Reset balls", "reset"))
+        bw = (self._w - 2 * self.PAD - gap * (len(verbs) - 1)) // len(verbs)
         self.ball_btns = []
-        for k, (label, what) in enumerate((("Plunge", "plunge"),
-                                           ("Drain", "drain"))):
+        for k, (label, what) in enumerate(verbs):
             b = tk.Button(self.cv, text=label, font=("Segoe UI", 9, "bold"),
                           pady=3, bg=bg, fg=fg, activebackground=active,
                           activeforeground=fg, relief="raised", bd=1,
@@ -2132,7 +2224,8 @@ class KeyPanel:
             self._drawn[i] = state
             on, suffix = state
             box, dot, key, lab, suf = self._items[i]
-            self.cv.itemconfig(box, fill=self.HIT_BG if on else "")
+            self.cv.itemconfig(box, fill=self.HIT_BG if on
+                               else self._idle_fill.get(i, ""))
             self.cv.itemconfig(dot, fill=SW_MADE if n else "")
             self.cv.itemconfig(key, fill=self.HIT_FG if on else self.KEY_FG)
             self.cv.itemconfig(lab, fill=self.HIT_FG if on else self.LAB_FG)
@@ -2296,6 +2389,28 @@ class KeyInput:
         self.pipe.close()
 
 
+def show_action_row(view, visible):
+    """Show or hide a view's bottom action row (PAD-134). A no-op when the
+    row is already in that state, so the poll can call it on every attach.
+
+    The artwork view re-lays its canvas windows (Field._layout_actions); the
+    schematic's row is packed on its top bar, so it is forgotten and re-packed
+    in WINDOW_ACTIONS order - the bar's left edge, where it always was.
+    """
+    acts = getattr(view, "_acts", None)
+    if not acts or getattr(view, "_acts_shown", True) == visible:
+        return
+    view._acts_shown = visible
+    if hasattr(view, "_layout_actions"):
+        view._layout_actions()
+        return
+    for b in acts:
+        if visible:
+            b.pack(side="left", padx=(0, 4), pady=2)
+        else:
+            b.pack_forget()
+
+
 def attach_key_panel(view):
     """The panel, packed to the right of the view's canvas, or None.
 
@@ -2312,8 +2427,13 @@ def attach_key_panel(view):
     """
     rows = keybinds.load(BINDS_PATH)
     if not rows:
+        # No panel: the bottom action row is the only way in, so it is shown.
+        # key_panel is cleared FIRST - a re-shown row re-lays the artwork's
+        # trough corner, and that must not reach for a panel just destroyed.
+        view.key_panel = None
+        show_action_row(view, True)
         return None
-    panel = KeyPanel(view.root, rows, view.drv)
+    panel = KeyPanel(view.root, rows, view.drv, on_action=view.run_action)
     panel.cv.pack(side="right", fill="y", before=view.cv)
     if view.trough_panel is not None:
         view.trough_panel.destroy()
@@ -2328,6 +2448,10 @@ def attach_key_panel(view):
     # The keyboard arrives with the rows (item 39): the same table that drew
     # the panel binds this window's keys, so the two can never disagree.
     view.keys = KeyInput(view, rows)
+    # ★ PAD-134: every action on the bottom row has a home on this panel now,
+    # so the row goes - see Field._layout_actions for the list.
+    view.key_panel = panel
+    show_action_row(view, False)
     return panel
 
 
@@ -3258,7 +3382,7 @@ class Field(StateOps, LedRing):
         self._acts = []
         for label, script, arg in WINDOW_ACTIONS:
             self._acts.append(tk.Button(
-                self.cv, text=label, width=11,
+                self.cv, text=label, width=max(11, len(label)),
                 command=lambda s=script, a=arg: self.run_action(s, a)))
 
         # Save/Load state, bottom-LEFT (item 13's GUI half, David 2026-08-08:
@@ -3275,8 +3399,35 @@ class Field(StateOps, LedRing):
         self._state_btns = []
         state = (self._build_state_widgets(self.cv, compact=True)
                  if SAVESTATES else [])
+        self._state_cluster, self._act_wh, self._act_items = state, (w, h), []
+        self._layout_actions()
+
+    def _layout_actions(self):
+        """Place the action row and the state cluster; re-run to show or hide
+        the row.
+
+        ★ PAD-134: THE ROW IS ONLY DRAWN WHEN THERE IS NO KEY PANEL. David,
+        looking at Insert coin / Start / Plunge / Reset balls / Clear alerts:
+        "do we still need any of these buttons on the virtual playfield? most
+        of them are covered by the keyboard shortcuts anyways." Once the key
+        panel is up every one of them has a home on it - Start Button and
+        Left Coin are clickable rows, Plunge / Drain / Reset balls are the
+        BALLS section's buttons, and Clear switch alerts sits under SERVICE -
+        so a second copy down here was one control in two places. Without a
+        panel (no padbinds yet, or never) the row is the only way in, so it
+        stays. show_action_row() flips `_acts_shown` and calls this; the
+        widgets are built once in _place_actions() and only their canvas
+        windows are recreated, so hide-then-show is the same layout twice.
+        With the row hidden the state cluster has the bottom edge to itself.
+        """
+        w, h = self._act_wh
+        for item in self._act_items:
+            self.cv.delete(item)
+        self._act_items = []
+        acts = self._acts if getattr(self, "_acts_shown", True) else []
+        state = self._state_cluster
         row_h = max([wdg.winfo_reqheight()
-                     for wdg in self._acts + state] or [0])
+                     for wdg in acts + state] or [0])
 
         # ★ TWO ROWS WHEN ONE CANNOT HOLD BOTH CLUSTERS, AND THAT IS MEASURED
         # RATHER THAN ASSUMED (PAD-119, C FB 2026-09-08, beatles on a 1080p
@@ -3325,7 +3476,7 @@ class Field(StateOps, LedRing):
         # two actions share the bottom edge, three actions sit above them.
         avail = max(1, w - 2 * self.ACT_PAD)
         state_cost = (span(state) + self.ACT_GAP) if state else 0
-        todo, act_rows = list(self._acts), []
+        todo, act_rows = list(acts), []
         while todo:
             budget = avail - (state_cost if not act_rows else 0)
             take = [todo.pop()]
@@ -3339,7 +3490,7 @@ class Field(StateOps, LedRing):
         # A single action too wide even for the reduced bottom budget: the
         # state cluster cannot share that row, and gets its own below-the-
         # actions row exactly as it did before.
-        bottom_fits = (not state
+        bottom_fits = (not state or not act_rows
                        or self.ACT_PAD + state_cost
                        + span(act_rows[0]) + self.ACT_PAD <= w)
 
@@ -3348,16 +3499,19 @@ class Field(StateOps, LedRing):
             cy = y - depth * (row_h + self.ACT_GAP)
             x = w - self.ACT_PAD
             for b in reversed(chunk):
-                self.cv.create_window(x, cy, anchor="se", window=b)
+                self._act_items.append(
+                    self.cv.create_window(x, cy, anchor="se", window=b))
                 x -= b.winfo_reqwidth() + self.ACT_GAP
 
         rows = len(act_rows) if bottom_fits else len(act_rows) + 1
         if state:
+            rows = max(rows, 1)       # the row hidden: the state row is one
             x = self.ACT_PAD
             sy = y - (0 if bottom_fits
                       else len(act_rows) * (row_h + self.ACT_GAP))
             for wdg in state:
-                self.cv.create_window(x, sy, anchor="sw", window=wdg)
+                self._act_items.append(
+                    self.cv.create_window(x, sy, anchor="sw", window=wdg))
                 x += wdg.winfo_reqwidth() + self.ACT_GAP
 
         # THE TROUGH PANEL GOES ABOVE THE BOTTOM ROW, not into it: that row is

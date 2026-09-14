@@ -2255,7 +2255,7 @@ fi
 # ★ OPT-IN as of 2026-08-22, off by default - David: "we no longer need the
 # 'clear alerts' function to automatically run every start up." The CHECK
 # SWITCH rows are cosmetic (autoattract walks past them regardless), the
-# playfield window's own "Clear alerts" button covers the case where they
+# playfield window's own "Clear switch alerts" button covers the case where they
 # matter, and the boot-time pass costs every run ~100 tagged edges and a
 # 12 s burst of switch pokes that lands mid-play on an attended boot -
 # autoattract stands down for an operator, this could not. PAD_SW_EXERCISE=1

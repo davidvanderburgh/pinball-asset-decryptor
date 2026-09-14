@@ -140,14 +140,17 @@ def _panel(playfield, on_ball):
     return root, panel, dots
 
 
-def test_plunge_and_drain_are_buttons_that_say_what_they_do(playfield):
+def test_plunge_drain_and_reset_are_buttons_that_say_what_they_do(playfield):
+    """Reset balls moved in from the bottom action row, which the key panel
+    retires (PAD-134)."""
     said = []
     root, panel, dots = _panel(playfield, said.append)
     try:
-        assert [b.cget("text") for b in panel.ball_btns] == ["Plunge", "Drain"]
+        assert [b.cget("text") for b in panel.ball_btns] == \
+            ["Plunge", "Drain", "Reset balls"]
         for b in panel.ball_btns:
             b.invoke()
-        assert said == ["plunge", "drain"]
+        assert said == ["plunge", "drain", "reset"]
     finally:
         root.destroy()
 

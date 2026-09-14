@@ -6957,7 +6957,7 @@ These have each been violated at least once and each cost a run or a window:
       family's one `/finish`.
 
 - [ ] **120. The JJP boot menu's sound: a safe level, no lag, and the
-      machine's own volume buttons with feedback on screen.** `S2 D4`
+      machine's own volume buttons with feedback on screen.** `S2 D4` ← WORKING ON
       *(Found on the first GNR machine boot, item 119. Branch from and merge
       into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
       `/finish` now follows this item, not 119.)* On David's GNR

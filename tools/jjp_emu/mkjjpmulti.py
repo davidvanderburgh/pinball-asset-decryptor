@@ -182,6 +182,20 @@ VOLUME_MAX = 40
 # the pre-120 menu David called very loud, and on the GNR that read as no sound at all
 # (2026-09-14).  At -3 the default sits 11 dB under it and the cap 5 dB under it.
 MEDIA_PEAK_DBFS = -3.0
+#: the selector's key_<name>= conf keys, in its order (conf.c); a value is <byte>.<bit>
+KEY_NAMES = ("key_left", "key_right", "key_start", "key_plus", "key_minus")
+
+
+def check_key_pos(name, val):
+    """<byte>.<bit> as conf.c reads it (0-63 . 0-7), or Refused."""
+    parts = str(val).split(".")
+    try:
+        b, bit = int(parts[0]), int(parts[1])
+    except (IndexError, ValueError):
+        raise Refused("%s=%r is not <byte>.<bit>" % (name, val))
+    if len(parts) != 2 or not 0 <= b <= 63 or not 0 <= bit <= 7:
+        raise Refused("%s=%r is not <0-63>.<0-7>" % (name, val))
+    return "%d.%d" % (b, bit)
 
 # ---- the installer patch (exact lines of JJP's jjp_install.sh) --------------------------------
 CHECK_ROOT_LINE = 'check_image "ROOT" "sda3.ext4-ptcl-img"'
@@ -683,7 +697,7 @@ def check_jjp_update(policy):
 
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None, media=None,
                        sound_move=None, sound_confirm=None, volume=None, media_dir=None, theme=None,
-                       colors=None, heading=None, jjp_update="refuse", debug_log=False):
+                       colors=None, heading=None, jjp_update="refuse", debug_log=False, keys=None):
     """images.conf for the JJP hook + selector: the same grammar the Stern builder writes (an
     image line as wide as it needs to be, the global keys after) with JJP's device tokens and
     its one extra key, jjp_update=."""
@@ -753,6 +767,12 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         if role in colors:
             out.append("color_%s=%s" % (role, colors[role]))
     out.append("jjp_update=%s" % jjp_update)
+    # the cabinet buttons the selector reads, where a machine has them elsewhere than the
+    # defaults (jjpcrt's LEFT 1.0 / RIGHT 1.2 / START 3.0, the table's Up 1.5 / Down 1.6):
+    # <byte>.<bit> in the I/O board frame, as the menu's --learn line names them
+    for name in KEY_NAMES:
+        if keys and keys.get(name):
+            out.append("%s=%s" % (name, keys[name]))
     if debug_log:
         out.append("# log: the selector's own diagnostics on the machine - one file per boot plus the")
         out.append("# previous one, 1 MB each; JJP's Utilities log dump copies /jjpe/temp/*.log* to a")
@@ -769,7 +789,7 @@ def parse_images_conf(text):
     """-> {'images': [(device, title, subtitle)], 'media': [(art, anim, music, confirm)], the keys}."""
     out = {"images": [], "media": [], "default": None, "timeout": None, "heading": None, "font": None,
            "sound_move": None, "sound_confirm": None, "volume": None, "volume_max": None, "media_dir": None,
-           "theme": None, "colors": {}, "jjp_update": None, "log": None}
+           "theme": None, "colors": {}, "jjp_update": None, "log": None, "keys": {}}
     for raw in (text or "").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -797,6 +817,8 @@ def parse_images_conf(text):
             out["colors"][key[6:]] = val.strip()
         elif key in ("heading", "font", "sound_move", "sound_confirm", "theme", "jjp_update", "log"):
             out[key] = val
+        elif key in KEY_NAMES:
+            out["keys"][key] = check_key_pos(key, val.strip())
     if not out["images"]:
         raise Refused("images.conf: no image= lines")
     return out
@@ -850,10 +872,15 @@ def conf_for_args(devices, args, existing=None, media=None, default_titles=None,
     if heading is None:
         heading = ex.get("heading")
     policy = getattr(args, "jjp_update", None) or ex.get("jjp_update") or "refuse"
+    keys = dict(ex.get("keys") or {})
+    for name in KEY_NAMES:
+        v = getattr(args, name, None)
+        if v is not None:
+            keys[name] = check_key_pos(name, v)
     return render_images_conf(devices, titles, subtitles, default, timeout,
                               PADSELECT_DIR + "/font.ttf" if font else None, rows, move, confirm, volume,
                               theme=theme, colors=colors, heading=heading, jjp_update=policy,
-                              debug_log=bool(getattr(args, "debug_log", False)))
+                              debug_log=bool(getattr(args, "debug_log", False)), keys=keys)
 
 
 # ============================================================================= the installer
@@ -1561,7 +1588,7 @@ def inspect_iso(iso, media_out=None):
             ("timeout", conf["timeout"]), ("default", conf["default"]), ("heading", conf.get("heading")),
             ("volume", conf["volume"]), ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
             ("theme", conf.get("theme")), ("colors", conf.get("colors") or {}), ("jjp_update", conf.get("jjp_update")),
-            ("log", conf.get("log")), ("media_files", media_files),
+            ("log", conf.get("log")), ("keys", dict(conf.get("keys") or {})), ("media_files", media_files),
             ("media", media_man), ("warnings", warnings)])
         if media_out:
             os.makedirs(media_out, exist_ok=True)
@@ -1585,9 +1612,9 @@ def print_inspect(rep):
               % (im["index"], im["device"], im["title"], im["subtitle"], im["art"], im["anim"], im["music"],
                  im["confirm"], im["pieces"], _gb(im["pieces_bytes"]), im["source"],
                  "" if im["source_exists"] else " (missing)"))
-    print("default=%s timeout=%s heading=%s volume=%s theme=%s jjp_update=%s log=%s"
+    print("default=%s timeout=%s heading=%s volume=%s theme=%s jjp_update=%s log=%s keys=%s"
           % (rep["default"], rep["timeout"], rep["heading"], rep["volume"], rep["theme"], rep["jjp_update"],
-             rep["log"] or "off"))
+             rep["log"] or "off", " ".join("%s=%s" % kv for kv in sorted((rep.get("keys") or {}).items())) or "default"))
     print("media: %s" % (", ".join(rep["media_files"]) or "none"))
     for w in rep["warnings"]:
         print("warning: %s" % w)
@@ -2143,6 +2170,11 @@ def _add_conf_flags(s):
     # came up silent and nothing on the machine could say why.  It is bounded (one file
     # per boot plus the previous one, 1 MB each, ~8 KB a boot) and JJP's own dumplogs.sh
     # copies /jjpe/temp/*.log* onto a stick, so it can be read without opening the machine.
+    for name in KEY_NAMES:
+        s.add_argument("--" + name.replace("_", "-"), dest=name, metavar="BYTE.BIT",
+                       help="images.conf %s=: where this machine's %s button sits in the I/O board frame "
+                            "(<0-63>.<0-7>, as the menu's --learn line names it); default: the selector's own"
+                            % (name, name[4:].upper()))
     s.add_argument("--no-machine-log", dest="debug_log", action="store_false", default=True,
                    help="leave the selector's own log (images.conf log=%s, collected by JJP's "
                         "Utilities log dump) off the machine" % JJP_CARD_LOG)

@@ -652,6 +652,22 @@ hardware and one header defends the build:
   device that refuses the buffer asked for at 120, 250 and 500 ms before it
   gives up (`PADSELECT_ALSA_LATENCY_MS` overrides the build's request, for
   the rig).
+- **The pump thread.** `audio_pump()` from the main loop was the design until
+  2026-09-14; a JJP machine's vsync-paced loop underran the 60 ms buffer and
+  the stream through the pulse plugin stopped restarting (the GNR, silent).
+  `audio_open` now starts a thread that pumps every `PUMP_MS` (5) under a
+  mutex every entry point takes; the main loop's `audio_pump()` is a no-op
+  while it runs, `audio_close` joins it before the sink closes. The JJP
+  build also REOPENS the PCM on an underrun (`ALSA_REOPEN_ON_XRUN`:
+  `alsa_reopen` = close + `open_pcm` with the same device and buffer, a fresh
+  plugin instance) because after `snd_pcm_recover` the pulse plugin's
+  bookkeeping leaves the stream stalled whatever the start threshold - the
+  rig stopped 80 ms of every 200 recovered 7 times and then wrote almost
+  nothing; a watchdog in `alsa_space` reopens as well when nothing has been
+  accepted for `ALSA_STALL_MS` (3000; a fresh pulse stream pauses ~1.1 s
+  after its first fill on the rig's sink, so not less) while open, since a stuck stream does
+  not always report an underrun; and it sets the start threshold to one
+  period (`ALSA_START_PERIODS`). The Stern card's sink keeps `recover`.
 - **`--learn` on the glass (jjpio).** A frame bit that changes and is not one
   of the five mapped buttons is queued as a RAW event (`EV_RAW(byte, bit,
   pressed)`, coded above `EV_COUNT` so the queue carries it as it is; only the

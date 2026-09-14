@@ -28,6 +28,7 @@
 #include <string.h>
 #include <errno.h>
 #include <math.h>
+#include <alloca.h>
 #include "audio.h"
 #include "codec.h"
 #include "log.h"
@@ -45,6 +46,12 @@ extern int  snd_pcm_open(snd_pcm_t **, const char *, int stream, int mode);
 extern int  snd_pcm_set_params(snd_pcm_t *, int format, int access, unsigned channels,
                                unsigned rate, int soft_resample, unsigned latency_us);
 extern int  snd_pcm_get_params(snd_pcm_t *, unsigned long *buffer_size, unsigned long *period_size);
+extern int  snd_pcm_state(snd_pcm_t *);
+extern unsigned long snd_pcm_sw_params_sizeof(void);
+extern int  snd_pcm_sw_params_current(snd_pcm_t *, void *sw);
+extern int  snd_pcm_sw_params_set_start_threshold(snd_pcm_t *, void *sw, unsigned long frames);
+extern int  snd_pcm_sw_params_set_avail_min(snd_pcm_t *, void *sw, unsigned long frames);
+extern int  snd_pcm_sw_params(snd_pcm_t *, void *sw);
 extern int  snd_pcm_nonblock(snd_pcm_t *, int);
 extern long snd_pcm_avail_update(snd_pcm_t *);
 extern long snd_pcm_writei(snd_pcm_t *, const void *, unsigned long frames);
@@ -110,6 +117,12 @@ static const char *const ALSA_DEVICES[] = {
 #define ALSA_LEAD_MS    500
 #endif
 #define CHUNK_FRAMES  1764          /* the game's period size */
+#define ALSA_STALL_MS 3000          /* nothing accepted for this long while open = stuck: reopen (JJP).
+                                     * Generous on purpose: a fresh stream through the pulse plugin
+                                     * takes ~1.1 s after its first fill before the server asks for
+                                     * more (the rig's null sink), and a watchdog under that reopened
+                                     * into the pause forever; the pump thread is what keeps xruns
+                                     * rare, this only catches a stream that truly stopped */
 
 /* THE AMPLIFIER GATE - why a stream the codec accepted made no sound.
  *
@@ -145,12 +158,18 @@ static const char *const MIXER_CTLS[] = { "backbox", "cabinet" };
 
 struct alsa {
     struct audio_sink base;
-    snd_pcm_t *pcm;
-    int err_logged, recovered;
+    snd_pcm_t *pcm;                /* NULL between a failed reopen and the next try */
+    const char *dev;               /* the device that opened, for a reopen */
+    unsigned latency_us;           /* the buffer that was granted, for a reopen */
+    int err_logged, recovered, reopens, stalls, first_logged, dbg;
+    long long last_accept_ms;      /* when the device last took frames (the stall watchdog) */
     int lo_was[NCTL];         /* LINEOUT_SWITCH per MIXER_CTLS before we touched it: 1/0, -1 = none/unknown */
 };
 
 static int lineout_switch(const char *ctl, int on, const char *note);
+#ifdef ALSA_REOPEN_ON_XRUN
+static int alsa_reopen(struct alsa *a);
+#endif
 
 static void quiet(const char *file, int line, const char *function, int err, const char *fmt, ...)
 {
@@ -162,14 +181,41 @@ static int alsa_space(struct audio_sink *s, long long now)
     struct alsa *a = (struct alsa *)s;
     long av;
     (void)now;
+#ifdef ALSA_REOPEN_ON_XRUN
+    if (!a->pcm && alsa_reopen(a) < 0) return 0;      /* a failed reopen: try again each pump */
+    /* THE WATCHDOG.  A stream through the pulse plugin can stop taking frames
+     * without ever reporting an underrun - the rig, stopped 80 ms of every
+     * 200, sat 2 s at a time accepting nothing after every reopen.  Nothing
+     * accepted for ALSA_STALL_MS while the device is open is stuck, whatever
+     * the cause: reopened, said up to three times, counted always. */
+    if (!getenv("PADSELECT_NO_WATCHDOG") && a->last_accept_ms && now - a->last_accept_ms > ALSA_STALL_MS) {
+        a->stalls++;
+        if (a->stalls <= 3)
+            sel_log("audio: alsa stalled: nothing accepted for %lld ms, reopening (#%d)",
+                    now - a->last_accept_ms, a->stalls);
+        if (alsa_reopen(a) < 0) return 0;
+        a->last_accept_ms = now;
+    }
+#else
+    if (!a->pcm) return 0;
+#endif
     av = snd_pcm_avail_update(a->pcm);
+    if (a->dbg < 60 && getenv("PADSELECT_AUDIO_DEBUG")) {
+        a->dbg++;
+        sel_log("audio: dbg space t=%lld av=%ld state=%d", now, av, snd_pcm_state(a->pcm));
+    }
     if (av < 0) {
+#ifdef ALSA_REOPEN_ON_XRUN
+        a->recovered++;
+        if (alsa_reopen(a) < 0) return 0;
+#else
         int rc = snd_pcm_recover(a->pcm, (int)av, 1);
         if (rc < 0) {
             if (!a->err_logged) { sel_log("audio: alsa recover: %s", snd_strerror(rc)); a->err_logged = 1; }
             return 0;
         }
         a->recovered++;
+#endif
         av = snd_pcm_avail_update(a->pcm);
         if (av < 0) return 0;
     }
@@ -180,13 +226,20 @@ static int alsa_write(struct audio_sink *s, const short *pcm, int frames)
 {
     struct alsa *a = (struct alsa *)s;
     int done = 0, retries = 0;
+    if (!a->pcm) return 0;
     while (done < frames) {
         int chunk = frames - done;
         long rc;
         if (chunk > CHUNK_FRAMES) chunk = CHUNK_FRAMES;
         rc = snd_pcm_writei(a->pcm, pcm + (size_t)done * 2, (unsigned long)chunk);
+        if (a->dbg < 60 && getenv("PADSELECT_AUDIO_DEBUG")) sel_log("audio: dbg write %d -> %ld state=%d", chunk, rc, snd_pcm_state(a->pcm));
         if (rc == -EAGAIN) break;                       /* buffer full: the rest waits for the next pump */
         if (rc == -EPIPE || rc == -ESTRPIPE) {
+#ifdef ALSA_REOPEN_ON_XRUN
+            a->recovered++;
+            alsa_reopen(a);                             /* the rest waits for the next pump */
+            break;
+#else
             int r = snd_pcm_recover(a->pcm, (int)rc, 1);
             a->recovered++;
             if (r < 0 || ++retries > 2) {
@@ -194,6 +247,7 @@ static int alsa_write(struct audio_sink *s, const short *pcm, int frames)
                 break;
             }
             continue;
+#endif
         }
         if (rc < 0) {
             if (!a->err_logged) { sel_log("audio: alsa writei: %s", snd_strerror((int)rc)); a->err_logged = 1; }
@@ -202,18 +256,31 @@ static int alsa_write(struct audio_sink *s, const short *pcm, int frames)
         done += (int)rc;
         if (rc < chunk) break;
     }
+    if (done > 0) {
+        long long t = sel_now_ms();
+        /* the first frames after the first fill: how long the stream took to
+         * get going, once per open, for the machine's log */
+        if (!a->first_logged && a->last_accept_ms && t - a->last_accept_ms > 50) {
+            sel_log("audio: alsa took %lld ms after the first fill to take more", t - a->last_accept_ms);
+            a->first_logged = 1;
+        }
+        a->last_accept_ms = t;
+    }
     return done;
 }
 
 static void alsa_close(struct audio_sink *s)
 {
     struct alsa *a = (struct alsa *)s;
-    int rc;
-    snd_pcm_nonblock(a->pcm, 0);
-    rc = snd_pcm_drain(a->pcm);
-    if (rc < 0) sel_log("audio: alsa drain: %s", snd_strerror(rc));
-    rc = snd_pcm_close(a->pcm);
-    sel_log("audio: alsa closed (%s), %d recover(s)", rc < 0 ? snd_strerror(rc) : "ok", a->recovered);
+    int rc = 0;
+    if (a->pcm) {
+        snd_pcm_nonblock(a->pcm, 0);
+        rc = snd_pcm_drain(a->pcm);
+        if (rc < 0) sel_log("audio: alsa drain: %s", snd_strerror(rc));
+        rc = snd_pcm_close(a->pcm);
+    }
+    sel_log("audio: alsa closed (%s), %d recover(s), %d reopen(s), %d stall(s)", rc < 0 ? snd_strerror(rc) : "ok",
+            a->recovered, a->reopens, a->stalls);
     /* the codecs back as found (after the kernel's own close-time writes),
      * and the kernel's switch back where it was shut */
     codec_restore();
@@ -225,40 +292,43 @@ static void alsa_close(struct audio_sink *s)
     free(a);
 }
 
-struct audio_sink *audio_alsa_open(char *err, int errlen)
+/* Open the device - the first of ALSA_DEVICES that opens, or *devp when a
+ * reopen names the one that did - and set it up: the buffer asked for (with
+ * the ladder), what was granted into the log, the start threshold, nonblock.
+ * NULL with err filled in.  *devp and *latency_us come back as what was used,
+ * so a reopen asks for exactly the same again.  chatty = the log lines a
+ * first open writes; a reopen after the first few is quiet. */
+static snd_pcm_t *open_pcm(const char **devp, unsigned *latency_us, char *err, int errlen, int chatty)
 {
-    struct alsa *a;
     snd_pcm_t *pcm = NULL;
-    const char *dev = NULL;
+    const char *dev = *devp;
+    unsigned lat = *latency_us;
     size_t i;
-    int rc = -1, buf_ms = 0;
-    unsigned latency_us = ALSA_LATENCY_US;
+    int rc = -1;
 
-    snd_lib_error_set_handler(quiet);
     err[0] = 0;
-    for (i = 0; i < sizeof ALSA_DEVICES / sizeof *ALSA_DEVICES; i++) {
-        rc = snd_pcm_open(&pcm, ALSA_DEVICES[i], SND_PCM_STREAM_PLAYBACK, 0);
-        if (rc >= 0) { dev = ALSA_DEVICES[i]; break; }
-        /* every failure is kept: which devices a machine HAS NOT got is the
-         * whole diagnosis when a card comes back silent */
-        sel_log("audio: alsa %s: %s", ALSA_DEVICES[i], snd_strerror(rc));
-        if (err[0]) {
-            size_t n = strlen(err);
-            snprintf(err + n, (size_t)errlen > n ? errlen - n : 0, "; ");
+    if (dev) {
+        rc = snd_pcm_open(&pcm, dev, SND_PCM_STREAM_PLAYBACK, 0);
+        if (rc < 0) { snprintf(err, errlen, "%s: %s", dev, snd_strerror(rc)); return NULL; }
+    } else {
+        for (i = 0; i < sizeof ALSA_DEVICES / sizeof *ALSA_DEVICES; i++) {
+            rc = snd_pcm_open(&pcm, ALSA_DEVICES[i], SND_PCM_STREAM_PLAYBACK, 0);
+            if (rc >= 0) { dev = ALSA_DEVICES[i]; break; }
+            /* every failure is kept: which devices a machine HAS NOT got is the
+             * whole diagnosis when a card comes back silent */
+            sel_log("audio: alsa %s: %s", ALSA_DEVICES[i], snd_strerror(rc));
+            if (err[0]) {
+                size_t n = strlen(err);
+                snprintf(err + n, (size_t)errlen > n ? errlen - n : 0, "; ");
+            }
+            {
+                size_t n = strlen(err);
+                snprintf(err + n, (size_t)errlen > n ? errlen - n : 0, "%s: %s",
+                         ALSA_DEVICES[i], snd_strerror(rc));
+            }
+            pcm = NULL;
         }
-        {
-            size_t n = strlen(err);
-            snprintf(err + n, (size_t)errlen > n ? errlen - n : 0, "%s: %s",
-                     ALSA_DEVICES[i], snd_strerror(rc));
-        }
-        pcm = NULL;
-    }
-    if (!pcm) return NULL;
-    /* the buffer asked for: the build's, or PADSELECT_ALSA_LATENCY_MS (the rig's
-     * knob for trying another against a real sink without a rebuild) */
-    {
-        const char *e = getenv("PADSELECT_ALSA_LATENCY_MS");
-        if (e && atoi(e) > 0) latency_us = (unsigned)atoi(e) * 1000u;
+        if (!pcm) return NULL;
     }
     /* THE LADDER: a device that refuses the buffer asked for is tried at 120, 250
      * and 500 ms before the menu gives up on sound - the lag of a bigger buffer is
@@ -267,19 +337,18 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
         static const unsigned ladder[] = { 120000u, 250000u, 500000u };
         size_t k;
         rc = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
-                                AUDIO_CH, AUDIO_RATE, 1, latency_us);
+                                AUDIO_CH, AUDIO_RATE, 1, lat);
         for (k = 0; rc < 0 && k < sizeof ladder / sizeof *ladder; k++) {
-            if (ladder[k] <= latency_us) continue;
+            if (ladder[k] <= lat) continue;
             sel_log("audio: alsa %s: snd_pcm_set_params(%u ms): %s; trying %u ms", dev,
-                    latency_us / 1000u, snd_strerror(rc), ladder[k] / 1000u);
-            latency_us = ladder[k];
+                    lat / 1000u, snd_strerror(rc), ladder[k] / 1000u);
+            lat = ladder[k];
             rc = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
-                                    AUDIO_CH, AUDIO_RATE, 1, latency_us);
+                                    AUDIO_CH, AUDIO_RATE, 1, lat);
         }
     }
     if (rc < 0) {
-        snprintf(err, errlen, "%s: snd_pcm_set_params(%u ms): %s", dev,
-                 latency_us / 1000u, snd_strerror(rc));
+        snprintf(err, errlen, "%s: snd_pcm_set_params(%u ms): %s", dev, lat / 1000u, snd_strerror(rc));
         snd_pcm_close(pcm);
         return NULL;
     }
@@ -287,15 +356,87 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
         /* what the lag really is: the buffer granted, not the one asked for */
         unsigned long bufsz = 0, persz = 0;
         if (snd_pcm_get_params(pcm, &bufsz, &persz) == 0) {
-            buf_ms = (int)(bufsz * 1000UL / AUDIO_RATE);
-            sel_log("audio: alsa buffer %lu frames (%d ms), period %lu frames (%lu ms); asked %d ms",
-                    bufsz, buf_ms, persz, persz * 1000UL / AUDIO_RATE, (int)(latency_us / 1000));
-        } else {
-            sel_log("audio: alsa buffer size unreadable; asked %d ms", (int)(latency_us / 1000));
+            if (chatty)
+                sel_log("audio: alsa buffer %lu frames (%d ms), period %lu frames (%lu ms); asked %d ms",
+                        bufsz, (int)(bufsz * 1000UL / AUDIO_RATE), persz, persz * 1000UL / AUDIO_RATE,
+                        (int)(lat / 1000));
+        } else if (chatty) {
+            sel_log("audio: alsa buffer size unreadable; asked %d ms", (int)(lat / 1000));
         }
+#ifdef ALSA_START_PERIODS
+        /* START ON ONE PERIOD, NOT A WHOLE BUFFER: snd_pcm_set_params leaves the
+         * start threshold at the buffer size; at ALSA_START_PERIODS period(s) the
+         * stream starts as soon as that much is queued.  The JJP build only: the
+         * Stern card's sink stays exactly as it was. */
+        if (persz) {
+            void *sw = alloca(snd_pcm_sw_params_sizeof());
+            unsigned long thr = persz * (unsigned long)ALSA_START_PERIODS;
+            if (snd_pcm_sw_params_current(pcm, sw) == 0
+                && snd_pcm_sw_params_set_start_threshold(pcm, sw, thr) == 0
+                && snd_pcm_sw_params_set_avail_min(pcm, sw, persz) == 0
+                && snd_pcm_sw_params(pcm, sw) == 0) {
+                if (chatty)
+                    sel_log("audio: alsa start threshold %lu frames (%d period%s)", thr,
+                            (int)ALSA_START_PERIODS, ALSA_START_PERIODS == 1 ? "" : "s");
+            } else if (chatty) {
+                sel_log("audio: alsa start threshold could not be set; the library's (a whole buffer) stays");
+            }
+        }
+#endif
     }
     rc = snd_pcm_nonblock(pcm, 1);
-    if (rc < 0) sel_log("audio: alsa nonblock: %s (writes may block briefly)", snd_strerror(rc));
+    if (rc < 0 && chatty) sel_log("audio: alsa nonblock: %s (writes may block briefly)", snd_strerror(rc));
+    *devp = dev;
+    *latency_us = lat;
+    return pcm;
+}
+
+#ifdef ALSA_REOPEN_ON_XRUN
+/* AN UNDERRUN REOPENS THE DEVICE.  snd_pcm_recover (prepare) is what the Stern
+ * card gets, and through the pulse plugin it is not enough: after a recover
+ * the plugin's own bookkeeping leaves the stream stalled - the rig, stopped
+ * 80 ms of every 200, recovered 7 times and then wrote almost nothing for the
+ * rest of the run (David's GNR, silent, 2026-09-14) - so the JJP build closes
+ * the PCM and opens it again, the same device, the same buffer: a fresh plugin
+ * instance every time.  A pump on its own thread makes this rare. */
+static int alsa_reopen(struct alsa *a)
+{
+    char err[200];
+    const char *dev = a->dev;
+    unsigned lat = a->latency_us;
+    snd_pcm_t *pcm;
+    if (a->pcm) { snd_pcm_close(a->pcm); a->pcm = NULL; }
+    pcm = open_pcm(&dev, &lat, err, sizeof err, a->reopens < 2);
+    if (!pcm) {
+        if (!a->err_logged) { sel_log("audio: alsa reopen: %s", err); a->err_logged = 1; }
+        return -1;
+    }
+    a->pcm = pcm;
+    a->reopens++;
+    a->last_accept_ms = sel_now_ms();
+    a->first_logged = 0;
+    if (a->reopens <= 3) sel_log("audio: alsa %s reopened after an underrun (#%d)", dev, a->reopens);
+    return 0;
+}
+#endif
+
+struct audio_sink *audio_alsa_open(char *err, int errlen)
+{
+    struct alsa *a;
+    snd_pcm_t *pcm;
+    const char *dev = NULL;
+    size_t i;
+    unsigned latency_us = ALSA_LATENCY_US;
+
+    snd_lib_error_set_handler(quiet);
+    /* the buffer asked for: the build's, or PADSELECT_ALSA_LATENCY_MS (the rig's
+     * knob for trying another against a real sink without a rebuild) */
+    {
+        const char *e = getenv("PADSELECT_ALSA_LATENCY_MS");
+        if (e && atoi(e) > 0) latency_us = (unsigned)atoi(e) * 1000u;
+    }
+    pcm = open_pcm(&dev, &latency_us, err, errlen, 1);
+    if (!pcm) return NULL;
     a = calloc(1, sizeof *a);
     if (!a) { snd_pcm_close(pcm); snprintf(err, errlen, "out of memory"); return NULL; }
     a->base.name = "alsa";
@@ -306,6 +447,9 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
      * logged, so the Stern card's sink behaves exactly as before item 120 */
     a->base.lead_ms = ALSA_LEAD_MS;
     a->pcm = pcm;
+    a->dev = dev;
+    a->latency_us = latency_us;
+    a->last_accept_ms = sel_now_ms();
     sel_log("audio: alsa %s ok (%d ch, %d Hz)", dev, AUDIO_CH, AUDIO_RATE);
     /* THE LINE-OUT, over i2c, the way the game does it (codec.h): after
      * snd_pcm_set_params, so the kernel's own hw_params and DAPM writes are

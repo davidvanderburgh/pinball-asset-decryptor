@@ -197,6 +197,30 @@ def test_cfg_redirect_is_a_bash_command_line(mj):
 
 
 # ============================================================================ images.conf
+def test_key_positions_are_written_parsed_and_carried(mj):
+    """David's GNR headphone-kit rocker sits at byte 3 bits 6/5 (the menu's --learn line,
+    2026-09-14): --key-plus / --key-minus write key_plus=/key_minus=, an inject carries
+    them, a bad position is refused before anything is built."""
+    import argparse
+    text = mj.render_images_conf(["rootA", "rootB"], ["A", "B"], ["", ""], 0, 15, None, [], None, None, 20,
+                                 keys={"key_plus": "3.6", "key_minus": "3.5"})
+    assert "key_plus=3.6\n" in text and "key_minus=3.5\n" in text and "key_left=" not in text
+    parsed = mj.parse_images_conf(text)
+    assert parsed["keys"] == {"key_plus": "3.6", "key_minus": "3.5"}
+    carried = mj.conf_for_args(["rootA", "rootB"], argparse.Namespace(), existing=parsed, default_titles=["A", "B"])
+    assert "key_plus=3.6\n" in carried and "key_minus=3.5\n" in carried
+    swapped = mj.conf_for_args(["rootA", "rootB"], argparse.Namespace(key_plus="3.5", key_minus="3.6"),
+                               existing=parsed, default_titles=["A", "B"])
+    assert "key_plus=3.5\n" in swapped and "key_minus=3.6\n" in swapped
+    p = argparse.ArgumentParser()
+    mj._add_conf_flags(p)
+    assert p.parse_args(["--key-plus", "3.6"]).key_plus == "3.6"
+    import pytest
+    for bad in ("3", "3.8", "64.0", "x.1"):
+        with pytest.raises(mj.Refused):
+            mj.check_key_pos("key_plus", bad)
+
+
 def test_the_machine_log_is_on_by_default(mj):
     """2026-09-14: the GNR's menu came up silent and nothing on the machine could say
     why.  The selector's bounded log now goes on the machine unless asked not to;

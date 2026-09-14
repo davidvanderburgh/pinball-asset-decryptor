@@ -7073,9 +7073,22 @@ These have each been violated at least once and each cost a run or a window:
       at 120/250/500 ms, a menu that wanted a sink and has none draws `SOUND OFF: <why>` on the
       glass (rig-proven: `C:\tmp\jjp120\pulse\sound_off.png`), and JJP builds carry the
       selector's bounded log at `/jjpe/temp/jjpselect.log` by default (JJP's own dumplogs.sh
-      copies it to a stick; `--no-machine-log` to leave it off). Owed: GNR check 2 with the
-      multi120w ISO. The machine's audio facts: [[reference_jjp_front_usb_port_is_slow]],
-      [[reference_jjp_menu_audio_is_pulse]]. The last rig run, on the merged tree
+      copies it to a stick; `--no-machine-log` to leave it off). GNR check 2 (the multi120w
+      ISO): STILL SILENT, even at 40 on the coin-door buttons (so not the level), and the
+      headphone kit's rocker printed `INPUT byte 3 bit 6 / bit 5` on the glass. The mechanism,
+      rig-reproduced with the selector stopped 80 ms of every 200 at 60 ms: an underrun's
+      recover through the pulse plugin reconnects the stream, and a fresh stream pays ~1.1 s
+      before the server pulls again (`audio: alsa took N ms after the first fill to take
+      more`), so frequent underruns chained into silence while 500 ms rode through them.
+      Fixed on item/120: the pump runs on its own thread every 5 ms (`audio.c`; the render
+      loop sleeping 100 ms a pass: 0 recovers, every click at the sink), the JJP build
+      reopens the PCM on an underrun and when nothing was accepted for 3 s
+      (`ALSA_REOPEN_ON_XRUN`, `ALSA_STALL_MS`; a 300 ms or 1 s watchdog reopened into that
+      startup pause forever - rig-bisected), a one-period start threshold, `--learn` watches
+      the whole frame with a chatter guard, and `mkjjpmulti.py build --key-plus 3.6
+      --key-minus 3.5` names the rocker. Owed: GNR check 3 with the multi120w ISO rebuilt
+      (15:49): audible clicks, the rocker stepping the level. The machine's audio facts:
+      [[reference_jjp_front_usb_port_is_slow]], [[reference_jjp_menu_audio_is_pulse]]. The last rig run, on the merged tree
       (`GunsNRoses-v03.03.multi120v.iso`, a GNR clip on each image): both clips loaded (120
       frames 5.0 s, 96 frames 4.0 s), every frame cached, 528 played / 528 drawn each, the loop
       at 326-334 passes/s (longest 71 ms at start, 5 ms after); grabs 400 ms apart differ in

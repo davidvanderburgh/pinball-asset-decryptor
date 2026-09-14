@@ -65,7 +65,7 @@ CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
             -DDEF_MEDIA='"/jjpe/gen1/padselect/media"' \
             -DDEF_VOLFILE='"/jjpe/perm/padselect.volume"' \
             -DDEF_VOLUME=20 -DVOLUME_CEILING=40 \
-            -DALSA_LATENCY_US=60000 -DALSA_LEAD_MS=60 \
+            -DALSA_LATENCY_US=60000 -DALSA_LEAD_MS=60 -DALSA_START_PERIODS=1 -DALSA_REOPEN_ON_XRUN=1 \
             -DCARD_FONT='"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"' \
             -I$(BUILD) $(EXTRA_CFLAGS)
 # THE MENU'S SOUND ON A JJP MACHINE (item 120).  JJP keeps its amplifier chain

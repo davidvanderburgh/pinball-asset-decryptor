@@ -1509,6 +1509,7 @@ int main(int argc, char **argv)
     long long osd_until = 0;  /* the volume indicator is up until then; 0 = not up */
     char learn_msg[96] = "";  /* --learn: the last unmapped frame bit, on the glass until... */
     long long learn_until = 0;
+    int stall_ms = getenv("PADSELECT_STALL_MS") ? atoi(getenv("PADSELECT_STALL_MS")) : 0;
     int audio_up = 0;         /* the bridge brought the audio section up (hw only) */
     int action;                       /* this title has a lockdown-bar ACTION button */
     int music_voice = -1;
@@ -2026,6 +2027,10 @@ int main(int argc, char **argv)
             draw_learn(&g, font, &L, learn_msg);
         }
         present(&g, &egl, headless, invert);
+        /* PADSELECT_STALL_MS: the rig's knob - every pass sleeps this long, the
+         * way a vsync-paced loop with slow frames would, so the pump thread's
+         * worth is measured rather than assumed (2026-09-14) */
+        if (stall_ms > 0) sel_sleep_ms(stall_ms);
         {
             long long dt = sel_now_ms() - now;
             if (dt > perf_worst) perf_worst = dt;

@@ -182,6 +182,36 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   GNR root's own PulseAudio 15 with a null sink inside the jail, its monitor
   recorded, the selector at 60 ms and at 500 ms - every click and the confirm
   chime reached the sink with the mix's own peaks, 0 dropped, 0 recovers.
+- **Why the GNR's menu was silent, and the fix (2026-09-14, evening).** The
+  machine's loop is vsync-paced and hiccups; a 60 ms buffer underruns on any
+  hiccup over ~45 ms, and after the recover a stream through the pulse plugin
+  never restarted: alsa-lib's start threshold is a whole buffer, which the
+  reconnected stream never quite reaches. Rig-reproduced with the selector
+  stopped 80 ms of every 200 (`STALL=1` in `pulseprobe120.sh`): 7 recovers,
+  then 33,729 frames for the rest of a 16 s run and a 10 s hang on close,
+  while 500 ms under the same stalls played everything. The fixes: the pump
+  runs on its own thread every 5 ms (`audio.c`, both builds), so the render
+  loop's stalls never starve the sink (`PADSELECT_STALL_MS` sleeps the loop
+  each pass: 0 recovers at 100 ms a pass); and on the JJP build an underrun
+  REOPENS the PCM (`ALSA_REOPEN_ON_XRUN=1`) instead of `snd_pcm_recover`,
+  because after a recover the pulse plugin's own bookkeeping leaves the
+  stream stalled whatever the start threshold (a one-period threshold,
+  `ALSA_START_PERIODS=1`, is set too, so a fresh stream starts on its first
+  period), and a WATCHDOG: nothing accepted by the device for 3 s while it
+  is open counts as stuck, whatever the cause, and reopens it too. Three
+  seconds because a fresh stream through the pulse plugin takes ~1.1 s after
+  its first fill before the server pulls more (`audio: alsa took N ms after
+  the first fill to take more` in the log), and every recover or reopen pays
+  that pause again - which is how frequent underruns became silence: the
+  pump thread is the cure, the reopen the net. The Stern card's sink keeps
+  `recover`, untouched.
+- **The headphone kit's rocker** (an LE/CE option: a plate with a 3.5 mm jack,
+  a Bluetooth button and a VOLUME rocker on its own little board) is not in
+  the game's switch table; on David's GNR the glass named it byte 3 bits 6
+  (+) and 5 (-), and `mkjjpmulti.py build --key-plus 3.6 --key-minus 3.5`
+  writes `key_plus=` / `key_minus=` into images.conf (all five `--key-*`
+  flags exist; an inject carries them; `inspect` shows `keys=`). The coin
+  door's Up / Down stay the defaults.
 - **The machine's buttons are READ, not guessed**: the hook runs the selector
   with `--learn`, so a frame bit that changes and is not one of the five
   mapped buttons is shown on the glass for 3 s (`INPUT byte N bit M pressed

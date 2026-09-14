@@ -7075,11 +7075,30 @@ These have each been violated at least once and each cost a run or a window:
       is then green, `jjpio_test.py` case 5 pressing the pty board's bits 5/6: clicks peaking
       [4000, 4750, 4000, 4750] for levels 25/30/25/30 (tone 15999 x gain), 30 kept and read
       back, the cap, the indicator in the headless frame and gone, `--volume 90` cut to 40.
-      **Resume:** the rig proof: build the selector, the JJP media and a multi ISO under a new
-      name (a fresh restore), and two muted watch.sh runs (Up/Up/Down in the menu, grab.sh
-      with the indicator up and gone, the mix dump's click peaks, the remembered level on
-      the second launch). Then the Stern `make check` once more (the icfg fix touched
-      shared code), MULTIBOOT.md's proof table, and David's GNR check.
+      **Rig-proven 2026-09-14 (muted; no Sentinel key plugged in, so watch.sh's steps without
+      the dongle - the menu needs none):** selector + media + `GunsNRoses-v03.03.multi120.iso`
+      built the tab's way (media move/confirm levelled -6.0/-6.9 -> -12.00 dBFS; build 426 s);
+      the menu logged `alsa buffer 2646 frames (60 ms), period 661 frames (14 ms)`, 0 recovers;
+      Up, Up, Down typed into the game's display arrived as plus/plus/minus: 20 -> 25 -> 30 ->
+      25, `indicator off at 25`, `25 remembered`, perm file 25; the mix dump's clicks peaked
+      2058 / 2444 / 2058 (expected 2057 / 2443 / 2057) and the confirm chime 2058; the second
+      launch logged `volume: 25 of 40 (remembered in /jjpe/perm/padselect.volume)`. The grabs
+      failed: grab.sh looked on :0, the menu is on the nested :1 (`JJP_DISPLAY=:1`).
+      **David, 2026-09-14, three more asks:** (a) is the level remembered - yes, above; (b)
+      the JJP work must be ISOLATED FROM STERN; (c) video/animations must play on the JJP
+      menu. For (b): Stern's ALSA lead is back to exactly its own; Stern's libasound exports
+      the new `snd_pcm_get_params`; the family's pre-existing Stern test assertions are all
+      intact; main (37 commits since the family branched, incl. Stern selector audio) is
+      merged in as `item/120-merge` (`8f961a7`) with the four tab conflicts resolved to main's
+      Stern behaviour (install step as root with the user's HOME, PAD-143's flash words in
+      `STERN.flash_tick/flash_detail`). For (c): the Edit image dialog no longer offers "The
+      game's own attract video" on a JJP row (it rendered nothing - no attract clip in the
+      clear); a video file is a JJP image's animation.
+      **Resume:** read the three merged-tree checks (Stern selector main vs merged frame for
+      frame, JJP `make check`, the multi-boot + smoke pytest set); then the rig run on the
+      merged tree with a GNR video on each image (animated panels in three grabs, perf lines)
+      plus the indicator grabs on :1; fast-forward item/120 to item/120-merge and drop the
+      temporary worktree; MULTIBOOT.md's proof table; David's GNR check.
       *(Found on the first GNR machine boot, item 119. Branch from and merge
       into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
       `/finish` now follows this item, not 119.)* On David's GNR

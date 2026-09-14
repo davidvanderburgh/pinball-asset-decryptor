@@ -459,14 +459,18 @@ HELP_CONTENT = {
          "before the app kept a saved original) keeps what it has — "
          "\"Revert all changes…\" on the Write tab is what restores those."),
         ("Where images come from",
-         "The Source column tells the four stores apart. \"File\" = a "
+         "The Source column tells the stores apart. \"File\" = a "
          "plain image file on the card (menus, apron/test art). \"Scene "
          "texture\" = artwork decoded out of the game's compiled display "
          "scenes — many are frames of an animation or sprite sheets. "
          "\"Radium\" = images embedded inside the scene descriptions "
          "themselves (song-title banners and similar). \"Glyph\" = a single "
          "character sliced out of a font atlas (see Font atlases below). "
-         "All four replace the same way; the Source dropdown in the toolbar "
+         "\"Boot screen\" = the picture the machine shows while it starts "
+         "up (Stern's logo, SternLogo.png), which lives on the OS partition "
+         "rather than with the game's files; an extract made before this "
+         "version doesn't have it until you Extract again. "
+         "All of them replace the same way; the Source dropdown in the toolbar "
          "narrows the list to one store, and clicking the Source header "
          "sorts by it."),
         ("Scene groups",
@@ -930,7 +934,9 @@ HELP_CONTENT = {
         ("Replace a file on the card",
          "Right-click any file → \"Replace with…\" swaps it for one of your "
          "own: a boot or game script, a font, the Stern splash screen on the "
-         "OS partition (sda2, /usr/local/spike/SternLogo.png). Your file does "
+         "OS partition (sda2, /usr/local/spike/SternLogo.png; that one is "
+         "also on the Replace Images tab as \"Boot screen\", and a build puts "
+         "it on the card like any other image). Your file does "
          "NOT have to match the original's size. A same-size file is written "
          "straight into the blocks the original occupied, which changes no "
          "filesystem structure at all and needs nothing installed. A bigger "

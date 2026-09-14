@@ -76,7 +76,11 @@ def card(monkeypatch, tmp_path):
              "counts": (1, 0, 0, 0), "audio": None, "val": None}
 
     def fake_compute(disk_f, parts, assets_dir, log, progress, cancel,
-                     phase=None, label=None, dest_is_device=False):
+                     phase=None, label=None, dest_is_device=False,
+                     boot_screen=True):
+        # An override set never carries the boot screen: the emulator starts
+        # the game without it (PAD-147).
+        assert boot_screen is False
         return (state["writes"], state["counts"], state["grow"],
                 state["audio"], state["val"])
 

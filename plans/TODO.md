@@ -7071,7 +7071,7 @@ These have each been violated at least once and each cost a run or a window:
       menu David called very loud. Fixed on item/120: media levelled to -3 dBFS (default 20 =
       11 dB under that menu, cap 40 = 5 dB under), `audio_alsa_open` retries a refused buffer
       at 120/250/500 ms, a menu that wanted a sink and has none draws `SOUND OFF: <why>` on the
-      glass (rig-proven: `C:	mp\jjp120\pulse\sound_off.png`), and JJP builds carry the
+      glass (rig-proven: `C:\tmp\jjp120\pulse\sound_off.png`), and JJP builds carry the
       selector's bounded log at `/jjpe/temp/jjpselect.log` by default (JJP's own dumplogs.sh
       copies it to a stick; `--no-machine-log` to leave it off). Owed: GNR check 2 with the
       multi120w ISO. The machine's audio facts: [[reference_jjp_front_usb_port_is_slow]],

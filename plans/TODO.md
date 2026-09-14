@@ -6495,6 +6495,51 @@ These have each been violated at least once and each cost a run or a window:
       — S3: feature. D3: hardware-only; what it finds cannot be provoked on
       the desk, and a dead menu still boots stock.
 
+- [ ] **120. The JJP boot menu's sound: a safe level, and no lag.** `S2 D3`
+      *(Found on the first GNR machine boot, item 119. Branch from and merge
+      into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
+      `/finish` now follows this item, not 119.)* On David's GNR
+      (2026-09-14) the menu's move sound came a noticeable moment late and the
+      volume was very high. **Why it is loud** (read from the installed image
+      and the selector source): the menu has its OWN level - images.conf
+      `volume=` (the Multi-boot tab's default 50, range 0-100) is a software
+      gain on the mixed samples (50 = 128/256, about -6 dB) - and it plays
+      through ALSA's `default` before the game starts. JJP runs the hardware
+      chain at full (root A's `/var/lib/alsa/asound.state` holds Front,
+      Surround, Center and LFE Playback Volume 87 = 0 dB; `scripts/audio/
+      mute.pl` sets Master, PCM and Speaker to 100%) and the game turns only
+      its OWN stream down to the operator volume, so the operator setting
+      never reaches the menu. The JJP build touches no mixer (`codec_*` are
+      stubs in `stubs_jjp.c`; the Stern ctl names `backbox`/`cabinet` do not
+      exist - the rig logs `attach: No such file or directory`), and
+      `volume=machine` is Stern-only (`MultibootBackend.machine_volume` is
+      False for JJP). `selectmedia.normalise_wav` changes format, length and
+      fade but never GAIN, so a music bed peaking near 0 dBFS would reach the
+      amplifier at about -6 dBFS continuous at volume 50 and full scale at
+      100 - loud enough to annoy and to stress the speakers; the synth click
+      is written at half scale (about -12 dBFS after the gain). **Why it
+      lags:** `audio_alsa.c` opens the device with `LATENCY_US 500000` and
+      `audio_pump` keeps that buffer topped up, so a new sound joins behind up
+      to 500 ms of queued audio - a value from the Stern card's sink.
+      **To do, in one rebuild:** (1) the JJP build's ALSA buffer and lead
+      under 100 ms (a `PLATFORM=jjp` value; Stern's untouched); (2) the tab's
+      JJP default volume quiet (15-20) and a JJP cap (40), refused beyond it
+      by `mkjjpmulti.py` too; (3) every menu sound and music bed the media
+      step writes for JJP peak-levelled to one fixed target (for example -12
+      dBFS), so no source file arrives louder than planned. **Not in scope
+      unless David asks:** following the machine's own volume setting - where
+      JJP keeps it is unknown (the image's perm partition is empty until the
+      game saves) and needs a machine with saved settings to read.
+      **Acceptance:** the selector's log on the rig shows the JJP ALSA
+      latency and lead under 100 ms; the tab's JJP default and cap hold
+      (tests); a media set built for JJP measures at the target peak with
+      selectmedia's own peak probe; then on the GNR, after a reinstall (which
+      wipes settings and scores), David hears the move sound with no
+      noticeable lag, at a comfortable level.
+      — S2: a quality defect with a speaker risk once music is used, not a
+      malfunction. D3: desk changes across the selector, the tab and the media
+      step plus a rig measurement; the final judgement needs the machine.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

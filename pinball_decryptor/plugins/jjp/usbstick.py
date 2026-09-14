@@ -159,15 +159,15 @@ def _ps_elevated(script, timeout=300):
         shutil.rmtree(ipc, ignore_errors=True)
 
 
-def _ps_admin(script, timeout=300, log=None):
+def _ps_admin(script, timeout=300, log=None, why="Formatting the stick"):
     """Run a PowerShell script with admin rights — in-process when the app
     is already elevated (the shipped build), else via one UAC prompt."""
     if is_admin():
         return _ps(script, timeout=timeout)
     if log is not None:
-        log("Formatting the stick needs administrator access — approve the "
-            "prompt to continue (the app itself keeps running normally).",
-            "info")
+        log("%s needs administrator access — approve the "
+            "prompt to continue (the app itself keeps running normally)."
+            % why, "info")
     return _ps_elevated(script, timeout=timeout)
 
 
@@ -190,6 +190,46 @@ def _iter_files(root):
     for dirpath, _dirs, files in os.walk(root):
         for name in files:
             yield os.path.join(dirpath, name)
+
+
+def iso_has_joliet(path):
+    """True / False: does the ISO carry a Joliet directory tree, the long-name
+    tree Windows' Mount-DiskImage reads?  None when *path* is not an ISO 9660
+    image this can read.
+
+    WITHOUT ONE WINDOWS SHOWS THE PLAIN ISO 9660 NAMES: upper case, one dot, the
+    rest underscores - ``sda3.ext4-ptcl-img.gz.aa`` reads as
+    ``SDA3_EXT4_PTCL_IMG_GZ.AA`` - and a stick copied from that view carries
+    names JJP's installer never finds.  The GNR multi-boot ISO was one (xorriso
+    rewrote the stock ISO without ``-joliet on``), and so is a custom ISO made
+    the same way (item 119, 2026-09-13).  Read off the volume descriptor set:
+    sector 16 on, 2048 bytes each; a Supplementary descriptor (type 2) whose
+    escape sequence at offset 88 is ``%/@``, ``%/C`` or ``%/E`` is Joliet."""
+    sector = 2048
+    try:
+        with open(path, "rb") as f:
+            for i in range(16, 64):
+                f.seek(i * sector)
+                vd = f.read(sector)
+                if len(vd) < 91 or vd[1:6] != b"CD001":
+                    return None if i == 16 else False
+                if vd[0] == 255:
+                    return False
+                if vd[0] == 2 and vd[88:91] in (b"%/@", b"%/C", b"%/E"):
+                    return True
+    except OSError:
+        return None
+    return False
+
+
+#: The refusal for an ISO Windows would copy under shortened names.
+NO_JOLIET_TEXT = (
+    "This ISO has no Joliet directory, so Windows shows its files under "
+    "shortened names (sda3.ext4-ptcl-img.gz.aa reads as "
+    "SDA3_EXT4_PTCL_IMG_GZ.AA) and a stick copied from it cannot install: the "
+    "machine's installer looks for the real names. Make the stick with Rufus in "
+    "ISO Image mode, which reads the ISO's full names itself, or rebuild the ISO "
+    "with this version of the app.")
 
 
 def _tree_size(root):
@@ -488,6 +528,101 @@ def mount_iso_linux(iso_path, log):
     return mount, _unmount
 
 
+# ---------------------------------------------------------------------------
+# Boot code: the stick has to START on the machine, in either firmware mode.
+# ---------------------------------------------------------------------------
+
+#: What the stick can do without its boot code, said when it cannot be added.
+UEFI_ONLY_NOTE = (
+    "This stick starts on machines that boot USB in UEFI mode. A machine that "
+    "boots it in legacy BIOS mode also needs the stick's boot code, and stops on "
+    "\"Reboot and Select proper Boot device\" without it. The app installs that "
+    "code on Windows; on this computer run the ISO's utils/linux/makeboot.sh on "
+    "the stick (Linux), or make the stick with Rufus in ISO Image mode.")
+
+
+def _stick_path(root, *parts):
+    """A path on the stick matched case-insensitively, or None.  A copy of a
+    Clonezilla ISO can carry its names upper case (UTILS\\WIN64\\SYSLINUX64.EXE)."""
+    cur = root
+    for part in parts:
+        try:
+            names = os.listdir(cur)
+        except OSError:
+            return None
+        hit = next((n for n in names if n.lower() == part.lower()), None)
+        if hit is None:
+            return None
+        cur = os.path.join(cur, hit)
+    return cur
+
+
+def _win_syslinux_script(tool, letter):
+    """Clonezilla's own boot-code install - the one command its
+    utils\\win64\\makeboot64.bat runs: ``syslinux64.exe -d syslinux -mafi X:``
+    (loader into \\syslinux, MBR boot code, partition active, force).  Run
+    through Start-Process so a line on stderr cannot end the elevated script,
+    and judged by the exit code it prints."""
+    return (
+        "$p = Start-Process -FilePath '%(tool)s' "
+        "-ArgumentList '-d','syslinux','-mafi','%(l)s:' "
+        "-Wait -PassThru -WindowStyle Hidden\n"
+        "'SYSLINUX_RC=' + $p.ExitCode\n" % {"tool": tool, "l": letter})
+
+
+def make_bootable_windows(mount_root, device_path, log):
+    """Install the stick's legacy-BIOS boot code with the ISO's own tool.
+
+    A JJP machine BOOTS the install stick (Clonezilla live).  The ISO carries
+    both ways in: syslinux for legacy BIOS and EFI/boot for UEFI.  A FAT copy
+    of its files is enough for UEFI, but a legacy boot needs boot code in the
+    MBR, an active partition and syslinux's loader - which a copy never
+    writes.  So the GNR multi-boot stick stopped on "Reboot and Select proper
+    Boot device" on David's machine (item 119, 2026-09-13), where JJP's own
+    Windows procedure, Rufus in ISO Image mode, installs that code.  The
+    Clonezilla ISO ships the installer for it, matched to its own syslinux
+    version: utils/win64/syslinux64.exe.  Returns True when the code is in.
+    """
+    letter = mount_root.rstrip(":\\/")
+    tool = _stick_path(mount_root, "utils", "win64", "syslinux64.exe")
+    if tool is None:
+        log(UEFI_ONLY_NOTE + " (This ISO carries no utils/win64/syslinux64.exe.)",
+            "info")
+        return False
+    log("Installing the stick's boot code with the ISO's own syslinux, so a "
+        "machine that boots USB in legacy BIOS mode can start it too...", "info")
+    rc, out = _ps_admin(_win_syslinux_script(tool, letter), timeout=180,
+                        log=log, why="Installing the stick's boot code")
+    m = re.search(r"^SYSLINUX_RC=(-?\d+)\s*$", out or "", re.M)
+    code = int(m.group(1)) if m else None
+    loader = _stick_path(mount_root, "syslinux", "ldlinux.sys")
+    _prc, active = _ps("(Get-Partition -DriveLetter %s).IsActive" % letter,
+                       timeout=60)
+    active = (active or "").strip().lower() == "true"
+    if rc != 0 or code != 0 or loader is None or not active:
+        raise PipelineError(
+            PHASES[3],
+            "The installer's files are on the stick, but its boot code did not "
+            "install (syslinux64 exit %s, syslinux\\ldlinux.sys %s, partition "
+            "%s). A machine that boots USB in legacy BIOS mode will stop on "
+            "\"Reboot and Select proper Boot device\" with this stick; UEFI "
+            "machines are unaffected. Prepare the stick again, or use Rufus in "
+            "ISO Image mode.%s"
+            % (code if code is not None else "unknown",
+               "present" if loader else "missing",
+               "active" if active else "not active",
+               ("\n\n" + _first_line(out)) if rc != 0 else ""))
+    log("Boot code installed: the stick starts in legacy BIOS mode as well as "
+        "UEFI.", "success")
+    return True
+
+
+def make_bootable_other(mount_root, device_path, log):
+    """macOS / Linux: the copy boots in UEFI mode; say what legacy needs."""
+    log(UEFI_ONLY_NOTE, "info")
+    return False
+
+
 def _win_eject_script(letter):
     """Flush, ask Explorer to eject, and WAIT for the drive letter to go.
 
@@ -566,6 +701,11 @@ class UsbStickPreparePipeline(BasePipeline):
               "darwin": mount_iso_macos}.get(sys.platform, mount_iso_linux)
         return fn(self.iso_path, self._log)
 
+    def _make_bootable(self, mount_root):
+        fn = {"win32": make_bootable_windows}.get(sys.platform,
+                                                  make_bootable_other)
+        return fn(mount_root, self.device_path, self._log)
+
     def _eject_stick(self, mount_root):
         fn = {"win32": eject_stick_windows,
               "darwin": eject_stick_macos}.get(sys.platform,
@@ -592,6 +732,11 @@ class UsbStickPreparePipeline(BasePipeline):
                 PHASES[0], "ISO not found: %r" % self.iso_path)
         iso_size = (_tree_size(self.iso_path) if iso_is_dir
                     else os.path.getsize(self.iso_path))
+        # Windows mounts the ISO to copy it, and without a Joliet tree it
+        # shows names the installer cannot use (see iso_has_joliet).
+        if (sys.platform == "win32" and not iso_is_dir
+                and iso_has_joliet(self.iso_path) is False):
+            raise PipelineError(PHASES[0], NO_JOLIET_TEXT)
         if sys.platform == "win32" and iso_size > _WIN_FAT32_USABLE:
             raise PipelineError(
                 PHASES[0],
@@ -679,6 +824,15 @@ class UsbStickPreparePipeline(BasePipeline):
                     % "\n  ".join(bad[:10]))
         finally:
             unmount()
+
+        # The boot code, last of the Verify step: the files alone boot only in
+        # UEFI mode (see make_bootable_windows).
+        if premounted:
+            self._log("Target is a folder — skipping the boot code (test "
+                      "mode).", "info")
+        else:
+            self._make_bootable(mount_root)
+        self._check_cancel()
 
         self._set_phase(4)  # Eject
         self._set_band(98, 100)

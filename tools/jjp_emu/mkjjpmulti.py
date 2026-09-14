@@ -316,6 +316,30 @@ def iso_extract(iso, paths, dest_dir):
             os.chmod(os.path.join(root, f), 0o644)
 
 
+def iso_has_joliet(iso):
+    """True / False: does the ISO carry a Joliet tree (read off the volume
+    descriptor set; None when it is not an ISO 9660 image)?  Windows reads an
+    ISO's long names from Joliet, and the app's stick maker on Windows copies
+    what Windows shows - without it every `sdaN.ext4-ptcl-img.gz.aa` lands on
+    the stick as `SDAN_EXT4_PTCL_IMG_GZ.AA` and the installer finds nothing
+    (item 119).  The same test as plugins/jjp/usbstick.py's."""
+    sector = 2048
+    try:
+        with open(iso, "rb") as f:
+            for i in range(16, 64):
+                f.seek(i * sector)
+                vd = f.read(sector)
+                if len(vd) < 91 or vd[1:6] != b"CD001":
+                    return None if i == 16 else False
+                if vd[0] == 255:
+                    return False
+                if vd[0] == 2 and vd[88:91] in (b"%/@", b"%/C", b"%/E"):
+                    return True
+    except OSError:
+        return None
+    return False
+
+
 def iso_has_boot(iso):
     """True when the ISO carries El Torito boot records (a stock JJP ISO does; the selftest's
     synthetic ones do not, and -boot_image any replay on those is a refusal)."""
@@ -1099,7 +1123,14 @@ def xorriso_build(indev, outdev, removes, find_removes, maps, chmods, meter=None
     """The output ISO = the input ISO with files removed, files/directories mapped in and
     modes set; the boot records replayed when the input has any."""
     need_tools("xorriso")
-    argv = ["xorriso", "-report_about", "UPDATE", "-indev", indev, "-outdev", outdev]
+    # -joliet on: THE LONG-NAME TREE WINDOWS READS.  xorriso writes only Rock
+    # Ridge unless told, so rewriting a stock JJP ISO (which carries Joliet)
+    # dropped it, and Windows then showed the plain ISO 9660 names -
+    # sda3.ext4-ptcl-img.gz.aa as SDA3_EXT4_PTCL_IMG_GZ.AA.  The app's stick
+    # maker copies what Windows shows, so the GNR multi-boot stick carried names
+    # JJP's installer never finds (item 119, 2026-09-13).
+    argv = ["xorriso", "-report_about", "UPDATE", "-indev", indev, "-outdev", outdev,
+            "-joliet", "on"]
     if iso_has_boot(indev):
         argv += ["-boot_image", "any", "replay"]
     for path in removes:
@@ -1583,6 +1614,9 @@ def verify_iso(iso, primary=None, extra=None, quick=False, workdir=None):
             big = [(p, s) for p, s in info.files if s >= (4 << 30)]
             check("every file fits FAT32 (under 4 GiB) for the stick copy", not big,
                   ", ".join(os.path.basename(p) for p, _s in big[:3]))
+            # ...and keeps its NAME there: Windows copies the Joliet names
+            check("a Joliet tree, so Windows copies the real file names onto the stick",
+                  iso_has_joliet(iso) is True)
             pad = os.path.join(m, ISO_PAD_DIR.lstrip("/"))
             conf = build = conf_text = None
             if check("%s on the ISO" % ISO_PAD_DIR, os.path.isdir(pad)):

@@ -43,6 +43,51 @@ def test_default_title_from_the_iso_name(mj):
     assert mj.default_title("") == "image"
 
 
+# ============================================================================ joliet (item 119)
+def _vds(path, joliet):
+    s = 2048
+    b = bytearray(s * 19)
+    for i, kind, esc in ((16, 1, b""), (17, 2, b"%/E"), (18, 255, b"")) if joliet else \
+            ((16, 1, b""), (17, 255, b"")):
+        o = i * s
+        b[o] = kind
+        b[o + 1:o + 6] = b"CD001"
+        b[o + 6] = 1
+        if esc:
+            b[o + 88:o + 91] = esc
+    path.write_bytes(bytes(b))
+    return str(path)
+
+
+def test_iso_has_joliet_reads_the_descriptors(mj, tmp_path):
+    assert mj.iso_has_joliet(_vds(tmp_path / "j.iso", True)) is True
+    assert mj.iso_has_joliet(_vds(tmp_path / "n.iso", False)) is False
+    junk = tmp_path / "junk.iso"
+    junk.write_bytes(b"\0" * 2048 * 17)
+    assert mj.iso_has_joliet(str(junk)) is None
+
+
+def test_the_output_iso_asks_xorriso_for_joliet(mj, tmp_path, monkeypatch):
+    """xorriso writes only Rock Ridge unless told, and Windows reads Joliet: the
+    GNR multi-boot stick carried SDA3_EXT4_PTCL_IMG_GZ.AA names without it."""
+    out = tmp_path / "out.iso"
+    seen = []
+
+    class Proc:
+        stdout = iter([b"xorriso : UPDATE : 50% done\n"])
+
+        def wait(self):
+            out.write_bytes(b"iso")
+            return 0
+    monkeypatch.setattr(mj, "need_tools", lambda *a: None)
+    monkeypatch.setattr(mj, "iso_has_boot", lambda iso: True)
+    monkeypatch.setattr(mj.subprocess, "Popen", lambda argv, **k: (seen.append(argv), Proc())[1])
+    mj.xorriso_build("in.iso", str(out), [], [], [], [])
+    argv = seen[0]
+    assert argv[argv.index("-joliet") + 1] == "on"
+    assert argv[argv.index("-boot_image") + 1:argv.index("-boot_image") + 3] == ["any", "replay"]
+
+
 def test_version_info_parses_jjps_file(mj):
     text = ("###\n# Copyright (c) 2025 Jersey Jack Pinball\n###\nTitle: Guns N Roses\nName: GunsNRoses\n"
             "Version: 03.03\nType: iso\nDisksize: 111\nOS: Ubuntu 21.10\nDate: 2025-03-26\n")

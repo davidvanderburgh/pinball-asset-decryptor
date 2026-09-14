@@ -6880,9 +6880,39 @@ These have each been violated at least once and each cost a run or a window:
       item/99); `_ps_elevated` now uses `core.elevated_flash._ipc_dir` and an
       unreadable result is a message (`541a1a7`, tests/test_jjp_usbstick_elevated.py).
       Only a source run hits it: the shipped build launches elevated.
-      **Resume (David, at the machine):** the stick and the GNR key in the
-      cabinet, power on; the installer runs by itself (it wipes settings and
-      scores); first boot with the coin door open; then the checks above.
+      **The first stick did not install (David at the GNR machine,
+      2026-09-13):** the machine's firmware said "Reboot and Select proper
+      Boot device or Insert Boot Media in selected Boot device and press a
+      key" - JJP's installer never started. Read back off the stick, TWO
+      defects the stick maker's size-verify could not see: (1) **no legacy
+      boot code** - the partition not active, no `syslinux/ldlinux.sys`, a
+      zeroed MBR: GNR boots USB in legacy BIOS mode, and JJP's own procedure
+      (their PC PDF: Rufus, default settings) installs syslinux, which a FAT
+      copy never does; (2) **shortened names** - `HOME/PARTIMAG/IMG/
+      SDA3_EXT4_PTCL_IMG_GZ.AA` where the installer globs
+      `sda3.ext4-ptcl-img.gz.a?`: Windows' Mount-DiskImage reads Joliet for
+      long names, the stock GNR ISO has a Joliet tree, the Chaka ISO and our
+      multi ISO do NOT (xorriso `-indev/-outdev` writes only Rock Ridge
+      without `-joliet on`), so Windows showed ISO 9660 names and the stick
+      maker copied them. So even a booting stick could not have installed.
+      **Fixed:** `mkjjpmulti.xorriso_build` passes `-joliet on`, and `verify`
+      checks for a Joliet tree; the stick maker refuses a Joliet-less ISO on
+      Windows before touching the stick (`usbstick.iso_has_joliet`, with a
+      Rufus pointer) and, after the copy, installs the boot code with the
+      ISO's own `utils/win64/syslinux64.exe -d syslinux -mafi X:` (Clonezilla's
+      makeboot64.bat command), then checks `syslinux/ldlinux.sys` and the
+      active flag (`make_bootable_windows`; macOS/Linux say what legacy needs).
+      The multi ISO was re-mastered with a Joliet tree and no file changed
+      (scratch remaster119.sh: file list, El Torito images and three shas
+      compared; the old image kept as `GunsNRoses-v03.03.multi.nojoliet.iso`),
+      and the stick is being remade by an ELEVATED run of the pipeline (one
+      UAC prompt; scratch stickjob119.py checks exact-case names, the loader,
+      the active flag and the cfg lines on the stick).
+      Memory: reference_jjp_stick_joliet_and_bootcode.
+      **Resume (David, at the machine):** the remade stick and the GNR key in
+      the cabinet (GNR: the USB extension cable at the front, per JJP's PDF),
+      power on; the installer runs by itself (it wipes settings and scores);
+      first boot with the coin door open; then the checks above.
 
 ## Reference material that is NOT in this repo
 

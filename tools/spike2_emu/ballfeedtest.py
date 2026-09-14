@@ -316,7 +316,15 @@ def main():
     # second launch landing after the first ball had already come home is the
     # one way this section could pass while the fault it is about was still
     # there.
-    henv = dict(env, PAD_BALL_HOME_MS="1500")
+    #
+    # AND A SMALL MINIMUM GAP, because this section is not about the retry
+    # rule and must not trip it. The two-launch check puts its ejects ~0.45 s
+    # apart, and the feeder measures the gap from the END of its last feed
+    # (after the lane flight), so under a loaded WSL it read "eject 284 ms
+    # after the last one - refused as a retry (PAD_BALL_MIN_GAP_MS=300)" and
+    # the check came out 5 instead of 4 - a flake in the harness, not the
+    # feeder. The retry rule keeps its own check in the feed section above.
+    henv = dict(env, PAD_BALL_HOME_MS="1500", PAD_BALL_MIN_GAP_MS="100")
     p2 = subprocess.Popen([sys.executable, os.path.join(HERE, "ballfeed.py")],
                           env=henv, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True, bufsize=1)

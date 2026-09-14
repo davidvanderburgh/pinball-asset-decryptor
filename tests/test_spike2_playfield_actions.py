@@ -32,6 +32,20 @@ if RIG not in sys.path:
     sys.path.insert(0, RIG)
 
 
+@pytest.fixture(autouse=True)
+def _no_key_panel(monkeypatch, tmp_path):
+    """Every test here is about the bottom ACTION ROW, which PAD-134 hides
+    whenever a key panel attaches - and a panel attaches whenever dump/padbinds
+    exists. On a developer box that file is whatever the last emulator run
+    left (this one had today's), so the row vanished under
+    test_schematic_keeps_the_state_cluster_away_from_the_actions while CI,
+    which has no rig, stayed green. Pinned to a file that does not exist, so
+    the answer does not depend on the desk; the panel side has its own tests
+    in test_spike2_playfield_panel_controls.py."""
+    import playfield
+    monkeypatch.setattr(playfield, "BINDS_PATH", str(tmp_path / "no-padbinds"))
+
+
 def _root():
     tk = pytest.importorskip("tkinter")
     try:
@@ -166,8 +180,10 @@ def test_clear_alerts_runs_the_exerciser_with_no_argument():
     try:
         view = playfield.Schematic(root, _switch_rows())
         view.drv = FakeDrv()
-        clear = [b for b in view._acts if b.cget("text") == "Clear alerts"]
-        assert len(clear) == 1, "the row should offer exactly one Clear alerts"
+        clear = [b for b in view._acts
+                 if b.cget("text") == "Clear switch alerts"]
+        assert len(clear) == 1, \
+            "the row should offer exactly one Clear switch alerts"
         clear[0].invoke()
         assert view.drv.ran == [("swexercise.py", ())]
     finally:

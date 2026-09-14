@@ -304,6 +304,34 @@ DOOR_NODE, DOOR_BIT = 0, 23
 BINDS_PATH = (os.environ.get("PAD_PF_BINDS")
               or os.path.join(padpath.dump() or "", "padbinds"))
 
+#: The ball feeder's status (PAD-134): `fed N`, then its newest lines. Written
+#: by ballfeed.publish() inside WSL, read here for the key panel's BALLS
+#: section. PAD_PF_BALL is the offline hatch, the PAD_PF_BINDS shape.
+BALL_PATH = (os.environ.get("PAD_PF_BALL")
+             or os.path.join(padpath.dump() or "", "padball"))
+
+
+def read_ball_status(path=None):
+    """(fed, [lines]) from the feeder's status file, or (None, []) without one.
+
+    None and not 0, for the same reason trough.Balls has an unknown total: a
+    window whose run has no feeder yet - or PAD_BALL_FEED=0 - has not fed
+    nothing, it has nobody counting, and the line should not claim a zero.
+    """
+    try:
+        with open(path or BALL_PATH, encoding="utf8", errors="replace") as f:
+            lines = [ln.rstrip("\n") for ln in f]
+    except OSError:
+        return None, []
+    fed = None
+    if lines and lines[0].startswith("fed "):
+        try:
+            fed = int(lines[0][4:])
+        except ValueError:
+            fed = None
+        lines = lines[1:]
+    return fed, [ln for ln in lines if ln.strip()]
+
 #: This directory, as WSL sees it - the helpers below are run inside WSL through
 #: interop, so they cannot be handed the Windows path this file was loaded from.
 #: `wslpath -u` is asked instead of assuming the checkout is on C:.
@@ -440,7 +468,9 @@ GONE_POLLS = 2 * TARGET_FPS
 #: running a different helper could not be expressed without either a second
 #: list or a special case - and a second list is the thing item 60 collapsed.
 #:
-#: "Clear alerts" is David's ask (2026-08-21, watching turtles_pro still list
+#: "Clear switch alerts" (first "Clear alerts"; renamed PAD-134, when it moved
+#: under the key panel's SERVICE buttons) is David's ask (2026-08-21, watching
+#: turtles_pro still list
 #: twelve CHECK SWITCH rows after a boot-time exercise had already run: "maybe
 #: we need an 'opt-in' button that clears them?"). It works every safe switch
 #: once so the game's own no-usage audit sees usage. swexercise.py's header has
@@ -459,7 +489,7 @@ WINDOW_ACTIONS = (("Insert coin", "plunge.py", "coin"),
                   ("Start", "plunge.py", "start"),
                   ("Plunge", "plunge.py", "plunge"),
                   ("Reset balls", "plunge.py", "reset"),
-                  ("Clear alerts", "swexercise.py", None))
+                  ("Clear switch alerts", "swexercise.py", None))
 
 #: How much of a helper's own answer the status bar carries. Long enough for
 #: plunge.py's longest real reply (Start's two lines, ~100 chars) and short
@@ -511,7 +541,8 @@ def run_helper(view, script, arg=None):
     `arg` is None for a helper that takes none, which is what keeps
     WINDOW_ACTIONS a plain table rather than a table with a special case in it.
     The driver runs these on their own thread because they take seconds -
-    "Clear alerts" takes about twelve - so the reply arrives on that thread and
+    "Clear switch alerts" takes about twelve - so the reply arrives on that
+    thread and
     hops back through `after(0)`; a TclError there is a window that closed
     while its helper was still running.
     """
@@ -523,6 +554,17 @@ def run_helper(view, script, arg=None):
                 view._flash(text)
             except (AttributeError, tk.TclError):       # pragma: no cover
                 pass
+            # A ball action's answer also lands in the BALLS note (PAD-134),
+            # beside the feeder's own lines and under the button that asked -
+            # the JJP window's run_plan logs its "drain:"/"plunge:" the same
+            # way. The status bar keeps it too; it is the one place every
+            # action reports.
+            panel = getattr(view, "key_panel", None)
+            if script == "plunge.py" and panel is not None:
+                try:
+                    panel.ball_say("%s: %s" % (arg, text) if arg else text)
+                except (AttributeError, tk.TclError):   # pragma: no cover
+                    pass
         try:
             view.status.after(0, show)
         except tk.TclError:                             # pragma: no cover
@@ -1226,6 +1268,17 @@ class SwitchWatch:
             if hit is not None:
                 self.door_id = hit["id"]
                 break
+        # The shooter lane, by NAME (ballmodel.LANE_NAME is the same words in
+        # every switch list on this disk). PAD-134: a ball waiting in the lane
+        # is neither home nor in play, and the BALLS line says so.
+        self.lane_id = None
+        for source in (rows or [], load_switch_list()):
+            hit = next((r for r in source
+                        if (r.get("name") or "").upper().strip()
+                        == "SHOOTER LANE"), None)
+            if hit is not None:
+                self.lane_id = hit["id"]
+                break
         return bool(self.positions)
 
     def poll(self):
@@ -1506,7 +1559,13 @@ def poll_switches(view):
         view._dot_drawn[dot] = made
         view.cv.itemconfig(dot, fill=SW_MADE if made else "")
     if view.trough_panel is not None:
-        view.trough_panel.update(view.sw.closed(), trough_text(view.sw))
+        # The key panel's dots are read-only (PAD-134) and say which end is
+        # which; the fallback strip's are still the control and say so.
+        on_panel = (view.key_panel is not None and view.trough_panel
+                    is getattr(view.key_panel, "ball_dots", None))
+        view.trough_panel.update(view.sw.closed(),
+                                 dots_caption(view.sw) if on_panel
+                                 else trough_text(view.sw))
     # The key panel (item 39) rides the same read. It can be missing at
     # window open - padbinds is written by padglhost, which may be seconds
     # behind - so keep asking for it on the switch table's cadence.
@@ -1538,6 +1597,13 @@ def poll_switches(view):
                 view.key_panel = attach_key_panel(view)
     if view.key_panel is not None:
         view.key_panel.update(view.sw)
+        # The BALLS section (PAD-134): the line off this same read, and the
+        # feeder's status file on its own slower cadence.
+        if time.monotonic() >= getattr(view, "_ball_next", 0.0):
+            view._ball_next = time.monotonic() + BALL_POLL_S
+            view._ball_status = read_ball_status()
+        fed, lines = getattr(view, "_ball_status", (None, []))
+        view.key_panel.show_balls(view.sw, fed, lines)
     return True
 
 
@@ -1568,6 +1634,89 @@ def trough_text(watch):
     # for exactly that during a multiball on 2026-08-11.
     txt = "%s   1 = eject end   click a ball: out / in" % watch.balls.text()
     return txt if watch.how == "named" else txt + "   (positions assumed)"
+
+
+#: How often the BALLS section re-reads the feeder's status file. Once a
+#: second: it is another 9p round trip, and the feeder's lines arrive at the
+#: pace a ball moves, not a flipper.
+BALL_POLL_S = 1.0
+
+
+def dots_caption(watch):
+    """The key panel's caption beside its READ-ONLY dots (PAD-134): which end
+    is which, and nothing about clicking - the buttons below do that now."""
+    txt = "1 = eject end"
+    return txt if watch.how == "named" else txt + "   (positions assumed)"
+
+
+def ball_line(watch, fed=None):
+    """The BALLS section's one line, in the JJP ball keeper's status() shape.
+
+    `balls 5/6 trough   lane 1   in play 1   fed 3`. The denominator is the
+    trough's POSITIONS, which is JJP's choice too, and not trough.Balls's
+    learned complement: that one only knows the most balls it has SEEN home,
+    so a window opened with a ball out read "0 in play" - the first thing
+    David's screenshot of this section showed. A ball waiting in the shooter
+    lane is counted on its own, because it is neither home nor in play and
+    "Plunge" is the button that moves it. `fed` is None when no feeder is
+    publishing, and then the line does not claim a zero.
+    """
+    if not watch.positions:
+        return "no trough found on this title"
+    if watch.mrg is None:
+        return "balls -   waiting for the switch block"
+    flags = watch.closed()
+    home = sum(1 for f in flags if f)
+    lane_id = getattr(watch, "lane_id", None)
+    lane = 1 if lane_id is not None and watch.is_made(lane_id) else 0
+    txt = "balls %d/%d trough" % (home, len(flags))
+    if lane:
+        txt += "   lane 1"
+    txt += "   in play %d" % max(0, len(flags) - home - lane)
+    if fed is not None:
+        txt += "   fed %d" % fed
+    return txt
+
+
+def new_lines(prev, cur):
+    """The lines in `cur` that `prev` had not seen.
+
+    The feeder's status file is a SLIDING WINDOW of its newest lines, so a
+    re-read overlaps the last one: what is new is whatever follows the longest
+    tail of `prev` that `cur` starts with. No overlap at all means the window
+    slid past everything - all of it is new.
+    """
+    for k in range(min(len(prev), len(cur)), 0, -1):
+        if list(prev[-k:]) == list(cur[:k]):
+            return list(cur[k:])
+    return list(cur)
+
+
+def wrap_rows(font, text, width):
+    """`text` as rows no wider than `width` px, broken at spaces where it can.
+
+    Rows rather than a Tk wrap width, because the note is pinned to a fixed
+    number of ROWS (so the panel never shuffles) and only a caller that knows
+    where the breaks fall can keep the newest ones.
+    """
+    rows, cur = [], ""
+    for word in text.split(" "):
+        cand = word if not cur else cur + " " + word
+        if font.measure(cand) <= width:
+            cur = cand
+            continue
+        if cur:
+            rows.append(cur)
+        while len(word) > 1 and font.measure(word) > width:
+            n = len(word) - 1
+            while n > 1 and font.measure(word[:n]) > width:
+                n -= 1
+            rows.append(word[:n])
+            word = word[n:]
+        cur = word
+    if cur:
+        rows.append(cur)
+    return rows or [""]
 
 
 class KeyPanel:
@@ -1636,9 +1785,18 @@ class KeyPanel:
     #: carries; the C table never renames its platform rows.
     SVC_ORDER = ("Service Back", "Service Minus", "Service Plus",
                  "Service Select")
+    #: The key-list rows a MOUSE can press too (PAD-134). They are the two the
+    #: bottom action row's Insert coin and Start stood in for, and without
+    #: them a mouse-only player - DragonRR's whole session - could not get a
+    #: game going once that row went. Press-and-hold, like the service
+    #: buttons: the mouse button's length is the closure.
+    CLICK_ROWS = ("Start Button", "Left Coin")
     DOOR_LABEL = "Coin Door Closed"
 
-    def __init__(self, parent, rows, drv):
+    def __init__(self, parent, rows, drv, on_action=None):
+        """`on_action(script, arg)` runs a WINDOW_ACTIONS helper - the view's
+        run_action - and is what the SERVICE section's Clear switch alerts
+        calls. None (a panel built without a view) leaves that button out."""
         self.drv = drv
         f9 = tkfont.Font(family="Consolas", size=9)
         f9b = tkfont.Font(family="Consolas", size=9, weight="bold")
@@ -1664,6 +1822,10 @@ class KeyPanel:
             need = max(f8.measure("/".join(r["keys"])) + 14
                        for r in self._svc_rows.values())
             w = max(w, 2 * self.PAD + 4 * max(need, 66))
+        # The BALLS section's three buttons (PAD-134) share the width in
+        # thirds, and a short key list must not make "Reset balls" clip.
+        bf = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        w = max(w, 2 * self.PAD + 3 * (bf.measure("Reset balls") + 24) + 12)
         self._w = w
         # Two section headers at most (cabinet first in the file, playfield
         # after), a title line and a hint line under the rows.
@@ -1672,6 +1834,9 @@ class KeyPanel:
         self.cv = tk.Canvas(parent, width=w, height=h, bg=self.BG,
                             highlightthickness=0)
         self._items, self._drawn = [], []
+        self._idle_fill = {}           # row index -> resting box fill
+        self._clickable = False
+        self._row_held = None
 
         x_dot = self.PAD + 3
         x_key = self.PAD + 10 + keyw            # right edge of the key column
@@ -1706,12 +1871,26 @@ class KeyPanel:
             suf = self.cv.create_text(x_suf, y + 1, anchor="e",
                                       fill=self.DIM, font=f9,
                                       text="n/a" if r["na"] else "")
+            if r["label"] in self.CLICK_ROWS and not r["na"] and r["ids"]:
+                # The whole row is the target, so its box is filled with the
+                # panel's own colour: a fill="" item is hittable only on its
+                # outline, which is the TroughPanel hover lesson again.
+                self._idle_fill[len(self._items)] = self.BG
+                self.cv.itemconfig(box, fill=self.BG)
+                self._bind_row(r["ids"][0], (box, dot, key, lab, suf))
+                self._clickable = True
             self._items.append((box, dot, key, lab, suf))
             self._drawn.append(None)
             y += self.ROW_H
         self.cv.create_text(self.PAD, y + 10, anchor="w", fill="#777", font=f8,
                             text="green dot = switch made")
         y += 24
+        if self._clickable:
+            self.cv.create_text(self.PAD, y - 1, anchor="w", fill="#777",
+                                font=f8,
+                                text="click Start Button or Left Coin to "
+                                     "press it")
+            y += 13
 
         # ---- THE SERVICE CLUSTER, drawn as the real coin-door panel -------
         # ONE control per action: each button wears its own key label in the
@@ -1752,6 +1931,35 @@ class KeyPanel:
             self.cv.create_text(self.PAD, y, anchor="w", fill="#777", font=f8,
                                 text="press SELECT for the service menu")
             y += 8
+
+        # ---- CLEAR SWITCH ALERTS, under SERVICE (PAD-134) ----------------
+        # It was the last button on the bottom action row as "Clear alerts",
+        # and the one that row had that nothing else in the window does: it
+        # works every safe switch once so the game's no-usage audit stops
+        # listing CHECK SWITCH rows. It belongs with the service controls
+        # because that is the screen it clears, and David named it.
+        self.clear_btn = None
+        if on_action is not None:
+            label, script, arg = next(a for a in WINDOW_ACTIONS
+                                      if a[1] == "swexercise.py")
+            if len(self._svc_rows) != 4:
+                y += 12
+                self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
+                                    font=f8, text="SERVICE")
+            y += 12
+            bg, fg, active = self.BALL_BTN
+            self.clear_btn = tk.Button(
+                self.cv, text=label, font=("Segoe UI", 9, "bold"), pady=3,
+                bg=bg, fg=fg, activebackground=active, activeforeground=fg,
+                relief="raised", bd=1, highlightthickness=0,
+                command=lambda: on_action(script, arg))
+            self.cv.create_window(self.PAD, y, anchor="nw",
+                                  window=self.clear_btn, width=w - 2 * self.PAD)
+            y += 36
+            self.cv.create_text(self.PAD, y, anchor="w", fill="#777", font=f8,
+                                text="presses every safe switch once, about "
+                                     "12 s")
+            y += 6
 
         # ---- THE COIN DOOR, a toggle because the real door STAYS ----------
         self._door_id = self._door_row["ids"][0] if self._door_row else None
@@ -1797,6 +2005,33 @@ class KeyPanel:
         self.cv.itemconfig(btn, width=3)
         self.drv.release(sw_id)
 
+    # ---- Start Button / Left Coin rows: press-and-hold (PAD-134) ----------
+    def _bind_row(self, sw_id, items):
+        for it in items:
+            self.cv.tag_bind(it, "<ButtonPress-1>",
+                             lambda e, s=sw_id: self._row_press(s))
+            self.cv.tag_bind(it, "<ButtonRelease-1>",
+                             lambda e: self._row_release())
+            self.cv.tag_bind(it, "<Enter>",
+                             lambda e: self.cv.configure(cursor="hand2"))
+            self.cv.tag_bind(it, "<Leave>",
+                             lambda e: self.cv.configure(cursor=""))
+
+    def _row_press(self, sw_id):
+        if self._row_held is not None:
+            return
+        self._row_held = sw_id
+        self.drv.press(sw_id)
+
+    def _row_release(self):
+        """Open what the press closed, by what was HELD - the service
+        buttons' rule, for the same reason (the canvas freezes its current
+        item for the length of a click)."""
+        if self._row_held is None:
+            return
+        sw_id, self._row_held = self._row_held, None
+        self.drv.release(sw_id)
+
     def _door_click(self):
         """Toggle off the last DRAWN state, the TroughPanel._click rule: the
         decision is the one the user could see when they clicked."""
@@ -1807,12 +2042,49 @@ class KeyPanel:
         else:
             self.drv.press(self._door_id)
 
-    def add_trough(self, positions, how, on_ball):
-        """The ball controls, at the panel's bottom.
+    #: The JJP window's button colours (jjpsw.py BTN_BG/BTN_FG/BTN_ACTIVE), so
+    #: the two virtual playfields' ball controls read as one design.
+    BALL_BTN = ("#33507a", "#eaf2ff", "#456ba1")
+    NOTE_FG = "#8a93a2"
+    #: How many of the newest ball messages the section shows.
+    NOTE_LINES = 3
 
-        Returns the TroughPanel; the caller stores it as its own
+    def add_trough(self, positions, how, on_ball):
+        """The BALLS section, at the panel's bottom - in the JJP window's shape.
+
+        ★ PAD-134, DAVID: "i think our ball in and out feedback on the switch
+        matrix is a little confusing from the ui perspective too. what we did
+        on the jjp virtual playfield does look much better." What was here was
+        six dots that WERE the control: click a full one for a ball out, an
+        empty one for a ball in, with the stack rather than the dot deciding
+        which switch moved - so clicking dot 6 could empty dot 5, and the
+        caption had to explain the gesture. The JJP window says where the
+        balls are in ONE LINE, gives the two things a person actually wants
+        their own buttons, and shows what the ball keeper just did under them.
+        This is that, top to bottom:
+
+          * the line - `balls 5/6 trough   lane 1   in play 1   fed 3`. The
+            denominator is the trough's POSITIONS, as JJP's is: the learned
+            complement (trough.Balls) read "0 in play" whenever the window
+            opened with a ball out, which is exactly when someone looks.
+          * the dots, READ-ONLY. Which position is empty is still worth seeing
+            (item 20 was a wrong-end bug a count cannot show), it just stops
+            being a gesture.
+          * Plunge, Drain and Reset balls, equal thirds of the panel (Reset
+            moved in from the bottom action row, which the panel retires -
+            see Field._layout_actions). NO KEY SHORTCUTS for the first two,
+            unlike JJP's Space and D: on Spike 2 those are already the Action
+            Button and Right Scoop in padglhost's table, and the playfield
+            rows are re-derived per title, so no letter is safely free.
+          * the note - the feeder's newest lines (dump/padball, ballfeed.py)
+            and this window's own Plunge/Drain replies, newest last, pinned to
+            three one-line rows so the panel does not shuffle as they arrive.
+
+        Returns the dots' TroughPanel; the caller stores it as its
         `trough_panel`, so poll_switches() keeps ONE update path wherever the
-        trough is drawn - panel or fallback strip, never both.
+        trough is drawn. The artwork corner and the schematic strip - drawn
+        only when there are no padbinds to build this panel from - keep their
+        clickable dots, because there they are the only drain there is.
         """
         y = self._y + 14
         self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
@@ -1824,15 +2096,86 @@ class KeyPanel:
                                 fill=self.KEY_FG, font=self._f8,
                                 text="/".join(self._trough_row["keys"])
                                      + " = all six in / out")
-        y += 10
-        t = TroughPanel(self.cv, positions, how, self.PAD - 4, y, anchor="nw",
-                        on_ball=on_ball, label_below=True,
-                        wrap=self._w - 2 * self.PAD)
-        # Balls and numbers are ~40 px; the wrapped caption below runs to
-        # three short lines.
-        self._y = y + 40 + 40
+        y += 18
+        self._f10 = tkfont.Font(family="Consolas", size=10)
+        self.ball_state = self.cv.create_text(self.PAD, y, anchor="w",
+                                              fill="#e8e8ea", font=self._f10,
+                                              text="")
+        y += 12
+        t = TroughPanel(self.cv, positions, how, self.PAD - 4, y, anchor="nw")
+        y += 2 * TroughPanel.PAD + 2 * TroughPanel.R + TroughPanel.NUM_H + 8
+        bg, fg, active = self.BALL_BTN
+        gap = 6
+        verbs = (("Plunge", "plunge"), ("Drain", "drain"),
+                 ("Reset balls", "reset"))
+        bw = (self._w - 2 * self.PAD - gap * (len(verbs) - 1)) // len(verbs)
+        self.ball_btns = []
+        for k, (label, what) in enumerate(verbs):
+            b = tk.Button(self.cv, text=label, font=("Segoe UI", 9, "bold"),
+                          pady=3, bg=bg, fg=fg, activebackground=active,
+                          activeforeground=fg, relief="raised", bd=1,
+                          highlightthickness=0,
+                          command=lambda w=what: on_ball(w))
+            self.cv.create_window(self.PAD + k * (bw + gap), y, anchor="nw",
+                                  window=b, width=bw)
+            self.ball_btns.append(b)
+        y += 34
+        self.ball_note = self.cv.create_text(self.PAD, y, anchor="nw",
+                                             fill=self.NOTE_FG, font=self._f8,
+                                             text="")
+        self._note = []                # what the note shows, oldest first
+        self._feed_seen = []           # the feeder's lines as last read
+        self._ball_drawn = None
+        self.ball_dots = t
+        self._y = y + self.NOTE_LINES * self._f8.metrics("linespace") + 4
         self.cv.config(height=self._y + 12)
         return t
+
+    def show_balls(self, sw, fed, feeder_lines):
+        """Repaint the line and fold any NEW feeder lines into the note.
+
+        Change-gated like every other draw on this panel. The feeder's file is
+        a sliding window of its newest lines, so what is new is whatever
+        follows the longest overlap with the last read (new_lines()).
+        """
+        if getattr(self, "ball_state", None) is None:
+            return
+        text = ball_line(sw, fed)
+        if text != self._ball_drawn:
+            self._ball_drawn = text
+            self.cv.itemconfig(self.ball_state, text=text)
+        fresh = new_lines(self._feed_seen, feeder_lines)
+        self._feed_seen = list(feeder_lines)
+        if fresh:
+            self.ball_say(*fresh)
+
+    def ball_say(self, *lines):
+        """Add messages to the note, newest last, in at most NOTE_LINES rows.
+
+        WHOLE MESSAGES ARE DROPPED, OLDEST FIRST - never the head of one. The
+        first version kept the newest ROWS, and a Plunge reply that wrapped to
+        four rows lost its opening words: the shot read "launch   the game
+        puts one there..." with the outcome gone. A message that alone needs
+        more rows than there are keeps its FIRST rows, and the last one is
+        marked cut, because the start of a sentence is the part that says what
+        happened.
+        """
+        if getattr(self, "ball_note", None) is None:
+            return
+        self._note.extend(lines)
+        del self._note[:-self.NOTE_LINES]
+        width = self._w - 2 * self.PAD
+        rows = []
+        for msg in reversed(self._note):
+            wrapped = wrap_rows(self._f8, msg, width)
+            if not rows and len(wrapped) > self.NOTE_LINES:
+                rows = wrapped[:self.NOTE_LINES]
+                rows[-1] = rows[-1].rstrip() + " …"
+                break
+            if len(rows) + len(wrapped) > self.NOTE_LINES:
+                break
+            rows = wrapped + rows
+        self.cv.itemconfig(self.ball_note, text="\n".join(rows))
 
     def update(self, sw):
         """Repaint rows whose switch state moved; a still machine costs the
@@ -1881,7 +2224,8 @@ class KeyPanel:
             self._drawn[i] = state
             on, suffix = state
             box, dot, key, lab, suf = self._items[i]
-            self.cv.itemconfig(box, fill=self.HIT_BG if on else "")
+            self.cv.itemconfig(box, fill=self.HIT_BG if on
+                               else self._idle_fill.get(i, ""))
             self.cv.itemconfig(dot, fill=SW_MADE if n else "")
             self.cv.itemconfig(key, fill=self.HIT_FG if on else self.KEY_FG)
             self.cv.itemconfig(lab, fill=self.HIT_FG if on else self.LAB_FG)
@@ -2045,6 +2389,28 @@ class KeyInput:
         self.pipe.close()
 
 
+def show_action_row(view, visible):
+    """Show or hide a view's bottom action row (PAD-134). A no-op when the
+    row is already in that state, so the poll can call it on every attach.
+
+    The artwork view re-lays its canvas windows (Field._layout_actions); the
+    schematic's row is packed on its top bar, so it is forgotten and re-packed
+    in WINDOW_ACTIONS order - the bar's left edge, where it always was.
+    """
+    acts = getattr(view, "_acts", None)
+    if not acts or getattr(view, "_acts_shown", True) == visible:
+        return
+    view._acts_shown = visible
+    if hasattr(view, "_layout_actions"):
+        view._layout_actions()
+        return
+    for b in acts:
+        if visible:
+            b.pack(side="left", padx=(0, 4), pady=2)
+        else:
+            b.pack_forget()
+
+
 def attach_key_panel(view):
     """The panel, packed to the right of the view's canvas, or None.
 
@@ -2061,8 +2427,13 @@ def attach_key_panel(view):
     """
     rows = keybinds.load(BINDS_PATH)
     if not rows:
+        # No panel: the bottom action row is the only way in, so it is shown.
+        # key_panel is cleared FIRST - a re-shown row re-lays the artwork's
+        # trough corner, and that must not reach for a panel just destroyed.
+        view.key_panel = None
+        show_action_row(view, True)
         return None
-    panel = KeyPanel(view.root, rows, view.drv)
+    panel = KeyPanel(view.root, rows, view.drv, on_action=view.run_action)
     panel.cv.pack(side="right", fill="y", before=view.cv)
     if view.trough_panel is not None:
         view.trough_panel.destroy()
@@ -2077,6 +2448,10 @@ def attach_key_panel(view):
     # The keyboard arrives with the rows (item 39): the same table that drew
     # the panel binds this window's keys, so the two can never disagree.
     view.keys = KeyInput(view, rows)
+    # ★ PAD-134: every action on the bottom row has a home on this panel now,
+    # so the row goes - see Field._layout_actions for the list.
+    view.key_panel = panel
+    show_action_row(view, False)
     return panel
 
 
@@ -3007,7 +3382,7 @@ class Field(StateOps, LedRing):
         self._acts = []
         for label, script, arg in WINDOW_ACTIONS:
             self._acts.append(tk.Button(
-                self.cv, text=label, width=11,
+                self.cv, text=label, width=max(11, len(label)),
                 command=lambda s=script, a=arg: self.run_action(s, a)))
 
         # Save/Load state, bottom-LEFT (item 13's GUI half, David 2026-08-08:
@@ -3024,8 +3399,35 @@ class Field(StateOps, LedRing):
         self._state_btns = []
         state = (self._build_state_widgets(self.cv, compact=True)
                  if SAVESTATES else [])
+        self._state_cluster, self._act_wh, self._act_items = state, (w, h), []
+        self._layout_actions()
+
+    def _layout_actions(self):
+        """Place the action row and the state cluster; re-run to show or hide
+        the row.
+
+        ★ PAD-134: THE ROW IS ONLY DRAWN WHEN THERE IS NO KEY PANEL. David,
+        looking at Insert coin / Start / Plunge / Reset balls / Clear alerts:
+        "do we still need any of these buttons on the virtual playfield? most
+        of them are covered by the keyboard shortcuts anyways." Once the key
+        panel is up every one of them has a home on it - Start Button and
+        Left Coin are clickable rows, Plunge / Drain / Reset balls are the
+        BALLS section's buttons, and Clear switch alerts sits under SERVICE -
+        so a second copy down here was one control in two places. Without a
+        panel (no padbinds yet, or never) the row is the only way in, so it
+        stays. show_action_row() flips `_acts_shown` and calls this; the
+        widgets are built once in _place_actions() and only their canvas
+        windows are recreated, so hide-then-show is the same layout twice.
+        With the row hidden the state cluster has the bottom edge to itself.
+        """
+        w, h = self._act_wh
+        for item in self._act_items:
+            self.cv.delete(item)
+        self._act_items = []
+        acts = self._acts if getattr(self, "_acts_shown", True) else []
+        state = self._state_cluster
         row_h = max([wdg.winfo_reqheight()
-                     for wdg in self._acts + state] or [0])
+                     for wdg in acts + state] or [0])
 
         # ★ TWO ROWS WHEN ONE CANNOT HOLD BOTH CLUSTERS, AND THAT IS MEASURED
         # RATHER THAN ASSUMED (PAD-119, C FB 2026-09-08, beatles on a 1080p
@@ -3074,7 +3476,7 @@ class Field(StateOps, LedRing):
         # two actions share the bottom edge, three actions sit above them.
         avail = max(1, w - 2 * self.ACT_PAD)
         state_cost = (span(state) + self.ACT_GAP) if state else 0
-        todo, act_rows = list(self._acts), []
+        todo, act_rows = list(acts), []
         while todo:
             budget = avail - (state_cost if not act_rows else 0)
             take = [todo.pop()]
@@ -3088,7 +3490,7 @@ class Field(StateOps, LedRing):
         # A single action too wide even for the reduced bottom budget: the
         # state cluster cannot share that row, and gets its own below-the-
         # actions row exactly as it did before.
-        bottom_fits = (not state
+        bottom_fits = (not state or not act_rows
                        or self.ACT_PAD + state_cost
                        + span(act_rows[0]) + self.ACT_PAD <= w)
 
@@ -3097,16 +3499,19 @@ class Field(StateOps, LedRing):
             cy = y - depth * (row_h + self.ACT_GAP)
             x = w - self.ACT_PAD
             for b in reversed(chunk):
-                self.cv.create_window(x, cy, anchor="se", window=b)
+                self._act_items.append(
+                    self.cv.create_window(x, cy, anchor="se", window=b))
                 x -= b.winfo_reqwidth() + self.ACT_GAP
 
         rows = len(act_rows) if bottom_fits else len(act_rows) + 1
         if state:
+            rows = max(rows, 1)       # the row hidden: the state row is one
             x = self.ACT_PAD
             sy = y - (0 if bottom_fits
                       else len(act_rows) * (row_h + self.ACT_GAP))
             for wdg in state:
-                self.cv.create_window(x, sy, anchor="sw", window=wdg)
+                self._act_items.append(
+                    self.cv.create_window(x, sy, anchor="sw", window=wdg))
                 x += wdg.winfo_reqwidth() + self.ACT_GAP
 
         # THE TROUGH PANEL GOES ABOVE THE BOTTOM ROW, not into it: that row is

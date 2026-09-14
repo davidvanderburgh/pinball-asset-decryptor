@@ -102,15 +102,38 @@ AUTO_PLUNGE = _num("PAD_BALL_AUTOPLUNGE", 1)
 #: THE WAY HOME. A real machine's launched ball rolls the playfield and, with
 #: nobody at the flippers, drains to the trough a few seconds later. This rig
 #: has no playfield, so that return is an action here: PAD_BALL_HOME_MS
-#: (default 5000) after an answered launch, the ball drains home - UNLESS the
-#: KEYBOARD generation moved since the launch. The keyboard array is written
-#: only by padglhost on real key events (padsw.py), flippers are keys, so a
-#: moved generation means a human is playing that ball and the playfield
-#: window's own drain click is the way it ends. Attract/ball-search cycles
-#: have no human at the keys, so their balls always come home - which is
-#: exactly what the game's search is waiting to see, and what clears (and
-#: never re-raises) the malfunction above. 0 disables the way home.
+#: (default 5000) after an answered launch, the ball drains home - UNLESS
+#: somebody is PLAYING it (`_claim` below). Attract/ball-search cycles have
+#: nobody at the controls, so their balls always come home - which is exactly
+#: what the game's search is waiting to see, and what clears (and never
+#: re-raises) the malfunction above. 0 disables the way home.
 HOME_S = _num("PAD_BALL_HOME_MS", 5000) / 1000.0
+
+#: WHO COUNTS AS SOMEBODY PLAYING, on the SCRIPT side of the block - the
+#: source letters padsw.h lists, of the writers that are a person moving a
+#: switch rather than the rig moving one by itself.
+#:
+#: ★ PAD-134, AND IT IS THE HALF PAD-128 LEFT BEHIND. The test used to be the
+#: KEYBOARD generation alone, which reads as "a human is playing" only if a
+#: human has a keyboard in this: the virtual playfield window drives every
+#: switch through these helpers (`PAD_SW_SRC=f`, playfield.wsl_run), and
+#: padglhost's array never moves for a mouse. So a MOUSE-ONLY session - the
+#: thing PAD-128's Insert coin button made possible end to end - had the
+#: feeder decide nobody was playing and drain the live ball back to the trough
+#: 5 s after the game auto-launched it. With BALL SAVE on that is every ball:
+#: the game re-serves and fires its own AUTO PLUNGER (measured on godzilla_pro,
+#: item 21b's live run), so each drain started an eject/launch/drain cycle
+#: behind the player's back, and their own drain click then landed on a trough
+#: the feeder had already filled ("the trough is already full").
+#:
+#: The rig's OWN automation is deliberately not in here - `a` autoattract,
+#: `x` swexercise, `g` longplay, `i` swinit, `r` swreplay, `b` this feeder -
+#: because those run with nobody watching and their balls are exactly the ones
+#: that must come home.
+#:
+#: The keyboard is not in here because it has its own generation and any move
+#: of it still counts, exactly as it did before.
+HUMAN_TAGS = "flhpc"
 
 #: How long the padled block may stay unreadable before this decides the run is
 #: over. watch.sh's teardown removes dump/padled precisely so a reader can tell
@@ -126,10 +149,48 @@ GONE_S = 3.0
 TABLE_WAIT_S = _num("PAD_BALL_TABLE_WAIT_S", 300.0)
 
 
+#: THE WINDOW'S COPY OF WHAT THIS SAYS (PAD-134). The virtual playfield is a
+#: Windows process and ~/padball.log is a file inside WSL it never opens, so
+#: every sentence below reached the run log and nobody at the window. David,
+#: comparing with the JJP window: its BALLS section shows the keeper's count
+#: and its newest three messages right under Plunge and Drain, and ours showed
+#: six dots. So the feeder publishes the same two things into dump/ - `fed N`
+#: then its newest lines, oldest first - by tmp+rename, the padbinds rule, so
+#: a reader over \\wsl.localhost never parses half a file. watch.sh clears it
+#: at start so a window never shows the LAST run's lines. PAD_BALL_FILE points
+#: it somewhere else, which ballfeedtest.py does so it touches nothing real.
+STATUS_PATH = (os.environ.get("PAD_BALL_FILE")
+               or os.path.join(padpath.dump() or "", "padball"))
+STATUS_LINES = 3
+_recent = []
+_fed = 0
+
+
+def publish(fed=None):
+    """Rewrite the status file. Best-effort: a failed write costs the window
+    one stale line, never the feeder its loop."""
+    global _fed
+    if fed is not None:
+        _fed = fed
+    tmp = STATUS_PATH + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf8", newline="\n") as f:
+            f.write("fed %d\n" % _fed)
+            for line in _recent:
+                f.write(line + "\n")
+        os.replace(tmp, STATUS_PATH)
+    except OSError:
+        pass
+
+
 def say(msg):
-    """One line, flushed. watch.sh folds this into the run log."""
+    """One line, flushed. watch.sh folds this into the run log, and the
+    playfield window shows the newest few (publish)."""
     sys.stdout.write("[ball] %s\n" % msg)
     sys.stdout.flush()
+    _recent.append(msg)
+    del _recent[:-STATUS_LINES]
+    publish()
 
 
 def read_led():
@@ -168,11 +229,26 @@ class Feeder:
         self.said = {}
         self.shape = None
         self.fed = 0
-        #: (launch time, keyboard generation at launch) while a feeder-answered
-        #: launch is out with no human claim on it yet; None otherwise. Only
-        #: launches THIS feeder answered are candidates for the way home -
-        #: plunge.py and the playfield window manage their own balls.
-        self.pending_home = None
+        #: (launch time, claim at launch) per feeder-answered launch that is
+        #: still out with nobody playing it. Only launches THIS feeder answered
+        #: are candidates for the way home - plunge.py and the playfield window
+        #: manage their own balls.
+        #:
+        #: ★ A LIST, NOT ONE SLOT (PAD-134). It was a single slot, so the
+        #: second launch overwrote the first and that ball could never come
+        #: home: the game goes on believing it is in play, which is a START
+        #: that refuses and a LOCATING BALLS search that never ends. A
+        #: multiball is the game doing this on purpose - three ejects, three
+        #: auto plunges - and a ball-save re-serve does it by accident the
+        #: moment two launches overlap.
+        self.pending = []
+        #: The script generation as WE last left it, so another writer's bump
+        #: is distinguishable from our own. Seeded on the first look.
+        self.my_gen = None
+        #: How many times somebody who is not this feeder's own automation has
+        #: moved a switch. A counter and not a flag because it has to survive
+        #: our own writes in between - see _claim().
+        self.hands = 0
 
     @staticmethod
     def _switch(rows, name):
@@ -250,10 +326,18 @@ class Feeder:
             if not self.dry:
                 padsw.set_held(m, step[1], step[2])
             say("%s%s" % ("would: " if self.dry else "", step[3]))
+        # OUR OWN BUMP IS NOT A PAIR OF HANDS. take() and set_held() both move
+        # the script generation, so _claim() would read the feeder answering an
+        # eject as somebody playing and cancel the way home of every ball it
+        # had already launched - the stranded-ball fault this file just fixed,
+        # from the other end. Recorded here because this is the one place the
+        # feeder writes.
+        self.my_gen = self._u32(m, padsw.OFF_SCR_GEN)
         return True
 
     def poll(self, m, d, now):
         """One look at the wire. Returns True if a ball was fed."""
+        claim = self._claim(m)
         lane_made = (self.lane is not None
                      and bool(padsw.merged(m, self.lane)))
         mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
@@ -276,6 +360,7 @@ class Feeder:
                 if self.run_plan(m, plan, "eject:"):
                     self.last_feed = time.monotonic()
                     self.fed += 1
+                    publish(self.fed)
                     fed = True
                     mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
                     say("trough %d/%d after the feed"
@@ -285,39 +370,91 @@ class Feeder:
                          and bool(padsw.merged(m, self.lane)))
             if self.run_plan(m, ballmodel.plan_launch(self.lane, lane_made),
                              "auto plunger:"):
-                self.pending_home = (now, self._kbd_gen(m))
-        self._way_home(m, now)
+                # The claim from the TOP of this poll, not a fresh read: our own
+                # launch write has moved the script generation by now, and
+                # _claim() has already adopted it.
+                self.pending.append((now, claim))
+        self._way_home(m, now, claim)
         return fed
 
     @staticmethod
-    def _kbd_gen(m):
-        """padglhost's keyboard generation - moves only on real key events."""
-        return struct.unpack_from("<I", m, padsw.OFF_GEN)[0]
+    def _u32(m, off):
+        return struct.unpack_from("<I", m, off)[0]
 
-    def _way_home(self, m, now):
+    def _claim(self, m):
+        """Is anybody PLAYING? Returned as one tuple that only moves forward.
+
+        Three counters, because the rig has three ways for a person to move a
+        switch and the feeder used to be able to see only one of them:
+
+          * `gen`      padglhost's KEYBOARD array - real key events, flippers
+                       included. Any move of it counts, as it always has.
+          * `hands`    this feeder's own count of SCRIPT writes that were not
+                       its own automation. The playfield window runs every
+                       helper with `PAD_SW_SRC=f` (playfield.wsl_run), so a
+                       mouse click on the artwork, the plunger, a trough dot or
+                       an action button lands here - which is the whole of
+                       PAD-134. `HUMAN_TAGS` says which letters count.
+          * `spin_gen` swspin.py's rip array (item 26), which a right-hold on a
+                       spinner writes and which touches neither of the others.
+                       DragonRR's report is a Mechagodzilla spinner being
+                       clicked, so leaving this out would miss the very input
+                       the mail describes.
+
+        A COUNTER RATHER THAN A FLAG for the script half, and that is the
+        non-obvious part: the feeder writes the same generation itself, so
+        "has it moved since the launch" is only answerable by adopting our own
+        bumps as they happen (run_plan) and counting everybody else's. A
+        comparison against a remembered generation would be erased by the next
+        eject the feeder answered.
+
+        Called ONCE per poll, before the feeder writes anything, because it
+        mutates `my_gen`/`hands`.
+        """
+        g = self._u32(m, padsw.OFF_SCR_GEN)
+        if self.my_gen is None:
+            self.my_gen = g                  # first look seeds, like fired()
+        elif g != self.my_gen:
+            self.my_gen = g
+            tag = chr(self._u32(m, padsw.OFF_SCR_SRC) & 0xFF)
+            if tag in HUMAN_TAGS:
+                self.hands += 1
+        return (self._u32(m, padsw.OFF_GEN), self._u32(m, padsw.OFF_SPIN_GEN),
+                self.hands)
+
+    def _way_home(self, m, now, claim):
         """A launched ball nobody is playing drains back to the trough.
 
-        See the HOME_S comment at the top for why this exists and why the
-        KEYBOARD generation is the human test. Cancelling on a key event is
-        one-way on purpose: once a human has touched the ball it is theirs,
-        even if they then go quiet - the playfield window's drain click is
-        how that ball ends.
+        See the HOME_S comment at the top for why this exists and `_claim` for
+        what counts as somebody playing. Cancelling is one-way on purpose: once
+        a person has touched the machine the balls are theirs, even if they then
+        go quiet - the playfield window's drain click is how they end.
+
+        ONE BALL PER POLL, deliberately. `plan_drain` is derived from the
+        MERGED array, which the guest republishes after our write, so two
+        drains in one pass could both read the same hole and put two balls in
+        one trough position. At 50 Hz the next one is 20 ms later and the
+        timers they are waiting on are a second apart anyway.
         """
-        if self.pending_home is None or not HOME_S:
+        if not self.pending or not HOME_S:
             return
-        t0, gen0 = self.pending_home
-        if self._kbd_gen(m) != gen0:
-            self.pending_home = None
-            say("launched ball claimed by the keyboard - it stays in play")
+        if any(c != claim for _, c in self.pending):
+            n = len(self.pending)
+            self.pending = []
+            say("somebody is playing - %d launched ball(s) stay in play "
+                "until Drain" % n)
             return
-        if now - t0 < HOME_S:
+        if now - self.pending[0][0] < HOME_S:
             return
-        self.pending_home = None
+        t0, _ = self.pending.pop(0)
         mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
         if self.run_plan(m, ballmodel.plan_drain(self.trough, mrg),
                          "way home:"):
-            say("launched ball came home untouched (%.1f s, no key events)"
-                % (now - t0))
+            say("launched ball came home untouched (%.1f s, nobody at the "
+                "controls)%s"
+                % (now - t0,
+                   ", %d still out" % len(self.pending) if self.pending
+                   else ""))
 
 
 def main():

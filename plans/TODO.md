@@ -6956,7 +6956,8 @@ These have each been violated at least once and each cost a run or a window:
       late, the level very high - are item 120, which now comes before the
       family's one `/finish`.
 
-- [ ] **120. The JJP boot menu's sound: a safe level, and no lag.** `S2 D3`
+- [ ] **120. The JJP boot menu's sound: a safe level, no lag, and the
+      machine's own volume buttons with feedback on screen.** `S2 D4`
       *(Found on the first GNR machine boot, item 119. Branch from and merge
       into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
       `/finish` now follows this item, not 119.)* On David's GNR
@@ -6991,15 +6992,46 @@ These have each been violated at least once and each cost a run or a window:
       unless David asks:** following the machine's own volume setting - where
       JJP keeps it is unknown (the image's perm partition is empty until the
       game saves) and needs a machine with saved settings to read.
+      **Added by David (2026-09-14): the menu must also follow the machine's
+      own VOLUME BUTTONS on the front, and show on screen that they react.**
+      GNR's device table names them `dswitch_plus` "Up / Volume+ Button" at
+      frame byte 1 bit 0x20 and `dswitch_minus` "Down / Volume- Button" at
+      byte 1 bit 0x40 - cabinet bytes, active low, beside the flippers
+      (`dswitch_enter` 0x10 and `dswitch_cancel` 0x80 share the byte); check
+      another title's dump before calling that platform-wide, as LEFT/RIGHT/
+      START were. The input layer already has `EV_PLUS`/`EV_MINUS` (Stern's
+      service buttons, `input_hw.c`), but `input_jjpio.c` maps only LEFT,
+      RIGHT and START, and `codeselect.c` treats PLUS/MINUS as a second
+      LEFT/RIGHT (they move the highlight) - so JJP needs its own meaning
+      without changing Stern's. **To do:** (4) `input_jjpio.c` reads the two
+      buttons (defaults from the table above, `key_plus=`/`key_minus=`
+      overrides and `--learn` like the others); (5) on JJP they step the
+      menu's volume, live, between 0 and the cap, and play the move sound at
+      the new level so each step is heard; (6) each press draws a volume
+      indicator over the menu - a bar and the number, gone about two seconds
+      after the last press - so it is obvious the buttons work even at 0;
+      (7) the level the operator sets is remembered on perm beside
+      `padselect.last` (for example `/jjpe/perm/padselect.volume`) and used at
+      the next boot, never above the cap. Assumption to confirm when this is
+      picked up: the buttons change the MENU's own remembered level, not the
+      game's operator volume (JJP's setting is still unread). The rig can
+      drive it already: the switch matrix's Up/= and Down/- keys are
+      `dswitch_plus`/`dswitch_minus`.
       **Acceptance:** the selector's log on the rig shows the JJP ALSA
       latency and lead under 100 ms; the tab's JJP default and cap hold
       (tests); a media set built for JJP measures at the target peak with
-      selectmedia's own peak probe; then on the GNR, after a reinstall (which
-      wipes settings and scores), David hears the move sound with no
-      noticeable lag, at a comfortable level.
+      selectmedia's own peak probe; in the rig, Up and Down during the menu
+      log each volume step, the indicator appears in a `grab.sh` capture and
+      goes away, the move sound's level follows (the selector's audio dump),
+      and the next launch starts at the remembered level; Stern's PLUS/MINUS
+      still move the highlight (tests); then on the GNR, after a reinstall
+      (which wipes settings and scores), David hears the move sound with no
+      noticeable lag at a comfortable level, and the front volume buttons
+      change it with the indicator on screen.
       — S2: a quality defect with a speaker risk once music is used, not a
-      malfunction. D3: desk changes across the selector, the tab and the media
-      step plus a rig measurement; the final judgement needs the machine.
+      malfunction. D4: changes across the selector's input, drawing and audio,
+      the tab, the builder and the media step, several rig runs to prove
+      them, and the final judgement needs the machine.
 
 ## Reference material that is NOT in this repo
 

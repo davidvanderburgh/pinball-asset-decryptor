@@ -536,6 +536,37 @@ def test_prepare_from_loose_files_without_a_card(sm, tmp_path, capsys):
     assert "media.json OK" in text
 
 
+def test_prepare_peak_levels_every_sound_to_one_mark(sm, tmp_path, capsys, monkeypatch):
+    """--peak-dbfs (item 120, what mkjjpmulti.py passes for a JJP machine): the synthetic
+    click (written at half scale, -6 dBFS), the chime and a quiet music bed all come out
+    peaking at the mark by the tool's own probe, and levelling again changes nothing.
+    Without the flag the click keeps its own level - the Stern card's media is untouched."""
+    monkeypatch.setattr(sm, "find_ffmpeg", lambda name="ffmpeg": None)
+    out = str(tmp_path / "set")
+    music = write_wav(str(tmp_path / "m.wav"), seconds=0.2, amp=2000)
+    rc = sm.main(["prepare", "--primary", "a.raw", "--out", out, "--art", "none",
+                  "--music", "0=" + music, "--sound-move", "synth", "--sound-confirm", "synth",
+                  "--peak-dbfs", "-12"])
+    text = capsys.readouterr().out
+    assert rc == 0, text
+    for name in ("move.wav", "confirm.wav", "music0.wav"):
+        peak, _rms = sm.wav_stats(os.path.join(out, name))
+        assert abs(peak - (-12.0)) < 0.05, (name, peak)
+    assert "level: move.wav peak -6.0 -> -12.0 dBFS" in text
+    assert "already peaks at -12.0" in sm.level_wav(os.path.join(out, "move.wav"), -12.0)
+    plain = str(tmp_path / "plain")
+    assert sm.main(["prepare", "--primary", "a.raw", "--out", plain, "--art", "none",
+                    "--sound-move", "synth", "--sound-confirm", "none"]) == 0
+    assert abs(sm.wav_stats(os.path.join(plain, "move.wav"))[0] - (-6.0)) < 0.1
+
+
+def test_level_wav_leaves_silence_alone(sm, tmp_path):
+    quiet = write_wav(str(tmp_path / "q.wav"), amp=0)
+    before = open(quiet, "rb").read()
+    assert "silent" in sm.level_wav(quiet, -12.0)
+    assert open(quiet, "rb").read() == before
+
+
 def test_prepare_music_from_a_wav_needs_no_ffmpeg_when_already_conformant(sm, tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(sm, "find_ffmpeg", lambda name="ffmpeg": None)
     out = str(tmp_path / "set")

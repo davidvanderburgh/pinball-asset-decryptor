@@ -7,7 +7,8 @@
  *   snd_pcm_open(<ALSA_DEVICES[] in order>, PLAYBACK, 0)
  *       any failure = 'no alsa' (-19 in the emulator chroot). NEVER the
  *       'null' device: alsa-lib 1.0.28 asserts inside hw_params on it.
- *   snd_pcm_set_params(S16_LE=2, RW_INTERLEAVED=3, 2 ch, 44100, resample 1, 500 ms)
+ *   snd_pcm_set_params(S16_LE=2, RW_INTERLEAVED=3, 2 ch, 44100, resample 1, ALSA_LATENCY_US)
+ *   snd_pcm_get_params: the buffer the device really granted, into the log
  *   snd_pcm_nonblock(1); avail_update says how much fits; writei in
  *       <= 1764-frame chunks (the game's period); -EPIPE -> snd_pcm_recover
  *   the amplifier gate: 'Line Out Mute' switched ON on ctl backbox and
@@ -43,6 +44,7 @@ extern const char *snd_strerror(int);
 extern int  snd_pcm_open(snd_pcm_t **, const char *, int stream, int mode);
 extern int  snd_pcm_set_params(snd_pcm_t *, int format, int access, unsigned channels,
                                unsigned rate, int soft_resample, unsigned latency_us);
+extern int  snd_pcm_get_params(snd_pcm_t *, unsigned long *buffer_size, unsigned long *period_size);
 extern int  snd_pcm_nonblock(snd_pcm_t *, int);
 extern long snd_pcm_avail_update(snd_pcm_t *);
 extern long snd_pcm_writei(snd_pcm_t *, const void *, unsigned long frames);
@@ -93,8 +95,20 @@ static const char *const ALSA_DEVICES[] = {
     "default", "cabinet_and_backbox", "sysdefault:CARD=sgtl5000main",
     "plughw:0,0",
 };
-#define LATENCY_US    500000
-#define LEAD_MS       500
+/* THE BUFFER IS THE LAG.  audio_pump() fills whatever the device has room for,
+ * so the buffer is always full and a new sound joins BEHIND all of it: a move
+ * sound comes out one buffer after the press.  500 ms was the Stern card's
+ * number and nobody heard it there; the first JJP machine did (David's GNR,
+ * 2026-09-14: "the sound effect for changing the option was a little
+ * delayed").  The JJP build asks for 60 ms (Makefile) - the menu pumps every
+ * frame, 16 ms at 60 Hz, so that is several frames of slack - and the buffer
+ * the device actually granted is logged, because a plugin may round it. */
+#ifndef ALSA_LATENCY_US
+#define ALSA_LATENCY_US 500000
+#endif
+#ifndef ALSA_LEAD_MS
+#define ALSA_LEAD_MS    500
+#endif
 #define CHUNK_FRAMES  1764          /* the game's period size */
 
 /* THE AMPLIFIER GATE - why a stream the codec accepted made no sound.
@@ -217,7 +231,7 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
     snd_pcm_t *pcm = NULL;
     const char *dev = NULL;
     size_t i;
-    int rc = -1;
+    int rc = -1, buf_ms = 0;
 
     snd_lib_error_set_handler(quiet);
     err[0] = 0;
@@ -240,12 +254,23 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
     }
     if (!pcm) return NULL;
     rc = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
-                            AUDIO_CH, AUDIO_RATE, 1, LATENCY_US);
+                            AUDIO_CH, AUDIO_RATE, 1, ALSA_LATENCY_US);
     if (rc < 0) {
         snprintf(err, errlen, "%s: snd_pcm_set_params: %s", dev,
                  snd_strerror(rc));
         snd_pcm_close(pcm);
         return NULL;
+    }
+    {
+        /* what the lag really is: the buffer granted, not the one asked for */
+        unsigned long bufsz = 0, persz = 0;
+        if (snd_pcm_get_params(pcm, &bufsz, &persz) == 0) {
+            buf_ms = (int)(bufsz * 1000UL / AUDIO_RATE);
+            sel_log("audio: alsa buffer %lu frames (%d ms), period %lu frames (%lu ms); asked %d ms",
+                    bufsz, buf_ms, persz, persz * 1000UL / AUDIO_RATE, ALSA_LATENCY_US / 1000);
+        } else {
+            sel_log("audio: alsa buffer size unreadable; asked %d ms", ALSA_LATENCY_US / 1000);
+        }
     }
     rc = snd_pcm_nonblock(pcm, 1);
     if (rc < 0) sel_log("audio: alsa nonblock: %s (writes may block briefly)", snd_strerror(rc));
@@ -255,7 +280,8 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
     a->base.space = alsa_space;
     a->base.write = alsa_write;
     a->base.close = alsa_close;
-    a->base.lead_ms = LEAD_MS;
+    /* after the confirm sound ends, pump at least one whole buffer more */
+    a->base.lead_ms = buf_ms > ALSA_LEAD_MS ? buf_ms : ALSA_LEAD_MS;
     a->pcm = pcm;
     sel_log("audio: alsa %s ok (%d ch, %d Hz)", dev, AUDIO_CH, AUDIO_RATE);
     /* THE LINE-OUT, over i2c, the way the game does it (codec.h): after

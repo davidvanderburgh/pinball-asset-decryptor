@@ -200,17 +200,21 @@ close_matrix() {
     rm -f "$MODE_FILE"
 }
 
-# The three switches a boot menu reads, at the JJP I/O board's platform-wide
-# addresses - the same bytes jjpselect's input_jjpio.c reads: LEFT flipper byte
-# 1 bit 0, RIGHT flipper byte 1 bit 2, START byte 3 bit 0 (the direct region,
-# active LOW; frame_bit is a MASK, as swdump writes it).  The symbols are the
-# ones the matrix's keymap resolves, so Left / Right / 1 work as in a game.
+# The five switches a boot menu reads, at the JJP I/O board's addresses - the
+# same bytes jjpselect's input_jjpio.c reads: LEFT flipper byte 1 bit 0, RIGHT
+# flipper byte 1 bit 2, START byte 3 bit 0 (jjpcrt's, platform-wide), and the
+# front Volume+ / Volume- buttons byte 1 bits 5 and 6 (GNR's device table;
+# item 120) - the direct region, active LOW; frame_bit is a MASK, as swdump
+# writes it.  The symbols are the ones the matrix's keymap resolves, so Left /
+# Right / 1 / Up / Down work as in a game.
 write_cabinet_dump() {
     python3 - "$CAB" "$(jjp_title)" <<'PY'
 import json, sys
 sw = [('dswitch_l_flipper_lo', 'Left Flipper', 1, 0x01),
       ('dswitch_r_flipper_lo', 'Right Flipper', 1, 0x04),
-      ('dswitch_start', 'Start Button', 3, 0x01)]
+      ('dswitch_start', 'Start Button', 3, 0x01),
+      ('dswitch_plus', 'Up / Volume+ Button', 1, 0x20),
+      ('dswitch_minus', 'Down / Volume- Button', 1, 0x40)]
 json.dump({'cabinet_only': True, 'elf': '', 'title': sys.argv[2],
            'calibration': {'ok': False}, 'lamps': [], 'coils': [],
            'switches': [{'index': i, 'symbol': s, 'name': n, 'addr': 0,

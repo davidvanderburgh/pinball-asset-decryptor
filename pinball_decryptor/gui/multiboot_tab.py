@@ -1292,6 +1292,18 @@ def _bad_number(value, what, integer=False, positive=False):
     return None
 
 
+def volume_range_error(form):
+    """The sentence both validators give for a menu volume out of range.  A
+    Jersey Jack machine plays the boot menu through amplifiers it keeps at
+    full (the game turns only its own stream down), so its cap is lower and
+    says why (item 120)."""
+    be = backend_for(form)
+    if be.key == "jjp":
+        return ("Volume is 0-%d. A Jersey Jack machine plays the boot menu "
+                "through amplifiers it keeps at full power." % be.volume_max)
+    return "Volume is 0-%d." % be.volume_max
+
+
 def validate_form(form, sources=True):
     """Every reason the form cannot be built, as sentences for the tab.
     Empty = build it.  The tool re-checks all of it; this is so a bad form is
@@ -1441,8 +1453,8 @@ def validate_form(form, sources=True):
                       ("confirm sound", form.sound_confirm)):
         if is_file_choice(val) and not os.path.isfile(val.strip()):
             errs.append("The %s file was not found: %s" % (what, val))
-    if not 0 <= int(form.volume) <= 100:
-        errs.append("Volume is 0-100.")
+    if not 0 <= int(form.volume) <= backend_for(form).volume_max:
+        errs.append(volume_range_error(form))
     if int(form.timeout) < 0:
         errs.append("The countdown cannot be negative (0 = wait for START).")
     head = (form.heading or "").strip()
@@ -5448,10 +5460,12 @@ class MenuSettingsDialog(_Modal):
                                                     sticky=tk.W, pady=3)
         vol = ttk.Frame(g)
         vol.grid(row=2, column=1, sticky=tk.W, pady=3)
-        ttk.Spinbox(vol, from_=0, to=100, width=5,
+        # the platform's cap: 40 on a Jersey Jack machine, whose amplifiers
+        # run at full while the menu plays (item 120)
+        ttk.Spinbox(vol, from_=0, to=panel._backend.volume_max, width=5,
                     textvariable=panel._volume_var).pack(side=tk.LEFT)
-        ttk.Label(vol, text="0-100", foreground=th["gray"]).pack(
-            side=tk.LEFT, padx=(6, 0))
+        ttk.Label(vol, text="0-%d" % panel._backend.volume_max,
+                  foreground=th["gray"]).pack(side=tk.LEFT, padx=(6, 0))
         if panel._backend.machine_volume:
             # the card's /data/nv mirror of the machine's own setting - a
             # Stern card thing; a JJP install has no such store to read
@@ -6143,7 +6157,7 @@ class MultibootPanel:
         self._out_var = tk.StringVar()
         self._move_var = tk.StringVar(value="auto")
         self._confirm_var = tk.StringVar(value="auto")
-        self._volume_var = tk.StringVar(value="50")
+        self._volume_var = tk.StringVar(value=str(self._backend.volume_default))
         self._machine_vol_var = tk.BooleanVar(value=True)
         self._timeout_var = tk.StringVar(value="15")
         #: The line across the top of the menu (PAD-135).  It STARTS as the
@@ -8839,7 +8853,7 @@ class MultibootPanel:
             self._out_var.set("")
             self._move_var.set("auto")
             self._confirm_var.set("auto")
-            self._volume_var.set("50")
+            self._volume_var.set(str(self._backend.volume_default))
             self._machine_vol_var.set(True)
             self._timeout_var.set("15")
             self._heading_var.set(DEF_HEADING)
@@ -9510,7 +9524,7 @@ class MultibootPanel:
             out=out,
             sound_move=self._move_var.get().strip() or "none",
             sound_confirm=self._confirm_var.get().strip() or "none",
-            volume=_int(self._volume_var, 50),
+            volume=_int(self._volume_var, self._backend.volume_default),
             machine_volume=bool(self._machine_vol_var.get()),
             compact=bool(self._compact_var.get()),
             timeout=_int(self._timeout_var, 15),
@@ -9687,7 +9701,8 @@ class MultibootPanel:
             self._out_auto_value = ""   # a restored path is the USER'S path
             self._move_var.set(menu["move"])
             self._confirm_var.set(menu["confirm"])
-            self._volume_var.set(str(menu["volume"]))
+            self._volume_var.set(str(min(int(menu["volume"]),
+                                         self._backend.volume_max)))
             self._machine_vol_var.set(bool(menu.get("machine_volume", True)))
             self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
@@ -10385,8 +10400,8 @@ class MultibootPanel:
                     "'synth', 'none' or a WAV before changing any media."
                     % (what, primary or "not recorded"))
         n = len(form.images)
-        if not 0 <= int(form.volume) <= 100:
-            errs.append("Volume is 0-100.")
+        if not 0 <= int(form.volume) <= backend_for(form).volume_max:
+            errs.append(volume_range_error(form))
         if int(form.timeout) < 0:
             errs.append("The countdown cannot be negative (0 = wait for "
                         "START).")

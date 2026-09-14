@@ -167,8 +167,18 @@ JJP_CARD_LOG = "/jjpe/temp/jjpselect.log"
 DEVICES = ("rootA", "rootB")
 DEVICE_RE = re.compile(r"^root([AB])(?::([A-Za-z0-9._-]+))?$")
 CONF_KEYS = ("default", "timeout", "heading", "font", "sound_move", "sound_confirm", "volume",
-             "media", "theme", "jjp_update", "log")
+             "volume_max", "media", "theme", "jjp_update", "log")
 JJP_UPDATE_POLICIES = ("refuse", "allow")
+#: THE MENU'S VOLUME ON A JJP MACHINE (item 120).  JJP runs its amplifier chain at full
+#: (root A's asound.state holds 0 dB, scripts/audio/mute.pl sets 100%) and turns only the
+#: game's own stream down to the operator volume, so the menu's software gain is the level
+#: the speakers get - volume=50 was "very high" on the first GNR.  A quiet default, a cap
+#: this builder refuses past (the selector's JJP build cannot pass it either, and the
+#: machine's own Volume+/- buttons step within it), and every menu sound and music bed the
+#: media step writes peak-levelled to one mark, so no source file arrives louder than planned.
+VOLUME_DEFAULT = 20
+VOLUME_MAX = 40
+MEDIA_PEAK_DBFS = -12.0
 
 # ---- the installer patch (exact lines of JJP's jjp_install.sh) --------------------------------
 CHECK_ROOT_LINE = 'check_image "ROOT" "sda3.ext4-ptcl-img"'
@@ -701,8 +711,10 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         raise Refused("images.conf: default=%s is not an image index (0..%d)" % (default, len(devices) - 1))
     if int(timeout) < 0:
         raise Refused("images.conf: timeout must be >= 0")
-    if volume is not None:
-        volume = mkc._int_range(volume, "volume", 0, 100)
+    volume = VOLUME_DEFAULT if volume is None else mkc._int_range(volume, "volume", 0, 100)
+    if volume > VOLUME_MAX:
+        raise Refused("images.conf: volume=%d is above %d, the most a JJP boot menu may play at "
+                      "(the machine's amplifiers run at full while it does)" % (volume, VOLUME_MAX))
     theme = mkc.check_theme(theme)
     colors = mkc.check_colors(colors)
     jjp_update = check_jjp_update(jjp_update)
@@ -726,8 +738,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append("sound_move=%s" % sound_move)
     if sound_confirm:
         out.append("sound_confirm=%s" % sound_confirm)
-    if volume is not None:
-        out.append("volume=%d" % volume)
+    out.append("volume=%d" % volume)
+    out.append("volume_max=%d" % VOLUME_MAX)
     if media_dir:
         out.append("media=%s" % media_dir)
     elif any_media or sound_move or sound_confirm:
@@ -752,8 +764,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
 def parse_images_conf(text):
     """-> {'images': [(device, title, subtitle)], 'media': [(art, anim, music, confirm)], the keys}."""
     out = {"images": [], "media": [], "default": None, "timeout": None, "heading": None, "font": None,
-           "sound_move": None, "sound_confirm": None, "volume": None, "media_dir": None, "theme": None,
-           "colors": {}, "jjp_update": None, "log": None}
+           "sound_move": None, "sound_confirm": None, "volume": None, "volume_max": None, "media_dir": None,
+           "theme": None, "colors": {}, "jjp_update": None, "log": None}
     for raw in (text or "").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -770,7 +782,7 @@ def parse_images_conf(text):
             out["images"].append((f[0], f[1], f[2]))
             m = tuple(f[3:]) + ("",) * (len(mkc.MEDIA_ROW) - len(f[3:]))
             out["media"].append(m)
-        elif key in ("default", "timeout", "volume"):
+        elif key in ("default", "timeout", "volume", "volume_max"):
             try:
                 out[key] = int(val.strip())
             except ValueError:
@@ -817,6 +829,10 @@ def conf_for_args(devices, args, existing=None, media=None, default_titles=None,
         move, confirm, volume = ex.get("sound_move"), ex.get("sound_confirm"), ex.get("volume")
     if getattr(args, "volume", None) is not None:
         volume = args.volume
+    elif volume is not None and int(volume) > VOLUME_MAX:
+        # an install or a media set from before the cap (item 120): brought down, out loud
+        say("note: volume=%s from the existing menu is above the JJP cap; %d is written" % (volume, VOLUME_MAX))
+        volume = VOLUME_MAX
     theme = mkc.check_theme(getattr(args, "theme", None))
     colors = mkc.check_colors(mkc.parse_color_flags(getattr(args, "color", None)))
     if theme is None:
@@ -1851,8 +1867,13 @@ def cmd_media(a):
     argv += ["--sound-move", a.sound_move]
     for s in (a.sound_confirm or ["synth"]):
         argv += ["--sound-confirm", s]
-    if a.volume is not None:
-        argv += ["--volume", str(a.volume)]
+    volume = VOLUME_DEFAULT if a.volume is None else a.volume
+    if not 0 <= volume <= VOLUME_MAX:
+        raise Refused("--volume %d: a JJP boot menu plays at 0-%d (the machine's amplifiers run at full)"
+                      % (volume, VOLUME_MAX))
+    argv += ["--volume", str(volume)]
+    # every menu sound and music bed levelled to one peak (item 120)
+    argv += ["--peak-dbfs", "%g" % MEDIA_PEAK_DBFS]
     if a.size:
         argv += ["--size", a.size]
     if a.visual_only:
@@ -2105,7 +2126,9 @@ def _add_conf_flags(s):
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
     s.add_argument("--heading", metavar="TEXT", help="images.conf heading=TEXT (the selector's own '%s' when unset; '' = no line)" % mkc.DEF_HEADING)
     s.add_argument("--default", type=int, help="images.conf default index (default 0)")
-    s.add_argument("--volume", type=int, help="images.conf volume 0-100 (overrides media.json)")
+    s.add_argument("--volume", type=int, help="images.conf volume 0-%d (default %d; overrides media.json) - a JJP "
+                                              "machine's amplifiers run at full while the menu plays"
+                                              % (VOLUME_MAX, VOLUME_DEFAULT))
     s.add_argument("--theme", help="the menu's colours: one of codeselect/themes.json's names, or custom")
     s.add_argument("--color", action="append", metavar="ROLE=RRGGBB", help="one colour on top of the theme (repeatable)")
     s.add_argument("--conf", help="use this images.conf verbatim instead of generating one")
@@ -2160,7 +2183,7 @@ def main(argv=None):
     s.add_argument("--music", action="append", default=[], metavar="N=PATH[@SECONDS]|none")
     s.add_argument("--sound-move", default="synth", metavar="PATH|synth|none")
     s.add_argument("--sound-confirm", action="append", default=[], metavar="PATH|synth|none | N=...")
-    s.add_argument("--volume", type=int)
+    s.add_argument("--volume", type=int, help="media.json volume 0-%d (default %d)" % (VOLUME_MAX, VOLUME_DEFAULT))
     s.add_argument("--size", help="WxH of the art panel (default: the menu's own for the image count)")
     s.add_argument("--visual-only", action="store_true")
     s.add_argument("--work")

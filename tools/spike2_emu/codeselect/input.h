@@ -40,11 +40,13 @@ struct input_cfg {
     const char *padsw;        /* padsw: the 4096-byte shared file */
     const char *tables;       /* padsw: switch_list.txt, may be missing */
     /* jjpio (a JJP machine, input_jjpio.c): the I/O board node, or NULL for
-     * the built-in list; the three cabinet buttons LEFT, RIGHT, START as a
-     * frame byte and bit (byte -1 = jjpcrt's positions, the defaults); and
-     * whether to log the cabinet bytes whenever they change (--learn) */
+     * the built-in list; the five cabinet buttons LEFT, RIGHT, START, PLUS
+     * (Volume+) and MINUS (Volume-) as a frame byte and bit (byte -1 = the
+     * defaults: jjpcrt's positions, and the device table's for the volume
+     * pair); and whether to log the cabinet bytes whenever they change
+     * (--learn) */
     const char *jjpio;
-    int jjp_byte[3], jjp_bit[3];
+    int jjp_byte[5], jjp_bit[5];
     int jjp_learn;
 };
 

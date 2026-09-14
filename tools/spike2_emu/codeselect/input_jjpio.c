@@ -22,6 +22,15 @@
  * platform-wide (the same jjpcrt runs on every title), and the rig's CUSE
  * board serves the same bytes (jjpshm.h: bytes 0..3 cabinet, active low).
  *
+ * THE VOLUME BUTTONS (item 120) are not jjpcrt's - its prompt needs only the
+ * flippers and START - but they sit in the same cabinet byte: GNR's device
+ * table names dswitch_plus "Up / Volume+ Button" byte 1 bit 5 and
+ * dswitch_minus "Down / Volume- Button" byte 1 bit 6 (masks 0x20 / 0x40,
+ * beside the flippers' 0x01 / 0x04).  That is ONE title's table, so
+ * key_plus= / key_minus= and --learn are how a machine that wires them
+ * elsewhere is set right.  They arrive as EV_PLUS / EV_MINUS, and the menu
+ * gives them their JJP meaning (codeselect.c: the volume, not the highlight).
+ *
  * PACING.  jjpcrt has no sleep: the real driver (jjp_bulk_io.ko) completes
  * a read when the interrupt URB does, ~1 ms.  The rig's CUSE device answers
  * at once, which would spin a core, so this thread paces itself to
@@ -37,8 +46,8 @@
  *
  * --learn logs the four cabinet bytes whenever they change, which is how a
  * machine whose buttons sit elsewhere in the frame is calibrated: read the
- * log, write key_left= / key_right= / key_start= (<byte>.<bit>) into
- * images.conf.  The name to the game is /dev/jjpio100 (udev's symlink,
+ * log, write key_left= / key_right= / key_start= / key_plus= / key_minus=
+ * (<byte>.<bit>) into images.conf.  The name to the game is /dev/jjpio100 (udev's symlink,
  * 90-jjp_usb_device.rules); the driver's own node is /dev/jjpio0.
  */
 #define _GNU_SOURCE
@@ -62,17 +71,19 @@
 
 static const char *const DEVS[] = { "/dev/jjpio100", "/dev/jjpio0", NULL };
 
-/* the three cabinet buttons, in EV order LEFT, RIGHT, START */
-static const int DEF_BYTE[3] = { 1, 1, 3 };
-static const int DEF_BIT[3]  = { 0, 2, 0 };
-static const int EV_OF[3]    = { EV_LEFT, EV_RIGHT, EV_START };
+/* the five cabinet buttons, in the conf's order LEFT, RIGHT, START, Volume+,
+ * Volume- (input_cfg.jjp_byte / conf.jjp_byte index the same way) */
+#define NBTN 5
+static const int DEF_BYTE[NBTN] = { 1, 1, 3, 1, 1 };
+static const int DEF_BIT[NBTN]  = { 0, 2, 0, 5, 6 };
+static const int EV_OF[NBTN]    = { EV_LEFT, EV_RIGHT, EV_START, EV_PLUS, EV_MINUS };
 
 struct jj {
     struct input base;
     char dev[512];               /* the one named, or "" = the built-in list */
     const char *opened;          /* which path is open */
     int fd;
-    int byte[3], bit[3];
+    int byte[NBTN], bit[NBTN];
     int learn;
     pthread_t th;
     int th_on, th_stop;
@@ -95,8 +106,9 @@ static int try_open(struct jj *j)
             j->opened = *cand;
             j->open_logged = 0;
             j->have_direct = 0;
-            sel_log("jjpio: %s open (LEFT %d.%d, RIGHT %d.%d, START %d.%d, active low)", *cand,
-                    j->byte[0], j->bit[0], j->byte[1], j->bit[1], j->byte[2], j->bit[2]);
+            sel_log("jjpio: %s open (LEFT %d.%d, RIGHT %d.%d, START %d.%d, VOL+ %d.%d, VOL- %d.%d, active low)",
+                    *cand, j->byte[0], j->bit[0], j->byte[1], j->bit[1], j->byte[2], j->bit[2],
+                    j->byte[3], j->bit[3], j->byte[4], j->bit[4]);
             return 0;
         }
         if (!j->open_logged) sel_log("jjpio: cannot open %s: %s", *cand, strerror(errno));
@@ -118,7 +130,7 @@ static void drop(struct jj *j, const char *why)
     j->next_open = sel_now_ms() + OPEN_MS;
 }
 
-/* one jjpcrt pass: a whole IN frame, the three bits, the zero OUT frame.
+/* one jjpcrt pass: a whole IN frame, the five bits, the zero OUT frame.
  * 0 ok, -1 the device went away (already dropped) */
 static int one_pass(struct jj *j)
 {
@@ -154,7 +166,7 @@ static int one_pass(struct jj *j)
         return 0;
     }
     j->frames++;
-    for (k = 0; k < 3; k++) {
+    for (k = 0; k < NBTN; k++) {
         int b = j->byte[k], bt = j->bit[k];
         int pressed = !(in[b] & (1u << bt));
         input_sample(&j->base, KEY_OF(EV_OF[k]), pressed);
@@ -233,17 +245,18 @@ struct input *input_jjpio_open(const struct input_cfg *cfg)
     j->base.threaded = 1;
     j->fd = -1;
     if (cfg->jjpio && *cfg->jjpio) snprintf(j->dev, sizeof j->dev, "%s", cfg->jjpio);
-    for (k = 0; k < 3; k++) {
+    for (k = 0; k < NBTN; k++) {
         int b = cfg->jjp_byte[k], bt = cfg->jjp_bit[k];
         int ok = b >= 0 && b < FRAME_LEN && bt >= 0 && bt < 8;
         j->byte[k] = ok ? b : DEF_BYTE[k];
         j->bit[k] = ok ? bt : DEF_BIT[k];
     }
     j->learn = cfg->jjp_learn;
-    /* what this cabinet has: the two flippers and START.  No lockdown-bar
-     * Action button, no service cluster - the footer must not promise them */
+    /* what this cabinet has: the two flippers, START and the volume pair.  No
+     * lockdown-bar Action button, no Select/Back - the footer must not promise
+     * them */
     for (k = 0; k < KEY_COUNT; k++) j->base.present[k] = 0;
-    for (k = 0; k < 3; k++) j->base.present[KEY_OF(EV_OF[k])] = 1;
+    for (k = 0; k < NBTN; k++) j->base.present[KEY_OF(EV_OF[k])] = 1;
     try_open(j);                                     /* a miss is retried by the thread */
     if (pthread_create(&j->th, NULL, jj_thread, j) == 0) {
         j->th_on = 1;

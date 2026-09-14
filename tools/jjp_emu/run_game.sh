@@ -74,6 +74,14 @@ if [ -n "${JJP_SELECT_LOG:-}" ]; then
     SELECT_ENV="$SELECT_ENV; export PADSELECT_SELECT_LOG=/jjpe/temp/jjpselect.log"
     rm -f "$JJP_JAIL/jjpe/temp/jjpselect.log"
 fi
+# JJP_SELECT_DUMP=1 (item 120): the menu also writes everything it mixes to
+# /jjpe/temp/jjpselect.mix.raw (s16le 44100 Hz stereo, the selector's
+# --audio-dump) - how a proof run hears the move sound follow the Volume+/-
+# buttons on a MUTED rig, where the sink itself is the null device.
+if [ -n "${JJP_SELECT_DUMP:-}" ]; then
+    SELECT_ENV="$SELECT_ENV; export PADSELECT_AUDIO_DUMP=/jjpe/temp/jjpselect.mix.raw"
+    rm -f "$JJP_JAIL/jjpe/temp/jjpselect.mix.raw"
+fi
 
 RUN='
   export JJPEDIR='"$JJPEDIR"'

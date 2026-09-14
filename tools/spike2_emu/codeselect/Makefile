@@ -63,8 +63,17 @@ CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
             -DDEF_LAST='"/jjpe/perm/padselect.last"' \
             -DDEF_FONT='"/jjpe/gen1/padselect/font.ttf"' \
             -DDEF_MEDIA='"/jjpe/gen1/padselect/media"' \
+            -DDEF_VOLFILE='"/jjpe/perm/padselect.volume"' \
+            -DDEF_VOLUME=20 -DVOLUME_CEILING=40 \
+            -DALSA_LATENCY_US=60000 -DALSA_LEAD_MS=60 \
             -DCARD_FONT='"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"' \
             -I$(BUILD) $(EXTRA_CFLAGS)
+# THE MENU'S SOUND ON A JJP MACHINE (item 120).  JJP keeps its amplifier chain
+# at full and turns only the game's own stream down, so the menu's software
+# gain IS the volume the speakers get: a quiet default (20), a ceiling nothing
+# can pass (40), and the level the front Volume+/- buttons set remembered on
+# perm.  And a 60 ms ALSA buffer instead of the Stern card's 500 ms, which put
+# every move sound half a second behind the press.
 # libEGL/libGLESv2 are NOT linked: egl_x11.c dlopens them, so a box without
 # Mesa (and the WSL host, which has no libGLESv2) still runs the menu.
 ifneq ($(JJPROOT),)

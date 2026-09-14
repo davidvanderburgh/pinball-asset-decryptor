@@ -613,11 +613,36 @@ hardware and one header defends the build:
   by their installer on a powered machine, so it drives no coil; it is the
   only thing ever written.  Paced to 200 Hz behind `poll()` (the rig's CUSE
   board answers at once).  A missing board is one log line and a menu that
-  times out into the primary.  `key_left=` / `key_right=` / `key_start=`
+  times out into the primary.  The front **Volume+ / Volume- buttons are
+  byte 1 bits 5 and 6** (GNR's device table: `dswitch_plus` "Up / Volume+
+  Button" 0x20, `dswitch_minus` "Down / Volume- Button" 0x40 - one title's
+  table, not jjpcrt's) and arrive as `EV_PLUS` / `EV_MINUS`.
+  `key_left=` / `key_right=` / `key_start=` / `key_plus=` / `key_minus=`
   `<byte>.<bit>` in images.conf move a button; `--learn` logs the four
   cabinet bytes whenever they change, which is how a machine is calibrated.
-  No Action button, no service cluster: `input_has()` keeps them off the
+  No Action button, no Select/Back: `input_has()` keeps them off the
   footer.
+- **The menu's sound on a JJP machine (item 120).**  JJP runs its amplifier
+  chain at full and turns only the game's own stream down, so the menu's
+  software gain is the level the speakers get (volume 50 was "very high" on
+  the first GNR).  The JJP build (Makefile) therefore sets `DEF_VOLUME=20`,
+  `VOLUME_CEILING=40` - nothing passes it: not `volume=`, not `--volume`,
+  not the remembered level; a conf's `volume_max=` can only lower it - and a
+  60 ms ALSA buffer (`ALSA_LATENCY_US`) where the Stern card keeps 500 ms,
+  because `audio_pump()` keeps the buffer full and a new sound joins behind
+  all of it; the buffer the device granted is logged (`audio: alsa buffer N
+  frames (M ms)`).  On `--input jjpio` PLUS/MINUS are the VOLUME buttons, not
+  a second LEFT/RIGHT: each press steps the level by 5 (to the next multiple
+  of 5 that way) within the ceiling, plays the move sound at the new level,
+  restarts the countdown, and draws an indicator over the middle of the card
+  row - "VOLUME n / cap" and a bar, "VOLUME OFF" at 0 - for 2 s after the
+  last press.  When it goes, the level is written to `--volume-file`
+  (`/jjpe/perm/padselect.volume`, beside `padselect.last`; tmp + rename), and
+  a level changed just before START is written at the choice; the next boot
+  starts from it.  Every other backend leaves PLUS/MINUS moving the highlight
+  (`padsw_test.py` checks Stern's).  The media step levels every JJP menu
+  sound and music bed to a -12 dBFS peak (`mkjjpmulti.py media` passes
+  `selectmedia.py prepare --peak-dbfs -12`).
 - **`stubs_jjp.c`**: `codec.c` and `input_hw.c` as no-ops.  A PC has an
   `/dev/i2c-1` of its own and the SGTL5000 code must never be let near it.
 - **`jjp_glibc.h`**, force-included: the host's glibc 2.39 headers redirect

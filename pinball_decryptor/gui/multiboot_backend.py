@@ -65,6 +65,13 @@ class MultibootBackend:
     groups: bool                      # random groups
     compact: bool                     # the store layout
     machine_volume: bool              # volume=machine (the card's /data/nv mirror)
+    #: THE MENU'S VOLUME, 0-volume_max, and what a new form starts at (item
+    #: 120).  A JJP machine keeps its amplifiers at full and turns only the
+    #: game's own stream down, so the menu's number is the level the speakers
+    #: get: 50 was "very high" on the first GNR.  The builder refuses above
+    #: the cap too, and the selector's JJP build cannot pass it.
+    volume_default: int
+    volume_max: int
     update: bool                      # in-place update of a loaded card
     bypass: bool                      # the validator bypass
     extract: bool                     # Recover images…
@@ -147,6 +154,7 @@ STERN = MultibootBackend(
     status_checks=(("card", "Card image"), ("images", "Images"),
                    ("built", "Built"), ("ready", "Ready to flash")),
     max_cards=16, groups=True, compact=True, machine_volume=True,
+    volume_default=50, volume_max=100,
     update=True, bypass=True, extract=True, read_card=True,
     selector_default="~/spike2root/usr/local/codeselect",
     selector_suffix="/usr/local/codeselect", selector_binary="codeselect",
@@ -191,6 +199,7 @@ JJP = MultibootBackend(
     status_checks=(("card", "Install ISO"), ("images", "Images"),
                    ("built", "Built"), ("ready", "Ready for the stick")),
     max_cards=2, groups=False, compact=False, machine_volume=False,
+    volume_default=20, volume_max=40,
     update=False, bypass=False, extract=False, read_card=False,
     selector_default="/var/tmp/jjpselect",
     selector_suffix="/jjpe/gen1/padselect", selector_binary="jjpe/gen1/padselect/jjpselect",

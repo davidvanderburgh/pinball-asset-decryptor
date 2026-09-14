@@ -169,7 +169,8 @@ esac
 [ -x "$BIN" ] || { hooklog "no $BIN: booting image 0"; exit 0; }
 [ -n "$GAMENAME" ] || { hooklog "no GAMENAME ($JJPEDIR/setenv.sh): booting image 0"; exit 0; }
 rm -f "$OUT"
-"$BIN" --conf "$CONF" --input jjpio --out "$OUT" --last "$LAST" ${SLOG:+--log "$SLOG"}
+"$BIN" --conf "$CONF" --input jjpio --out "$OUT" --last "$LAST" ${SLOG:+--log "$SLOG"} \
+    ${PADSELECT_AUDIO_DUMP:+--audio-dump "$PADSELECT_AUDIO_DUMP"}
 rc=$?
 [ "$rc" -eq 0 ] || { hooklog "selector exit $rc: booting image 0"; exit 0; }
 idx=$(head -n 1 "$OUT" 2>/dev/null | tr -cd '0-9')

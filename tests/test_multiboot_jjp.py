@@ -45,6 +45,20 @@ def test_backend_lookup_and_defaults():
     assert STERN.device(0) == "p3" and STERN.device(1) == "p7" and STERN.device(2) == "p7:img2"
 
 
+def test_menu_volume_default_and_cap_follow_the_platform():
+    """Item 120: a JJP machine keeps its amplifiers at full while the menu plays, so its
+    menu starts quiet and cannot pass 40; Stern's card keeps 50 and 0-100."""
+    assert (JJP.volume_default, JJP.volume_max) == (20, 40)
+    assert (STERN.volume_default, STERN.volume_max) == (50, 100)
+    loud = mt.validate_form(jjp_form(volume=41), sources=False)
+    assert any(e.startswith("Volume is 0-40.") for e in loud), loud
+    assert not any(e.startswith("Volume is") for e in mt.validate_form(jjp_form(volume=40), sources=False))
+    rows = [ImageRow(path="D:/a.raw"), ImageRow(path="D:/b.raw")]
+    assert not any(e.startswith("Volume is")
+                   for e in mt.validate_form(MultibootForm(images=rows, volume=41), sources=False))
+    assert "Volume is 0-100." in mt.validate_form(MultibootForm(images=rows, volume=101), sources=False)
+
+
 def test_titles_and_output_names():
     assert mt.suggest_title(ISO1, "jjp") == ("CHAKAs LOTLJ V1.0 GNR LE 3.03", "")
     assert mt.suggest_title(ISO0, "jjp") == ("GunsNRoses-v03.03", "")

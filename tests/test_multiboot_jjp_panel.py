@@ -70,9 +70,12 @@ def test_switching_platforms_clears_the_form_and_swaps_the_words():
         panel.add_image("D:/x/a.raw")
         panel.add_image("D:/x/b.raw")
         assert len(panel._rows) == 2
+        assert panel._volume_var.get() == "50"
         assert panel.set_platform("jjp") is True
         assert panel.platform == "jjp" and panel._rows == []
         assert panel._out_var.get() == ""
+        # item 120: a JJP menu starts quiet - its machine's amplifiers run at full
+        assert panel._volume_var.get() == str(JJP.volume_default) == "20"
         assert panel._src_lbl.cget("text") == JJP.out_label
         assert not _shown(panel._from_card_btn) and not _shown(panel._compact_chk)
         assert panel.set_platform("jjp") is False               # already there
@@ -84,6 +87,7 @@ def test_switching_platforms_clears_the_form_and_swaps_the_words():
         assert len(panel._rows) == 2
         assert panel.set_platform("stern") is True
         assert panel._rows == [] and panel._src_lbl.cget("text") == STERN.out_label
+        assert panel._volume_var.get() == "50"
         assert _shown(panel._from_card_btn) and _shown(panel._recover_btn) and _shown(panel._compact_chk)
         assert panel._selector_var.get() == multiboot_tab.DEFAULT_SELECTOR_DIR
         assert panel._check_lbls["card"].cget("text").endswith("Card image")

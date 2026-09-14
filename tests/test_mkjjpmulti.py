@@ -244,6 +244,53 @@ def test_conf_refusals(mj):
     assert mj.parse_device("rootB:img2") == ("B", "img2")
 
 
+def test_conf_volume_is_quiet_and_capped_for_a_jjp_machine(mj):
+    """Item 120: a JJP machine plays the menu through amplifiers it keeps at full, so the
+    conf always says a level (the quiet default when none is given) and the cap, and the
+    builder refuses past it."""
+    bare = mj.parse_images_conf(mj.render_images_conf(["rootA", "rootB"], ["a", "b"]))
+    assert bare["volume"] == mj.VOLUME_DEFAULT == 20
+    assert bare["volume_max"] == mj.VOLUME_MAX == 40
+    assert mj.parse_images_conf(mj.render_images_conf(["rootA", "rootB"], ["a", "b"], volume=40))["volume"] == 40
+    with pytest.raises(mj.Refused):
+        mj.render_images_conf(["rootA", "rootB"], ["a", "b"], volume=41)
+    assert "volume_max" in mj.CONF_KEYS
+
+
+def test_conf_for_args_brings_an_old_loud_menu_under_the_cap(mj, capsys):
+    old = mj.parse_images_conf("image=rootA|a|\nimage=rootB|b|\nvolume=50\n")      # a pre-120 install
+    a = argparse.Namespace(titles=None, subtitles=None, timeout=None, default=None, volume=None, heading=None,
+                           theme=None, color=None, conf=None, jjp_update=None, debug_log=False)
+    p = mj.parse_images_conf(mj.conf_for_args(mj.DEVICES, a, existing=old))
+    assert p["volume"] == 40 and p["volume_max"] == 40
+    said = capsys.readouterr()
+    assert "above the JJP cap" in said.out + said.err
+    a.volume = 50                                 # asked for outright: refused, not quietly cut
+    with pytest.raises(mj.Refused):
+        mj.conf_for_args(mj.DEVICES, a, existing=old)
+
+
+def test_media_step_levels_every_sound_and_caps_the_volume(mj, monkeypatch, tmp_path):
+    import selectmedia
+    seen = []
+
+    def fake_main(argv):
+        seen.append(list(argv))
+        return 0
+
+    monkeypatch.setattr(selectmedia, "main", fake_main)
+    a = argparse.Namespace(primary="a.iso", extra=["b.iso"], out=str(tmp_path / "m"), art=["0=none", "1=none"],
+                           anim=[], music=[], sound_move="synth", sound_confirm=None, volume=None, size=None,
+                           visual_only=False, work=None, cache_dir=None)
+    assert mj.cmd_media(a) == 0
+    argv = seen[-1]
+    assert argv[argv.index("--volume") + 1] == "20"
+    assert argv[argv.index("--peak-dbfs") + 1] == "-12"
+    a.volume = 41
+    with pytest.raises(mj.Refused):
+        mj.cmd_media(a)
+
+
 def test_conf_for_args_carries_an_existing_menu_through(mj):
     old = mj.parse_images_conf(mj.render_images_conf(["rootA", "rootB"], ["Old0", "Old1"], ["s0", "s1"], default=1,
                                                      timeout=30, theme="midnight", heading="H", jjp_update="allow",

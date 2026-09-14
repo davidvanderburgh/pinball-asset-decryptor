@@ -1271,6 +1271,40 @@ def normalise_wav(src, out, max_seconds=None, fade_ms=0):
     return write_wav_s16(out, L, R)
 
 
+def level_wav(path, peak_dbfs):
+    """Scale a 16-bit WAV IN PLACE so its peak sits at *peak_dbfs* (item 120).  A JJP
+    machine plays the boot menu through amplifiers it keeps at full, so no sound may
+    arrive louder than planned - and one that is quieter is brought up to the same
+    mark, so the menu's volume means the same for every sound on it.  Silence is left
+    alone, and a file already at the mark is not rewritten, so a second run changes
+    nothing.  Returns the line for the log."""
+    name = os.path.basename(path)
+    with wave.open(path, "rb") as w:
+        params = w.getparams()
+        raw = w.readframes(w.getnframes())
+    if params.sampwidth != 2 or not raw:
+        return "level: %s left alone (not 16-bit PCM)" % name
+    a = array.array("h")
+    a.frombytes(raw[:len(raw) - len(raw) % 2])
+    if sys.byteorder != "little":
+        a.byteswap()
+    peak = max(max(a), -min(a))
+    if peak <= 0:
+        return "level: %s is silent, left alone" % name
+    target = min(32767, int(round(32768 * 10 ** (peak_dbfs / 20.0))))
+    before = 20 * math.log10(peak / 32768.0)
+    if abs(peak - target) <= 1:
+        return "level: %s already peaks at %.1f dBFS" % (name, before)
+    g = target / float(peak)
+    b = array.array("h", [int(round(x * g)) for x in a])
+    if sys.byteorder != "little":
+        b.byteswap()
+    with wave.open(path, "wb") as w:
+        w.setparams(params)
+        w.writeframes(b.tobytes())
+    return "level: %s peak %.1f -> %.1f dBFS" % (name, before, 20 * math.log10(target / 32768.0))
+
+
 def probe_fps(path, default=None, stream=0):
     """The video's native frame rate (frames per second), or *default* when
     it cannot be read (no ffprobe, an audio-only or odd file).  *stream* is
@@ -2784,6 +2818,16 @@ def cmd_prepare(a):
         for s in sources.values():
             s.close()
         shutil.rmtree(work, ignore_errors=True)
+    # ONE PEAK FOR EVERY SOUND (--peak-dbfs; mkjjpmulti.py passes it for a JJP machine,
+    # item 120): the move and confirm sounds, each image's own confirm and music, and a
+    # random card's - whatever this run wrote or kept.  A cached file was levelled when
+    # it was written and reads as already at the mark.
+    if getattr(a, "peak_dbfs", None) is not None:
+        names = [move, confirm] + [r[2] for r in rows] + [r[3] for r in rows]
+        for g in sorted(groups_out):
+            names += [groups_out[g].get("music"), groups_out[g].get("confirm")]
+        for nm in sorted(set(x for x in names if x)):
+            say("  " + level_wav(os.path.join(out, nm), a.peak_dbfs))
     # The two menu sounds' own sources, so a set whose sound was CHANGED (the
     # file is still there, from a different source) reads as stale.  None on a
     # --visual-only run, which renders no menu sound at all.
@@ -2906,6 +2950,9 @@ def main(argv=None):
     s.add_argument("--visual-only", action="store_true",
                    help="art/anim (+music) only: no move/confirm sounds, none pulled off a card (the GUI preview)")
     s.add_argument("--volume", type=int, default=DEFAULT_VOLUME)
+    s.add_argument("--peak-dbfs", type=float, default=None, metavar="DB",
+                   help="scale every sound and music bed this run writes so its peak sits at DB "
+                        "dBFS (e.g. -12; default: leave levels as the sources have them)")
     s.add_argument("--size", default=None, help="panel WxH (default by image count)")
     s.add_argument("--seconds", type=float, default=GIF_MAX_SECONDS,
                    help="animation length (default and cap %g s)" % GIF_MAX_SECONDS)

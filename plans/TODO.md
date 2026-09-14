@@ -6957,7 +6957,28 @@ These have each been violated at least once and each cost a run or a window:
       family's one `/finish`.
 
 - [ ] **120. The JJP boot menu's sound: a safe level, no lag, and the
-      machine's own volume buttons with feedback on screen.** `S2 D4` ← WORKING ON
+      machine's own volume buttons with feedback on screen.** `S2 D4` ← WORKING ON ← IN PROGRESS
+      **Established (2026-09-14, item/120):** all seven to-dos are written. Selector: the JJP
+      build asks for a 60 ms ALSA buffer (Stern keeps 500) and logs the one granted
+      (`audio: alsa buffer N frames (M ms)`); `DEF_VOLUME=20`, `VOLUME_CEILING=40` nothing
+      passes, `volume_max=` lowers it; on `--input jjpio` PLUS/MINUS are Volume+/- (byte 1
+      bits 5/6, `key_plus=`/`key_minus=`), step 5 within the cap, play the move sound, draw
+      "VOLUME n / cap" + a bar for 2 s, and the settled level goes to
+      `/jjpe/perm/padselect.volume` (read at the next boot). Tab default 20 / cap 40;
+      mkjjpmulti always writes `volume=` + `volume_max=40`, refuses 41, clamps an inherited 50
+      with a note; `selectmedia prepare --peak-dbfs -12` (the JJP media step passes it);
+      `JJP_SELECT_DUMP=1` gives the rig the menu's mix. GNR's saved device tables (the only
+      title on disk) agree on 0x20/0x40. Stern `make check` OK incl. a new Plus-still-moves
+      check; pytest 468 + 50 green. The first JJP `make check` caught codeselect.c copying only
+      3 of the 5 button places (Volume+/- read off byte 0 bit 0) - fixed; the JJP `make check`
+      is then green, `jjpio_test.py` case 5 pressing the pty board's bits 5/6: clicks peaking
+      [4000, 4750, 4000, 4750] for levels 25/30/25/30 (tone 15999 x gain), 30 kept and read
+      back, the cap, the indicator in the headless frame and gone, `--volume 90` cut to 40.
+      **Resume:** the rig proof: build the selector, the JJP media and a multi ISO under a new
+      name (a fresh restore), and two muted watch.sh runs (Up/Up/Down in the menu, grab.sh
+      with the indicator up and gone, the mix dump's click peaks, the remembered level on
+      the second launch). Then the Stern `make check` once more (the icfg fix touched
+      shared code), MULTIBOOT.md's proof table, and David's GNR check.
       *(Found on the first GNR machine boot, item 119. Branch from and merge
       into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
       `/finish` now follows this item, not 119.)* On David's GNR

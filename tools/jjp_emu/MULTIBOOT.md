@@ -182,6 +182,17 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   GNR root's own PulseAudio 15 with a null sink inside the jail, its monitor
   recorded, the selector at 60 ms and at 500 ms - every click and the confirm
   chime reached the sink with the mix's own peaks, 0 dropped, 0 recovers.
+- **The machine's buttons are READ, not guessed**: the hook runs the selector
+  with `--learn`, so a frame bit that changes and is not one of the five
+  mapped buttons is shown on the glass for 3 s (`INPUT byte N bit M pressed
+  (not a menu button)`) and the changed frame goes to the log as hex (two
+  lines of 32 bytes, at most 4 a second and 300 a run). David's GNR has an
+  outside volume toggle that moved no mapped bit (2026-09-14); a press of it
+  in the menu now names its byte and bit, which `key_plus=` / `key_minus=`
+  in images.conf then take. The five mapped buttons: LEFT 1.0 and RIGHT 1.2
+  and START 3.0 (JJP's own jjpcrt reads them there), Up/Volume+ 1.5 and
+  Down/Volume- 1.6 (the game's switch table: frame bit = table index - 1,
+  which puts the three jjpcrt buttons exactly where jjpcrt reads them).
 - **Proof runs**: `JJP_SELECT_DUMP=1` makes `run_game.sh` hand the menu
   `--audio-dump /jjpe/temp/jjpselect.mix.raw` (s16le, 44100 Hz, stereo), which
   is how a MUTED rig hears the clicks follow the buttons.

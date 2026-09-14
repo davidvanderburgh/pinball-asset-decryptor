@@ -652,6 +652,14 @@ hardware and one header defends the build:
   device that refuses the buffer asked for at 120, 250 and 500 ms before it
   gives up (`PADSELECT_ALSA_LATENCY_MS` overrides the build's request, for
   the rig).
+- **`--learn` on the glass (jjpio).** A frame bit that changes and is not one
+  of the five mapped buttons is queued as a RAW event (`EV_RAW(byte, bit,
+  pressed)`, coded above `EV_COUNT` so the queue carries it as it is; only the
+  first 8 bytes, the cabinet's) and the menu draws `INPUT byte N bit M
+  pressed (not a menu button)` for `LEARN_OSD_MS`; every changed frame goes
+  to the log as hex, rate-limited (`LEARN_LINES_PER_S`, `LEARN_LINES_MAX`).
+  The JJP hook always passes `--learn`: the GNR's outside volume toggle moved
+  no mapped bit and the menu could not say so (2026-09-14).
 - **`stubs_jjp.c`**: `codec.c` and `input_hw.c` as no-ops.  A PC has an
   `/dev/i2c-1` of its own and the SGTL5000 code must never be let near it.
 - **`jjp_glibc.h`**, force-included: the host's glibc 2.39 headers redirect

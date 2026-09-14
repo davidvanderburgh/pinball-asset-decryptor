@@ -92,7 +92,63 @@ struct jj {
     long long frames, writes, short_reads, reopens;
     unsigned char last_direct[4];
     int have_direct;
+    /* --learn, the whole frame: raw events for the cabinet bytes, hex lines
+     * for any change, bounded (see learn_frame) */
+    unsigned char last_frame[FRAME_LEN];
+    unsigned char toggles[FRAME_LEN * 8];   /* per bit: changes seen, saturating (the chatter guard) */
+    int have_frame, learn_in_sec, learn_lines;
+    long long learn_sec;
 };
+
+#define LEARN_BYTES       FRAME_LEN   /* raw events from the whole frame: JJP's headphone kit
+                                       * puts its volume rocker on lines the switch table does
+                                       * not name, so the cabinet bytes alone are not enough */
+#define LEARN_CHATTER     8           /* a bit that changed more often than this in a run is a
+                                       * status bit, not a button: said once, then ignored */
+#define LEARN_LINES_PER_S 4           /* hex lines a second, so a chattering byte cannot flood */
+#define LEARN_LINES_MAX   300         /* ...and a run, whatever happens */
+
+/* --learn: the frame changed.  Every changed bit in the first LEARN_BYTES that
+ * is not one of the five buttons is queued as a raw event - the menu shows it
+ * on the glass, which is how a machine's own buttons are READ instead of
+ * guessed (the GNR's outside volume toggle moved no mapped bit and the menu
+ * said nothing, 2026-09-14).  The whole frame goes to the log as hex, two
+ * lines of 32 bytes, at most LEARN_LINES_PER_S a second and LEARN_LINES_MAX
+ * a run. */
+static void learn_frame(struct jj *j, const unsigned char *in)
+{
+    int b, k, m, half;
+    long long sec;
+    for (b = 0; b < LEARN_BYTES; b++) {
+        unsigned d = (unsigned)(in[b] ^ j->last_frame[b]);
+        for (k = 0; k < 8 && d; k++) {
+            int mapped = 0;
+            unsigned char *t = &j->toggles[b * 8 + k];
+            if (!(d & (1u << k))) continue;
+            if (*t < 255) (*t)++;
+            if (*t > LEARN_CHATTER) {
+                if (*t == LEARN_CHATTER + 1)
+                    sel_log("jjpio: learn: byte %d bit %d changed %d times - a status bit, ignored from now", b, k, *t);
+                continue;
+            }
+            for (m = 0; m < NBTN; m++) if (j->byte[m] == b && j->bit[m] == k) mapped = 1;
+            if (!mapped) input_raw(&j->base, EV_RAW(b, k, !(in[b] & (1u << k))));
+        }
+    }
+    if (j->learn_lines >= LEARN_LINES_MAX) return;
+    sec = sel_now_ms() / 1000;
+    if (sec != j->learn_sec) { j->learn_sec = sec; j->learn_in_sec = 0; }
+    if (++j->learn_in_sec > LEARN_LINES_PER_S) return;
+    for (half = 0; half < 2; half++) {
+        char hex[32 * 3 + 1];
+        int n = 0, i;
+        for (i = 0; i < 32; i++)
+            n += snprintf(hex + n, sizeof hex - (size_t)n, "%02x%s", in[half * 32 + i], i < 31 ? " " : "");
+        sel_log("jjpio: learn: frame[%d-%d] %s", half * 32, half * 32 + 31, hex);
+    }
+    if (++j->learn_lines == LEARN_LINES_MAX)
+        sel_log("jjpio: learn: %d frame lines this run, no more", LEARN_LINES_MAX);
+}
 
 static int try_open(struct jj *j)
 {
@@ -106,6 +162,7 @@ static int try_open(struct jj *j)
             j->opened = *cand;
             j->open_logged = 0;
             j->have_direct = 0;
+            j->have_frame = 0;
             sel_log("jjpio: %s open (LEFT %d.%d, RIGHT %d.%d, START %d.%d, VOL+ %d.%d, VOL- %d.%d, active low)",
                     *cand, j->byte[0], j->bit[0], j->byte[1], j->bit[1], j->byte[2], j->bit[2],
                     j->byte[3], j->bit[3], j->byte[4], j->bit[4]);
@@ -176,6 +233,13 @@ static int one_pass(struct jj *j)
                 in[0], in[1], in[2], in[3]);
         memcpy(j->last_direct, in, 4);
         j->have_direct = 1;
+    }
+    if (j->learn) {
+        if (!j->have_frame) { memcpy(j->last_frame, in, FRAME_LEN); j->have_frame = 1; }
+        else if (memcmp(in, j->last_frame, FRAME_LEN)) {
+            learn_frame(j, in);
+            memcpy(j->last_frame, in, FRAME_LEN);
+        }
     }
     {
         int put = 0;

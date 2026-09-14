@@ -136,7 +136,7 @@ grep -q "update refused: multi-boot install" "$R/updater.sh" || fail primary "th
 if $SH "$R/updater.sh" 2>/dev/null; then fail primary "the mask exited 0"; fi
 grep -q "update refused" "$T/rprogress" && grep -q "update refused" "$T/pcprogress" || fail primary "rprogress/pcprogress"
 argv=$(cat "$SELARGS")
-want="--conf $G/padselect/images.conf --input jjpio --out $T/padselect.choice --last $P/padselect.last"
+want="--conf $G/padselect/images.conf --input jjpio --learn --out $T/padselect.choice --last $P/padselect.last"
 case "$argv" in *"$want"*) ;; *) fail primary "selector argv: $argv" "expected: $want" ;; esac
 case " $argv " in *" --log "*) fail primary "the selector got --log with no log= in the conf" ;; esac
 

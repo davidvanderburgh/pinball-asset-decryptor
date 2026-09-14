@@ -28,6 +28,11 @@ static void queue(struct input *in, int ev)
     pthread_mutex_unlock(&in->lock);
 }
 
+void input_raw(struct input *in, int code)
+{
+    if (in && code >= EV_RAW_BASE) queue(in, code);
+}
+
 void input_sample(struct input *in, int key, int pressed)
 {
     if (key < 0 || key >= KEY_COUNT) return;

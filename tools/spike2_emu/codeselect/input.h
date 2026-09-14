@@ -32,6 +32,11 @@ enum sel_event {
 };
 #define KEY_COUNT (EV_COUNT - 1)      /* keys are events minus EV_NONE */
 #define KEY_OF(ev) ((ev) - 1)
+/* RAW EVENTS (jjpio --learn): a frame bit that is NOT one of the menu's
+ * buttons changed.  Coded above EV_COUNT so the queue carries them as they
+ * are: EV_RAW_BASE + (byte * 8 + bit) * 2 + pressed.  Never a key. */
+#define EV_RAW_BASE 1000
+#define EV_RAW(byte, bit, pressed) (EV_RAW_BASE + ((byte) * 8 + (bit)) * 2 + ((pressed) ? 1 : 0))
 
 struct input_cfg {
     const char *nodebus;      /* hw: tty device */
@@ -73,6 +78,7 @@ struct input {
 
 void input_base_init(struct input *in, const struct input_ops *ops);
 void input_sample(struct input *in, int key, int pressed);
+void input_raw(struct input *in, int code);           /* queue an EV_RAW() code (jjpio --learn) */
 int  input_poll(struct input *in, long long now_ms);   /* next event or EV_NONE */
 int  input_has(const struct input *in, int ev);        /* 0 = ev can never arrive */
 void input_close(struct input *in);

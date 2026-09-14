@@ -169,7 +169,10 @@ esac
 [ -x "$BIN" ] || { hooklog "no $BIN: booting image 0"; exit 0; }
 [ -n "$GAMENAME" ] || { hooklog "no GAMENAME ($JJPEDIR/setenv.sh): booting image 0"; exit 0; }
 rm -f "$OUT"
-"$BIN" --conf "$CONF" --input jjpio --out "$OUT" --last "$LAST" ${SLOG:+--log "$SLOG"} \
+# --learn: the cabinet frame into the log (and an unmapped bit onto the glass) whenever a
+# bit changes - one line a press, nothing while idle - so a machine whose buttons sit
+# elsewhere in the frame (the GNR's outside volume toggle, 2026-09-14) is read, not guessed
+"$BIN" --conf "$CONF" --input jjpio --learn --out "$OUT" --last "$LAST" ${SLOG:+--log "$SLOG"} \
     ${PADSELECT_AUDIO_DUMP:+--audio-dump "$PADSELECT_AUDIO_DUMP"}
 rc=$?
 [ "$rc" -eq 0 ] || { hooklog "selector exit $rc: booting image 0"; exit 0; }

@@ -6856,6 +6856,33 @@ These have each been violated at least once and each cost a run or a window:
       into each.
       — S3: feature. D3: hardware-only; what it finds cannot be provoked on
       the desk, and a dead menu still boots stock.
+      **IN PROGRESS 2026-09-13 (item/119 from feature/jjp-multiboot at 118's
+      close, `0765c3d`).** **The stick is made (step 1 done):** David's USB
+      SanDisk 3.2Gen1 (disk 5, 28.7 GB; he emptied it first) through the app's
+      own JJP stick pipeline (`UsbStickPreparePipeline`, what Build / make
+      stick… runs; scratch makestick119.py re-checks the disk by model, bus,
+      size and emptiness before anything formats): format FAT32/MBR label
+      JJPUSB (one UAC prompt), 637 files / 13.0 GB copied from
+      `D:\Pinball\multi\GunsNRoses-v03.03.multi.iso` in 22.5 min (~10 MB/s),
+      every file's size verified, then checked before the eject:
+      `jjp/pad_install.sh` 14,800 bytes = the ISO's, `syslinux/syslinux.cfg`
+      and `boot/grub/grub.cfg` each carry the one `ocs_live_run` line naming
+      pad_install.sh and no stock line, `version_info.txt` says Guns N Roses;
+      17.8 GB free after. **The pipeline's eject did not happen:** the volume
+      was still mounted as F: afterwards, with nothing logged, because
+      Shell.Application's `InvokeVerb('Eject')` is asynchronous and the
+      PowerShell that asked exited at once; `_win_eject_script` now waits up
+      to 15 s for the drive letter to go and the pipeline says so when it
+      stays. **Bug paid on the way:** the first run's
+      format SUCCEEDED and the pipeline then crashed reading the elevated
+      child's `result.txt` (PermissionError: an owner-only mkdtemp, the child's
+      files owned by Administrators - the trap the Stern flash helper fixed on
+      item/99); `_ps_elevated` now uses `core.elevated_flash._ipc_dir` and an
+      unreadable result is a message (`541a1a7`, tests/test_jjp_usbstick_elevated.py).
+      Only a source run hits it: the shipped build launches elevated.
+      **Resume (David, at the machine):** the stick and the GNR key in the
+      cabinet, power on; the installer runs by itself (it wipes settings and
+      scores); first boot with the coin door open; then the checks above.
 
 ## Reference material that is NOT in this repo
 

@@ -488,15 +488,34 @@ def mount_iso_linux(iso_path, log):
     return mount, _unmount
 
 
+def _win_eject_script(letter):
+    """Flush, ask Explorer to eject, and WAIT for the drive letter to go.
+
+    Shell.Application's InvokeVerb('Eject') is asynchronous: it hands the
+    request to the shell and returns, and a PowerShell that exits at once
+    takes the request with it.  The GNR multi-boot stick came back still
+    mounted as F: after the pipeline had logged that it was ejecting (item
+    119, 2026-09-13).  So the script stays until the volume is gone, or 15 s
+    pass, and says which."""
+    return (
+        "Write-VolumeCache -DriveLetter %(l)s\n"
+        "(New-Object -ComObject Shell.Application).Namespace(17)"
+        ".ParseName('%(l)s:').InvokeVerb('Eject')\n"
+        "for ($i = 0; $i -lt 30; $i++) {\n"
+        "  if (-not (Test-Path '%(l)s:\\')) { 'EJECTED=1'; exit 0 }\n"
+        "  Start-Sleep -Milliseconds 500\n"
+        "}\n"
+        "'EJECTED=0'\n" % {"l": letter})
+
+
 def eject_stick_windows(mount_root, device_path, log):
     letter = mount_root.rstrip(":\\/")
-    _ps("Write-VolumeCache -DriveLetter %s" % letter, timeout=120)
-    rc, out = _ps(
-        "(New-Object -ComObject Shell.Application).Namespace(17)"
-        ".ParseName('%s:').InvokeVerb('Eject')" % letter, timeout=60)
-    if rc != 0:
-        log("Could not auto-eject the stick (%s) — use 'Safely Remove "
-            "Hardware' before pulling it." % (out or "unknown error"),
+    rc, out = _ps(_win_eject_script(letter), timeout=120)
+    if rc != 0 or "EJECTED=1" not in (out or ""):
+        log("The stick did not eject by itself (%s) — its files are written "
+            "and flushed, but use 'Safely Remove Hardware' before pulling it."
+            % ("still mounted as %s:" % letter if rc == 0
+               else _first_line(out)),
             "info")
 
 

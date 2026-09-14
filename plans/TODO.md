@@ -7057,8 +7057,18 @@ These have each been violated at least once and each cost a run or a window:
       late, the level very high - are item 120, which now comes before the
       family's one `/finish`.
 
-- [ ] **120. The JJP boot menu's sound: a safe level, no lag, and the
-      machine's own volume buttons with feedback on screen.** `S2 D4` ← WORKING ON ← IN PROGRESS
+- [x] **120. The JJP boot menu's sound: a safe level, no lag, and the
+      machine's own volume buttons with feedback on screen.** `S2 D4`
+      **DONE 2026-09-14 on `item/120` - emulator-proven; NOT released on its own: merged into
+      `feature/jjp-multiboot`, and the family's ONE `/finish` can run now. Owed: David's GNR
+      check after a reinstall (the lag, a comfortable level, the front buttons and the
+      indicator on the real glass).** The last rig run, on the merged tree
+      (`GunsNRoses-v03.03.multi120v.iso`, a GNR clip on each image): both clips loaded (120
+      frames 5.0 s, 96 frames 4.0 s), every frame cached, 528 played / 528 drawn each, the loop
+      at 326-334 passes/s (longest 71 ms at start, 5 ms after); grabs 400 ms apart differ in
+      87-92% of the highlighted panel; Up drew "VOLUME 25 / 40" with 5 of 8 segments over the
+      playing clips and 3 s later the plain menu (`osd_up.png` / `osd_gone.png` in
+      `C:\tmp\jjp120\`), `25 remembered`. The build path the tab uses throughout.
       **Established (2026-09-14, item/120):** all seven to-dos are written. Selector: the JJP
       build asks for a 60 ms ALSA buffer (Stern keeps 500) and logs the one granted
       (`audio: alsa buffer N frames (M ms)`); `DEF_VOLUME=20`, `VOLUME_CEILING=40` nothing
@@ -7108,10 +7118,10 @@ These have each been violated at least once and each cost a run or a window:
       GNR clips PAD extracted are VP9 .webm (16 .flv); both lists gain .webm and .flv (only
       adds choices); the media step then made anim0/anim1 GIFs of the two clips (512x288, 4 s,
       15.8 MB of the 96 MB budget).
-      **Resume:** the rig run on the merged tree with a GNR clip on each image (animated panels
-      in three grabs, perf lines) plus the indicator grabs on :1; fast-forward item/120 to
-      item/120-merge and drop the temporary worktree; MULTIBOOT.md's proof table; David's GNR
-      check.
+      **For David's GNR check:** build the ISO from the app (Jersey Jack -> Multi-boot, volume
+      20 is the new default), make the stick, reinstall (settings and scores are wiped), and
+      judge the move sound's lag, the level, and Volume+/- with the indicator; a level set
+      there survives a power cycle.
       *(Found on the first GNR machine boot, item 119. Branch from and merge
       into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
       `/finish` now follows this item, not 119.)* On David's GNR

@@ -172,6 +172,33 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
 - **Proof runs**: `JJP_SELECT_DUMP=1` makes `run_game.sh` hand the menu
   `--audio-dump /jjpe/temp/jjpselect.mix.raw` (s16le, 44100 Hz, stereo), which
   is how a MUTED rig hears the clicks follow the buttons.
+- **Videos**: a JJP image's picture is a video file (the Edit image dialog's
+  "A video file"; there is no "attract video" choice on JJP - a JJP root has
+  no attract clip in the clear). `.webm` and `.flv` are videos, because that is
+  what PAD extracts from a JJP game (629 of GNR's 648 clips are VP9 `.webm`).
+
+### Proof (2026-09-14, muted, no Sentinel key plugged in)
+
+The menu needs no key (the hook runs before `./game`), so the launch was
+`watch.sh`'s own steps with the dongle step left out; the game after the menu
+died with H0007, which is the key's business. Every ISO was built the tab's
+way: `ensurejjpselect.sh`, `mkjjpmulti.py media`, `mkjjpmulti.py build`.
+
+| step | oracle | result |
+|---|---|---|
+| media | `selectmedia.wav_stats` | move.wav -6.0 -> -12.00 dBFS, confirm.wav -6.9 -> -12.00 dBFS; `media.json` volume 20 |
+| buffer | the selector's log | `alsa buffer 2646 frames (60 ms), period 661 frames (14 ms); asked 60 ms`, `lead 60 ms`, 0 recovers |
+| buttons | Up, Up, Down typed into the game's display | `key: plus/plus/minus`, `volume: 20 -> 25 -> 30 -> 25 (of 40)`, `indicator off at 25`, `25 remembered in /jjpe/perm/padselect.volume`, the perm file holds 25 |
+| level follows | the mix dump (`JJP_SELECT_DUMP=1`) | the clicks peak 2058 / 2444 / 2058 against 2057 / 2443 / 2057 expected (move.wav's 8231 x the gains of 25 / 30 / 25); the confirm chime 2058 |
+| remembered | a second launch | `volume: 25 of 40 (remembered in /jjpe/perm/padselect.volume)` |
+| indicator | `JJP_DISPLAY=:1 grab.sh` | "VOLUME 25 / 40" and 5 of 8 segments over the menu, then the plain menu 3 s later (`C:\tmp\jjp120\osd_up.png`, `osd_gone.png`) |
+| animations | a GNR clip on each image (`Attract_Montage_1.webm`, `Attract_Back_BulletsRoses_loop.webm`) | `anim: image 0 120 frames 512x288, a 5.0 s loop`, `image 1 96 frames ... 4.0 s`, every frame cached, `played 528 drawn 528` each; grabs 400 ms apart differ in 87-92 % of the highlighted panel; the loop at 326-334 passes/s, longest 71 ms at start and 5 ms after |
+| teardown | `stop.sh`, `alive.sh --total` | `game=0 matrix=0 xephyr=0 cuse=0`, alive 0 |
+
+The last run was on the family with main merged in (`item/120-merge`), after
+the Stern check: Stern's selector built from main and from the merge ran
+`make check` and 133 of 138 frames matched byte for byte; the other five
+differ between two runs of main too, or print a clock-seeded random group roll.
 
 ## From the app (item 118)
 

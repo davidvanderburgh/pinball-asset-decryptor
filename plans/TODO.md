@@ -7094,11 +7094,24 @@ These have each been violated at least once and each cost a run or a window:
       `STERN.flash_tick/flash_detail`). For (c): the Edit image dialog no longer offers "The
       game's own attract video" on a JJP row (it rendered nothing - no attract clip in the
       clear); a video file is a JJP image's animation.
-      **Resume:** read the three merged-tree checks (Stern selector main vs merged frame for
-      frame, JJP `make check`, the multi-boot + smoke pytest set); then the rig run on the
-      merged tree with a GNR video on each image (animated panels in three grabs, perf lines)
-      plus the indicator grabs on :1; fast-forward item/120 to item/120-merge and drop the
-      temporary worktree; MULTIBOOT.md's proof table; David's GNR check.
+      **Stern isolation, measured on the merged tree:** Stern `make check` OK on main and on
+      main + the family; of 138 headless frames 133 are byte-identical and the 5 that differ
+      are noise, shown two ways - `live.ppm` and the pick LOADING frame differ between two runs
+      of MAIN itself, and the default_card / group LOADING frames print a group's rolled member,
+      which qemu seeds from the clock (`/dev/urandom gave 0 byte(s)`: main rolled CUSTOM 1,
+      merged CUSTOM 2); the two differing padsw logs are reader-loss timing counts. The
+      multi-boot + smoke pytest set on the merged tree: 1206 passed after one fix - the family's
+      JJP test pinned Stern's selector step as a user step, main's PAD-140 made it root on
+      Windows, and the test now asks for main's shape. JJP `make check` OK on the merged tree.
+      **Video:** the first animation run refused `Attract_Montage_1.webm@1` - VIDEO_EXTS (the
+      media step's, the tab's and its file dialog) knew only mp4/mov/mkv/avi, and 629 of the 648
+      GNR clips PAD extracted are VP9 .webm (16 .flv); both lists gain .webm and .flv (only
+      adds choices); the media step then made anim0/anim1 GIFs of the two clips (512x288, 4 s,
+      15.8 MB of the 96 MB budget).
+      **Resume:** the rig run on the merged tree with a GNR clip on each image (animated panels
+      in three grabs, perf lines) plus the indicator grabs on :1; fast-forward item/120 to
+      item/120-merge and drop the temporary worktree; MULTIBOOT.md's proof table; David's GNR
+      check.
       *(Found on the first GNR machine boot, item 119. Branch from and merge
       into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
       `/finish` now follows this item, not 119.)* On David's GNR

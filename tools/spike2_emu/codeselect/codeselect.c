@@ -194,7 +194,8 @@ static void usage(FILE *f)
         "  --preamble min|full  node-bus bring-up to replay before scanning (default min)\n"
         "  --font PATH        TrueType font (default conf font=, " DEF_FONT ", " CARD_FONT ")\n"
         "  --media DIR        where the conf's media names live (default conf media=, " DEF_MEDIA ")\n"
-        "  --audio auto|alsa|fifo:PATH|none  sound sink (default auto: alsa, else $PAD_AUDIO_PLAY, else none)\n"
+        "  --audio auto|alsa|pulse|fifo:PATH|none  sound sink (default auto: pulse on a JJP build,\n"
+        "                     then alsa, else $PAD_AUDIO_PLAY, else none)\n"
         "  --audio-fmt PATH   the rig's fmt file, gets '44100 2' (default $PAD_AUDIO_FMT)\n"
         "  --codec auto|off   auto = power the machine's codecs' line-out over i2c the way the game\n"
         "                     does, put back at exit (only when both SGTL5000s answer); off = leave them\n"
@@ -330,9 +331,9 @@ missing:
         fprintf(stderr, "codeselect: --preamble must be min or full\n");
         return -1;
     }
-    if (strcmp(o->audio, "auto") && strcmp(o->audio, "alsa") && strcmp(o->audio, "none") &&
-        strncmp(o->audio, "fifo:", 5)) {
-        fprintf(stderr, "codeselect: --audio must be auto, alsa, fifo:PATH or none\n");
+    if (strcmp(o->audio, "auto") && strcmp(o->audio, "alsa") && strcmp(o->audio, "pulse") &&
+        strcmp(o->audio, "none") && strncmp(o->audio, "fifo:", 5)) {
+        fprintf(stderr, "codeselect: --audio must be auto, alsa, pulse, fifo:PATH or none\n");
         return -1;
     }
     if (o->snapshot && o->headless) {

@@ -46,6 +46,9 @@ struct audio_sink {
 struct audio_sink *audio_fifo_open(const char *path, const char *fmt_path);
 /* NULL = no ALSA on this box (snd_pcm_open failed); the reason in err */
 struct audio_sink *audio_alsa_open(char *err, int errlen);
+/* a JJP machine: PulseAudio through libpulse-simple (audio_pulse.c, the JJP
+ * build only - AUDIO_PULSE); NULL with the reason when no server answers */
+struct audio_sink *audio_pulse_open(char *err, int errlen);
 /* the game's codec curve on selem 'PCM' of ctl backbox + cabinet; 0 ok */
 int  audio_alsa_mixer(int v63);
 /* THE MACHINE'S OWN VOLUME as a software gain (0-100): the codec's

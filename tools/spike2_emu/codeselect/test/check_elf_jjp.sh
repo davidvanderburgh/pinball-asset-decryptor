@@ -2,7 +2,8 @@
 # check_elf_jjp.sh BIN [JJPROOT] - the ceiling the JJP card's loader imposes
 # on jjpselect (Ubuntu 21.10 rootfs, glibc 2.34, x86-64):
 #   max GLIBC_ version node <= 2.34
-#   NEEDED only libX11.so.6 libasound.so.2 libc.so.6 libm.so.6 libgcc_s.so.1
+#   NEEDED only libX11.so.6 libasound.so.2 libpulse-simple.so.0 libpulse.so.0 libc.so.6 libm.so.6 libgcc_s.so.1
+#   (the two pulse libraries since the JJP build plays through libpulse-simple, 2026-09-14)
 #     (+ libpthread.so.0 / libdl.so.2 when linked against a 2.34 image, where
 #     they are still separate libraries; a 2.39 host folds them into libc)
 #     - never libEGL / libGLESv2: egl_x11.c dlopens those so a box without
@@ -35,7 +36,7 @@ bad=0
 needed=$(readelf -d "$BIN" | grep NEEDED | sed 's/.*\[\(.*\)\]/\1/')
 for n in $needed; do
     case "$n" in
-        libX11.so.6|libasound.so.2|libpthread.so.0|libdl.so.2|libc.so.6|libm.so.6|libgcc_s.so.1) ;;
+        libX11.so.6|libasound.so.2|libpulse-simple.so.0|libpulse.so.0|libpthread.so.0|libdl.so.2|libc.so.6|libm.so.6|libgcc_s.so.1) ;;
         *) echo "check_elf_jjp: FAIL unexpected NEEDED $n"; bad=1 ;;
     esac
 done
@@ -58,7 +59,7 @@ if [ -n "$JJPROOT" ]; then
     # unresolved; only a STRONG one dies before main().
     syms=$(mktemp)
     for lib in "$LIBDIR"/libc.so.6 "$LIBDIR"/libm.so.6 "$LIBDIR"/libpthread.so.0 "$LIBDIR"/libdl.so.2 \
-               "$LIBDIR"/libgcc_s.so.1 "$LIBDIR"/libX11.so.6 "$LIBDIR"/libasound.so.2; do
+               "$LIBDIR"/libgcc_s.so.1 "$LIBDIR"/libX11.so.6 "$LIBDIR"/libasound.so.2 \n               "$LIBDIR"/libpulse-simple.so.0 "$LIBDIR"/libpulse.so.0; do
         [ -f "$lib" ] && readelf --dyn-syms -W "$lib" 2>/dev/null | awk 'NF>=8 && $7!="UND" {print $8}'
     done | sed 's/@.*//' | sort -u > "$syms"
     missing=""

@@ -7086,8 +7086,17 @@ These have each been violated at least once and each cost a run or a window:
       (`ALSA_REOPEN_ON_XRUN`, `ALSA_STALL_MS`; a 300 ms or 1 s watchdog reopened into that
       startup pause forever - rig-bisected), a one-period start threshold, `--learn` watches
       the whole frame with a chatter guard, and `mkjjpmulti.py build --key-plus 3.6
-      --key-minus 3.5` names the rocker. Owed: GNR check 3 with the multi120w ISO rebuilt
-      (15:49): audible clicks, the rocker stepping the level. The machine's audio facts:
+      --key-minus 3.5` names the rocker. GNR check 3 (that ISO): the rocker steps the indicator
+      (mapping right), STILL SILENT - the ALSA pulse PLUGIN's stream is what fails on the
+      machine, and the rig reproduces only parts of it. So the JJP build now plays through
+      PulseAudio itself, libpulse-simple (`audio_pulse.c`, the game's own audio library):
+      a blocking stream on the server's terms, an underrun is silence the server inserts,
+      nothing reconnects; paced 60 ms ahead of the wall clock into an 80 ms server buffer,
+      the backlog after a stall dropped; `--audio auto` tries it first, ALSA is the
+      fallback. Rig-proven on the GNR root's own pulse 15: plain, the loop sleeping 100 ms
+      a pass, the process stopped 80 ms of every 200 - every click and the chime at the sink
+      in all three, 0 errors, 0 reconnects. Owed: GNR check 4 with the multi120w ISO rebuilt
+      on it: audible clicks. The machine's audio facts:
       [[reference_jjp_front_usb_port_is_slow]], [[reference_jjp_menu_audio_is_pulse]]. The last rig run, on the merged tree
       (`GunsNRoses-v03.03.multi120v.iso`, a GNR clip on each image): both clips loaded (120
       frames 5.0 s, 96 frames 4.0 s), every frame cached, 528 played / 528 drawn each, the loop

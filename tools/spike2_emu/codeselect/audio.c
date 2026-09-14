@@ -218,12 +218,31 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
             sel_log("audio: none (no alsa: %s)", err);
             snprintf(a->missing, sizeof a->missing, "no alsa: %s", err);
         }
+    } else if (!strcmp(mode, "pulse")) {
+#ifdef AUDIO_PULSE
+        a->sink = audio_pulse_open(err, sizeof err);
+        if (!a->sink) {
+            sel_log("audio: none (%s)", err);
+            snprintf(a->missing, sizeof a->missing, "%s", err);
+        }
+#else
+        sel_log("audio: none (this build has no pulse sink)");
+        snprintf(a->missing, sizeof a->missing, "no pulse sink in this build");
+#endif
     } else if (!strncmp(mode, "fifo:", 5)) {
         if (mode[5]) a->sink = audio_fifo_open(mode + 5, fmt_path);
         else sel_log("audio: none (fifo: without a path)");
     } else if (!strcmp(mode, "auto")) {
         const char *play = getenv("PAD_AUDIO_PLAY");
+#ifdef AUDIO_PULSE
+        /* A JJP MACHINE: PulseAudio itself first (audio_pulse.c says why the
+         * ALSA pulse plugin is not enough), ALSA when no server answers */
+        a->sink = audio_pulse_open(err, sizeof err);
+        if (!a->sink) sel_log("audio: no pulse server (%s); trying alsa", err);
+        if (!a->sink) a->sink = audio_alsa_open(err, sizeof err);
+#else
         a->sink = audio_alsa_open(err, sizeof err);
+#endif
         if (!a->sink) {
             if (play && *play) {
                 sel_log("audio: no alsa (%s), using the rig's fifo", err);

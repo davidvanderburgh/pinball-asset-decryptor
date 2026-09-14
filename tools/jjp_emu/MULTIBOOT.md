@@ -182,6 +182,24 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   GNR root's own PulseAudio 15 with a null sink inside the jail, its monitor
   recorded, the selector at 60 ms and at 500 ms - every click and the confirm
   chime reached the sink with the mix's own peaks, 0 dropped, 0 recovers.
+- **The JJP build plays through PulseAudio ITSELF** (`audio_pulse.c`,
+  libpulse-simple, the library the game's own audio uses): `--audio auto` on a
+  JJP build tries the server first and falls back to ALSA when none answers.
+  GNR check 3 (2026-09-14): a fourth stick through ALSA's `default` - the
+  pulse PLUGIN - with the pump thread and the reopens was STILL silent while
+  the rocker stepped the indicator; the plugin's stream is what fails on the
+  machine and only partly reproduces here. libpulse-simple is a blocking
+  stream on the server's terms: an underrun is silence the server inserts
+  and the stream carries on, nothing reconnects. The sink paces itself
+  60 ms ahead of the wall clock (`PULSE_LEAD_MS`) into an 80 ms server
+  buffer (`PULSE_TLENGTH_MS`), drops the backlog after a stall instead of
+  playing it late, and logs `audio: pulse ok (... latency N ms)`, errors,
+  reconnects and resyncs. Rig-proven on the GNR root's own PulseAudio 15
+  (2026-09-14 evening, `pulseprobe120.sh`): plain, the render loop sleeping
+  100 ms a pass, and the process stopped 80 ms of every 200 - every click and
+  the chime reached the sink in all three, 0 errors, 0 reconnects; a single
+  resync at 1.2 s in the quiet runs is the rig's null sink taking ~1.1 s to
+  start pulling (the write blocks once, the backlog is dropped).
 - **Why the GNR's menu was silent, and the fix (2026-09-14, evening).** The
   machine's loop is vsync-paced and hiccups; a 60 ms buffer underruns on any
   hiccup over ~45 ms, and after the recover a stream through the pulse plugin

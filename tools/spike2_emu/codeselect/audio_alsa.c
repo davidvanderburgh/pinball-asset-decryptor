@@ -225,7 +225,10 @@ static int alsa_space(struct audio_sink *s, long long now)
 static int alsa_write(struct audio_sink *s, const short *pcm, int frames)
 {
     struct alsa *a = (struct alsa *)s;
-    int done = 0, retries = 0;
+    int done = 0;
+#ifndef ALSA_REOPEN_ON_XRUN
+    int retries = 0;
+#endif
     if (!a->pcm) return 0;
     while (done < frames) {
         int chunk = frames - done;

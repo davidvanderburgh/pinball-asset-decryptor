@@ -66,6 +66,7 @@ CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
             -DDEF_VOLFILE='"/jjpe/perm/padselect.volume"' \
             -DDEF_VOLUME=20 -DVOLUME_CEILING=40 \
             -DALSA_LATENCY_US=60000 -DALSA_LEAD_MS=60 -DALSA_START_PERIODS=1 -DALSA_REOPEN_ON_XRUN=1 \
+            -DAUDIO_PULSE=1 \
             -DCARD_FONT='"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"' \
             -I$(BUILD) $(EXTRA_CFLAGS)
 # THE MENU'S SOUND ON A JJP MACHINE (item 120).  JJP keeps its amplifier chain
@@ -81,17 +82,19 @@ ifneq ($(JJPROOT),)
 JJPLIB    = $(JJPROOT)/usr/lib/x86_64-linux-gnu
 LDPRE     = -nostdlib -nostartfiles $(shell $(CC) -print-file-name=crt1.o) $(shell $(CC) -print-file-name=crti.o) $(CRTBEGIN)
 LDPOST    = $(CRTEND) $(shell $(CC) -print-file-name=crtn.o) -L$(JJPLIB) -Wl,-rpath-link,$(JJPLIB) \
-            -l:libX11.so.6 -l:libasound.so.2 -l:libpthread.so.0 -l:libdl.so.2 -l:libm.so.6 \
+            -Wl,-rpath-link,$(JJPLIB)/pulseaudio \
+            -l:libX11.so.6 -l:libasound.so.2 -l:libpulse-simple.so.0 -l:libpulse.so.0 \
+            -l:libpthread.so.0 -l:libdl.so.2 -l:libm.so.6 \
             -l:libc.so.6 $(shell $(CC) -print-file-name=libc_nonshared.a) -l:libgcc_s.so.1 -lgcc
 else
 # the host's runtime libraries by soname (no -dev packages needed)
 LDPRE     =
-LDPOST    = -L/usr/lib/x86_64-linux-gnu -l:libX11.so.6 -l:libasound.so.2 -lpthread -ldl -lm
+LDPOST    = -L/usr/lib/x86_64-linux-gnu -Wl,-rpath-link,/usr/lib/x86_64-linux-gnu/pulseaudio -l:libX11.so.6 -l:libasound.so.2 -l:libpulse-simple.so.0 -l:libpulse.so.0 -lpthread -ldl -lm
 endif
 GLLIBS    =
 AUDLIBS   =
 LIBC      =
-SRCS = codeselect.c conf.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c nvm.c
+SRCS = codeselect.c conf.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c
 HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h jjp_glibc.h $(BUILD)/theme_table.h
 else
 # ---- Stern: the ARM cross build against the card rootfs ----

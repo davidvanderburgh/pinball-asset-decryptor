@@ -652,6 +652,14 @@ hardware and one header defends the build:
   device that refuses the buffer asked for at 120, 250 and 500 ms before it
   gives up (`PADSELECT_ALSA_LATENCY_MS` overrides the build's request, for
   the rig).
+- **The pulse sink (JJP).** `audio_pulse.c`: libpulse-simple, hand-written
+  prototypes (no headers on the box), `pa_simple_new` with tlength
+  `PULSE_TLENGTH_MS` and prebuf/minreq a quarter of it; `space()` answers
+  from the wall clock (stay `PULSE_LEAD_MS` ahead, drop the backlog after a
+  stall), `write()` is `pa_simple_write` (a failure drops the stream and
+  retries a second later). `--audio auto` on the JJP build (`AUDIO_PULSE`)
+  tries it before ALSA; `--audio pulse` insists. The ALSA pulse plugin left
+  the GNR silent through four sticks; this is the game's own path.
 - **The pump thread.** `audio_pump()` from the main loop was the design until
   2026-09-14; a JJP machine's vsync-paced loop underran the 60 ms buffer and
   the stream through the pulse plugin stopped restarting (the GNR, silent).

@@ -48,14 +48,16 @@ HARNESS = r"""
 
 %s
 
-/* argv[1..] are the lamp commands, each "<ms>:<moving>". Prints the verdict
- * and the window of every frame the gate had something to say about. */
-int main(int argc, char **argv)
+/* stdin is the lamp commands, one "<ms>:<moving>" per line. Prints the verdict
+ * and the window of every frame the gate had something to say about. They come
+ * on stdin and not argv because a still refresh minutes long is a longer
+ * command line than Windows will start a process with (WinError 206). */
+int main(void)
 {
-    int i;
-    for (i = 1; i < argc; i++) {
-        unsigned long now = strtoul(argv[i], 0, 10), window = 0;
-        char *colon = argv[i];
+    char line[64];
+    while (fgets(line, sizeof line, stdin)) {
+        unsigned long now = strtoul(line, 0, 10), window = 0;
+        char *colon = line;
         int moving, v;
         while (*colon && *colon != ':') colon++;
         moving = (*colon == ':') && colon[1] == '1';
@@ -160,8 +162,8 @@ def _moving(moving, now, times):
 
 def _run(gate, frames):
     """[(verdict, ms, window)] for a list of (ms, moving) lamp commands."""
-    args = ["%d:%d" % (ms, bool(moving)) for ms, moving in frames]
-    r = subprocess.run([gate] + args, capture_output=True, text=True)
+    lines = "".join("%d:%d\n" % (ms, bool(moving)) for ms, moving in frames)
+    r = subprocess.run([gate], input=lines, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     out = []
     for tok in r.stdout.split():

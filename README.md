@@ -1152,6 +1152,18 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    nothing to eject", "a game needs CREDITS"). Those sentences were being
    printed and thrown away, which is why a press that could not do
    anything looked exactly like one that had.
+   **A ball played with the mouse ends when it drains.** From v0.212.9 a
+   click in this window counts as somebody playing, so with ball save on
+   the ball feeder no longer takes the game's own re-served ball back to
+   the trough five seconds after it launches, and it keeps a way home
+   for every launched ball instead of one — which is what left a drained
+   ball never ending, Start refusing and the game searching for balls.
+   Plunge only launches the ball waiting in the shooter lane and never
+   serves one from the trough. With the key panel up, the bottom button
+   row is gone: Start Button and Left Coin are clickable rows in the key
+   list, the BALLS section reads trough, lane, in play and fed on one
+   line above Plunge, Drain and Reset balls, and Clear alerts is
+   **Clear switch alerts** under SERVICE.
    **A one-screen cabinet now draws at its own panel size.** The
    machines that carry a single screen instead of a backbox-and-topper
    pair — James Bond 60th, Star Wars Home Edition, Jurassic Park The
@@ -1202,7 +1214,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    same way and was dimmed the same way — and a level of zero still
    decodes as zero, so the titles that only ever use this command to
    turn a lamp off are unmoved.
-   **And a Home Edition's light show runs.** From v0.212.8 the inserts
+   **And a Home Edition's light show runs.** From v0.212.9 the inserts
    on Jurassic Park The Pin and Star Wars Home Edition cycle through
    attract instead of holding nine lamps still, and two things were in
    the way. The rig decides a game is past its Tech Alerts screen by

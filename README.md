@@ -1202,6 +1202,23 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    same way and was dimmed the same way — and a level of zero still
    decodes as zero, so the titles that only ever use this command to
    turn a lamp off are unmoved.
+   **And a Home Edition's light show runs.** From v0.212.8 the inserts
+   on Jurassic Park The Pin and Star Wars Home Edition cycle through
+   attract instead of holding nine lamps still, and two things were in
+   the way. The rig decides a game is past its Tech Alerts screen by
+   watching for a light show, and a Home Edition re-sends the same
+   lamp levels about eleven times a second while that screen is up, so
+   a parked machine passed for one in attract and nothing ever pressed
+   Service Back. A show now has to CHANGE the lamps, at the pace a real
+   attract does, before it counts, and a run whose lamps are busy but
+   never change says so in its log. The retry press waits 75 seconds
+   instead of 45, so it cannot land in a show that has already started.
+   And the show those insert boards actually run is a lamp command the
+   rig refused on an insert board; it is decoded now, checked against
+   a full-size title's own LED test (the lit lamp agrees 657 of 657
+   and 1522 of 1522), and it owns the lamps it addresses, so the steady
+   refresh command no longer writes over them and invents changes the
+   wire never carried.
    **The switch list carries the game's own names.** A title whose
    device table describes only a handful of its switches used to leave
    the rest of the list as question marks — one 105-switch machine

@@ -54,6 +54,11 @@ def _abs(card_path):
     return "/" + card_path.strip("/") if card_path else None
 
 
+#: The boot screen's own manifest (PAD-147): the Stern extractor keeps it apart
+#: from ``images/manifest.txt`` because its files are on the OS partition.
+_BOOT_SCREEN_MANIFEST = "images/boot_screen/manifest.txt"
+
+
 def video_card_path(assets_dir, rel_path):
     """On-card path of a ``video/<name>`` slot (a directly-stored asset)."""
     name = rel_path.split("/", 1)[1] if "/" in rel_path else rel_path
@@ -65,13 +70,19 @@ def video_card_path(assets_dir, rel_path):
 
 
 def image_card_path(assets_dir, rel_path):
-    """On-card path of an ``images/<rel>`` slot, across all three stores:
-    a loose file on the card, a ``scene.assets`` texture, or a PNG embedded
-    inside a ``.radium`` container."""
+    """On-card path of an ``images/<rel>`` slot, across every store: a loose
+    file on the card, the boot screen on the OS partition, a
+    ``scene.assets`` texture, or a PNG embedded inside a ``.radium``
+    container."""
     rel = rel_path.split("/", 1)[1] if "/" in rel_path else rel_path
     card = _read_manifest(assets_dir, "images/manifest.txt").get(rel)
     if card:
         return _abs(card), ""
+    card = _read_manifest(assets_dir, _BOOT_SCREEN_MANIFEST).get(rel)
+    if card:
+        return _abs(card), ("This is the boot screen: it is on the OS "
+                            "partition (sda2), and the machine shows it "
+                            "while it starts up.")
     card = _read_manifest(
         assets_dir, "images/scene_textures/manifest.txt").get(rel)
     if card:
@@ -104,6 +115,7 @@ def extracted_card_paths(assets_dir):
         return out
     for rel_manifest in ("video/manifest.txt",
                          "images/manifest.txt",
+                         _BOOT_SCREEN_MANIFEST,
                          "images/scene_textures/manifest.txt",
                          "images/scene_textures/radium_images.txt"):
         for card in _read_manifest(assets_dir, rel_manifest).values():

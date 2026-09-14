@@ -8888,7 +8888,7 @@ class MainWindow:
             tools, textvariable=self.image_source_filter_var,
             state="readonly", width=13,
             values=("All sources", "File", "Scene texture", "Radium",
-                    "Glyph"))
+                    "Glyph", "Boot screen"))
         self._image_source_combo.pack(side=tk.LEFT, padx=(0, 12))
         self._image_source_combo.bind(
             "<<ComboboxSelected>>", lambda _e: self._save_staged_changes())
@@ -9143,7 +9143,7 @@ class MainWindow:
             self._seed_group_tags_from_library(scan_dir)
             srcf = staged.get("image_source_filter")
             if srcf in ("All sources", "File", "Scene texture", "Radium",
-                        "Glyph"):
+                        "Glyph", "Boot screen"):
                 self.image_source_filter_var.set(srcf)
         else:
             self._image_assignments = {
@@ -9236,10 +9236,12 @@ class MainWindow:
         them tell-apart-able + sortable).  Derived purely from the extract
         layout: the Stern engine lands decoded scene textures under
         ``scene_textures/`` (radium-embedded ones named ``radimg_*``,
-        per-character font slices under ``glyphs/``); every other image is a
-        plain file copied off the card.  Non-Stern plugins simply show "File"
-        throughout."""
+        per-character font slices under ``glyphs/``) and the boot screen
+        under ``boot_screen/``; every other image is a plain file copied off
+        the card.  Non-Stern plugins simply show "File" throughout."""
         parts = rel_path.replace("\\", "/").lower().split("/")
+        if parts[:2] == ["images", "boot_screen"] and len(parts) > 2:
+            return "Boot screen"
         if "scene_textures" in parts:
             if "glyphs" in parts:
                 return "Glyph"

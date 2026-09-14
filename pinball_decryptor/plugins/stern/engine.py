@@ -669,6 +669,93 @@ def extract_images(reader, output_dir, log=None, progress=None, cancel=None):
 
 
 # --------------------------------------------------------------------------
+# The boot screen: the picture the machine shows while it starts up.  Every
+# other image is on the games partition; this one is on the OS partition
+# (sda2), where /etc/init.d/lvds_panel starts /usr/local/bin/boot_display and
+# it draws /usr/local/spike/SternLogo.png until the game script kills it.  It
+# extracts to images/boot_screen/ with a manifest of its own, so Write knows
+# which partition to put it back on (PAD-147).
+# --------------------------------------------------------------------------
+_BOOT_IMAGE_DIR = "usr/local/spike"
+_BOOT_IMAGE_SUBDIR = "boot_screen"
+
+
+def _boot_screen_dir(disk_f, partitions, games_base=None):
+    """``(reader, dir_inode)`` for ``/usr/local/spike`` on the card's OS
+    partition, or ``(None, None)`` when no partition has one.
+
+    Every ext partition but the games one (*games_base*, its byte offset) is
+    tried in turn; on a Spike 2 card only the rootfs holds that folder."""
+    from .ext4 import S_IFDIR, S_IFMT, Ext4Reader
+    for off, size in partitions:
+        if games_base is not None and off == games_base:
+            continue
+        try:
+            reader = Ext4Reader(disk_f, off, size)
+            node = reader.read_inode(2)
+            for name in _BOOT_IMAGE_DIR.split("/"):
+                child = next((c for n, c, _t in reader._iter_dir(node)
+                              if n == name), None)
+                if child is None:
+                    break
+                node = reader.read_inode(child)
+                if (node["mode"] & S_IFMT) != S_IFDIR:
+                    break
+            else:
+                return reader, node
+        except Exception:
+            continue
+    return None, None
+
+
+def _boot_images(reader, dir_node):
+    """``[(card_path, inode), ...]`` for the image files directly inside the
+    boot screen's folder, sorted by name."""
+    from .ext4 import S_IFMT, S_IFREG
+    out = []
+    for name, child, _t in reader._iter_dir(dir_node):
+        if name in (".", "..") or not name.lower().endswith(_IMAGE_EXTS):
+            continue
+        try:
+            node = reader.read_inode(child)
+        except Exception:
+            continue
+        if (node["mode"] & S_IFMT) == S_IFREG and node["size"] > 0:
+            out.append(("/%s/%s" % (_BOOT_IMAGE_DIR, name), node))
+    out.sort(key=lambda e: e[0].lower())
+    return out
+
+
+def extract_boot_images(disk_f, partitions, output_dir, games_base=None,
+                        log=None):
+    """Extract the boot screen off the OS partition to
+    ``output_dir/images/boot_screen/``, with a ``manifest.txt`` in the loose
+    images' shape (output, card path, bytes).  Returns how many; 0 on a card
+    whose OS partition has none."""
+    log = log or (lambda *a, **k: None)
+    reader, dir_node = _boot_screen_dir(disk_f, partitions, games_base)
+    imgs = _boot_images(reader, dir_node) if reader is not None else []
+    if not imgs:
+        log("No boot screen image found on the OS partition.", "info")
+        return 0
+    out_dir = os.path.join(output_dir, "images", _BOOT_IMAGE_SUBDIR)
+    os.makedirs(out_dir, exist_ok=True)
+    manifest = []
+    for card_path, node in imgs:
+        name = card_path.rsplit("/", 1)[1]
+        reader.extract_file(node, os.path.join(out_dir, name))
+        manifest.append("%s/%s\t%s\t%d"
+                        % (_BOOT_IMAGE_SUBDIR, name, card_path, node["size"]))
+    with open(os.path.join(out_dir, "manifest.txt"), "w",
+              encoding="utf-8") as f:
+        f.write("# output\tcard path\tbytes\n" + "\n".join(manifest) + "\n")
+    log("Extracted the boot screen (%s) from the OS partition to %s."
+        % (", ".join(c.rsplit("/", 1)[1] for c, _n in imgs), out_dir),
+        "success")
+    return len(manifest)
+
+
+# --------------------------------------------------------------------------
 # Scene-texture extract: the BC3/DXT5 "DDS" glyph/sprite atlases packed as the
 # non-ftyp scene.assets/<N>.asset files (their dims live in the scene.radium).
 # --------------------------------------------------------------------------
@@ -1922,6 +2009,13 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 log("Image extraction failed (%s); continuing." % e, "warning")
             if cancel():
                 return 0
+            # The boot screen, off the OS partition rather than the games one.
+            try:
+                extract_boot_images(disk_f, partitions, output_dir,
+                                    games_base=reader.base, log=log)
+            except Exception as e:
+                log("Boot screen extraction failed (%s); continuing." % e,
+                    "warning")
             # Scene textures (BC3/DXT5 glyph/sprite atlases inside scene.assets)
             # — decoded to editable PNGs; an own try/except so a texture hiccup
             # never blocks the loose-PNG or audio extraction.
@@ -2679,8 +2773,22 @@ def _changed_images(assets_dir, baseline):
     ``assets_dir/images`` whose current bytes differ from the Extract baseline
     (``.checksums.md5``).  Empty when there's no ``images/manifest.txt``.
     *output* is the forward-slash path under ``images/`` (mirrors the card)."""
+    return _changed_listed_images(assets_dir, baseline, _IMAGE_MANIFEST)
+
+
+def _changed_boot_images(assets_dir, baseline):
+    """:func:`_changed_images` for the boot screen (``images/boot_screen/``,
+    with its own manifest because the files are on the OS partition).  Empty
+    for an extract made before the boot screen was extracted."""
+    return _changed_listed_images(
+        assets_dir, baseline, _BOOT_IMAGE_SUBDIR + "/" + _IMAGE_MANIFEST)
+
+
+def _changed_listed_images(assets_dir, baseline, manifest_rel):
+    """The rows of ``images/<manifest_rel>`` whose staged file differs from
+    the Extract baseline -> ``[(output, card_path, staged_path), ...]``."""
     img_dir = os.path.join(assets_dir, "images")
-    manifest = os.path.join(img_dir, _IMAGE_MANIFEST)
+    manifest = os.path.join(img_dir, *manifest_rel.split("/"))
     if not os.path.isfile(manifest):
         return []
     out = []
@@ -3496,6 +3604,70 @@ def _prepare_image_patches(reader, image_edits, work_dir, log, cancel):
     return patches, skipped
 
 
+def _prepare_boot_screen_patches(disk_f, parts, games_base, boot_edits,
+                                 work_dir, log, cancel, dest_is_device=False):
+    """The boot screen's edits, on the OS partition -> ``(writes, grow, n)``:
+    flat ``(disk_offset, bytes)`` *writes*; *grow* ``None`` or
+    ``{"offset": <the OS partition>, "jobs": [(card_rel, source), ...]}``;
+    *n* how many images the two put on the card.
+
+    A replacement no bigger than the original goes into the file's own
+    blocks, padded with trailing zero bytes (boot_display's PNG reader stops
+    at IEND, as the game's does).  A bigger one is copied over the file whole
+    through the ext4 driver, the way a full-size video is, so it keeps every
+    byte; only a direct-SD write or a system without the driver re-compresses
+    it to fit, and skips it when even that won't.  Nothing on the OS
+    partition is in the game's .sidx manifest, so there is no record to
+    refresh."""
+    reader, dir_node = _boot_screen_dir(disk_f, parts, games_base)
+    if reader is None:
+        log("The boot screen was not written: this card has no /%s on its "
+            "OS partition." % _BOOT_IMAGE_DIR, "warning")
+        return [], None, 0
+    nodes = dict(_boot_images(reader, dir_node))
+    writes, jobs, n = [], [], 0
+    can_grow = None
+    for output, card_path, staged in boot_edits:
+        if cancel():
+            break
+        node = nodes.get(card_path)
+        if node is None:
+            log("Boot screen %s: its original (%s) wasn't found on the card's "
+                "OS partition; skipped." % (output, card_path), "warning")
+            continue
+        size = os.path.getsize(staged)
+        if size > node["size"]:
+            if can_grow is None:
+                if dest_is_device:
+                    can_grow, why = False, "a direct-SD write can't grow a file"
+                else:
+                    from ...core import ext4_grow
+                    can_grow, why = ext4_grow.available()
+                if not can_grow:
+                    log("A boot screen bigger than the original can't be "
+                        "copied onto the card whole here (%s); it is "
+                        "re-compressed to fit instead." % why, "warning")
+            if can_grow:
+                jobs.append((card_path.lstrip("/"), staged))
+                n += 1
+                log("Boot screen %s: %d bytes where the original has %d, so "
+                    "it is copied onto the card whole."
+                    % (output, size, node["size"]), "info")
+                continue
+        payload = _fit_image_payload(staged, node["size"], work_dir, log)
+        if payload is None:
+            continue
+        off = 0
+        for disk, cnt in reader.disk_ranges(node, 0, len(payload)):
+            writes.append((disk, payload[off:off + cnt]))
+            off += cnt
+        n += 1
+        log("Boot screen %s: ready to patch (%d bytes)."
+            % (output, node["size"]), "info")
+    grow = {"offset": reader.base, "jobs": jobs} if jobs else None
+    return writes, grow, n
+
+
 # --------------------------------------------------------------------------
 # Replace scene textures: re-encode an edited PNG back to BC3 and patch the
 # original scene.assets/<N>.asset in place (size-neutral by construction).
@@ -4094,7 +4266,8 @@ def _stage_done(log, name, t0):
 
 
 def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
-                     phase=None, label=None, dest_is_device=False):
+                     phase=None, label=None, dest_is_device=False,
+                     boot_screen=True):
     """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
     edits, and resolve them to a flat list of absolute on-disk writes
     ``[(disk_offset, bytes), ...]`` (offsets relative to the start of
@@ -4105,7 +4278,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     this call) and closes it afterwards.  This is the shared core of both the
     file Write (:func:`write_image`) and the Direct-SD Write
     (:func:`write_device`), so the exact same patch set is produced whether the
-    destination is an image copy or the card itself.
+    destination is an image copy or the card itself.  ``boot_screen=False``
+    leaves a replaced boot screen out (an override set: the emulator starts
+    the game without it).
 
     Returns ``(writes, counts, grow_plan, audio_mode, valpatch_mode)`` where
     ``counts`` is
@@ -4138,6 +4313,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
 
     video_edits = _changed_videos(assets_dir, baseline)
     image_edits = _changed_images(assets_dir, baseline)
+    # The boot screen is on the OS partition (PAD-147).  The emulator starts
+    # the game without it, so an override set leaves it out.
+    boot_edits = _changed_boot_images(assets_dir, baseline)
+    if boot_edits and not boot_screen:
+        log("The boot screen isn't shown by the emulator, so the replaced one "
+            "is left out of this run; build the card to see it.", "info")
+        boot_edits = []
     texture_edits = _changed_scene_textures(assets_dir, baseline)
     # Edited font-glyph slices make their atlas count as an edited radium image
     # (the composite happens inside _radium_image_writes).
@@ -4163,7 +4345,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
-            and not text_edits and not color_edits and not layout_edits):
+            and not text_edits and not color_edits and not layout_edits
+            and not boot_edits):
         raise FileNotFoundError(
             "Nothing to write: every sound (idxNNNN.wav / music_catNN_*.wav) "
             "still matches the Extract baseline (.checksums.md5) and no replaced "
@@ -4257,6 +4440,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         log("Found %d replaced video(s) to write." % len(video_edits), "info")
     if image_edits:
         log("Found %d replaced image(s) to write." % len(image_edits), "info")
+    if boot_edits:
+        log("Found %d replaced boot screen image(s) to write."
+            % len(boot_edits), "info")
     if texture_edits:
         log("Found %d edited scene texture(s) to write." % len(texture_edits),
             "info")
@@ -4348,7 +4534,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     "game firmware uses a Spike 2 codec the engine can't locate "
                     "a single decode path for (e.g. a dual-path codec), so the "
                     "per-sound keystream can't be derived.")
-                if not video_edits and not image_edits:
+                if not video_edits and not image_edits and not boot_edits:
                     raise RuntimeError(msg)
                 log(msg + "  Writing only the replaced video(s) / image(s).",
                     "warning")
@@ -4713,6 +4899,16 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             _stage_done(log, "preparing %d replaced image(s)"
                         % len(image_edits), t0)
 
+        boot_writes, boot_grow, n_boot = [], None, 0
+        if boot_edits:
+            if progress:
+                progress(93, 100, "Preparing the boot screen...")
+            boot_writes, boot_grow, n_boot = _prepare_boot_screen_patches(
+                disk_f, parts, reader.base, boot_edits, work, log, cancel,
+                dest_is_device=dest_is_device)
+            if cancel():
+                return None, None, None, None
+
         texture_patches = []   # (inode, payload bytes == inode size)
         if texture_edits:
             if progress:
@@ -4727,6 +4923,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 and not texture_patches and not radimg_writes
                 and not text_writes and not color_writes
                 and not layout_writes and not radium_grow_jobs
+                and not boot_writes and boot_grow is None
                 and patched_gr is None):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
@@ -4773,6 +4970,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             for disk, n in reader.disk_ranges(node, 0, len(payload)):
                 writes.append((disk, payload[off:off + n]))
                 off += n
+        # The boot screen's writes are flat already, and on the OS partition,
+        # so the games tree's .sidx refresh below has no record of them.
+        writes += boot_writes
         # Regenerate the .sidx manifest records for the changed files so the
         # card passes Stern's SD validation (recompute HMAC-SHA1 + MD5 with the
         # manifest's global validation key).  Best-effort: a missing /
@@ -4847,8 +5047,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                       # fail from the end).  None when nothing was grown.
                       "audio_job": (grow_jobs.index(image_grow_job)
                                     if image_grow_job is not None else None),
-                      "cleanup": grow_work if uses_work else None}
-                     if grow_jobs else None)
+                      "cleanup": grow_work if uses_work else None,
+                      # A boot screen that outgrew its file: another
+                      # partition, so another mount (_grow_boot_screen).
+                      "boot": boot_grow}
+                     if grow_jobs or boot_grow else None)
         # Only a plan that actually carries a staged file (the firmware, a
         # re-serialised scene) owns that dir; a video-only plan doesn't, and
         # neither does a build whose cave was dropped after being written.
@@ -4862,7 +5065,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # than the letters.
         counts = (len(audio_patches) + len(music_patches),
                   len(video_patches) + len(video_grow_jobs),
-                  len(image_patches) + len(texture_patches) + n_radimg,
+                  len(image_patches) + len(texture_patches) + n_radimg
+                  + n_boot,
                   n_text + n_color + n_layout)
         return writes, counts, grow_plan, audio_mode, valpatch_mode
     finally:
@@ -4978,11 +5182,19 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         n_grown = _grow_video_slots(output_path, grow_plan, log)
         _stage_done(log, "copying the full-size (grown) videos into the card",
                     t0)
+        n_boot_grown = _grow_boot_screen(output_path, grow_plan, log)
     finally:
         # The rebuilt firmware has been copied onto the card (or has failed to
         # be); either way its scratch dir is ours to remove now.
         _rmtree_grow_plan(grow_plan)
     n_audio, n_video, n_image, n_text = counts
+    n_boot_jobs = len(((grow_plan or {}).get("boot") or {}).get("jobs") or ())
+    if n_boot_grown < n_boot_jobs:
+        n_image -= n_boot_jobs - n_boot_grown
+        counts = (n_audio, n_video, n_image, n_text)
+        log("The replaced boot screen could NOT be copied onto the card, so "
+            "it still shows Stern's own. Fix the issue above and run the "
+            "Write again.", "error")
     n_planned = len(grow_plan["jobs"]) if grow_plan else 0
     # The firmware job is queued last, so jobs fail from the end: anything short
     # of the full count means the firmware didn't land, and only the remainder
@@ -5171,7 +5383,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     disk_f = open(_lp(original_path), "rb")
     try:
         writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
-            disk_f, parts, assets_dir, log, progress, cancel, label=label)
+            disk_f, parts, assets_dir, log, progress, cancel, label=label,
+            boot_screen=False)
         if writes is None:                  # cancelled mid-compute
             _rmtree_grow_plan(grow_plan)
             return None, None, None, None
@@ -5643,6 +5856,25 @@ def _grow_video_slots(image_or_device, grow_plan, log):
         return getattr(e, "grown", 0)
 
 
+def _grow_boot_screen(image_or_device, grow_plan, log):
+    """Copy a boot screen that outgrew its file onto the OS partition through
+    the ext4 driver: :func:`_grow_video_slots`' route, on the partition the
+    plan's ``boot`` entry names.  Returns how many landed."""
+    boot = (grow_plan or {}).get("boot")
+    if not boot or not boot.get("jobs"):
+        return 0
+    from ...core import ext4_grow
+    try:
+        return ext4_grow.grow_files(image_or_device, boot["offset"],
+                                    boot["jobs"], log=log)
+    except ext4_grow.Ext4GrowUnavailable as e:
+        log("Could not write the boot screen: %s" % e, "warning")
+        return 0
+    except ext4_grow.Ext4GrowError as e:
+        log("Writing the boot screen failed: %s" % e, "error")
+        return getattr(e, "grown", 0)
+
+
 def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
                   cancel=None, open_disk=None, partitions=None, label=None):
     """Re-derive the pristine bytes of *rels* from the source card and write them
@@ -5754,6 +5986,10 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
                     extract_videos(reader, work, log=log, cancel=cancel)
                 if want_images:
                     extract_images(reader, work, log=log, cancel=cancel)
+                if any(r.startswith("images/%s/" % _BOOT_IMAGE_SUBDIR)
+                       for r in media_rels):
+                    extract_boot_images(disk_f, parts, work,
+                                        games_base=reader.base, log=log)
             except Exception as e:
                 log("Media re-extract failed (%s)." % e, "warning")
             for rel in media_rels:

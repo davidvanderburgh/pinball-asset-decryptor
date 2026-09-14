@@ -2097,7 +2097,10 @@ Back navigation), and `detect()` against synthetic filenames.
 |---|---|---|
 | `ubuntu-latest` | apt | `xvfb-run` wraps pytest |
 | `macos-latest` | brew | native |
-| `windows-latest` | winget (GnuPG.GnuPG) | native |
+
+There is no Windows runner: the release flow's ship gate is the full suite
+green on the developer's own Windows machine, and a Windows CI job only
+repeated that check on the slowest, scarcest runner.
 
 Tests that need WSL or Docker (full Clonezilla / JJP extraction) are
 marked `@pytest.mark.requires_wsl` / `requires_docker` and skip

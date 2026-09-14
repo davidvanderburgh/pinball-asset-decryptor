@@ -1,4 +1,4 @@
-r"""The Tk lane's xdist grouping is the shape of the Windows CI job.
+r"""The Tk lane's xdist grouping is the shape of the CI job.
 
 ``conftest.pytest_collection_modifyitems`` stamps an ``xdist_group`` marker on
 every tkinter-touching test.  ``--dist loadgroup`` then keeps a group on one
@@ -25,6 +25,10 @@ run, so they are pinned here:
   curve that a 2-way split still pays (232s -> 177s, a76064c) and stays the
   default there.  Anyone reading "CI only uses one worker for a third of the
   suite" as an oversight should read those numbers first.
+
+The Windows CI leg itself was removed on 2026-09-13 (.github/workflows/test.yml
+says why); the measurements above stay as the record of why ONE group, and the
+CI setting now applies to the ubuntu and macOS legs.
 """
 import os
 import sys

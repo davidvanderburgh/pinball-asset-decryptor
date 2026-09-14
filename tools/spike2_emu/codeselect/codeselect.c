@@ -1091,7 +1091,7 @@ static void draw_chevron(struct gfx *g, int ax, int cy, int len, int t,
  * means the footer must not promise one */
 static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
                       const struct conf *c, const struct media *m,
-                      int hl, int remain, int action)
+                      int hl, int remain, int action, const char *sound_off)
 {
     float s = L->s;
     int W = g->w, slot;
@@ -1170,6 +1170,21 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         cpx = gfx_fit_px(f, widest, wmax, 38 * s, 24 * s);
         gfx_ellipsize(f, cpx, buf, wmax, cut, sizeof cut);
         gfx_text_center(g, f, cpx, W / 2, (int)(718 * s), cut, TH(L, COUNTDOWN));
+    }
+
+    /* SOUND OFF, SAID ON THE GLASS.  The GNR's menu came up with no sound anyone
+     * could hear (2026-09-14) and nothing on the machine said whether the sink had
+     * opened at all; the log lives where no owner reads it.  So a menu that asked
+     * for a sink and got none says why, small, along the top edge, LAST
+     * (gfx_fill clears the canvas first) - only then:
+     * --audio none, a snapshot, and the rig's fifo show nothing. */
+    if (sound_off && *sound_off) {
+        const int wmax = W - (int)(40 * s);
+        float px;
+        snprintf(buf, sizeof buf, "SOUND OFF: %s", sound_off);
+        px = gfx_fit_px(f, buf, wmax, 20 * s, 14 * s);
+        gfx_ellipsize(f, px, buf, wmax, cut, sizeof cut);
+        gfx_text_center(g, f, px, W / 2, (int)(30 * s), cut, TH(L, FOOTER));
     }
 }
 
@@ -1356,7 +1371,7 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
         char where[CONF_MAX_CARDS * 24 + 8];
         int wn = 0, i;
         media_pin(&media, n, pin);
-        draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, action);
+        draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, action, NULL);
         for (i = 0; i < n; i++) media_check(&media, i);
         if (gfx_write_ppm(g, path, invert) < 0) {
             sel_say("error: cannot write %s: %s", path, strerror(errno));
@@ -1811,7 +1826,7 @@ int main(int argc, char **argv)
      * modes (--anim-frame) hold them all at that frame instead */
     if (pinned) media_pin(&media, n, o.anim_frame);
     else media_start(&media, n, (double)start);
-    draw_menu(&g, font, &L, &c, &media, hl, deadline ? timeout : -1, action);
+    draw_menu(&g, font, &L, &c, &media, hl, deadline ? timeout : -1, action, audio_missing(au));
     remain_shown = deadline ? timeout : -1;
     dirty = 0;
     if (!headless) egl_stern_texture(&egl, w, h, gfx_pixels(&g, invert));
@@ -1959,7 +1974,7 @@ int main(int argc, char **argv)
         audio_pump(au, now);
 
         if (dirty) {
-            draw_menu(&g, font, &L, &c, &media, hl, remain, action);
+            draw_menu(&g, font, &L, &c, &media, hl, remain, action, audio_missing(au));
             dirty = 0;
         }
         /* THE VOLUME INDICATOR, on top of whatever was just painted - an
@@ -1968,7 +1983,7 @@ int main(int argc, char **argv)
          * settled level goes to perm */
         if (osd_until && now >= osd_until) {
             osd_until = 0;
-            draw_menu(&g, font, &L, &c, &media, hl, remain, action);
+            draw_menu(&g, font, &L, &c, &media, hl, remain, action, audio_missing(au));
             sel_log("volume: indicator off at %d", volume);
             remember_volume(vol_file, volume, &vol_saved);
         } else if (osd_until) {

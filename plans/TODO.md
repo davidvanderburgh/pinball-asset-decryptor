@@ -7062,7 +7062,20 @@ These have each been violated at least once and each cost a run or a window:
       **DONE 2026-09-14 on `item/120` - emulator-proven; NOT released on its own: merged into
       `feature/jjp-multiboot`, and the family's ONE `/finish` can run now. Owed: David's GNR
       check after a reinstall (the lag, a comfortable level, the front buttons and the
-      indicator on the real glass).** The last rig run, on the merged tree
+      indicator on the real glass).** GNR check 1 (2026-09-14 afternoon): the menu came up
+      with NO AUDIBLE SOUND. Rig instrument (scratchpad `pulseprobe120.sh`: the GNR root's own
+      PulseAudio 15 + null sink inside the jail, its monitor recorded): the 60 ms request is
+      granted through the pulse plugin and every click and the chime reach the sink at 60 ms
+      and 500 ms alike - the path works; what was wrong is the LEVEL: volume 20 (-14 dB) on
+      top of the -12 dBFS levelling put the 40 ms click at -26 dBFS, 20 dB under the pre-120
+      menu David called very loud. Fixed on item/120: media levelled to -3 dBFS (default 20 =
+      11 dB under that menu, cap 40 = 5 dB under), `audio_alsa_open` retries a refused buffer
+      at 120/250/500 ms, a menu that wanted a sink and has none draws `SOUND OFF: <why>` on the
+      glass (rig-proven: `C:	mp\jjp120\pulse\sound_off.png`), and JJP builds carry the
+      selector's bounded log at `/jjpe/temp/jjpselect.log` by default (JJP's own dumplogs.sh
+      copies it to a stick; `--no-machine-log` to leave it off). Owed: GNR check 2 with the
+      multi120w ISO. The machine's audio facts: [[reference_jjp_front_usb_port_is_slow]],
+      [[reference_jjp_menu_audio_is_pulse]]. The last rig run, on the merged tree
       (`GunsNRoses-v03.03.multi120v.iso`, a GNR clip on each image): both clips loaded (120
       frames 5.0 s, 96 frames 4.0 s), every frame cached, 528 played / 528 drawn each, the loop
       at 326-334 passes/s (longest 71 ms at start, 5 ms after); grabs 400 ms apart differ in
@@ -7209,9 +7222,9 @@ These have each been violated at least once and each cost a run or a window:
       of black screen, an install that would take hours - so the app's six port
       instructions (the stick maker's done message, the manufacturer's install help, the
       pipeline's two log blocks x Windows/other) now name a backbox port, with the front
-      slot as the slow fallback. Confound, stated plainly: today's first boot of the new
-      stick was in the front slot, and which slot this morning's two freezes used is not
-      confirmed (last night's working boot was the backbox); the copy order stays because
+      slot as the slow fallback. RESOLVED by David (2026-09-14 afternoon): this morning's two
+      freezes were the front slot too, and last night's working boot was the backbox - so
+      the port was the whole cause and the layout change a bonus; the copy order stays because
       the firmware's reads belong at the start of the volume regardless (Clonezilla sorts
       its own ISO the same way, `syslinux/iso_sort.txt`), pinned by
       `tests/test_jjp_usbstick_copy_order.py`. **Ruled out on the way:** the syslinux

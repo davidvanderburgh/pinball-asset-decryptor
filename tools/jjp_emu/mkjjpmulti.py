@@ -178,7 +178,10 @@ JJP_UPDATE_POLICIES = ("refuse", "allow")
 #: media step writes peak-levelled to one mark, so no source file arrives louder than planned.
 VOLUME_DEFAULT = 20
 VOLUME_MAX = 40
-MEDIA_PEAK_DBFS = -12.0
+# -3 dBFS, not -12: at -12 on top of volume 20 the menu's 40 ms click peaked 20 dB under
+# the pre-120 menu David called very loud, and on the GNR that read as no sound at all
+# (2026-09-14).  At -3 the default sits 11 dB under it and the cap 5 dB under it.
+MEDIA_PEAK_DBFS = -3.0
 
 # ---- the installer patch (exact lines of JJP's jjp_install.sh) --------------------------------
 CHECK_ROOT_LINE = 'check_image "ROOT" "sda3.ext4-ptcl-img"'
@@ -751,8 +754,9 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
             out.append("color_%s=%s" % (role, colors[role]))
     out.append("jjp_update=%s" % jjp_update)
     if debug_log:
-        out.append("# log: the selector's own diagnostics ON THE MACHINE (a development build; the hook's")
-        out.append("# one-line-per-boot log in /jjpe/temp/padselect.log is always written)")
+        out.append("# log: the selector's own diagnostics on the machine - one file per boot plus the")
+        out.append("# previous one, 1 MB each; JJP's Utilities log dump copies /jjpe/temp/*.log* to a")
+        out.append("# stick (the hook's one-line-per-boot /jjpe/temp/padselect.log is always written)")
         out.append("log=%s" % JJP_CARD_LOG)
     for line in out:
         if len(line) > mkc.CONF_LINE_MAX:
@@ -2135,8 +2139,14 @@ def _add_conf_flags(s):
     s.add_argument("--jjp-update", choices=JJP_UPDATE_POLICIES, dest="jjp_update",
                    help="images.conf jjp_update=: refuse (default) masks JJP's own updater on the machine - it would "
                         "overwrite image 1 and boot it without the menu; allow leaves it alone")
-    s.add_argument("--debug-log", action="store_true",
-                   help="DEVELOPMENT ONLY: images.conf log=%s - the selector's own diagnostics on the machine" % JJP_CARD_LOG)
+    # The selector's own log ON THE MACHINE, on by default since 2026-09-14: the GNR's menu
+    # came up silent and nothing on the machine could say why.  It is bounded (one file
+    # per boot plus the previous one, 1 MB each, ~8 KB a boot) and JJP's own dumplogs.sh
+    # copies /jjpe/temp/*.log* onto a stick, so it can be read without opening the machine.
+    s.add_argument("--no-machine-log", dest="debug_log", action="store_false", default=True,
+                   help="leave the selector's own log (images.conf log=%s, collected by JJP's "
+                        "Utilities log dump) off the machine" % JJP_CARD_LOG)
+    s.add_argument("--debug-log", dest="debug_log", action="store_true", help=argparse.SUPPRESS)
 
 
 def main(argv=None):

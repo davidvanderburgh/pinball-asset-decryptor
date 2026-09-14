@@ -197,6 +197,18 @@ def test_cfg_redirect_is_a_bash_command_line(mj):
 
 
 # ============================================================================ images.conf
+def test_the_machine_log_is_on_by_default(mj):
+    """2026-09-14: the GNR's menu came up silent and nothing on the machine could say
+    why.  The selector's bounded log now goes on the machine unless asked not to;
+    JJP's own dumplogs.sh copies /jjpe/temp/*.log* to a stick."""
+    import argparse
+    p = argparse.ArgumentParser()
+    mj._add_conf_flags(p)
+    assert p.parse_args([]).debug_log is True
+    assert p.parse_args(["--no-machine-log"]).debug_log is False
+    assert p.parse_args(["--debug-log"]).debug_log is True     # the old spelling still works
+
+
 def test_conf_round_trip_with_jjp_devices_and_policy(mj):
     text = mj.render_images_conf(["rootA", "rootB"], ["GUNS N' ROSES 3.03", "CHAKA'S LOTLJ"], ["Stock", "Retheme"],
                                  default=1, timeout=20, font="/jjpe/gen1/padselect/font.ttf",
@@ -285,7 +297,7 @@ def test_media_step_levels_every_sound_and_caps_the_volume(mj, monkeypatch, tmp_
     assert mj.cmd_media(a) == 0
     argv = seen[-1]
     assert argv[argv.index("--volume") + 1] == "20"
-    assert argv[argv.index("--peak-dbfs") + 1] == "-12"
+    assert argv[argv.index("--peak-dbfs") + 1] == "-3"
     a.volume = 41
     with pytest.raises(mj.Refused):
         mj.cmd_media(a)

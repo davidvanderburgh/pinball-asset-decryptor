@@ -232,6 +232,7 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
     const char *dev = NULL;
     size_t i;
     int rc = -1, buf_ms = 0;
+    unsigned latency_us = ALSA_LATENCY_US;
 
     snd_lib_error_set_handler(quiet);
     err[0] = 0;
@@ -253,11 +254,32 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
         pcm = NULL;
     }
     if (!pcm) return NULL;
-    rc = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
-                            AUDIO_CH, AUDIO_RATE, 1, ALSA_LATENCY_US);
+    /* the buffer asked for: the build's, or PADSELECT_ALSA_LATENCY_MS (the rig's
+     * knob for trying another against a real sink without a rebuild) */
+    {
+        const char *e = getenv("PADSELECT_ALSA_LATENCY_MS");
+        if (e && atoi(e) > 0) latency_us = (unsigned)atoi(e) * 1000u;
+    }
+    /* THE LADDER: a device that refuses the buffer asked for is tried at 120, 250
+     * and 500 ms before the menu gives up on sound - the lag of a bigger buffer is
+     * a nuisance, a silent menu is a fault nobody can diagnose from the glass. */
+    {
+        static const unsigned ladder[] = { 120000u, 250000u, 500000u };
+        size_t k;
+        rc = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
+                                AUDIO_CH, AUDIO_RATE, 1, latency_us);
+        for (k = 0; rc < 0 && k < sizeof ladder / sizeof *ladder; k++) {
+            if (ladder[k] <= latency_us) continue;
+            sel_log("audio: alsa %s: snd_pcm_set_params(%u ms): %s; trying %u ms", dev,
+                    latency_us / 1000u, snd_strerror(rc), ladder[k] / 1000u);
+            latency_us = ladder[k];
+            rc = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
+                                    AUDIO_CH, AUDIO_RATE, 1, latency_us);
+        }
+    }
     if (rc < 0) {
-        snprintf(err, errlen, "%s: snd_pcm_set_params: %s", dev,
-                 snd_strerror(rc));
+        snprintf(err, errlen, "%s: snd_pcm_set_params(%u ms): %s", dev,
+                 latency_us / 1000u, snd_strerror(rc));
         snd_pcm_close(pcm);
         return NULL;
     }
@@ -267,9 +289,9 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
         if (snd_pcm_get_params(pcm, &bufsz, &persz) == 0) {
             buf_ms = (int)(bufsz * 1000UL / AUDIO_RATE);
             sel_log("audio: alsa buffer %lu frames (%d ms), period %lu frames (%lu ms); asked %d ms",
-                    bufsz, buf_ms, persz, persz * 1000UL / AUDIO_RATE, ALSA_LATENCY_US / 1000);
+                    bufsz, buf_ms, persz, persz * 1000UL / AUDIO_RATE, (int)(latency_us / 1000));
         } else {
-            sel_log("audio: alsa buffer size unreadable; asked %d ms", ALSA_LATENCY_US / 1000);
+            sel_log("audio: alsa buffer size unreadable; asked %d ms", (int)(latency_us / 1000));
         }
     }
     rc = snd_pcm_nonblock(pcm, 1);

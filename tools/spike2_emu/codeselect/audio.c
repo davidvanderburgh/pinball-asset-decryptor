@@ -130,6 +130,7 @@ struct audio {
     struct voice v[VOICES];
     long long written, dropped;
     FILE *dump;
+    char missing[200];        /* why a WANTED sink is absent, "" otherwise */
     short buf[MIX_MAX * 2];
 };
 
@@ -188,7 +189,10 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
         sel_log("audio: none (--audio none)");
     } else if (!strcmp(mode, "alsa")) {
         a->sink = audio_alsa_open(err, sizeof err);
-        if (!a->sink) sel_log("audio: none (no alsa: %s)", err);
+        if (!a->sink) {
+            sel_log("audio: none (no alsa: %s)", err);
+            snprintf(a->missing, sizeof a->missing, "no alsa: %s", err);
+        }
     } else if (!strncmp(mode, "fifo:", 5)) {
         if (mode[5]) a->sink = audio_fifo_open(mode + 5, fmt_path);
         else sel_log("audio: none (fifo: without a path)");
@@ -201,6 +205,7 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
                 a->sink = audio_fifo_open(play, fmt_path);
             } else {
                 sel_log("audio: none (no alsa: %s; PAD_AUDIO_PLAY unset)", err);
+                snprintf(a->missing, sizeof a->missing, "no alsa: %s", err);
             }
         }
     } else {
@@ -250,6 +255,11 @@ int audio_active(const struct audio *a)
 const char *audio_sink_name(const struct audio *a)
 {
     return a && a->sink ? a->sink->name : "none";
+}
+
+const char *audio_missing(const struct audio *a)
+{
+    return a && !a->sink ? a->missing : "";
 }
 
 int audio_play(struct audio *a, const struct audio_clip *c, int loop)

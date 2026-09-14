@@ -641,8 +641,17 @@ hardware and one header defends the build:
   a level changed just before START is written at the choice; the next boot
   starts from it.  Every other backend leaves PLUS/MINUS moving the highlight
   (`padsw_test.py` checks Stern's).  The media step levels every JJP menu
-  sound and music bed to a -12 dBFS peak (`mkjjpmulti.py media` passes
-  `selectmedia.py prepare --peak-dbfs -12`).
+  sound and music bed to a -3 dBFS peak (`mkjjpmulti.py media` passes
+  `selectmedia.py prepare --peak-dbfs -3`; it was -12 until 2026-09-14, which
+  with volume 20 put the menu's 40 ms click 20 dB under the pre-120 menu David
+  called very loud, and on the GNR that read as no sound at all).
+- **SOUND OFF on the glass.** A menu that asked for a sink (`--audio auto` or
+  `alsa`) and has none draws `SOUND OFF: <why>` small along the top edge -
+  the reason `audio_open` logged (`audio_missing()`); `--audio none`, a
+  snapshot and the rig's fifo show nothing. And `audio_alsa_open` retries a
+  device that refuses the buffer asked for at 120, 250 and 500 ms before it
+  gives up (`PADSELECT_ALSA_LATENCY_MS` overrides the build's request, for
+  the rig).
 - **`stubs_jjp.c`**: `codec.c` and `input_hw.c` as no-ops.  A PC has an
   `/dev/i2c-1` of its own and the SGTL5000 code must never be let near it.
 - **`jjp_glibc.h`**, force-included: the host's glibc 2.39 headers redirect

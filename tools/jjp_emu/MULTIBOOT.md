@@ -167,8 +167,21 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   rig they are the switch matrix's Up / = and Down / - keys, from either
   window.
 - **The media** the JJP media step writes is peak-levelled: every menu sound
-  and music bed to -12 dBFS (`selectmedia.py prepare --peak-dbfs -12`), so no
+  and music bed to -3 dBFS (`selectmedia.py prepare --peak-dbfs -3`; -12 until
+  2026-09-14, when the GNR's 40 ms click at -26 dBFS read as no sound at all), so no
   source file arrives louder than planned.
+- **When the menu has no sink it says so on the glass**: `SOUND OFF: <why>`
+  along the top edge (only when a sink was asked for: `--audio none`, a
+  snapshot and the rig's fifo show nothing), and a device that refuses the
+  60 ms buffer is retried at 120, 250 and 500 ms before the menu gives up on
+  sound. The selector's own log is on the machine by default
+  (`log=/jjpe/temp/jjpselect.log`, bounded; `mkjjpmulti.py build
+  --no-machine-log` leaves it off): JJP's own `dumplogs.sh` copies
+  `/jjpe/temp/*.log*` onto a stick, so the Utilities log dump carries it.
+  Proven silent on the rig (2026-09-14, scratchpad `pulseprobe120.sh`): the
+  GNR root's own PulseAudio 15 with a null sink inside the jail, its monitor
+  recorded, the selector at 60 ms and at 500 ms - every click and the confirm
+  chime reached the sink with the mix's own peaks, 0 dropped, 0 recovers.
 - **Proof runs**: `JJP_SELECT_DUMP=1` makes `run_game.sh` hand the menu
   `--audio-dump /jjpe/temp/jjpselect.mix.raw` (s16le, 44100 Hz, stereo), which
   is how a MUTED rig hears the clicks follow the buttons.
@@ -186,7 +199,7 @@ way: `ensurejjpselect.sh`, `mkjjpmulti.py media`, `mkjjpmulti.py build`.
 
 | step | oracle | result |
 |---|---|---|
-| media | `selectmedia.wav_stats` | move.wav -6.0 -> -12.00 dBFS, confirm.wav -6.9 -> -12.00 dBFS; `media.json` volume 20 |
+| media | `selectmedia.wav_stats` | move.wav -6.0 -> -12.00 dBFS, confirm.wav -6.9 -> -12.00 dBFS; `media.json` volume 20 (the mark is -3 dBFS since 2026-09-14) |
 | buffer | the selector's log | `alsa buffer 2646 frames (60 ms), period 661 frames (14 ms); asked 60 ms`, `lead 60 ms`, 0 recovers |
 | buttons | Up, Up, Down typed into the game's display | `key: plus/plus/minus`, `volume: 20 -> 25 -> 30 -> 25 (of 40)`, `indicator off at 25`, `25 remembered in /jjpe/perm/padselect.volume`, the perm file holds 25 |
 | level follows | the mix dump (`JJP_SELECT_DUMP=1`) | the clicks peak 2058 / 2444 / 2058 against 2057 / 2443 / 2057 expected (move.wav's 8231 x the gains of 25 / 30 / 25); the confirm chime 2058 |

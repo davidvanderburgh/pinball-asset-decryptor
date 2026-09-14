@@ -280,8 +280,9 @@ struct audio_sink *audio_alsa_open(char *err, int errlen)
     a->base.space = alsa_space;
     a->base.write = alsa_write;
     a->base.close = alsa_close;
-    /* after the confirm sound ends, pump at least one whole buffer more */
-    a->base.lead_ms = buf_ms > ALSA_LEAD_MS ? buf_ms : ALSA_LEAD_MS;
+    /* the build's own lead, as it always was: the granted buffer is only
+     * logged, so the Stern card's sink behaves exactly as before item 120 */
+    a->base.lead_ms = ALSA_LEAD_MS;
     a->pcm = pcm;
     sel_log("audio: alsa %s ok (%d ch, %d Hz)", dev, AUDIO_CH, AUDIO_RATE);
     /* THE LINE-OUT, over i2c, the way the game does it (codec.h): after

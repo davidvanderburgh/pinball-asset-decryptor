@@ -1449,6 +1449,10 @@ def validate_form(form, sources=True):
                               "Image %d: the animation start" % i)
             if why:
                 errs.append(why)
+        if anim_spec(row).startswith("auto") and not backend_for(form).attract_clip:
+            errs.append("Image %d: a Jersey Jack image has no attract video "
+                        "to pull - pick 'A video file' for it (a clip PAD "
+                        "extracted from the game works)." % i)
     for what, val in (("move sound", form.sound_move),
                       ("confirm sound", form.sound_confirm)):
         if is_file_choice(val) and not os.path.isfile(val.strip()):
@@ -5244,6 +5248,14 @@ class ImageEditorDialog(_Modal):
              ("video", "A video file"),
              ("none", "Nothing - text only"))
 
+    @classmethod
+    def kinds_for(cls, backend):
+        """The picture choices this platform can honour: all of :attr:`KINDS`
+        on a Stern card; no "attract video" on a JJP image, whose root has
+        no attract clip in the clear - a video file plays instead."""
+        return tuple((k, label) for k, label in cls.KINDS
+                     if k != "attract" or backend.attract_clip)
+
     #: ...and what a RANDOM CARD offers instead (David, 2026-09-10: "the
     #: options for a Random group need to be bespoke to a random group").  Not
     #: one of the five above survives the move: each of them names "the game",
@@ -5305,7 +5317,8 @@ class ImageEditorDialog(_Modal):
         panel._media_entries = {}
         panel._clip_widgets = []
         r = 0
-        for kind, label in (self.GROUP_KINDS if self._group else self.KINDS):
+        for kind, label in (self.GROUP_KINDS if self._group
+                            else self.kinds_for(panel._backend)):
             ttk.Radiobutton(g, text=label, value=kind,
                             variable=panel._ed_media).grid(
                 row=r, column=0, sticky=tk.W, pady=3, padx=(0, 10))

@@ -72,6 +72,12 @@ class MultibootBackend:
     #: the cap too, and the selector's JJP build cannot pass it.
     volume_default: int
     volume_max: int
+    #: "The game's own attract video" as a picture choice.  A Stern card's
+    #: attract clip is read off the card; a JJP root has none in the clear
+    #: (the attract clips sit encrypted in edata), so a JJP image plays a
+    #: VIDEO FILE instead - a clip PAD extracted works - and the choice that
+    #: could only ever render nothing is not offered.
+    attract_clip: bool
     update: bool                      # in-place update of a loaded card
     bypass: bool                      # the validator bypass
     extract: bool                     # Recover images…
@@ -154,7 +160,7 @@ STERN = MultibootBackend(
     status_checks=(("card", "Card image"), ("images", "Images"),
                    ("built", "Built"), ("ready", "Ready to flash")),
     max_cards=16, groups=True, compact=True, machine_volume=True,
-    volume_default=50, volume_max=100,
+    volume_default=50, volume_max=100, attract_clip=True,
     update=True, bypass=True, extract=True, read_card=True,
     selector_default="~/spike2root/usr/local/codeselect",
     selector_suffix="/usr/local/codeselect", selector_binary="codeselect",
@@ -199,7 +205,7 @@ JJP = MultibootBackend(
     status_checks=(("card", "Install ISO"), ("images", "Images"),
                    ("built", "Built"), ("ready", "Ready for the stick")),
     max_cards=2, groups=False, compact=False, machine_volume=False,
-    volume_default=20, volume_max=40,
+    volume_default=20, volume_max=40, attract_clip=False,
     update=False, bypass=False, extract=False, read_card=False,
     selector_default="/var/tmp/jjpselect",
     selector_suffix="/jjpe/gen1/padselect", selector_binary="jjpe/gen1/padselect/jjpselect",

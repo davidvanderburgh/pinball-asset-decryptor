@@ -62,8 +62,9 @@ multi-boot image (`jjpsw_launch.sh --menu`), not after it: it used to need a
 running game, so the menu came and went with nothing to press (David,
 2026-09-13). It opens from this title's saved device tables, which are right
 for both images because a multi-boot install's two images run the same game
-binary; on a first run with none saved it opens with the three cabinet
-switches alone (LEFT byte 1 bit 0, RIGHT byte 1 bit 2, START byte 3 bit 0),
+binary; on a first run with none saved it opens with the five cabinet
+switches alone (LEFT byte 1 bit 0, RIGHT byte 1 bit 2, START byte 3 bit 0,
+and the Volume+ / Volume- pair on byte 1 bits 5 and 6, keys Up / Down),
 and a detached `jjpsw_launch.sh --await-game` reopens it onto the game's own
 tables once the game is up. Stop ends the waiter with the matrix.
 
@@ -138,6 +139,39 @@ The captures and both drivers' output are kept outside the repo at
 That is the acceptance: the machine's own scripts, unchanged, boot whichever
 image the cabinet buttons pick, with the key answering for both. What is left
 for the hardware is item 119.
+
+## The menu's sound (item 120)
+
+A JJP machine keeps its amplifier chain at full while the menu plays (root
+A's `asound.state` holds 0 dB, `scripts/audio/mute.pl` sets 100%) and the
+game turns only its OWN stream down to the operator volume, so the menu's
+software gain is the level the speakers get. On the first GNR the menu at
+`volume=50` was very loud, and its move sound came a moment late: the ALSA
+buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
+
+- **The JJP build** asks for a 60 ms buffer and logs the one granted
+  (`audio: alsa buffer N frames (M ms), period ...`); starts at 20
+  (`DEF_VOLUME`), and nothing takes it past 40 (`VOLUME_CEILING`): not
+  `volume=`, not `--volume`, not the remembered level. `volume_max=` in the
+  conf can only lower it; `mkjjpmulti.py` always writes `volume=` and
+  `volume_max=40` and refuses a volume above 40.
+- **The machine's front Volume+ / Volume- buttons** (byte 1 bits 5 and 6,
+  active low: `dswitch_plus` "Up / Volume+ Button" and `dswitch_minus` "Down /
+  Volume- Button" in GNR's device table; `key_plus=` / `key_minus=` move them)
+  step the menu's level by 5 within the cap, play the move sound at the new
+  level, restart the countdown, and put "VOLUME n / cap" and a bar over the
+  middle of the menu for 2 s ("VOLUME OFF" at 0). When the indicator goes the
+  level is written to `/jjpe/perm/padselect.volume`, beside
+  `padselect.last`, and the next boot starts there. They change the MENU's
+  level only; the game's operator volume is JJP's own and is not read. In the
+  rig they are the switch matrix's Up / = and Down / - keys, from either
+  window.
+- **The media** the JJP media step writes is peak-levelled: every menu sound
+  and music bed to -12 dBFS (`selectmedia.py prepare --peak-dbfs -12`), so no
+  source file arrives louder than planned.
+- **Proof runs**: `JJP_SELECT_DUMP=1` makes `run_game.sh` hand the menu
+  `--audio-dump /jjpe/temp/jjpselect.mix.raw` (s16le, 44100 Hz, stereo), which
+  is how a MUTED rig hears the clicks follow the buttons.
 
 ## From the app (item 118)
 

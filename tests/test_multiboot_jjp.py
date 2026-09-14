@@ -59,6 +59,25 @@ def test_menu_volume_default_and_cap_follow_the_platform():
     assert "Volume is 0-100." in mt.validate_form(MultibootForm(images=rows, volume=101), sources=False)
 
 
+def test_a_jjp_image_plays_a_video_file_not_an_attract_clip():
+    """A JJP root has no attract clip in the clear, so the Edit image dialog does not
+    offer one there, and a row still set to it is refused with the way out; a video
+    file is a JJP image's animation.  Stern keeps every choice."""
+    assert JJP.attract_clip is False and STERN.attract_clip is True
+    assert [k for k, _l in mt.ImageEditorDialog.kinds_for(JJP)] == ["logo", "picture", "video", "none"]
+    assert mt.ImageEditorDialog.kinds_for(STERN) == mt.ImageEditorDialog.KINDS
+    form = jjp_form()
+    form.images[1].anim = "auto"
+    assert any("no attract video" in e for e in mt.validate_form(form, sources=False))
+    form.images[1].anim = r"D:\Pinball\videos\Guns N Roses\Attract_Montage_1.webm"
+    assert not any("attract video" in e for e in mt.validate_form(form, sources=False))
+    args = mt.prepare_args(form, r"D:\m")
+    anims = [args[i + 1] for i, a in enumerate(args) if a == "--anim"]
+    assert anims[1] == "1=" + wsl(form.images[1].anim)
+    rows = [ImageRow(path="D:/a.raw", anim="auto"), ImageRow(path="D:/b.raw")]
+    assert not any("attract video" in e for e in mt.validate_form(MultibootForm(images=rows), sources=False))
+
+
 def test_titles_and_output_names():
     assert mt.suggest_title(ISO1, "jjp") == ("CHAKAs LOTLJ V1.0 GNR LE 3.03", "")
     assert mt.suggest_title(ISO0, "jjp") == ("GunsNRoses-v03.03", "")

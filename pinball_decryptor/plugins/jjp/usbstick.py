@@ -1,12 +1,15 @@
 """Prepare a JJP USB install stick — format FAT32/MBR + copy the ISO's files.
 
-A JJP machine never boots the install stick.  At power-on the game's own boot
-sequence mounts the stick's FAT volume and runs the installer it finds there,
-so a raw-imaged (Etcher/dd) stick is unreadable to it — the machine shows
-"Failed to mount USB stick" and boots the old game (a tester's Sonic report,
-2026-07-29).  JJP's own procedure is Rufus in ISO Image mode on Windows, or
-"format MS-DOS(FAT) + copy the ISO's files" on macOS.  This pipeline is that
-procedure in-app:
+A JJP machine BOOTS the install stick: the ISO is Clonezilla live, with
+syslinux for legacy BIOS and EFI/boot for UEFI, and its boot config runs JJP's
+installer.  A raw-imaged (Etcher/dd) stick is not what JJP ships for - the
+machine shows "Failed to mount USB stick" and boots the old game (a tester's
+Sonic report, 2026-07-29).  JJP's own procedure is Rufus in ISO Image mode on
+Windows (a FAT32 copy of the ISO's files plus syslinux boot code), or "format
+MS-DOS(FAT) + copy the ISO's files" on macOS.  A copy WITHOUT the boot code
+starts only on a UEFI boot: the GNR multi-boot stick stopped on "Reboot and
+Select proper Boot device" on a machine that boots USB in legacy mode (item 119,
+2026-09-13).  This pipeline is that procedure in-app:
 
   1. Check    — sanity: real device (or test dir), ISO present, rough fit.
   2. Format   — one FAT32 primary partition in an MBR table, label JJPUSB
@@ -746,9 +749,9 @@ class UsbStickPreparePipeline(BasePipeline):
                 "Image mode'): Rufus formats large FAT32 itself."
                 % (iso_size / 1e9))
         self._log("Preparing a JJP install stick: the stick is formatted "
-                  "FAT32 and the ISO's files are copied onto it (the "
-                  "machine reads the files off the stick — it never boots "
-                  "a raw image).", "info")
+                  "FAT32, the ISO's files are copied onto it and its boot "
+                  "code is installed, the way Rufus prepares one (never a "
+                  "raw image).", "info")
         self._check_cancel()
 
         self._set_phase(1)  # Format stick

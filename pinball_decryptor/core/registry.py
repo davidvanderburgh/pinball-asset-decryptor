@@ -248,8 +248,8 @@ class Capabilities:
     # onto a physical card/stick.  For Stern/CGC that is a dd-style raw
     # whole-image write of a ``.img``/``.raw``; for JJP the same surface
     # instead formats the USB stick FAT32/MBR and copies the installer ISO's
-    # files onto it (the machine mounts the stick's FAT volume itself — a
-    # raw-imaged stick is unreadable to it).  Distinct from the
+    # files onto it and installs its boot code (the machine boots the stick's
+    # own installer — a raw-imaged stick fails).  Distinct from the
     # asset-modifying Write/Direct-SD paths.  When True, the GUI calls
     # ``make_flash_pipeline`` and the ``flash_*`` wording attributes below
     # label the button/dialog; raw device writes need Administrator/root.

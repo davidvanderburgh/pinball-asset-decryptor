@@ -681,6 +681,8 @@ class Manufacturer(ABC):
         Only meaningful when ``capabilities.flash_image`` is True.
         ``image_path`` is the source ``.img``/``.raw``; ``device_path`` is an
         OS-native physical-disk path (``\\\\.\\PHYSICALDRIVEn`` / ``/dev/sdX``).
+        A plugin that also names ``menu_flash_phases`` takes ``menu_only=``
+        too; no other plugin is ever passed it.
         """
         raise NotImplementedError(
             f"{self.display} does not implement a flash-image pipeline.")

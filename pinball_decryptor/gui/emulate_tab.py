@@ -1314,9 +1314,23 @@ def setup_summary(facts):
     """
     if not facts:
         return [], "1"
-    missing = [(pkg, why) for key, pkg, why in _SETUP_TOOLS
-               if facts.get(key) == "0"]
+    missing = [(_apt_name(facts, key, pkg), why)
+               for key, pkg, why in _SETUP_TOOLS if facts.get(key) == "0"]
     return missing, facts.get("binfmt", "1")
+
+
+def _apt_name(facts, key, pkg):
+    """The package as THIS machine's apt names it.
+
+    ★ PAD-139.  The tables here spell qemu-user-static, and on Ubuntu 26.04
+    that is a virtual name apt refuses: qemu-user-binfmt carries the static
+    interpreter there.  setupcheck.sh asks apt and says so as ``pkg_<key>``,
+    and every list, consent line and command in this module is built from the
+    answer - so the name on the tab is the one the button, and a user typing
+    the printed command, will actually get.  Absent on every other machine
+    and on an older rig, where the table's spelling stands.
+    """
+    return (facts or {}).get("pkg_" + key) or pkg
 
 
 def setup_extras(facts):
@@ -1348,7 +1362,8 @@ def _setup_optional_rows(facts):
     if not facts:
         return []
     wsl = facts.get("iswsl") != "0"
-    return [(feat, pkg, why) for key, pkg, why, _how, feat in _SETUP_OPTIONAL
+    return [(feat, _apt_name(facts, key, pkg), why)
+            for key, pkg, why, _how, feat in _SETUP_OPTIONAL
             if facts.get(key) == "0"
             and (wsl or feat not in _WSL_ONLY_FEATURES)]
 

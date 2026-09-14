@@ -21,7 +21,9 @@ the same way here -
     and a longer one is cut at 120 seconds;
   * moving to a card whose music is the SAME clip does not restart the music
     (``codeselect.c``: "its music takes over (hard switch)" only fires when
-    ``media.music[hl] != music_clip``).
+    ``media.music[hl] != music_clip``);
+  * the move sound is never started over itself: a press while it is still
+    playing leaves it alone (``audio_playing_clip``, PAD-141).
 
 WHERE THE SOUND COMES OUT.  sounddevice + numpy when they are there, because
 that is the only backend that can genuinely mix a one-shot OVER a loop, which
@@ -323,6 +325,15 @@ class Mixer(object):
     def playing(self, index):
         return 0 <= index < len(self.voices) and self.voices[index].active
 
+    def playing_clip(self, index, clip):
+        """audio_playing_clip(): still playing THIS clip - not stopped, and
+        not stolen by another since."""
+        if clip is None or not 0 <= index < len(self.voices):
+            return False
+        with self.lock:
+            v = self.voices[index]
+            return bool(v.active and not v.fade_left and v.clip is clip)
+
     def render(self, frames):
         """One block, int16 ``(frames, 2)``: sum the voices, then ONE gain,
         then saturate - the order audio.c mixes in, because a gain applied
@@ -386,6 +397,8 @@ class SoundDeviceBackend(object):
         self._blocksize = blocksize
         self._candidates = candidates
         self._loop_voice = -1
+        #: the last one-shot's voice, so a click is never played over itself
+        self._shot_voice = -1
 
     def start(self):
         """Open and start the output stream, trying the routes in turn.
@@ -453,7 +466,11 @@ class SoundDeviceBackend(object):
             clip = self.cache.get(path)
         except WavRefused as exc:
             return str(exc)
-        self.mixer.start(clip, loop=False)
+        # never over itself, as on the card (codeselect.c, PAD-141): a press
+        # while this clip is still playing leaves it alone
+        if self.mixer.playing_clip(self._shot_voice, clip):
+            return ""
+        self._shot_voice = self.mixer.start(clip, loop=False)
         return ""
 
     def set_volume(self, volume):

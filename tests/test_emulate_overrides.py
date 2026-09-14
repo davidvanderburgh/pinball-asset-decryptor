@@ -841,3 +841,35 @@ def test_run_game_never_binds_the_two_bookkeeping_files():
     body = (RIG / "run_game.sh").read_text(encoding="utf-8", errors="replace")
     assert "! -name overrides.json" in body
     assert "! -name overrides.delta" in body
+
+
+def test_run_game_skips_a_set_file_a_card_run_does_not_mount():
+    """PAD-133: the .sidx is in EVERY set, and a card run mounts the TITLE.
+
+    ``cardmount.sh`` prints the title directory and ``run_game.sh`` binds that
+    one directory into ``games/`` — so ``spk/index/<title>.sidx``, which every
+    build refreshes, has nothing under ``$R/games`` to bind over.  Failing the
+    run on it is what ended every card run of this feature: the renderer window
+    was already up, the guest never started, and the user saw a black screen
+    with their own edit named in the log.  Measured in a real mount namespace
+    under WSL against a set built from ``godzilla_le-1_16_0`` with one replaced
+    image: before, ``could not apply spk/index/godzilla_le-1_16_0.sidx`` and
+    exit 1; after, two files bound and the record reported as skipped.
+    """
+    body = (RIG / "run_game.sh").read_text(encoding="utf-8", errors="replace")
+    loop = body[body.index("if [ -n \"$OVERRIDE_SRC\" ]; then"):
+                body.index('echo "[run] your edits: $ovr_n file(s) applied')]
+    # A missing target is sorted into "the user's edit" or "not part of what
+    # this run mounts" — and a title tree is one carrying the title's own ELF
+    # or sound bank, so a set built for ANOTHER card still fails the run.
+    assert 'ovr_top=${rel%%/*}' in loop
+    assert '[ "$ovr_top" = "$GAME" ]' in loop
+    assert '[ -e "$OVERRIDE_SRC/$ovr_top/game" ]' in loop
+    assert '[ -e "$OVERRIDE_SRC/$ovr_top/image.bin" ]' in loop
+    # The skip is reported, never silent...
+    assert 'ovr_skip="$ovr_skip $rel"' in loop
+    assert 'not applied, and not needed here:$ovr_skip' in body
+    # ...and a set of nothing but skips is still a refusal: binding none of
+    # them is the stock card, run while the tab says it is testing the edits.
+    assert 'if [ "$ovr_n" = 0 ]; then' in body
+    assert body.count("exit 1") >= 2

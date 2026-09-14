@@ -3500,6 +3500,107 @@ These have each been violated at least once and each cost a run or a window:
       `led_insert_node()` still refuses everything outside 1/8/9, so the topper
       lamps stay dark; nobody has reported them and the artwork view does not
       draw them.
+      **★ 2026-09-11, TICKET PAD-129 — THE NINE LAMPS ARE RIGHT AND THE GAME
+      WAS NEVER IN ATTRACT.** Same reporter, next run: "I see the 9 LEDs in
+      attract mode on Jurassic Park Home Edition, but they are static and
+      don't cycle." They are static because the wire is static, and the wire
+      is static because **the machine is still on its Tech Alerts screen**.
+      Replayed off the PAD-125 captures: node 8 takes **4260 `cmd 70` writes,
+      20 indices, and not one value ever changes** after the first sweep at
+      12.6 s (`star_wars_elg`: 14241 writes, 44 indices, no change); node 12's
+      strip frames are 212 byte-identical copies; the LCD stops changing clip
+      at 12.1 s and loops one 11 s clip for the remaining 350 s; and **no
+      Service Back press happens in any of the six Home Edition runs on this
+      disk.** The clip it loops belongs to `auto_loaded/60ed7e50…`, a bundle
+      `turtles_pro` and `godzilla_pro` load too — a platform screen, not title
+      art.
+      **THE CAUSE IS OUR OWN "PAST TECH ALERTS" TEST.** `gs_past_alerts` reads
+      one line the shim prints at 30 lamp commands in 3 s, and item 79 added
+      `cmd 70` to that set for batman. A Home Edition's boot sweep and its
+      ~11/s refresh of the same twenty levels satisfy it **while the alerts
+      screen is up** — announced at 12.3 s (The Pin) and 15.2 s (SW HE) — so
+      `autoattract.sh` printed "already past Tech Alerts; nothing to do" and
+      never pressed. **It is not only the Home Editions**: replaying
+      `x1_gz.log` (godzilla_pro, three presses at 21.6/69.0/116.6 s, the third
+      one the one that took) the rate-only rule fires at **75.1 s**, 41 s
+      before the press that cleared the screen.
+      **Fixed on `ticket/PAD-129`:** the shim's announcer keeps the 30-in-3s
+      rate and adds "and a lamp changed value in the same 3 s"
+      (`led_show_gate`, `led_val`), judged against the version-4 `seen` plane
+      so a boot sweep's first write does not count as movement; a run whose
+      traffic never moves says `[led] lamp traffic with a STILL picture` once,
+      which is the Tech Alerts fingerprint. Replayed through the REAL C
+      function over every capture here that contains a boot: The Pin and SW HE
+      **never** announce (correct), batman 32.3/51.5/85.6 s across three
+      captures, godzilla 117.3 s against that run's own 118.2 s, turtles
+      182.4 s, DnD 31.6 s. `PAD_AUTO_GAP` 45 → 75 s because the surviving
+      signal can lag the press that earned it by 57.8 s (batman run3), and 45
+      sat inside that.
+      **★ THE LIVE RUN IS DONE, 2026-09-13, and it both CONFIRMS the fix and
+      finds the layer under it.** Three runs on the real card on this box:
+      | run | what happened |
+      |---|---|
+      | control (shipped shim) | `[led] light show running ... 12380 ms`, `[auto] already past Tech Alerts; nothing to do`, **no press**, window reads **9 of 50 inserts lit, LED 0.0 Hz, data 2.0 Hz** |
+      | with the gate fix | `[led] lamp traffic with a STILL picture ... 12414 ms`, `[auto] bus quiet after 14s; pressing Service Back once (2000ms)` → `past Tech Alerts after 1 press(es)`, then `[led] light show running ... and the picture is moving` at 47.8 s |
+      The LCD settles it independently: the control changed video clip **4
+      times in 362 s** (all before 12.1 s) and then looped one 11 s clip; the
+      fixed run changed clip **57 times in 160 s**. The machine is in attract.
+      **★ AND THE INSERTS STILL DO NOT CYCLE, because their show is a command
+      this shim refuses on an insert board.** In real attract, node 8 takes
+      2320 `cmd 70` writes that change NOTHING (the same nine held levels) —
+      and 329 `cmd 86` frames that the swelf grammar parses **329 of 329
+      exactly**, addressing **54 distinct lamps, which is exactly the 54 that
+      board enumerated at boot**, carrying **11169 level changes**. Node 12,
+      the half already decoded, is the control at 328 frames / 27 lamps.
+      `led_publish`'s `cmd != 0x97 && …` filter returns before the swelf
+      attempt, so on nodes 1/8/9 that family has no decoder at all.
+      **A FIRST ATTEMPT AT WIDENING THAT GATE WAS BUILT, RUN AND BACKED OUT,
+      and what it ran into is why the shipped version has three parts.** The
+      same `0x8x` frames exist on the titles that already work — replayed over
+      every capture here they parse exactly and address **100% of each board's
+      enumerated list** on godzilla_pro (56/56, 71/71), turtles_pro (64/64,
+      58/58, 19116 changes) and DnD (90/90, 78/78) — so a bare widening gives
+      those titles a second writer into `val[]`, and their movement reaches
+      this ticket's own show gate during Tech Alerts.
+      **★ THE ORACLE SETTLES WHAT THE FAMILY IS, and the answer is: the lamp
+      state.** turtles_pro's LED Tests name the lit fixture on the wire — the
+      `94/95` pair item 50 walked against the glass — so replaying both of
+      those runs and asking the swelf grammar about the same board at the same
+      moment is a check against something already trusted. **The stepped lamp
+      agrees 657 of 657 and 1522 of 1522.** It is not a coincidental parse and
+      it is not another board's data; it is the picture, seen another way, on
+      a title of the OTHER generation.
+      **★ SHIPPED, three parts, because each one is load-bearing:**
+      (1) the swelf grammar is offered an insert board's non-godzilla commands
+      **once the dialect verdict is already in** — `led_wide_settled()`, not
+      `led_wide_dialect()`, so these frames obey the verdict without voting on
+      it and every title's verdict is the one it has today;
+      (2) **the swelf layer OWNS the lamps it addresses** and `cmd 70` no
+      longer writes over one. Both layers address the same lamps on a Home
+      Edition, and on the six-minute parked capture that argument manufactured
+      **1908 "changes" out of 4260 writes** where the wire carried none. The
+      cost is the per-lamp intensity trim `cmd 70` seems to carry (The Pin
+      holds nine lamps at 4/8, 5/8, 7/8, 3/8 and full), which no rule on the
+      wire says how to combine — a lamp at the wrong brightness beats a lamp
+      flickering between two decoders;
+      (3) **the gate's movement half becomes a RATE** (`led_moving()`, 200
+      changed lamp writes in 3 s). With the show decoded, both states move:
+      parked on the alerts screen for six minutes The Pin changes **54** lamp
+      values and star_wars_elg **114**, all in one burst as the boards come
+      up, then none; in attract the same card runs **~1900 per 10 s**, and the
+      busiest 3 s window across godzilla, turtles, batman and DnD is
+      **508..1278**. 200 sits in that gap with margin on both sides.
+      **LIVE, both directions.** jurassic_park_the_pin: one press at 14 s,
+      "the picture is moving" at 48.9 s, and the window reads **23 of 50
+      inserts lit, LED 3.7 Hz** where it read 9 and 0.0 Hz. godzilla_pro as
+      the control: dialect **REFUSED (0 of 200)**, so none of (1) or (2)
+      applies to it at all, one press at 12 s, announce at 27.3 s via node 14
+      `cmd a6`, window **64 of 81 lit, LED 2.7 Hz**.
+      **STILL OPEN:** what `cmd 70`'s fractional levels mean when the swelf
+      layer is driving the same lamp. The reading that fits is a per-lamp
+      intensity trim under an on/off show, which would make the right answer
+      `trim x show` rather than either alone; nothing on the wire proves it,
+      and the LED Tests oracle can be pointed at that question too.
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the
@@ -6205,6 +6306,194 @@ These have each been violated at least once and each cost a run or a window:
       powers up straight into the last choice (a group re-rolls), and a held
       flipper brings the menu up. After 106, not before.
       — S3: friction. D3: one mechanism on two input paths, needs a run to see.
+
+- [ ] **114. `jjpselect`: the boot selector runs on a JJP rootfs (x86, X11,
+      the cabinet buttons off `/dev/jjpio`).** `S3 D3` *(Filed 2026-09-12 from
+      `plans/jjp_multiboot_plan.md`, the JJP multi-boot plan — gitignored like
+      the handoff, so it is local to David's machine and these six entries
+      carry everything a fresh checkout needs; David has a GNR key, wants an
+      install stick, and shared settings — decided the same day. First of
+      six; the others say "after N".)* Port `codeselect` to the
+      JJP card: `egl_x11.c` replaces `egl_stern.c` (override-redirect
+      fullscreen X window on `DISPLAY=:0`, Mesa `eglGetDisplay(xdpy)` +
+      `eglCreateWindowSurface`; the 1360x768 canvas scales on the one quad;
+      **XShmPutImage fallback** if EGL bring-up fails), a new `--input jjpio`
+      backend (`input_jjpio.c`) that does exactly what JJP's own installer
+      helper `jjpcrt` does — `read(fd, buf, 64)` then `write(fd, 64 zero
+      bytes)` on `/dev/jjpio100` (fallback `/dev/jjpio0`); **LEFT = byte 1 bit
+      0, RIGHT = byte 1 bit 2, START = byte 3 bit 0, active low, press =
+      released-then-low**; the zero OUT frame is JJP's idle frame, written by
+      their installer on a powered machine, so it drives no coil. `input_hw.c`,
+      `codec.c`, `nvm.c` are dropped; `audio_alsa.c` opens `default` only
+      (silent is acceptable). Conf keys `key_left/right/start=<byte>.<bit>`
+      and a `--learn` flag that logs the raw direct bytes on change. Build
+      natively in WSL against the CARD's glibc 2.34 the way
+      `tools/jjp_emu/build.sh` links `jjphwshim.so`; `check_elf.sh` gets a
+      GLIBC <= 2.34 ceiling and a NEEDED whitelist. `make check` keeps the
+      headless render/conf cases plus a jjpio case over a fake 64-byte device;
+      `--snapshot` works natively (no qemu). Oracle: the rig's Xephyr shows
+      the menu, the matrix UI's L/R Flipper and Start (CUSE `/dev/jjpio100`,
+      `tools/jjp_emu/jjpshm.h` byte 1/3) move and confirm, the choice file
+      holds one integer, exit 0/2 as `conf.c` pins. Acceptance: that run, plus
+      `make check` green, plus the ELF ceiling test refusing a 2.35 symbol.
+      — S3: a feature; flashing one image at a time is the workaround. D3: a
+      known-shape port on a seam that already exists (`struct input_ops`),
+      but it needs rig runs to see it draw and take keys.
+
+- [ ] **115. `padselect.sh`: the JJP hook binds the chosen image's game
+      directory over the primary's, and refuses JJP's own updater.** `S3 D3`
+      *(Plan §2.2 and §2.5. After 114, not before — its rig gates need the
+      selector, though the shell tests do not.)*
+      **THE JJP CHAIN'S BRANCH RULE (David, 2026-09-13: "not to release until
+      we finish all of the related items for JJP multiboot"). Items 115-119
+      live on ONE integration branch, `feature/jjp-multiboot`, which starts
+      at item 114's closed tip. Each of them: `git worktree add -b item/<N>
+      ../pinball-asset-decryptor-wt/item-<N> feature/jjp-multiboot` — FROM
+      THE FEATURE BRANCH, NOT MAIN — and at close its branch is merged into
+      `feature/jjp-multiboot` (a fast-forward when the chain is linear) and
+      pushed, so the next item sees it. NO `/finish` and NO release for any
+      of 114-119 on its own: `/finish` runs ONCE, on `feature/jjp-multiboot`,
+      after 119 closes — one merge to main, one release for the family.
+      116-119 point here rather than restate this.** One guarded line in root A's
+      `rungame.sh` right after `runonce.sh`: `[ -x $JJPEDIR/scripts/padselect.sh
+      ] && . $JJPEDIR/scripts/padselect.sh`. The script (dash): read
+      `$JJPEDIR/padselect/images.conf` (< 2 images → return); run `jjpselect
+      --out /jjpe/temp/padselect.choice --last /jjpe/perm/padselect.last
+      --input jjpio`; rc != 0 → boot image 0 untouched; index N → device token
+      `rootB` resolves to `/dev/disk/by-uuid/$FS_UUID_ROOTB` from the card's
+      OWN `/jjpe/gen1/scripts/fs_uuids.sh` (never a UUID of ours), `mount -o
+      rw,noatime,discard` at `/jjpe/multi/b` — skipped when
+      `/jjpe/multi/b/jjpe/gen1` is already there, which is how the rig
+      pre-mounts it (one script, both worlds) — then `mount --bind
+      /jjpe/multi/b/jjpe/gen1/$GAMENAME /jjpe/gen1/$GAMENAME`; re-do what
+      `runonce.sh` did on the tree the game now sees (`ln -s -f -T
+      /jjpe/perm/vf $GAMEDIR/vf`, `chown -R root:root $GAMEDIR/*`, `chmod +x
+      $GAMEDIR/game`); any failure undoes the bind and unmounts. `jjp_update=
+      refuse|allow` (derived `refuse` with a second image): a bind over
+      `$JJPEDIR/scripts/updater.sh` for the life of the boot that writes
+      `update refused: multi-boot install` to `/jjpe/temp/rprogress` and
+      `pcprogress` and exits non-zero — JJP's updater rsyncs/partclones the
+      OTHER slot (= image 1) and then `swapgrub.sh -p b`, which would boot
+      image 1 with no menu. One log line per boot into
+      `/jjpe/temp/padselect.log` (rotated `.1`, 1 MiB cap); the selector's
+      own log only with `--debug-log`. Shell tests like `select_sh_test.sh`
+      (fake selector, fake mount/umount, dash). Oracle in the rig: plan rows
+      R1 (one image: boots identical to stock), R2 (Wonka pair with David's
+      key: the modified asset shows on choice 1), R4 (selector missing /
+      killed / bad conf / unmountable root B → image 0 every time, one line
+      says why), R6 (`updater.sh` from the jail with a fake `/mnt/usb` delta →
+      refused, root B unchanged). Acceptance: those four rows green and
+      `alive.sh` 0 after each.
+      — S3: feature. D3: a small script, but the proof is four rig runs and a
+      real rw slot mount.
+
+- [ ] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
+      ISO out.** `S3 D3` *(Plan §2.4. After 115, not before; lands with 117.
+      Branch from and merge into `feature/jjp-multiboot` — the rule is in 115.)*
+      Same CLI protocol as `mkmulticard.py` so the tab's parsers hold: `plan /
+      build / inject / verify / inspect`, `[card] progress a/b p% what`,
+      `image-size` rows, `[card] error:` refusals, the `images.conf` writer,
+      `themes.json`. `build`: restore both sda3 sets to raw (the rig's
+      `mount.sh` recipe, cached per ISO); GATE — `version_info.txt`
+      `Name`+`Version`, `setenv.sh` `GAMENAME`, sha256 of
+      `/jjpe/gen1/<GAME>/game` and `fl.dat` must all match (refuse otherwise;
+      `--allow-version-mismatch` reserved for a later whole-`/jjpe/gen1`
+      bind); media via `selectmedia.py` with three JJP seams in place of the
+      Stern ones (art = a PNG decrypted out of `edata` with the plugin's own
+      crypto, clip = an attract webm → GIF, sound = a WAV; zero-crypto default
+      art = `miscfiles/graphics/JJP_logo_message.png`, which is plaintext);
+      stage the hook, `jjpselect`, font, conf and `media/` into image 0's raw
+      (root loop mount, or the plugin's mode-preserving debugfs writes);
+      re-partclone image 0 with the plugin's own recipe
+      (`_phase_convert_standalone`: `e2fsck -fy`, `partclone.ext4 -c | pigz
+      --rsyncable | split -b 1000000000`); copy image 1's sda3 pieces VERBATIM
+      renamed `sda5.ext4-ptcl-img.gz.a?`; put a copy of the stick's own
+      `jjp_install.sh` at `/jjp/pad_install.sh` with two edits — `check_image
+      "ROOT B" "sda5.ext4-ptcl-img"` and line 362 `restore_partition
+      "$PART_ROOTB" "sda5.ext4-ptcl-img" "$FS_UUID_ROOTB"` — and point both
+      `syslinux/syslinux.cfg` and `boot/grub/grub.cfg` at it:
+      `ocs_live_run="/lib/live/mount/medium/jjp/pad_install.sh"`
+      (`medium_path` IS the stick, so no squashfs repack); `xorriso -indev
+      stock -outdev out.multi.iso -boot_image any replay` with `-map`s (the
+      plugin's `_phase_build_iso` pattern). `verify` re-mounts the ISO:
+      `gunzip -t` every piece, the two cfg lines, the installer diff, the
+      hook files' shas inside sda3. `inject` = re-stage + re-partclone image 0
+      + rebuild the ISO. Sizes for the GNR pair: 5.8 + 6.5 + ~0.6 GB = ~13 GB
+      → a 16 GB FAT32 stick through the app's existing stick flow. Acceptance:
+      plan row R5 (`verify` PASS on the built GNR ISO; the app's stick flow
+      writes it; the installer/cfg diff is exactly the lines above) and R3
+      through 117.
+      — S3: feature. D3: the largest desk item of the six, over proven
+      pieces (partclone/xorriso/selectmedia), with `verify` and one rig boot
+      as the run.
+
+- [ ] **117. The JJP rig boots a multi-boot install ISO and proves the
+      choice.** `S3 D3` *(Plan §2.8. After 115; 116 and this land together —
+      the rig can start from a hand-staged `sda5.raw` before the builder
+      exists. Branch from and merge into `feature/jjp-multiboot` — the rule
+      is in 115.)* `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO
+      carries, so `JJP_ISO=<multi.iso>` yields `sda3.raw` (root) and
+      `sda5.raw` (image 1); `jail.sh` overlays `sda5.raw` with its own tmpfs
+      upper (rw, as root B is on the machine) at `$JJP_JAIL/jjpe/multi/b`;
+      `run_game.sh` runs `$RUN` under `unshare -m` and sources
+      `$JJPEDIR/scripts/padselect.sh` at the point `rungame.sh` does (display
+      up, before `./game`) when the image carries it; `JJP_SELECT` is the
+      same three-way switch as `PAD_SELECT` (unset = ask the image, 1/0
+      force); `status.sh` gains `multiboot=` and `choice=`; `alive.sh` gains
+      `jjpselect`; nothing new for `unjail.sh` because the namespace dies
+      with the run. Oracles: `padselect.log`, `findmnt /jjpe/gen1/<GAME>` in
+      the jail, the game log's `Loaded N files (bytes)` line (differs between
+      the two GNR images: 8.206 vs 8.864 GiB used), `grab.sh` of attract.
+      Acceptance: plan row R3 on the real GNR artifact WITH David's GNR key
+      attached over usbipd (choose 1 → Chaka art in attract; choose 0 →
+      stock), the proof table written into `tools/jjp_emu/MULTIBOOT.md` (the
+      JJP twin of `codeselect/DESIGN.md`), `alive.sh` 0 after.
+      — S3: feature. D3: rig plumbing over known pieces, but the acceptance
+      is a real two-image boot with the GNR key.
+
+- [ ] **118. The Multi-boot tab learns a second platform: JJP declares
+      `multiboot=True` and the tab stops hard-coding Stern.** `S3 D3` *(Plan
+      §2.7. After 116 and 117, not before. Branch from and merge into
+      `feature/jjp-multiboot` — the rule is in 115.)* A `MultibootBackend` object
+      (Stern today, JJP added) holding everything the 2026-09-12 audit found
+      hard-coded in `gui/multiboot_tab.py`: `TOOL_DIR`/`MKMULTICARD`/
+      `SELECTMEDIA`/`CODESELECT_SRC` (216–223), `SELECTOR_SUFFIX`/
+      `DEFAULT_SELECTOR_DIR`/`DEFAULT_ROOTFS`/`CONF_FONT` (237–256),
+      `FRAME_W/H` (326), `write_preview_conf`'s `p3/p7/p7:imgN` tokens (2554)
+      vs `rootA/rootB/rootB:imgN`, `_FITS_RE` `fits Stern <N>G` (3973),
+      `CARD_SIZES` (4165) vs "USB stick needed: 16 GB / SSD needs 111 GiB",
+      the `<model>-<size>G.sdcard.raw` default name vs `<Game>-<ver>.multi.iso`,
+      the "SD card" wording (5423–7498), qemu for the preview (2101) vs native
+      `jjpselect --snapshot`, `flash_fn` (JJP: the stick pipeline on the multi
+      ISO), `emulate_fn` (JJP: `JJP_ISO=<multi.iso>` with the selector on).
+      `image_table.py` untouched; the phase chips keep Media / Copy / Inject /
+      Verify. `plugins/jjp/manufacturer.py` `capabilities` gains
+      `multiboot=True`; the tab shows through the existing one-line gate
+      (`main_window.py:17227`). Tests for both backends; the 319-test tab
+      suite must stay green for Stern byte-for-byte. Acceptance: build the GNR
+      multi ISO from the tab, make a stick from it with the green button,
+      launch the rig from the tab and see the menu.
+      — S3: feature. D3: a refactor across a 12.8k-line tab plus the JJP
+      wiring, with one app-driven build + launch as the run.
+
+- [ ] **119. First GNR machine boot of a multi-boot install.** `S3 D3` *(Plan
+      §2.9. After 118. David's hardware; whatever it finds is fixed on the
+      spot. Branch from and merge into `feature/jjp-multiboot` — the rule is
+      in 115 — and this is the item whose close is followed by the ONE
+      `/finish` of the whole family.)* Stick from 118, key in the machine, install (settings/scores
+      are wiped — JJP's installer always does), first boot with the coin door
+      OPEN. Expected: the menu on the backglass, flippers move, START
+      confirms, 15 s timeout boots image 0, both images play, the key is
+      accepted by both. Afterwards read `/jjpe/temp/padselect.log` (a
+      Direct-SSD read, or `dumplogs.sh -u` from the game's Utilities menu). If
+      the buttons do nothing: `--learn` names the bytes that changed, and
+      `key_*=` in `images.conf` + `inject` fixes it. The two hardware-only
+      unknowns (a second opener of `/dev/jjpio` before the game, EGL on the
+      machine's GPU under the `jjpxorg` confs) can only be answered here.
+      Acceptance: "worked" from the machine, both images, plus one power-cycle
+      into each.
+      — S3: feature. D3: hardware-only; what it finds cannot be provoked on
+      the desk, and a dead menu still boots stock.
 
 ## Reference material that is NOT in this repo
 

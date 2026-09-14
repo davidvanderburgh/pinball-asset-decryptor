@@ -32,6 +32,10 @@
  *                            useless for an unattended power-up - which is the
  *                            whole point of the card.  Wins over default=.
  *   timeout=<seconds>        0 = wait for ever
+ *   heading=<text>           the line across the top (default "SELECT GAME
+ *                            CODE"); free UTF-8 text, shrunk and then cut to
+ *                            the glass, and a line of nothing but spaces
+ *                            leaves the top of the menu empty
  *   font=<path>              optional TrueType font
  *   media=<dir>              where the media names resolve (default
  *                            /usr/local/codeselect/media; --media overrides)
@@ -172,6 +176,9 @@ struct conf {
     int def;          /* default=  (-1 when absent) */
     int def_card;     /* default_card=  (-1 when absent); wins over def */
     int timeout;      /* timeout=  (-1 when absent) */
+    char heading[CONF_STR];        /* heading= ("" when absent = the built-in line) */
+    int heading_set;               /* ...and whether the key was there at all, so an
+                                    * empty one can mean "no heading" (C FB, PAD-135) */
     char font[CONF_STR];
     char media[CONF_STR];          /* media= ("" when absent) */
     char sound_move[CONF_STR];     /* "" when absent */

@@ -98,12 +98,32 @@ class FlashImageDialog:
                  initial_image=None, on_build_flash=None, build_target="",
                  can_build=False, cannot_build_reason="",
                  has_pending_changes=True, initial_choices=None,
-                 on_choices=None):
+                 on_choices=None, handed_in="", fresh_image=False,
+                 flashed_fn=None):
         self._parent = parent
         self._mfr = manufacturer
         self._on_flash = on_flash
         self._on_build_flash = on_build_flash
-        self._can_build = bool(can_build and on_build_flash is not None)
+        # A FINISHED CARD HANDED IN BY ANOTHER TAB (named: the Multi-boot
+        # tab's) is only ever written.  The Build section builds the Write
+        # tab's single-game image, which is not that card, and the "nothing
+        # modified" check is about Write-tab edits the card never came from
+        # (PAD-144: "Could you even use this option to create a fresh build
+        # of a multigame?" / "a warning that nothing has changed but its not
+        # really true").
+        self._handed_in = handed_in or ""
+        self._can_build = bool(can_build and on_build_flash is not None
+                               and not self._handed_in)
+        # ...and a card that was only just BUILT or UPDATED is on no SD card
+        # yet.  The menu-only write refuses a card this image was not flashed
+        # onto, so after a build it could only refuse - and after an update,
+        # which rewrites game files INSIDE the card without changing what the
+        # check compares, it would pass and leave the old games on the SD card.
+        self._fresh_image = (os.path.normpath(initial_image)
+                             if fresh_image and initial_image else "")
+        # ...and whether a flash of an image has FINISHED onto an SD card
+        # from here, asked of the app, which records every one (PAD-145).
+        self._flashed_fn = flashed_fn
         self._cannot_build_reason = cannot_build_reason
         self._has_pending_changes = has_pending_changes
         self._on_choices = on_choices
@@ -145,6 +165,8 @@ class FlashImageDialog:
         somehow all-off is treated as nothing remembered, since a dialog that
         opens with Start greyed out looks broken.
         """
+        if self._handed_in:
+            return False, True              # a finished card: write it
         if not isinstance(saved, dict) or not saved:
             return (self._can_build and self._has_pending_changes), True
         build = self._can_build and bool(
@@ -155,8 +177,12 @@ class FlashImageDialog:
         return build, write
 
     def _remember_choices(self):
-        """Report the ticked pair back for next time (Start only)."""
-        if self._on_choices is None:
+        """Report the ticked pair back for next time (Start only).
+
+        Never for a handed-in card: writing the Multi-boot tab's card is not
+        a choice about the Write tab's own dialog, and recording its forced
+        build-off opened that dialog without the build ticked next time."""
+        if self._on_choices is None or self._handed_in:
             return
         choices = {"write": bool(self._write_var.get())}
         # A disabled Build box is not a choice — leaving it out keeps the
@@ -204,23 +230,36 @@ class FlashImageDialog:
 
         header = (getattr(self._mfr, "flash_header", None)
                   or "Build an image and/or write one onto a %s" % noun)
+        intro = ("Tick both to test changes on the machine in one step: "
+                 "build a fresh image, then put it straight onto the %s."
+                 % noun)
+        if self._handed_in:
+            # Only the write is on offer, so the words say only that.
+            dlg.title("Flash %s image" % noun)
+            header = "Write the %s card onto the %s" % (self._handed_in,
+                                                          noun)
+            intro = ("The card the %s tab made, as it is: nothing here "
+                     "builds or changes it. Pick the %s below; nothing is "
+                     "written until you confirm." % (self._handed_in, noun))
         ttk.Label(
             body, text=header,
             font=(self._sans, 12, "bold")).pack(anchor="w", pady=(0, 2))
         ttk.Label(
-            body,
-            text=("Tick both to test changes on the machine in one step: "
-                  "build a fresh image, then put it straight onto the %s."
-                  % noun),
+            body, text=intro,
             font=(self._sans, 9), foreground=th["gray"],
             wraplength=560, justify="left").pack(anchor="w", pady=(0, 10))
 
         # ---- Section 1: build ----------------------------------------
         # Opening state: the pair the user last ran, else the defaults —
-        # see _opening_ticks.
+        # see _opening_ticks.  Never shown for a handed-in card (see
+        # __init__); its widgets still exist, so the syncing has one shape.
+        build_box = ttk.Frame(body)
+        self._build_box = build_box
+        if not self._handed_in:
+            build_box.pack(fill="x")
         self._build_var = tk.BooleanVar(value=self._initial_build)
         build_check = ttk.Checkbutton(
-            body, text="Build a fresh image from your modifications",
+            build_box, text="Build a fresh image from your modifications",
             variable=self._build_var, command=self._sync_sections)
         build_check.pack(anchor="w")
         if self._on_build_flash is None:
@@ -228,7 +267,7 @@ class FlashImageDialog:
         elif not self._can_build:
             build_check.state(["disabled"])
             ttk.Label(
-                body,
+                build_box,
                 text=(self._cannot_build_reason
                       or "Set the original image, assets folder and build "
                          "location on the Write tab first."),
@@ -236,7 +275,7 @@ class FlashImageDialog:
                 wraplength=540, justify="left").pack(
                 anchor="w", padx=(22, 0))
 
-        target_row = ttk.Frame(body)
+        target_row = ttk.Frame(build_box)
         target_row.pack(fill="x", pady=(4, 10), padx=(22, 0))
         ttk.Label(target_row, text="Build to:", width=12, anchor="w").pack(
             side="left")
@@ -252,13 +291,16 @@ class FlashImageDialog:
 
         # ---- Section 2: flash ----------------------------------------
         self._write_var = tk.BooleanVar(value=self._initial_write)
-        ttk.Checkbutton(
+        # A handed-in card has nothing else to do, so there is no tick to
+        # take away the one thing Start can do.
+        self._write_chk = ttk.Checkbutton(
             body, text=self._words["section"],
-            variable=self._write_var, command=self._sync_sections).pack(
-            anchor="w")
+            variable=self._write_var, command=self._sync_sections)
+        if not self._handed_in:
+            self._write_chk.pack(anchor="w")
 
         flash_body = ttk.Frame(body)
-        flash_body.pack(fill="x", padx=(22, 0))
+        flash_body.pack(fill="x", padx=(0 if self._handed_in else 22, 0))
 
         # Image-file row.  Tracks the build output while section 1 is ticked.
         img_row = ttk.Frame(flash_body)
@@ -281,20 +323,31 @@ class FlashImageDialog:
         # /data and /dump alone, so the machine keeps its settings and scores,
         # which a whole-image flash cannot.
         #
-        # DEFAULT ON when the image supports it: the run REFUSES a card this
-        # image was not flashed from, naming what differed, so a wrong default
-        # costs one refusal - while the wrong default the other way costs an
-        # hour, every time.
+        # DEFAULT ON for an image a flash has already put onto an SD card
+        # from here, and only then.  It used to be on for any image that
+        # could take it, since the run refuses a card this image was not
+        # flashed onto - but that ticked it for cards no SD card had ever
+        # held, and a tester who had just built one reported it twice
+        # (PAD-144, then PAD-145: "only boot menu" was still checked, on a
+        # card built in an earlier run and flashed on its own).  Once a
+        # flash of it finishes, the app records it and the next dialog ticks
+        # it again, so the fast write stays one dialog away for its card.
         self._menu_var = tk.BooleanVar(value=False)
         self._menu_chk = ttk.Checkbutton(
             flash_body, variable=self._menu_var, command=self._sync_sections,
             text="Only the boot menu — fast, and the machine keeps its "
                  "settings and scores")
-        self._menu_chk.pack(anchor="w", pady=(2, 0))
         self._menu_note = ttk.Label(
             flash_body, foreground=self._theme["gray"], wraplength=430,
             justify="left", text="")
-        self._menu_note.pack(anchor="w", padx=(22, 0))
+        # ...and only on a brand whose flash CAN write just the menu.  A JJP
+        # USB stick or a CGC card has no such write, so there the tick was a
+        # Stern promise ("the machine keeps its settings and scores") that
+        # the run could never keep (PAD-138).
+        self._menu_offered = bool(getattr(self._mfr, "menu_flash_phases", ()))
+        if self._menu_offered:
+            self._menu_chk.pack(anchor="w", pady=(2, 0))
+            self._menu_note.pack(anchor="w", padx=(22, 0))
 
         # Target-card row.
         card_row = ttk.Frame(flash_body)
@@ -466,32 +519,69 @@ class FlashImageDialog:
             ["!disabled"] if (building or writing) else ["disabled"])
         self._update_readout()
 
-    #: What the menu-only tick says under itself, per state.
-    _MENU_NOTE_OK = ("Writes the menu partition only, onto a card this image "
-                     "was already flashed from. It checks first, and refuses "
+    #: What the menu-only tick says under itself, per state.  Each says what
+    #: the write is FOR, not only what it does: "The whole image is written."
+    #: left a tester asking what the tick was and how it related to anything
+    #: else in the dialog (PAD-144).
+    _MENU_NOTE_OK = ("For an SD card that already has this image on it: "
+                     "writes the menu partition only, so the games, settings "
+                     "and scores stay. It checks the card first, and refuses "
                      "if the card holds anything else.")
+    _MENU_NOTE_WHOLE = ("The whole image is written, games and all - what an "
+                        "SD card needs the first time this image goes onto "
+                        "it. The machine's settings and scores are replaced "
+                        "too.")
     _MENU_NOTE_BUILD = ("A freshly built image has never been on this card, "
                         "so the whole of it has to be written.")
+    _MENU_NOTE_FRESH = ("This card was only just built or updated, so no SD "
+                        "card holds it yet: the whole image has to be "
+                        "written.")
+    _MENU_NOTE_UNFLASHED = ("This image has not been flashed onto an SD card "
+                            "from here yet, so the whole of it is written, "
+                            "games and all - what an SD card needs the first "
+                            "time. If yours already has this image, tick this "
+                            "to write only the menu; it checks the card "
+                            "first.")
+
+    def _was_flashed(self, img):
+        """Has a flash of *img* finished from here?  Asked of the app; a
+        dialog opened without the question knows of none."""
+        if self._flashed_fn is None:
+            return False
+        try:
+            return bool(self._flashed_fn(img))
+        except Exception:                               # noqa: BLE001
+            return False
 
     def _sync_menu_only(self, writing, building):
         """Offer the menu-only write only where it can mean anything: a
-        flash (not a build+flash - a fresh image was never on that card) of
-        an image that HAS a menu partition to write.
+        flash (not a build+flash - a fresh image was never on that card, nor
+        a handed-in card that was only just built or updated, see __init__)
+        of an image that HAS a menu partition to write - and tick it only for
+        an image a flash has already put onto an SD card (see _was_flashed).
 
         The image is asked, not assumed: reading its partition table is 512
         bytes, and an image with no Linux rootfs as its second partition is
         not a Stern card at all."""
         why = ""
-        can = bool(writing and not building)
+        flashed = False
+        img = (self._image_var.get() or "").strip().strip('"')
+        # Fresh is about THAT card: browse to another image and it is offered.
+        fresh = bool(self._fresh_image and img
+                     and os.path.normpath(img) == self._fresh_image)
+        can = bool(writing and not building and not fresh
+                   and self._menu_offered)
         if can:
-            img = (self._image_var.get() or "").strip().strip('"')
             try:
                 menu_write_plan(img)
-                why = self._MENU_NOTE_OK
             except Exception:                           # noqa: BLE001
                 can = False                 # not a card image, or not there
+            else:
+                flashed = self._was_flashed(img)
         elif writing and building:
             why = self._MENU_NOTE_BUILD
+        elif writing and fresh:
+            why = self._MENU_NOTE_FRESH
         try:
             self._menu_chk.state(["!disabled"] if can else ["disabled"])
         except tk.TclError:                             # pragma: no cover
@@ -499,13 +589,16 @@ class FlashImageDialog:
         if not can:
             self._menu_var.set(False)
         elif self._menu_seen != self._image_var.get():
-            # First sight of an image that supports it: on by default.
-            self._menu_var.set(True)
+            # First sight of an image that supports it: on by default only
+            # when an SD card already has it.
+            self._menu_var.set(flashed)
         self._menu_seen = self._image_var.get()
+        if can:
+            why = (self._MENU_NOTE_OK if self._menu_var.get()
+                   else self._MENU_NOTE_WHOLE if flashed
+                   else self._MENU_NOTE_UNFLASHED)
         try:
-            self._menu_note.configure(
-                text=(why if (can and self._menu_var.get()) or not can
-                      else "The whole image is written."))
+            self._menu_note.configure(text=why)
         except tk.TclError:                             # pragma: no cover
             pass
 
@@ -707,10 +800,12 @@ class FlashImageDialog:
         card = self._selected
         if writing:
             if not building and (not img or not os.path.isfile(img)):
+                what = self._words["filetypes"][0][0]
                 messagebox.showwarning(
                     "No image",
-                    "Pick a %s — or tick \"Build a fresh image\" to build "
-                    "one first." % self._words["filetypes"][0][0],
+                    ("Pick a %s." % what if self._handed_in else
+                     "Pick a %s — or tick \"Build a fresh image\" to build "
+                     "one first." % what),
                     parent=self._dlg)
                 return
             if card is None:
@@ -723,7 +818,10 @@ class FlashImageDialog:
             # Flash-only with nothing modified this session: legitimate
             # (restoring a backup, re-flashing an earlier build), but worth a
             # heads-up so an accidental no-change flash is caught (a tester).
-            if not building and not self._has_pending_changes:
+            # Never for a handed-in card: it was just made on another tab,
+            # and "nothing was modified" said the opposite (PAD-144).
+            if (not building and not self._has_pending_changes
+                    and not self._handed_in):
                 if not messagebox.askyesno(
                     "Nothing modified",
                     "Nothing was modified this session.\n\nFlashing writes a "

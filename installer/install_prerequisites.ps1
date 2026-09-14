@@ -420,7 +420,15 @@ $ManufacturerPrereqs = [ordered]@{
             # private prefix with `apt-get download`, deliberately, because that
             # needs no root - but it does need fusermount3 to be present and
             # setuid, which is what the fuse3 package provides.
-            @{ probe="qemu-arm-static";        pkg="qemu-user-static";         label="qemu-user-static";        reason="Emulate tab: runs the machine's own 32-bit ARM game binary on this PC" }
+            # A STATIC qemu-arm counts too (PAD-139): Ubuntu 26.04 ships the
+            # interpreter as plain /usr/bin/qemu-arm in qemu-user and has no
+            # qemu-arm-static at all, so probing the name reported a working
+            # install as missing.  Static, because 24.04's qemu-user ships a
+            # DYNAMIC qemu-arm the rig cannot use - the rig's own pad_qemu_arm
+            # asks the same two questions.  setupfix.sh (the repair below)
+            # knows the package is qemu-user-binfmt there.
+            @{ probe="qemu-arm-static";        pkg="qemu-user-static";         label="qemu-user-static";        reason="Emulate tab: runs the machine's own 32-bit ARM game binary on this PC";
+               probeCmd="command -v qemu-arm-static || (test -x /usr/bin/qemu-arm && ! ldd /usr/bin/qemu-arm 2>&1 | grep -q '=>')" }
             @{ probe="arm-linux-gnueabihf-gcc"; pkg="gcc-arm-linux-gnueabihf"; label="ARM cross-compiler";      reason="Emulate tab: builds the LD_PRELOAD hardware shim the game runs against" }
             # The NATIVE compiler, which is a different one from the line
             # above and was left off this list until a user turned up with the

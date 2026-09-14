@@ -29,6 +29,7 @@ the GUI gates the Direct-SD buttons on that before these are reached.
 """
 
 import contextlib
+import hashlib
 import os
 import re
 import shutil
@@ -1535,6 +1536,29 @@ def _ranges_match(dev, src, ranges, log=None):
 def _read_file_range(f, off, length):
     f.seek(off)
     return f.read(length)
+
+
+def menu_identity_digest(image_path):
+    """WHAT A MENU-ONLY WRITE KNOWS AN IMAGE BY, as one hex digest: every
+    byte :func:`menu_write_plan` proves a card against, read off the image.
+
+    The app records it when a flash of the image finishes, so the flash
+    dialog can tell an image some SD card already holds from one no card has
+    had (PAD-145).  RAW BYTES, not :func:`_ext_identity`: it is the card's
+    copy that drifts at boot, while the IMAGE's own superblocks change only
+    when something writes that games tree - a rebuild, or an update syncing
+    files into it - and either way no SD card has this image any more.  A
+    menu change lives in p2, which is not proved, so it keeps the digest.
+
+    Raises as :func:`menu_write_plan` does for an image with no menu
+    partition to write."""
+    plan = menu_write_plan(image_path)
+    h = hashlib.sha256()
+    with open(image_path, "rb") as f:
+        for off, length, _what, _kind in plan["prove"]:
+            h.update(struct.pack("<QI", off, length))
+            h.update(_read_file_range(f, off, length))
+    return h.hexdigest()
 
 
 def menu_read_ranges(read_at, dev_size):

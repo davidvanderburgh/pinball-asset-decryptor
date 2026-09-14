@@ -1287,6 +1287,48 @@ def test_a_long_bed_is_cut_and_faded(sm, tmp_path, monkeypatch):
     src, secs, fade = seen["args"]
     assert src == str(track)
     assert secs == sm.MUSIC_MAX_SECONDS and fade == sm.MUSIC_FADE_MS
+
+
+def test_a_move_sound_from_a_file_is_cut_to_a_few_seconds(sm, tmp_path, monkeypatch):
+    """PAD-141: "maybe put in a physical cap on the audio so people don't
+    shoot themselves in the foot by putting in a 30 second sample".  A file
+    picked as the move sound is cut and faded; a short one goes through whole
+    and unfaded; and the confirm sound, which the menu already holds for up
+    to 8 s, is not touched by this cap."""
+    seen = []
+
+    def fake(src, out, max_seconds=None, fade_ms=0):
+        seen.append((os.path.basename(out), max_seconds, fade_ms))
+        with open(out, "wb") as f:
+            f.write(b"RIFF")
+        return out
+    lengths = {"long.wav": 30.0, "short.wav": 2.2}
+    monkeypatch.setattr(sm, "normalise_wav", fake)
+    monkeypatch.setattr(sm, "_duration_of", lambda p: lengths[os.path.basename(p)])
+    for name in lengths:
+        (tmp_path / name).write_bytes(b"RIFF")
+    logs = []
+    move = str(tmp_path / "move.wav")
+    for name in ("long.wav", "short.wav"):
+        sm._sound_default(str(tmp_path / name), {}, "a.raw", sm.MOVE_IDX, sm.MOVE_MAX_SECONDS, 0,
+                          "click", move, logs.append, sm.MOVE_FILE_MAX_SECONDS, sm.MOVE_FILE_FADE_MS)
+    sm._sound_default(str(tmp_path / "long.wav"), {}, "a.raw", sm.CONFIRM_IDX, sm.CONFIRM_SECONDS,
+                      sm.CONFIRM_FADE_MS, "chime", str(tmp_path / "confirm.wav"), logs.append)
+    assert seen == [("move.wav", sm.MOVE_FILE_MAX_SECONDS, sm.MOVE_FILE_FADE_MS),
+                    ("move.wav", sm.MOVE_FILE_MAX_SECONDS, 0),
+                    ("confirm.wav", None, 0)]
+    assert "(the first 3 s of 30 s, faded out)" in logs[0]
+    assert "first" not in logs[1] and "first" not in logs[2]
+
+
+def test_prepare_hands_the_move_sound_its_file_cap(sm):
+    """...and the one caller that matters passes it: the cap is an argument,
+    so a call site that forgets it quietly ships the old no-limit behaviour."""
+    src = open(sm.__file__, encoding="utf-8").read()
+    call = src[src.index("move = _sound_default("):]
+    call = call[:call.index(")\n") + 1]
+    assert "MOVE_FILE_MAX_SECONDS" in call and "MOVE_FILE_FADE_MS" in call
+    assert sm.MOVE_FILE_MAX_SECONDS == 3.0, "the Menu settings note says 3 s"
 # ---- item 106: a RANDOM card's own picture ---------------------------------
 
 def _member_logos(sm, n, size=(400, 225)):

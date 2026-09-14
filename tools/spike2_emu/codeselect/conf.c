@@ -368,6 +368,12 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             c->def_card = atoi(val);
         } else if (!strcmp(key, "timeout")) {
             c->timeout = atoi(val);
+        } else if (!strcmp(key, "heading")) {
+            /* AN EMPTY VALUE IS A CHOICE, not an absent key: 'heading=' means
+             * no line across the top, which is what somebody who put their own
+             * artwork up there wants (PAD-135). */
+            c->heading_set = 1;
+            copy_field(c->heading, val);
         } else if (!strcmp(key, "font")) {
             copy_field(c->font, val);
         } else if (!strcmp(key, "media")) {

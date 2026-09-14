@@ -324,7 +324,21 @@ pkg_installed() {
             # (vim's xxd stands in for tinyxxd, which conflicts with it).
             local cmd=${PM_CMD_OF[$1]:-}
             [ -n "$cmd" ] && command -v "$cmd" >/dev/null 2>&1 ;;
-        *)  dpkg -s "$1" >/dev/null 2>&1 ;;
+        *)  dpkg -s "$1" >/dev/null 2>&1 && return 0
+            # ...or an installed package PROVIDES the name, which is how apt
+            # itself counts it as met.  PAD-139: Ubuntu 26.04 has no
+            # qemu-user-static package - qemu-user-binfmt provides the name -
+            # so `dpkg -s` alone called a working install MISSING.
+            dpkg-query -W -f='${db:Status-Abbrev}|${Provides}\n' 2>/dev/null |
+                awk -F'|' -v want="$1" '
+                    $1 ~ /^ii/ {
+                        n = split($2, prov, /, */)
+                        for (i = 1; i <= n; i++) {
+                            sub(/ .*/, "", prov[i])
+                            if (prov[i] == want) hit = 1
+                        }
+                    }
+                    END { exit !hit }' ;;
     esac
 }
 

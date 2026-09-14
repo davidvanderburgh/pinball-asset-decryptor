@@ -133,6 +133,64 @@ def test_unrelated_success_never_fires_a_stale_chain(app, monkeypatch):
     assert app._chain_flash_after_build is None
 
 
+# ---- A flash on a brand with no menu-only write (PAD-138) -----------------
+
+@pytest.mark.parametrize("key, module, name", [
+    ("jjp", "pinball_decryptor.plugins.jjp.usbstick",
+     "UsbStickPreparePipeline"),
+    ("cgc", "pinball_decryptor.plugins.cgc.manufacturer",
+     "FlashImagePipeline"),
+])
+def test_a_flash_starts_on_a_brand_with_no_menu_only_write(
+        app, monkeypatch, key, module, name):
+    """The menu-only write taught Stern's flash factory a ``menu_only``
+    keyword and the app handed it to EVERY brand's: a JJP USB stick died with
+    "make_flash_pipeline() got an unexpected keyword argument 'menu_only'"
+    before it began.  This is the dialog's own call, on the real factory."""
+    import importlib
+    made = []
+
+    class _Pipe:
+        def __init__(self, *args, **kwargs):
+            made.append((args[:2], kwargs))
+
+        def run(self):
+            pass
+
+        def cancel(self):
+            pass
+
+    monkeypatch.setattr(importlib.import_module(module), name, _Pipe)
+    _pick(app, key)
+    try:
+        app._start_flash_image(FAKE_IMG, FAKE_DEVICE, menu_only=False)
+        assert made == [((FAKE_IMG, FAKE_DEVICE), {})]
+    finally:
+        app._active_mode = None
+        app.window.set_running(False, mode="write")
+
+
+def test_a_flash_that_cannot_start_hands_the_window_back(app, monkeypatch):
+    """The TypeError above came AFTER the run state was armed, so the window
+    sat on a live Cancel with nothing behind it, and pressing that only greyed
+    it out ("the application locks up").  Nothing started means nothing will
+    ever call done_cb - the start itself has to put the window back."""
+    _pick(app, "jjp")
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("no pipeline")
+
+    monkeypatch.setattr(app._current_mfr, "make_flash_pipeline", _boom)
+    with pytest.raises(RuntimeError):
+        app._start_flash_image(FAKE_IMG, FAKE_DEVICE)
+    assert app.window._running is False
+    assert app._active_mode is None
+    assert app.pipeline is None, "a Cancel must not reach a stale pipeline"
+    btn = getattr(app.window, "_flash_btn", None)
+    if btn is not None:
+        assert btn.cget("text") != "Cancel"
+
+
 # ---- The two-section Build / flash dialog ---------------------------------
 
 def _make_dialog(app, monkeypatch, **kw):

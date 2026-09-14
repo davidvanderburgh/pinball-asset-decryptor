@@ -273,10 +273,17 @@ if [ -n "${PAD_CARD:-}" ]; then
                     | head -1
             fi
             echo "timeout=$SEL_TIMEOUT"
-            # the card's sound and volume keys, verbatim (media= is NOT
-            # copied: the media directory is handed over with --media below).
+            # the card's sound, volume and LOOK keys, verbatim (media= and
+            # font= are NOT copied: both are paths on the card's own rootfs,
+            # and the media directory is handed over with --media below).
             # Spacing tolerated on the same rule as the image lines above.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume)[[:space:]]*=' || true
+            # ★ heading=, theme= and color_*= were missing until PAD-141: the
+            # Multi-boot tab wrote the owner's heading onto the card and this
+            # menu still read SELECT GAME CODE in the default colours, so the
+            # one place to try a card before flashing it showed a different
+            # menu from the card. An empty heading= rides along too - it is a
+            # card that asked for no line across the top at all.
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|theme|color_[a-z_]+)[[:space:]]*=' || true
         } > "$R/dump/codeselect.conf"
         echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after $SEL_TIMEOUT s"
         # THE MEDIA (item 90 v2): the card's /usr/local/codeselect/media,
@@ -473,8 +480,10 @@ trap 'kill $NODEBUS_PID 2>/dev/null; [ -n "$STUB" ] && rmdir "$STUB" 2>/dev/null
 # byte-for-byte the chroot path it has always been.
 PIVOT=${PAD_PIVOT:-}
 if [ -n "$PIVOT" ]; then
-    QEMU=$(command -v qemu-arm-static)
-    [ -x "$QEMU" ] || { echo "[run] PAD_PIVOT needs qemu-arm-static" >&2; exit 1; }
+    # pad_qemu_arm, not `command -v qemu-arm-static`: Ubuntu 26.04 ships the
+    # static interpreter as plain qemu-arm (PAD-139).
+    QEMU=$(pad_qemu_arm)
+    [ -x "$QEMU" ] || { echo "[run] PAD_PIVOT needs a static qemu-arm (qemu-user-static)" >&2; exit 1; }
     # pad_static_busybox (padpath.sh) is the ONE test for this - watch.sh asks
     # it before it requests a pivot at all, and setupcheck.sh asks it before
     # Start is pressed. A run that gets here anyway was asked for by hand.
@@ -877,15 +886,51 @@ fi
 # built from a different card than the one being booted (or a title that does
 # not carry that file), and going ahead would run a card that is part one build
 # and part another.
+#
+# ...EXCEPT FOR A FILE THAT IS NOT PART OF WHAT THIS RUN MOUNTS, and that turned
+# out to be every card run there has ever been (PAD-133). A CARD RUN DOES NOT
+# MOUNT THE GAMES PARTITION: cardmount.sh puts it on a FUSE mount outside this
+# namespace and prints the TITLE directory, and only that directory is bound in
+# (`mount --bind "$CARD_SRC" "$R/games/$GAME"` above). So nothing that sits
+# BESIDE the title has anywhere to land - and /spk/index/<title>.sidx, the
+# SD-validation record, is in EVERY set, because the .sidx refresh and the
+# validator bypass run on every write, whatever the user edited. The `exit 1`
+# below is therefore where every card run of this feature ended: the renderer
+# window was already open, the guest never started, and what the user saw was a
+# black screen with their own edit named in the log above it. It worked on the
+# desk it was written on for one reason - that rootfs has titles extracted into
+# games/ by hand, so it has a games/spk/index to bind onto.
+#
+# A file outside the booted title's directory is therefore REPORTED AND SKIPPED
+# rather than failing the run. Nothing in the emulator reads it: the game's own
+# validator is the only thing that ever does, and the same set's firmware patch
+# is what turns that off. A file INSIDE the title's directory is still the hard
+# error above, and so is one under a title tree that is not the one booting (a
+# set built for another card) - those ARE the user's edits, and running without
+# them is the outcome this feature must not have. Nor may a set be ALL skips:
+# that would be the stock card, run while the tab says it is testing edits.
 if [ -n "$OVERRIDE_SRC" ]; then
     ovr_n=0
     ovr_bad=""
+    ovr_skip=""
     OLDIFS=$IFS; IFS=$'\n'
     for rel in $(cd "$OVERRIDE_SRC" && find . -type f ! -name overrides.json \
                                             ! -name overrides.delta \
                                             -printf '%P\n' | LC_ALL=C sort); do
         if [ ! -f "$R/games/$rel" ]; then
-            ovr_bad="$rel"; break
+            # Is this a file of a TITLE, or one that lives beside one? A title
+            # directory is the one carrying that title's own `game` ELF or its
+            # `image.bin` sound bank, and a set names exactly one title; any
+            # other name at the top of the path is a part of the games
+            # partition that a card or folder run does not mount.
+            ovr_top=${rel%%/*}
+            if [ "$ovr_top" = "$GAME" ] \
+                    || [ -e "$OVERRIDE_SRC/$ovr_top/game" ] \
+                    || [ -e "$OVERRIDE_SRC/$ovr_top/image.bin" ]; then
+                ovr_bad="$rel"; break
+            fi
+            ovr_skip="$ovr_skip $rel"
+            continue
         fi
         mount --bind "$OVERRIDE_SRC/$rel" "$R/games/$rel" || { ovr_bad="$rel"; break; }
         ovr_n=$(( ovr_n + 1 ))
@@ -898,8 +943,22 @@ if [ -n "$OVERRIDE_SRC" ]; then
         echo "[run]   against this one." >&2
         exit 1
     fi
+    if [ "$ovr_n" = 0 ]; then
+        echo "[run] your edits: nothing in this set belongs to the title being" >&2
+        echo "[run]   booted -$ovr_skip" >&2
+        echo "[run]   so the run would be the stock card while the app says it" >&2
+        echo "[run]   is testing your edits. Rebuild the set against this card." >&2
+        exit 1
+    fi
     echo "[run] your edits: $ovr_n file(s) applied on top of the card (nothing"
     echo "[run]   was rebuilt and the card image itself is untouched)"
+    if [ -n "$ovr_skip" ]; then
+        echo "[run]   not applied, and not needed here:$ovr_skip"
+        echo "[run]   those sit beside the title on the card (the SD-validation"
+        echo "[run]   record the machine checks), and a card run mounts the"
+        echo "[run]   title's own directory and nothing else. Every edit you"
+        echo "[run]   made is in the $ovr_n file(s) above."
+    fi
 fi
 
 cd "$R"

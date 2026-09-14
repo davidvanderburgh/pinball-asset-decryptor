@@ -1003,8 +1003,10 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     # it is JSON, and exactly the keys contract A names
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
-                      "volume", "machine_volume", "mixer_volume", "sound_move", "sound_confirm", "theme",
-                      "colors", "groups"}
+                      "volume", "machine_volume", "mixer_volume", "sound_move", "sound_confirm",
+                      "heading", "theme", "colors", "groups"}
+    # a card that never set one records null, not the selector's own line
+    assert d["heading"] is None
     # a card with no media at all: the fields are null, not absent
     plain = mk.build_manifest(plan, mk.parse_images_conf(_menu_conf(mk, plan)), None)
     assert [im["art"] for im in plain["images"]] == [None, None]
@@ -1229,7 +1231,8 @@ def test_inspect_reads_back_every_field_a_loader_needs(mk, tmp_path, monkeypatch
     # every key contract B names, and the whole report is JSON
     assert set(rep) >= {"card", "size", "layout", "partitions", "images", "timeout", "default", "volume",
                         "mixer_volume", "sound_move", "sound_confirm", "font", "media", "has_media_json",
-                        "has_build_json", "selector", "warnings", "theme", "colors"}
+                        "has_build_json", "selector", "warnings", "heading", "theme", "colors"}
+    assert rep["heading"] is None            # no heading key: the selector's own line
     assert json.loads(json.dumps(rep))["images"][1]["title"] == "TMNT 1987"
     # --media-out gives back a directory that IS a --media-dir again
     d = tmp_path / "loaded"
@@ -1328,6 +1331,45 @@ def test_images_conf_carries_a_theme_and_its_colours(mk):
                                                                                 "countdown": "00ff00"}
     with pytest.raises(mk.Refused):
         mk.parse_color_flags(["frame_hl"])
+
+
+def test_images_conf_carries_a_heading(mk):
+    """PAD-135: heading= is the line across the top of the menu.  Three states, and the
+    difference between the last two is the whole point: no key (the selector's own line),
+    a key with text, and a key with nothing (no line at all)."""
+    devs = ["/dev/mmcblk0p3", "/dev/mmcblk0p7"]
+    plain = mk.render_images_conf(devs, ["A", "B"])
+    assert "heading" not in plain and mk.parse_images_conf(plain)["heading"] is None
+    text = mk.render_images_conf(devs, ["A", "B"], heading="THE BEATLES JUKEBOX")
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    assert lines == ["image=/dev/mmcblk0p3|A|", "image=/dev/mmcblk0p7|B|", "default=0", "timeout=15",
+                     "heading=THE BEATLES JUKEBOX"]
+    assert mk.parse_images_conf(text)["heading"] == "THE BEATLES JUKEBOX"
+    bare = mk.render_images_conf(devs, ["A", "B"], heading="")
+    assert "heading=\n" in bare and mk.parse_images_conf(bare)["heading"] == ""
+    # a '|' is fine - the key is not a pipe-separated line - a newline is not, and neither
+    # is more than the selector's field holds
+    assert mk.conf_heading("A | B") == "A | B"
+    for bad in ("a\nb", "a\rb", "x" * 200):
+        with pytest.raises(mk.Refused):
+            mk.render_images_conf(devs, ["A", "B"], heading=bad)
+    # build.json carries it, and inspect's printout names all three states in words
+    man = mk.build_manifest(None, mk.parse_images_conf(text), None)
+    assert man["heading"] == "THE BEATLES JUKEBOX"
+    assert mk.build_manifest(None, mk.parse_images_conf(bare), None)["heading"] == ""
+
+
+def test_conf_for_plan_takes_the_heading_from_the_flag_else_the_card(mk):
+    plan = _two_image_plan(mk)
+    ex = mk.parse_images_conf(_menu_conf(mk, plan, heading="OLD LINE"))
+    # no flag: the card's own heading rides through
+    assert "heading=OLD LINE\n" in mk.conf_for_plan(plan, argparse.Namespace(), existing=ex)
+    # --heading replaces it, and --heading '' takes the line away for good
+    assert "heading=NEW LINE\n" in mk.conf_for_plan(plan, argparse.Namespace(heading="NEW LINE"), existing=ex)
+    assert "heading=\n" in mk.conf_for_plan(plan, argparse.Namespace(heading=""), existing=ex)
+    # a card that never had one still gets no key
+    plainex = mk.parse_images_conf(_menu_conf(mk, plan))
+    assert "heading" not in mk.conf_for_plan(plan, argparse.Namespace(), existing=plainex)
 
 
 def test_conf_for_plan_takes_the_theme_from_the_flags_else_the_card(mk):

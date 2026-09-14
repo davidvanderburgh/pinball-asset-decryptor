@@ -39,7 +39,7 @@ move/confirm sounds and the volume; only the referenced files are staged into
 /usr/local/codeselect/media on p2 (flat, names ^[A-Za-z0-9._-]+$, PNG <= 1360x768, GIF <= 10 MB /
 512x288 / 150 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the whole set <= 96 MB), and images.conf gets
 the image lines (image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>) and the
-sound_move= / sound_confirm= / volume= / mixer_volume= / media= keys.  The line is written only as
+sound_move= / sound_confirm= / volume= / mixer_volume= / media= / heading= keys.  The line is written only as
 wide as it needs to be - 3 fields with no media at all, 6 when no image names a confirm of its own -
 and every narrower form stays valid.  An image's own confirm is the sound that plays when THAT image
 is chosen; an empty field falls back to the menu-wide sound_confirm=.
@@ -57,7 +57,7 @@ images.conf - never inside media/, never in the media budget, never opened by th
                "images": [{"device", "source", "title", "subtitle", "art", "anim", "music",
                            "confirm"}],
                "timeout", "default", "volume", "mixer_volume", "sound_move", "sound_confirm",
-               "theme", "colors"}
+               "heading", "theme", "colors"}
               'source' is the .raw each image came from - the one thing images.conf cannot
               hold and a rebuild needs.  An `inject` given no --primary/--extra reads the
               card's build.json first and carries the old sources through: an inject must
@@ -289,12 +289,21 @@ P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
 MAX_IMAGES = 64
 MAX_CARDS = 16
 MAX_GROUPS = 8
+#: The line the selector draws across the top when no card sets `heading=` - codeselect.c's
+#: DEF_HEADING, and only ever shown (in `inspect`, in the CLI's help and as the app's field
+#: placeholder), never written into a conf: a card that never asked for a heading must not
+#: grow a key that pins this spelling.
+DEF_HEADING = "SELECT GAME CODE"
 #: conf.c reads a line into `line[1024]`, so a line longer than this is refused HERE
 #: rather than silently truncated on the machine.
 CONF_LINE_MAX = 1000
+#: ...and conf.c copies a key's value into a CONF_STR field, so the heading is capped
+#: here for the same reason (the selector shrinks and then cuts it to the glass anyway,
+#: so this is about the file, not about how much fits on the LCD).
+CONF_STR_MAX = 199
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
-CONF_KEYS = ("default", "timeout", "font", "sound_move", "sound_confirm", "volume", "mixer_volume", "media",
-             "theme", "machine_volume")
+CONF_KEYS = ("default", "timeout", "heading", "font", "sound_move", "sound_confirm", "volume", "mixer_volume",
+             "media", "theme", "machine_volume")
 
 #: THE MACHINE'S OWN VOLUME (images.conf volume=machine + machine_volume=<store>|<key>|<default>):
 #: the selector plays at the MASTER VOLUME SETTING the owner set on the coin door, read off the
@@ -1006,13 +1015,57 @@ def store_sectors_for_class(P, extra_geoms, primary, extras, subs, cls, work_sec
         return Plan(P, extra_geoms, primary, extras, "store", multi_subdirs=subs, store_sectors=n,
                     work_sectors=work_sectors).total
     if total_of(c3) > total:
+        # THE FLOOR IS THE PRIMARY'S OWN p3, so this class is out of the question
+        # whatever the images share: `build` copies that filesystem verbatim and
+        # grows it, and it cannot be shrunk.  A stock 8G card's p3 fills the 8G
+        # class to the last sector, so anything else the layout needs - and the
+        # deltas' work partition is the one thing that does (item 107) - puts the
+        # card over.  The sentence has to name that, or it reads as a complaint
+        # about the games partition's size and there is nothing to do about that
+        # (C FB, PAD-135: the size strip said only "the size check failed").
+        over = _gb((total_of(c3) - total) * SECTOR)
         raise Refused("--size %s: the primary's games partition alone (%s) does not leave room for the store"
-                      % (cls, _gb(c3 * SECTOR)))
+                      % (cls, _gb(c3 * SECTOR))
+                      + (" and the %s the deltas' work partition needs after it - over by %s, so this "
+                         "content wants a bigger card" % (_gb(int(work_sectors) * SECTOR), over)
+                         if work_sectors else " - over by %s" % over))
     while total_of(cnt) > total and cnt - ALIGN >= c3:
         cnt -= ALIGN
     while total_of(cnt + ALIGN) <= total:
         cnt += ALIGN
     return cnt
+
+
+def store_class_for(P, extra_geoms, primary, extras, subs, need, work_sectors=None):
+    """``(class, p3 sectors)`` of the smallest Stern image size a store card of these
+    sources fits, `need` bytes of content and all - asked of the PLANNER, one class at
+    a time, rather than estimated.
+
+    IT USED TO BE AN ESTIMATE, and the estimate did not know the floor the planner
+    enforces: p3 can never be smaller than the primary's own games partition, because
+    `build` copies that filesystem verbatim and grows it.  A stock 8G card's p3 fills
+    the 8G class to the last sector, so six 8G images that share almost everything -
+    a unique-content total well under 8G - were sized to the 8G class by the estimate
+    and then REFUSED by :func:`store_sectors_for_class`, which had just been handed a
+    class its own arithmetic cannot lay out.  The app's size strip then said "the size
+    check failed" and named no card size at all (C FB, PAD-135: six Beatles images).
+    Walking the classes through the planner cannot disagree with the planner.
+    """
+    room = None                    # the biggest class that laid out, and the p3 it left
+    refusal = None                 # ...or why even that one could not be laid out
+    for cls in STERN_SIZES:
+        try:
+            cnt = store_sectors_for_class(P, extra_geoms, primary, extras, subs, cls, work_sectors)
+        except Refused as exc:
+            refusal = exc          # too small for the fixed partitions; a bigger one may not be
+            continue
+        if cnt * SECTOR >= need:
+            return cls, cnt
+        room = cnt
+    if room is None:
+        raise refusal
+    raise Refused("the images' unique content needs %s of p3 and the biggest Stern image size (%s) "
+                  "leaves %s" % (_gb(need), list(STERN_SIZES)[-1], _gb(room * SECTOR)))
 
 
 def measure_sources(paths, cache_dir=None, progress=None):
@@ -1093,13 +1146,7 @@ def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdir
         grow = int(sum(unique[1:]) * (1 + STORE_META_SLACK)) + STORE_HEADROOM
         cnt = c3 + align_up((grow + SECTOR - 1) // SECTOR)
     elif size_class is None:
-        fixed = (s3 + TAIL + sum(lc for (_e, _t, _s, lc) in P.logical) + ALIGN * (len(P.logical) + 2)
-                 + (work_sectors or 0)) * SECTOR
-        cls = next((k for k, v in STERN_SIZES.items() if v >= fixed + need), None)
-        if cls is None:
-            raise Refused("the images' unique content (%s) does not fit the biggest Stern image size even stored once"
-                          % _gb(sum(unique)))
-        cnt = store_sectors_for_class(P, XG, primary, list(extras), subs, cls, work_sectors)
+        _cls, cnt = store_class_for(P, XG, primary, list(extras), subs, need, work_sectors)
     else:
         if size_class not in STERN_SIZES:
             raise Refused("--size %r: one of %s" % (size_class, "/".join(STORE_SIZES)))
@@ -1493,6 +1540,22 @@ def _media_name_ok(name, what):
     return name or ""
 
 
+def conf_heading(text):
+    """A ``heading=`` value for images.conf, validated: free text on ONE line, at most
+    CONF_STR_MAX bytes of it.  '' is allowed and means no heading at all.
+
+    A '|' is fine here - the key is not a pipe-separated line - but a newline would end
+    the key and turn the rest of somebody's title into an unknown key, which is exactly
+    the kind of thing this file is refused for rather than half-written."""
+    s = "" if text is None else str(text)
+    if "\n" in s or "\r" in s:
+        raise Refused("images.conf: heading=%r may not contain a newline" % s)
+    if len(s.encode("utf-8")) > CONF_STR_MAX:
+        raise Refused("images.conf: heading= is %d bytes; the selector reads at most %d"
+                      % (len(s.encode("utf-8")), CONF_STR_MAX))
+    return s
+
+
 def _int_range(val, key, lo, hi):
     try:
         v = int(val)
@@ -1654,14 +1717,16 @@ def check_groups(groups, nimages):
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None,
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
-                       groups=None, default_card=None):
+                       groups=None, default_card=None, heading=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
     own, 6 when some other media is set, else the 3-field form every older selector reads.  The
     global keys follow.  `theme` (a built-in's name or 'custom') and `colors` ({role: RRGGBB}) are
-    the menu's colours (see THEMES_JSON); neither is written when not given.  `debug_log` writes
-    `log=CARD_LOG` (the selector's diagnostics on the card - a development build only)."""
+    the menu's colours (see THEMES_JSON); neither is written when not given.  `heading` is the line
+    across the top of the menu (None = the selector's own SELECT GAME CODE, '' = no line at all).
+    `debug_log` writes `log=CARD_LOG` (the selector's diagnostics on the card - a development build
+    only)."""
     devices = list(devices)
     if not devices:
         raise Refused("images.conf: no images")
@@ -1757,6 +1822,11 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         # their own, no image index resolves to the group
         out.append("default_card=%d" % int(default_card))
     out.append("timeout=%d" % int(timeout))
+    # THE HEADING.  None leaves the key out, so a card that never asked for one
+    # is byte for byte what it always was and an older selector reads it; '' is
+    # a CHOICE and writes 'heading=', which the selector reads as no line at all.
+    if heading is not None:
+        out.append("heading=%s" % conf_heading(heading))
     if font:
         out.append("font=%s" % font)
     if sound_move:
@@ -1797,6 +1867,7 @@ def parse_images_conf(text):
     'media': [(art, anim, music, confirm)] (aligned,
     '' = none), 'default': int, 'timeout': int, 'font': str|None, 'sound_move': str|None,
     'sound_confirm': str|None, 'volume': int|None, 'mixer_volume': int|None, 'media_dir': str|None,
+    'heading': str|None (None = the key was absent, '' = the card asked for no heading),
     'theme': str|None, 'colors': {role: rrggbb}, 'debug_log': str|None (the log= path)}.
     3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
     '|' ':' or '/', more than MAX_IMAGES images, more than MAX_CARDS cards or more than MAX_GROUPS
@@ -1808,7 +1879,7 @@ def parse_images_conf(text):
     if isinstance(text, bytes):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "groups": [], "default": 0, "default_card": None,
-            "timeout": 15, "font": None,
+            "timeout": 15, "heading": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None}
     for raw in text.splitlines():
@@ -1855,6 +1926,11 @@ def parse_images_conf(text):
                 conf[key] = int(val.strip())
             except ValueError:
                 raise Refused("images.conf: bad %s=%r" % (key, val))
+        elif key == "heading":
+            # NOT `or None`: 'heading=' is a card that asked for no line across
+            # the top, which is a different answer from a card that never said
+            # (None, the selector's own default).
+            conf["heading"] = val.strip()
         elif key == "font":
             conf["font"] = val.strip() or None
         elif key in ("sound_move", "sound_confirm"):
@@ -2873,8 +2949,8 @@ def conf_for_plan(plan, args, existing=None, media=None):
         return text
     ex = existing or {"images": [], "media": [], "groups": [], "default": None,
                       "default_card": None, "timeout": None,
-                      "font": None, "sound_move": None, "sound_confirm": None, "volume": None,
-                      "mixer_volume": None, "theme": None, "colors": {}}
+                      "heading": None, "font": None, "sound_move": None, "sound_confirm": None,
+                      "volume": None, "mixer_volume": None, "theme": None, "colors": {}}
     n = len(plan.trees)
     same_n = len(ex["images"]) == n
     titles = split_list(getattr(args, "titles", None))
@@ -2954,10 +3030,16 @@ def conf_for_plan(plan, args, existing=None, media=None):
     default_card = getattr(args, "default_card", None)
     if default_card is None:
         default_card = ex.get("default_card")
+    # THE HEADING: --heading is the whole answer (and '' is a real one - no line at
+    # all); without the flag the card keeps whatever it already carries, and a card
+    # that never had one still gets no key.
+    heading = getattr(args, "heading", None)
+    if heading is None:
+        heading = ex.get("heading")
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
-                              groups=groups, default_card=default_card)
+                              groups=groups, default_card=default_card, heading=heading)
 
 
 # ============================================================================= the JSON sidecars
@@ -3017,6 +3099,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("mixer_volume", conf["mixer_volume"]),
         ("sound_move", conf["sound_move"]),
         ("sound_confirm", conf["sound_confirm"]),
+        ("heading", conf.get("heading")),
         ("theme", conf.get("theme")),
         ("colors", dict(conf.get("colors") or {})),
         # ONE ENTRY PER GROUP CARD (item 106), with the media *_source keys the tab's
@@ -6661,6 +6744,9 @@ def inspect_card(card, media_out=None):
         ("sound_confirm_source", (media_man or {}).get("sound_confirm_source")),
         ("font", conf["font"]), ("media_dir", conf["media_dir"]),
         ("debug_log", conf.get("debug_log")),
+        # null = the card never set one (the selector's own line is drawn); "" = the
+        # card asked for no heading at all
+        ("heading", conf.get("heading")),
         ("theme", conf.get("theme")), ("colors", dict(conf.get("colors") or {})),
         ("media", media), ("media_out", out),
         ("has_media_json", media_json is not None), ("has_build_json", build is not None),
@@ -6693,6 +6779,10 @@ def print_inspect(rep):
     print("menu       default=%s timeout=%s volume=%s mixer_volume=%s sound_move=%s sound_confirm=%s font=%s log=%s"
           % (rep["default"], rep["timeout"], rep["volume"], rep["mixer_volume"],
              rep["sound_move"], rep["sound_confirm"], rep["font"], rep.get("debug_log") or "off"))
+    head = rep.get("heading")
+    print("heading    %s" % ("(the selector's own SELECT GAME CODE)" if head is None
+                             else "(none - the top of the menu is bare)" if not head
+                             else repr(head)))
     colors = "".join(" color_%s=%s" % kv for kv in sorted((rep.get("colors") or {}).items()))
     print("theme      %s%s" % (rep.get("theme") or "(the selector's default)", colors))
     # WHAT THE PLAYER ACTUALLY SCROLLS THROUGH (item 106), before the per-image detail:
@@ -8121,6 +8211,10 @@ def _add_conf_flags(s):
     s.add_argument("--titles", help="';'-separated titles, one per image (index order)")
     s.add_argument("--subtitles", help="';'-separated subtitles, one per image")
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
+    s.add_argument("--heading", metavar="TEXT",
+                   help="images.conf heading=TEXT - the line across the top of the menu (the selector's "
+                        "own '%s' when no card ever set one; --heading '' leaves the top bare); an "
+                        "existing card's is kept when absent" % DEF_HEADING)
     s.add_argument("--default", type=int, help="images.conf default index (default 0)")
     s.add_argument("--volume", type=int, help="images.conf volume 0-100 (software mix gain; overrides media.json)")
     s.add_argument("--mixer-volume", type=int, help="images.conf mixer_volume 0-63 (the game's codec curve on selem PCM; only when set)")

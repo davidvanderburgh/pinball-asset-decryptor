@@ -825,6 +825,38 @@ def test_a_menu_write_refuses_an_image_that_is_not_a_card(tmp_path):
     assert "Linux rootfs" in str(e.value)
 
 
+def test_the_identity_digest_follows_the_games_not_the_menu(tmp_path):
+    """PAD-145: the app records this digest when a flash finishes, and ticks
+    "Only the boot menu" only for an image whose digest is on record.  A menu
+    edit has to keep it - that is the card the menu write is for - and a
+    games tree written into, or another table, has to lose it."""
+    path = tmp_path / "img.raw"
+    img = _spike_image(path, 0xA1B2C3D4)
+    first = rd.menu_identity_digest(img)
+    assert first == rd.menu_identity_digest(img)
+    # the menu edited in the image (p2)
+    raw = bytearray(path.read_bytes())
+    raw[128 * _SEC:128 * _SEC + 64] = b"A DIFFERENT MENU".ljust(64)
+    path.write_bytes(bytes(raw))
+    assert rd.menu_identity_digest(img) == first
+    # files synced into p3 move its superblock's write time (s_wtime) - which
+    # the menu write's own proof does NOT see, so the record has to
+    sb = 256 * _SEC + 1024
+    old = bytes(raw[256 * _SEC:256 * _SEC + 4096])
+    raw[sb + 0x30:sb + 0x34] = struct.pack("<I", 1757800000)
+    path.write_bytes(bytes(raw))
+    assert rd._ext_identity(old) == rd._ext_identity(
+        bytes(raw[256 * _SEC:256 * _SEC + 4096]))
+    assert rd.menu_identity_digest(img) != first
+    # another card's table
+    assert rd.menu_identity_digest(
+        _spike_image(tmp_path / "o.raw", 0x99999999)) != first
+    plain = tmp_path / "plain.raw"
+    plain.write_bytes(b"\x00" * (64 * _SEC))
+    with pytest.raises(rd.FlashError):
+        rd.menu_identity_digest(str(plain))
+
+
 def test_the_pipeline_carries_menu_only_through(tmp_path, monkeypatch):
     import pinball_decryptor.plugins.stern.pipeline as pl
     monkeypatch.setattr(pl, "is_device_path", lambda _p: True)

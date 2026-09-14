@@ -53,6 +53,7 @@ from pinball_decryptor.gui.multiboot_tab import (
     rebuild_blockers, snapshot_commands, split_anim_source,
     split_art_source, suggest_title, under_library, validate_form,
     write_preview_conf,
+    sound_choices, used_sounds,
     build_args, inject_args)
 
 
@@ -262,7 +263,10 @@ def test_two_image_form_builds_plan_build_verify(monkeypatch, tmp_path):
                                             "verify"]
     for label, argv in cmds:
         if label == "selector":
-            assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"], argv
+            # root too (PAD-140): it installs into a filesystem that is
+            # usually root's
+            assert callable(argv)
+            assert argv({})[:3] == ["wsl.exe", "-u", "root"], argv({})
             continue
         if label == "build":
             # the build runs AS ROOT (item 93: it records the card the way
@@ -537,9 +541,15 @@ def test_preview_conf_is_the_form_with_placeholder_devices(tmp_path):
         "image=p3|STERN 1.59.0|Original Stern code|art0.png||",
         "image=p7|turtles_pro-1_59_0|1987 cartoon upscale|art1.png|anim1.gif|",
         "image=p7:img2|IMG 2|||anim2.gif|",
-        "default=1", "timeout=20", "volume=40",
+        "default=1", "timeout=20", "heading=SELECT GAME CODE", "volume=40",
         "font=/usr/local/codeselect/font.ttf", "theme=midnight"]
     assert text.endswith("\n") and "\r" not in text
+    # PAD-135: an emptied heading reaches the preview as 'heading=', which is
+    # what the selector reads as no line across the top
+    form.heading = ""
+    assert "heading=\n" in write_preview_conf(form)
+    form.heading = "THE BEATLES JUKEBOX"
+    assert "heading=THE BEATLES JUKEBOX\n" in write_preview_conf(form)
 
 
 def test_fingerprint_changes_with_what_the_frame_shows(tmp_path):
@@ -615,15 +625,19 @@ def test_the_card_run_installs_the_menu_program_first(monkeypatch,
     the guest filesystem from the card when there is none, build the menu
     program when it is missing, rebuild it when these sources are newer).
 
-    It runs AS THE USER, carries the primary image (what a first-run rootfs
-    is built from) and names the rootfs the selector directory sits in.  No
-    ``$`` anywhere and ``~/`` outside the quotes, like every other line this
-    tab hands to wsl.exe.
+    It runs AS ROOT with the desktop HOME (PAD-140 - see the test below),
+    carries the primary image (what a first-run rootfs is built from) and
+    names the rootfs the selector directory sits in.  No ``$`` anywhere and
+    ``~/`` outside the quotes, like every other line this tab hands to
+    wsl.exe.
     """
     _win(monkeypatch)
     form = _form(tmp_path, 2)
-    argv = install_selector_args(form, cwd="/mnt/c/repo")
-    assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"]      # never root
+    step = install_selector_args(form, cwd="/mnt/c/repo")
+    assert callable(step)            # resolved on the worker, like build
+    argv = step({})
+    assert argv[:8] == ["wsl.exe", "-u", "root", "-e", "env",
+                        "HOME=/home/x", "bash", "-lc"], argv
     line = _line(argv)
     assert line == ("cd /mnt/c/repo && PAD_ROOT=~/spike2root bash "
                     "tools/spike2_emu/ensureselect.sh %s"
@@ -633,6 +647,41 @@ def test_the_card_run_installs_the_menu_program_first(monkeypatch,
     form.selector_dir = "~/my root/usr/local/codeselect"
     assert "PAD_ROOT=~/'my root' bash" in _line(install_selector_args(
         form, cwd="/mnt/c/repo"))
+
+
+def test_the_menu_program_installs_as_root_into_roots_filesystem(
+        monkeypatch, tmp_path):
+    """★ PAD-140.  The Emulate tab's Start is ``wsl -u root`` and unpacks
+    ~/spike2root as root, so on a machine that had run a game the selector
+    step - then a USER step - could not create /usr/local/codeselect, and a
+    first multi-boot build stopped on coreutils' words for that:
+
+        install: cannot change permissions of
+        '/home/home/spike2root/usr/local/codeselect': No such file or directory
+
+    It installs as root now, with the desktop HOME so ``~`` is still the
+    user's rootfs (buildselect.sh hands the tree back).  The shapes a root
+    step has to get right, one each:"""
+    _win(monkeypatch)
+    form = _form(tmp_path, 2)
+    user_line = _line(install_selector_args(form, cwd="/mnt/c/repo"))
+    # WSL will not say who it logs in as: the user step it used to be, not a
+    # refusal - the build step right after it says the sentence.
+    monkeypatch.setattr(multiboot_tab, "wsl_home", lambda: None)
+    monkeypatch.setattr(multiboot_tab, "wsl_account", lambda: ("", ""))
+    argv = install_selector_args(form, cwd="/mnt/c/repo")({})
+    assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"], argv
+    assert argv[-1] == user_line
+    # a root-default distro (PAD-114): root's own home, like the build
+    monkeypatch.setattr(multiboot_tab, "wsl_account", lambda: ("root", "/root"))
+    argv = install_selector_args(form, cwd="/mnt/c/repo")({})
+    assert argv[:6] == ["wsl.exe", "-u", "root", "-e", "env", "HOME=/root"]
+    assert argv[-1] == user_line
+    # Linux: nothing there unpacks the filesystem as root, and `sudo -n`
+    # would refuse a machine that builds today
+    monkeypatch.setattr(multiboot_tab.sys, "platform", "linux")
+    argv = install_selector_args(form, cwd="/mnt/c/repo")
+    assert not callable(argv) and argv[:2] == ["bash", "-lc"], argv
 
 
 def test_a_selector_dir_of_somebody_elses_is_checked_never_written():
@@ -796,8 +845,10 @@ def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
     ppm = str(tmp_path / "multi" / "preview" / "frame_1_3.ppm")
     words = preview_snapshot_args("/home/d/emusrc/codeselect-preview/"
                                   "codeselect", conf, media, ppm, 1, 3)
-    assert words[:4] == ["qemu-arm-static", "-L", "~/spike2root",
-                         "/home/d/emusrc/codeselect-preview/codeselect"]
+    n = len(multiboot_tab.QEMU_ARM)
+    assert words[:n] == multiboot_tab.QEMU_ARM
+    assert words[n:n + 3] == ["-L", "~/spike2root",
+                              "/home/d/emusrc/codeselect-preview/codeselect"]
     assert words[words.index("--snapshot") + 1] == multiboot_tab.wsl(ppm)
     assert words[words.index("--conf") + 1] == multiboot_tab.wsl(conf)
     assert words[words.index("--media") + 1] == multiboot_tab.wsl(media)
@@ -821,8 +872,9 @@ def test_snapshot_runs_the_selector_under_qemu(monkeypatch, tmp_path):
                                     conf, media, ppm, 1, 3, cwd="/mnt/c/repo")[0]
     assert label == "frame 3"
     line = _line(argv)
-    assert line.startswith("cd /mnt/c/repo && qemu-arm-static -L ~/spike2root "
-                           "~/emusrc/codeselect-preview/codeselect --snapshot ")
+    assert line.startswith("cd /mnt/c/repo && sh -c ")
+    assert (" qemu-arm -L ~/spike2root "
+            "~/emusrc/codeselect-preview/codeselect --snapshot ") in line
     assert "python3" not in line and "\\" not in line
     # the frame count comes from the selector's own log line
     log = ("codeselect: art: image 0 art0.png -> 546x168\n"
@@ -889,9 +941,14 @@ def test_the_table_cells_and_the_menu_summary_say_it_in_a_phrase():
                          machine_volume=False)
     assert menu_summary(form) == (
         "sounds click.wav / auto  ·  volume 35  ·  wait for START  ·  "
-        "default 1  ·  theme midnight")
+        "default 1  ·  theme midnight  ·  \"SELECT GAME CODE\"")
     form.machine_volume = True
     assert "volume 35 (the machine's own on the card)" in menu_summary(form)
+    # PAD-135: the heading, quoted and cut - and named in words when there is none
+    form.heading = ""
+    assert menu_summary(form).endswith("no heading")
+    form.heading = "A HEADING FAR TOO LONG FOR ONE SUMMARY LINE"
+    assert menu_summary(form).endswith('"A HEADING FAR TOO LONG FOR …"')
     assert "15 s countdown" in menu_summary(MultibootForm(images=[]))
 
 
@@ -1588,6 +1645,116 @@ def test_an_image_can_have_a_confirm_sound_of_its_own(tmp_path):
         root.destroy()
 
 
+def _combos(widget):
+    """Every ttk.Combobox under *widget*, in creation order."""
+    out = []
+    for w in widget.winfo_children():
+        if w.winfo_class() == "TCombobox":
+            out.append(w)
+        out.extend(_combos(w))
+    return out
+
+
+def test_used_sounds_are_the_files_this_menu_already_has(tmp_path):
+    """C FB: "the drop down list, populated with all current selections
+    would be a nice addition".  One list for all four sound boxes - the
+    menu's own two and every image's music and confirm - with the words,
+    the duplicates, the files on somebody else's machine and the names a
+    load read off the card all left out of it."""
+    a = tmp_path / "ComeTogether.wav"
+    b = tmp_path / "bed" / "Medley.wav"
+    b.parent.mkdir()
+    for p in (a, b):
+        p.write_bytes(bytes(4))
+    gone = str(tmp_path / "not-here.wav")
+    rows = [ImageRow("x", music="none", confirm=str(a)),
+            # the same file again, and spelled with quotes round it
+            ImageRow("y", music=str(b), confirm='"%s"' % a),
+            # a load's own values: a NAME on the card, not a path here
+            ImageRow("z", music="music2.wav", music_on_card=True,
+                     confirm="confirm2.wav", confirm_on_card=True),
+            # ...and a card built on somebody else's PC
+            ImageRow("w", music=gone, confirm="auto@7")]
+    assert used_sounds(rows, "auto", "synth", "") == [str(a), str(b)]
+    # the menu's own two are in it as well
+    assert used_sounds([], str(b), "auto") == [str(b)]
+    # and the labels are file NAMES, because the list is 26 characters wide
+    assert sound_choices([str(a), str(b)]) == [("ComeTogether.wav", str(a)),
+                                               ("Medley.wav", str(b))]
+    # ...unless two of them share one, and then the folder comes too
+    twin = tmp_path / "bed" / "ComeTogether.wav"
+    twin.write_bytes(bytes(4))
+    assert sound_choices([str(a), str(twin)]) == [
+        ("ComeTogether.wav  (%s)" % tmp_path.name, str(a)),
+        ("ComeTogether.wav  (bed)", str(twin))]
+
+
+def test_the_sound_boxes_offer_every_file_the_menu_uses(tmp_path):
+    """...and picking one writes the PATH, which is what Browse… writes.
+
+    The list is rebuilt every time it drops open, so a file browsed into one
+    box is in the next box's list without closing the dialog."""
+    root, panel = _panel()
+    try:
+        wav = tmp_path / "ComeTogether.wav"
+        bed = tmp_path / "Medley.wav"
+        for p in (wav, bed):
+            p.write_bytes(bytes(4))
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        # image 1 has a WAV of its own; the menu's confirm is another
+        panel._table.select(0)
+        panel._load_editor()
+        panel._ed_confirm.set(str(wav))
+        panel._confirm_var.set(str(bed))
+        assert panel.used_sounds() == [str(wav), str(bed)]
+
+        # EDIT IMAGE 2: its boxes offer both files under their own words
+        panel._table.select(1)
+        panel._load_editor()
+        dlg = panel.edit_image()
+        root.update()
+        music_cb, confirm_cb = _combos(dlg.body)
+        assert list(confirm_cb.cget("values")) == [
+            "menu", "auto", "synth", "ComeTogether.wav", "Medley.wav"]
+        assert list(music_cb.cget("values")) == [
+            "none", "ComeTogether.wav", "Medley.wav"]
+        # picking the NAME sets the PATH on the row, exactly as Browse… does
+        panel._ed_confirm.set("ComeTogether.wav")
+        confirm_cb.event_generate("<<ComboboxSelected>>")
+        root.update()
+        assert panel._ed_confirm.get() == str(wav)
+        assert panel.form().images[1].confirm == str(wav)
+        # a WORD picked out of the same list is still the word
+        panel._ed_music.set("none")
+        music_cb.event_generate("<<ComboboxSelected>>")
+        assert panel._ed_music.get() == "none"
+        # a file browsed in now is in the OTHER box's list a moment later,
+        # without the dialog being closed and opened again
+        third = tmp_path / "HeyJude.wav"
+        third.write_bytes(bytes(4))
+        panel._ed_music.set(str(third))
+        root.tk.call(str(confirm_cb.cget("postcommand")))   # the list opens
+        assert "HeyJude.wav" in list(confirm_cb.cget("values"))
+        dlg.cancel()
+        root.update()
+
+        # ...and the menu's own two boxes have the same list
+        menu = panel.open_menu_settings()
+        root.update()
+        move_cb = _combos(menu.body)[0]
+        assert list(move_cb.cget("values")) == [
+            "auto", "synth", "none", "ComeTogether.wav", "Medley.wav"]
+        panel._move_var.set("Medley.wav")
+        move_cb.event_generate("<<ComboboxSelected>>")
+        root.update()
+        assert panel._move_var.get() == str(bed)
+        menu.cancel()
+        root.update()
+    finally:
+        root.destroy()
+
+
 def test_the_table_carries_each_images_settings_in_columns(tmp_path):
     """The table is the full width of the tab, so what an image is SET TO
     is columns rather than one phrase - and the four icons at the right
@@ -2012,7 +2179,7 @@ def test_an_action_waits_for_the_render_instead_of_being_refused(tmp_path):
 
 def test_flash_button_passes_the_output_path(tmp_path):
     flashed = []
-    root, panel = _panel(flash_fn=flashed.append)
+    root, panel = _panel(flash_fn=lambda p, fresh=False: flashed.append(p))
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
@@ -4762,9 +4929,14 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
     assert menu == {"move": "auto", "confirm": "auto", "volume": 50,
                     "timeout": 15, "default": 2,
                     "machine_volume": True,
+                    # PAD-135: a state written before the field existed
+                    # described a menu that said SELECT GAME CODE
+                    "heading": "SELECT GAME CODE",
                     "theme": "midnight", "colors": {}}
     assert "bypass" not in menu_from_state(None)     # always on: not a setting
     assert menu_from_state({"volume": 900})["volume"] == 100
+    # ...and a state that saved an EMPTY heading gets it back, not the default
+    assert menu_from_state({"heading": ""})["heading"] == ""
 
 
 def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
@@ -5398,7 +5570,7 @@ def test_the_build_flash_modal_can_build_then_flash(tmp_path):
     finished card straight to the flash flow."""
     root, panel, card, media = _loaded(tmp_path)
     flashed = []
-    panel._flash_fn = lambda p: flashed.append(p)
+    panel._flash_fn = lambda p, fresh=False: flashed.append(p)
     try:
         # a recorder that reports success, so the after-hook (flash) runs
         def ok(cmds, on_step=None, on_done=None, quiet=(), preview=False, on_tick=None):
@@ -5425,6 +5597,59 @@ def test_the_build_flash_modal_can_build_then_flash(tmp_path):
         panel._ed_sub.set("y")
         panel._do_build_flash(True, True)
         assert flashed == []
+    finally:
+        root.destroy()
+
+
+def test_a_card_just_built_or_updated_is_handed_on_as_fresh(tmp_path):
+    """PAD-144: a card the modal just BUILT, or UPDATED (game files rewritten
+    inside it), is on no SD card yet, so the flash dialog must write it whole
+    - its menu-only write would refuse a fresh build, and pass an update's
+    check while leaving the old games on the SD card.  An APPLY changes only
+    the menu, which is what that write is for; flashing the card as it is
+    says nothing about it either way."""
+    root, panel, card, media = _loaded(tmp_path)
+    flashed = []
+    panel._flash_fn = lambda p, fresh=False: flashed.append((p, fresh))
+    try:
+        for name in ("_build_card", "update_card", "apply_to_card"):
+            setattr(panel, name, lambda after=None: after and after())
+        for action in ("build", "update", "apply"):
+            panel._write_plan = lambda a=action: {"action": a}
+            panel._do_build_flash(True, True)
+        panel._do_build_flash(False, True)
+        assert flashed == [(card, True), (card, True), (card, False),
+                           (card, False)]
+    finally:
+        root.destroy()
+
+
+def test_the_build_flash_modal_says_where_the_sd_card_is_picked(tmp_path):
+    """PAD-143: the flash tick names no drive, because it has none to name -
+    Start hands the card to the app's flash dialog, which is where the SD
+    card is chosen and the erase confirmed.  Said nowhere, the tick read as
+    'it will write somewhere', so the modal says it on the tick and under
+    it."""
+    root, panel, card, media = _loaded(tmp_path)
+    panel._flash_fn = lambda p: None
+    try:
+        dlg = panel._open_build_flash()
+        root.update()
+        assert "you pick which card next" in dlg._flash_chk.cget("text")
+        texts = []
+
+        def walk(w):
+            try:
+                texts.append(str(w.cget("text")))
+            except Exception:                           # noqa: BLE001
+                pass
+            for child in w.winfo_children():
+                walk(child)
+        walk(dlg.top)
+        said = " ".join(texts)
+        assert "WHICH SD CARD? You pick it in the next dialog" in said
+        assert "nothing is written to any card until" in said
+        dlg.cancel()
     finally:
         root.destroy()
 
@@ -7107,6 +7332,223 @@ def test_the_theme_is_saved_and_restored_with_the_menu(tmp_path):
         root.destroy()
 
 
+# ---- hearing a sound before the card is built (C FB, PAD-135) ---------------
+def _wav(path, seconds=0.5, rate=44100, width=2, channels=2):
+    import struct
+    import wave
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(width)
+        w.setframerate(rate)
+        w.writeframes(struct.pack("<%dh" % (int(rate * seconds) * channels),
+                                  *([0] * int(rate * seconds) * channels)))
+    return str(path)
+
+
+def test_the_play_button_plays_the_file_a_sound_row_names(tmp_path):
+    """PAD-135: "Could there be an option to preview the audio clip
+    selected?"  A row holding a path plays that file; the Log says which file
+    and how long, because that is the answer to "what does this sound like"
+    when nothing came out of the speakers."""
+    import tkinter as tk
+    root, panel = _panel()
+    played = []
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._audio = type("P", (), {
+            "play": lambda _s, path: played.append(path),
+            "loop": lambda _s, path: None,
+            "set_volume": lambda _s, v: None,
+            "stop": lambda _s: None, "close": lambda _s: None,
+            "status": "", "backend_name": "test", "available": True})()
+        wav = _wav(tmp_path / "come_together.wav", seconds=2.25)
+        var = tk.StringVar(value=wav)
+        assert panel.play_sound_choice("Confirm sound", var) is True
+        assert played == [wav]
+        line = panel.log_lines()[-1]
+        assert "come_together.wav" in line and "2.25 s" in line
+        # ...and Mute is named, so silence is not a mystery
+        panel._pv_mute_var.set(True)
+        assert panel.play_sound_choice("Confirm sound", var) is True
+        assert "Mute is on" in panel.log_lines()[-1]
+        panel._pv_mute_var.set(False)
+        # none: nothing to play, and it says so rather than doing nothing
+        assert panel.play_sound_choice("Music", tk.StringVar(value="none")) \
+            is False
+        assert "set to none" in panel.log_lines()[-1]
+        # a path that is not there
+        assert panel.play_sound_choice(
+            "Music", tk.StringVar(value=str(tmp_path / "gone.wav"))) is False
+        assert "was not found" in panel.log_lines()[-1]
+        # A FILE THE SELECTOR'S MIXER WILL NOT TAKE is not an error about the
+        # card: the build converts it, this preview does not
+        odd = _wav(tmp_path / "odd.wav", seconds=0.2, rate=22050)
+        assert panel.play_sound_choice("Music", tk.StringVar(value=odd)) \
+            is False
+        said = panel.log_lines()[-1]
+        assert "22050 Hz" in said and "The build converts it" in said
+        assert played == [wav, wav]
+    finally:
+        root.destroy()
+
+
+def test_a_word_sound_row_plays_what_the_prepare_rendered_for_that_row(
+        tmp_path):
+    """auto / synth / menu name no file of their own, so the ▶ plays the WAV
+    the media directory holds FOR THAT ROW - the sound the card will carry -
+    and says how to make one when there is none."""
+    import tkinter as tk
+    root, panel = _panel()
+    played = []
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._audio = type("P", (), {
+            "play": lambda _s, path: played.append(path),
+            "loop": lambda _s, path: None,
+            "set_volume": lambda _s, v: None,
+            "stop": lambda _s: None, "close": lambda _s: None,
+            "status": "", "backend_name": "test", "available": True})()
+        # no prepared media at all
+        assert panel.play_sound_choice(
+            "Move sound", tk.StringVar(value="auto")) is False
+        assert "prepared" in panel.log_lines()[-1]
+        media = tmp_path / "media"
+        media.mkdir()
+        move = _wav(media / "move.wav", seconds=0.04)
+        confirm = _wav(media / "confirm.wav", seconds=1.5)
+        (media / "media.json").write_text(json.dumps({
+            "images": [{"art": "art0.png"}, {"art": "art1.png"}],
+            "sound_move": "move.wav", "sound_confirm": "confirm.wav",
+            "sound_move_source": "auto", "sound_confirm_source": "auto",
+            "volume": 50}), encoding="utf-8")
+        panel._media_override = str(media)
+        assert panel.play_sound_choice(
+            "Move sound", tk.StringVar(value="auto")) is True
+        assert played[-1] == move
+        assert panel.play_sound_choice(
+            "Confirm sound", tk.StringVar(value="auto")) is True
+        assert played[-1] == confirm
+        # the Music row has nothing rendered: named, not silently ignored
+        assert panel.play_sound_choice(
+            "Music", tk.StringVar(value="auto")) is False
+        assert "nothing rendered" in panel.log_lines()[-1]
+        # A WORD ON ONE IMAGE'S ROW IS THAT IMAGE'S SOUND, not the previewed
+        # one's: Edit image passes its own row, and the picture is usually on
+        # some other one (PAD-135).  Image 1 has a confirm sound of its own
+        # here; image 0 uses the menu's, which is how the rows start.
+        own = _wav(media / "confirm1.wav", seconds=2.25)
+        panel._rows[1].confirm = "auto"
+        doc = json.loads((media / "media.json").read_text(encoding="utf-8"))
+        doc["images"][1]["confirm"] = "confirm1.wav"
+        doc["images"][1]["confirm_source"] = "auto"
+        (media / "media.json").write_text(json.dumps(doc), encoding="utf-8")
+        panel._manifest_at = ((None, None, None), {})    # re-read it
+        panel._hl_var.set("0")
+        assert panel.play_sound_choice(
+            "Confirm sound", tk.StringVar(value="auto"), image=1) is True
+        assert played[-1] == own
+        assert panel.play_sound_choice(
+            "Confirm sound", tk.StringVar(value="auto"), image=0) is True
+        assert played[-1] == confirm      # image 0 falls back to the menu's
+    finally:
+        root.destroy()
+
+
+# ---- the menu's heading (C FB, PAD-135) --------------------------------------
+def test_the_heading_rides_every_command_line_and_the_preview_conf(tmp_path):
+    """PAD-135, about SELECT GAME CODE: "Can there be an option to change this
+    text?"  The form starts as what the menu already says, --heading is always
+    spelled out (so clearing it CLEARS it rather than leaving the card's), and
+    the field is refused where it is typed rather than half-written."""
+    form = _form(tmp_path, 2)
+    assert form.heading == "SELECT GAME CODE" == multiboot_tab.DEF_HEADING
+    for argv in (build_args(form), inject_args(form, form.out),
+                 multiboot_tab.update_args(form, form.out)):
+        assert argv[argv.index("--heading") + 1] == "SELECT GAME CODE"
+    form.heading = "THE BEATLES JUKEBOX"
+    assert multiboot_tab.heading_args(form) == ["--heading",
+                                                "THE BEATLES JUKEBOX"]
+    assert "heading=THE BEATLES JUKEBOX" in write_preview_conf(form)
+    # the frame depends on it: a new heading is a new picture
+    before = preview_fingerprint(form)
+    form.heading = ""
+    assert preview_fingerprint(form) != before
+    # AN EMPTY BOX IS AN ANSWER: the flag still goes, with nothing after it
+    assert build_args(form)[build_args(form).index("--heading") + 1] == ""
+    assert "heading=\n" in write_preview_conf(form)
+    assert validate_form(form, sources=False) == []
+    # ...and the two things the selector's own field cannot take
+    form.heading = "two\nlines"
+    assert any("one line" in e for e in validate_form(form, sources=False))
+    form.heading = "x" * 200
+    assert any("too long" in e for e in validate_form(form, sources=False))
+
+
+def test_form_from_inspect_carries_the_heading(monkeypatch, tmp_path):
+    """null in the report is a card that never set one, and what it draws IS
+    the selector's line - so that is what the field shows.  An empty string is
+    a card that asked for a bare top, and must not read as "never set"."""
+    _win(monkeypatch)
+    info = _rich_report(tmp_path)
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    info["heading"] = None
+    assert form_from_inspect(info, card, "")[0].heading == "SELECT GAME CODE"
+    info["heading"] = "THE BEATLES JUKEBOX"
+    assert form_from_inspect(info, card, "")[0].heading == "THE BEATLES JUKEBOX"
+    info["heading"] = ""
+    assert form_from_inspect(info, card, "")[0].heading == ""
+
+
+def test_the_heading_is_saved_restored_and_edited_in_menu_settings(tmp_path):
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        assert panel._heading_var.get() == "SELECT GAME CODE"
+        dlg = panel.open_menu_settings()
+        assert dlg is not None
+        panel._heading_var.set("THE BEATLES JUKEBOX")
+        assert panel.form().heading == "THE BEATLES JUKEBOX"
+        assert 'heading "THE BEATLES JUKEBOX"' not in menu_summary(
+            panel.form())         # quoted, no label
+        assert menu_summary(panel.form()).endswith('"THE BEATLES JUKEBOX"')
+        # Cancel puts it back with the rest of the menu
+        panel._menu_settings_cancel()
+        assert panel._heading_var.get() == "SELECT GAME CODE"
+        panel._heading_var.set("")
+        doc = panel.state()
+        assert doc["menu"]["heading"] == ""
+    finally:
+        root.destroy()
+    root, panel = _panel()
+    try:
+        assert panel.restore_state(doc) is True
+        assert panel._heading_var.get() == "" and panel.form().heading == ""
+        panel.new_card()                      # ...and a new card is the default
+        assert panel._heading_var.get() == "SELECT GAME CODE"
+    finally:
+        root.destroy()
+
+
+def test_a_loaded_cards_heading_change_is_a_menu_change(tmp_path):
+    """It is words in images.conf, so an inject writes it in seconds - the
+    card is never rebuilt for a retitled menu."""
+    root, panel, card, _media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        assert "no changes yet" in panel.check_detail("card")
+        panel._heading_var.set("THE BEATLES JUKEBOX")
+        assert "1 menu change (heading)" in panel.check_detail("card")
+        assert panel.apply_to_card() is True
+        inject = [c for c in calls[0] if c[0] == "inject"][0][1]
+        words = _tool_words(inject)
+        assert words[words.index("--heading") + 1] == "THE BEATLES JUKEBOX"
+    finally:
+        root.destroy()
+
+
 def test_a_loaded_cards_theme_change_is_a_menu_change(tmp_path):
     """On a loaded card a new theme is one menu change - an inject, not a
     rebuild - and the inject carries it."""
@@ -7514,10 +7956,27 @@ def test_a_size_check_that_failed_says_so_in_the_strip(tmp_path):
         assert panel.size_view() is None
         assert panel._size_need.cget("text") == panel.SIZE_UNKNOWN
         assert "size check failed" in panel._size_detail.cget("text")
+        # ...AND WHAT THE TOOL SAID, not "see the Log" (PAD-135): the reason is
+        # the only part anybody can act on
+        assert "no logical chain" in panel._size_detail.cget("text")
+        assert "see the Log" not in panel._size_detail.cget("text")
         # ...and a new answer clears it
         panel._plan_step("plan", 0, PLAN_TEXT)
         assert panel._size_need.cget("text") == "16 GB"
         assert "failed" not in panel._size_detail.cget("text")
+        # a failure the tool gave no sentence for still says something
+        panel._plan_step("plan", 2, "plan: exit 2")
+        assert "see the Log" in panel._size_detail.cget("text")
+        # A LONG REFUSAL IS CUT TO THE ONE LINE and hangs whole on the
+        # tooltip: the words share the row with the bar, and the bar is what
+        # would otherwise be pushed off the tab
+        long_why = ("[card] error: the images' unique content needs 6.42 GB "
+                    "of p3 and the 8G class leaves 6.86 GB after the deltas' "
+                    "work partition - this content wants a 16G card")
+        panel._plan_step("plan", 2, long_why)
+        shown = panel._size_detail.cget("text")
+        assert len(shown) <= panel.SIZE_DETAIL_MAX and shown.endswith("…")
+        assert "wants a 16G card" in panel._size_detail_tip.text
     finally:
         root.destroy()
 
@@ -8028,6 +8487,148 @@ def test_parse_plan_reads_the_shared_row_and_the_strip_says_so():
     info["shared"] = None
     v2 = card_size_view(info)
     assert v2["detail"] == "4.00 GB of games, 5.00 GB free for updates." and v2["saved"] == 0
+
+
+#: The report's own card (C FB, PAD-137): 10.83 GB of games and 6.21 GB of
+#: room for updates, which together want a 32 GB card the games alone would
+#: not.  Whole sectors, and the rows plus the room plus the overhead add up
+#: to the total, the way the tool's own arithmetic does.
+PLAN_ROOMY = (
+    "image-size 0 /dev/mmcblk0p3 1600000000 Abbey.raw\n"
+    "image-size 1 /dev/mmcblk0p7:img1 4600000000 Pepper.raw\n"
+    "image-size 2 /dev/mmcblk0p7:img2 4630000128 Revolver.raw\n"
+    "image-size free 6210000384 room for updates in the games partitions\n"
+    "image-size overhead 609999872 boot + rootfs + data + dump + metadata\n"
+    "image: 34472657 sectors = 17650000384 bytes (17.65 GB)\n"
+    "  fits Stern 8G  image size 7861174272: NO (spare -9788826112)\n"
+    "  fits Stern 16G image size 15494807552: NO (spare -2155192832)\n"
+    "  fits Stern 32G image size 30359420928: YES (spare 12709420544)\n")
+
+
+def test_the_strip_says_why_the_card_is_bigger_than_the_games():
+    """C FB, PAD-137: "I was wondering why it suggested a 32gb card for my
+    images when it looks like it does not break 16gb".  Both numbers were
+    already on the strip; what was missing was the sum that joins them."""
+    view = card_size_view(parse_plan(PLAN_ROOMY))
+    assert view["head"] == "32 GB" and not view["over"]
+    assert view["detail"] == (
+        "10.83 GB of games + 6.21 GB free for updates = 17.65 GB, "
+        "so 32 GB and not 16 GB.")
+    # ...and the line still fits the strip, which gives the BAR up before
+    # it gives up the words
+    assert len(view["detail"]) <= multiboot_tab.MultibootPanel.SIZE_DETAIL_MAX
+    # the paragraph behind it names the smaller card's real size, the build's
+    # own, and the one tick that does something about it
+    assert "A 16 GB card holds 15.49 GB and this build is 17.65 GB." \
+        in view["why"]
+    assert "Compact build" in view["why"]
+    # the card sizes are the PLAN's, never a table in the view: drop the
+    # 16G row and there is no smaller card to name
+    info = parse_plan(PLAN_ROOMY)
+    del info["fits"]["16G"]
+    assert multiboot_tab.card_without_room(
+        info, info["bytes"], info["free"], "32 GB") is None
+
+
+def test_the_strip_explains_nothing_when_the_games_want_that_card_anyway():
+    """The clause is only for a card the ROOM bought.  A list whose games
+    need the card on their own gets the two numbers and no lecture."""
+    text = PLAN_ROOMY.replace("image-size 1 /dev/mmcblk0p7:img1 4600000000",
+                              "image-size 1 /dev/mmcblk0p7:img1 16000000000")
+    text = text.replace("image: 34472657 sectors = 17650000384 bytes",
+                        "image: 56736329 sectors = 29050000384 bytes")
+    text = text.replace("32G image size 30359420928: YES (spare 12709420544)",
+                        "32G image size 30359420928: YES (spare 1309420544)")
+    text = text.replace("16G image size 15494807552: NO (spare -2155192832)",
+                        "16G image size 15494807552: NO (spare -13555192832)")
+    view = card_size_view(parse_plan(text))
+    assert view["head"] == "32 GB"
+    assert view["detail"] == "22.23 GB of games, 6.21 GB free for updates."
+    assert view["why"] == ""
+    # ...and neither does the compact layout's own sentence grow one
+    assert card_size_view(parse_plan(PLAN_ROOMY.replace(
+        "image-size free", "image-size shared 900000000 stored once\n"
+        "image-size free")))["why"] == ""
+
+
+def test_the_two_confirm_boxes_name_each_other():
+    """C FB, PAD-137: "the confirm sound is both in the image properties and
+    the overall properties which seems to not be in synch".  One setting
+    falling back to the other - so each box says what the other is doing."""
+    rows = [ImageRow("a.raw", title="Abbey Road"),
+            ImageRow("b.raw", title="Sgt. Pepper", confirm="synth"),
+            ImageRow("c.raw", title="Revolver")]
+    assert multiboot_tab.own_confirm_note(rows) == (
+        "1 of the 3 images has a confirm sound of its own - Sgt. Pepper - "
+        "and does not use this one.")
+    rows[2].confirm = r"D:\wav\ComeTogether.wav"
+    assert multiboot_tab.own_confirm_note(rows) == (
+        "2 of the 3 images have a confirm sound of their own - Sgt. Pepper "
+        "and Revolver - and do not use this one.")
+    # a row that inherits says so with '' or the word, and a name a LOAD read
+    # off the card is the image's own
+    assert multiboot_tab.own_confirm_note(
+        [ImageRow("a.raw", confirm=""), ImageRow("b.raw", confirm="menu")]) == ""
+    assert multiboot_tab.has_own_confirm(
+        ImageRow("a.raw", confirm="confirm2.wav", confirm_on_card=True))
+    # ...and a long list does not read out every name
+    many = [ImageRow("%d.raw" % i, title="T%d" % i, confirm="synth")
+            for i in range(5)]
+    assert "T0, T1, T2 and 2 more" in multiboot_tab.own_confirm_note(many)
+    # an untitled row is named the way the list names it
+    assert multiboot_tab.plain_title(ImageRow(""), 2) == "image 2"
+    assert multiboot_tab.plain_title(
+        ImageRow("D:/x/turtles_pro-1_59_0.Release.8G.sdcard.raw")) == \
+        "turtles_pro-1_59_0"
+    # and the other direction: what the image dialog's 'menu' resolves to
+    assert multiboot_tab.menu_confirm_now("auto") == "auto"
+    assert multiboot_tab.menu_confirm_now("") == "none"
+    assert multiboot_tab.menu_confirm_now(r"D:\wav\ComeTogether.wav") == \
+        "ComeTogether.wav"
+
+
+def test_both_sound_panels_carry_the_other_ones_answer(tmp_path):
+    """The two sentences above, in the two dialogs that need them."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._confirm_var.set("auto")
+        panel._rows[1].title = "Sgt. Pepper"
+        panel._rows[1].confirm = "synth"
+        dlg = panel.edit_image(0)
+        root.update()
+        notes = " ".join(_label_texts(dlg.body))
+        assert "menu = whatever the whole menu uses, which is auto at the " \
+            "moment." in notes
+        dlg.cancel()
+        root.update()
+        menu = panel.open_menu_settings()
+        root.update()
+        notes = " ".join(_label_texts(menu.body))
+        assert "1 of the 2 images has a confirm sound of its own - " \
+            "Sgt. Pepper - and does not use this one." in notes
+        menu.cancel()
+        root.update()
+        # ...and with nobody overriding it, Menu settings says nothing
+        panel._rows[1].confirm = ""
+        menu = panel.open_menu_settings()
+        root.update()
+        assert "confirm sound of its own" not in " ".join(
+            _label_texts(menu.body))
+        menu.cancel()
+    finally:
+        root.destroy()
+
+
+def _label_texts(widget):
+    """Every label's text under *widget*, in creation order."""
+    out = []
+    for w in widget.winfo_children():
+        if w.winfo_class() in ("TLabel", "Label"):
+            out.append(str(w.cget("text")))
+        out.extend(_label_texts(w))
+    return out
 
 
 def test_form_from_inspect_reads_the_store_layout_as_the_compact_tick(monkeypatch, tmp_path):

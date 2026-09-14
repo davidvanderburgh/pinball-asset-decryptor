@@ -5291,9 +5291,150 @@ def test_clear_replacements_button_clears_the_whole_tab(
     assert w._image_assignments == {}
     assert str(w._clear_all_btns["image"].cget("state")) == "disabled"
     assert asked and "all 3 replacements" in asked[0]
-    # The promise the confirm makes, in the confirm's own words.
+    # The promise the confirm makes, in the confirm's own words: nothing had
+    # been applied yet, so nothing in the folder changes.
     assert "only drops the picks" in asked[0]
-    assert "Revert all changes" in asked[0]
+    assert "none of your own files are touched" in asked[0]
+    assert "applied to the project folder" not in asked[0]
+
+
+def _apply_image_pick(assets, rel, mine=b"\x89PNG-mine"):
+    """What a build, or the emulator's Start, does to a picked slot: snapshot
+    the extract's own file under .orig, then write the replacement over it."""
+    import os as _os
+    from pinball_decryptor.core import staged_originals
+    assert staged_originals.snapshot(assets, rel, None)
+    with open(_os.path.join(assets, *rel.split("/")), "wb") as f:
+        f.write(mine)
+
+
+def test_clearing_a_pick_start_already_applied_puts_the_cards_file_back(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """PAD-142, a field report: "I HAVE cleared all replacements but note that the
+    replacement is still showing in the list."  Start with the overlay box
+    ticked had applied his pick into the project folder, and a clear dropped
+    only the pick: the slot kept his bytes, stayed "changed on disk", and the
+    next emulator run still showed it.  A clear takes it back out."""
+    import os as _os
+    from pinball_decryptor.core import history_log, staged_originals
+    from pinball_decryptor.gui import main_window as mw
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    assets, rels = _seed_image_picks(w, tmp_path)
+    rel = rels[0]
+    _apply_image_pick(assets, rel)
+    w._image_changed_on_disk.add(rel)
+    w._refresh_image_list()
+    monkeypatch.setattr(
+        mw.messagebox, "askyesno",
+        lambda *a, **k: pytest.fail("a single-row clear must not ask"))
+
+    w._image_tree.selection_set(rel)
+    w._image_clear_selected()
+
+    with open(_os.path.join(assets, *rel.split("/")), "rb") as f:
+        assert f.read() == b"\x89PNG-fake"          # the extract's own bytes
+    assert staged_originals.snapshot_path(assets, rel) is None
+    assert rel not in w._image_assignments
+    assert rel not in w._image_changed_on_disk
+    assert w._image_tree.item(rel, "values")[-1] == "Choose…"
+    assert "put the card's original file back" in w._log_text.get(
+        "1.0", "end-1c")
+    with open(history_log.path_for(assets), encoding="utf-8") as f:
+        assert "put back to the extract's original" in f.read()
+
+
+def test_a_slot_left_applied_after_its_pick_went_can_still_be_cleared(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """His folder as v0.212.3 left it: the pick already cleared, the slot
+    still holding his image under its remembered name.  The button must not
+    be greyed out over that, and its confirm has to say that Yes changes a
+    file in the project folder."""
+    import os as _os
+    from pinball_decryptor.core import staged_changes
+    from pinball_decryptor.gui import main_window as mw
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    assets, rels = _seed_image_picks(w, tmp_path)
+    applied = rels[1]
+    _apply_image_pick(assets, applied)
+    data = staged_changes.load(assets)
+    data["replacement_names"] = {applied: "Godzilla_Player1_Gunmetal.png"}
+    staged_changes.save(assets, data)
+    for rel in rels:
+        del w._image_assignments[rel]
+    w._image_changed_on_disk.add(applied)
+    w._refresh_image_list()
+    assert str(w._clear_all_btns["image"].cget("state")) == "normal"
+
+    asked = []
+    monkeypatch.setattr(mw.messagebox, "askyesno",
+                        lambda _t, msg, **k: asked.append(msg) or True)
+    w._clear_all_btns["image"].invoke()
+    app.root.update()
+
+    assert asked and "Clear all 1 replacement on this tab?" in asked[0]
+    assert "1 of these is already applied to the project folder" in asked[0]
+    assert "back to the card's original file" in asked[0]
+    with open(_os.path.join(assets, *applied.split("/")), "rb") as f:
+        assert f.read() == b"\x89PNG-fake"
+    assert applied not in (
+        staged_changes.load(assets).get("replacement_names") or {})
+    assert str(w._clear_all_btns["image"].cget("state")) == "disabled"
+
+
+def test_every_clear_menu_counts_a_slot_already_applied(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """An applied slot with no pick is a replacement to the selection menu,
+    the row menu and a scene group's menu alike, and the group's clear puts
+    its file back through the same path."""
+    import os as _os
+    import tkinter as tk
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    assets, rels = _seed_image_picks(w, tmp_path)
+    unpicked = "images/scene_textures/radimg_Char_Select_8x8_00000002.png"
+    _apply_image_pick(assets, unpicked)
+
+    def _labels(menu):
+        return [str(menu.entrycget(i, "label"))
+                for i in range(menu.index("end") + 1)
+                if str(menu.type(i)) != "separator"]
+
+    menu = tk.Menu(w._image_tree, tearoff=0)
+    w._add_multi_row_clear(menu, "image", tuple(rels) + (unpicked,))
+    assert "Clear 4 replacements in this selection" in _labels(menu)
+
+    shown = []
+    monkeypatch.setattr(tk.Menu, "tk_popup",
+                        lambda self, *a, **k: shown.append(self))
+    monkeypatch.setattr(tk.Menu, "grab_release", lambda self: None)
+
+    class _Ev:
+        x = y = 5
+        x_root = y_root = 200
+
+    tree = w._image_tree
+    monkeypatch.setattr(tree, "identify_row", lambda _y: unpicked)
+    w._image_on_tree_right(_Ev())
+    assert "Clear replacement" in _labels(shown[-1])
+
+    w.image_group_by_scene_var.set(True)
+    grp = [t for t in tree.get_children()
+           if "Char_Select" in tree.item(t, "text")][0]
+    kids = tuple(tree.get_children(grp))
+    assert unpicked in kids
+    monkeypatch.setattr(tree, "identify_row", lambda _y: grp)
+    tree.selection_set(())
+    w._image_on_tree_right(_Ev())
+    assert "Clear replacements in group" in _labels(shown[-1])
+    w._image_group_apply(grp, kids, None)
+    with open(_os.path.join(assets, *unpicked.split("/")), "rb") as f:
+        assert f.read() == b"\x89PNG-fake"
+    assert not any(k in w._image_assignments for k in kids)
 
 
 def test_declining_the_confirm_keeps_every_pick(

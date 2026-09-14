@@ -34,7 +34,10 @@ TWO KINDS OF TEST, both without a card, a rootfs or WSL:
 import io
 import os
 import re
+import shlex
+import shutil
 import struct
+import subprocess
 import sys
 
 import pytest
@@ -700,8 +703,26 @@ def test_list_games_is_read_with_the_fifth_field_and_tokens_carry_the_subdir():
 def test_the_cards_sound_and_volume_keys_reach_the_emulator_conf_but_media_does_not():
     outer = _select_outer()
     assert ("grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|"
-            "machine_volume|mixer_volume)[[:space:]]*='") in outer
+            "machine_volume|mixer_volume|heading|theme|color_[a-z_]+)[[:space:]]*='") in outer
     assert "media=" not in outer.replace("image=", ""), "media= is the card's path; the rig passes --media"
+
+
+def test_the_cards_heading_and_colours_reach_the_emulator_conf():
+    """PAD-141: "The title did not update on the build and still says 'select
+    game code' when run in the emulator."  The Multi-boot tab had written
+    heading= onto the card; this conf carried only the sound and volume keys,
+    so the emulator drew the selector's own heading in the default theme.  The
+    line's OWN pattern is applied to a card's keys here, so a key that is named
+    but can never match fails as surely as one that is missing."""
+    outer = _select_outer()
+    line = next(ln for ln in outer.splitlines() if '"$SEL_CARDCONF" | grep -E' in ln)
+    pat = re.search(r"grep -E '([^']+)'", line).group(1).replace("[[:space:]]", r"\s")
+    carried = ["heading=PICK YOUR BEATLES", "heading=", "  theme = neon",
+               "color_card_hl=263041", "sound_move=move.wav", "volume=machine"]
+    # paths on the card's own rootfs, and the lines the script writes itself
+    kept_back = ["font=/usr/local/codeselect/font.ttf", "media=/usr/local/codeselect/media",
+                 "image=/dev/mmcblk0p3|A|a", "default=1", "timeout=20", "headingx=1"]
+    assert [k for k in carried + kept_back if re.search(pat, k)] == carried
 
 
 def test_the_cards_conf_is_read_the_way_conf_c_reads_it():
@@ -1288,6 +1309,75 @@ def test_the_refusal_the_tab_shows_names_the_missing_tool():
     # ...and the old sentence is still there for a build that DID start and
     # failed, where "see the lines above" is the accurate answer.
     assert "see the lines above" in body
+
+
+def test_a_blocked_install_names_the_directory_and_its_owner():
+    """★ PAD-140.  A guest filesystem the app's emulator Start unpacked AS
+    ROOT has a root-owned /usr/local, the user's `make install` cannot create
+    codeselect/ in it, and coreutils reports the failed mkdir as the stat
+    after it:
+
+        [build]   install: cannot change permissions of
+                  '/home/home/spike2root/usr/local/codeselect': No such file or directory
+        [selector] error: the boot menu program could not be built - see the lines above.
+
+    One question (padpath.sh's pad_select_blocker), asked by buildselect.sh
+    before anything is staged and by the refusal the tab's status bar shows.
+    """
+    pp = _read("padpath.sh")
+    assert "pad_select_blocker() {" in pp
+    code = _code(_read("buildselect.sh"))
+    assert "pad_select_blocker" in code
+    assert code.index("pad_select_blocker") < code.index("pad_stage"), (
+        "asked before a source is staged")
+    ask = code[code.index("pad_select_blocker"):code.index("pad_stage")]
+    assert "exit 1" in ask and "stat -c %U" in ask, (
+        "the refusal must stop the build and name the owner")
+    text = _read("ensureselect.sh")
+    body = text[text.index("if ! pad_ensure_select"):]
+    assert (body.index("_pad_select_gap") < body.index("pad_select_blocker")
+            < body.index("see the lines above")), (
+        "a missing tool first, then who owns the directory, then the rest")
+    # ...and a root run hands back the one file ensureselect.sh installs itself
+    assert 'chown --reference="$SEL_DIR" "$SEL_DIR/materialize.py"' in text
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not shutil.which("bash")
+                    or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="needs POSIX permission bits and a non-root user")
+def test_pad_select_blocker_answers_for_each_shape(tmp_path):
+    """The helper itself, lifted out of padpath.sh (sourcing all of it asks
+    WSL questions) and run against the shapes that matter."""
+    pp = _read("padpath.sh")
+    fn = pp[pp.index("pad_select_blocker() {"):]
+    fn = fn[:fn.index("\n}") + 2]
+    root = tmp_path / "rootfs"
+    local = root / "usr" / "local"
+    local.mkdir(parents=True)
+
+    def ask():
+        script = ('%s\nPAD_SELECT_BIN=%s/usr/local/codeselect/codeselect\n'
+                  'pad_select_blocker; echo "rc=$?"'
+                  % (fn, shlex.quote(str(root))))
+        out = subprocess.run(["bash", "-c", script], stdout=subprocess.PIPE,
+                             universal_newlines=True).stdout
+        return out.strip().splitlines()
+
+    # a writable /usr/local with no codeselect in it yet: nothing in the way
+    assert ask() == ["rc=1"]
+    # root's /usr/local, as far as this user can tell: THAT is the answer
+    local.chmod(0o555)
+    try:
+        assert ask() == [str(local), "rc=0"]
+    finally:
+        local.chmod(0o755)
+    # an installed tree of the user's own
+    (local / "codeselect").mkdir()
+    assert ask() == ["rc=1"]
+    # a link to nowhere where the directory should be
+    (local / "codeselect").rmdir()
+    os.symlink(str(tmp_path / "gone"), str(local / "codeselect"))
+    assert ask() == [str(local / "codeselect"), "rc=0"]
 
 
 def _selector_tree():

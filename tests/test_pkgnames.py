@@ -193,4 +193,7 @@ def test_the_binfmt_advice_knows_archs_file_and_package():
     # ...and Debian's own answers are still there, ahead of it.
     assert fn.index("qemu-arm.conf") < fn.index("qemu-arm-static.conf")
     assert "update-binfmts --import qemu-arm" in fn
-    assert fn.rstrip().endswith('echo "sudo apt install qemu-user-static"\n    fi')
+    # The apt answer is last, and asks apt what the package is called: on
+    # Ubuntu 26.04 qemu-user-static is a virtual name apt refuses (PAD-139).
+    assert fn.rstrip().endswith(
+        'echo "sudo apt install $(pad_apt_name qemu-user-static)"\n    fi')

@@ -66,10 +66,20 @@ that fails, a staged file that ends up the wrong size — each of them falls bac
 to staging the set whole, because a stage that is part one build and part
 another is a run that plays a sound the user has already taken back.
 
-The set names the card it was built from. A file in it that the booted card
-does not have **fails the run** rather than being skipped: it means the set was
-built against a different card, and half of one build over half of another is
-not a card anybody should be listening to.
+The set names the card it was built from. A file of the booted title that the
+card does not have **fails the run** rather than being skipped: it means the set
+was built against a different card, and half of one build over half of another
+is not a card anybody should be listening to.
+
+**A file that sits beside the title is the exception**, and on a card run that
+is every set's `spk/index/<title>.sidx` (PAD-133). This rig binds the title's
+DIRECTORY into `games/`, not the whole games partition, so that record has
+nowhere to land — and it is in every set, because the SD-validation refresh and
+the validator bypass run on every write whatever was edited. It is reported and
+skipped: nothing here reads it, the machine's own validator being the only
+thing that ever does, and the same set's firmware patch is what turns that off.
+A set that turns out to be nothing BUT those still fails the run, because that
+would be the stock card running while the app says it is testing your edits.
 
 ## Boot selector (item 90)
 

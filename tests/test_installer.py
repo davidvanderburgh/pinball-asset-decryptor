@@ -1161,6 +1161,56 @@ def test_wsl_probe_does_not_traverse_the_windows_path():
         f"PATH too:\n{body}")
 
 
+def test_the_windows_qemu_probe_accepts_ubuntu_2604s_interpreter():
+    """★ PAD-139.  Ubuntu 26.04 ships the static interpreter as plain
+    /usr/bin/qemu-arm (qemu-user) and has no qemu-arm-static at all, so a
+    probe for that one name called a repaired machine MISSING.  Static
+    matters: 24.04's qemu-user ships a DYNAMIC qemu-arm the rig cannot use.
+
+    No `$` in it, because `wsl -- bash -c "..."` goes through the distro's
+    default shell first and a variable would expand to nothing there."""
+    lines = PS1.read_text(encoding="utf-8").splitlines()
+    i = next(n for n, ln in enumerate(lines) if 'pkg="qemu-user-static"' in ln)
+    entry = lines[i] + " " + lines[i + 1]
+    probe = entry.split('probeCmd="', 1)[1].rsplit('"', 1)[0]
+    assert probe.startswith("command -v qemu-arm-static || "), probe
+    assert "test -x /usr/bin/qemu-arm" in probe, probe
+    assert "! ldd /usr/bin/qemu-arm 2>&1 | grep -q '=>'" in probe, probe
+    assert "$" not in probe, probe
+
+
+@pytest.mark.skipif(not HAS_BASH, reason="no working bash")
+def test_linux_installer_counts_a_provided_package_as_installed():
+    """★ PAD-139.  `dpkg -s qemu-user-static` fails on Ubuntu 26.04 however
+    well the emulator is installed - qemu-user-binfmt PROVIDES that name - so
+    the summary said MISSING under a working install.  An installed package
+    that provides the name is how apt itself counts it as met."""
+    src = (INSTALLER / "install_prerequisites_linux.sh").read_text(
+        encoding="utf-8")
+    start = src.index("pkg_installed() {")
+    body = src[start:src.index("\n}\n", start) + 3]
+    harness = r"""
+tmp=$(mktemp -d) || exit 1
+printf '#!/bin/sh\nexit 1\n' > "$tmp/dpkg"
+printf '#!/bin/sh\nprintf "ii |qemu-user-static\\n"\nprintf "ii |\\n"\nprintf "rc |ffmpeg\\n"\nprintf "ii |qemu-user-binfmt (= 1:10.2.1), qemu-user-static-binfmt\\n"\n' > "$tmp/dpkg-query"
+chmod +x "$tmp/dpkg" "$tmp/dpkg-query"
+PATH="$tmp:$PATH"
+PM=apt
+for p in qemu-user-static ffmpeg qemu-user-static-binfmt qemu-user-binfmt qemu-user; do
+    if pkg_installed "$p"; then echo "$p=yes"; else echo "$p=no"; fi
+done
+rm -rf "$tmp"
+"""
+    out = subprocess.run(["bash", "-s"], input=(body + harness).encode("utf-8"),
+                         capture_output=True, timeout=60)
+    said = out.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace") + said
+    got = dict(ln.split("=", 1) for ln in said.splitlines() if "=" in ln)
+    assert got == {"qemu-user-static": "yes", "ffmpeg": "no",
+                   "qemu-user-static-binfmt": "yes",
+                   "qemu-user-binfmt": "yes", "qemu-user": "no"}, said
+
+
 def test_both_installers_offer_every_emulator_package_the_tab_names():
     """Regression guard — the native compiler was on nobody's list.
 

@@ -6921,10 +6921,30 @@ These have each been violated at least once and each cost a run or a window:
       instead: efi.img, bootx64.efi, pad_install.sh, both cfgs and a root B
       piece identical.)
       Memory: reference_jjp_stick_joliet_and_bootcode.
-      **Resume (David, at the machine):** the remade stick and the GNR key in
-      the cabinet (GNR: the USB extension cable at the front, per JJP's PDF),
-      power on; the installer runs by itself (it wipes settings and scores);
-      first boot with the coin door open; then the checks above.
+      **On the machine (David, 2026-09-14): the install WORKED and the menu
+      came up.** The first image chosen after the install did not load and
+      the machine came back to the menu; the second choice booted as
+      expected. **Diagnosis (JJP's own scripts, read from root A with
+      debugfs; no machine log read):** this is the game's FIRST-RUN
+      maintenance reboot, not a multi-boot fault. A fresh install carries the
+      golden disk's hostname; the game's first start sets the machine's own
+      and exits 68, and `rungame.sh` answers 68 with `reboot` ("maintenance
+      reboot (hostname set)" - the same exit 68 every fresh emulator jail
+      shows once, README "Exit 68 is normal on a first run"). Our hook line
+      sits BEFORE rungame.sh's `while true`, so it runs once per rungame.sh
+      start: a game restart inside the loop (43/44/254/1) never shows the
+      menu again, but a REBOOT (68, 69, 42) or a jjp.service restart does. A
+      stock install reboots the same way on first boot; without a menu it
+      just looks like a longer boot. Expected once per install; again only
+      after a JJP maintenance reboot (69) or a runonce.sh exec-bit repair.
+      **Not changed** (David's call): the hook could carry a chosen image
+      across a game-requested reboot - a guarded line before `reboot` in
+      rungame.sh's 42/68/69 cases writing a one-shot marker to perm that the
+      next boot's hook consumes, booting the same image without the menu -
+      at the cost of a second rungame.sh edit, a rebuilt ISO, a remade stick
+      and a reinstall (which wipes settings and scores again).
+      **Remaining for acceptance:** both images played, and one power-cycle
+      into each (David to confirm).
 
 ## Reference material that is NOT in this repo
 

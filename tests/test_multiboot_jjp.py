@@ -9,6 +9,7 @@ seen to leave the old argv alone.
 """
 import json
 import os
+import sys
 
 import pytest
 
@@ -167,11 +168,13 @@ def test_build_commands_run_the_writing_steps_as_root():
     for label in ("selector", "prepare", "build", "verify"):
         assert callable(argv[label]), label
     assert not callable(argv["plan"]) and argv["plan"][-1].startswith("cd /repo && python3 ")
-    # the Stern run keeps its shape: the selector and the plan as the user,
-    # the build as root
+    # the Stern run keeps MAIN's shape: the plan and verify as the user, the
+    # build as root, and the selector as root on Windows (PAD-140, main's
+    # test_multiboot_tab.py pins it) - a user step anywhere else
     stern = MultibootForm(images=[ImageRow(path="D:/a.raw"), ImageRow(path="D:/b.raw")], out="D:/o.raw")
     scmds = dict(mt.build_commands(stern, cwd="/repo"))
-    assert not callable(scmds["selector"]) and not callable(scmds["plan"]) and callable(scmds["build"])
+    assert callable(scmds["selector"]) == (sys.platform == "win32")
+    assert not callable(scmds["plan"]) and callable(scmds["build"])
     assert not callable(scmds["verify"])
 
 

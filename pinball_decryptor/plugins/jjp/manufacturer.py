@@ -460,5 +460,8 @@ class JJPManufacturer(Manufacturer):
                 "FAT32/MBR stick (macOS/Linux). Do NOT raw-write the ISO "
                 "with balenaEtcher or dd -- the machine cannot read a "
                 "raw-imaged stick and shows 'Failed to mount USB stick'.\n"
-                "3. Plug the stick into the cabinet's front USB port and "
-                "turn the game on; the installer runs by itself.")
+                "3. Plug the stick into a USB port on the computer in the "
+                "backbox and turn the game on; the installer runs by itself. "
+                "(The cabinet's front USB slot works too, but on some machines "
+                "it is 30x slower: a minute on the Restore menu, hours to "
+                "install.)")

@@ -7197,43 +7197,33 @@ These have each been violated at least once and each cost a run or a window:
       the tab, the builder and the media step, several rig runs to prove
       them, and the final judgement needs the machine.
 
-- [ ] **121. A JJP install stick made by the app froze on the machine at syslinux's
+- [x] **121. A JJP install stick made by the app froze on the machine at syslinux's
       "Automatic boot in 1 second...": the stick maker put every boot file behind
-      13 GB of image pieces.** `S1 D3` *(Found 2026-09-14 on David's GNR with item 120's stick; part of
-      the JJP multi-boot family - its `/finish` should wait on this.)* The stick sat 2+
-      minutes on the Restore menu; the item 119 stick with the same boot bytes left it in
-      a few seconds. **Established:** all 639 stick files equal the ISO's except
-      `syslinux/ldlinux.c32`; `usbstick.make_bootable_windows` runs the ISO's
-      `utils/win64/syslinux64.exe`, which embeds an upstream SYSLINUX 6.03 built with
-      Red Hat GCC 4.8.3, while the ISO's `ldlinux.c32`/`vesamenu.c32`/`libcom32.c32`/
-      `libutil.c32` are Debian GCC 6.3.0 builds - a mixed loader; the ISO's
-      `utils/linux/x64/extlinux` (and `syslinux`, which needs mtools) carry the matching
-      build. A legacy-BIOS VM (qemu, the real stick over usbipd, read-only snapshot)
-      boots BOTH the mixed and the matched stick to JJP's installer screen in 28-34 s at
-      2/4/8 GB on xHCI and EHCI, so the VM cannot reproduce the machine's hang. **Ruled
-      out:** the build mix - David's stick re-done with the matched build (`extlinux
-      --install`, Clonezilla's `mbr.bin`; backups in `C:\tmp\jjp120\bootcode_backup`)
-      froze in the same place; and `ldlinux.sys` placement - it sat at 13.28 GB (win64)
-      and at 2.1 GB (extlinux) and both froze. The VM's frames show what the frozen
-      screen IS: "Automatic boot in 1 second..." at 10 s, the kernel's black screen at
-      12 s, no "Loading" text between - so the machine stalls exactly while the loader
-      reads `live/vmlinuz` (15 MB) and `live/initrd.img` (63 MB) through the BIOS, and
-      those two sit at ~13.2 GB (LCN 0xc58c5 / 0xc4922, 16 KB clusters): the pipeline's
-      `sorted()` copy order puts every boot file behind 13 GB of `home/partimag` pieces,
-      a shape no stock JJP stick has. The maker now copies the boot files first
-      (`_copy_rank`/`_copy_order`: syslinux/, then vmlinuz + initrd, then EFI/boot/live,
-      then the rest; `tests/test_jjp_usbstick_copy_order.py`), and David's stick was
-      re-made that way (scratchpad `stickjob120b.py`, the same win64 boot code last
-      night's working stick booted with; every BIOS-read file in the first ~100 MB).
-      **Resume:** David boots the boot-files-first stick on the GNR. If it leaves the
-      menu at once: close, and add the placement check to the maker's post-copy checks.
-      If it still freezes, the stick's content and layout are exhausted: make a stick
-      from the STOCK GNR ISO (6.4 GB) - if that freezes too the machine side changed
-      (port, boot mode, firmware state), if it boots, diff what the 13 GB stick still
-      does differently (partition size, FAT size, cluster count). **Acceptance:** a stick
-      made by the app's own Build / make stick boots the GNR from the Restore menu to
-      JJP's installer with no stall. Scripts: [[reference_jjp_stick_syslinux_build_mismatch]]
-      (memory).
+      13 GB of image pieces.** `S1 D3` **DONE 2026-09-14 on `item/120` - machine-proven;
+      part of the JJP multi-boot family, released with its ONE `/finish`.** What closed it:
+      the boot-files-first stick (the maker's new copy order, `_copy_rank`/`_copy_order`,
+      with the same win64 boot code as before) left the Restore menu and reached JJP's
+      installer on David's GNR, and the restore ran at 30-50 MB/s from a backbox USB port.
+      What also came out: the cabinet's FRONT USB slot ran the same stick at 1.1 MB/s (USB
+      1.1 speed) - a minute on the Restore menu (the 78 MB kernel + initrd read), minutes
+      of black screen, an install that would take hours - so the app's six port
+      instructions (the stick maker's done message, the manufacturer's install help, the
+      pipeline's two log blocks x Windows/other) now name a backbox port, with the front
+      slot as the slow fallback. Confound, stated plainly: today's first boot of the new
+      stick was in the front slot, and which slot this morning's two freezes used is not
+      confirmed (last night's working boot was the backbox); the copy order stays because
+      the firmware's reads belong at the start of the volume regardless (Clonezilla sorts
+      its own ISO the same way, `syslinux/iso_sort.txt`), pinned by
+      `tests/test_jjp_usbstick_copy_order.py`. **Ruled out on the way:** the syslinux
+      build mix (a matched-build stick froze too) and `ldlinux.sys` placement (13.28 GB and
+      2.1 GB both froze); the boot-code installer rewrites `ldlinux.sys`/`.c32` as new
+      files, so they land after the copy (13.4 GB here) and that is fine. The VM harness
+      (qemu + usbipd; scratchpad `qemuboot120.sh`, `vmmatrix120.sh`, `bootcode120.sh`,
+      `stickjob120b.py`, `vmcheck120b.sh`) boots every variant in 28-34 s and never
+      reproduced the hang; a stick Windows has just written cannot be usbipd-attached
+      ("Device busy (exported)") until it is replugged. Memory:
+      [[reference_jjp_stick_syslinux_build_mismatch]]. Owed: nothing for 121; item 120's
+      GNR check follows this install.
 
 ## Reference material that is NOT in this repo
 

@@ -159,6 +159,90 @@ def is_running():
     return any(line.strip().lstrip("﻿") for line in text.splitlines())
 
 
+def _lxss_names():
+    """Every registered distro's name, casefolded, from ``HKCU\\...\\Lxss``;
+    None when the registry cannot be read.  Never runs wsl.exe."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    base = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
+    names = set()
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as k:
+            i = 0
+            while True:
+                try:
+                    sub = winreg.EnumKey(k, i)
+                except OSError:
+                    break
+                i += 1
+                try:
+                    with winreg.OpenKey(k, sub) as dk:
+                        names.add(
+                            winreg.QueryValueEx(dk, "DistributionName")[0]
+                            .casefold())
+                except OSError:
+                    continue
+    except OSError:
+        return None
+    return names
+
+
+def running_distros():
+    """Names of the WSL distros running right now; ``[]`` when none, off
+    Windows, or when wsl.exe cannot answer.
+
+    Same ``wsl -l --running -q`` as :func:`is_running`, so it never starts a
+    distro - which matters most to the in-app update's WSL restart, which must
+    not boot the VM it is about to shut down.
+
+    NOTHING RUNNING IS ANSWERED WITH A SENTENCE, and a localised one ("There
+    are no running distributions."), so the lines are kept only when they name
+    a distro the registry knows.  Without the registry, a failed exit is the
+    empty answer.
+    """
+    if not is_supported():
+        return []
+    try:
+        proc = subprocess.run(
+            ["wsl", "-l", "--running", "-q"],
+            capture_output=True, timeout=15, creationflags=_CREATE_FLAGS)
+    except Exception:
+        return []
+    names = [line.strip().lstrip("﻿")
+             for line in _decode_wsl(proc.stdout or b"").splitlines()]
+    names = [n for n in names if n]
+    known = _lxss_names()
+    if known is None:
+        return names if proc.returncode == 0 else []
+    return [n for n in names if n.casefold() in known]
+
+
+def default_distro_name():
+    """The machine's DEFAULT distro's name, or None.  Registry only.
+
+    Not :func:`_default_distro_vhdx`, which answers "the distro the app uses"
+    and has to ask the runtime whether ours is usable to do it - a wsl.exe
+    call, and one that starts PAD-Runtime.
+    """
+    if not is_supported():
+        return None
+    try:
+        import winreg
+    except ImportError:
+        return None
+    base = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as k:
+            guid = winreg.QueryValueEx(k, "DefaultDistribution")[0]
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            base + "\\" + guid) as k:
+            return winreg.QueryValueEx(k, "DistributionName")[0]
+    except OSError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Usage + scan (read-only)
 # ---------------------------------------------------------------------------

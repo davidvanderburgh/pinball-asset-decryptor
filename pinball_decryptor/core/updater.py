@@ -367,6 +367,66 @@ def launch_installer_windows(path, shell_execute=None):
     return int(ret) > 32
 
 
+def _wsl_shutdown():
+    """``wsl --shutdown``, bounded.  Its own function so the tests and the
+    proof shot can stand in for it without shutting down a real WSL."""
+    subprocess.run(["wsl.exe", "--shutdown"], capture_output=True, timeout=60,
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def restart_wsl_for_update(platform=None):
+    """Shut WSL down as the app closes for an in-app update.  Returns the
+    line for the log, or None when there was nothing to say.
+
+    PAD-150.  A tester had to press Restart WSL after EVERY in-app update: the
+    emulator's game window came up with no picture, the virtual playfield was
+    fine, and a restart (or a reboot) cured it without reopening PAD.  His log
+    from the first run after one settled what PAD-146 could not.
+    ``[watch] WSL session up 0h 2m`` put the VM's start BEFORE the updated app
+    opened, so it was the VM the old app had started and the update carried
+    over.  ``[padglhost] picture: FIRST at frame 81`` said the game was
+    drawing.  So the picture was lost between WSLg and the Windows desktop, on
+    a VM that outlived the app that started it, and restarting that VM is the
+    known cure.  Doing it here means the updated app starts a fresh one, which
+    is exactly what Restart WSL left him with.
+
+    WHAT IT WILL NOT SHUT DOWN.  ``wsl --shutdown`` stops every distro, so it
+    runs only when everything running is ours to stop: PAD-Runtime, or the
+    machine's default distro, which is where the app runs without the runtime.
+    Anything else running (Docker Desktop's distro, a second Linux) leaves WSL
+    alone and the line says how to do it by hand.  Nothing running means
+    nothing to restart, and no line.
+
+    The caller runs this after the emulators are taken down: they stop through
+    wsl.exe, and a stop after this would boot the VM again.
+    """
+    if (platform or sys.platform) != "win32":
+        return None
+    from . import runtime, wsl_disk
+    running = wsl_disk.running_distros()
+    if not running:
+        return None
+    ours = {runtime.DISTRO.casefold()}
+    default = wsl_disk.default_distro_name()
+    if default:
+        ours.add(default.casefold())
+    by_hand = ("If the emulator's game window has no picture after the "
+               "update, press Restart WSL… on the Emulate tab.")
+    others = [n for n in running if n.casefold() not in ours]
+    if others:
+        return ("Left WSL running for the update, because %s %s running in "
+                "it too. %s" % (", ".join(others),
+                                "is" if len(others) == 1 else "are", by_hand))
+    try:
+        _wsl_shutdown()
+    except Exception as exc:                            # noqa: BLE001
+        return "Couldn't shut WSL down for the update (%s). %s" % (exc,
+                                                                   by_hand)
+    return ("Shut WSL down for the update, so the emulator's game window "
+            "starts fresh afterwards. WSL starts again by itself when the "
+            "app needs it.")
+
+
 def macos_app_bundle(start=None):
     """The ``.app`` this process is running from, or None.
 

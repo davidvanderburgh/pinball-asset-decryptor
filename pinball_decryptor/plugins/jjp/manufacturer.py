@@ -408,12 +408,15 @@ class JJPManufacturer(Manufacturer):
             image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
 
     def make_install_to_disk_pipeline(self, image_path, device_path,
-                                      log_cb, phase_cb, progress_cb, done_cb):
-        # The ISO onto the disk as the machine's installer would put it - see
-        # RestoreToSSDPipeline (it runs tools/jjp_emu/mkjjpmulti.py install).
+                                      log_cb, phase_cb, progress_cb, done_cb,
+                                      menu_only=False, image=None, from_iso=None):
+        # The ISO onto the disk as the machine's installer would put it - or
+        # only its menu, or only one image from that image's own ISO (item
+        # 124) - see RestoreToSSDPipeline (tools/jjp_emu/mkjjpmulti.py install).
         from .pipeline import RestoreToSSDPipeline
         return RestoreToSSDPipeline(image_path, device_path,
-                                    log_cb, phase_cb, progress_cb, done_cb)
+                                    log_cb, phase_cb, progress_cb, done_cb,
+                                    menu_only=menu_only, image=image, from_iso=from_iso)
 
     def write_output_ext(self):
         # A JJP build is always a Clonezilla-derived install ISO; pinning

@@ -14690,7 +14690,8 @@ class MainWindow:
             badge_fn=self._make_round_icon,
             resize_fn=self._resize_notebook_to_current_tab,
             flash_fn=lambda p, fresh=False: self._open_flash_dialog(
-                initial_image=p, fresh=fresh),
+                initial_image=p, fresh=fresh,
+                image_titles=self._multiboot_panel.image_titles()),
             emulate_fn=run_emulator,
             phase_fn=self.set_multiboot_phase,
             status_fn=self.set_status)
@@ -21325,7 +21326,8 @@ class MainWindow:
         if self._help_window is not None:
             self._help_window.refresh(tab_name)
 
-    def _open_flash_dialog(self, initial_image=None, fresh=False):
+    def _open_flash_dialog(self, initial_image=None, fresh=False,
+                           image_titles=None):
         """Open the two-section Build / flash modal.
 
         Section 1 builds a fresh image (the Write tab's normal Build, path
@@ -21396,7 +21398,8 @@ class MainWindow:
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(k, c),
             handed_in=handed_in,
             fresh_image=bool(handed_in and fresh),
-            flashed_fn=self._image_was_flashed)
+            flashed_fn=self._image_was_flashed,
+            image_titles=image_titles)
 
     def _open_read_card_dialog(self):
         """Open the "Save card as image…" modal (card → .raw file).

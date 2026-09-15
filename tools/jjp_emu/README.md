@@ -406,12 +406,16 @@ wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py verify  --iso /var/tmp/GNR.mu
 wsl -e         python3 tools/jjp_emu/mkjjpmulti.py inspect --iso /var/tmp/GNR.multi.iso [--json] [--media-out DIR]
 wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py inject  --iso /var/tmp/GNR.multi.iso --selector-dir SEL --titles "A;B"
 wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py install --iso /var/tmp/GNR.multi.iso --disk /dev/sdX [--yes]
+wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py install --iso /var/tmp/GNR.multi.iso --disk /dev/sdX --menu-only
+wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py install --iso /var/tmp/GNR.multi.iso --disk /dev/sdX --image 1 --from CHAKA2.iso
 wsl -u root -- python3 tools/jjp_emu/mkjjpmulti.py selftest /var/tmp/jjpmulti_selftest
 ```
 
 `install` writes the ISO onto a whole disk - the game's SSD in a dock, attached to
 WSL with `wsl --mount \.\PhysicalDriveN --bare` - by the steps the ISO's own
-installer runs on the machine, then reads it back (MULTIBOOT.md, item 123).
+installer runs on the machine, then reads it back (MULTIBOOT.md, item 123); with
+`--menu-only` or `--image N --from ISO` it changes only that on a disk that already
+holds the install, settings and scores kept (item 124).
 `SEL` is a flat directory holding `jjpselect`, `padselect.sh` and `font.ttf`,
 or the tree `make install PLATFORM=jjp DESTDIR=SEL` leaves. `--art N=auto` is
 the image's own plaintext `miscfiles/graphics/JJP_logo_message.png` (1360x768);

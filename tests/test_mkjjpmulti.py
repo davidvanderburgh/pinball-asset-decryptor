@@ -721,3 +721,70 @@ def test_a_real_shaped_backup_is_parsed_not_guessed(mj):
     with pytest.raises(mj.Refused):
         mj.parse_gpt_backup(b"\0" * mj.GPT_BACKUP_SIZE)
 
+
+# ============================================================================ install: the modes
+def _ns(mj, **kw):
+    import argparse
+    base = dict(iso="x.iso", disk="/dev/sdz", yes=True, no_verify=False, workdir=None, menu_only=False, image=None,
+                from_iso=None, allow_version_mismatch=False, cache_dir=None)
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def test_install_modes_full_menu_image(mj):
+    assert mj.install_args_check(_ns(mj)) == "full"
+    assert mj.install_args_check(_ns(mj, menu_only=True)) == "menu"
+    assert mj.install_args_check(_ns(mj, image=1, from_iso="new.iso")) == "image"
+    assert mj.install_args_check(_ns(mj, image=0, from_iso="new.iso")) == "image"
+
+
+@pytest.mark.parametrize("kw, why", [
+    (dict(menu_only=True, image=1, from_iso="y.iso"), "two different writes"),
+    (dict(image=1), "go together"),
+    (dict(from_iso="y.iso"), "go together"),
+    (dict(image=2, from_iso="y.iso"), "0 (root A) or 1 (root B)"),
+])
+def test_a_mixed_or_half_mode_is_refused_before_anything_runs(mj, kw, why):
+    with pytest.raises(mj.Refused) as e:
+        mj.install_args_check(_ns(mj, **kw))
+    assert why in str(e.value)
+
+
+def test_the_cli_refuses_a_mixed_mode_before_the_root_check(mj, capsys):
+    rc = mj.main(["install", "--iso", "x.iso", "--disk", "/dev/sdz", "--menu-only", "--image", "1", "--from", "y.iso", "--yes"])
+    out = capsys.readouterr()
+    assert rc == 2 and "two different writes" in out.out + out.err
+    rc = mj.main(["install", "--iso", "x.iso", "--disk", "/dev/sdz", "--menu-only", "--yes"])
+    out = capsys.readouterr()
+    assert rc == 2 and "needs root" in out.out + out.err
+
+
+def test_root_manifest_bytes_drop_the_staged_map_only(mj):
+    import collections
+    import json
+    man = collections.OrderedDict([("tool", "t"), ("images", [{"device": "rootA"}]), ("staged", {"/a": "x"}), ("layout", "jjp-ab")])
+    out = mj.root_manifest_bytes(man)
+    back = json.loads(out.decode("utf-8"))
+    assert "staged" not in back and list(back) == ["tool", "images", "layout"]
+    assert out.endswith(b"\n")
+    # the same manifest without the map gives the same bytes: what `build` staged into the root
+    man2 = collections.OrderedDict((k, v) for k, v in man.items() if k != "staged")
+    assert mj.root_manifest_bytes(man2) == out
+
+
+def test_gate_root_pair_names_what_differs(mj):
+    class _Info:
+        path, name, game_version = "/x/new.iso", "GunsNRoses", "03.04"
+    rec_other = {"name": "GunsNRoses", "game_version": "03.03"}
+    same = {"gamename": "GunsNRoses", "game_sha256": "a" * 64, "fldat_sha256": "b" * 64}
+    with pytest.raises(mj.Refused) as e:
+        mj.gate_root_pair(_Info(), rec_other, same, dict(same), 1, False)
+    assert "03.04" in str(e.value) and "03.03" in str(e.value) and "--allow-version-mismatch" in str(e.value)
+    _Info.game_version = "03.03"
+    assert mj.gate_root_pair(_Info(), rec_other, same, dict(same), 1, False) == []
+    other = dict(same, game_sha256="c" * 64)
+    with pytest.raises(mj.Refused) as e:
+        mj.gate_root_pair(_Info(), rec_other, same, other, 1, False)
+    assert "game binary differs" in str(e.value)
+    assert mj.gate_root_pair(_Info(), rec_other, same, other, 1, True)
+

@@ -7310,7 +7310,8 @@ These have each been violated at least once and each cost a run or a window:
       keep the machine from booting. Acceptance: on David's GNR a menu-update
       stick changes the menu (a new title or clip) in under five minutes with the
       scores and settings intact, and `inspect` of the machine's root A shows the
-      new build.json.
+      new build.json. (2026-09-15: item 124 does this menu change on the SSD in a dock -
+      `install --menu-only` - so the stick version is for a tester without a dock.)
 
 - [x] **123. The multi-boot install written STRAIGHT ONTO THE GAME'S SSD in a dock on this
       PC: no stick, no install run on the machine.** `S3 D3` **DONE 2026-09-15 on `item/120` -
@@ -7362,6 +7363,46 @@ These have each been violated at least once and each cost a run or a window:
       same way is the plain "reinstall from the PC". Not done: macOS (Docker has no block
       device - the dialog offers the stick only there); a docked SSD with 4 KiB logical
       sectors is refused (JJP's table is 512-byte, the machine's installer would fail too).
+
+- [x] **124. On a docked SSD, change ONLY the boot menu, or ONLY one image (a new custom
+      code), and keep the settings and scores.** `S3 D2` **DONE 2026-09-15 on `item/120` -
+      emulator-proven; part of the JJP multi-boot family, released with its ONE `/finish`.
+      Owed: David's dock test (with 123's).** David, 2026-09-15: "do we have a way to just
+      make the multi-boot menu changes for direct SSD? how about if i just want to change one
+      of the images? (like if there's an update to the custom code)" - "Do both". What closed
+      it: two switches on `mkjjpmulti.py install`, both for a disk that ALREADY holds this
+      ISO's install (`check_jjp_disk`: the installer's seven slots on the GPT and every slot's
+      UUID, else refused - a full install writes it whole), both leaving perm A and everything
+      else alone. `--menu-only`: the ISO's menu into root A by the same `stage_into_root`
+      that `build`/`inject` use, now on the partition itself (`LoopRW` takes a block device);
+      root A's build.json is the ISO's manifest minus its `staged` map, the bytes `build`
+      staged, so the map's own sha holds; refused when root A is not the ISO's image 0
+      (build.json's game sha). `--image N --from GAME.iso`: slot N restored from GAME.iso's
+      own sda3 pieces with the installer's tail (image 0 gets the menu re-staged), root A's
+      build.json updated with the new source and identity; a multi-boot ISO as `--from` is
+      refused; THE SAME-VERSION GATE against the OTHER root on the disk (`gate_root_pair`:
+      GAME.iso's Name/Version vs build.json's record of the other image, then GAME.iso's
+      root - restored into the rig's cache for its identity - vs that root's GAMENAME, game
+      and fl.dat shas). `verify_disk` grew: every staged menu file in root A is the ISO's,
+      root A's build.json records the replaced image, that slot's game binary is the new
+      ISO's. In the app: the disk target's "Write:" choice (everything / only the boot menu
+      / only image 0 or 1, named by the tab's titles, with a From ISO box) reaches
+      `RestoreToSSDPipeline(menu_only= / image= / from_iso=)`, which passes the tool's
+      flags; the confirmations say what stays. PROOF: `selftest` on the loop disk - a
+      "score" planted on perm A survives the menu write, image 1 from fake0, image 0 from
+      fake1 with the menu re-staged; a 03.04 image, a multi-boot ISO as --from and a blank
+      disk are refused. Rig proof on the item 123 disk (2026-09-15): a copy of the GNR multi ISO injected
+      with new titles, then `--menu-only` (25 checks, 16 s) and `--image 1 --from` the LOTLJ
+      ISO (27 checks, 372 s) - perm A (padselect.last, vf), perm B and the logs on temp the
+      same before and after - and the VM boot showed the menu with the new titles
+      (C:/tmp/jjp120/qemu_ssd124); the first run's one FAIL was the verify's own "temp is
+      empty" check, right for a fresh install only, made a full-install check. Tests: tests/
+      test_mkjjpmulti.py (the mode check, the CLI's refusal before root, the root-side
+      manifest bytes, the gate's words), tests/test_jjp_install_to_disk.py (the flags, the
+      done words, a missing --from refused before the disk is touched, the factory),
+      tests/test_gui_batch31.py (the Write choice, its confirmations and kwargs). Item 122's
+      menu-update STICK is now only for a tester without a dock: the dock route does the
+      menu change in two minutes with nothing else on the machine touched.
 
 ## Reference material that is NOT in this repo
 

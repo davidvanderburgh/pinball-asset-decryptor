@@ -208,3 +208,43 @@ def test_other_brands_offer_no_second_place():
     with pytest.raises(NotImplementedError):
         # the base method, on a real instance (the class itself is abstract)
         Manufacturer.make_install_to_disk_pipeline(JJPManufacturer(), "x", "y", None, None, None, None)
+
+
+def test_the_menu_only_and_one_image_writes_reach_the_tool_as_its_flags(tmp_path):
+    """Item 124: the two partial writes are the tool's --menu-only and --image N --from ISO,
+    the from-ISO mapped into WSL like the multi ISO; the done words say what stayed."""
+    ex = _Wsl({"sda"}, {"sda", "sdc"}, TOOL_LINES)
+    iso = tmp_path / "multi.iso"
+    iso.write_bytes(b"iso")
+    sink = _Sink()
+    p = RestoreToSSDPipeline(str(iso), DISK, *sink.cbs(), tool_path="/t/mkjjpmulti.py", executor=ex, menu_only=True)
+    assert p.mode == "menu"
+    p.run()
+    assert ex.bash[-1].endswith("--disk /dev/sdc --yes --menu-only")
+    assert sink.done[0][0] is True and "boot menu" in sink.done[0][1] and "scores are as they were" in sink.done[0][1]
+    new = tmp_path / "custom-v2.iso"
+    new.write_bytes(b"iso")
+    ex = _Wsl({"sda"}, {"sda", "sdc"}, TOOL_LINES)
+    sink = _Sink()
+    p = RestoreToSSDPipeline(str(iso), DISK, *sink.cbs(), tool_path="/t/mkjjpmulti.py", executor=ex, image=1, from_iso=str(new))
+    assert p.mode == "image"
+    p.run()
+    assert ex.bash[-1].endswith("--disk /dev/sdc --yes --image 1 --from /mnt/x/custom-v2.iso")
+    assert sink.done[0][0] is True and "Image 1" in sink.done[0][1] and "custom-v2.iso" in sink.done[0][1]
+    # a missing from-ISO is refused before the disk is touched
+    ex = _Wsl({"sda"}, {"sda", "sdc"}, TOOL_LINES)
+    sink = _Sink()
+    RestoreToSSDPipeline(str(iso), DISK, *sink.cbs(), tool_path="/t/mkjjpmulti.py", executor=ex, image=0,
+                         from_iso=str(tmp_path / "gone.iso")).run()
+    assert sink.done[0][0] is False and "was not found" in sink.done[0][1] and ex.host == []
+
+
+def test_the_manufacturer_passes_the_partial_write_through():
+    mfr = JJPManufacturer()
+    sink = _Sink()
+    p = mfr.make_install_to_disk_pipeline("x.iso", DISK, *sink.cbs(), menu_only=True)
+    assert p.mode == "menu"
+    p = mfr.make_install_to_disk_pipeline("x.iso", DISK, *sink.cbs(), image=1, from_iso="y.iso")
+    assert (p.mode, p.image, p.from_iso) == ("image", 1, "y.iso")
+    assert mfr.make_install_to_disk_pipeline("x.iso", DISK, *sink.cbs()).mode == "full"
+

@@ -10319,9 +10319,16 @@ class RestoreToSSDPipeline:
     CHECK_RE = re.compile(r"^(ok|FAIL): ")
 
     def __init__(self, iso_path, device_path, log_cb, phase_cb, progress_cb,
-                 done_cb, tool_path=None, executor=None):
+                 done_cb, tool_path=None, executor=None, menu_only=False,
+                 image=None, from_iso=None):
         self.iso_path = iso_path
         self.device_path = device_path
+        # Item 124: two partial writes onto a disk that already holds this
+        # ISO's install - the menu alone (`--menu-only`), or one image's root
+        # from its own ISO (`--image N --from ISO`); both keep the settings.
+        self.menu_only = bool(menu_only)
+        self.image = image
+        self.from_iso = from_iso
         self.log = log_cb
         self.on_phase = phase_cb
         self.on_progress = progress_cb
@@ -10343,13 +10350,36 @@ class RestoreToSSDPipeline:
             raise PipelineError("Install", "Cancelled by user. The disk is half written: "
                                 "install again before it goes into a machine.")
 
+    @property
+    def mode(self):
+        return "menu" if self.menu_only else ("image" if self.image is not None else "full")
+
+    def _done_words(self):
+        if self.mode == "menu":
+            return ("The boot menu on %s is replaced; the games, settings and scores are as "
+                    "they were.\n\nPut the disk back and power on." % self.device_path)
+        if self.mode == "image":
+            return ("Image %d on %s is now %s; the other image, the menu, the settings and "
+                    "scores are as they were.\n\nPut the disk back and power on."
+                    % (self.image, self.device_path, os.path.basename(self.from_iso or "?")))
+        return ("Installed %s onto %s.\n\nThe disk is ready for the machine: put it back and "
+                "power on. Settings and scores start fresh, as after any JJP install."
+                % (os.path.basename(self.iso_path), self.device_path))
+
     def run(self):
         last = len(config.RESTORE_TO_SSD_PHASES) - 1
         try:
             self.log("ISO: %s" % self.iso_path, "info")
             self.log("Target disk: %s" % self.device_path, "info")
+            if self.mode == "menu":
+                self.log("Only the boot menu is written; the games, settings and scores stay.", "info")
+            elif self.mode == "image":
+                self.log("Only image %d is written, from %s; the other image, the menu, the settings "
+                         "and scores stay." % (self.image, self.from_iso), "info")
             if not os.path.isfile(self.iso_path):
                 raise PipelineError("Attach", "ISO not found: %s" % self.iso_path)
+            if self.mode == "image" and not (self.from_iso and os.path.isfile(self.from_iso)):
+                raise PipelineError("Attach", "The image's own install ISO was not found: %s" % self.from_iso)
             self.on_phase(0)
             disk = self._attach()
             self._check_cancel()
@@ -10358,11 +10388,7 @@ class RestoreToSSDPipeline:
             self.on_phase(last)
             self._detach()
             if ok:
-                self.on_done(True,
-                             "Installed %s onto %s.\n\nThe disk is ready for the machine: "
-                             "put it back and power on. Settings and scores start fresh, "
-                             "as after any JJP install."
-                             % (os.path.basename(self.iso_path), self.device_path))
+                self.on_done(True, self._done_words())
             else:
                 self.on_done(False,
                              "The install ran, but the disk did not read back as expected "
@@ -10453,10 +10479,18 @@ class RestoreToSSDPipeline:
         iso = self.executor.to_exec_path(self.iso_path)
         tool = (self.executor.to_exec_path(self._tool)
                 if isinstance(self.executor, WslExecutor) else self._tool)
-        cmd = "python3 %s install --iso %s --disk %s --yes" % (
-            shlex.quote(tool), shlex.quote(iso), shlex.quote(disk))
-        self.log("mkjjpmulti.py install --iso %s --disk %s"
-                 % (os.path.basename(self.iso_path), disk), "info")
+        flags = ""
+        if self.mode == "menu":
+            flags = " --menu-only"
+        elif self.mode == "image":
+            flags = " --image %d --from %s" % (int(self.image), shlex.quote(self.executor.to_exec_path(self.from_iso)))
+        cmd = "python3 %s install --iso %s --disk %s --yes%s" % (
+            shlex.quote(tool), shlex.quote(iso), shlex.quote(disk), flags)
+        self.log("mkjjpmulti.py install --iso %s --disk %s%s"
+                 % (os.path.basename(self.iso_path), disk,
+                    (" --menu-only" if self.mode == "menu" else
+                     " --image %d --from %s" % (int(self.image), os.path.basename(self.from_iso)) if self.mode == "image" else "")),
+                 "info")
         self._verifying, self._done_ok, self._fails = False, False, 0
         try:
             for line in self.executor.stream(cmd, timeout=config.INSTALL_TO_DISK_TIMEOUT):

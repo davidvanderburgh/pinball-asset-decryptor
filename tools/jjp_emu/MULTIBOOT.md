@@ -380,3 +380,39 @@ loop device and checks it (plus the in-use and too-small refusals); the rig proo
 2026-09-15 wrote the GNR multi-boot ISO onto a 120 GB sparse disk on D: the same way
 and booted it under qemu with UEFI firmware (see plans/TODO.md item 123).
 
+### Only the menu, or only one image (item 124)
+
+Two partial writes onto a disk that ALREADY holds this ISO's install, both leaving the
+settings partition (scores, settings, audits) and everything else alone. The disk is
+checked first: the installer's seven slots on its GPT and every slot's filesystem UUID
+the installer's, else refused (a full install writes it whole).
+
+- `install --iso MULTI.iso --disk /dev/sdX --menu-only`: the ISO's menu into root A -
+  the same staging `build` and `inject` do (`stage_into_root`, on the partition itself:
+  selector, font, images.conf, media, build.json, the hook, rungame.sh hooked). For a
+  new title, clip or conf, `inject` the ISO first, then this. Refused when root A on the
+  disk is not the ISO's image 0 (build.json's game sha; `--allow-version-mismatch`
+  overrides). Two minutes.
+- `install --iso MULTI.iso --disk /dev/sdX --image N --from GAME.iso`: image N's root
+  (0 = root A, the menu re-staged on top; 1 = root B) restored from GAME.iso's own
+  sda3 pieces with the installer's tail (resize2fs, the slot's UUID), and root A's
+  build.json updated to say where image N came from and what code it is. GAME.iso is
+  the game's own install ISO (a multi-boot ISO is refused). THE SAME-VERSION GATE
+  holds against the OTHER root on the disk: GAME.iso's Name/Version against
+  build.json's record of the other image, then GAME.iso's root (restored into the
+  rig's cache for its identity) against that root's GAMENAME, game and fl.dat shas -
+  both roots share one settings partition. A new custom code in slot B is six minutes.
+
+In the app, the disk target's "Write:" choice offers everything, only the boot menu,
+or only image 0/1 (named by the tab's titles) with a From ISO box. Both partial
+writes read the disk back with the same checks as a full install, plus: every staged
+menu file in root A is the ISO's, root A's build.json records the replaced image, and
+that slot's game binary is the new ISO's.
+
+Proof: the self-test's legs on the loop disk (a "score" planted on perm A survives
+the menu write, image 1 from fake0, and image 0 from fake1 with the menu re-staged;
+a 03.04 image and a multi-boot ISO as `--from`, and a blank disk, are refused); the
+rig proof of 2026-09-15 on the item 123 disk: a copy of the GNR multi ISO injected
+with new titles, `--menu-only`, then `--image 1 --from` the LOTLJ ISO, then the VM
+boot showing the new titles (plans/TODO.md item 124).
+

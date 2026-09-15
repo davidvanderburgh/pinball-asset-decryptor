@@ -104,6 +104,14 @@ for every refusal (exit 2), `verify: PASS|FAIL`, `inspect --json` one object.
         `wsl --mount` of its PhysicalDrive path, `--bare`, and passes the /dev/sdX that appears.
         The table is written from the template by this tool, not by sgdisk: gdisk ends
         every write with the global sync() that hangs under WSL2 (2026-09-13, 2026-09-15).
+        Two partial writes onto a disk that ALREADY holds this ISO's install (the slots and
+        UUIDs are checked first; the games, settings and scores stay):
+          --menu-only            the ISO's menu into root A (inject the ISO first for a new
+                                 title, clip or conf): two minutes, nothing else touched
+          --image N --from Y.iso image N's root (0 = A, the menu re-staged on top; 1 = B)
+                                 restored from Y's own sda3 pieces - a new custom code in
+                                 slot B without a reinstall; the same-version gate holds
+                                 against the OTHER root on the disk (one settings partition)
   mkjjpmulti.py selftest DIR
         two synthetic JJP ISOs (root: mke2fs -d, partclone, mksquashfs, xorriso) ->
         build -> verify -> inspect -> inject -> the mismatch refusal -> install onto a
@@ -1047,7 +1055,8 @@ def unsquash_installer(squashfs, dest_dir):
 
 # ============================================================================= staging
 class LoopRW:
-    """A raw ext4 file attached to a loop device and mounted rw for a `with` block (root)."""
+    """A raw ext4 file attached to a loop device and mounted rw for a `with` block (root) - or
+    a partition device, mounted as it is (the disk modes of `install`)."""
 
     def __init__(self, raw):
         self.raw = raw
@@ -1056,11 +1065,15 @@ class LoopRW:
     def __enter__(self):
         require_root("staging into the root image")
         need_tools("losetup", "mount", "umount")
-        out = _run(["losetup", "--find", "--show", self.raw]).strip().splitlines()
-        self.loop = out[-1]
+        import stat as _stat
+        if _stat.S_ISBLK(os.stat(self.raw).st_mode):
+            dev = self.raw                                  # a partition on a disk: mounted as it is
+        else:
+            out = _run(["losetup", "--find", "--show", self.raw]).strip().splitlines()
+            self.loop = dev = out[-1]
         self.mnt = tempfile.mkdtemp(prefix=MOUNT_PREFIX)
         try:
-            _run(["mount", "-t", "ext4", "-o", "rw,noatime", self.loop, self.mnt])
+            _run(["mount", "-t", "ext4", "-o", "rw,noatime", dev, self.mnt])
         except Refused:
             self._detach()
             raise
@@ -2337,7 +2350,7 @@ def disk_facts(disk):
             "in_use": in_use}
 
 
-def confirm_wipe(disk, facts):
+def confirm_wipe(disk, facts, what="EVERYTHING on %s (%s, %s) is erased."):
     """No --yes: the disk as it is now, then its name typed back, or Refused."""
     if not sys.stdin.isatty():
         raise Refused("%s would be wiped: pass --yes (there is no terminal to confirm on)" % disk)
@@ -2345,7 +2358,7 @@ def confirm_wipe(disk, facts):
     print(r.stdout.decode("utf-8", "replace").rstrip())
     name = os.path.basename(disk)
     try:
-        typed = input("EVERYTHING on %s (%s, %s) is erased. Type %s to go on: " % (disk, facts["model"] or "no model", _gb(facts["size"]), name))
+        typed = input((what + " Type %s to go on: ") % (disk, facts["model"] or "no model", _gb(facts["size"]), name))
     except EOFError:
         typed = ""
     if typed.strip() != name:
@@ -2436,11 +2449,106 @@ def template_rows(tpl):
     return gpt_rows(entries)
 
 
-def verify_disk(disk, ins, info, tpl, work):
+def blkid_uuid(dev):
+    r = subprocess.run(["blkid", "-s", "UUID", "-o", "value", dev], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return r.stdout.decode("utf-8", "replace").strip()
+
+
+def _uuid_norm(u):
+    return (u or "").replace("-", "").upper()
+
+
+def check_jjp_disk(disk, ins):
+    """A disk this tool or the machine's installer wrote: the installer's slots on its GPT and
+    every slot's filesystem UUID the installer's.  Refused otherwise - the menu and image
+    modes change one part of such a disk and must never land on anything else."""
+    try:
+        _h, entries = read_gpt(disk)
+    except Refused as e:
+        raise Refused("%s carries no partition table this tool reads (%s): not a JJP disk - a full install "
+                      "(no --menu-only / --image) writes it whole" % (disk, e))
+    rows = gpt_rows(entries)
+    missing = sorted(n for n in ins["parts"].values() if n not in rows)
+    if missing:
+        raise Refused("%s has no partition %s: not a JJP disk laid out as the installer lays it - a full install "
+                      "writes it whole" % (disk, ", ".join(str(n) for n in missing)))
+    bad = []
+    for name, n in sorted(ins["parts"].items(), key=lambda kv: kv[1]):
+        got = blkid_uuid(part_dev(disk, n))
+        if _uuid_norm(got) != _uuid_norm(ins["uuids"][name]):
+            bad.append("%s %s is %s, not %s" % (name, part_dev(disk, n), got or "no filesystem", ins["uuids"][name]))
+    if bad:
+        raise Refused("%s is not a JJP disk as the installer lays it out (%s) - a full install writes it whole"
+                      % (disk, "; ".join(bad[:3])))
+    return rows
+
+
+def root_manifest_bytes(man):
+    """build.json as it sits INSIDE root A: the manifest without its `staged` map (that map
+    describes the root, and the ISO's copy carries it) - the bytes `build` staged, so the map's
+    own sha of build.json holds after a menu write too."""
+    out = collections.OrderedDict((k, v) for k, v in man.items() if k != "staged")
+    return (json.dumps(out, indent=1) + "\n").encode("utf-8")
+
+
+def carried_media(pad, work):
+    """The ISO's own media set as a flat directory (media.json beside the files), the way
+    `inject` carries it -> (media_dir or None, plan or None)."""
+    if not (os.path.isdir(os.path.join(pad, "media")) and os.path.isfile(os.path.join(pad, mkc.MEDIA_MANIFEST))):
+        return None, None
+    media_dir = os.path.join(work, "media_carried")
+    if os.path.isdir(media_dir):
+        shutil.rmtree(media_dir)
+    shutil.copytree(os.path.join(pad, "media"), media_dir)
+    shutil.copyfile(os.path.join(pad, mkc.MEDIA_MANIFEST), os.path.join(media_dir, mkc.MEDIA_MANIFEST))
+    return media_dir, mkc.plan_media(media_dir, 2)
+
+
+def read_pad(pad):
+    """The multi-boot ISO's menu record: (images.conf text, its parse, build.json dict)."""
+    with open(os.path.join(pad, "images.conf"), "r", encoding="utf-8") as f:
+        conf_text = f.read()
+    conf = parse_images_conf(conf_text)
+    bp = os.path.join(pad, mkc.BUILD_MANIFEST)
+    build = parse_manifest(open(bp, "rb").read(), mkc.BUILD_MANIFEST) if os.path.isfile(bp) else None
+    if not build or not isinstance(build.get("images"), list) or len(build["images"]) < 2:
+        raise Refused("%s carries no %s naming its two images - not a multi-boot ISO this tool wrote" % (pad, mkc.BUILD_MANIFEST))
+    return conf_text, conf, build
+
+
+def gate_root_pair(finfo, rec_other, id_new, id_other, n, allow):
+    """The same-version gate for one slot: the new ISO's Name/Version against what build.json
+    records for the other image, and the new root's game code against the other root ON THE
+    DISK (both share one settings partition)."""
+    why = []
+    if (finfo.name, finfo.game_version) != (rec_other.get("name"), rec_other.get("game_version")):
+        why.append("%s is %s %s, the other image is %s %s (version_info.txt vs build.json)"
+                   % (os.path.basename(finfo.path), finfo.name, finfo.game_version, rec_other.get("name"), rec_other.get("game_version")))
+    if id_new["gamename"] != id_other["gamename"]:
+        why.append("its GAMENAME is %s, the other root's %s" % (id_new["gamename"], id_other["gamename"]))
+    if id_new["game_sha256"] != id_other["game_sha256"]:
+        why.append("its game binary differs from the other root's (%s vs %s)" % (id_new["game_sha256"][:12], id_other["game_sha256"][:12]))
+    if id_new["fldat_sha256"] != id_other["fldat_sha256"]:
+        why.append("its fl.dat differs from the other root's (%s vs %s)"
+                   % ((id_new["fldat_sha256"] or "none")[:12], (id_other["fldat_sha256"] or "none")[:12]))
+    if why:
+        msg = "image %d would not be the same game code as the other image: %s. %s" % (n, "; ".join(why), VERSION_COST)
+        if not allow:
+            raise Refused(msg + ". Pass --allow-version-mismatch to write it anyway")
+        say("WARNING: " + msg + " (--allow-version-mismatch given)")
+    return why
+
+
+def verify_disk(disk, ins, info, tpl, work, expect_staged=None, expect_images=None, fresh=True):
     """The written disk read back: the table sector for sector against the template, every
     slot's UUID, root A's menu (or its absence on a stock install), the game in both roots,
     grub set to A with root A's UUID, a loader on the EFI partition, mountable perms, an
-    empty temp.  Prints ok/FAIL lines like `verify`; returns True when all hold."""
+    empty temp.  `expect_staged` ({path in root A: sha256}, the ISO's build.json map): every
+    menu file in root A is that file.  `expect_images` ({n: {"source", "game_sha256"}}):
+    root A's build.json records image n so, and slot n's game IS that binary.  `fresh`: a full
+    install just made the temp partition, so it is empty; after a partial write it holds the
+    machine's logs from its boots, and only has to mount.  Prints ok/FAIL lines like `verify`;
+    returns True when all hold."""
     results = []
 
     def check(name, ok, detail=""):
@@ -2486,14 +2594,33 @@ def verify_disk(disk, ins, info, tpl, work):
         dev = part_dev(disk, parts[slot])
         try:
             with DevMount(dev) as m:
-                check("%s holds %s" % (slot, game), read(m, game) is not None)
+                gb = read(m, game)
+                check("%s holds %s" % (slot, game), gb is not None)
+                n_slot = 0 if slot == "ROOTA" else 1
+                if expect_images and n_slot in expect_images and gb is not None:
+                    want = expect_images[n_slot]["game_sha256"]
+                    check("%s's game is %s's binary (%s)" % (slot, os.path.basename(expect_images[n_slot]["source"]), want[:12]),
+                          sha256_bytes(gb) == want, sha256_bytes(gb)[:12])
                 rg = (read(m, RUNGAME) or b"").decode("utf-8", "replace")
                 has_menu = os.path.isdir(os.path.join(m, PADSELECT_DIR.lstrip("/")))
                 if slot == "ROOTA" and menu_wanted:
                     check("root A carries the menu: %s and rungame.sh hooked once" % PADSELECT_DIR,
                           has_menu and hook_line_count(rg) == 1, "menu %s, hook lines %d" % (has_menu, hook_line_count(rg)))
-                    check("root A carries %s" % (PADSELECT_DIR + "/" + mkc.BUILD_MANIFEST),
-                          read(m, PADSELECT_DIR + "/" + mkc.BUILD_MANIFEST) is not None)
+                    bj = read(m, PADSELECT_DIR + "/" + mkc.BUILD_MANIFEST)
+                    check("root A carries %s" % (PADSELECT_DIR + "/" + mkc.BUILD_MANIFEST), bj is not None)
+                    if expect_staged:
+                        skip = PADSELECT_DIR + "/" + mkc.BUILD_MANIFEST
+                        bad = [p for p, sha in expect_staged.items()
+                               if p != skip and (read(m, p) is None or sha256_bytes(read(m, p)) != sha)]
+                        check("every staged menu file in root A is the ISO's (%d file(s))" % (len(expect_staged) - (skip in expect_staged)),
+                              not bad, ", ".join(bad[:4]))
+                    if expect_images and bj is not None:
+                        man = parse_manifest(bj, mkc.BUILD_MANIFEST) or {}
+                        for n, want in sorted(expect_images.items()):
+                            rec = (man.get("images") or [{}, {}])[n] if n < len(man.get("images") or []) else {}
+                            check("root A's build.json records image %d as %s (%s)" % (n, os.path.basename(want["source"]), want["game_sha256"][:12]),
+                                  rec.get("source") == want["source"] and rec.get("game_sha256") == want["game_sha256"],
+                                  "%s %s" % (rec.get("source"), (rec.get("game_sha256") or "?")[:12]))
                 else:
                     check("%s is a stock root (no menu, no hook)" % slot, not has_menu and hook_line_count(rg) == 0)
                 fu = (read(m, FS_UUIDS) or b"").decode("utf-8", "replace")
@@ -2529,7 +2656,10 @@ def verify_disk(disk, ins, info, tpl, work):
     try:
         with DevMount(part_dev(disk, parts["TEMP"])) as m:
             extra = [n for n in os.listdir(m) if n != "lost+found"]
-            check("temp is an empty ext4", not extra, ", ".join(extra[:4]))
+            if fresh:
+                check("temp is an empty ext4", not extra, ", ".join(extra[:4]))
+            else:
+                check("temp mounts (the machine's logs stay: %d entr%s)" % (len(extra), "y" if len(extra) == 1 else "ies"), True)
     except Refused as e:
         check("TEMP mounts", False, str(e)[-200:])
     ok = all(r[1] for r in results)
@@ -2537,18 +2667,41 @@ def verify_disk(disk, ins, info, tpl, work):
     return ok
 
 
+def install_args_check(a):
+    """The mode from the flags, before anything else: full (the default), menu (--menu-only),
+    image (--image N --from ISO).  Refused for a mix or a half."""
+    menu = bool(getattr(a, "menu_only", False))
+    image = getattr(a, "image", None)
+    from_iso = getattr(a, "from_iso", None)
+    if menu and (image is not None or from_iso):
+        raise Refused("--menu-only and --image are two different writes: give one of them")
+    if (image is None) != (not from_iso):
+        raise Refused("--image N and --from ISO go together (the image's own install ISO for that slot)")
+    if image is not None and image not in (0, 1):
+        raise Refused("--image takes 0 (root A) or 1 (root B)")
+    return "menu" if menu else ("image" if image is not None else "full")
+
+
+PROGRESS_T0 = []
+
+
 def install_disk(a):
-    """`install`: the ISO onto a.disk as the ISO's own installer would put it on the machine."""
+    """`install`: the ISO onto a.disk as the ISO's own installer would put it on the machine
+    (full), or - on a disk that already holds that install - only the menu (--menu-only) or
+    only one image's root (--image N --from ISO); the two partial writes leave the settings
+    partition, and everything else, alone."""
+    mode = install_args_check(a)
     require_root("install")
+    PROGRESS_T0[:] = [time.time()]
     need_tools("partclone.restore", "gunzip", "e2fsck", "resize2fs", "tune2fs", "mkfs.ext4",
-               "blockdev", "lsblk", "blkid", "mount", "umount")
+               "blockdev", "lsblk", "blkid", "mount", "umount", "debugfs")
     iso = os.path.abspath(a.iso)
     if not os.path.isfile(iso):
         raise Refused("%s does not exist" % iso)
     facts = disk_facts(a.disk)
     disk = facts["dev"]
     if facts["in_use"]:
-        raise Refused("%s is in use (%s) - not a disk to wipe" % (disk, "; ".join(facts["in_use"][:4])))
+        raise Refused("%s is in use (%s) - not a disk to write" % (disk, "; ".join(facts["in_use"][:4])))
     if facts["ro"]:
         raise Refused("%s is read-only" % disk)
     work = os.path.abspath(a.workdir) if a.workdir else tempfile.mkdtemp(prefix="mkjjpmulti_install_")
@@ -2568,68 +2721,199 @@ def install_disk(a):
                 text = unsquash_installer(squashfs, os.path.join(work, "sq"))
                 which = "/" + SQ_INSTALLER + " (JJP's installer, in the live system)"
             ins = parse_installer(text)
-            try:
-                min_gib = int(str(info.version.get("Disksize") or "").strip() or ins["min_disk_gib"])
-            except ValueError:
-                min_gib = ins["min_disk_gib"]
-            if facts["size"] < (min_gib << 30):
-                raise Refused("%s holds %s; %s wants a disk of at least %d GiB (version_info.txt Disksize) - the "
-                              "machine's installer would refuse it too" % (disk, _gb(facts["size"]), os.path.basename(iso), min_gib))
+            dev_size_bytes(disk)                          # 512-byte sectors, or Refused before anything is written
             tpl_name = pick_template(ins, facts["size"])
             tpl = unsquash_files(squashfs, os.path.join(work, "sq"), [SQ_LIB + "/" + tpl_name])[0]
-            for p, img, _u in ins["restores"]:
-                part = img.split(".")[0]
-                if not info.pieces.get(part):
-                    raise Refused("the installer restores %s into PART_%s but the ISO carries no %s pieces" % (img, p, part))
-            dev_size_bytes(disk)                          # 512-byte sectors, or Refused before anything is written
-            say("install %s -> %s (%s%s, %s) by %s" % (os.path.basename(iso), disk, facts["model"] or "no model",
-                                                       (", " + facts["tran"]) if facts["tran"] else "", _gb(facts["size"]), which))
-            say("slots: " + ", ".join("%s=%s" % (p, part_dev(disk, n)) for p, n in sorted(ins["parts"].items(), key=lambda kv: kv[1])))
-            say("images: " + ", ".join("%s -> %s" % (img, p) for p, img, _u in ins["restores"]) + "; TEMP mkfs")
-            if not a.yes:
-                confirm_wipe(disk, facts)
-            budget = sum(info.piece_bytes(img.split(".")[0]) for _p, img, _u in ins["restores"])
-            PROGRESS.start(budget + 2, "install")
-            PROGRESS.step("partition table", 1)
-            say("partition table: %s (the installer's choice for this size), written as sgdisk -Z + --load-backup would"
-                % tpl_name)
-            written = write_gpt(disk, tpl)
-            say("  %d partition(s): %s" % (len(written), ", ".join("%d %s" % (e["num"], _gb((e["last"] - e["first"] + 1) * SECTOR))
-                                                                  for e in written)))
-            wait_for_parts(disk, sorted(set(ins["parts"].values())))
-            for p, img, u in ins["restores"]:
-                dev = part_dev(disk, ins["parts"][p])
-                uuid = ins["uuids"][u]
-                part = img.split(".")[0]
-                pieces = piece_paths(m, info, part)
-                PROGRESS.step("%s -> %s" % (img, dev), info.piece_bytes(part))
-                say("%s: %s (%d piece(s), %s) -> %s, %s" % (p, img, len(pieces), _gb(info.piece_bytes(part)), dev,
-                                                           ("volume id %s" % uuid) if "vfat" in img else ("resize2fs, UUID %s" % uuid)))
-                log = os.path.join(work, part + ".restore.log")
-                rc, broken = _partclone_feed(pieces, dev, log, PROGRESS)
-                if rc != 0 or broken:
-                    raise Refused("%s -> %s: partclone.restore failed (rc=%d)%s" % (img, dev, rc, ("\n" + _log_tail(log)) if _log_tail(log) else ""))
-                if "vfat" in img:
-                    _finish_vfat(dev, uuid)
+            pad = os.path.join(m, ISO_PAD_DIR.lstrip("/"))
+            if mode == "full":
+                ok = _install_full(a, disk, facts, ins, info, m, tpl, tpl_name, iso, which, work)
+            else:
+                if not info.pad_dir or not info.pieces.get(ROOTB_PART):
+                    raise Refused("%s is not a multi-boot ISO this tool wrote (no %s / no sda5 pieces): --menu-only and "
+                                  "--image work with the menu such an ISO carries" % (os.path.basename(iso), ISO_PAD_DIR))
+                check_jjp_disk(disk, ins)
+                if mode == "menu":
+                    ok = _install_menu(a, disk, facts, ins, info, pad, tpl, work)
                 else:
-                    _finish_ext4(dev, uuid)
-            dev = part_dev(disk, ins["parts"]["TEMP"])
-            PROGRESS.step("temp " + dev, 1)
-            say("TEMP: mkfs.ext4 %s, UUID %s" % (dev, ins["uuids"]["TEMP"]))
-            _run(["mkfs.ext4", "-q", "-F", dev])
-            _run(["e2fsck", "-f", "-y", dev], ok_rc=(0, 1, 2))
-            _run(["tune2fs", dev, "-f", "-U", ins["uuids"]["TEMP"]])
-            PROGRESS.finish()
-            flush_disk(disk)
-            say("written in %d s" % (time.time() - t0))
-            ok = True
-            if not getattr(a, "no_verify", False):
-                ok = verify_disk(disk, ins, info, tpl, work)
-        say("install: %s (%s, %d s)" % ("DONE" if ok else "FAILED VERIFY", disk, time.time() - t0))
+                    ok = _install_image(a, disk, facts, ins, info, pad, tpl, work)
+        say("install: %s (%s, %s, %d s)" % ("DONE" if ok else "FAILED VERIFY", mode, disk, time.time() - t0))
         return 0 if ok else 1
     finally:
         if not a.workdir:
             shutil.rmtree(work, ignore_errors=True)
+
+
+def _install_full(a, disk, facts, ins, info, m, tpl, tpl_name, iso, which, work):
+    """Everything, as the machine's installer writes it."""
+    try:
+        min_gib = int(str(info.version.get("Disksize") or "").strip() or ins["min_disk_gib"])
+    except ValueError:
+        min_gib = ins["min_disk_gib"]
+    if facts["size"] < (min_gib << 30):
+        raise Refused("%s holds %s; %s wants a disk of at least %d GiB (version_info.txt Disksize) - the "
+                      "machine's installer would refuse it too" % (disk, _gb(facts["size"]), os.path.basename(iso), min_gib))
+    for p, img, _u in ins["restores"]:
+        part = img.split(".")[0]
+        if not info.pieces.get(part):
+            raise Refused("the installer restores %s into PART_%s but the ISO carries no %s pieces" % (img, p, part))
+    say("install %s -> %s (%s%s, %s) by %s" % (os.path.basename(iso), disk, facts["model"] or "no model",
+                                               (", " + facts["tran"]) if facts["tran"] else "", _gb(facts["size"]), which))
+    say("slots: " + ", ".join("%s=%s" % (p, part_dev(disk, n)) for p, n in sorted(ins["parts"].items(), key=lambda kv: kv[1])))
+    say("images: " + ", ".join("%s -> %s" % (img, p) for p, img, _u in ins["restores"]) + "; TEMP mkfs")
+    if not a.yes:
+        confirm_wipe(disk, facts)
+    budget = sum(info.piece_bytes(img.split(".")[0]) for _p, img, _u in ins["restores"])
+    PROGRESS.start(budget + 2, "install")
+    PROGRESS.step("partition table", 1)
+    say("partition table: %s (the installer's choice for this size), written as sgdisk -Z + --load-backup would"
+        % tpl_name)
+    written = write_gpt(disk, tpl)
+    say("  %d partition(s): %s" % (len(written), ", ".join("%d %s" % (e["num"], _gb((e["last"] - e["first"] + 1) * SECTOR))
+                                                          for e in written)))
+    wait_for_parts(disk, sorted(set(ins["parts"].values())))
+    for p, img, u in ins["restores"]:
+        dev = part_dev(disk, ins["parts"][p])
+        uuid = ins["uuids"][u]
+        part = img.split(".")[0]
+        pieces = piece_paths(m, info, part)
+        PROGRESS.step("%s -> %s" % (img, dev), info.piece_bytes(part))
+        say("%s: %s (%d piece(s), %s) -> %s, %s" % (p, img, len(pieces), _gb(info.piece_bytes(part)), dev,
+                                                   ("volume id %s" % uuid) if "vfat" in img else ("resize2fs, UUID %s" % uuid)))
+        _restore_slot(pieces, dev, img, uuid, work)
+    dev = part_dev(disk, ins["parts"]["TEMP"])
+    PROGRESS.step("temp " + dev, 1)
+    say("TEMP: mkfs.ext4 %s, UUID %s" % (dev, ins["uuids"]["TEMP"]))
+    _run(["mkfs.ext4", "-q", "-F", dev])
+    _run(["e2fsck", "-f", "-y", dev], ok_rc=(0, 1, 2))
+    _run(["tune2fs", dev, "-f", "-U", ins["uuids"]["TEMP"]])
+    PROGRESS.finish()
+    flush_disk(disk)
+    say("written in %d s" % (time.time() - PROGRESS_T0[0] if PROGRESS_T0 else 0))
+    if getattr(a, "no_verify", False):
+        return True
+    staged = None
+    if info.pad_dir:
+        pad = os.path.join(m, ISO_PAD_DIR.lstrip("/"))
+        try:
+            _ct, _conf, build = read_pad(pad)
+            staged = build.get("staged") if isinstance(build.get("staged"), dict) else None
+        except Refused:
+            staged = None
+    return verify_disk(disk, ins, info, tpl, work, expect_staged=staged)
+
+
+def _restore_slot(pieces, dev, img, uuid, work):
+    """One slot: the pieces through partclone onto the partition, then the installer's tail."""
+    part = img.split(".")[0]
+    log = os.path.join(work, part + ".restore.log")
+    rc, broken = _partclone_feed(pieces, dev, log, PROGRESS)
+    if rc != 0 or broken:
+        raise Refused("%s -> %s: partclone.restore failed (rc=%d)%s" % (img, dev, rc, ("\n" + _log_tail(log)) if _log_tail(log) else ""))
+    if "vfat" in img:
+        _finish_vfat(dev, uuid)
+    else:
+        _finish_ext4(dev, uuid)
+
+
+def _install_menu(a, disk, facts, ins, info, pad, tpl, work):
+    """--menu-only: the ISO's menu into root A of the disk - the staging `build` and `inject`
+    do, onto the partition itself - and nothing else on the disk touched."""
+    dev_a = part_dev(disk, ins["parts"]["ROOTA"])
+    conf_text, _conf, build = read_pad(pad)
+    id_a = root_identity(dev_a)
+    im0 = build["images"][0] if isinstance(build["images"][0], dict) else {}
+    if im0.get("game_sha256") and im0["game_sha256"] != id_a["game_sha256"] and not getattr(a, "allow_version_mismatch", False):
+        raise Refused("root A on %s is not this ISO's image 0 (game %s on the disk, %s in build.json): this menu "
+                      "belongs to an install of that ISO; --allow-version-mismatch writes it here anyway"
+                      % (disk, id_a["game_sha256"][:12], im0["game_sha256"][:12]))
+    media_dir, media = carried_media(pad, work)
+    sidecars = collections.OrderedDict([(mkc.BUILD_MANIFEST, root_manifest_bytes(build))])
+    if media_dir:
+        with open(os.path.join(media_dir, mkc.MEDIA_MANIFEST), "rb") as f:
+            sidecars[mkc.MEDIA_MANIFEST] = f.read()
+    say("menu only: %s's menu -> root A (%s) of %s (%s, %s); the games, settings and scores stay"
+        % (os.path.basename(info.path), dev_a, disk, facts["model"] or "no model", _gb(facts["size"])))
+    if not a.yes:
+        confirm_wipe(disk, facts, what="The boot menu on %s (%s, %s) is replaced; nothing else changes.")
+    PROGRESS.start((media["total"] if media else 0) + 1_000_000, "menu")
+    PROGRESS.step("stage", (media["total"] if media else 0) + 1_000_000)
+    staged = stage_into_root(dev_a, pad, conf_text, media, sidecars, PROGRESS)
+    PROGRESS.finish()
+    flush_disk(disk)
+    if getattr(a, "no_verify", False):
+        return True
+    return verify_disk(disk, ins, info, tpl, work, expect_staged=staged, fresh=False)
+
+
+def _install_image(a, disk, facts, ins, info, pad, tpl, work):
+    """--image N --from ISO: that slot's root restored from the ISO's own sda3 pieces (image 0:
+    the menu re-staged on top), root A's build.json updated, the rest of the disk untouched."""
+    n = a.image
+    slot, other = ("ROOTA", "ROOTB") if n == 0 else ("ROOTB", "ROOTA")
+    from_iso = os.path.abspath(a.from_iso)
+    if not os.path.isfile(from_iso):
+        raise Refused("%s does not exist" % from_iso)
+    conf_text, conf, build = read_pad(pad)
+    with IsoMount(from_iso, os.path.join(work, "from")) as mf:
+        finfo = iso_info(from_iso, mf)
+        finfo.check_stock_shape("--from ISO")
+        if finfo.pad_dir:
+            raise Refused("%s is a multi-boot ISO: --from takes the game's own install ISO (its sda3 is what goes into "
+                          "slot %d); to change the menu use --menu-only" % (os.path.basename(from_iso), n))
+        rec_other = build["images"][1 - n] if isinstance(build["images"][1 - n], dict) else {}
+        c = finfo.piece_bytes(ROOT_PART)
+        PROGRESS.start(c * 2 + 1_000_000, "image")
+        PROGRESS.step("read %s's root" % os.path.basename(from_iso), c)
+        raw = cached_root_raw(from_iso, getattr(a, "cache_dir", None), mf, finfo, PROGRESS)
+        id_new = root_identity(raw)
+        id_other = root_identity(part_dev(disk, ins["parts"][other]))
+        gate_root_pair(finfo, rec_other, id_new, id_other, n, getattr(a, "allow_version_mismatch", False))
+        dev = part_dev(disk, ins["parts"][slot])
+        uuid = ins["uuids"][slot]
+        say("image %d only: %s's root -> %s (%s) of %s (%s, %s)%s; the other image, settings and scores stay"
+            % (n, os.path.basename(from_iso), slot, dev, disk, facts["model"] or "no model", _gb(facts["size"]),
+               ", the menu re-staged on top" if n == 0 else ""))
+        if not a.yes:
+            confirm_wipe(disk, facts, what="Image %d on %%s (%%s, %%s) is replaced; the other image and the settings stay." % n)
+        pieces = piece_paths(mf, finfo, ROOT_PART)
+        PROGRESS.step("%s -> %s" % (ROOT_PIECE, dev), c)
+        _restore_slot(pieces, dev, ROOT_PIECE, uuid, work)
+        sources = [None, None]
+        sources[n] = from_iso
+        infos = [None, None]
+        infos[n] = finfo
+        idents = [None, None]
+        idents[n] = id_new
+        man = build_manifest(conf, sources, infos, idents, split_size=build.get("split_size"), existing=build)
+        PROGRESS.step("menu", 1_000_000)
+        if n == 0:
+            media_dir, media = carried_media(pad, work)
+            sidecars = collections.OrderedDict([(mkc.BUILD_MANIFEST, root_manifest_bytes(man))])
+            if media_dir:
+                with open(os.path.join(media_dir, mkc.MEDIA_MANIFEST), "rb") as f:
+                    sidecars[mkc.MEDIA_MANIFEST] = f.read()
+            staged = stage_into_root(dev, pad, conf_text, media, sidecars, PROGRESS)
+        else:
+            dev_a = part_dev(disk, ins["parts"]["ROOTA"])
+            with LoopRW(dev_a) as mnt:
+                p = mnt + PADSELECT_DIR + "/" + mkc.BUILD_MANIFEST
+                if not os.path.isdir(os.path.dirname(p)):
+                    raise Refused("root A on %s carries no %s: not a multi-boot install" % (disk, PADSELECT_DIR))
+                with open(p, "wb") as f:
+                    f.write(root_manifest_bytes(man))
+                os.chmod(p, 0o644)
+                syncfs(mnt)
+            e2fsck(dev_a)
+            staged = build.get("staged") if isinstance(build.get("staged"), dict) else None
+        PROGRESS.finish()
+        flush_disk(disk)
+        if getattr(a, "no_verify", False):
+            return True
+        return verify_disk(disk, ins, info, tpl, work, expect_staged=staged, fresh=False,
+                           expect_images={n: {"source": from_iso, "game_sha256": id_new["game_sha256"]}})
+
+
+
 
 
 def _write(path, data, mode=0o644):
@@ -2895,7 +3179,8 @@ def selftest(root_dir, selector=None):
             failures.append(name)
 
     game = os.urandom(50000)
-    iso0, raw0 = make_fake_iso(work, "fake0-v03.03", "03.03", game, os.urandom(400000))
+    edata0 = os.urandom(400000)
+    iso0, raw0 = make_fake_iso(work, "fake0-v03.03", "03.03", game, edata0)
     edata1 = os.urandom(600000)
     iso1, raw1 = make_fake_iso(work, "fake1_custom", "03.03", game, edata1)
     iso2, _ = make_fake_iso(work, "fake2-v03.04", "03.04", os.urandom(50000), os.urandom(100000))
@@ -3013,7 +3298,8 @@ def selftest(root_dir, selector=None):
         f.truncate(120 * 1000 ** 3)
     loop = _run(["losetup", "-P", "--find", "--show", disk_raw]).strip().splitlines()[-1]
     try:
-        ns4 = argparse.Namespace(iso=out, disk=loop, yes=True, no_verify=False, workdir=os.path.join(work, "winstall"))
+        ns4 = argparse.Namespace(iso=out, disk=loop, yes=True, no_verify=False, workdir=os.path.join(work, "winstall"),
+                                 menu_only=False, image=None, from_iso=None, allow_version_mismatch=False, cache_dir=cache)
         rc = install_disk(ns4)
         expect("install onto %s returns 0 (its verify PASSED)" % loop, rc == 0)
         with DevMount(part_dev(loop, ins["parts"]["ROOTB"])) as mb:
@@ -3029,15 +3315,90 @@ def selftest(root_dir, selector=None):
                 expect("a disk with a mount on it is refused", "in use" in str(e), str(e)[:100])
         with DevMount(part_dev(loop, ins["parts"]["PERMA"])) as mp:
             expect("perm A on the disk is the factory perm image", os.path.isfile(os.path.join(mp, "vf", "settings.dat")))
+        # item 124: the menu alone, then one image alone, onto that installed disk - a "score"
+        # planted in perm A must survive both
+        edata_path = os.path.join("jjpe", "gen1", "GunsNRoses", "edata", "graphics", "Attract Mode", "a.bin")
+
+        def edata_on(slot):
+            with DevMount(part_dev(loop, ins["parts"][slot])) as mm:
+                with open(os.path.join(mm, edata_path), "rb") as f:
+                    return sha256_bytes(f.read())
+
+        def perm_marker():
+            with DevMount(part_dev(loop, ins["parts"]["PERMA"])) as mm:
+                return os.path.isfile(os.path.join(mm, "vf", "marker.dat"))
+
+        with LoopRW(part_dev(loop, ins["parts"]["PERMA"])) as mp:
+            _write(os.path.join(mp, "vf", "marker.dat"), b"a score\n")
+        with LoopRW(part_dev(loop, ins["parts"]["TEMP"])) as mt:
+            _write(os.path.join(mt, "game.log"), b"the machine booted\n")       # a partial write leaves the logs alone
+        ns5 = argparse.Namespace(**dict(vars(ns2), titles="Stock3;Custom3", workdir=os.path.join(work, "winject2")))
+        expect("inject (new titles for the menu-only leg) returns 0", inject_iso(ns5) == 0)
+        disk_ns = dict(iso=out, disk=loop, yes=True, no_verify=False, menu_only=False, image=None, from_iso=None,
+                       allow_version_mismatch=False, cache_dir=cache)
+        rc = install_disk(argparse.Namespace(**dict(disk_ns, menu_only=True, workdir=os.path.join(work, "wmenu"))))
+        expect("install --menu-only returns 0 (its verify PASSED)", rc == 0)
+        with DevMount(part_dev(loop, ins["parts"]["ROOTA"])) as ma:
+            with open(os.path.join(ma, PADSELECT_DIR.lstrip("/"), "images.conf"), "r", encoding="utf-8") as f:
+                expect("--menu-only: root A's menu carries the new titles", "Stock3" in f.read())
+            with open(os.path.join(ma, RUNGAME.lstrip("/")), "r") as f:
+                expect("--menu-only: rungame.sh still hooked once", hook_line_count(f.read()) == 1)
+        expect("--menu-only: root B untouched (image 1's edata)", edata_on("ROOTB") == sha256_bytes(edata1))
+        expect("--menu-only: perm A kept (the score)", perm_marker())
+        rc = install_disk(argparse.Namespace(**dict(disk_ns, image=1, from_iso=iso0, workdir=os.path.join(work, "wimg1"))))
+        expect("install --image 1 --from fake0 returns 0 (its verify PASSED)", rc == 0)
+        expect("--image 1: root B is now fake0's root (its edata)", edata_on("ROOTB") == sha256_bytes(edata0))
+        expect("--image 1: root A untouched (image 0's edata)", edata_on("ROOTA") == sha256_bytes(edata0))
+        with DevMount(part_dev(loop, ins["parts"]["ROOTA"])) as ma:
+            man = parse_manifest(open(os.path.join(ma, PADSELECT_DIR.lstrip("/"), mkc.BUILD_MANIFEST), "rb").read(), "build.json")
+            expect("--image 1: root A's build.json records image 1 from fake0", man["images"][1]["source"] == iso0
+                   and man["images"][1]["game_sha256"] == sha256_bytes(game) and "staged" not in man)
+        expect("--image 1: perm A kept (the score)", perm_marker())
+        try:
+            install_disk(argparse.Namespace(**dict(disk_ns, image=1, from_iso=iso2, workdir=os.path.join(work, "wimg1b"))))
+            expect("--image 1 from a different version is refused", False)
+        except Refused as e:
+            expect("--image 1 from a different version is refused", "not be the same game code" in str(e), str(e)[:120])
+        expect("...and root B is untouched by the refusal", edata_on("ROOTB") == sha256_bytes(edata0))
+        rc = install_disk(argparse.Namespace(**dict(disk_ns, image=0, from_iso=iso1, workdir=os.path.join(work, "wimg0"))))
+        expect("install --image 0 --from fake1 returns 0 (its verify PASSED)", rc == 0)
+        expect("--image 0: root A is now fake1's root (its edata)", edata_on("ROOTA") == sha256_bytes(edata1))
+        with DevMount(part_dev(loop, ins["parts"]["ROOTA"])) as ma:
+            expect("--image 0: the menu re-staged on the new root A",
+                   os.path.isfile(os.path.join(ma, PADSELECT_DIR.lstrip("/"), "jjpselect")) and os.path.isfile(os.path.join(ma, HOOK_PATH.lstrip("/"))))
+            with open(os.path.join(ma, RUNGAME.lstrip("/")), "r") as f:
+                expect("--image 0: rungame.sh hooked once", hook_line_count(f.read()) == 1)
+        expect("--image 0: perm A kept (the score)", perm_marker())
+        with DevMount(part_dev(loop, ins["parts"]["TEMP"])) as mt:
+            expect("the partial writes left the machine's log on temp alone", os.path.isfile(os.path.join(mt, "game.log")))
+        try:
+            install_disk(argparse.Namespace(**dict(disk_ns, image=1, from_iso=out, workdir=os.path.join(work, "wimg1c"))))
+            expect("--from a multi-boot ISO is refused", False)
+        except Refused as e:
+            expect("--from a multi-boot ISO is refused", "is a multi-boot ISO" in str(e), str(e)[:100])
     finally:
         subprocess.run(["losetup", "-d", loop], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    blank = os.path.join(work, "blank.raw")
+    with open(blank, "wb") as f:
+        f.truncate(120 * 1000 ** 3)
+    loop = _run(["losetup", "-P", "--find", "--show", blank]).strip().splitlines()[-1]
+    try:
+        install_disk(argparse.Namespace(iso=out, disk=loop, yes=True, no_verify=False, workdir=None, menu_only=True, image=None,
+                                        from_iso=None, allow_version_mismatch=False, cache_dir=cache))
+        expect("--menu-only onto a blank disk is refused", False)
+    except Refused as e:
+        expect("--menu-only onto a blank disk is refused", "not a JJP disk" in str(e), str(e)[:100])
+    finally:
+        subprocess.run(["losetup", "-d", loop], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    os.unlink(blank)
     os.unlink(disk_raw)
     small = os.path.join(work, "small.raw")
     with open(small, "wb") as f:
         f.truncate(20 * 1000 ** 3)
     loop = _run(["losetup", "--find", "--show", small]).strip().splitlines()[-1]
     try:
-        install_disk(argparse.Namespace(iso=out, disk=loop, yes=True, no_verify=False, workdir=None))
+        install_disk(argparse.Namespace(iso=out, disk=loop, yes=True, no_verify=False, workdir=None, menu_only=False, image=None,
+                                        from_iso=None, allow_version_mismatch=False, cache_dir=cache))
         expect("a disk under Disksize is refused", False)
     except Refused as e:
         expect("a disk under Disksize is refused", "at least 111 GiB" in str(e), str(e)[:100])
@@ -3128,7 +3489,17 @@ def main(argv=None):
                                        "the machine, then verify it (root; WIPES the disk)")
     s.add_argument("--iso", required=True, help="a multi-boot ISO (root B = image 1) or a stock JJP install ISO (root B = a copy of A)")
     s.add_argument("--disk", required=True, metavar="/dev/sdX", help="the whole disk (sdX, nvmeXnY, loopN with -P); every byte on it goes")
-    s.add_argument("--yes", action="store_true", help="wipe without the typed confirmation (no terminal = required)")
+    s.add_argument("--yes", action="store_true", help="write without the typed confirmation (no terminal = required)")
+    s.add_argument("--menu-only", action="store_true", dest="menu_only",
+                   help="only the boot menu, into root A of a disk that already holds this ISO's install "
+                        "(a multi-boot ISO; inject it first for a new menu); the games, settings and scores stay")
+    s.add_argument("--image", type=int, metavar="N",
+                   help="only image N's root (0 = root A, the menu re-staged on top; 1 = root B), restored from --from "
+                        "onto a disk that already holds this ISO's install; the other image, settings and scores stay")
+    s.add_argument("--from", dest="from_iso", metavar="ISO", help="the game's own install ISO whose root goes into --image N")
+    s.add_argument("--allow-version-mismatch", action="store_true",
+                   help="--image / --menu-only although the game code differs (read the refusal first)")
+    s.add_argument("--cache-dir", help="where --from's root is restored for its identity (default %s, the rig's)" % CACHE_DIR_DEFAULT)
     s.add_argument("--no-verify", action="store_true", dest="no_verify", help="skip reading the disk back afterwards")
     s.add_argument("--workdir", help="scratch for the ISO mount, the installer and the logs (default: a temp dir)")
     s = sub.add_parser("inspect", help="read a multi-boot ISO back (no root)")

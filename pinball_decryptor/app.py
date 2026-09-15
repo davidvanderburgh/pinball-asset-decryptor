@@ -2052,7 +2052,8 @@ class App:
         self._start_write(chain_flash_device=device_path)
 
     def _start_flash_image(self, image_path, device_path, menu_only=False,
-                           target=None):
+                           target=None, disk_mode=None, image=None,
+                           from_iso=None):
         """Flash a pre-built image onto a card (dd-style whole-image write).
 
         ``menu_only`` writes ONLY the boot menu partition onto a card this
@@ -2125,9 +2126,13 @@ class App:
         extra = {"menu_only": True} if menu_only else {}
         try:
             if to_disk:
+                # ``disk_mode`` (item 124): "menu" = only the boot menu,
+                # "image" = only image ``image`` from ``from_iso``; else all.
                 self.pipeline = mfr.make_install_to_disk_pipeline(
                     image_path, device_path, log_cb, phase_cb, progress_cb,
-                    done_cb)
+                    done_cb, menu_only=(disk_mode == "menu"),
+                    image=(image if disk_mode == "image" else None),
+                    from_iso=(from_iso if disk_mode == "image" else None))
             else:
                 self.pipeline = mfr.make_flash_pipeline(
                     image_path, device_path, log_cb, phase_cb, progress_cb,

@@ -10183,6 +10183,11 @@ class MultibootPanel:
             return None
         return out
 
+    def image_titles(self):
+        """The card's titles in image order, for the flash dialog's "only image
+        N" choice (item 124); blanks where a row has none."""
+        return [(getattr(r, "title", "") or "") for r in self._rows]
+
     def _flash(self, fresh=False):
         # *fresh*: the card was only just built or updated, so no SD card
         # holds it yet and the flash dialog writes it whole (PAD-144).

@@ -694,10 +694,14 @@ class Manufacturer(ABC):
             f"{self.display} does not implement a flash-image pipeline.")
 
     def make_install_to_disk_pipeline(self, image_path, device_path,
-                                      log_cb, phase_cb, progress_cb, done_cb):
+                                      log_cb, phase_cb, progress_cb, done_cb,
+                                      menu_only=False, image=None, from_iso=None):
         """Install *image_path* onto the game's own disk at *device_path* (an
-        OS-native physical-disk path), as the machine's installer would.  Only
-        meaningful when ``flash_targets`` names a second place."""
+        OS-native physical-disk path), as the machine's installer would - or,
+        onto a disk that already holds that install, only its boot menu
+        (``menu_only``) or only image ``image`` from ``from_iso``, that image's
+        own install ISO.  Only meaningful when ``flash_targets`` names a second
+        place."""
         raise NotImplementedError(
             f"{self.display} does not install an image onto a disk.")
 

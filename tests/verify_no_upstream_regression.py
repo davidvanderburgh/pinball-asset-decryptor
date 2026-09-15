@@ -145,8 +145,12 @@ PLAN = {
     # JJP was lifted wholesale — every module is byte-equal to
     # upstream.  Manufacturer.py wraps StandaloneDecryptPipeline +
     # StandaloneModPipeline without touching their internals.
+    # config.py DIVERGED as of v0.216.0: the Restore-to-SSD phase list now
+    # names the install-onto-a-docked-SSD pipeline's steps (Attach / Install /
+    # Verify / Detach) and carries its timeout - upstream's restore was never
+    # wired to a button, and its phases described a pipeline this app replaced.
     "pinball_decryptor/plugins/jjp/config.py":
-        ("jjp/jjp_decryptor/config.py", "identical"),
+        ("jjp/jjp_decryptor/config.py", "diverged"),
     "pinball_decryptor/plugins/jjp/executor.py":
         ("jjp/jjp_decryptor/executor.py", "diverged"),
     "pinball_decryptor/plugins/jjp/wsl.py":
@@ -222,6 +226,10 @@ WHY_DIVERGED = {
         "runs in the Linux the app installs, not the machine's default",
     "pinball_decryptor/plugins/jjp/executor.py":
         "runs in the Linux the app installs, not the machine's default",
+    "pinball_decryptor/plugins/jjp/config.py":
+        "RESTORE_TO_SSD_PHASES names the install-onto-a-docked-SSD pipeline's "
+        "steps (Attach/Install/Verify/Detach, v0.216.0) and INSTALL_TO_DISK_TIMEOUT "
+        "was added; upstream's Restore-to-SSD was never wired to a button",
 }
 
 

@@ -1214,7 +1214,12 @@ EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  "theme.c", "theme.h", "themes.json", "gen_themes.py",
                  "gfx.c", "gfx.h",
                  "egl_stern.c", "egl_stern.h", "input.c", "input.h",
-                 "input_hw.c", "input_padsw.c", "log.c", "log.h",
+                 "input_hw.c", "input_padsw.c",
+                 # the JJP build's own sources (items 114-120): the Stern SRCS
+                 # took input_jjpio.c too, and buildselect.sh stages ONLY this list
+                 "input_jjpio.c", "egl_x11.c", "stubs_jjp.c", "audio_pulse.c",
+                 "jjp_glibc.h", "padselect.sh",
+                 "log.c", "log.h",
                  "art.c", "art.h", "audio.c", "audio.h", "audio_fifo.c", "audio_alsa.c",
                  "codec.c", "codec.h",
                  "nvm.c", "nvm.h",

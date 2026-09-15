@@ -778,3 +778,62 @@ def test_the_multiboot_hand_off_reaches_the_dialog(app, monkeypatch,
     assert [(kw["handed_in"], kw["fresh_image"]) for kw in opened] == [
         ("Multi-boot", True), ("", False)]
     assert opened[0]["initial_image"] == img
+
+
+@pytest.mark.gui
+@gui_only
+def test_a_jjp_iso_can_go_straight_onto_the_games_disk(app, monkeypatch, tmp_path):
+    """Item 123: the dialog's second place for a JJP install ISO - the game's SSD in a
+    dock.  Choosing it swaps the drive picker to disks, words the confirmation as an
+    install that wipes the disk, and hands ``target="disk"`` to the app; the stick, the
+    default, hands nothing new."""
+    import sys
+    from tkinter import messagebox
+    if sys.platform not in ("win32", "linux"):
+        pytest.skip("the disk target is Windows/Linux only")
+    _pick(app, "jjp")
+    img = tmp_path / "GunsNRoses-v03.03.multi.iso"
+    img.write_bytes(b"iso")
+    asked, flashed = [], []
+    monkeypatch.setattr(messagebox, "askyesno",
+                        lambda title, *a, **k: asked.append(title) or True)
+    dlg = _make_dialog(
+        app, monkeypatch, initial_image=str(img), handed_in="Multi-boot",
+        has_pending_changes=False,
+        on_flash=lambda i, d, menu_only=False, **kw: flashed.append((i, d, kw)))
+    try:
+        assert dlg._target_row is not None, "JJP offers the disk as a second place"
+        assert [t[0] for t in dlg._targets] == ["stick", "disk"]
+        assert dlg._target_var.get() == "stick" and not dlg._to_disk()
+        assert dlg._words["target_kind"] == "usb_stick"
+        # the disk: the picker's kind and label follow, the readout says what happens
+        dlg._target_var.set("disk")
+        dlg._on_target_changed()
+        assert dlg._to_disk()
+        assert dlg._words["target_kind"] == "ssd"
+        assert dlg._target_label.cget("text") == "Target disk:"
+        dlg._selected = _reader()
+        dlg._update_readout()
+        assert "erased" in dlg._readout.cget("text")
+        dlg._do_start()
+        assert asked == ["Erase the disk and install onto it?"]
+        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {"target": "disk"})]
+    finally:
+        if dlg._dlg.winfo_exists():
+            dlg._dlg.destroy()
+    # ...and back on the stick nothing new travels
+    asked.clear()
+    flashed.clear()
+    dlg = _make_dialog(
+        app, monkeypatch, initial_image=str(img), handed_in="Multi-boot",
+        has_pending_changes=False,
+        on_flash=lambda i, d, menu_only=False, **kw: flashed.append((i, d, kw)))
+    try:
+        dlg._selected = _reader()
+        dlg._do_start()
+        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {})]
+        assert asked and asked[0].startswith("Erase the USB stick")
+    finally:
+        if dlg._dlg.winfo_exists():
+            dlg._dlg.destroy()
+

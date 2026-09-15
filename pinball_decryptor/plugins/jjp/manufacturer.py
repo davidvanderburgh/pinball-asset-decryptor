@@ -246,6 +246,15 @@ class JJPManufacturer(Manufacturer):
     direct_ssd_write_phases = tuple(config.DIRECT_SSD_MOD_PHASES)
     # USB-stick prep flow (the "flash" surface) — see usbstick.py.
     flash_phases = usbstick.PHASES
+    # Item 123: the same ISO STRAIGHT ONTO THE GAME'S SSD in a dock on this PC - the
+    # flash dialog's second place for it.  The install is what the machine's own
+    # installer would do, run from here (tools/jjp_emu/mkjjpmulti.py install): no
+    # stick, no security key.  The stick stays first: it is what every tester has.
+    install_to_disk_phases = tuple(config.RESTORE_TO_SSD_PHASES)
+    flash_targets = (
+        ("stick", "a USB install stick (the machine installs from it)", "usb_stick"),
+        ("disk", "the game's SSD in a dock on this PC (installed here; no stick, no key)", "ssd"),
+    )
     # The shared Build / flash button + dialog read dd-flavoured by
     # default (Stern/CGC); JJP's operation is a format-and-copy, so every
     # user-facing word says so.
@@ -397,6 +406,14 @@ class JJPManufacturer(Manufacturer):
         # (the only stick layout a JJP machine can read — see usbstick.py).
         return usbstick.UsbStickPreparePipeline(
             image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
+
+    def make_install_to_disk_pipeline(self, image_path, device_path,
+                                      log_cb, phase_cb, progress_cb, done_cb):
+        # The ISO onto the disk as the machine's installer would put it - see
+        # RestoreToSSDPipeline (it runs tools/jjp_emu/mkjjpmulti.py install).
+        from .pipeline import RestoreToSSDPipeline
+        return RestoreToSSDPipeline(image_path, device_path,
+                                    log_cb, phase_cb, progress_cb, done_cb)
 
     def write_output_ext(self):
         # A JJP build is always a Clonezilla-derived install ISO; pinning

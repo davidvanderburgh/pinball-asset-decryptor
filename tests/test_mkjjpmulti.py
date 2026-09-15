@@ -519,3 +519,205 @@ def test_selector_files_and_paths(mj):
     assert mj.PADSELECT_DIR == "/jjpe/gen1/padselect" and mj.HOOK_PATH == "/jjpe/gen1/scripts/padselect.sh"
     assert mj.ROOTB_PIECE == "sda5.ext4-ptcl-img" and mj.PAD_INSTALLER == "/jjp/pad_install.sh"
     assert mj.CFG_FILES == ("/syslinux/syslinux.cfg", "/boot/grub/grub.cfg")
+
+
+# ============================================================================ install (a disk)
+GNR_INSTALLER_LINES = """#!/bin/bash
+lib_path="/jjp/lib"
+sgdisk_backup30="${lib_path}/backup.sgdisk1"
+sgdisk_backup60="${lib_path}/backup.sgdisk2"
+sgdisk_backup120="${lib_path}/backup.sgdisk3"
+
+FS_UUID_EFI="DD8B8D65"
+FS_UUID_BOOT="61af91e2-2fcf-4434-8508-4d1aaf8d2c59"
+FS_UUID_ROOTA="d8223f69-d29a-474f-a837-0a11dccc27f2"
+FS_UUID_ROOTB="e1a1fecc-e0a1-4daa-9c51-9a8fbd2c2f87"
+FS_UUID_PERMA="3930f288-dba6-4e1a-ab3d-5a23b73aae76"
+FS_UUID_PERMB="bb26c099-d746-457e-abcc-dad19f55c7ab"
+FS_UUID_TEMP="76695bac-6f28-4546-8fad-d3b121016394"
+min_disk_size_gib="111"
+elif [[ "$disk_size" -lt $(( $min_disk_size_gib * 1024 * 1024 * 1024 )) ]]
+then
+    jjp_error "Storage device $dest_disk not large enough"
+fi
+PART_EFI="${dest_disk}${part_prefix}1"
+PART_BOOT="${dest_disk}${part_prefix}2"
+PART_ROOTA="${dest_disk}${part_prefix}3"
+PART_ROOTB="${dest_disk}${part_prefix}5"
+PART_PERMA="${dest_disk}${part_prefix}4"
+PART_PERMB="${dest_disk}${part_prefix}6"
+PART_TEMP="${dest_disk}${part_prefix}7"
+if [[ "$compatible" != "true" ]]
+then
+    # choose the partition table to use
+    backup_to_use="$sgdisk_backup120"
+    if [[ "$disk_size" -lt $((55 * 1024 * 1024 * 1024)) ]]
+    then
+        backup_to_use="$sgdisk_backup30"
+    elif [[ "$disk_size" -lt $((111 * 1024 * 1024 * 1024)) ]]
+    then
+        backup_to_use="$sgdisk_backup60"
+    fi
+    sgdisk -Z "$dest_disk" &> /dev/null
+    sgdisk --load-backup="$backup_to_use" "$dest_disk" &> /dev/null
+fi
+restore_partition "$PART_EFI"   "sda1.vfat-ptcl-img" "$FS_UUID_EFI"
+restore_partition "$PART_BOOT"  "sda2.ext4-ptcl-img" "$FS_UUID_BOOT"
+restore_partition "$PART_ROOTA" "sda3.ext4-ptcl-img" "$FS_UUID_ROOTA"
+restore_partition "$PART_ROOTB" "sda5.ext4-ptcl-img" "$FS_UUID_ROOTB"
+
+if [[ "$compatible" != "true" ]]
+then
+    restore_partition "$PART_PERMA" "sda4.ext4-ptcl-img" "$FS_UUID_PERMA"
+    restore_partition "$PART_PERMB" "sda4.ext4-ptcl-img" "$FS_UUID_PERMB"
+else
+    :
+fi
+mkfs.ext4 -F "$PART_TEMP" &> /dev/null
+e2fsck -f -y "$PART_TEMP" &> /dev/null
+tune2fs "$PART_TEMP" -f -U "$FS_UUID_TEMP" &> /dev/null
+halt -f
+"""
+
+
+def test_parse_installer_reads_the_gnr_installer(mj):
+    """The lines `install` runs are the installer's own: seven slots, the UUIDs grub and
+    fstab expect, three templates by size, the six restores in order (a pad_install.sh
+    puts sda5 in root B), the temp partition."""
+    ins = mj.parse_installer(GNR_INSTALLER_LINES)
+    assert ins["parts"] == {"EFI": 1, "BOOT": 2, "ROOTA": 3, "ROOTB": 5, "PERMA": 4, "PERMB": 6, "TEMP": 7}
+    assert ins["uuids"]["ROOTA"] == "d8223f69-d29a-474f-a837-0a11dccc27f2"
+    assert ins["uuids"]["EFI"] == "DD8B8D65"
+    assert ins["templates"] == {"30": "backup.sgdisk1", "60": "backup.sgdisk2", "120": "backup.sgdisk3"}
+    assert ins["choices"] == [(55, "30"), (111, "60")] and ins["default"] == "120"
+    assert [r[0] for r in ins["restores"]] == ["EFI", "BOOT", "ROOTA", "ROOTB", "PERMA", "PERMB"]
+    assert ins["restores"][3] == ("ROOTB", "sda5.ext4-ptcl-img", "ROOTB")
+    assert ins["min_disk_gib"] == 111
+    # the stock installer: root B from sda3
+    stock = mj.parse_installer(GNR_INSTALLER_LINES.replace('"sda5.ext4-ptcl-img"', '"sda3.ext4-ptcl-img"'))
+    assert stock["restores"][3] == ("ROOTB", "sda3.ext4-ptcl-img", "ROOTB")
+
+
+def test_parse_installer_reads_the_fake_installer_the_same_way(mj):
+    fake = mj.parse_installer(mj.FAKE_INSTALLER)
+    real = mj.parse_installer(GNR_INSTALLER_LINES)
+    assert fake["parts"] == real["parts"] and fake["uuids"] == real["uuids"] and fake["templates"] == real["templates"]
+    assert fake["choices"] == real["choices"] and fake["default"] == real["default"]
+    assert [r[0] for r in fake["restores"]] == [r[0] for r in real["restores"]]
+    assert mj.FAKE_UUIDS == real["uuids"]
+
+
+def test_pick_template_is_the_installers_size_ladder(mj):
+    ins = mj.parse_installer(GNR_INSTALLER_LINES)
+    assert mj.pick_template(ins, 30 * 1000 ** 3) == "backup.sgdisk1"
+    assert mj.pick_template(ins, 60 * 1000 ** 3) == "backup.sgdisk2"
+    assert mj.pick_template(ins, (111 << 30) - 1) == "backup.sgdisk2"
+    assert mj.pick_template(ins, 111 << 30) == "backup.sgdisk3"
+    assert mj.pick_template(ins, 120 * 1000 ** 3) == "backup.sgdisk3"
+    assert mj.pick_template(ins, 2 * 1000 ** 4) == "backup.sgdisk3"
+
+
+def test_part_dev_follows_the_installers_prefix_rule(mj):
+    assert mj.part_dev("/dev/sda", 3) == "/dev/sda3"
+    assert mj.part_dev("/dev/nvme0n1", 5) == "/dev/nvme0n1p5"
+    assert mj.part_dev("/dev/loop7", 1) == "/dev/loop7p1"
+
+
+@pytest.mark.parametrize("drop, why", [
+    ('PART_TEMP="${dest_disk}${part_prefix}7"\n', "PART_TEMP"),
+    ('FS_UUID_ROOTB="e1a1fecc-e0a1-4daa-9c51-9a8fbd2c2f87"\n', "FS_UUID_ROOTB"),
+    ('mkfs.ext4 -F "$PART_TEMP" &> /dev/null\n', "mkfs"),
+    ('sgdisk_backup120="${lib_path}/backup.sgdisk3"\n', "sgdisk_backup120"),
+    ('min_disk_size_gib="111"\n', "min_disk_size_gib"),
+])
+def test_an_installer_missing_a_line_is_refused_not_guessed(mj, drop, why):
+    text = GNR_INSTALLER_LINES.replace(drop, "")
+    assert drop not in text
+    with pytest.raises(mj.Refused) as e:
+        mj.parse_installer(text)
+    assert why in str(e.value) and "not run blind" in str(e.value)
+
+
+def test_a_slot_restored_twice_is_refused(mj):
+    text = GNR_INSTALLER_LINES.replace('restore_partition "$PART_PERMB" "sda4.ext4-ptcl-img" "$FS_UUID_PERMB"',
+                                       'restore_partition "$PART_PERMA" "sda4.ext4-ptcl-img" "$FS_UUID_PERMA"')
+    with pytest.raises(mj.Refused) as e:
+        mj.parse_installer(text)
+    assert "restored twice" in str(e.value)
+
+
+def test_the_install_command_is_wired_and_needs_root(mj, capsys):
+    """The CLI reaches install_disk, whose first act is the root check - so on this side of
+    WSL it exits 2 with the refusal and touches nothing."""
+    rc = mj.main(["install", "--iso", "x.iso", "--disk", "/dev/sdz", "--yes"])
+    out = capsys.readouterr()
+    assert rc == 2
+    assert "needs root" in out.out + out.err
+
+
+# ============================================================================ the GPT by hand
+def test_a_backup_round_trips_and_lays_out_to_the_disk_like_sgdisk(mj, tmp_path):
+    """An sgdisk-shaped backup (MBR + header + 128 entries) parses, its entries read back with
+    their GUIDs, and on a disk of another size the layout moves the backup header to the last
+    sector and the last usable sector 34 from the end - what --load-backup does."""
+    parts = [(mj.GPT_TYPE_EFI, 94 * 2048), (mj.GPT_TYPE_LINUX, 250 * 2048), (mj.GPT_TYPE_LINUX, 4 * 1024 * 2048)]
+    total = 5 * 1000 ** 3 // 512
+    data = mj.make_gpt_backup(parts, total, disk_guid="F8F0C24F-3358-4267-81DA-B737B45AB104")
+    assert len(data) == mj.GPT_BACKUP_SIZE == 17920
+    mbr, h, entries = mj.parse_gpt_backup(data)
+    assert h["guid"] == mj.uuid.UUID("F8F0C24F-3358-4267-81DA-B737B45AB104").bytes_le
+    used = mj.gpt_entries(entries)
+    assert [(e["num"], e["first"], e["last"], e["type"]) for e in used] == [
+        (1, 2048, 2048 + 94 * 2048 - 1, mj.GPT_TYPE_EFI),
+        (2, 2048 + 94 * 2048, 2048 + 344 * 2048 - 1, mj.GPT_TYPE_LINUX),
+        (3, 2048 + 344 * 2048, 2048 + 344 * 2048 + 4 * 1024 * 2048 - 1, mj.GPT_TYPE_LINUX)]
+    assert len({e["guid"] for e in used}) == 3
+    assert mj.gpt_rows(entries) == {e["num"]: (e["first"], e["last"]) for e in used}
+    # a bigger disk: the same entries, the backup at ITS end
+    bigger = 8 * 1000 ** 3 // 512
+    layout = mj.gpt_layout(mbr, h, entries, bigger)
+    lbas = [lba for lba, _d in layout]
+    assert lbas == [0, 1, 2, bigger - 33, bigger - 1]
+    primary = mj.parse_gpt_header(layout[1][1])
+    backup = mj.parse_gpt_header(layout[4][1])
+    assert (primary["my"], primary["alt"], primary["first"], primary["last"], primary["elba"]) == (1, bigger - 1, 34, bigger - 34, 2)
+    assert (backup["my"], backup["alt"], backup["elba"]) == (bigger - 1, 1, bigger - 33)
+    assert primary["guid"] == backup["guid"] == h["guid"]
+    # the protective MBR spans the whole (bigger) disk
+    pm = layout[0][1]
+    assert pm[0x1BE + 4] == 0xEE and mj.struct.unpack_from("<II", pm, 0x1BE + 8) == (1, bigger - 1)
+    # a disk too small for the entries is refused before anything is written
+    with pytest.raises(mj.Refused):
+        mj.gpt_layout(mbr, h, entries, 3 * 1000 ** 3 // 512)
+
+
+def test_write_gpt_onto_a_file_reads_back_exactly(mj, tmp_path):
+    """The self-test's road: the template onto a plain file, read back CRC-checked, entry for
+    entry the template's; the old table zeroed first."""
+    tpl = tmp_path / "backup.sgdisk3"
+    parts = [(mj.GPT_TYPE_EFI, 94 * 2048), (mj.GPT_TYPE_LINUX, 250 * 2048), (mj.GPT_TYPE_LINUX, 100 * 2048)]
+    tpl.write_bytes(mj.make_gpt_backup(parts, 500 * 2048))
+    disk = tmp_path / "disk.raw"
+    with open(disk, "wb") as f:
+        f.truncate(600 * 2048 * 512)
+    written = mj.write_gpt(str(disk), str(tpl))
+    assert [e["num"] for e in written] == [1, 2, 3]
+    h, entries = mj.read_gpt(str(disk))
+    _mbr, th, tentries = mj.parse_gpt_backup(tpl.read_bytes())
+    assert entries == tentries and h["guid"] == th["guid"]
+    assert h["alt"] == 600 * 2048 - 1 and h["last"] == 600 * 2048 - 34
+    assert mj.template_rows(str(tpl)) == mj.gpt_rows(entries)
+    # a corrupted header is a refusal, not a guess
+    with open(disk, "r+b") as f:
+        f.seek(512 + 40)
+        f.write(b"\xff")
+    with pytest.raises(mj.Refused):
+        mj.read_gpt(str(disk))
+
+
+def test_a_real_shaped_backup_is_parsed_not_guessed(mj):
+    with pytest.raises(mj.Refused):
+        mj.parse_gpt_backup(b"\0" * 100)
+    with pytest.raises(mj.Refused):
+        mj.parse_gpt_backup(b"\0" * mj.GPT_BACKUP_SIZE)
+

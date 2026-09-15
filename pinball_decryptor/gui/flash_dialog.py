@@ -129,6 +129,10 @@ class FlashImageDialog:
         self._on_choices = on_choices
         self._theme = THEMES.get(theme_name) or THEMES["light"]
         self._words = _flash_words(manufacturer)
+        self._base_target_label = self._words["target_label"]
+        self._targets = ()           # (key, wording, drive kind) per place, stick first
+        self._target_var = None
+        self._target_row = None
         self._sans, _ = platform_font()
         self._drives = []            # list[PhysicalDrive] from last enumeration
         self._selected = None        # the chosen PhysicalDrive
@@ -315,6 +319,28 @@ class FlashImageDialog:
             img_row, text="Browse…", command=self._browse_image)
         self._image_browse.pack(side="left", padx=(4, 0))
 
+        # WHERE IT GOES (item 123).  A brand that names ``flash_targets`` has a
+        # second place for the image besides its usual medium: a JJP install ISO
+        # can go straight onto the game's SSD in a dock, installed on this PC
+        # exactly as the machine would (no stick, no security key).  The choice
+        # swaps the drive picker's kind, so a stick is never offered as the disk
+        # nor a disk as the stick.  Windows (WSL) and Linux only: the install
+        # wants a Linux block device, which Docker on macOS cannot hand it.
+        self._targets = tuple(getattr(self._mfr, "flash_targets", ()) or ())
+        self._target_var = tk.StringVar(
+            value=self._targets[0][0] if self._targets else "")
+        if len(self._targets) > 1 and sys.platform in ("win32", "linux"):
+            self._target_row = ttk.Frame(flash_body)
+            self._target_row.pack(fill="x", pady=(2, 0))
+            ttk.Label(self._target_row, text="Onto:", width=12,
+                      anchor="w").pack(side="left", anchor="n")
+            choices = ttk.Frame(self._target_row)
+            choices.pack(side="left", fill="x", expand=True)
+            for key, text, _kind in self._targets:
+                ttk.Radiobutton(
+                    choices, text=text, value=key, variable=self._target_var,
+                    command=self._on_target_changed).pack(anchor="w")
+
         # THE MENU-ONLY WRITE.  A multi-boot card's menu lives in ONE
         # partition, so changing it and writing that partition back is 350 MB
         # rather than the whole image - a minute instead of the hour a 14.7 GB
@@ -352,8 +378,9 @@ class FlashImageDialog:
         # Target-card row.
         card_row = ttk.Frame(flash_body)
         card_row.pack(fill="x", pady=4)
-        ttk.Label(card_row, text=self._words["target_label"], width=12,
-                  anchor="w").pack(side="left")
+        self._target_label = ttk.Label(
+            card_row, text=self._words["target_label"], width=12, anchor="w")
+        self._target_label.pack(side="left")
         self._drive_var = tk.StringVar()
         self._drive_combo = ttk.Combobox(
             card_row, textvariable=self._drive_var, state="readonly")
@@ -706,6 +733,35 @@ class FlashImageDialog:
         self._selected = chosen
         self._update_readout()
 
+    def _target(self):
+        """The (key, wording, drive kind) chosen, or None when the brand offers
+        one place only."""
+        key = self._target_var.get() if (self._targets and self._target_var) else ""
+        for t in self._targets:
+            if t[0] == key:
+                return t
+        return None
+
+    def _to_disk(self):
+        """Is the image going onto the game's own disk rather than the brand's
+        usual medium (the first target)?"""
+        t = self._target()
+        return t is not None and t is not self._targets[0]
+
+    def _on_target_changed(self):
+        t = self._target()
+        if t is None:
+            return
+        # the picker's kind follows the place: a stick's list hides disks, a
+        # disk's shows them (the game SSD is a big removable disk)
+        self._words["target_kind"] = t[2]
+        self._words["target_label"] = ("Target disk:" if self._to_disk()
+                                       else self._base_target_label)
+        self._target_label.configure(text=self._words["target_label"])
+        self._selected = None
+        self._refresh_drives()
+        self._update_readout()
+
     def _on_drive_selected(self):
         idx = self._drive_combo.current()
         self._selected = (self._drives[idx]
@@ -747,6 +803,20 @@ class FlashImageDialog:
             # say it already, and the Start-click validation still nags
             # (feedback batch 8: the line was redundant).
             self._readout.configure(text="", foreground=th["gray"])
+            return
+        if self._to_disk():
+            # No fit line: the disk must be big enough for the INSTALL, which the
+            # tool checks the way the machine's installer does before it writes.
+            if card is None:
+                self._readout.configure(
+                    text="Image: %s  •  pick the game's disk." % _fmt_size(img_size),
+                    foreground=th["gray"])
+            else:
+                self._readout.configure(
+                    text="Image %s  →  %s: the whole disk is erased and the game "
+                         "installed onto it, as the machine's installer would."
+                         % (_fmt_size(img_size), card.display),
+                    foreground=th["gray"])
             return
         noun = self._words["noun"]
         if card is None:
@@ -796,6 +866,13 @@ class FlashImageDialog:
             ):
                 return
 
+        if building and self._to_disk():
+            messagebox.showwarning(
+                "Build first",
+                "Build the image first, then reopen this dialog to install the "
+                "finished image onto the disk - or choose the stick to build "
+                "and make a stick in one step.", parent=self._dlg)
+            return
         img = self._image_var.get().strip()
         card = self._selected
         if writing:
@@ -837,7 +914,7 @@ class FlashImageDialog:
             # core.elevated_flash).  On a platform with no self-elevation
             # path (Linux without pkexec) the flash surfaces a clear
             # "re-launch as root" error instead of writing.
-            if (not building and card.size_bytes
+            if (not building and card.size_bytes and not self._to_disk()
                     and os.path.getsize(img) > card.size_bytes):
                 messagebox.showerror(
                     "Image too big",
@@ -866,6 +943,23 @@ class FlashImageDialog:
                     parent=self._dlg,
                 ):
                     return
+            elif self._to_disk():
+                # THE DISK IS INSTALLED, NOT COPIED ONTO: every partition is
+                # rewritten the way the machine's installer rewrites them, so
+                # whatever the disk held - a game, its settings and scores - is
+                # gone, and the words say so before the drive name.
+                if not messagebox.askyesno(
+                    "Erase the disk and install onto it?",
+                    "This will ERASE the entire disk and install %s onto it "
+                    "exactly as the machine's own installer would: every "
+                    "partition is rewritten, so any settings and scores on it "
+                    "are gone (as after every JJP install). There is no undo."
+                    "\n\n  Target: %s\n  Image:  %s\n\n"
+                    "Make sure this is the game's SSD and not a backup drive. "
+                    "Proceed?" % (flash_what, card.display, flash_what),
+                    icon="warning", parent=self._dlg,
+                ):
+                    return
             else:
                 lead = ("After the build finishes, this will ERASE the entire "
                         "%s and %s." % (noun, verb)
@@ -892,7 +986,10 @@ class FlashImageDialog:
             if self._on_build_flash is not None:
                 self._on_build_flash(build_path, device_path)
         elif writing and self._on_flash is not None:
-            self._on_flash(img, device_path, menu_only=menu_only)
+            # ``target`` goes only where a second place was chosen: every other
+            # brand's callback has never heard of it.
+            extra = {"target": self._target()[0]} if self._to_disk() else {}
+            self._on_flash(img, device_path, menu_only=menu_only, **extra)
 
     def _cancel(self):
         try:

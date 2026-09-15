@@ -7312,6 +7312,57 @@ These have each been violated at least once and each cost a run or a window:
       scores and settings intact, and `inspect` of the machine's root A shows the
       new build.json.
 
+- [x] **123. The multi-boot install written STRAIGHT ONTO THE GAME'S SSD in a dock on this
+      PC: no stick, no install run on the machine.** `S3 D3` **DONE 2026-09-15 on `item/120` -
+      emulator-proven; part of the JJP multi-boot family, released with its ONE `/finish`.
+      Owed: David's own dock test on the GNR (see the hardware line).** David, 2026-09-15:
+      "if we want to write the multi-boot straight to the ssd, we should confirm that works
+      next" - the plan's "Direct-SSD write of the same layout" that was "later, not queued".
+      What was there: the app's `RestoreToSSDPipeline` (v0.7.0, never wired to a button) took
+      partimag's `sda-pt.sf`/`parts` at face value - Clonezilla's record of a 4.6 GB golden
+      disk that JJP's installer never reads - so it would have written a wrong table, one root
+      slot, no UUIDs and no temp partition. What closed it: `mkjjpmulti.py install --iso X
+      --disk /dev/sdX [--yes]` runs THE ISO'S OWN INSTALLER'S STEPS, read out of it
+      (`parse_installer`: PART_*, FS_UUID_*, the sgdisk templates by size, the size gate,
+      the six `restore_partition` lines in order, the temp mkfs/UUID - each anchored exactly;
+      an installer that does not parse is refused): a multi-boot ISO's `pad_install.sh` puts
+      image 1 in root B, a stock ISO's `jjp_install.sh` a copy of root A. The table is written
+      FROM JJP'S `backup.sgdisk3` BY HAND (`parse_gpt_backup`/`gpt_layout`/`write_gpt`: MBR +
+      main header + backup header + 128 entries, sized to the disk as `--load-backup` sizes
+      it, every GUID verbatim) because gdisk ends every write with the global `sync()` that
+      hangs under WSL2 - the first proof sat 14 minutes in D state on it, together with a
+      120 GB file on D: that a `truncate` through 9p had left NON-sparse (NTFS zero-filled
+      it; `fsutil sparse setflag` first - memory `reference_ntfs_file_over_9p_not_sparse`).
+      Then the disk is read back (24 checks: the table entry for entry, every slot's
+      UUID, the menu + hook in root A, the game in both roots, `curgrub`=a with root A's UUID,
+      a loader on the EFI partition, mountable perms, an empty temp). Nothing new in the
+      runtime image: partclone, e2fsprogs, util-linux. In the app: the stick dialog's new
+      "Onto:" row (`flash_targets` on the JJP plugin: the USB stick first, "the game's SSD in
+      a dock" second; Windows/Linux) - the disk picker switches to disks, the confirmation
+      says every partition is rewritten, `_start_flash_image(target="disk")` goes through the
+      Direct-SSD Administrator gate to `RestoreToSSDPipeline` (rewritten: Attach = Set-Disk
+      offline + `wsl --mount --bare` + the /dev/sdX found by lsblk diff; Install = the tool
+      streamed, its `[card] progress` lines on the bar; Verify = its ok/FAIL lines; Detach =
+      `wsl --unmount` + online, whatever happened). PROOF: `selftest` installs the synthetic
+      multi ISO onto a 120 GB sparse file on a loop device and reads it back, plus the in-use
+      and too-small refusals (PASS); the rig proof wrote the GNR multi-boot ISO
+      (`GunsNRoses-v03.03.multi120w.iso`, the one on David's stick) onto a 120 GB sparse disk
+      on D: on a loop device in 16 min (984 s, ~30 MB/s through the loop over 9p) (`install verify: PASS`, 24 checks) and
+      then BOOTED under qemu (OVMF UEFI firmware, a SATA disk on q35, KVM, the plain std VGA) to
+      the SELECT GAME CODE menu at 40 s - grub, root A by UUID, the perm generator, jjpxorg, X on
+      the VM's VGA, the hook, jjpselect with its 20 s countdown to GUNS N' ROSES 3.03 (the frames
+      in C:/tmp/jjp120/qemu_ssd123). Tests: tests/test_mkjjpmulti.py (parse_installer on the GNR installer's
+      lines, the size ladder, the prefix rule, five missing-line refusals, the GPT round
+      trip and write/read), tests/test_jjp_install_to_disk.py (the pipeline with a scripted
+      WSL executor: attach/detach order, the tool's lines on the bar/phases/log, FAIL and
+      refusal verdicts, two-disk and wsl --mount refusals, the manufacturer's wiring),
+      tests/test_gui_batch31.py (the dialog's second place). HARDWARE LINE (owed): David
+      puts the GNR's SSD in a dock, picks "the game's SSD in a dock" in the app's stick
+      dialog with the multi ISO, and the machine boots the menu from it; a stock ISO the
+      same way is the plain "reinstall from the PC". Not done: macOS (Docker has no block
+      device - the dialog offers the stick only there); a docked SSD with 4 KiB logical
+      sectors is refused (JJP's table is 512-byte, the machine's installer would fail too).
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

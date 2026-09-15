@@ -343,3 +343,40 @@ squashfs with a loop mount there. Proven 2026-09-13 through the real tab code
 on the GNR pair: selector 17 s, build 585 s (12.97 GB to `D:\Pinball\multi`),
 verify 33/33, "Card built and verified". The stick and the emulator launch
 from the tab wait on a USB stick and a tab-driven run with the GNR key.
+
+## Straight onto the SSD (item 123)
+
+`mkjjpmulti.py install --iso X.iso --disk /dev/sdX [--yes]` writes an install ISO onto a
+disk the way JJP's installer writes it on the machine, with no stick, no live boot and
+no security key (the key gates the game, not the disk).  THE STEPS ARE THE ISO'S OWN
+INSTALLER'S, READ OUT OF IT: `jjp_install.sh` (this tool's `pad_install.sh` on a
+multi-boot ISO) names the partition numbers, the filesystem UUIDs grub.cfg, fstab and
+the perm mount generator expect, the sgdisk templates by disk size (`/jjp/lib/
+backup.sgdisk1/2/3` in the live squashfs: 30/60/120 GB), the size gate
+(`version_info.txt` Disksize, 111 GiB), which image goes into which slot in what order,
+and how the temp partition is made - each line anchored exactly, like the installer
+patch, and an installer that does not parse is refused.  So a stock ISO installs as
+JJP's does (root B = a copy of root A) and a multi-boot ISO as `pad_install.sh` does
+(root B = image 1).  The disk is then read back: the table sector for sector against
+the template, every slot's UUID, the menu in root A (`padselect` + the hook once),
+the game in both roots, `curgrub` = a with root A's UUID in grub.cfg, a loader on the
+EFI partition, mountable perms, an empty temp.
+
+What the ISO carries and NEITHER installer reads: partimag's `parts`, `sda-pt.sf`,
+`sda-gpt-*`, `dev-fs.list` - Clonezilla's record of a 4.6 GB golden disk.  The app's
+old Restore-to-SSD path used them (a wrong table, one root, no UUIDs, no temp); it now
+runs this command.
+
+In the app: the Multi-boot tab's green button opens the stick dialog, whose "Onto:"
+row offers the game's SSD in a dock as the second place (Windows and Linux).  The
+disk is taken offline, handed to WSL whole (`wsl --mount --bare`: Administrator, the
+Direct-SSD gate), installed by this command, verified, and handed back.  Nothing new in
+the runtime image: the partition table is written from the template by the tool itself
+(gdisk ends every write with the global sync() that hangs under WSL2), partclone,
+e2fsprogs and util-linux do the rest.
+
+Proof: the self-test installs the synthetic multi ISO onto a 120 GB sparse file on a
+loop device and checks it (plus the in-use and too-small refusals); the rig proof of
+2026-09-15 wrote the GNR multi-boot ISO onto a 120 GB sparse disk on D: the same way
+and booted it under qemu with UEFI firmware (see plans/TODO.md item 123).
+

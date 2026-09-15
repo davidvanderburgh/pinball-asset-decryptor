@@ -89,9 +89,25 @@ for every refusal (exit 2), `verify: PASS|FAIL`, `inspect --json` one object.
         the media set + media.json through selectmedia.py with JJP's seams: 'auto' art is
         the image's own /jjpe/gen1/miscfiles/graphics/JJP_logo_message.png (plaintext,
         1360x768); an attract clip has no JJP seam yet, so an animation is a video file
+  mkjjpmulti.py install --iso X.iso --disk /dev/sdX [--yes] [--no-verify] [--workdir DIR]
+        the ISO written straight onto a disk - the game's SSD in a dock on this PC - by
+        the same steps JJP's installer runs on the machine, READ OUT OF THE ISO'S OWN
+        INSTALLER (partition numbers, filesystem UUIDs, the sgdisk template by disk
+        size, the size gate, which image lands in which slot, the temp partition); a
+        multi-boot ISO's pad_install.sh puts image 1 in root B, a stock ISO's
+        jjp_install.sh a copy of root A.  No stick, no live boot, no security key.
+        The disk is WIPED (--yes, or the device name typed at a prompt); a disk with
+        anything mounted from it is refused.  Then the disk is verified: the table
+        sector for sector, every UUID, the menu in root A, the game in both roots,
+        grub set to A, the loader on the EFI partition, an empty temp.  A file takes
+        `losetup -P --find --show FILE` first; the app attaches a docked SSD with
+        `wsl --mount` of its PhysicalDrive path, `--bare`, and passes the /dev/sdX that appears.
+        The table is written from the template by this tool, not by sgdisk: gdisk ends
+        every write with the global sync() that hangs under WSL2 (2026-09-13, 2026-09-15).
   mkjjpmulti.py selftest DIR
         two synthetic JJP ISOs (root: mke2fs -d, partclone, mksquashfs, xorriso) ->
-        build -> verify -> inspect -> inject -> the mismatch refusal; in DIR
+        build -> verify -> inspect -> inject -> the mismatch refusal -> install onto a
+        120 GB sparse file on a loop device (+ the in-use and too-small refusals); in DIR
 
 Every OUTPUT path is explicit; an existing one needs --force; nothing is ever
 written under David's image library (mkmulticard's refusal, shared).
@@ -109,6 +125,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -579,26 +597,17 @@ def root_identity(raw):
 
 
 # ============================================================================= restore
-def restore_pieces(pieces, dest, meter=None, label="sda3"):
-    """cat pieces | gunzip | partclone.restore into a sparse raw file, then size it up to the
-    filesystem's own block count (partclone stops at the last used block).  Written as
-    dest.part and renamed when complete.  The pieces are fed from here so the meter sees
-    the compressed bytes go by."""
-    need_tools("gunzip", "partclone.restore")
-    part = dest + ".part"
-    log = dest + ".restore.log"
-    for p in (part, log):
-        if os.path.exists(p):
-            os.unlink(p)
-    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    # TEXT mode, not -N: in partclone 0.3.x -N means "use the NCURSES
-    # interface", so the log used to hold a full-screen UI's escape codes and
-    # a failure's tail was unreadable.  -f 5 -B: a "Completed: N%" line every
-    # five seconds and no block-count line under each - the log stays small
-    # and a refusal's tail says how far it got.  (The meter above is the
-    # builder's own progress; this is only what the log records.)
+def _partclone_feed(pieces, out_path, log, meter=None):
+    """cat pieces | gunzip | partclone.restore -C ... -o out_path (a raw file or a partition
+    device), the pieces fed from here so the meter sees the compressed bytes go by.
+    Returns (rc, broken).
+
+    TEXT mode, not -N: in partclone 0.3.x -N means "use the NCURSES interface", so the log
+    used to hold a full-screen UI's escape codes and a failure's tail was unreadable.
+    -f 5 -B: a "Completed: N%" line every five seconds and no block-count line under each -
+    the log stays small and a refusal's tail says how far it got."""
     cmd = 'set -o pipefail; gunzip -c | partclone.restore -C -f 5 -B -s - -o "$0" >"$1" 2>&1'
-    proc = subprocess.Popen(["bash", "-c", cmd, part, log], stdin=subprocess.PIPE)
+    proc = subprocess.Popen(["bash", "-c", cmd, out_path, log], stdin=subprocess.PIPE)
     fed = 0
     broken = False
     try:
@@ -621,11 +630,30 @@ def restore_pieces(pieces, dest, meter=None, label="sda3"):
         except OSError:
             pass
         rc = proc.wait()
+    return rc, broken
+
+
+def _log_tail(log, n=1200):
+    if os.path.isfile(log):
+        with open(log, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()[-n:]
+    return ""
+
+
+def restore_pieces(pieces, dest, meter=None, label="sda3"):
+    """cat pieces | gunzip | partclone.restore into a sparse raw file, then size it up to the
+    filesystem's own block count (partclone stops at the last used block).  Written as
+    dest.part and renamed when complete."""
+    need_tools("gunzip", "partclone.restore")
+    part = dest + ".part"
+    log = dest + ".restore.log"
+    for p in (part, log):
+        if os.path.exists(p):
+            os.unlink(p)
+    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+    rc, broken = _partclone_feed(pieces, part, log, meter)
     if rc != 0 or broken:
-        tail = ""
-        if os.path.isfile(log):
-            with open(log, "r", encoding="utf-8", errors="replace") as f:
-                tail = f.read()[-1200:]
+        tail = _log_tail(log)
         for p in (part,):
             if os.path.exists(p):
                 os.unlink(p)
@@ -974,25 +1002,26 @@ def patch_cfg(text):
     return text.replace(OCS_STOCK, OCS_PAD)
 
 
-def unsquash_installer(squashfs, dest_dir):
-    """The stock installer out of the live squashfs -> its text.  unsquashfs
-    where squashfs-tools is installed; a read-only loop mount of the squashfs
-    otherwise - root, which a build is anyway - because the app's own runtime
-    distro (PAD-Runtime) ships no squashfs-tools and every JJP install ISO's
-    live system is a squashfs the kernel can mount."""
-    p = os.path.join(dest_dir, SQ_INSTALLER)
+def unsquash_files(squashfs, dest_dir, paths):
+    """Files out of the live squashfs -> their paths under dest_dir.  unsquashfs where
+    squashfs-tools is installed; a read-only loop mount of the squashfs otherwise - root,
+    which a build is anyway - because the app's own runtime distro (PAD-Runtime) ships no
+    squashfs-tools and every JJP install ISO's live system is a squashfs the kernel can
+    mount."""
+    out = [os.path.join(dest_dir, p) for p in paths]
     if shutil.which("unsquashfs"):
-        _run(["unsquashfs", "-q", "-n", "-f", "-d", dest_dir, squashfs, SQ_INSTALLER])
+        _run(["unsquashfs", "-q", "-n", "-f", "-d", dest_dir, squashfs] + list(paths))
     elif is_root() and shutil.which("mount"):
         mnt = tempfile.mkdtemp(prefix="mkjjpmulti_sq_")
         try:
             _run(["mount", "-t", "squashfs", "-o", "loop,ro", squashfs, mnt])
             try:
-                src = os.path.join(mnt, SQ_INSTALLER)
-                if not os.path.isfile(src):
-                    raise Refused("%s carries no /%s" % (squashfs, SQ_INSTALLER))
-                os.makedirs(os.path.dirname(p), exist_ok=True)
-                shutil.copyfile(src, p)
+                for p, dst in zip(paths, out):
+                    src = os.path.join(mnt, p)
+                    if not os.path.isfile(src):
+                        raise Refused("%s carries no /%s" % (squashfs, p))
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(src, dst)
             finally:
                 subprocess.run(["umount", mnt], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         finally:
@@ -1002,9 +1031,16 @@ def unsquash_installer(squashfs, dest_dir):
                 pass
     else:
         raise Refused("no unsquashfs (apt-get install squashfs-tools) and not root, so %s cannot be "
-                      "read out of %s" % (SQ_INSTALLER, squashfs))
-    if not os.path.isfile(p):
-        raise Refused("%s carries no /%s" % (squashfs, SQ_INSTALLER))
+                      "read out of %s" % (", ".join(paths), squashfs))
+    for p, dst in zip(paths, out):
+        if not os.path.isfile(dst):
+            raise Refused("%s carries no /%s" % (squashfs, p))
+    return out
+
+
+def unsquash_installer(squashfs, dest_dir):
+    """The stock installer out of the live squashfs -> its text."""
+    p = unsquash_files(squashfs, dest_dir, [SQ_INSTALLER])[0]
     with open(p, "r", encoding="utf-8", errors="replace") as f:
         return f.read()
 
@@ -1973,6 +2009,629 @@ def cmd_media(a):
 
 
 # ============================================================================= selftest
+
+# ============================================================================= install (a disk)
+# THE ISO WRITTEN STRAIGHT ONTO A DISK - the game's SSD in a dock on this PC (item 123) - by
+# THE SAME STEPS JJP'S INSTALLER RUNS ON THE MACHINE, READ OUT OF THE ISO'S OWN INSTALLER.
+# jjp_install.sh (this tool's pad_install.sh on a multi-boot ISO) names the partition numbers,
+# the filesystem UUIDs grub.cfg, fstab and the perm mount generator expect, the sgdisk
+# templates by disk size, the size gate, which image lands in which slot in what order, and
+# how the temp partition is made.  Each of those lines is anchored exactly (like the installer
+# patch above) and run here, so a stock ISO installs as JJP's does (root B = a copy of root A)
+# and a multi-boot ISO as pad_install.sh does (root B = the second image); an installer that
+# does not parse is refused, never guessed at.  What the machine's run has and this one does
+# not: the live system, the framebuffer screens, and donglecheck - the security key gates the
+# GAME, not the disk.  What the ISO has and neither reads: partimag's `parts`, `sda-pt.sf`,
+# `sda-gpt-*` - Clonezilla's record of a 4.6 GB golden disk the installer never looks at.
+SQ_LIB = "jjp/lib"                                            # the templates, inside the squashfs
+
+# ---- the partition table: JJP's sgdisk backup, written and read by hand ----------------------
+# `sgdisk --load-backup` is what the installer runs, and it ends every write with sync() -
+# the GLOBAL sync, which hangs under WSL2 whenever a Windows drive has dirty pages (it parked
+# a build for good on 2026-09-13, and the first loop-device proof of this command for
+# fourteen minutes in D state on 2026-09-15).  The backup file is only the three things the
+# disk needs - the protective MBR, the primary header, the 128 entries - so they are written
+# here, sized to the disk exactly as sgdisk sizes them (the backup header at the last
+# sector, the last usable sector 34 from the end, the protective entry capped at 2 TiB),
+# with every GUID verbatim, and read back the same way.  No gdisk in the runtime image.
+SECTOR = 512
+GPT_SIG = b"EFI PART"
+GPT_ENTRIES = 128
+GPT_ENTRY_SIZE = 128
+GPT_TABLE_SECTORS = GPT_ENTRIES * GPT_ENTRY_SIZE // SECTOR              # 32
+GPT_BACKUP_SIZE = 3 * SECTOR + GPT_ENTRIES * GPT_ENTRY_SIZE            # 17920: MBR, main header, backup header, entries
+_GPT_HDR = struct.Struct("<8sIIII QQQQ 16s QIII")
+GPT_TYPE_EFI = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+GPT_TYPE_LINUX = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+GPT_TYPE_MSDATA = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+O_BINARY = getattr(os, "O_BINARY", 0)                     # Windows opens TEXT by default; the pure tests run there
+
+
+def _crc(data):
+    return zlib.crc32(data) & 0xFFFFFFFF
+
+
+def parse_gpt_header(hdr):
+    """One 512-byte GPT header -> its fields (Refused unless the signature and its own CRC hold)."""
+    if len(hdr) < 92 or hdr[:8] != GPT_SIG:
+        raise Refused("no GPT header (signature %r)" % hdr[:8])
+    (sig, rev, hsize, hcrc, _res, my, alt, first, last, guid, elba, n, esize, ecrc) = _GPT_HDR.unpack_from(hdr, 0)
+    if hsize < 92 or hsize > SECTOR:
+        raise Refused("GPT header size %d" % hsize)
+    if _crc(hdr[:16] + b"\0\0\0\0" + hdr[20:hsize]) != hcrc:
+        raise Refused("GPT header CRC does not match")
+    return {"rev": rev, "size": hsize, "my": my, "alt": alt, "first": first, "last": last, "guid": guid,
+            "elba": elba, "entries": n, "entry_size": esize, "entries_crc": ecrc}
+
+
+def build_gpt_header(h, my, alt, first, last, elba, entries):
+    """A 512-byte header from the fields of `h` with these positions, both CRCs fresh."""
+    body = bytearray(_GPT_HDR.pack(GPT_SIG, h["rev"], 92, 0, 0, my, alt, first, last, h["guid"], elba,
+                                   GPT_ENTRIES, GPT_ENTRY_SIZE, _crc(entries)))
+    struct.pack_into("<I", body, 16, _crc(bytes(body)))
+    return bytes(body) + b"\0" * (SECTOR - len(body))
+
+
+def parse_gpt_backup(data):
+    """An sgdisk backup (gdisk's SaveGPTBackup: the protective MBR, the main header, the backup
+    header, the 128 entries) -> (protective MBR, main header fields, the entries as bytes)."""
+    if len(data) != GPT_BACKUP_SIZE:
+        raise Refused("sgdisk backup: %d bytes, not %d (MBR + two headers + %d entries)" % (len(data), GPT_BACKUP_SIZE, GPT_ENTRIES))
+    mbr, hdr, hdr2, entries = data[:SECTOR], data[SECTOR:2 * SECTOR], data[2 * SECTOR:3 * SECTOR], data[3 * SECTOR:]
+    if mbr[510:512] != b"\x55\xaa":
+        raise Refused("sgdisk backup: no MBR signature")
+    h = parse_gpt_header(hdr)
+    h2 = parse_gpt_header(hdr2)
+    if h2["guid"] != h["guid"] or h2["entries_crc"] != h["entries_crc"]:
+        raise Refused("sgdisk backup: its two headers disagree")
+    if h["entries"] != GPT_ENTRIES or h["entry_size"] != GPT_ENTRY_SIZE:
+        raise Refused("sgdisk backup: %d entries of %d bytes, not %d of %d" % (h["entries"], h["entry_size"], GPT_ENTRIES, GPT_ENTRY_SIZE))
+    if _crc(entries) != h["entries_crc"]:
+        raise Refused("sgdisk backup: the entries' CRC does not match the header")
+    return mbr, h, entries
+
+
+def gpt_entries(entries):
+    """The used entries: [{num, type, guid, first, last, attrs, name}] (GUIDs as upper-case text)."""
+    out = []
+    for i in range(GPT_ENTRIES):
+        e = entries[i * GPT_ENTRY_SIZE:(i + 1) * GPT_ENTRY_SIZE]
+        t, g, first, last, attrs = struct.unpack_from("<16s16sQQQ", e, 0)
+        if t == b"\0" * 16:
+            continue
+        out.append({"num": i + 1, "type": str(uuid.UUID(bytes_le=t)).upper(), "guid": str(uuid.UUID(bytes_le=g)).upper(),
+                    "first": first, "last": last, "attrs": attrs,
+                    "name": e[56:128].decode("utf-16-le", "replace").rstrip("\0")})
+    return out
+
+
+def gpt_rows(entries):
+    return {e["num"]: (e["first"], e["last"]) for e in gpt_entries(entries)}
+
+
+def protective_mbr(mbr, total_sectors):
+    """The template's protective MBR with its 0xEE entry sized to this disk (sgdisk's rule:
+    everything after LBA 0, capped at what 32 bits hold)."""
+    out = bytearray(mbr)
+    for i in range(4):
+        at = 0x1BE + 16 * i
+        if out[at + 4] == 0xEE:
+            struct.pack_into("<II", out, at + 8, 1, min(total_sectors - 1, 0xFFFFFFFF))
+            break
+    else:
+        raise Refused("sgdisk backup: the MBR has no protective (0xEE) entry")
+    return bytes(out)
+
+
+def gpt_layout(mbr, h, entries, total_sectors):
+    """What sgdisk would put on a disk of `total_sectors` from this backup: [(lba, bytes)...] -
+    the MBR, the primary header and table at the start, the table and header again at the end."""
+    last = total_sectors - 1
+    if total_sectors < 2 * (1 + GPT_TABLE_SECTORS) + 2:
+        raise Refused("a disk of %d sectors cannot hold a GPT" % total_sectors)
+    used = gpt_entries(entries)
+    last_usable = total_sectors - 1 - GPT_TABLE_SECTORS - 1
+    if used and max(e["last"] for e in used) > last_usable:
+        raise Refused("the template's partitions end at sector %d, past what a %s disk holds (last usable %d)"
+                      % (max(e["last"] for e in used), _gb(total_sectors * SECTOR), last_usable))
+    first_usable = h["first"]
+    primary = build_gpt_header(h, 1, last, first_usable, last_usable, 2, entries)
+    backup = build_gpt_header(h, last, 1, first_usable, last_usable, total_sectors - 1 - GPT_TABLE_SECTORS, entries)
+    return [(0, protective_mbr(mbr, total_sectors)), (1, primary), (2, entries),
+            (total_sectors - 1 - GPT_TABLE_SECTORS, entries), (last, backup)]
+
+
+def dev_size_bytes(dev):
+    """A block device's size (blockdev), or a plain file's (the self-tests write onto files)."""
+    import stat as _stat
+    if _stat.S_ISBLK(os.stat(dev).st_mode):
+        ss = int(_run(["blockdev", "--getss", dev]).strip() or SECTOR)
+        if ss != SECTOR:
+            raise Refused("%s has %d-byte sectors; JJP's partition table is laid out for 512 (the machine's installer "
+                          "would fail on it too)" % (dev, ss))
+        return int(_run(["blockdev", "--getsize64", dev]).strip())
+    return os.path.getsize(dev)
+
+
+def write_gpt(dev, tpl_path):
+    """The template onto `dev` as sgdisk -Z + --load-backup would leave it, then the kernel
+    told to read the table (no sync(): fsync of the device only)."""
+    with open(tpl_path, "rb") as f:
+        mbr, h, entries = parse_gpt_backup(f.read())
+    total = dev_size_bytes(dev) // SECTOR
+    pieces = gpt_layout(mbr, h, entries, total)
+    fd = os.open(dev, os.O_RDWR | O_BINARY)
+    try:
+        # sgdisk -Z: the old table gone first, so a failure half way leaves no stale GPT
+        for lba in (1, total - 1):
+            os.lseek(fd, lba * SECTOR, 0)
+            os.write(fd, b"\0" * SECTOR)
+        for lba, data in pieces:
+            os.lseek(fd, lba * SECTOR, 0)
+            os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    import stat as _stat
+    if _stat.S_ISBLK(os.stat(dev).st_mode):
+        subprocess.run(["blockdev", "--rereadpt", dev], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return gpt_entries(entries)
+
+
+def read_gpt(dev):
+    """The primary header and table off `dev` -> (header fields, entries bytes), CRC-checked."""
+    fd = os.open(dev, os.O_RDONLY | O_BINARY)
+    try:
+        os.lseek(fd, SECTOR, 0)
+        hdr = os.read(fd, SECTOR)
+        h = parse_gpt_header(hdr)
+        os.lseek(fd, h["elba"] * SECTOR, 0)
+        entries = os.read(fd, h["entries"] * h["entry_size"])
+    finally:
+        os.close(fd)
+    if _crc(entries) != h["entries_crc"]:
+        raise Refused("%s: the partition entries' CRC does not match the header" % dev)
+    return h, entries
+
+
+def make_gpt_backup(parts, total_sectors, disk_guid=None):
+    """An sgdisk-shaped backup for a disk of `total_sectors` from [(type GUID text, size in
+    sectors)...] laid out from sector 2048 on 2048-sector boundaries (the self-test's
+    stand-in for JJP's backup.sgdisk1/2/3)."""
+    entries = bytearray(GPT_ENTRIES * GPT_ENTRY_SIZE)
+    at = 2048
+    for i, (type_guid, size) in enumerate(parts):
+        first, last = at, at + size - 1
+        struct.pack_into("<16s16sQQQ", entries, i * GPT_ENTRY_SIZE, uuid.UUID(type_guid).bytes_le, uuid.uuid4().bytes_le,
+                         first, last, 0)
+        at = (last + 1 + 2047) // 2048 * 2048
+    h = {"rev": 0x00010000, "guid": (uuid.UUID(disk_guid) if disk_guid else uuid.uuid4()).bytes_le, "first": 34}
+    mbr = bytearray(SECTOR)
+    mbr[0x1BE:0x1BE + 16] = bytes([0x00, 0x00, 0x02, 0x00, 0xEE, 0xFF, 0xFF, 0xFF]) + struct.pack("<II", 1, 0)
+    mbr[510:512] = b"\x55\xaa"
+    layout = gpt_layout(bytes(mbr), h, bytes(entries), total_sectors)
+    return layout[0][1] + layout[1][1] + layout[4][1] + bytes(entries)
+_INS_UUID_RE = re.compile(r'^FS_UUID_([A-Z]+)="([0-9A-Fa-f-]+)"[ \t]*$', re.M)
+_INS_PART_RE = re.compile(r'^PART_([A-Z]+)="\$\{dest_disk\}\$\{part_prefix\}(\d+)"[ \t]*$', re.M)
+_INS_TPL_RE = re.compile(r'^sgdisk_backup(\d+)="\$\{lib_path\}/(backup\.sgdisk\d+)"[ \t]*$', re.M)
+_INS_RESTORE_RE = re.compile(r'^[ \t]*restore_partition[ \t]+"\$PART_([A-Z]+)"[ \t]+'
+                             r'"(sda\d+\.[a-z0-9]+-ptcl-img)"[ \t]+"\$FS_UUID_([A-Z]+)"[ \t]*$', re.M)
+_INS_CHOICE_RE = re.compile(r'-lt[ \t]+\$\(\((\d+)[ \t]*\*[ \t]*1024[ \t]*\*[ \t]*1024[ \t]*\*[ \t]*1024\)\)[ \t]*\]\]'
+                            r'[ \t]*\n[ \t]*then[ \t]*\n[ \t]*backup_to_use="\$sgdisk_backup(\d+)"')
+_INS_DEFAULT_RE = re.compile(r'^[ \t]*backup_to_use="\$sgdisk_backup(\d+)"[ \t]*$', re.M)
+_INS_MIN_RE = re.compile(r'^min_disk_size_gib="(\d+)"[ \t]*$', re.M)
+_INS_TEMP_MKFS = 'mkfs.ext4 -F "$PART_TEMP"'
+_INS_TEMP_UUID = 'tune2fs "$PART_TEMP" -f -U "$FS_UUID_TEMP"'
+_INS_LINE_FORMS = ("FS_UUID_<NAME>=\"..\"", "PART_<NAME>=\"${dest_disk}${part_prefix}N\"",
+                   "sgdisk_backup<GB>=\"${lib_path}/backup.sgdiskN\"", "backup_to_use=",
+                   "restore_partition \"$PART_<NAME>\" \"sdaN.<fs>-ptcl-img\" \"$FS_UUID_<NAME>\"",
+                   "min_disk_size_gib=", _INS_TEMP_MKFS, _INS_TEMP_UUID)
+
+
+def parse_installer(text):
+    """jjp_install.sh / pad_install.sh -> what an install does: {uuids, parts, templates,
+    choices [(GiB, template key)...] in the installer's order, default (template key),
+    restores [(PART name, image, UUID name)...] in order, min_disk_gib}.  Refused when a
+    line this needs is missing or doubled - an installer this tool does not know is not run
+    blind."""
+    uuids = dict(_INS_UUID_RE.findall(text))
+    parts = {k: int(v) for k, v in _INS_PART_RE.findall(text)}
+    templates = dict(_INS_TPL_RE.findall(text))
+    choices = [(int(g), t) for g, t in _INS_CHOICE_RE.findall(text)]
+    defaults = _INS_DEFAULT_RE.findall(text)
+    restores = _INS_RESTORE_RE.findall(text)
+    mins = _INS_MIN_RE.findall(text)
+    problems = []
+    if not uuids:
+        problems.append("no FS_UUID_* lines")
+    if not parts:
+        problems.append("no PART_* lines")
+    elif len(set(parts.values())) != len(parts):
+        problems.append("two PART_* names share a partition number")
+    if not templates:
+        problems.append("no sgdisk_backup* lines")
+    if not defaults:
+        problems.append("no backup_to_use= line")
+    if not restores:
+        problems.append("no restore_partition lines")
+    if len(mins) != 1:
+        problems.append("%d min_disk_size_gib= lines" % len(mins))
+    for what, line in (("mkfs", _INS_TEMP_MKFS), ("UUID", _INS_TEMP_UUID)):
+        n = sum(1 for ln in text.split("\n") if ln.strip().startswith(line))
+        if n != 1:
+            problems.append("%d line(s) for the temp partition's %s" % (n, what))
+    if "TEMP" not in parts or "TEMP" not in uuids:
+        problems.append("no PART_TEMP / FS_UUID_TEMP")
+    seen = set()
+    for p, _img, u in restores:
+        if p not in parts:
+            problems.append("PART_%s is restored but never defined" % p)
+        if u not in uuids:
+            problems.append("FS_UUID_%s is used but never defined" % u)
+        if parts.get(p) in seen:
+            problems.append("PART_%s is restored twice" % p)
+        seen.add(parts.get(p))
+    default = defaults[0] if defaults else None
+    for _g, t in choices + ([(0, default)] if default else []):
+        if t not in templates:
+            problems.append("sgdisk_backup%s is chosen but never defined" % t)
+    if problems:
+        raise Refused("the ISO's installer: %s - an installer this tool does not know is not run blind "
+                      "(it reads these line forms: %s)" % ("; ".join(problems), "; ".join(_INS_LINE_FORMS)))
+    return {"uuids": uuids, "parts": parts, "templates": templates, "choices": choices, "default": default,
+            "restores": [tuple(r) for r in restores], "min_disk_gib": int(mins[0])}
+
+
+def pick_template(ins, size_bytes):
+    """The installer's choice: the first `-lt N GiB` that holds, else the default."""
+    for gib, t in ins["choices"]:
+        if size_bytes < (gib << 30):
+            return ins["templates"][t]
+    return ins["templates"][ins["default"]]
+
+
+def part_dev(disk, n):
+    """/dev/sda -> /dev/sda3; /dev/nvme0n1 -> /dev/nvme0n1p3; /dev/loop7 -> /dev/loop7p3: the
+    installer's part_prefix rule (a name ending in a digit takes a 'p')."""
+    return "%s%s%d" % (disk, "p" if disk[-1:].isdigit() else "", n)
+
+
+def _lsblk_col(dev, col):
+    r = subprocess.run(["lsblk", "-dno", col, dev], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return r.stdout.decode("utf-8", "replace").strip()
+
+
+def disk_facts(disk):
+    """{dev (resolved), size, ro, model, tran, in_use [..]}: in_use names every mount and swap
+    that sits on the disk or one of its partitions - the whole reason a disk gets refused."""
+    import stat as _stat
+    real = os.path.realpath(disk)
+    try:
+        st = os.stat(real)
+    except OSError as e:
+        raise Refused("%s: %s" % (disk, e.strerror))
+    if not _stat.S_ISBLK(st.st_mode):
+        raise Refused("%s is not a block device (a disk image takes `losetup -P --find --show FILE` first)" % disk)
+    size = int(_run(["blockdev", "--getsize64", real]).strip())
+    ro = _run(["blockdev", "--getro", real]).strip() == "1"
+
+    def on_disk(src):
+        if not src.startswith("/dev/"):
+            return False
+        rs = os.path.realpath(src)
+        if rs == real:
+            return True
+        return rs.startswith(real) and rs[len(real):].lstrip("p").isdigit() and rs[len(real):] != ""
+
+    in_use = []
+    for table, what in (("/proc/mounts", "mounted on"), ("/proc/swaps", "swap")):
+        try:
+            with open(table, "r") as f:
+                for line in f:
+                    cols = line.split()
+                    if len(cols) >= 2 and on_disk(cols[0]):
+                        in_use.append("%s %s %s" % (cols[0], what, cols[1]) if what == "mounted on" else "%s is swap" % cols[0])
+        except OSError:
+            pass
+    return {"dev": real, "size": size, "ro": ro, "model": _lsblk_col(real, "MODEL"), "tran": _lsblk_col(real, "TRAN"),
+            "in_use": in_use}
+
+
+def confirm_wipe(disk, facts):
+    """No --yes: the disk as it is now, then its name typed back, or Refused."""
+    if not sys.stdin.isatty():
+        raise Refused("%s would be wiped: pass --yes (there is no terminal to confirm on)" % disk)
+    r = subprocess.run(["lsblk", "-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS", disk], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    print(r.stdout.decode("utf-8", "replace").rstrip())
+    name = os.path.basename(disk)
+    try:
+        typed = input("EVERYTHING on %s (%s, %s) is erased. Type %s to go on: " % (disk, facts["model"] or "no model", _gb(facts["size"]), name))
+    except EOFError:
+        typed = ""
+    if typed.strip() != name:
+        raise Refused("not confirmed; nothing was written")
+
+
+def wait_for_parts(disk, numbers, seconds=20):
+    """The partition nodes after the table is written: write_gpt asks the kernel to re-read it
+    (blockdev --rereadpt); asked once more when the nodes are slow to appear; then wait."""
+    want = [part_dev(disk, n) for n in numbers]
+    t0 = time.time()
+    asked = False
+    while time.time() - t0 < seconds:
+        if all(os.path.exists(p) for p in want):
+            return want
+        if not asked and time.time() - t0 > 2:
+            subprocess.run(["blockdev", "--rereadpt", disk], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            asked = True
+        time.sleep(0.25)
+    missing = [p for p in want if not os.path.exists(p)]
+    raise Refused("after the table was written the kernel shows no %s - is %s attached with partition scanning "
+                  "(losetup -P; wsl --mount --bare)?" % (", ".join(missing), disk))
+
+
+def _finish_ext4(dev, uuid):
+    """The installer's restore_partition tail for an ext4 slot: fsck, grow into the partition,
+    fsck, the UUID grub/fstab expect."""
+    _run(["e2fsck", "-f", "-y", dev], ok_rc=(0, 1, 2))
+    _run(["resize2fs", dev])
+    _run(["e2fsck", "-f", "-y", dev], ok_rc=(0, 1, 2))
+    _run(["tune2fs", dev, "-f", "-U", uuid])
+
+
+def _finish_vfat(dev, uuid):
+    """The installer's line for the EFI slot is `dosfslabel -i DEV ID`, which under the
+    dosfstools the live system carries (4.2) changes nothing - `-i` takes no value there,
+    so the line prints the id and sets no label - and the shipped image already carries
+    the id the fstab wants.  Nothing is run; verify checks the id on the disk instead."""
+    return None
+
+
+def flush_disk(disk):
+    subprocess.run(["blockdev", "--flushbufs", disk], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        fd = os.open(disk, os.O_RDWR | O_BINARY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+class DevMount:
+    """A read-only mount of a partition device for a `with` block (root)."""
+
+    def __init__(self, dev, fstype=None):
+        self.dev, self.fstype, self.mnt = dev, fstype, None
+
+    def __enter__(self):
+        self.mnt = tempfile.mkdtemp(prefix=MOUNT_PREFIX)
+        try:
+            _run(["mount", "-o", "ro"] + (["-t", self.fstype] if self.fstype else []) + [self.dev, self.mnt])
+        except Refused:
+            os.rmdir(self.mnt)
+            self.mnt = None
+            raise
+        return self.mnt
+
+    def __exit__(self, *exc):
+        if not self.mnt:
+            return
+        for attempt in range(6):
+            r = subprocess.run(["umount", self.mnt], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            if r.returncode == 0:
+                break
+            time.sleep(0.5 * (attempt + 1))
+        try:
+            os.rmdir(self.mnt)
+        except OSError:
+            pass
+
+
+def template_rows(tpl):
+    """{number: (first, last)} of the template's partitions."""
+    with open(tpl, "rb") as f:
+        _mbr, _h, entries = parse_gpt_backup(f.read())
+    return gpt_rows(entries)
+
+
+def verify_disk(disk, ins, info, tpl, work):
+    """The written disk read back: the table sector for sector against the template, every
+    slot's UUID, root A's menu (or its absence on a stock install), the game in both roots,
+    grub set to A with root A's UUID, a loader on the EFI partition, mountable perms, an
+    empty temp.  Prints ok/FAIL lines like `verify`; returns True when all hold."""
+    results = []
+
+    def check(name, ok, detail=""):
+        results.append((name, bool(ok), detail))
+        print("%s: %s%s" % ("ok" if ok else "FAIL", name, (" - " + detail) if detail else ""))
+        return bool(ok)
+
+    def norm(u):
+        return (u or "").replace("-", "").upper()
+
+    def read(mnt, rel):
+        p = os.path.join(mnt, rel.lstrip("/"))
+        if not os.path.isfile(p):
+            return None
+        with open(p, "rb") as f:
+            return f.read()
+
+    parts, uuids = ins["parts"], ins["uuids"]
+    try:
+        h, entries = read_gpt(disk)
+        rows = gpt_rows(entries)
+        check("%d partitions on %s" % (len(parts), disk), set(rows) == set(parts.values()),
+              "found %s" % (sorted(rows) or "none"))
+        with open(tpl, "rb") as f:
+            _mbr, th, tentries = parse_gpt_backup(f.read())
+        check("the partition table is %s entry for entry (GUIDs included)" % os.path.basename(tpl), entries == tentries,
+              "" if entries == tentries else "differs at %s" % sorted(n for n in set(rows) | set(gpt_rows(tentries))
+                                                                       if rows.get(n) != gpt_rows(tentries).get(n)))
+        total = dev_size_bytes(disk) // SECTOR
+        check("the GPT is sized to the disk (backup header at the last sector, disk GUID kept)",
+              h["alt"] == total - 1 and h["last"] == total - 2 - GPT_TABLE_SECTORS and h["guid"] == th["guid"],
+              "alt %d last usable %d of %d" % (h["alt"], h["last"], total))
+    except Refused as e:
+        check("a GPT on %s" % disk, False, str(e)[-200:])
+    for name, n in sorted(parts.items(), key=lambda kv: kv[1]):
+        dev = part_dev(disk, n)
+        r = subprocess.run(["blkid", "-s", "UUID", "-o", "value", dev], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        got = r.stdout.decode("utf-8", "replace").strip()
+        check("%s %s has UUID %s" % (name, dev, uuids[name]), norm(got) == norm(uuids[name]), got or "no filesystem")
+    game = JJPEDIR + "/" + info.name + "/game"
+    menu_wanted = bool(info.pad_dir)
+    for slot in ("ROOTA", "ROOTB"):
+        dev = part_dev(disk, parts[slot])
+        try:
+            with DevMount(dev) as m:
+                check("%s holds %s" % (slot, game), read(m, game) is not None)
+                rg = (read(m, RUNGAME) or b"").decode("utf-8", "replace")
+                has_menu = os.path.isdir(os.path.join(m, PADSELECT_DIR.lstrip("/")))
+                if slot == "ROOTA" and menu_wanted:
+                    check("root A carries the menu: %s and rungame.sh hooked once" % PADSELECT_DIR,
+                          has_menu and hook_line_count(rg) == 1, "menu %s, hook lines %d" % (has_menu, hook_line_count(rg)))
+                    check("root A carries %s" % (PADSELECT_DIR + "/" + mkc.BUILD_MANIFEST),
+                          read(m, PADSELECT_DIR + "/" + mkc.BUILD_MANIFEST) is not None)
+                else:
+                    check("%s is a stock root (no menu, no hook)" % slot, not has_menu and hook_line_count(rg) == 0)
+                fu = (read(m, FS_UUIDS) or b"").decode("utf-8", "replace")
+                check("%s's fs_uuids.sh names root A/B as the installer does" % slot,
+                      all(re.search(r'^FS_UUID_%s="?%s"?\s*$' % (k, re.escape(uuids.get(k, "?"))), fu, re.M | re.I)
+                          for k in ("ROOTA", "ROOTB")))
+        except Refused as e:
+            check("%s mounts" % slot, False, str(e)[-200:])
+    if "BOOT" in parts:
+        try:
+            with DevMount(part_dev(disk, parts["BOOT"])) as m:
+                cur = (read(m, "grub/curgrub") or b"").decode("utf-8", "replace").strip()
+                check("grub boots slot a (curgrub)", cur == "a", cur or "no curgrub")
+                cfg = (read(m, "grub/grub.cfg") or b"").decode("utf-8", "replace")
+                check("grub.cfg boots root A's UUID", uuids.get("ROOTA", "?") in cfg)
+                check("a kernel on the boot partition", any(n.startswith("vmlinuz") for n in os.listdir(m)))
+        except Refused as e:
+            check("BOOT mounts", False, str(e)[-200:])
+    if "EFI" in parts:
+        try:
+            with DevMount(part_dev(disk, parts["EFI"]), "vfat") as m:
+                efi = [os.path.join(r, f) for r, _d, fs in os.walk(m) for f in fs if f.lower().endswith(".efi")]
+                check("a boot loader on the EFI partition", bool(efi), "%d .efi file(s)" % len(efi))
+        except Refused as e:
+            check("EFI mounts", False, str(e)[-200:])
+    for slot in ("PERMA", "PERMB"):
+        if slot in parts:
+            try:
+                with DevMount(part_dev(disk, parts[slot])):
+                    check("%s mounts" % slot, True)
+            except Refused as e:
+                check("%s mounts" % slot, False, str(e)[-200:])
+    try:
+        with DevMount(part_dev(disk, parts["TEMP"])) as m:
+            extra = [n for n in os.listdir(m) if n != "lost+found"]
+            check("temp is an empty ext4", not extra, ", ".join(extra[:4]))
+    except Refused as e:
+        check("TEMP mounts", False, str(e)[-200:])
+    ok = all(r[1] for r in results)
+    print("install verify: %s (%d check(s), %d failed)" % ("PASS" if ok else "FAIL", len(results), sum(1 for r in results if not r[1])))
+    return ok
+
+
+def install_disk(a):
+    """`install`: the ISO onto a.disk as the ISO's own installer would put it on the machine."""
+    require_root("install")
+    need_tools("partclone.restore", "gunzip", "e2fsck", "resize2fs", "tune2fs", "mkfs.ext4",
+               "blockdev", "lsblk", "blkid", "mount", "umount")
+    iso = os.path.abspath(a.iso)
+    if not os.path.isfile(iso):
+        raise Refused("%s does not exist" % iso)
+    facts = disk_facts(a.disk)
+    disk = facts["dev"]
+    if facts["in_use"]:
+        raise Refused("%s is in use (%s) - not a disk to wipe" % (disk, "; ".join(facts["in_use"][:4])))
+    if facts["ro"]:
+        raise Refused("%s is read-only" % disk)
+    work = os.path.abspath(a.workdir) if a.workdir else tempfile.mkdtemp(prefix="mkjjpmulti_install_")
+    os.makedirs(work, exist_ok=True)
+    t0 = time.time()
+    try:
+        with IsoMount(iso, os.path.join(work, "iso")) as m:
+            info = iso_info(iso, m)
+            info.check_stock_shape("ISO")
+            pad_path = os.path.join(m, PAD_INSTALLER.lstrip("/"))
+            squashfs = os.path.join(m, SQUASHFS.lstrip("/"))
+            if os.path.isfile(pad_path):
+                with open(pad_path, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+                which = PAD_INSTALLER + " (this tool's copy of JJP's installer, on the ISO)"
+            else:
+                text = unsquash_installer(squashfs, os.path.join(work, "sq"))
+                which = "/" + SQ_INSTALLER + " (JJP's installer, in the live system)"
+            ins = parse_installer(text)
+            try:
+                min_gib = int(str(info.version.get("Disksize") or "").strip() or ins["min_disk_gib"])
+            except ValueError:
+                min_gib = ins["min_disk_gib"]
+            if facts["size"] < (min_gib << 30):
+                raise Refused("%s holds %s; %s wants a disk of at least %d GiB (version_info.txt Disksize) - the "
+                              "machine's installer would refuse it too" % (disk, _gb(facts["size"]), os.path.basename(iso), min_gib))
+            tpl_name = pick_template(ins, facts["size"])
+            tpl = unsquash_files(squashfs, os.path.join(work, "sq"), [SQ_LIB + "/" + tpl_name])[0]
+            for p, img, _u in ins["restores"]:
+                part = img.split(".")[0]
+                if not info.pieces.get(part):
+                    raise Refused("the installer restores %s into PART_%s but the ISO carries no %s pieces" % (img, p, part))
+            dev_size_bytes(disk)                          # 512-byte sectors, or Refused before anything is written
+            say("install %s -> %s (%s%s, %s) by %s" % (os.path.basename(iso), disk, facts["model"] or "no model",
+                                                       (", " + facts["tran"]) if facts["tran"] else "", _gb(facts["size"]), which))
+            say("slots: " + ", ".join("%s=%s" % (p, part_dev(disk, n)) for p, n in sorted(ins["parts"].items(), key=lambda kv: kv[1])))
+            say("images: " + ", ".join("%s -> %s" % (img, p) for p, img, _u in ins["restores"]) + "; TEMP mkfs")
+            if not a.yes:
+                confirm_wipe(disk, facts)
+            budget = sum(info.piece_bytes(img.split(".")[0]) for _p, img, _u in ins["restores"])
+            PROGRESS.start(budget + 2, "install")
+            PROGRESS.step("partition table", 1)
+            say("partition table: %s (the installer's choice for this size), written as sgdisk -Z + --load-backup would"
+                % tpl_name)
+            written = write_gpt(disk, tpl)
+            say("  %d partition(s): %s" % (len(written), ", ".join("%d %s" % (e["num"], _gb((e["last"] - e["first"] + 1) * SECTOR))
+                                                                  for e in written)))
+            wait_for_parts(disk, sorted(set(ins["parts"].values())))
+            for p, img, u in ins["restores"]:
+                dev = part_dev(disk, ins["parts"][p])
+                uuid = ins["uuids"][u]
+                part = img.split(".")[0]
+                pieces = piece_paths(m, info, part)
+                PROGRESS.step("%s -> %s" % (img, dev), info.piece_bytes(part))
+                say("%s: %s (%d piece(s), %s) -> %s, %s" % (p, img, len(pieces), _gb(info.piece_bytes(part)), dev,
+                                                           ("volume id %s" % uuid) if "vfat" in img else ("resize2fs, UUID %s" % uuid)))
+                log = os.path.join(work, part + ".restore.log")
+                rc, broken = _partclone_feed(pieces, dev, log, PROGRESS)
+                if rc != 0 or broken:
+                    raise Refused("%s -> %s: partclone.restore failed (rc=%d)%s" % (img, dev, rc, ("\n" + _log_tail(log)) if _log_tail(log) else ""))
+                if "vfat" in img:
+                    _finish_vfat(dev, uuid)
+                else:
+                    _finish_ext4(dev, uuid)
+            dev = part_dev(disk, ins["parts"]["TEMP"])
+            PROGRESS.step("temp " + dev, 1)
+            say("TEMP: mkfs.ext4 %s, UUID %s" % (dev, ins["uuids"]["TEMP"]))
+            _run(["mkfs.ext4", "-q", "-F", dev])
+            _run(["e2fsck", "-f", "-y", dev], ok_rc=(0, 1, 2))
+            _run(["tune2fs", dev, "-f", "-U", ins["uuids"]["TEMP"]])
+            PROGRESS.finish()
+            flush_disk(disk)
+            say("written in %d s" % (time.time() - t0))
+            ok = True
+            if not getattr(a, "no_verify", False):
+                ok = verify_disk(disk, ins, info, tpl, work)
+        say("install: %s (%s, %d s)" % ("DONE" if ok else "FAILED VERIFY", disk, time.time() - t0))
+        return 0 if ok else 1
+    finally:
+        if not a.workdir:
+            shutil.rmtree(work, ignore_errors=True)
+
+
 def _write(path, data, mode=0o644):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb" if isinstance(data, bytes) else "w") as f:
@@ -1980,12 +2639,50 @@ def _write(path, data, mode=0o644):
     os.chmod(path, mode)
 
 
+#: The shape of JJP's jjp_install.sh (GNR 3.03, Sonic 00.925): every line `install` reads.
 FAKE_INSTALLER = """#!/bin/bash
 ################################################################################
 # Copyright (c) 2025 Jersey Jack Pinball
 ################################################################################
 lib_path="/jjp/lib"
+bin_path="/jjp/bin"
 medium_path="/lib/live/mount/medium"
+sgdisk_backup30="${lib_path}/backup.sgdisk1"
+sgdisk_backup60="${lib_path}/backup.sgdisk2"
+sgdisk_backup120="${lib_path}/backup.sgdisk3"
+
+FS_UUID_EFI="DD8B8D65"
+FS_UUID_BOOT="61af91e2-2fcf-4434-8508-4d1aaf8d2c59"
+FS_UUID_ROOTA="d8223f69-d29a-474f-a837-0a11dccc27f2"
+FS_UUID_ROOTB="e1a1fecc-e0a1-4daa-9c51-9a8fbd2c2f87"
+FS_UUID_PERMA="3930f288-dba6-4e1a-ab3d-5a23b73aae76"
+FS_UUID_PERMB="bb26c099-d746-457e-abcc-dad19f55c7ab"
+FS_UUID_TEMP="76695bac-6f28-4546-8fad-d3b121016394"
+min_disk_size_gib="111"
+ver_info_file="$medium_path/version_info.txt"
+while read -r line
+do
+    value=$( printf "$line" | cut -d ':' -f 2 | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//' )
+    case "$line" in
+    Disksize*)
+        min_disk_size_gib=$value
+        ;;
+    esac
+done < "$ver_info_file"
+dest_disk="/dev/sda"
+part_prefix=""
+disk_size=$( lsblk -dnb -o SIZE "$dest_disk" )
+if [[ "$disk_size" -lt $(( $min_disk_size_gib * 1024 * 1024 * 1024 )) ]]
+then
+    jjp_error "Storage device $dest_disk not large enough"
+fi
+PART_EFI="${dest_disk}${part_prefix}1"
+PART_BOOT="${dest_disk}${part_prefix}2"
+PART_ROOTA="${dest_disk}${part_prefix}3"
+PART_ROOTB="${dest_disk}${part_prefix}5"
+PART_PERMA="${dest_disk}${part_prefix}4"
+PART_PERMB="${dest_disk}${part_prefix}6"
+PART_TEMP="${dest_disk}${part_prefix}7"
 function check_image {
     pieces="$medium_path/home/partimag/img/$2.gz.a?"
     cat $pieces | gunzip -t
@@ -1994,15 +2691,68 @@ check_image "EFI"  "sda1.vfat-ptcl-img"
 check_image "BOOT" "sda2.ext4-ptcl-img"
 check_image "ROOT" "sda3.ext4-ptcl-img"
 check_image "PERM" "sda4.ext4-ptcl-img"
+compatible=""
+if [[ "$compatible" != "true" ]]
+then
+    backup_to_use="$sgdisk_backup120"
+    if [[ "$disk_size" -lt $((55 * 1024 * 1024 * 1024)) ]]
+    then
+        backup_to_use="$sgdisk_backup30"
+    elif [[ "$disk_size" -lt $((111 * 1024 * 1024 * 1024)) ]]
+    then
+        backup_to_use="$sgdisk_backup60"
+    fi
+    sgdisk -Z "$dest_disk" &> /dev/null
+    sgdisk --load-backup="$backup_to_use" "$dest_disk" &> /dev/null
+fi
 function restore_partition {
     cat $medium_path/home/partimag/img/$2.gz.a? | gunzip -c | partclone.restore -N -s - -o "$1"
+    if [[ -z "${2##*vfat*}" ]]
+    then
+        dosfslabel -i "$1" "$3"
+    else
+        e2fsck -f -y "$1" &> /dev/null
+        resize2fs "$1" &> /dev/null
+        e2fsck -f -y "$1" &> /dev/null
+        tune2fs "$1" -f -U "$3" &> /dev/null
+    fi
 }
 restore_partition "$PART_EFI"   "sda1.vfat-ptcl-img" "$FS_UUID_EFI"
 restore_partition "$PART_BOOT"  "sda2.ext4-ptcl-img" "$FS_UUID_BOOT"
 restore_partition "$PART_ROOTA" "sda3.ext4-ptcl-img" "$FS_UUID_ROOTA"
 restore_partition "$PART_ROOTB" "sda3.ext4-ptcl-img" "$FS_UUID_ROOTB"
+if [[ "$compatible" != "true" ]]
+then
+    restore_partition "$PART_PERMA" "sda4.ext4-ptcl-img" "$FS_UUID_PERMA"
+    restore_partition "$PART_PERMB" "sda4.ext4-ptcl-img" "$FS_UUID_PERMB"
+fi
+mkfs.ext4 -F "$PART_TEMP" &> /dev/null
+e2fsck -f -y "$PART_TEMP" &> /dev/null
+tune2fs "$PART_TEMP" -f -U "$FS_UUID_TEMP" &> /dev/null
 halt -f
 """
+
+#: the fake installer's UUIDs, for the fake's boot/EFI images and the self-test's checks
+FAKE_UUIDS = dict(_INS_UUID_RE.findall(FAKE_INSTALLER))
+
+
+def make_fake_templates(lib_dir, work=None):
+    """Three sgdisk-shaped backups like JJP's (EFI, boot, root A, perm A, root B, perm B, temp)
+    for 30/60/120 GB disks."""
+    os.makedirs(lib_dir, exist_ok=True)
+    mib = 2048
+    for n, gb, root, perm, temp in ((1, 30, 9 * 1024, 256, 8 * 1024), (2, 60, 19 * 1024, 1024, 14 * 1024),
+                                    (3, 120, 40 * 1024, 2 * 1024, 27 * 1024)):
+        parts = [(GPT_TYPE_EFI, 94 * mib), (GPT_TYPE_LINUX, 250 * mib), (GPT_TYPE_LINUX, root * mib), (GPT_TYPE_LINUX, perm * mib),
+                 (GPT_TYPE_LINUX, root * mib), (GPT_TYPE_LINUX, perm * mib), (GPT_TYPE_LINUX, temp * mib)]
+        with open(os.path.join(lib_dir, "backup.sgdisk%d" % n), "wb") as f:
+            f.write(make_gpt_backup(parts, gb * 1000 ** 3 // SECTOR))
+
+
+def _partclone_piece(kind, raw, dest):
+    """partclone.<kind> -c | gzip | split -> dest.aa (one piece)."""
+    _run(["bash", "-c", 'set -o pipefail; partclone.%s -c -s "$0" -o - 2>/dev/null | gzip -c --fast | split -b 3000000 -a 2 - "$1"' % kind,
+          raw, dest])
 
 FAKE_RUNGAME = """#!/bin/dash
 export JJPEDIR='/jjpe/gen1'
@@ -2036,7 +2786,7 @@ FAKE_CFG = ("label Clonezilla live with img\n  kernel /live/vmlinuz\n"
 def make_fake_iso(work, name, version, game_bytes, edata_bytes, size_mb=64):
     """A synthetic JJP install ISO: a real ext4 root (mke2fs -d) partcloned into sda3 pieces,
     gzip'd fillers for the other partitions, a squashfs with the installer, both cfgs."""
-    need_tools("mke2fs", "partclone.ext4", "gzip", "split", "mksquashfs", "xorriso")
+    need_tools("mke2fs", "partclone.ext4", "partclone.vfat", "mkfs.vfat", "gzip", "split", "mksquashfs", "xorriso")
     d = os.path.join(work, "fake_" + name.replace(".", "_"))
     if os.path.isdir(d):
         shutil.rmtree(d)
@@ -2067,8 +2817,43 @@ def make_fake_iso(work, name, version, game_bytes, edata_bytes, size_mb=64):
     os.makedirs(img)
     _run(["bash", "-c", 'set -o pipefail; partclone.ext4 -c -s "$0" -o - 2>/dev/null | gzip -c --fast | split -b 3000000 -a 2 - "$1"',
           raw, os.path.join(img, ROOT_PIECE + ".gz.")])
-    for part, kind in (("sda1", "vfat"), ("sda2", "ext4"), ("sda4", "ext4")):
-        _run(["bash", "-c", 'head -c 200000 /dev/urandom | gzip -c > "$0"', os.path.join(img, "%s.%s-ptcl-img.gz.aa" % (part, kind))])
+    # EFI: a vfat with the shipped volume id and a loader; boot: grub set to slot a with root A's
+    # UUID and a "kernel"; perm: an ext4 with vf/ - small images `install` grows into the slots
+    efi_raw = os.path.join(d, "sda1.raw")
+    with open(efi_raw, "wb") as f:
+        f.truncate(40 << 20)
+    _run(["mkfs.vfat", "-F", "32", "-i", FAKE_UUIDS["EFI"], efi_raw])
+    emnt = tempfile.mkdtemp(prefix=MOUNT_PREFIX)
+    try:
+        _run(["mount", "-o", "loop", efi_raw, emnt])
+        try:
+            _write(os.path.join(emnt, "EFI", "BOOT", "BOOTX64.EFI"), b"not a loader\n")
+        finally:
+            _run(["umount", emnt])
+    finally:
+        os.rmdir(emnt)
+    _partclone_piece("vfat", efi_raw, os.path.join(img, "sda1.vfat-ptcl-img.gz."))
+    boot_tree = os.path.join(d, "boot_tree")
+    _write(os.path.join(boot_tree, "grub", "curgrub"), "a\n")
+    _write(os.path.join(boot_tree, "grub", "grub.cfg"), "search --no-floppy --fs-uuid --set=root %s\nlinux /vmlinuz root=UUID=%s ro quiet\n"
+           % (FAKE_UUIDS["ROOTA"], FAKE_UUIDS["ROOTA"]))
+    _write(os.path.join(boot_tree, "vmlinuz"), b"not a kernel\n")
+    boot_raw = os.path.join(d, "sda2.raw")
+    with open(boot_raw, "wb") as f:
+        f.truncate(48 << 20)
+    _run(["mke2fs", "-q", "-F", "-t", "ext4", "-d", boot_tree, "-L", "boot", boot_raw])
+    _partclone_piece("ext4", boot_raw, os.path.join(img, "sda2.ext4-ptcl-img.gz."))
+    perm_tree = os.path.join(d, "perm_tree")
+    _write(os.path.join(perm_tree, "vf", "settings.dat"), b"factory\n")
+    perm_raw = os.path.join(d, "sda4.raw")
+    with open(perm_raw, "wb") as f:
+        f.truncate(32 << 20)
+    _run(["mke2fs", "-q", "-F", "-t", "ext4", "-d", perm_tree, "-L", "perm", perm_raw])
+    _partclone_piece("ext4", perm_raw, os.path.join(img, "sda4.ext4-ptcl-img.gz."))
+    for p in (efi_raw, boot_raw, perm_raw):
+        os.unlink(p)
+    shutil.rmtree(boot_tree)
+    shutil.rmtree(perm_tree)
     _write(os.path.join(img, "parts"), "sda1 sda2 sda3 sda4\n")
     _write(os.path.join(img, "Info-img-size.txt"), "Image size (Bytes):\n1.3G\t/home/partimag/img\n")
     _write(os.path.join(iso_dir, "version_info.txt"),
@@ -2081,6 +2866,7 @@ def make_fake_iso(work, name, version, game_bytes, edata_bytes, size_mb=64):
     sq = os.path.join(d, "sq")
     _write(os.path.join(sq, SQ_INSTALLER), FAKE_INSTALLER, 0o755)
     _write(os.path.join(sq, "jjp", "bin", "donglecheck"), "#!/bin/sh\nexit 0\n", 0o755)
+    make_fake_templates(os.path.join(sq, SQ_LIB), d)
     os.makedirs(os.path.join(iso_dir, "live"))
     _run(["mksquashfs", sq, os.path.join(iso_dir, "live", "filesystem.squashfs"), "-no-progress", "-quiet", "-noappend"])
     _write(os.path.join(iso_dir, "live", "vmlinuz"), b"not a kernel\n")
@@ -2094,8 +2880,9 @@ def make_fake_iso(work, name, version, game_bytes, edata_bytes, size_mb=64):
 
 def selftest(root_dir, selector=None):
     require_root("selftest")
-    need_tools("partclone.ext4", "partclone.restore", "gunzip", "split", "e2fsck", "losetup", "mount", "umount",
-               "debugfs", "xorriso", "unsquashfs", "mksquashfs", "mke2fs")
+    need_tools("partclone.ext4", "partclone.restore", "partclone.vfat", "gunzip", "split", "e2fsck", "losetup", "mount",
+               "umount", "debugfs", "xorriso", "unsquashfs", "mksquashfs", "mke2fs", "mkfs.vfat", "resize2fs",
+               "tune2fs", "mkfs.ext4", "blkid", "blockdev")
     work = os.path.abspath(root_dir)
     os.makedirs(work, exist_ok=True)
     cache = os.path.join(work, "cache")
@@ -2109,7 +2896,8 @@ def selftest(root_dir, selector=None):
 
     game = os.urandom(50000)
     iso0, raw0 = make_fake_iso(work, "fake0-v03.03", "03.03", game, os.urandom(400000))
-    iso1, raw1 = make_fake_iso(work, "fake1_custom", "03.03", game, os.urandom(600000))
+    edata1 = os.urandom(600000)
+    iso1, raw1 = make_fake_iso(work, "fake1_custom", "03.03", game, edata1)
     iso2, _ = make_fake_iso(work, "fake2-v03.04", "03.04", os.urandom(50000), os.urandom(100000))
     sel = os.path.join(work, "selector")
     if os.path.isdir(sel):
@@ -2214,6 +3002,48 @@ def selftest(root_dir, selector=None):
     ns3.allow_version_mismatch = True
     rc = build_iso(ns3)
     expect("--allow-version-mismatch builds it", rc == 0 and os.path.isfile(ns3.out))
+    # install: the multi ISO onto a "disk" - a 120 GB sparse file on a loop device, the block
+    # device a docked SSD is once the app attaches it - exactly as pad_install.sh lays it out
+    ins = parse_installer(FAKE_INSTALLER)
+    expect("parse_installer reads the fake installer's seven slots and six restores",
+           sorted(ins["parts"].values()) == [1, 2, 3, 4, 5, 6, 7] and len(ins["restores"]) == 6 and ins["default"] == "120"
+           and ins["choices"] == [(55, "30"), (111, "60")] and ins["min_disk_gib"] == 111)
+    disk_raw = os.path.join(work, "disk.raw")
+    with open(disk_raw, "wb") as f:
+        f.truncate(120 * 1000 ** 3)
+    loop = _run(["losetup", "-P", "--find", "--show", disk_raw]).strip().splitlines()[-1]
+    try:
+        ns4 = argparse.Namespace(iso=out, disk=loop, yes=True, no_verify=False, workdir=os.path.join(work, "winstall"))
+        rc = install_disk(ns4)
+        expect("install onto %s returns 0 (its verify PASSED)" % loop, rc == 0)
+        with DevMount(part_dev(loop, ins["parts"]["ROOTB"])) as mb:
+            with open(os.path.join(mb, "jjpe", "gen1", "GunsNRoses", "edata", "graphics", "Attract Mode", "a.bin"), "rb") as f:
+                expect("root B on the disk is image 1's root (its edata)", sha256_bytes(f.read()) == sha256_bytes(edata1))
+        with DevMount(part_dev(loop, ins["parts"]["ROOTA"])) as ma:
+            expect("root A on the disk is image 0's root with the menu",
+                   os.path.isfile(os.path.join(ma, "jjpe", "gen1", "GunsNRoses", "game")) and os.path.isfile(os.path.join(ma, PADSELECT_DIR.lstrip("/"), "jjpselect")))
+            try:
+                install_disk(ns4)
+                expect("a disk with a mount on it is refused", False)
+            except Refused as e:
+                expect("a disk with a mount on it is refused", "in use" in str(e), str(e)[:100])
+        with DevMount(part_dev(loop, ins["parts"]["PERMA"])) as mp:
+            expect("perm A on the disk is the factory perm image", os.path.isfile(os.path.join(mp, "vf", "settings.dat")))
+    finally:
+        subprocess.run(["losetup", "-d", loop], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    os.unlink(disk_raw)
+    small = os.path.join(work, "small.raw")
+    with open(small, "wb") as f:
+        f.truncate(20 * 1000 ** 3)
+    loop = _run(["losetup", "--find", "--show", small]).strip().splitlines()[-1]
+    try:
+        install_disk(argparse.Namespace(iso=out, disk=loop, yes=True, no_verify=False, workdir=None))
+        expect("a disk under Disksize is refused", False)
+    except Refused as e:
+        expect("a disk under Disksize is refused", "at least 111 GiB" in str(e), str(e)[:100])
+    finally:
+        subprocess.run(["losetup", "-d", loop], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    os.unlink(small)
     print("selftest: %s (%d failure(s))" % ("PASS" if not failures else "FAIL", len(failures)))
     for f in failures:
         print("  FAIL " + f)
@@ -2294,6 +3124,13 @@ def main(argv=None):
     s.add_argument("--extra", action="append", default=[], metavar="ISO", help="also compare sda5 against image 1's sda3")
     s.add_argument("--quick", action="store_true", help="skip gunzip -t, the piece shas and the root restore")
     s.add_argument("--workdir")
+    s = sub.add_parser("install", help="write an install ISO onto a disk (a docked SSD) the way JJP's installer does on "
+                                       "the machine, then verify it (root; WIPES the disk)")
+    s.add_argument("--iso", required=True, help="a multi-boot ISO (root B = image 1) or a stock JJP install ISO (root B = a copy of A)")
+    s.add_argument("--disk", required=True, metavar="/dev/sdX", help="the whole disk (sdX, nvmeXnY, loopN with -P); every byte on it goes")
+    s.add_argument("--yes", action="store_true", help="wipe without the typed confirmation (no terminal = required)")
+    s.add_argument("--no-verify", action="store_true", dest="no_verify", help="skip reading the disk back afterwards")
+    s.add_argument("--workdir", help="scratch for the ISO mount, the installer and the logs (default: a temp dir)")
     s = sub.add_parser("inspect", help="read a multi-boot ISO back (no root)")
     s.add_argument("--iso", required=True)
     s.add_argument("--json", action="store_true", dest="as_json", help="print ONE JSON object")
@@ -2326,6 +3163,8 @@ def main(argv=None):
             return inject_iso(a)
         if a.cmd == "verify":
             return 0 if verify_iso(a.iso, a.primary, a.extra[0] if a.extra else None, a.quick, a.workdir) else 1
+        if a.cmd == "install":
+            return install_disk(a)
         if a.cmd == "inspect":
             rep = inspect_iso(a.iso, a.media_out)
             if a.as_json:

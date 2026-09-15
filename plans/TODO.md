@@ -7482,9 +7482,15 @@ These have each been violated at least once and each cost a run or a window:
       shapes: two baselines 915 apart, tesla forced on ~4900 with 13 new shapes).
       **Ruled out:** hand-starting tesla's shows (95/96/344/346/351/356) as lights -
       show 96's footprint did not repeat and the control show 231 moved more.
-      **Resume:** lights - `lightprobe.sh fx:2000:3:0 ...` (0x185e9c) each twice,
-      then the `blele` runner if that fails too; `modes/soak.sh 10` in a run with
-      `PAD_PEEK=0x7e4968:8,0x7aba5a:2`; then a stock run (no PAD_TRACE_SO /
+      **SOAK PASSED (run 5, `modes/soak.sh 10`):** 14 cycles, 14 KAIJU RUSH starts
+      and 14 timer ends in one ten-minute game (score 16,475,000 -> 233,865,000), 0
+      new `[segv]`, 0 fatal signals, guest up; `killgame` then `alive.sh` 0. Modded
+      60 s bar (run 5): renderer 60.0 fps, video 30.0 NEW/s, guest 58.7 fps, 0
+      faults, 0 Radium Errors. **`0x185e9c` inconclusive, very likely a device
+      driver** (calls `0x39fe24(7, ...)`, the path `ControlCoil::v[58]` uses), not a
+      light.
+      **Resume:** run 6 is `modes/bleletest.sh` (the game's own light runner
+      `0x1c3454` through `padmode.blele`); then a stock run (no PAD_TRACE_SO /
       PAD_MODE_SO) compared with `modes/regress.sh stock 60` against
       `/var/tmp/item125_regress_modded.txt`.
       **Acceptance:** in a played Godzilla Pro 1.15 game in the rig with `PAD_MODE_SO`

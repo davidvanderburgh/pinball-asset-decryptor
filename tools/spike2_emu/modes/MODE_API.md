@@ -494,8 +494,17 @@ The whole countdown is now seen:
 It ran 30,100 ms of wall time. The mode log then said "borrowed messages 3159/3160
 restored", six seconds after the end.
 
-Not yet: its lights, the 10-minute soak, and the stock regression check with the .so
-absent (`modes/soak.sh`, `modes/regress.sh`).
+### The 10-minute soak (run 5, 2026-09-15)
+
+`modes/soak.sh 10` kept one game going for ten minutes. Every 45 s it started KAIJU
+RUSH and played the mode's five shots:
+- **14 cycles, 14 starts, 14 ends.** Every end read "time ran out": 5 shots,
+  15,000,000 awarded, 29,983 ms of wall time.
+- The score climbed from 16,475,000 to 233,865,000 within the one game.
+- **0 new `[segv]` lines and 0 new fatal signals.** The guest was still up at the end.
+
+Not yet: its lights, and the stock regression check with the .so absent
+(`modes/regress.sh`).
 - **Lights.** `0x185e9c(n, a, b)` (it checks `global_mode_mask & 0x310` and calls
   `0x39fe24(7, ...)`) and the `blele` runner.
 - **There are no free timers, so a mode.so keeps its own clock.** `ctimer_get` has 66

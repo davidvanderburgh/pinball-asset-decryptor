@@ -14615,11 +14615,19 @@ class MainWindow:
         # session and item 14 is what forgetting one of these costs.  Default
         # OFF: it changes what the guest reads, so it is opted into.
         self.emulate_overrides_var = tk.BooleanVar(value=False)
+        # PAD-149: the machine row - the country the CPU board's DIP switches
+        # report, and the mains.  Window-owned so the app can remember them,
+        # GLOBALLY: they describe the user's machine, not a project.
+        self.emulate_country_var = tk.StringVar(value=EmulatePanel.COUNTRIES[0])
+        self.emulate_power_var = tk.StringVar(
+            value=EmulatePanel.POWER_CHOICES[0][0])
         self._emulate_panel = EmulatePanel(
             self._tab_emulate,
             log=self.append_log,
             card_var=self.emulate_card_var,
             savestates_var=self.emulate_savestates_var,
+            country_var=self.emulate_country_var,
+            power_var=self.emulate_power_var,
             # The Write tab's Assets Folder, SHARED not copied - the project
             # has one extract folder and that field already owns it.
             assets_var=self.write_assets_var,

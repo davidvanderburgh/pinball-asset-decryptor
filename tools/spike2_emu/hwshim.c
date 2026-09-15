@@ -3272,6 +3272,75 @@ static int ser_seen;
  * joined EXACTLY, with no cross-clock alignment step at all. */
 static unsigned cab_ctr;
 
+/* ══ PAD_CAB_DIP=<n> - THE CPU BOARD'S COUNTRY DIP SWITCHES (PAD-149) ═══════
+ *
+ * A Spike 2 CPU board carries an 8-position DIP bank, SW1, and Stern's own
+ * SPIKE system manual names what it is for: "8 bank dip switch for setting
+ * the country codes". The game reads it as switch ids 17..24 "DIP 1".."DIP 8"
+ * at NODE 0, BITS 0..7 - byte 0 of the cabinet word - ACTIVE LOW.
+ *
+ * <n> is the bank as the game sees it: bit k set = DIP k+1 ON (closed). The
+ * wire therefore carries ~n, and that is MEASURED, not assumed: stranger_things
+ * 1.12.0 with PAD_CAB_DIP=6 (byte 0 = f9) holds 0x0608 in its switch word at
+ * 0x7b9bee, and its country init (0x41c71c) reads (word >> 8) & 0x7f = 6 as
+ * the reported country, 0xff meaning "no DIP bank". So all eight OFF - the rig's
+ * at-rest ff, and a US machine from the factory - reports 0, which is U.S.A.
+ * in the game's own 30-entry country table (0 U.S.A. ... 6 FRANCE ... 29
+ * INDONESIA).
+ *
+ * What the game does with it is ITS business, and that is the point of feeding
+ * the switches rather than writing its settings: on a change it records the new
+ * DIP country (0x7e2cb8), runs its coinage resets (0x37c3f0, 0x412070) and
+ * marks the stored country for the operator to confirm, exactly as it would on
+ * a machine whose switches were moved.
+ *
+ * Applied to EVERY cabinet word handed over - a rebuilt one, a tapped one and
+ * the synthesized at-rest one - because the first version of this knob lived
+ * only in the synthesized branch, which is the one only a title with no
+ * findable switch table ever reaches. */
+static int cab_dip_on = -1;
+static unsigned char cab_dip_wire;
+
+static void cab_dip_apply(unsigned char *bits)
+{
+    if (cab_dip_on == -1) {
+        const char *dp = getenv("PAD_CAB_DIP");
+        unsigned v = 0;
+        int any = 0;
+        cab_dip_on = 0;
+        if (dp && *dp) {
+            if (dp[0] == '0' && (dp[1] == 'x' || dp[1] == 'X')) {
+                for (dp += 2; *dp; dp++) {
+                    if (*dp >= '0' && *dp <= '9') v = v * 16 + (unsigned)(*dp - '0');
+                    else if (*dp >= 'a' && *dp <= 'f') v = v * 16 + (unsigned)(*dp - 'a' + 10);
+                    else if (*dp >= 'A' && *dp <= 'F') v = v * 16 + (unsigned)(*dp - 'A' + 10);
+                    else break;
+                    any = 1;
+                }
+            } else {
+                for (; *dp >= '0' && *dp <= '9'; dp++) {
+                    v = v * 10 + (unsigned)(*dp - '0');
+                    any = 1;
+                }
+            }
+            if (any && v <= 0xffu) {
+                char m[200];
+                cab_dip_on = 1;
+                cab_dip_wire = (unsigned char)(~v & 0xffu);
+                snprintf(m, sizeof m,
+                         "[cabdip] CPU DIP switches SW1 = %u: the game reads "
+                         "country %u (cabinet byte 0 = %02x, active low)\n",
+                         v, v & 0x7fu, cab_dip_wire);
+                logmsg(m);
+            } else {
+                logmsg("[cabdip] PAD_CAB_DIP is not a number 0..255; "
+                       "the DIP switches stay as they are\n");
+            }
+        }
+    }
+    if (cab_dip_on == 1) bits[0] = cab_dip_wire;
+}
+
 static int slot_for(int addr)
 {
     int i;
@@ -3528,6 +3597,110 @@ static void nv_poke_apply(void)
     logmsg(m);
 }
 
+/* ══ PAD_FACTORY_HZ=50|60 - WHICH MAINS THE CPU BOARD WAS BUILT FOR (PAD-149) ═
+ *
+ * The Spike 2 CPU board was sold in a 60 Hz version for US games and a 50 Hz
+ * version for European ones, and the game refuses to run a 60 Hz board on 50
+ * Hz mains: "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY". The board says
+ * which it is in bytes [8..9] of the cabinet identity record (see
+ * nv_ident_seed above for the encoding). READ OFF THE INSTRUCTIONS in
+ * stranger_things 1.12.0's mains check 0x23996c, same shape in deadpool_pro
+ * 1.16.0 (0x1506e4) and godzilla_pro 1.16.0 (0x3eaeb4):
+ *
+ *   measured 57..63 Hz                 -> passes, whatever the board says
+ *   anything else                      -> passes only if [8..9] == 50
+ *   otherwise                          -> flag 3, refusal screen 8 or 9
+ *
+ * So 50 makes a European board, and 60 - what the field means for anything
+ * that is not 50 - makes a US one again. The rig's own seeded record carries
+ * 0, which reads as US. The mains the board is plugged into is run_game.sh's
+ * PAD_MAINS_HZ; this is only the board.
+ *
+ * Written into the loaded EEPROM image, so it is saved with it like any other
+ * board state; a later run that does not set the variable keeps the board it
+ * had, and a 60 Hz mains passes on either kind. A record that does not decode
+ * to a valid checksum is left alone rather than rewritten into one. */
+static unsigned nv_udiv(unsigned n, unsigned d)
+{
+    /* No libgcc division helper in this object; shift-and-subtract. */
+    unsigned q = 0;
+    int b;
+    for (b = 31; b >= 0; b--) {
+        if ((n >> b) >= d) {
+            n -= d << b;
+            q |= 1u << b;
+        }
+    }
+    return q;
+}
+
+static void nv_factory_hz_apply(void)
+{
+    const char *p = getenv("PAD_FACTORY_HZ");
+    unsigned char *e = store[0];
+    unsigned char rec[12];
+    unsigned seed, state, key, w, sum, want, had, i;
+    char m[240];
+    if (!p || !*p) return;
+    if (p[0] == '5' && p[1] == '0' && !p[2]) want = 50;
+    else if (p[0] == '6' && p[1] == '0' && !p[2]) want = 60;
+    else {
+        logmsg("[i2c] PAD_FACTORY_HZ must be 50 or 60; the board is left as "
+               "it is\n");
+        return;
+    }
+    seed = (unsigned)e[0] | (unsigned)e[1] << 8 | (unsigned)e[2] << 16 |
+           (unsigned)e[3] << 24;
+    state = seed;
+    for (i = 0; i < 12; i++) {
+        state = state * 0x19660du + 1u;
+        key = state >> 8;
+        if (!key) key = 1;
+        w = (unsigned)e[4 + 4 * i] | (unsigned)e[5 + 4 * i] << 8 |
+            (unsigned)e[6 + 4 * i] << 16 | (unsigned)e[7 + 4 * i] << 24;
+        w = nv_udiv(w, key);
+        if (w > 0xffu) {
+            logmsg("[i2c] cabinet identity record does not decode; the board "
+                   "is left as it is\n");
+            return;
+        }
+        rec[i] = (unsigned char)w;
+    }
+    for (sum = 0, i = 0; i < 10; i++) sum += rec[i];
+    if (((unsigned)rec[10] | (unsigned)rec[11] << 8) != (~sum & 0xffffu)) {
+        logmsg("[i2c] cabinet identity record fails its checksum; the board "
+               "is left as it is\n");
+        return;
+    }
+    had = (unsigned)rec[8] | (unsigned)rec[9] << 8;
+    if ((had == 50) == (want == 50)) {
+        snprintf(m, sizeof m, "[i2c] CPU board is already a %u Hz board "
+                 "(identity record says %u)\n", want, had);
+        logmsg(m);
+        return;
+    }
+    rec[8] = (unsigned char)want;
+    rec[9] = 0;
+    for (sum = 0, i = 0; i < 10; i++) sum += rec[i];
+    sum = ~sum & 0xffffu;
+    rec[10] = (unsigned char)sum;
+    rec[11] = (unsigned char)(sum >> 8);
+    state = seed;
+    for (i = 0; i < 12; i++) {
+        state = state * 0x19660du + 1u;
+        key = state >> 8;
+        if (!key) key = 1;
+        w = rec[i] * key;
+        e[4 + 4 * i]     = (unsigned char)w;
+        e[4 + 4 * i + 1] = (unsigned char)(w >> 8);
+        e[4 + 4 * i + 2] = (unsigned char)(w >> 16);
+        e[4 + 4 * i + 3] = (unsigned char)(w >> 24);
+    }
+    snprintf(m, sizeof m, "[i2c] CPU board made a %u Hz board (identity record "
+             "line frequency %u -> %u)\n", want, had, want);
+    logmsg(m);
+}
+
 static long (*real_read)(int, void *, unsigned long);
 static long (*real_write)(int, const void *, unsigned long);
 static int (*real_close)(int);
@@ -3562,6 +3735,7 @@ static void nv_load(void)
         snprintf(m, sizeof m, "[i2c] no saved NVRAM at %s, starting blank\n", path);
         logmsg(m);
         nv_ident_seed();
+        nv_factory_hz_apply();
         nv_poke_apply();     /* a poke must land on a blank chip too */
         return;
     }
@@ -3574,6 +3748,7 @@ static void nv_load(void)
                     : "");
     logmsg(m);
     nv_ident_seed();
+    nv_factory_hz_apply();
     nv_poke_apply();
 }
 
@@ -3954,6 +4129,8 @@ int shim_ioctl(int fd, unsigned long req, ...)
             seen_kbd = sw_shm_gen();
             sw_shm_edges();
             have = sw_scan_bytes(0, bits);
+            cab_dip_apply(bits);          /* PAD-149: before the diff, so a */
+                                          /* held DIP is not a change per pass */
             if (have) cab_synth = 0;      /* a real word replaced the synthetic */
             /* EVERY change to the cabinet word, with a timestamp. The menu
              * cursor was seen wandering on its own, and inferring the cause
@@ -3995,6 +4172,7 @@ int shim_ioctl(int fd, unsigned long req, ...)
                 pad_tap_id = (int)sw_shm->tap_id;
                 tap_left   = sw_shm->tap_reads ? sw_shm->tap_reads : 1u;
                 have = sw_scan_bytes(0, bits);      /* word WITH the tap made */
+                cab_dip_apply(bits);
                 seen_gen = sw_gen;                  /* do not fight the rebuild */
                 seen_kbd = sw_shm_gen();
             }
@@ -4078,36 +4256,11 @@ int shim_ioctl(int fd, unsigned long req, ...)
                  * ACTIVE LOW, so the 0xff above rests them all open. That is a
                  * correct at-rest level and there is no reason to move it.
                  *
-                 * PAD_CAB_DIP=<n> still forces dips 1..8 to n. It is a knob for
-                 * whoever needs one; it is NOT the country and it is NOT a
-                 * remedy for that screen. Do not sweep it looking for one. */
-                {
-                    char *dp = getenv("PAD_CAB_DIP");
-                    if (dp && *dp) {
-                        unsigned v = 0;
-                        int any = 0;
-                        if (dp[0] == '0' && (dp[1] == 'x' || dp[1] == 'X')) {
-                            dp += 2;
-                            for (; *dp; dp++) {
-                                if (*dp >= '0' && *dp <= '9') v = v*16 + (unsigned)(*dp-'0');
-                                else if (*dp >= 'a' && *dp <= 'f') v = v*16 + (unsigned)(*dp-'a'+10);
-                                else if (*dp >= 'A' && *dp <= 'F') v = v*16 + (unsigned)(*dp-'A'+10);
-                                else break;
-                                any = 1;
-                            }
-                        } else {
-                            for (; *dp >= '0' && *dp <= '9'; dp++) { v = v*10 + (unsigned)(*dp-'0'); any = 1; }
-                        }
-                        if (any) {
-                            char m4[160];
-                            bits[0] = (unsigned char)(~v & 0xff);
-                            snprintf(m4, sizeof m4,
-                                     "[cabdip] country dips 1..8 set to %u "
-                                     "(byte0=%02x, active low)\n", v & 0xff, bits[0]);
-                            logmsg(m4);
-                        }
-                    }
-                }
+                 * PAD-149 CORRECTS THE REST: those dips ARE the country - the
+                 * CPU board's SW1 - and PAD_CAB_DIP sets them on every title
+                 * now, not only here. See cab_dip_apply(). They are still not a
+                 * remedy for the refusal screen, which is the mains check. */
+                cab_dip_apply(bits);
                 have = 1;
                 cab_synth = 1;
                 if (!said) {
@@ -4203,6 +4356,7 @@ int shim_ioctl(int fd, unsigned long req, ...)
                 logmsg(m4);
                 pad_tap_id = -1;
                 have = sw_scan_bytes(0, bits);
+                cab_dip_apply(bits);
             }
         }
         /* ---- PACE THE SPI LOOP. This is the single biggest CPU cost in the

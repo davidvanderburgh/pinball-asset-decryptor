@@ -1943,7 +1943,11 @@ and the update never re-runs the prerequisites installer (the app checks
 for missing prerequisites at runtime and offers **Install Missing** if
 any actually are).
 The download is verified against the release asset's SHA-256 before it
-runs.
+runs. Closing for the update also shuts WSL down, so the updated app starts
+a fresh one: a WSL left running across an update could bring the emulator's
+game window up with no picture until **Restart WSL…** was pressed. If
+anything other than the app's own Linux is running in WSL (Docker Desktop,
+say), WSL is left alone and the log says so.
 
 On Linux the banner offers **Download update**, which fetches the new
 AppImage itself rather than handing the release page to a browser. From

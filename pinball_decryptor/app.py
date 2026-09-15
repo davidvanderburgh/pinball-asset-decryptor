@@ -19,7 +19,8 @@ from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
 from .core.prereqs import check_prerequisite
 from .core.registry import all_manufacturers, get_manufacturer, load_plugins
 from .core.updater import (check_for_update, download_installer,
-                           install_update_macos, launch_installer_windows)
+                           install_update_macos, launch_installer_windows,
+                           restart_wsl_for_update)
 from .gui.main_window import MainWindow
 
 
@@ -485,6 +486,12 @@ class App:
         except Exception:
             pass
         self._save_settings()
+        # Closing for an in-app update also shuts WSL down (PAD-150).  Last,
+        # because the emulators stop through wsl.exe above and would boot the
+        # VM again, and after the settings, because the installer may close
+        # this process while the shutdown runs.
+        if getattr(self, "_restart_wsl_on_close", False):
+            self._restart_wsl_for_update()
         self.root.destroy()
 
     # ------------------------------------------------------------------
@@ -4523,7 +4530,20 @@ class App:
         self.window.append_log(
             f"Installing v{version} — the app will close and reopen "
             f"updated.", "info")
+        self._restart_wsl_on_close = True
         self._on_close()
+
+    def _restart_wsl_for_update(self):
+        """Quit-time half of an in-app update: shut WSL down so the updated
+        app starts a fresh VM.  See core/updater.restart_wsl_for_update for
+        why, and for what it will not shut down.  Best effort - nothing here
+        may stop the app closing for its installer."""
+        try:
+            line = restart_wsl_for_update()
+        except Exception:                                   # noqa: BLE001
+            return
+        if line:
+            self.window.append_log(line, "info")
 
     # ------------------------------------------------------------------
     # Settings

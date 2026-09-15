@@ -446,6 +446,28 @@ never evidence. The next measurement reads the lamp slots directly instead
 `+36` is the written flag, and the probe now dumps it after our command AND after each
 of the game's own, side by side.
 
+### Run 11: what a light command actually writes, and WHEN
+
+Our command and the game's own were run in one game and read at the lamp slots
+(`dump_group_slots`), not at the LEDs.
+
+- **The game's tesla award writes lamps 413-420**: `+2 0`, `+3 255`, `+8 20`, flag
+  `+36 1` - eight lamps, the powerline tower. So a command does reach the slots, and
+  the instrument can see it.
+- **The ids are 413-420 against a 585-lamp slot array**, while the lamp table
+  `0x71b06c` holds 260 entries. So slots are indexed by a light index of 585, NOT by
+  that table, and set 224's "lamp 177" is an id in a different space.
+- **The write does not happen at parse time.** The game's first two calls dumped
+  "none written" as well; the lamps appeared only on a dump 1.5 s later. A sweep lands
+  on later frames.
+- **So our own "none written" proved nothing**: our dump was taken a millisecond after
+  our call. The probe now has `padmode.slots`, which re-dumps the group our last
+  command used, and `scratchpad/run12_slots.sh` reads it at 0.2, 1, 2, 4, 8 and 12 s.
+
+Geometry, confirmed against the game's own resolver `0x3be84c`: bounds-check the id
+against `[0x7b10b4]` (585), base `[0x7dc4c4]` for the global bank or the bank passed in
+for a group's own, stride 40 (`id + id<<2`, then `<<3`).
+
 ### The lamp and light-set tables (read 2026-09-15)
 
 - **Light sets: `0x7257a8[set]`**, each a 0-terminated u16 list of lamp ids, with the

@@ -318,6 +318,22 @@ static void dump_group_slots(void *group, const char *tag)
     }
 }
 
+/* padmode.slots - dump the group our last command used, again.
+ * A command's lamp writes do NOT land at parse time. In run 11 the game's own tesla
+ * award dumped "none written" on the call that started the sweep, and lamps 413-420
+ * appeared only on a dump 1.5 s later. Our own dump was taken a millisecond after the
+ * call, so it proved nothing. This lets the same group be read over several seconds. */
+static void *last_group;
+
+static void slots_trigger(void)
+{
+    int fd = open("/dump/padmode.slots", O_RDONLY);
+    if (fd < 0) return;
+    close(fd);
+    unlink("/dump/padmode.slots");
+    dump_group_slots(last_group, "again");
+}
+
 static unsigned char *live_show_event(void)
 {
     unsigned char *n = *(unsigned char **)(unsigned long)GZ_EV_HEAD;
@@ -390,6 +406,7 @@ static void blele_trigger(void)
              owner, prio & 0xffu, group, *(void **)(unsigned long)GZ_EV_CUR,
              (void *)ev, (void *)old_cur, s, rc);
     hk_logs(m);
+    last_group = group;
     dump_group_slots(group, "ours");
 }
 
@@ -419,6 +436,7 @@ static void poll_triggers(void)
 
     blele_trigger();
     evdump_trigger();
+    slots_trigger();
 
     /* padmode.text "<type> <msgid> <value> [count]" - the award-screen family tesla's
      * award uses: 0x3ba540(type, 0, 0, 0x6fa618), then msg id at +0xa0, u64 value at

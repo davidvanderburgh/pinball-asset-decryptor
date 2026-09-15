@@ -287,6 +287,37 @@ static char blele_cmd[256];
 #define GZ_EV_HEAD  0x7b7e80u
 #define GZ_EV_CUR   0x7b7e84u
 
+/* A group's OWN lamp slots, which is what a light command actually writes.
+ * 0x3c1700 gives each of the 48 group records a malloc'd array of [0x7b10b4] * 40
+ * bytes at group[0], and 0x3be898 resolves a lamp to group[0] + id*40. Byte +36 is
+ * the written flag (0x3bef7c and 0x3befe8 both set it to 1), +2/+3/+8 the bytes a
+ * command leaves behind. Reading these says whether a command reached the lamps at
+ * all - which no LED measurement could, since tesla's own set 224 is a SINGLE lamp
+ * and ledact averages the whole playfield. */
+static void dump_group_slots(void *group, const char *tag)
+{
+    char m[220];
+    unsigned char *base = group ? *(unsigned char **)group : 0;
+    unsigned count = *(unsigned *)(unsigned long)0x7b10b4u, i, shown = 0;
+    if (!base) {
+        snprintf(m, sizeof m, "[slots] %s group %p: no slot array\n", tag, group);
+        hk_logs(m);
+        return;
+    }
+    for (i = 0; i < count && shown < 8; i++) {
+        unsigned char *s = base + i * 40u;
+        if (!s[36]) continue;
+        snprintf(m, sizeof m, "[slots] %s group %p lamp %u: +2 %u +3 %u +8 %u +36 %u\n",
+                 tag, group, i, s[2], s[3], s[8], s[36]);
+        hk_logs(m);
+        shown++;
+    }
+    if (!shown) {
+        snprintf(m, sizeof m, "[slots] %s group %p: %u lamps, none written\n", tag, group, count);
+        hk_logs(m);
+    }
+}
+
 static unsigned char *live_show_event(void)
 {
     unsigned char *n = *(unsigned char **)(unsigned long)GZ_EV_HEAD;
@@ -359,6 +390,7 @@ static void blele_trigger(void)
              owner, prio & 0xffu, group, *(void **)(unsigned long)GZ_EV_CUR,
              (void *)ev, (void *)old_cur, s, rc);
     hk_logs(m);
+    dump_group_slots(group, "ours");
 }
 
 /* The GAME's own light commands, as a positive control. The parser 0x1c2b6c is hooked
@@ -375,6 +407,7 @@ static void on_blele_parse(unsigned *r)
     snprintf(m, sizeof m, "[blele] owner %u group 0x%08x arg3 0x%08x lr 0x%08x \"%.140s\"\n",
              r[0], r[1], r[3], r[5], cmd ? cmd : "(null)");
     hk_logs(m);
+    dump_group_slots((void *)(unsigned long)r[1], "game");
 }
 
 static void poll_triggers(void)

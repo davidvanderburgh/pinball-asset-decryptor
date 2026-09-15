@@ -421,6 +421,31 @@ Still open, cheapest first:
 - **The set.** Nothing references the `--lts` string from code or data as a plain
   pointer, so how set 224 becomes lamps has not been read yet.
 
+### The positive control: the game DOES use this parser (run 10, 2026-09-15)
+
+The probe now hooks the parser `0x1c2b6c` itself and logs every call the game makes.
+(The runner `0x1c3454` is a single `b` into it, which cannot be relocated into a
+trampoline, so the hook goes on the parser.) In one game:
+
+- **29 calls, all of them the game's own.** 24 at game start, then **5 during 60 s of
+  play - and those five were TESLA STRIKE's award**, owner 538, `--lts 224`, the green
+  variant with `--end 1` and `--end 3`: the very command runs 6, 7 and 9 sent. Attract
+  made none at all, which is why nothing showed there.
+- **The game's call shape** (`0x1c34cc`, its list-taking form): `r0` owner, `r1` group,
+  `r2` the command string, and **`r3` a zeroed 8-byte scratch on the caller's own
+  stack** which the parser fills and the caller then appends to a vector. So the `0` we
+  passed as the fourth argument was never the difference.
+- Its commands look like `--sweep <id> --lt 149 --level 255 --rgb 0 --use_alpha 1
+  --delay_start 40 --loop --delay_loop 89`, and `--lts_light` appears beside `--lts`.
+
+**So the road is right and the measurement was wrong.** Tesla's set 224 is a single
+lamp, and `ledact` averages the whole playfield, so it could not have seen tesla's own
+award either - which means the "nothing happened" readings of runs 6, 7 and 9 were
+never evidence. The next measurement reads the lamp slots directly instead
+(`dump_group_slots` in the probe): a group's slot array is `group[0] + id*40`, byte
+`+36` is the written flag, and the probe now dumps it after our command AND after each
+of the game's own, side by side.
+
 ### The lamp and light-set tables (read 2026-09-15)
 
 - **Light sets: `0x7257a8[set]`**, each a 0-terminated u16 list of lamp ids, with the

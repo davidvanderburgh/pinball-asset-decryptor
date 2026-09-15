@@ -8,7 +8,8 @@ refuses and logs instead of patching an unrelated function. It refuses at BUILD 
 too: a site whose first two instructions are not position-independent cannot be
 relocated into a trampoline, and this exits non-zero rather than emit it.
 
-Usage: gen_sites.py <game_elf> > padmode_sites.h      (item 125, Phase 0 probe)
+Usage: gen_sites.py <game_elf> > padmode_sites.h
+One header for both .so files (padmode.c the probe, mode.c our mode). Item 125.
 """
 import hashlib
 import os
@@ -33,7 +34,11 @@ SITES = [
     ("EVPOST", 0x2555DC, True),       # event_post_replacing(id, handler, flags)
     ("TEXT", 0x3BA540, True),         # 0x3ba540(n, a, b, obj) - text screen?
     ("FX", 0x185E9C, True),           # 0x185e9c(n, a, b) - lights/flash?
+    ("DISPATCH", 0xD1A9C, True),      # cmode_manager::v[7](mgr, _, mask64, x) - every shot
+    ("BALLEND", 0xD3DCC, True),       # every mode's v[4] - the end-of-ball broadcast
+    ("MSG", 0x34A764, True),          # msg_lookup(id) -> string, 1079 callers
     ("GET", 0xD1C10, False),          # cmode_manager_get(mgr, id) - called, not hooked
+    ("CALLOUT_NTH", 0x18800C, False), # callout_play_nth(req, n) - called, not hooked
 ]
 
 

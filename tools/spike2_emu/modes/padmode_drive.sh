@@ -10,5 +10,8 @@ for sw in "$@"; do
   python3 "$RIG/swpoke.py" "$sw" 150 > /dev/null 2>&1 || echo "swpoke $sw failed"
   sleep 1.5
   echo "== switch $sw: $(grep -E "^$sw " "$TABLES/${PAD_GAME:-godzilla_pro}/switch_list.txt" | cut -c 23-)"
-  tail -n +$((n + 1)) "$LOG" | grep -E 'v15 mode=0 |mode=23 |tesla|\[(score|award|mode|trigger|callout)\]' | head -24
+  tail -n +$((n + 1)) "$LOG" | grep -E 'dispatch|tesla|\[(score|award|mode|trigger|callout|ball)\]' | head -24
+  if [ -f "$ROOT/dump/mode.log" ]; then
+    tail -n 3 "$ROOT/dump/mode.log" | grep -E "^ *[0-9]+ \[rush\]" | tail -2
+  fi
 done

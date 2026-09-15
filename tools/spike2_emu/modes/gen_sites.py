@@ -45,6 +45,7 @@ SITES = [
     ("BLELE_RUN", 0x1C3454, False),   # run a blele/blela light command (owner, group, str, 0) - called
     ("LAMP_GROUP", 0x4BF294, False),  # lamp group from light-set table 0x7257a8 (set 0 = empty) - called
     ("SHOW_PRIO", 0x4F3740, False),   # the running show's lamp priority, off the current event - called
+    ("GROUP_FREE", 0x3C15CC, False),  # give a lamp group back (the pool is 48, 0x3c1700) - called
     ("BLELE_PARSE", 0x1C2B6C, True),  # the light command parser itself. The runner 0x1c3454 is a
                                       # single `b` into it, which cannot be relocated into a
                                       # trampoline, so the GAME's own light commands are watched here

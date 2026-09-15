@@ -468,6 +468,37 @@ Geometry, confirmed against the game's own resolver `0x3be84c`: bounds-check the
 against `[0x7b10b4]` (585), base `[0x7dc4c4]` for the global bank or the bank passed in
 for a group's own, stride 40 (`id + id<<2`, then `<<3`).
 
+### RUN 12: OUR LIGHT COMMAND LIGHTS THE LAMPS
+
+Tesla's own green command, sent through `padmode.blele` with `ev` (a live show event
+made current, priority 145 from that show), then the same group re-read over 12 s:
+
+| When | What our group held |
+|---|---|
+| at the call | nothing written yet |
+| **+0.2 s** | **lamps 413-420 written**, `+3 255`, flag `+36 1`, `+2` = 0/255/0/0/255/0/0/255 |
+| +1 s | the same eight, `+2` moved again - the sweep animating |
+| +2 s on | lamp 515 at `+8 31` |
+
+Those are **the same eight lamps the game's own tesla award writes** (seen in the same
+run, group `0x7dd730`, `+3 255` `+8 20`): the powerline tower. Ours differs only in
+`+8` (fade), because the game's sweep carries `--fade 20` in its second line.
+
+**So the command works, and every earlier "nothing happened" was the instrument.** A
+light command writes nothing at parse time - it writes on later frames - and
+`ledact`'s playfield average could never have seen eight lamps anyway. The recipe:
+
+1. Make a live show event current (`[0x7b7e84]`, from the list at `0x7b7e80`, a node
+   with flag `0x20` at `+2` and a show id at `+0x96`), and take its lamp priority from
+   `0x4f3740()`.
+2. `group = 0x4bf294(0, prio, 0, 0)`.
+3. `0x1c3454(owner, group, command, 0)` - owner 538 for tesla's own commands.
+4. Restore the previous current event.
+5. Read back `group[0] + id*40` to prove it: byte `+36` is the written flag.
+
+A group comes from a pool of 48 (`0x3c1700`), so a mode must not take a fresh one per
+start: `0x3c15cc(group)` frees one, under the lamp mutex.
+
 ### The lamp and light-set tables (read 2026-09-15)
 
 - **Light sets: `0x7257a8[set]`**, each a 0-terminated u16 list of lamp ids, with the

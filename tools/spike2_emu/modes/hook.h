@@ -223,4 +223,63 @@ HK_UNUSED static const char *gz_msg_en(unsigned id)
     return grp ? grp[0] : 0;
 }
 
+/* ---- lights: the game's own light runner (emulator-proven, run 12) -------------
+ * Everything the light system makes is tagged with the CURRENT event, and from a tick
+ * hook that is null - which is the one thing that separated our call from the game's.
+ * With a live show event made current, tesla's own command wrote lamps 413-420 (the
+ * powerline tower) 0.2 s later, the same eight the game's own award writes.
+ * A group comes from a pool of 48 (0x3c1700), so ONE is kept and reused rather than
+ * taken per call; nothing here has to free it. MODE_API.md has the recipe. */
+#define GZ_EV_HEAD     0x7b7e80u   /* event list head; chain runs through +0x84 */
+#define GZ_EV_CUR      0x7b7e84u   /* the event running now */
+#define GZ_LAMP_COUNT  0x7b10b4u   /* slots per group array, 585 on Pro 1.15 */
+
+HK_UNUSED static unsigned char *gz_live_show_event(void)
+{
+    unsigned char *n = *(unsigned char **)(unsigned long)GZ_EV_HEAD;
+    int guard = 64;
+    while (n && guard-- > 0) {
+        if ((*(unsigned short *)(n + 2) & 0x20u) && *(unsigned short *)(n + 0x96)) return n;
+        n = *(unsigned char **)(n + 0x84);
+    }
+    return 0;
+}
+
+/* Runs one blele command the way the game's own shows do. Returns the group, or 0. */
+HK_UNUSED static void *gz_blele(unsigned owner, const char *cmd)
+{
+    static void *group;
+    unsigned char *ev = gz_live_show_event(), *old = 0;
+    unsigned prio = 0;
+    if (ev) {
+        old = *(unsigned char **)(unsigned long)GZ_EV_CUR;
+        *(unsigned char **)(unsigned long)GZ_EV_CUR = ev;
+        prio = ((unsigned (*)(void))(unsigned long)SITE_SHOW_PRIO)();
+    }
+    if (!group)
+        group = ((void *(*)(unsigned, unsigned, unsigned, unsigned))
+                 (unsigned long)SITE_LAMP_GROUP)(0u, prio & 0xffu, 0u, 0u);
+    if (group)
+        ((int (*)(unsigned, void *, const char *, unsigned))
+         (unsigned long)SITE_BLELE_RUN)(owner, group, cmd, 0u);
+    if (ev) *(unsigned char **)(unsigned long)GZ_EV_CUR = old;
+    return group;
+}
+
+/* How many of a group's lamps carry the written flag, and the first one's id. The
+ * proof that a command reached the lamps: group[0] + id*40, byte +36. */
+HK_UNUSED static unsigned gz_group_written(void *group, unsigned *first)
+{
+    unsigned char *base = group ? *(unsigned char **)group : 0;
+    unsigned n = *(unsigned *)(unsigned long)GZ_LAMP_COUNT, i, c = 0;
+    if (first) *first = 0;
+    if (!base) return 0;
+    for (i = 0; i < n; i++)
+        if (base[i * 40u + 36u]) {
+            if (!c && first) *first = i;
+            c++;
+        }
+    return c;
+}
+
 #endif

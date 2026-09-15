@@ -7519,7 +7519,20 @@ These have each been violated at least once and each cost a run or a window:
       never the difference. And tesla's set 224 is a SINGLE lamp while `ledact`
       averages the whole playfield: it could not have seen tesla's own award either,
       so those three "negative" runs were never evidence.
-      **Resume:** read the lamp slots, not the LEDs - a group's array is
+      **RUN 12: THE LIGHTS WORK.** Tesla's own green command sent through the probe
+      with a live show event borrowed (priority 145) wrote **lamps 413-420 - the
+      powerline tower, the same eight the game's own award writes** - 0.2 s after the
+      call, flag `+36 1`, `+2` sweeping 0/255 across them and moving again at 1 s.
+      Nothing is written at parse time, which is why every earlier reading was empty,
+      and `ledact`'s playfield average could not have seen eight lamps in any case.
+      Recipe in MODE_API.md: make a show event current, `0x4bf294(0, prio, 0, 0)`,
+      `0x1c3454(owner, group, cmd, 0)`, restore; groups come from a pool of 48, so
+      free with `0x3c15cc` rather than taking a fresh one per mode start.
+      **Resume:** put it in `mode.c` (sweep on at KAIJU RUSH start, the fade-out
+      command at the end), then one run: captures of the virtual playfield at start
+      and end plus the probe's slot dump as the proof. That closes the last
+      acceptance point.
+      **Superseded:** read the lamp slots, not the LEDs - a group's array is
       `group[0] + id*40` with byte `+36` the written flag (`modes/padmode.c`
       `dump_group_slots`, dumped after ours AND after each of the game's own;
       `scratchpad/run11_slots.sh` runs the pair in one game). If ours writes the slot

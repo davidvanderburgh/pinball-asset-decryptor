@@ -100,10 +100,30 @@ static void words_restore(void)
     }
 }
 
-/* LIGHTS ARE NOT HERE YET, deliberately. The first candidate - starting one of the
- * shows tesla strike's condition entries start (95/96/344/346/351/356) - left no
- * reproducible footprint on the LEDs in modes/lightprobe.sh (MODE_API.md, run 4), so
- * a call that proves nothing is not shipped in a mode. */
+/* ---- the lights: the game's own light runner (emulator-proven, run 12) ----------
+ * KAIJU RUSH lights the POWERLINE TOWER, the same eight lamps (413-420) tesla
+ * strike's award lights, with tesla's own pair of commands through hook.h's gz_blele:
+ * a green sweep on at the start, and the fade to black at the end.
+ *
+ * Three earlier candidates are ruled out in MODE_API.md: starting tesla's shows
+ * (95/96/344/346/351/356), 0x185e9c (a device driver, not a light), and this same
+ * runner called WITHOUT a live show event current - which is what made runs 6, 7 and
+ * 9 read as nothing. gz_blele makes a show event current, which is what the game's
+ * own handler does, and then the lamps are written 0.2 s later. */
+#define LIGHT_OWNER 538u
+#define LIGHT_ON    "blele --sweep 0 --lts 224 --red 0 --green 255 --blue 0 --freq 10 --use_alpha 1 --alpha 255"
+#define LIGHT_OFF   "blele --sweep 1 --lts 224 --fade 20 --rgb 0 --freq 10 --delay_start 15 --end 1"
+
+static void lights(const char *cmd, const char *why)
+{
+    char m[160];
+    unsigned first = 0, n;
+    void *group = gz_blele(LIGHT_OWNER, cmd);
+    n = gz_group_written(group, &first);
+    snprintf(m, sizeof m, "[rush] lights %s: group %p, %u lamps written (first %u)\n",
+             why, group, n, first);
+    hk_logs(m);
+}
 
 static void screen(unsigned msg, unsigned long long value)
 {
@@ -150,6 +170,7 @@ static void rush_start(const char *why)
     rush.maser[rush.player] = 0;
     rush.restore_ticks = 0;
     words_borrow();
+    lights(LIGHT_ON, "on");                 /* the powerline tower, green */
     screen(MSG_TITLE, AWARD_STEP);          /* "KAIJU RUSH / 1,000,000" - the first shot's worth */
     snprintf(m, sizeof m, "[rush] KAIJU RUSH START (%s): player %u, %u s, score %llu\n",
              why, rush.player, RUSH_SECONDS, rush.score_at_start);
@@ -161,6 +182,7 @@ static void rush_end(const char *why)
     char m[240];
     if (!rush.active) return;
     rush.active = 0;
+    lights(LIGHT_OFF, "off");               /* fade the tower back to black */
     screen(MSG_TOTAL, rush.total);          /* "KAIJU RUSH TOTAL / 15,000,000" */
     rush.restore_ticks = RESTORE_AFTER_S * TICKS_PER_S;
     snprintf(m, sizeof m, "[rush] KAIJU RUSH END (%s): %u shots, awarded %llu, score %llu -> %llu, %lu ms wall\n",
@@ -253,7 +275,10 @@ static void mode_init(void)
        & hk_site_ok(SITE_SCORE_ADD, SITE_SCORE_ADD_W0, SITE_SCORE_ADD_W1, "score_add")
        & hk_site_ok(SITE_CALLOUT, SITE_CALLOUT_W0, SITE_CALLOUT_W1, "callout")
        & hk_site_ok(SITE_CALLOUT_NTH, SITE_CALLOUT_NTH_W0, SITE_CALLOUT_NTH_W1, "callout_nth")
-       & hk_site_ok(SITE_TEXT, SITE_TEXT_W0, SITE_TEXT_W1, "award_screen");
+       & hk_site_ok(SITE_TEXT, SITE_TEXT_W0, SITE_TEXT_W1, "award_screen")
+       & hk_site_ok(SITE_BLELE_RUN, SITE_BLELE_RUN_W0, SITE_BLELE_RUN_W1, "blele_run")
+       & hk_site_ok(SITE_LAMP_GROUP, SITE_LAMP_GROUP_W0, SITE_LAMP_GROUP_W1, "lamp_group")
+       & hk_site_ok(SITE_SHOW_PRIO, SITE_SHOW_PRIO_W0, SITE_SHOW_PRIO_W1, "show_prio");
     if (!ok) {
         hk_logs("[rush] NOT THIS BUILD - KAIJU RUSH is not installed, the game runs stock\n");
         return;

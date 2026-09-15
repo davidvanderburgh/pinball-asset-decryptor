@@ -46,7 +46,69 @@ static struct {
     unsigned long long total, score_at_start;
     unsigned long started_ms;
     unsigned maser[5];
+    unsigned restore_ticks;      /* after the end, when to put the borrowed words back */
 } rush;
+
+/* ---- the screen: text of our own on a screen the game already has ---------------
+ * Emulator-proven with the probe (run 4): the award screen family 0x3ba540(type, 0,
+ * 0, 0x6fa618) shows the message id at +0xa0 over the u64 value at +0xa8 - type 122,
+ * tesla strike's award, is "TESLA STRIKE AWARD / 2,000,000" over its powerline clip.
+ * Our words go in by pointing a message's group at a block of our own: the table
+ * 0x744c60 is plain .data. We borrow tesla's 3159 (AWARD) and 3160 (COMPLETED) for
+ * the length of the mode and a few seconds after, so a tesla award screen shown in
+ * that window would read our words - the one visible cost, and only while ours runs. */
+#define SCREEN_TYPE       122u
+#define MSG_TITLE         3159u
+#define MSG_TOTAL         3160u
+#define RESTORE_AFTER_S   6
+
+static const char *const title_group[6] = {
+    "KAIJU RUSH", "KAIJU RUSH", "KAIJU RUSH", "KAIJU RUSH", "KAIJU RUSH", 0
+};
+static const char *const total_group[6] = {
+    "KAIJU RUSH TOTAL", "KAIJU RUSH TOTAL", "KAIJU RUSH TOTAL", "KAIJU RUSH TOTAL", "KAIJU RUSH TOTAL", 0
+};
+
+static struct borrowed { unsigned id, idx; const char **old; int held; } borrow[2] = {
+    { MSG_TITLE, 0, 0, 0 }, { MSG_TOTAL, 0, 0, 0 },
+};
+
+static void words_borrow(void)
+{
+    unsigned count = *(unsigned *)(unsigned long)GZ_MSG_COUNT, i;
+    unsigned short *remap = *(unsigned short **)(unsigned long)GZ_MSG_REMAP;
+    for (i = 0; i < 2; i++) {
+        struct borrowed *b = &borrow[i];
+        const char ***slot;
+        if (b->held || !remap || b->id >= count || remap[b->id] >= count) continue;
+        b->idx = remap[b->id];
+        slot = (const char ***)(unsigned long)(GZ_MSG_PTRS + 4u * b->idx);
+        b->old = *slot;
+        *slot = (const char **)(i == 0 ? title_group : total_group);
+        b->held = 1;
+    }
+}
+
+static void words_restore(void)
+{
+    unsigned i;
+    for (i = 0; i < 2; i++) {
+        struct borrowed *b = &borrow[i];
+        if (!b->held) continue;
+        *(const char ***)(unsigned long)(GZ_MSG_PTRS + 4u * b->idx) = b->old;
+        b->held = 0;
+    }
+}
+
+static void screen(unsigned msg, unsigned long long value)
+{
+    unsigned char *node = ((unsigned char *(*)(unsigned, unsigned, unsigned, unsigned))
+                           (unsigned long)SITE_TEXT)(SCREEN_TYPE, 0u, 0u, 0x6fa618u);
+    if (!node) return;
+    *(unsigned short *)(node + 0xa0) = (unsigned short)msg;
+    *(unsigned long long *)(node + 0xa8) = value;
+    *(unsigned *)(node + 0xb0) = 0u;
+}
 
 static unsigned long long score_now(unsigned p)
 {
@@ -81,6 +143,9 @@ static void rush_start(const char *why)
     rush.score_at_start = score_now(rush.player);
     rush.started_ms = hk_ms();
     rush.maser[rush.player] = 0;
+    rush.restore_ticks = 0;
+    words_borrow();
+    screen(MSG_TITLE, AWARD_STEP);          /* "KAIJU RUSH / 1,000,000" - the first shot's worth */
     snprintf(m, sizeof m, "[rush] KAIJU RUSH START (%s): player %u, %u s, score %llu\n",
              why, rush.player, RUSH_SECONDS, rush.score_at_start);
     hk_logs(m);
@@ -91,6 +156,8 @@ static void rush_end(const char *why)
     char m[240];
     if (!rush.active) return;
     rush.active = 0;
+    screen(MSG_TOTAL, rush.total);          /* "KAIJU RUSH TOTAL / 15,000,000" */
+    rush.restore_ticks = RESTORE_AFTER_S * TICKS_PER_S;
     snprintf(m, sizeof m, "[rush] KAIJU RUSH END (%s): %u shots, awarded %llu, score %llu -> %llu, %lu ms wall\n",
              why, rush.hits, rush.total, rush.score_at_start, score_now(rush.player),
              hk_ms() - rush.started_ms);
@@ -116,6 +183,7 @@ static void on_dispatch(unsigned *r)
     if (p == rush.player && (mask & RUSH_SHOT_BITS)) {
         unsigned long long asked = AWARD_STEP * ++rush.hits, got = score_add(p, asked);
         rush.total += got;
+        screen(MSG_TITLE, got);             /* "KAIJU RUSH / 3,000,000" */
         snprintf(m, sizeof m, "[rush] shot %08x_%08x: +%llu (asked %llu), %u shots, %llu awarded\n",
                  (unsigned)(mask >> 32), (unsigned)mask, got, asked, rush.hits, rush.total);
         hk_logs(m);
@@ -141,6 +209,10 @@ static void on_tick(unsigned *r)
     if (++ticks % 30 == 0) {
         if (hk_read_trigger("/dump/mode.start", v) >= 0) rush_start("trigger");
         if (hk_read_trigger("/dump/mode.stop", v) >= 0) rush_end("trigger");
+    }
+    if (rush.restore_ticks && --rush.restore_ticks == 0 && !rush.active) {
+        words_restore();
+        hk_logs("[rush] borrowed messages 3159/3160 restored\n");
     }
     if (!rush.active) return;
     if (!gz_in_game() || gz_player() != rush.player) {
@@ -175,7 +247,8 @@ static void mode_init(void)
        & hk_site_ok(SITE_BALLEND, SITE_BALLEND_W0, SITE_BALLEND_W1, "ballend")
        & hk_site_ok(SITE_SCORE_ADD, SITE_SCORE_ADD_W0, SITE_SCORE_ADD_W1, "score_add")
        & hk_site_ok(SITE_CALLOUT, SITE_CALLOUT_W0, SITE_CALLOUT_W1, "callout")
-       & hk_site_ok(SITE_CALLOUT_NTH, SITE_CALLOUT_NTH_W0, SITE_CALLOUT_NTH_W1, "callout_nth");
+       & hk_site_ok(SITE_CALLOUT_NTH, SITE_CALLOUT_NTH_W0, SITE_CALLOUT_NTH_W1, "callout_nth")
+       & hk_site_ok(SITE_TEXT, SITE_TEXT_W0, SITE_TEXT_W1, "award_screen");
     if (!ok) {
         hk_logs("[rush] NOT THIS BUILD - KAIJU RUSH is not installed, the game runs stock\n");
         return;

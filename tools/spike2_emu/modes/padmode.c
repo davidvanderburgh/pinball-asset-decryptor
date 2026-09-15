@@ -19,6 +19,10 @@
  *   padmode.score   "<value>"         score_add(current player, value)
  *   padmode.sound   "<req>"           sound_request_play(req)
  *   padmode.msgdump (any)             every message id -> English into /dump/padmode_msgs.txt
+ *   padmode.text    "<type> <msgid> <value> [count]"  the award screen 0x3ba540 (tesla: 122)
+ *   padmode.msgset  "<id>" / padmode.msgrestore       point a message at "KAIJU RUSH" and back
+ *   padmode.show / padmode.showkill "<id>"            show_start / show_kill
+ *   padmode.fx      "<n> <a> <b>"     0x185e9c(n, a, b)
  *
  * LOG. /dump/padmode.log, appended, capped at 40000 lines. Build: modes/build_modes.sh.
  */
@@ -287,6 +291,16 @@ static void poll_triggers(void)
     if ((k = hk_read_trigger("/dump/padmode.show", v)) >= 1) {
         void *node = ((void *(*)(unsigned))(unsigned long)SITE_SHOW)((unsigned)v[0]);
         snprintf(m, sizeof m, "[trigger] show_start(%u) -> node %p\n", (unsigned)v[0], node);
+        hk_logs(m);
+    }
+    /* padmode.fx "<n> <a> <b>" - 0x185e9c(n, a, b), the call the game made with 2000,3
+     * at game start, 334 in tesla's award and 200,3 on its spinner: the other lights
+     * candidate beside show_start */
+    if ((k = hk_read_trigger("/dump/padmode.fx", v)) >= 1) {
+        int rc = ((int (*)(unsigned, unsigned, unsigned))(unsigned long)SITE_FX)
+                 ((unsigned)v[0], (unsigned)v[1], (unsigned)v[2]);
+        snprintf(m, sizeof m, "[trigger] fx 0x185e9c(%u, %u, %u) -> %d\n",
+                 (unsigned)v[0], (unsigned)v[1], (unsigned)v[2], rc);
         hk_logs(m);
     }
     if ((k = hk_read_trigger("/dump/padmode.showkill", v)) >= 1) {

@@ -7409,7 +7409,7 @@ These have each been violated at least once and each cost a run or a window:
       menu change in two minutes with nothing else on the machine touched.
 
 - [ ] **125. A NEW game mode of our own, running inside Godzilla Pro 1.15 in the
-      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D5` David,
+      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D5` ← WORKING ON David,
       2026-09-15: "what would it take to add a mode to a game like godzilla?" Plan
       (approved): `plans/spike2_new_mode_plan.md`, pointer under REMAINING item 125 in
       the handoff (both gitignored, local to this machine). **Established at the desk:**

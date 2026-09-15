@@ -276,13 +276,59 @@ static void msg_hijack(unsigned id, int restore)
  * The string stays in a static buffer: nothing says the parser copies it. */
 static char blele_cmd[256];
 
+/* The event list. `0x7b7e80` is the head and `0x7b7e84` the event running right now;
+ * the chain runs through `+0x84`. A show's node carries flag 0x20 at `+2`, its show id
+ * at `+0x96` and its lamp priority at `+0x98` - which is what 0x4f3740 reads to give
+ * tesla's award handler the priority it hands the group builder. Everything the light
+ * system makes is tagged with the current event: the group keeps the pointer at +16
+ * (0x3c14d4), an effect slot keeps the show id (0x1bebe0), and up to four cleanup
+ * callbacks hang off the event at +0x118 (0x255bb8). From a tick hook the current event
+ * is null, which is the one difference left between our call and tesla's. */
+#define GZ_EV_HEAD  0x7b7e80u
+#define GZ_EV_CUR   0x7b7e84u
+
+static unsigned char *live_show_event(void)
+{
+    unsigned char *n = *(unsigned char **)(unsigned long)GZ_EV_HEAD;
+    int guard = 64;
+    while (n && guard-- > 0) {
+        if ((*(unsigned short *)(n + 2) & 0x20u) && *(unsigned short *)(n + 0x96)) return n;
+        n = *(unsigned char **)(n + 0x84);
+    }
+    return 0;
+}
+
+/* padmode.evdump - what events are live, so a borrowed one can be chosen by hand. */
+static void evdump_trigger(void)
+{
+    char m[200];
+    unsigned char *n;
+    int i = 0, fd = open("/dump/padmode.evdump", O_RDONLY);
+    if (fd < 0) return;
+    close(fd);
+    unlink("/dump/padmode.evdump");
+    n = *(unsigned char **)(unsigned long)GZ_EV_HEAD;
+    snprintf(m, sizeof m, "[trigger] evdump: head %p current %p\n",
+             (void *)n, *(void **)(unsigned long)GZ_EV_CUR);
+    hk_logs(m);
+    while (n && i++ < 24) {
+        snprintf(m, sizeof m, "[evdump] %2d %p id %u flags 0x%04x show %u prio %u\n",
+                 i, (void *)n, *(unsigned short *)n, *(unsigned short *)(n + 2),
+                 *(unsigned short *)(n + 0x96), *(unsigned char *)(n + 0x98));
+        hk_logs(m);
+        n = *(unsigned char **)(n + 0x84);
+    }
+}
+
 static void blele_trigger(void)
 {
-    char m[360];
+    char m[400];
     long n;
     unsigned owner = 0, prio = 0;
+    int borrow = 0;
     char *s;
     void *group;
+    unsigned char *ev = 0, *old_cur = 0;
     int rc, fd = open("/dump/padmode.blele", O_RDONLY);
     if (fd < 0) return;
     n = read(fd, blele_cmd, sizeof blele_cmd - 1);
@@ -295,12 +341,23 @@ static void blele_trigger(void)
         for (s++; *s >= '0' && *s <= '9'; s++) prio = prio * 10 + (unsigned)(*s - '0');
         while (*s == ' ') s++;
     }
+    if (s[0] == 'e' && s[1] == 'v' && s[2] == ' ') {          /* run it as a live show would */
+        borrow = 1;
+        for (s += 2; *s == ' '; s++) ;
+    }
     for (n = 0; s[n]; n++) if (s[n] == '\n' || s[n] == '\r') { s[n] = 0; break; }
     if (!owner || !*s) return;
+    if (borrow && (ev = live_show_event()) != 0) {
+        old_cur = *(unsigned char **)(unsigned long)GZ_EV_CUR;
+        *(unsigned char **)(unsigned long)GZ_EV_CUR = ev;
+        if (!prio) prio = ((unsigned (*)(void))(unsigned long)SITE_SHOW_PRIO)();
+    }
     group = ((void *(*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)SITE_LAMP_GROUP)(0u, prio & 0xffu, 0u, 0u);
     rc = ((int (*)(unsigned, void *, const char *, unsigned))(unsigned long)SITE_BLELE_RUN)(owner, group, s, 0u);
-    snprintf(m, sizeof m, "[trigger] blele owner %u prio %u group %p event %p \"%.160s\" -> %d\n",
-             owner, prio & 0xffu, group, *(void **)(unsigned long)0x7b7e84u, s, rc);
+    if (borrow && ev) *(unsigned char **)(unsigned long)GZ_EV_CUR = old_cur;
+    snprintf(m, sizeof m, "[trigger] blele owner %u prio %u group %p event %p (borrowed %p, was %p) \"%.140s\" -> %d\n",
+             owner, prio & 0xffu, group, *(void **)(unsigned long)GZ_EV_CUR,
+             (void *)ev, (void *)old_cur, s, rc);
     hk_logs(m);
 }
 
@@ -312,6 +369,7 @@ static void poll_triggers(void)
     if (!(*(unsigned *)(unsigned long)GZ_MGR_GUARD & 1)) return;
 
     blele_trigger();
+    evdump_trigger();
 
     /* padmode.text "<type> <msgid> <value> [count]" - the award-screen family tesla's
      * award uses: 0x3ba540(type, 0, 0, 0x6fa618), then msg id at +0xa0, u64 value at
@@ -457,6 +515,7 @@ static void padmode_init(void)
     ok &= hk_site_ok(SITE_SHOW_KILL, SITE_SHOW_KILL_W0, SITE_SHOW_KILL_W1, "show_kill");
     ok &= hk_site_ok(SITE_BLELE_RUN, SITE_BLELE_RUN_W0, SITE_BLELE_RUN_W1, "blele_run");
     ok &= hk_site_ok(SITE_LAMP_GROUP, SITE_LAMP_GROUP_W0, SITE_LAMP_GROUP_W1, "lamp_group");
+    ok &= hk_site_ok(SITE_SHOW_PRIO, SITE_SHOW_PRIO_W0, SITE_SHOW_PRIO_W1, "show_prio");
     if (!ok) {
         hk_logs("[padmode] NOT THIS BUILD - nothing hooked, the game runs stock\n");
         return;

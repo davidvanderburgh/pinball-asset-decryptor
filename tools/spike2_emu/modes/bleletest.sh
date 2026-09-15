@@ -17,6 +17,10 @@ W=/var/tmp/bleletest
 SECS=${BLELE_SECS:-6}
 mkdir -p "$W"
 measure() { python3 "$M/ledact.py" "$SECS" 250 --save "$W/$1.json" > /dev/null; }
+echo "=== live events (an 'ev' case makes one of these current for the call)"
+: > "$D/padmode.evdump"
+sleep 1
+grep -a 'evdump' "$D/padmode.log" | tail -12
 measure noise1
 measure noise2
 echo "=== noise (two windows, nothing fired)"

@@ -44,6 +44,7 @@ SITES = [
     ("SHOW_RUNNING", 0x255D7C, False),# is show id running - called
     ("BLELE_RUN", 0x1C3454, False),   # run a blele/blela light command (owner, group, str, 0) - called
     ("LAMP_GROUP", 0x4BF294, False),  # lamp group from light-set table 0x7257a8 (set 0 = empty) - called
+    ("SHOW_PRIO", 0x4F3740, False),   # the running show's lamp priority, off the current event - called
 ]
 
 

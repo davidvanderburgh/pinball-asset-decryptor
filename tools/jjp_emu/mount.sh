@@ -17,6 +17,11 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 
+# --root-only: sda3 alone, restored into the cache, nothing mounted and no
+# image switched (ensurejjpselect.sh; see where it is read below).
+ROOT_ONLY=0
+if [ "${1:-}" = "--root-only" ]; then ROOT_ONLY=1; shift; fi
+
 # The ISO must be known BEFORE padpath.sh is sourced: padpath derives JJP_BASE
 # from JJP_ISO, and without it falls back to the current-title pointer.  Source
 # it too early and a Godfather ISO resolves to the last-mounted Wonka
@@ -47,6 +52,17 @@ done
 BASE=$JJP_BASE
 mkdir -p "$BASE"
 
+# ROOT ONLY (2026-09-15).  The JJP menu program links against a handful of the
+# root's libraries and needs nothing else of the image, and it used to get them
+# by calling this script whole: a loaded 13 GB multi-boot ISO restored sda3,
+# sda5, sda2 and sda4 behind a Multi-boot tab that said nothing for ten
+# minutes, and switched the emulator's current image on the way.  This mode
+# restores sda3 and stops: no other partition, no mount, no switch.
+if [ "$ROOT_ONLY" = "1" ] && [ -s "$BASE/sda3.raw" ]; then
+    echo "root: $BASE/sda3.raw (already restored)"
+    exit 0
+fi
+
 # Is the RIGHT image already mounted?
 #
 # This test used to be "is anything mounted at $JJP_ROOT", with $JJP_ROOT a
@@ -54,7 +70,7 @@ mkdir -p "$BASE"
 # mounted" and the GUI's picker appeared to do nothing at all.  $JJP_BASE is
 # now derived from the ISO, so a different title is a different directory and
 # this can only ever be true for the one actually asked for.
-if mountpoint -q "$JJP_ROOT"; then
+if [ "$ROOT_ONLY" = "0" ] && mountpoint -q "$JJP_ROOT"; then
     echo "already mounted: $JJP_ROOT"
     # root B of a multi-boot ISO (item 117) may have been unmounted on its own
     # (a lazy teardown, a WSL idle-out); put it back so jail.sh finds it
@@ -72,7 +88,7 @@ fi
 # A DIFFERENT title may still be mounted from a previous run.  It has to come
 # down first: the jail overlays whichever root was current when it was built,
 # so leaving it up would run the OLD title while every label said the new one.
-if [ -r "$JJP_CURRENT" ]; then
+if [ "$ROOT_ONLY" = "0" ] && [ -r "$JJP_CURRENT" ]; then
     PREV=$(cat "$JJP_CURRENT" 2>/dev/null)
     if [ -n "$PREV" ] && [ "$PREV" != "$JJP_BASE" ]; then
         echo "switching image: $PREV -> $JJP_BASE"
@@ -130,8 +146,13 @@ restore_one() {
     # filter turns them into a line per ten percent, and the restore's own
     # exit status is read off the pipeline, not the filter's.  (Proven on a
     # 3.4 GB ISO in the app's distro, 2026-09-13.)
+    #
+    # INTO $dest.part, renamed only when whole.  "Already restored" above is
+    # `-s $dest`, so a restore written straight to $dest and cut short (the app
+    # closed, WSL idled out) left a torn image that every later run trusted.
+    rm -f "$dest.part"
     cat "$IMG/$part".*-ptcl-img.gz.* | gunzip -c \
-        | partclone.restore -C -f 1 -B -s - -o "$dest" 2>&1 >/dev/null \
+        | partclone.restore -C -f 1 -B -s - -o "$dest.part" 2>&1 >/dev/null \
         | tr '\r' '\n' \
         | awk -v part="$part" '
             /Completed:/ {
@@ -140,7 +161,7 @@ restore_one() {
                 if (p > last) { last = p; printf "  %s: %d%%\n", part, p; fflush() }
             }'
     if [ "${PIPESTATUS[2]}" != "0" ]; then
-        echo "  $part: partclone failed" >&2; rm -f "$dest"; return 1
+        echo "  $part: partclone failed" >&2; rm -f "$dest.part"; return 1
     fi
 
     # partclone writes only the USED blocks, so the file ends at the last used
@@ -150,7 +171,7 @@ restore_one() {
     # the mount always fits.  (ext4 superblock: s_blocks_count_lo @0x400+0x4,
     # s_log_block_size @0x400+0x18 giving block size = 1024<<n.)
     local fs_size
-    fs_size=$(python3 - "$dest" <<'PY'
+    fs_size=$(python3 - "$dest.part" <<'PY'
 import struct, sys
 with open(sys.argv[1], 'rb') as f:
     f.seek(0x400)
@@ -163,12 +184,18 @@ print(blocks * (1024 << log_bs))
 PY
 )
     if [ -n "$fs_size" ] && [ "$fs_size" -gt 0 ]; then
-        cur=$(stat -c%s "$dest")
-        [ "$cur" -lt "$fs_size" ] && truncate -s "$fs_size" "$dest"
+        cur=$(stat -c%s "$dest.part")
+        [ "$cur" -lt "$fs_size" ] && truncate -s "$fs_size" "$dest.part"
     fi
+    mv -f "$dest.part" "$dest"
 }
 
 restore_one sda3 "$BASE/sda3.raw" || { echo "mount.sh: sda3 is required" >&2; exit 7; }
+if [ "$ROOT_ONLY" = "1" ]; then
+    umount "$ISOMNT" 2>/dev/null || umount -l "$ISOMNT" 2>/dev/null
+    echo "root: $BASE/sda3.raw"
+    exit 0
+fi
 # EVERY other ext4 set the ISO carries: sda2 (/boot) and sda4 (perm) on a stock
 # ISO, and sda5 - root B, the second image - on a multi-boot install ISO
 # (mkjjpmulti.py, item 116).  Read off the image directory, not from a list, so

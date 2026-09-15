@@ -327,13 +327,25 @@ to its JJP backend (`gui/multiboot_backend.py`): the path box says
 "Multi-boot install ISO", the list takes two install ISOs (root A, root B; no
 random groups), the size strip says which USB stick they need, and the green
 button is "Build / make stick…". Its run is the selector step
-(`tools/jjp_emu/ensurejjpselect.sh` builds `jjpselect` against the first ISO's
-own root and installs it under `/var/tmp/jjpselect` in the card's layout),
+(`tools/jjp_emu/ensurejjpselect.sh` builds `jjpselect` and installs it under
+`/var/tmp/jjpselect` in the card's layout),
 the media (`mkjjpmulti.py media`: 'auto' art is each image's own JJP logo,
 'auto' sounds are the built-in click and chime), `plan`, `build` and `verify`,
 all `mkjjpmulti.py`, the writing steps as root. The dialog's stick tick hands
 the ISO to the plugin's own FAT32 stick maker; 'Run in emulator' hands it to
 the Emulate JJP tab, whose rig shows the menu by itself.
+
+**Loading an ISO touches only its menu.** The load reads `/jjp/padselect` off
+the ISO (the conf, the media, the menu program) and restores nothing.
+`jjpselect` links against nine of a JJP root's libraries and what those need,
+so `ensurejjpselect.sh` copies them once into `/var/tmp/jjpselect_sysroot`
+from a root already on the PC (a mounted one, or a restored
+`/var/tmp/jjp_<slug>/sda3.raw`), and every rebuild after that takes seconds
+with nothing mounted. With no root on the PC, the preview (`--preview`) draws
+with the ISO's own `jjpselect`; only a writing run restores anything, and then
+only the first ISO's root partition (`mount.sh --root-only`). Until
+2026-09-15 a loaded multi-boot ISO went to `mount.sh` whole: all four
+partitions, 13 GB, with the progress thrown away.
 
 **The tab's tools run in the app's own distro, PAD-Runtime**, not the default
 one: its `/var/tmp` holds its own restores (`jjp_<slug>`), its own

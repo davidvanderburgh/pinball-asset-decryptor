@@ -320,19 +320,28 @@ def plan_launch(lane, lane_made):
     return Plan([('set', lane, False, 'shooter lane opened (ball launched)')])
 
 
-def plan_drain(trough, is_closed):
+def plan_drain(trough, is_closed, lane=None, lane_made=False):
     """A ball in play drained.  It arrives at the FAR end of the trough.
 
     THIS IS THE HALF NOTHING CAN OBSERVE, so it is an action and not an event.
     Until something says a ball drained it stays in play, which means a
     multiball can start but never end - and the game's ball counter would walk
     away from the rig's within one game.
+
+    Not while the only ball out is waiting in the shooter lane (PAD-153, the
+    Spike 2 window's report; ballmodel.plan_drain has the story): it has not
+    been launched, and draining it home leaves the lane holding a ball more
+    than the machine has, so the next eject can never land.
     """
     if not trough.positions:
         return Plan(refused='no trough switches on this title')
     home = trough.arriving(is_closed)
     if home is None:
         return Plan(refused='the trough is already full - no ball is in play')
+    out = len(trough) - trough.count(is_closed)
+    if lane is not None and lane_made and out <= 1:
+        return Plan(refused='the ball is still in the shooter lane - '
+                            'plunge it first')
     return Plan([('set', home, True, 'trough closed (ball drained home)')])
 
 
@@ -596,13 +605,15 @@ class Feeder:
             self.log('drain: nothing touched the playfield for %.0f s - '
                      'bringing %d ball(s) home (nobody was flipping)'
                      % (self.auto_drain_s, self.in_play()))
-        if self.run_plan(plan_drain(self.trough, self.is_closed), 'drain:'):
+        if self.run_plan(plan_drain(self.trough, self.is_closed, self.lane,
+                                    self.lane_made()), 'drain:'):
             self.auto_drained += 1
 
     # ------------------------------------------------------------- actions
     def drain(self):
         """A ball in play came home.  The only half nothing can observe."""
-        return self.run_plan(plan_drain(self.trough, self.is_closed), 'drain:')
+        return self.run_plan(plan_drain(self.trough, self.is_closed, self.lane,
+                                        self.lane_made()), 'drain:')
 
     def plunge(self):
         """A human worked the shooter.  Same effect as the auto launcher, and it

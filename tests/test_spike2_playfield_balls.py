@@ -148,9 +148,55 @@ def test_plunge_drain_and_reset_are_buttons_that_say_what_they_do(playfield):
     try:
         assert [b.cget("text") for b in panel.ball_btns] == \
             ["Plunge", "Drain", "Reset balls"]
+        panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67], lane=62),
+                         None, [])                     # a ball in play
         for b in panel.ball_btns:
             b.invoke()
         assert said == ["plunge", "drain", "reset"]
+    finally:
+        root.destroy()
+
+
+# --- Drain is greyed until a ball is in play (PAD-153) ----------------------
+
+def test_drain_is_ready_only_with_a_ball_in_play(playfield):
+    """DragonRR: "I drained before I plunged.. and that forces an endless
+    cycle. Is it possible to grey out the drain until it is valid?" """
+    served = _watch(playfield, [71, 70, 69, 68, 67, 62], lane=62)
+    assert not playfield.drain_ready(served)            # waiting in the lane
+    assert playfield.drain_ready(_watch(playfield, [71, 70, 69, 68, 67],
+                                        lane=62))       # launched
+    assert not playfield.drain_ready(_watch(playfield, [71, 70, 69, 68, 67,
+                                                        66], lane=62))
+    # A multiball with a ball waiting still has two out there to drain.
+    assert playfield.drain_ready(_watch(playfield, [71, 70, 69, 62], lane=62))
+    unread = _watch(playfield, [])
+    unread.mrg = None
+    assert not playfield.drain_ready(unread)
+
+
+def test_drain_is_greyed_while_the_ball_waits_and_lights_once_launched(
+        playfield):
+    said = []
+    root, panel, dots = _panel(playfield, said.append)
+    try:
+        drain = panel.ball_btns[1]
+        assert drain is panel.drain_btn
+        assert drain.cget("state") == "disabled"        # nothing read yet
+        panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67, 62], lane=62),
+                         1, [])
+        assert drain.cget("state") == "disabled"
+        drain.invoke()
+        assert said == []                               # a grey press is nothing
+        assert panel.ball_btns[0].cget("state") == "normal"   # Plunge is live
+        panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67], lane=62),
+                         1, [])
+        assert drain.cget("state") == "normal"
+        drain.invoke()
+        assert said == ["drain"]
+        panel.show_balls(_watch(playfield, [71, 70, 69, 68, 67, 66], lane=62),
+                         1, [])
+        assert drain.cget("state") == "disabled"        # home again
     finally:
         root.destroy()
 

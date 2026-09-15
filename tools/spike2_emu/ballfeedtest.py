@@ -304,6 +304,32 @@ def main():
     check("...and says why, naming how a ball in play ends",
           ("a ball is in play" in out_txt and "Drain" in out_txt), True)
 
+    # ---- PAD-153: Drain before Plunge moves nothing ------------------------
+    # DragonRR drained the served ball while it still sat in the shooter lane.
+    # The trough was one short, so there was a hole to close, and closing it
+    # put every ball home with one more still in the lane - the game's next
+    # eject had nowhere to land and it cycled for ever. A ball in the lane is
+    # not in play until it is launched.
+    run("reset")
+    time.sleep(0.3)
+    run("take")
+    time.sleep(0.3)
+    plunge_lane_ball(shim, lane)
+    before = shim.count(ids)
+    out_txt = run("drain")
+    time.sleep(0.3)
+    if lane is not None:
+        check("drain with the only ball out WAITING IN THE LANE moves nothing",
+              shim.count(ids), before)
+        check("...and says to plunge it first",
+              "shooter lane" in out_txt and "Plunge" in out_txt, True)
+    run("plunge")
+    time.sleep(0.3)
+    run("drain")
+    time.sleep(0.3)
+    check("once it is launched, the same drain brings it home",
+          shim.count(ids), len(ids))
+
     # ---- PAD-134: THE WAY HOME, which nothing here used to reach -----------
     # A launched ball that nobody is playing drains back to the trough, and
     # the two faults this section exists for are the two the old one slot

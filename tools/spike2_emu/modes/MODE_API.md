@@ -88,10 +88,10 @@ borrow.**
 | `+0x04` | id | v[16]; the manager keys on it |
 | `+0x08` | a | v[17] |
 | `+0x0c` | b | v[18]; copied into display nodes (`0x10cf54`) |
-| `+0x10+p` | qualified[p] | v[6] sets it, v[19] reads it (p is 1-based, so the arrays below start one element in) |
-| `+0x14+p` | stopped this ball[p] | set once by v[11], read by v[21] |
-| `+0x18+p` | stop reason[p] | v[11] stores its reason when this is 0; v[23]. **1 = completed.** |
-| `+0x1c+p` | running[p] | v[12] |
+| `+0x0f+p` | qualified[p] | v[6] sets it, v[19] reads it. p is 1-based, so player 1 is `+0x10` |
+| `+0x13+p` | stopped this ball[p] | set once by v[11], read by v[21] |
+| `+0x17+p` | stop reason[p] | v[11] stores its reason when this is 0; v[23]. **1 = completed.** |
+| `+0x1b+p` | running[p] | v[12] (`strb [this+p+27]` in start). The first probe read `+0x1c+p` and printed "running 0 -> 0" over a start that had worked. |
 | `+0x18+8p` | lit-shot mask[p], u64 | v[25] get, v[26] set, v[45] |
 | `+0x3c+4p` | level[p] (starts) | v[32]; start increments it, v[3] clears it |
 | `+0x50` | `caward*` | constructor: `caward_get(cawards_manager, award)` |
@@ -226,16 +226,117 @@ with id 23, award 30 and b 9; its object is at `0x7a2878`.
   `"Mothra_godzilla_powerlines10_2"` by completion, and 582/565.
 - Slots 27/28/29 return 3242/243/244.
 
-## Not located yet
+## The vehicle, in the rig: `modes/padmode.so` (the Phase 0 probe)
 
-- **How shots reach v[15].** Something turns switch closures into the 64-bit shot masks
-  (`cshot`, and the per-switch descriptors behind `switch_drain 0x1e7540`) and hands them
-  to the modes. A mode.so's own shots need this, or its own subscription to the
-  switch event.
+`modes/build_padmode.sh` builds it into the stage. `gen_sites.py` bakes in every
+site's expected first two instruction words, read from the ELF it is built for. The
+run copies it to `$ROOT/lib` under the rig lock and preloads it with
+`PAD_TRACE_SO=/lib/padmode.so`. Hooks are hwshim's `pad_hook` trampoline, except the
+logger gets a pointer to the saved r0-r3/ip/lr. Triggers are files in `/dump`
+(`padmode.start|stop|shot|score|sound`), polled from the tick hook, so everything the
+probe does to the game happens on the game's own scheduler thread.
+
+**Run 1 (2026-09-15) found the vehicle's first real rule: `LD_PRELOAD` reaches every
+child the game spawns.** A `PAD_PIVOT` run exports it, and `system("rm -r -f
+/connectivity/files/gkpd_3")` runs 2.3 s after boot. The probe had installed all 13
+hooks in the game and logged a live `0x3ba540(6, ...)` call. It then loaded into that
+child `/bin/sh`, read Godzilla's tick address with nothing mapped there, and took
+SIGSEGV (`[system] ... -> 139`). `watch.sh` saw the fatal signal in the shared
+`game.out` and stopped a game that was fine. The card's launcher is the same shape
+(`game_monitor` is a shell loop under the same `LD_PRELOAD`). So **a mode.so must
+confirm from `/proc/self/maps` that an executable `game` mapping covers its sites
+before it reads a single game address.** padmode.c now does. At the desk,
+`qemu-arm-static -E LD_PRELOAD=padmode.so affcat --help` runs its constructor and
+writes nothing.
+
+## How far the locators carry: Pro 1.15 against LE
+
+`patloc.py godzilla_pro/game godzilla_le/game_real` (2026-09-15). Signatures come from
+the Pro function's first 8-40 instructions. A strict mask drops branch and literal
+offsets and movw/movt immediates; the loose fallback also drops data-processing
+immediates and ldr/str offsets. **29 of 41 land exactly once on LE.**
+
+- **Portable (strict):** caward_get, cmode_ctor, cmode_manager_get / started / stopped,
+  cmode_timed_ctor, callout_play_nth, ctimer_get, switch_drain, event_post,
+  fiber_yield, event_post_replacing, all four sound_request calls, audit_add,
+  error_log, get_adjustment, player_check, message_picker, tick_body_60hz,
+  show_start, **score_add**, cmode_start (v[8]), RulePowerlines' shot handler.
+- **Portable (loose):** hook_subscribe, hook_dispatch, cmode_timed's expiry callback.
+- **Absent on LE:** caward_add / caward_add_scaled, game_event, current_player,
+  score_add_current, cmode v[10] / v[11], cmode_timed start, both tesla functions.
+  `callout_play` is not unique even on Pro (two identical 40-word bodies).
+- **LE has one more slot at every `cmode` level:** `cmode` 49 virtuals (Pro 48),
+  `cmode_timed` 63, `cmode_tesla_strike` 51. So a slot NUMBER is not portable. A
+  mode.so should find a slot by comparing the vtable against a located base
+  function, which is how the game itself devirtualises.
+- **The handoff's `0x25feec` is LE's `get_adjustment`:** the Pro 1.15 pattern lands
+  there. That is why it read as mid-function on Pro.
+
+A locator that misses is reached through a unique caller instead. For example,
+`current_player`'s byte is a movw/movt pair inside `score_add`.
+
+## Emulator-proven: run 2 (2026-09-15)
+
+`PAD_PIVOT` Godzilla Pro, `PAD_TRACE_SO=/lib/padmode.so`, `PAD_PEEK=0x7e4968:8`. A game
+was started with `plunge.py game` and driven with `padmode_trig.sh` and
+`padmode_drive.sh`. All 13 hooks ran through boot, attract and a game without a fault.
+
+- **A mode starts on demand.** The `padmode.start` trigger ran `get(mgr, 23)->v[8]()` on
+  the tick thread mid-game:
+  - `cmode_manager_started(23)` fired from `0x7dc28`, inside base start.
+  - `caward_add(aw 30, 250000)` came from `0x10c244`, inside tesla's start.
+  - `score_add(1, 250000)` came from `0x2fafc`, inside `caward_add`.
+  - The peek of player 1's score moved from 0 to `90 d0 03 00` = 250,000.
+
+  A second forced start after the ball ended worked the same way.
+- **Calling `score_add` from our own code works.** `score_add(1, 12345)` from the .so
+  (r0 = player, r2:r3 = the u64) returned 12345, and the score peek read 3,850,315.
+- **How shots reach a mode.** The shot handler `0x18601c` takes a 64-bit mask, finds
+  it in a 24-byte table at `0x7a6e38` (an audit id at `+18`), and calls
+  `cmode_manager::v[7]` `0xd1a9c(mgr, _, mask, 1)`. That walks the 27-entry table and
+  calls every mode's **v[15]**; the call site is `0xd1ad4`. Each playfield switch makes
+  two dispatches: bit 0 (`0x1`, "a playfield switch"), then its own shot bit. A mode
+  sees a shot only through v[41], and only while v[14] says it is active.
+- **End of ball** is `0xd3dcc`, which calls **v[4]** on all 27 modes. Tesla's v[4] stops
+  it with reason 0: `STOPPED id=23 reason=0` from `0xd3e00` when the rig's ball drained.
+- **Tesla scored nothing from the ramps or the building.** Its v[41] received bits 20,
+  21 and 22 (also when injected straight into v[15]) and added no score. So its lit
+  mask is set by a rule we have not traced; the ramps and building bits alone don't
+  light it.
+
+### Switch → shot bit (godzilla Pro 1.15, one 150 ms `swpoke` each)
+
+| Switch | Shot bit(s) after the `0x1` dispatch |
+|---|---|
+| 73 L Ramp Made Opto | `0x00100000` (bit 20) |
+| 81 R Ramp Made Opto | `0x00200000` (bit 21) |
+| 77 Building Hit Opto | `0x00400000` (bit 22) |
+| 76 Godzilla Target | `0x00080000` |
+| 48 Maser Target | `0x08000000` |
+| 78 / 79 / 80 Pwrline Left / Center / Right | `0x10000000` / `0x20000000` / `0x40000000` |
+| 85 / 86 Shield Target Left / Right | `0x80000000` / `0x1_00000000` |
+| 46 Skill Shot | `0x4_00000000` |
+| 74 Big Loop Exit, 82 Big Loop Enter | `0x10_00000000`, in the same mask as `0x1`; scored 500,000 then 1,030,000 through `caward_add_scaled` |
+| 47 / 83 / 84 spinners (Left / Top / Right) | three bits each: `0x80`, `0x200`, then `0x400` 770 ms later / `0x800`, `0x2000`, `0x4000` / `0x2_00008000`, `0x20000`, `0x40000` |
+| 75 Building Exit, 50 Mecha Exit Top | only `0x1` |
+| 53 Right Scoop | nothing within 1.5 s |
+
+The spinner rows are read as one poke's sequence, because all three spinners show the
+same shape. That reading is not separately proven.
+
+## Not located yet
 - **The text screen.** `0x3ba540(n, a, b, 0x6fa618)` → `0x51eab8`/`0x51eb00`, and
-  `show_start`, are the candidates. The message ids (3242, 3159, 3160) are not yet
-  resolved through the message table.
+  `show_start`, are the candidates.
+- **What id space v[27] and the award screens use.** Ruled out: they are NOT rows of
+  the `0x748a10` message table. That table itself checks out (row 1668 reads "Tech
+  Alerts", as the handoff says), but row 3242 reads "SET", 3159/3160 are the
+  "THIS MACHINE SHALL NOT / OPERATE IN THIS COUNTRY" warning, and 565 is a
+  flee-jackpot prompt. So "title message id" above is a name for the slot's
+  position, not its meaning (scratch `msgrow.py`).
 - **Lights.** `0x185e9c(n, a, b)` (it checks `global_mode_mask & 0x310` and calls
   `0x39fe24(7, ...)`) and the `blele` runner.
-- **Free timers.** Modes take 0-3, 5-7, 14, 15, 17, 18, 21 and 25; rules take others.
+- **There are no free timers, so a mode.so keeps its own clock.** `ctimer_get` has 66
+  call sites. Its constants reach 4, 8-13, 15-20, 22-24 and 26-29, and the mode
+  constructors add 0-3, 5-7, 14, 17, 18, 21 and 25: every index from 0 to 29. The
+  obvious clock is to count frames from a hook on `tick_body_60hz`.
 - **`cgametimer`'s own slots.** The roles above come from how `cmode_timed` calls them.

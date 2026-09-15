@@ -7409,7 +7409,7 @@ These have each been violated at least once and each cost a run or a window:
       menu change in two minutes with nothing else on the machine touched.
 
 - [ ] **125. A NEW game mode of our own, running inside Godzilla Pro 1.15 in the
-      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D5` ← WORKING ON ← IN PROGRESS David,
+      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D4` ← IN PROGRESS David,
       2026-09-15: "what would it take to add a mode to a game like godzilla?" Plan
       (approved): `plans/spike2_new_mode_plan.md`, pointer under REMAINING item 125 in
       the handoff (both gitignored, local to this machine). **Established at the desk:**
@@ -7447,23 +7447,42 @@ These have each been violated at least once and each cost a run or a window:
       **Ruled out / corrected:** no null slot to borrow (all 27 are real modes on
       Pro); `0x25feec` is NOT get_adjustment on Pro 1.15 (`0x45df38` is); evmap.sh
       misses 60 of the 227 subscribe sites (tail-call `b`).
-      **Not located yet:** how shot masks reach a mode's v[15] (the switch -> shot
-      bit map), the text-screen call (`0x3ba540` / `0x4f34e0` candidates), the
-      `blele` runner, which of the 30 timers are free.
-      **Resume:** find the shot-mask dispatcher and the free timers
-      (`armxref.py args ... 0x18b47c`), then take the rig lock for ONE probe run: a
-      `modes/` .so (codeselect recipe, `-shared`, behind `PAD_MODE_SO`) that forces
-      `get(mgr,23)->v[8]()` once a game is running and logs start / shot / stop,
-      with `PAD_PEEK=0x7e4968:8` on the score.
+      **Emulator-proven (run 2, 2026-09-15; `modes/padmode.so` through
+      PAD_TRACE_SO, built by `modes/build_padmode.sh`):** forcing
+      `get(mgr,23)->v[8]()` from the tick hook starts tesla strike mid-game
+      (manager started from `0x7dc28`, caward_add(30, 250000), score 0 -> 250,000
+      read by `PAD_PEEK=0x7e4968:8`); `score_add(1, 12345)` called from the .so
+      returned 12345 and moved the score. Shots: switch -> `0x18601c` ->
+      `cmode_manager::v[7]` `0xd1a9c` -> every mode's v[15](mask); each switch is a
+      `0x1` dispatch then its own bit (ramps bits 20/21, building hit 22,
+      powerlines 28-30 - full map in MODE_API.md). End of ball = `0xd3dcc` calling
+      every mode's v[4]. **Run 1 found the vehicle rule:** a PAD_PIVOT run exports
+      LD_PRELOAD into the game's `system()` children, so a mode.so must gate on
+      `/proc/self/maps` before reading any game address - the first probe SEGV'd a
+      child `sh` and watch.sh stopped a healthy game; padmode.c now gates, checked at
+      the desk under qemu-arm-static.
+      **Not located yet:** the text-screen call (`0x3ba540` / `0x4f34e0`
+      candidates), the `blele` light-show runner, and what lights tesla's own
+      shots (its v[41] got bits 20-22 and scored nothing). No timer is free (all 30
+      taken), so a mode.so counts ticks. The v[27] "title" id is NOT a `0x748a10`
+      message row.
+      **Resume:** Phase 1 in `modes/` - grow padmode.c into `mode.so` behind a
+      `PAD_MODE_SO` alias in run_game.sh: our own mode (id 27, which the manager
+      ignores) that starts on a chosen shot bit seen at the v[7] dispatch, runs 30 s
+      of ticks, scores its shots with `score_add`, and plays a callout with
+      `callout_play`; hook `0x3ba540`/`0x4f34e0` during a battle's start screen to
+      find the text call. `modes/padmode_trig.sh` / `padmode_drive.sh` drive a live
+      run; `plunge.py game` starts one.
       **Acceptance:** in a played Godzilla Pro 1.15 game in the rig with `PAD_MODE_SO`
       set, the mode starts on its trigger, runs a timer, scores its shots (`PAD_PEEK` on
       the player score), shows its text (`PAD_SCREEN`), runs an existing light show and
       callout, and ends on the timer; a 10-minute soak with no SEGV and `alive.sh` 0;
       with the .so absent the godzilla regression bar is unchanged. Its own
       scene/clips/callouts and a hardware card are later items, not this one.
-      - S3: a new capability, nothing about play is broken. D5: the game-play API is
-      unknown, reaching an existing mode on demand in the rig is unproven, and it is
-      several passes.
+      - S3: a new capability, nothing about play is broken. D4 (was D5, 2026-09-15:
+      the mode API is mapped and starting a mode on demand is emulator-proven with a
+      validated probe): what is left is several runs - our own mode object, the text
+      call, the lights.
 
 ## Reference material that is NOT in this repo
 

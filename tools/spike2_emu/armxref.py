@@ -327,9 +327,46 @@ def cmd_args(e, fn):
     print("0x%x %s: %d call site(s)" % (fn, e.name(fn) or "", hits))
 
 
+def cmd_vcalls(e, off, near):
+    """Virtual calls through slot offset `off`: `ldr rT,[rN,#off]` then `blx rT`/`bx rT`
+    within three instructions. A pure virtual call has no devirtualised compare to
+    xref, so this is how "who calls a mode's v[15]" is found. With `near`, only
+    functions that also reach one of those values (bl, literal, movw/movt) print."""
+    words = struct.unpack_from("<%dI" % (e.tsz // 4), e.b, e.toff)
+    starts = [i for i, w in enumerate(words) if (w & 0xFFFFC000) == 0xE92D4000]
+    refs, cur, reg = {}, None, {}
+    sites = []
+    for i, w in enumerate(words):
+        a = e.tva + 4 * i
+        if (w & 0xFFFFC000) == 0xE92D4000:
+            cur, reg = a, {}
+            refs.setdefault(cur, set())
+        if cur is not None:
+            refs[cur].update(decode_refs(e, a, w, reg))
+        if (w & 0x0FF00000) == 0x05900000 and (w & 0xFFF) == off:
+            rt_ = (w >> 12) & 0xF
+            for k in range(1, 4):
+                if i + k < len(words):
+                    x = words[i + k]
+                    if (x & 0x0FFFFFF0) in (0x012FFF30, 0x012FFF10) and (x & 0xF) == rt_:
+                        sites.append((a, cur, "blx" if (x & 0x0FFFFFF0) == 0x012FFF30 else "bx"))
+                        break
+    near = set(near)
+    shown = 0
+    for a, fs, kind in sites:
+        hit = near & refs.get(fs, set()) if near else set()
+        if near and not hit:
+            continue
+        shown += 1
+        print("  %-3s 0x%x  fn 0x%s%s  %s" % (kind, a, "%x" % fs if fs else "?",
+              " (%s)" % e.name(fs) if fs and e.name(fs) else "",
+              " ".join(e.name(h) or "0x%x" % h for h in sorted(hit))))
+    print("slot +0x%x: %d virtual call site(s), %d shown" % (off, len(sites), shown))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("cmd", choices=["dis", "xref", "args"])
+    ap.add_argument("cmd", choices=["dis", "xref", "args", "vcalls"])
     ap.add_argument("elf")
     ap.add_argument("vals", nargs="+")
     ap.add_argument("--title", default=None)
@@ -352,6 +389,8 @@ def main(argv=None):
     elif a.cmd == "args":
         for v in vals:
             cmd_args(e, v)
+    elif a.cmd == "vcalls":
+        cmd_vcalls(e, vals[0], vals[1:])
     else:
         cmd_xref(e, vals)
     return 0

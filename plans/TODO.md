@@ -7408,6 +7408,45 @@ These have each been violated at least once and each cost a run or a window:
       menu-update STICK is now only for a tester without a dock: the dock route does the
       menu change in two minutes with nothing else on the machine touched.
 
+- [ ] **125. A NEW game mode of our own, running inside Godzilla Pro 1.15 in the
+      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D5` David,
+      2026-09-15: "what would it take to add a mode to a game like godzilla?" Plan
+      (approved): `plans/spike2_new_mode_plan.md`, pointer under REMAINING item 125 in
+      the handoff (both gitignored, local to this machine). **Established at the desk:**
+      the rules are compiled C++ and RTTI survives the strip - `Rule*` singletons off
+      `HookListener` (the event bus: `subscribe 0x4bb380`, table `0x7e4d48`), one
+      `cmode_*` class per mode off `cmode` (Pro vtable `0x626410`) under a
+      `cmode_manager` singleton (vtable `0x62c740`), `BDL<Mode>Start/BG/Total` display
+      layers off `SceneLoaderLayeredDisplayElement`; nothing rule-shaped on the card.
+      Light shows go through a RUNTIME parser (242 `blele`/`blela` strings plus 39
+      standalone `--option` tokens). Code reaches a scene by a 40-hex literal (all 70
+      in the ELF are top-level `assets/lcd/*_loaded` dirs), so a new scene is a fresh
+      dir. The vehicle is a preloaded `mode.so`: `run_game.sh` already chains
+      `PAD_TRACE_SO` ahead of hwshim, and a card's `/etc/init.d/game` -> `game_monitor`
+      is plain sh. **Ruled out:** the ELF cave or an appended PT_LOAD as the vehicle (0
+      hardware boots, 7-17 KB); subscribing from the .so constructor (the bus is `.bss`
+      the game's init fills - subscribe on the first tick); brand-new SOUNDS (a grown
+      bank only copies a stock record - reuse or replace spare ones); DnD's "requester
+      0x2a3120 / hook 197 / feature #121" are not Godzilla addresses. **The work, none of
+      it located yet:** mode start/stop and the `cmode` slot roles, `ctimer_manager`,
+      score add, the scene layer, the `blele` runner, play-sound by request id,
+      Godzilla's per-switch descriptor array. Phase 0 traces `cmode_tesla_strike`
+      (smallest leaf, vtable `0x6307b8`, 50 virtuals) under `pad_hook(pass_lr=1)` +
+      `PAD_PEEK` into `plans/spike2_mode_api.md` and `tools/spike2_emu/modes/modeapi.h`
+      (byte-pattern locators only: Pro, LE and 1.16 move everything). Phase 1 builds
+      `tools/spike2_emu/modes/mode.so` (codeselect recipe, `-shared`) behind a
+      `PAD_MODE_SO` alias. `tools/spike2_emu/rtti_tree.py` (the RTTI/vtable dump) is
+      UNTRACKED in the main checkout - copy it into the item's worktree.
+      **Acceptance:** in a played Godzilla Pro 1.15 game in the rig with `PAD_MODE_SO`
+      set, the mode starts on its trigger, runs a timer, scores its shots (`PAD_PEEK` on
+      the player score), shows its text (`PAD_SCREEN`), runs an existing light show and
+      callout, and ends on the timer; a 10-minute soak with no SEGV and `alive.sh` 0;
+      with the .so absent the godzilla regression bar is unchanged. Its own
+      scene/clips/callouts and a hardware card are later items, not this one.
+      - S3: a new capability, nothing about play is broken. D5: the game-play API is
+      unknown, reaching an existing mode on demand in the rig is unproven, and it is
+      several passes.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

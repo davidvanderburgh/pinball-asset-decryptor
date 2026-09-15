@@ -168,10 +168,10 @@ HK_UNUSED static int hk_install(unsigned fn, hk_logger logger)
 }
 
 /* ---- trigger files -------------------------------------------------------------- */
-/* Reads, deletes, and parses up to two numbers (decimal or 0x hex). -1 = no file. */
-HK_UNUSED static int hk_read_trigger(const char *path, unsigned long long v[2])
+/* Reads, deletes, and parses up to four numbers (decimal or 0x hex). -1 = no file. */
+HK_UNUSED static int hk_read_trigger(const char *path, unsigned long long v[4])
 {
-    char buf[64], *s;
+    char buf[96], *s;
     long n;
     int fd = open(path, O_RDONLY), k = 0;
     if (fd < 0) return -1;
@@ -179,8 +179,8 @@ HK_UNUSED static int hk_read_trigger(const char *path, unsigned long long v[2])
     close(fd);
     unlink(path);
     buf[n > 0 ? n : 0] = 0;
-    v[0] = v[1] = 0;
-    for (s = buf; *s && k < 2; ) {
+    v[0] = v[1] = v[2] = v[3] = 0;
+    for (s = buf; *s && k < 4; ) {
         int base = 10, got = 0;
         unsigned long long x = 0;
         while (*s == ' ' || *s == '\n') s++;

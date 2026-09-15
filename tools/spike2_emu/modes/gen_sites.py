@@ -37,8 +37,11 @@ SITES = [
     ("DISPATCH", 0xD1A9C, True),      # cmode_manager::v[7](mgr, _, mask64, x) - every shot
     ("BALLEND", 0xD3DCC, True),       # every mode's v[4] - the end-of-ball broadcast
     ("MSG", 0x34A764, True),          # msg_lookup(id) -> string, 1079 callers
+    ("SOUND_NTH", 0x2A32BC, True),    # sound_request_play_nth(req, n) - the countdown's path
     ("GET", 0xD1C10, False),          # cmode_manager_get(mgr, id) - called, not hooked
     ("CALLOUT_NTH", 0x18800C, False), # callout_play_nth(req, n) - called, not hooked
+    ("SHOW_KILL", 0x255DD4, False),   # kill every running instance of show id - called
+    ("SHOW_RUNNING", 0x255D7C, False),# is show id running - called
 ]
 
 

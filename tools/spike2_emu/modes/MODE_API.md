@@ -228,7 +228,7 @@ with id 23, award 30 and b 9; its object is at `0x7a2878`.
 
 ## The vehicle, in the rig: `modes/padmode.so` (the Phase 0 probe)
 
-`modes/build_padmode.sh` builds it into the stage. `gen_sites.py` bakes in every
+`modes/build_modes.sh` builds it, and `mode.so`, into the stage. `gen_sites.py` bakes in every
 site's expected first two instruction words, read from the ELF it is built for. The
 run copies it to `$ROOT/lib` under the rig lock and preloads it with
 `PAD_TRACE_SO=/lib/padmode.so`. Hooks are hwshim's `pad_hook` trampoline, except the
@@ -327,12 +327,70 @@ same shape. That reading is not separately proven.
 ## Not located yet
 - **The text screen.** `0x3ba540(n, a, b, 0x6fa618)` → `0x51eab8`/`0x51eb00`, and
   `show_start`, are the candidates.
-- **What id space v[27] and the award screens use.** Ruled out: they are NOT rows of
-  the `0x748a10` message table. That table itself checks out (row 1668 reads "Tech
-  Alerts", as the handoff says), but row 3242 reads "SET", 3159/3160 are the
-  "THIS MACHINE SHALL NOT / OPERATE IN THIS COUNTRY" warning, and 565 is a
-  flee-jackpot prompt. So "title message id" above is a name for the slot's
-  position, not its meaning (scratch `msgrow.py`).
+- **Which screen shows a message with a value, from outside a mode.** The candidate is
+  the award screen family: `0x3ba540(type, 0, 0, 0x6fa618)` returns a node, then the
+  message id goes at `+0xa0`, a u64 value at `+0xa8` and a count at `+0xb0`. Tesla uses
+  type 122 with 3159/3160, and there are 131 call sites with dozens of types. The
+  probe's `padmode.text` trigger is built to try it; not yet run.
+
+## Messages: ids go through a RUNTIME remap (corrected 2026-09-15)
+
+`msg_lookup(id)` `0x34a764`: if `id < [0x5ec0c8]` (3949), then
+`idx = (*(u16 **)0x7b9654)[id]`, `group = 0x744c60[idx]` (a `{en,de,fr,es,it,0}` block
+of `char *`), and `message_picker(group)` `0x485918` returns the current language.
+**The remap is filled at run time**, so an id cannot be read statically as a row of
+`0x748a10`. An earlier line here "ruled out" v[27] being a message id on exactly
+that mistake. Read live through the remap (the probe's `padmode.msgdump` writes all
+3949):
+
+- v[27]'s **3242 = "TESLA STRIKE"**, and 3159 / 3160 = "TESLA STRIKE AWARD" / "TESLA
+  STRIKE COMPLETED". So v[27] IS the title message.
+- 3150 "SHOOT FLASHING POWERLINE TARGET TO START TESLA STRIKE", 3152 "%d MORE
+  TARGET%P1//S/% TO START TESLA STRIKE", 3156 "SHOOT SPINNER TO BUILD TESLA STRIKE
+  VALUE!", 3157 "SHOOT BLUE ARROWS TO COLLECT TESLA STRIKE AWARD!", 3161 "TESLA STRIKE
+  IS RUNNING", 3445 "TIME LEFT".
+- The small numbers a display event carries (50, 77, 90, 232, 275, 565, 582) are NOT
+  message ids: 232 reads "DR. PINBALL" and 565 "PRESS 'BACK' TO EXIT".
+
+**Who shows a mode's title.** With tesla forced on, the probe's msg hook caught id 3242
+looked up from `0x445f4`. That is inside a background display layer's refresh
+(`0x44598`): `mode = layer->v[21]()`, `title = mode->v[27]()`, `msg_lookup(title)`, then
+`0x55c1f4(layer, std::string)` sets the text placeholder in the layer's scene.
+`BDLTeslaStrikeBG::v[13]` (`0x10fc20`) fetches 3156, the instruction line, the same way.
+Title text therefore belongs to the 27 modes' own scenes. A mode of ours shows text
+through a screen that takes a message id (above), and gets its OWN words by pointing
+an otherwise unused message group at a `{"KAIJU RUSH" x5, 0}` block. `0x744c60` is
+plain `.data` (the ELF has no RELRO). The probe's `padmode.msgset` / `msgrestore` do
+that; not yet run.
+
+**Lights are shows, started by condition.** A table walked by `0x431a44` pairs a
+`global_mode_mask` filter (`+8`) and a condition function (`+12`) with a show id
+(`+16`). When the condition holds and the show is not running (`0x255d7c`), it calls
+`show_start(id)`; when it stops holding, `show_kill(id)` (`0x255dd4`). Forcing tesla on
+started shows 346, 96, 95 and 356 from that walker (`lr` `0x431aac`). Which show ids
+are lamp shows is the next measurement (`modes/ledact.py` against `dump/padled`).
+
+## KAIJU RUSH, a mode of our own: emulator-proven (run 3, 2026-09-15)
+
+`modes/mode.c`, loaded by `PAD_MODE_SO=/lib/mode.so` beside the probe. In a
+`plunge.py game` on godzilla_pro, `modes/rush_test.sh` did the following:
+
+- Three Maser Target pokes, each seen at the shot dispatch as `0x08000000`, **started
+  it**: "KAIJU RUSH START (maser target x3): player 1, 30 s, score 75000".
+- Pwrline L, C, R, then the L and R ramps **scored 1M, 2M, 3M, 4M, 5M** through
+  `score_add`. The probe logged each add from `mode.so` (`lr` `0x40859dcc`) next to the
+  game's own awards for the same switches, and the score peek climbed to 15,725,000.
+- **The tick clock ran it for 30 s and ended it:** "20 s left" ... "1 s left", then
+  "END (time ran out): 5 shots, awarded 15000000, score 75000 -> 15725000, 30099 ms
+  wall", so the tick holds 60 Hz in the rig.
+- **Callouts:** 1291 at 10 s and 1295 at the end went through `callout_play`, from
+  `mode.so`. The 5..1 countdown uses `callout_play_nth` → `0x2a32bc`, which that probe
+  build did not hook, so those five are not yet shown. The next probe build hooks it.
+- Both objects hooked the tick and the shot dispatch at once: `hook.h`'s site check
+  follows the sibling's trampoline, and the probe installed 15 hooks, KAIJU RUSH 3.
+
+Not yet: its text, its lights, a 10-minute soak, and the stock regression check with
+the .so absent.
 - **Lights.** `0x185e9c(n, a, b)` (it checks `global_mode_mask & 0x310` and calls
   `0x39fe24(7, ...)`) and the `blele` runner.
 - **There are no free timers, so a mode.so keeps its own clock.** `ctimer_get` has 66

@@ -139,6 +139,13 @@ static void on_sound(unsigned *r)
     hk_logs(m);
 }
 
+static void on_sound_nth(unsigned *r)
+{
+    char m[120];
+    snprintf(m, sizeof m, "[sound] request_nth %u n=%u  lr=0x%x\n", r[0], r[1], r[5]);
+    hk_logs(m);
+}
+
 static void on_callout(unsigned *r)
 {
     char m[120];
@@ -220,12 +227,77 @@ static void msgdump(void)
     hk_logs(m);
 }
 
+/* "KAIJU RUSH" in all five language slots, in the {en,de,fr,es,it,0} shape a message
+ * group has, so a hijacked id renders our text whatever the language setting. */
+static const char *const kaiju_group[6] = {
+    "KAIJU RUSH", "KAIJU RUSH", "KAIJU RUSH", "KAIJU RUSH", "KAIJU RUSH", 0
+};
+static unsigned hijack_idx = 0xffffffffu;
+static const char **hijack_old;
+
+/* Point message id's group at kaiju_group (restore=0), or put the one saved back. The
+ * group table 0x744c60 is ordinary .data (the ELF has no RELRO), and every id the
+ * remap sends to the same index changes with it, so only pick an id nothing else
+ * on screen is using. */
+static void msg_hijack(unsigned id, int restore)
+{
+    unsigned count = *(unsigned *)(unsigned long)GZ_MSG_COUNT;
+    unsigned short *remap = *(unsigned short **)(unsigned long)GZ_MSG_REMAP;
+    const char ***slot;
+    char m[160];
+    if (restore) {
+        if (hijack_idx == 0xffffffffu) return;
+        *(const char ***)(unsigned long)(GZ_MSG_PTRS + 4u * hijack_idx) = hijack_old;
+        snprintf(m, sizeof m, "[trigger] msg index %u restored\n", hijack_idx);
+        hk_logs(m);
+        hijack_idx = 0xffffffffu;
+        return;
+    }
+    if (id >= count || !remap || remap[id] >= count) return;
+    slot = (const char ***)(unsigned long)(GZ_MSG_PTRS + 4u * remap[id]);
+    if (hijack_idx == 0xffffffffu) { hijack_idx = remap[id]; hijack_old = *slot; }
+    snprintf(m, sizeof m, "[trigger] msg id %u (index %u, was \"%.40s\") now reads \"%s\"\n",
+             id, remap[id], *slot && (*slot)[0] ? (*slot)[0] : "?", kaiju_group[0]);
+    *slot = (const char **)kaiju_group;
+    hk_logs(m);
+}
+
 static void poll_triggers(void)
 {
-    unsigned long long v[2];
+    unsigned long long v[4];
     char m[200];
     int k;
     if (!(*(unsigned *)(unsigned long)GZ_MGR_GUARD & 1)) return;
+
+    /* padmode.text "<type> <msgid> <value> [count]" - the award-screen family tesla's
+     * award uses: 0x3ba540(type, 0, 0, 0x6fa618), then msg id at +0xa0, u64 value at
+     * +0xa8, count at +0xb0 (tesla: type 122, 3159/3160) */
+    if ((k = hk_read_trigger("/dump/padmode.text", v)) >= 2) {
+        unsigned char *node = ((unsigned char *(*)(unsigned, unsigned, unsigned, unsigned))
+                               (unsigned long)SITE_TEXT)((unsigned)v[0], 0u, 0u, 0x6fa618u);
+        if (node) {
+            *(unsigned short *)(node + 0xa0) = (unsigned short)v[1];
+            *(unsigned long long *)(node + 0xa8) = v[2];
+            *(unsigned *)(node + 0xb0) = (unsigned)v[3];
+        }
+        snprintf(m, sizeof m, "[trigger] text type %u msg %u value %llu -> node %p\n",
+                 (unsigned)v[0], (unsigned)v[1], v[2], (void *)node);
+        hk_logs(m);
+    }
+    if ((k = hk_read_trigger("/dump/padmode.show", v)) >= 1) {
+        void *node = ((void *(*)(unsigned))(unsigned long)SITE_SHOW)((unsigned)v[0]);
+        snprintf(m, sizeof m, "[trigger] show_start(%u) -> node %p\n", (unsigned)v[0], node);
+        hk_logs(m);
+    }
+    if ((k = hk_read_trigger("/dump/padmode.showkill", v)) >= 1) {
+        int rc = ((int (*)(unsigned))(unsigned long)SITE_SHOW_KILL)((unsigned)v[0]);
+        snprintf(m, sizeof m, "[trigger] show_kill(%u) -> %d\n", (unsigned)v[0], rc);
+        hk_logs(m);
+    }
+    if ((k = hk_read_trigger("/dump/padmode.msgset", v)) >= 1)
+        msg_hijack((unsigned)v[0], 0);
+    if (hk_read_trigger("/dump/padmode.msgrestore", v) >= 0)
+        msg_hijack(0, 1);
 
     if ((k = hk_read_trigger("/dump/padmode.start", v)) >= 0) {
         unsigned id = k > 0 ? (unsigned)v[0] : 23u;
@@ -318,6 +390,7 @@ static void padmode_init(void)
         { SITE_TEXT, SITE_TEXT_W0, SITE_TEXT_W1, on_text, "text" },
         { SITE_FX, SITE_FX_W0, SITE_FX_W1, on_fx, "fx" },
         { SITE_MSG, SITE_MSG_W0, SITE_MSG_W1, on_msg, "msg" },
+        { SITE_SOUND_NTH, SITE_SOUND_NTH_W0, SITE_SOUND_NTH_W1, on_sound_nth, "sound_nth" },
     };
     unsigned i, ok = 1;
     char m[120];
@@ -327,6 +400,7 @@ static void padmode_init(void)
     for (i = 0; i < sizeof s / sizeof s[0]; i++)
         ok &= hk_site_ok(s[i].fn, s[i].w0, s[i].w1, s[i].tag);
     ok &= hk_site_ok(SITE_GET, SITE_GET_W0, SITE_GET_W1, "get");
+    ok &= hk_site_ok(SITE_SHOW_KILL, SITE_SHOW_KILL_W0, SITE_SHOW_KILL_W1, "show_kill");
     if (!ok) {
         hk_logs("[padmode] NOT THIS BUILD - nothing hooked, the game runs stock\n");
         return;

@@ -7461,18 +7461,29 @@ These have each been violated at least once and each cost a run or a window:
       `/proc/self/maps` before reading any game address - the first probe SEGV'd a
       child `sh` and watch.sh stopped a healthy game; padmode.c now gates, checked at
       the desk under qemu-arm-static.
-      **Not located yet:** the text-screen call (`0x3ba540` / `0x4f34e0`
-      candidates), the `blele` light-show runner, and what lights tesla's own
-      shots (its v[41] got bits 20-22 and scored nothing). No timer is free (all 30
-      taken), so a mode.so counts ticks. The v[27] "title" id is NOT a `0x748a10`
-      message row.
-      **Resume:** Phase 1 in `modes/` - grow padmode.c into `mode.so` behind a
-      `PAD_MODE_SO` alias in run_game.sh: our own mode (id 27, which the manager
-      ignores) that starts on a chosen shot bit seen at the v[7] dispatch, runs 30 s
-      of ticks, scores its shots with `score_add`, and plays a callout with
-      `callout_play`; hook `0x3ba540`/`0x4f34e0` during a battle's start screen to
-      find the text call. `modes/padmode_trig.sh` / `padmode_drive.sh` drive a live
-      run; `plunge.py game` starts one.
+      **KAIJU RUSH EMULATOR-PROVEN (run 3, 2026-09-15):** `modes/mode.c` loaded by
+      the new `PAD_MODE_SO=/lib/mode.so` (run_game.sh) - three Maser Target hits
+      started it, five powerline/ramp shots scored 1M..5M through score_add (score
+      75,000 -> 15,725,000 by PAD_PEEK), the tick clock ended it after 30 s (30099 ms
+      wall), callouts 1291 at 10 s and 1295 at the end played from mode.so
+      (`modes/rush_test.sh` drives it). Probe and mode hook the same sites at once
+      (`modes/hook.h` follows a sibling's trampoline).
+      **Corrected:** message ids resolve through a RUNTIME remap (`msg_lookup`
+      `0x34a764`), so v[27] IS the title message - 3242 "TESLA STRIKE" - read live by
+      the probe's msgdump; the earlier "not a message row" was the wrong table.
+      **Text and lights, located not proven:** a mode's title is set by its own
+      background layer (`0x44598` -> `0x55c1f4`), so ours needs a screen that takes a
+      message id - the award family `0x3ba540(type,0,0,0x6fa618)` + id at +0xa0 +
+      u64 value at +0xa8 (tesla: type 122) - and its own words by repointing a
+      message group (`0x744c60` is plain .data). Lights are shows started by a
+      condition table (`0x431a44`); tesla's are 95/96/346/356.
+      **Resume:** in the run 3 shape (lock, both .so, PAD_PEEK), first validate
+      `modes/ledact.py` - an LED baseline window against one after forcing tesla
+      (`padmode_trig.sh start 23`) must differ - then with the rebuilt probe try
+      `padmode_trig.sh text "122 3445 1000000"` and `msgset`/`text` for "KAIJU RUSH"
+      with a `shotwin.py` capture, and `show 356`/`showkill 356` under ledact; fold
+      the ones that work into mode.c, then the 10-minute soak and a stock run with
+      no .so.
       **Acceptance:** in a played Godzilla Pro 1.15 game in the rig with `PAD_MODE_SO`
       set, the mode starts on its trigger, runs a timer, scores its shots (`PAD_PEEK` on
       the player score), shows its text (`PAD_SCREEN`), runs an existing light show and

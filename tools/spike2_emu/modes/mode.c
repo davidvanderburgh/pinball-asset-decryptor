@@ -134,7 +134,7 @@ static void on_ballend(unsigned *r)
 static void on_tick(unsigned *r)
 {
     static unsigned ticks;
-    unsigned long long v[2];
+    unsigned long long v[4];
     unsigned secs;
     char m[80];
     (void)r;

@@ -3701,6 +3701,57 @@ static void nv_factory_hz_apply(void)
     logmsg(m);
 }
 
+/* ══ PAD_COUNTRY=<n> - THE COUNTRY THE MACHINE IS SET TO (PAD-149) ═════════
+ *
+ * THE DIP SWITCHES ARE NOT WHAT THE GAME SHOWS. MEASURED on dungeons_and_
+ * dragons_le 1.00.0: with PAD_CAB_DIP=9 (Denmark) reaching the game, its boot
+ * screen still said U.S.A. That screen's builder (0x2bc32c) asks get_country
+ * (0x3acbf0 -> 0x3acb90), which returns byte 0 of the country record at EEPROM
+ * 0x140 - {country, flags, ~(country + flags) as a u16} - and nothing else.
+ * The DIP handler (stranger_things 1.12.0 0x41c71c, same record there) only
+ * notes a new DIP country, runs its resets and sets the record's flag bit 0;
+ * the country BYTE is written by one setter alone (ST 0x41cae0, D&D 0x3ad2f8),
+ * the operator confirming a country. So a machine SET to Denmark is this
+ * record holding 9, and this writes it the way that setter does: the country,
+ * the flags byte kept (2, the setter's own value, on a record that does not
+ * check), the check fixed. Saved with the EEPROM like any operator setting,
+ * so it stays until something sets it again. */
+static void nv_country_apply(void)
+{
+    const char *p = getenv("PAD_COUNTRY");
+    unsigned char *e = store[0];
+    unsigned v = 0, sum, flags;
+    int any = 0, valid;
+    char m[200];
+    if (!p || !*p) return;
+    for (; *p >= '0' && *p <= '9' && v <= 0xffu; p++) {
+        v = v * 10 + (unsigned)(*p - '0');
+        any = 1;
+    }
+    if (!any || *p || v > 0x7fu) {
+        logmsg("[i2c] PAD_COUNTRY must be a country number 0..127; the stored "
+               "country is left as it is\n");
+        return;
+    }
+    sum = (unsigned)e[0x140] + (unsigned)e[0x141];
+    valid = ((unsigned)e[0x142] | (unsigned)e[0x143] << 8) == (~sum & 0xffffu);
+    if (valid && e[0x140] == v) {
+        snprintf(m, sizeof m, "[i2c] stored country is already %u\n", v);
+        logmsg(m);
+        return;
+    }
+    flags = valid ? (unsigned)e[0x141] : 2u;
+    snprintf(m, sizeof m, "[i2c] stored country set to %u (EEPROM 0x140 said "
+             "%u%s)\n", v, (unsigned)e[0x140],
+             valid ? "" : ", in a record that did not check");
+    e[0x140] = (unsigned char)v;
+    e[0x141] = (unsigned char)flags;
+    sum = ~(v + flags) & 0xffffu;
+    e[0x142] = (unsigned char)sum;
+    e[0x143] = (unsigned char)(sum >> 8);
+    logmsg(m);
+}
+
 static long (*real_read)(int, void *, unsigned long);
 static long (*real_write)(int, const void *, unsigned long);
 static int (*real_close)(int);
@@ -3736,6 +3787,7 @@ static void nv_load(void)
         logmsg(m);
         nv_ident_seed();
         nv_factory_hz_apply();
+        nv_country_apply();
         nv_poke_apply();     /* a poke must land on a blank chip too */
         return;
     }
@@ -3749,6 +3801,7 @@ static void nv_load(void)
     logmsg(m);
     nv_ident_seed();
     nv_factory_hz_apply();
+    nv_country_apply();
     nv_poke_apply();
 }
 

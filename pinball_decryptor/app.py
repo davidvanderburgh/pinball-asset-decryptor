@@ -598,7 +598,7 @@ class App:
         powers = [label for label, _env in EmulatePanel.POWER_CHOICES]
         for key, name, allowed in (
                 ("emulate_country", "emulate_country_var",
-                 EmulatePanel.COUNTRIES),
+                 (EmulatePanel.COUNTRY_GAME,) + EmulatePanel.COUNTRIES),
                 ("emulate_power", "emulate_power_var", powers)):
             var = getattr(self.window, name, None)
             value = settings.get(key)

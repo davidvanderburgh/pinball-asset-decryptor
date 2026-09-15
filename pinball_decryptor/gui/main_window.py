@@ -14618,7 +14618,7 @@ class MainWindow:
         # PAD-149: the machine row - the country the CPU board's DIP switches
         # report, and the mains.  Window-owned so the app can remember them,
         # GLOBALLY: they describe the user's machine, not a project.
-        self.emulate_country_var = tk.StringVar(value=EmulatePanel.COUNTRIES[0])
+        self.emulate_country_var = tk.StringVar(value=EmulatePanel.COUNTRY_GAME)
         self.emulate_power_var = tk.StringVar(
             value=EmulatePanel.POWER_CHOICES[0][0])
         self._emulate_panel = EmulatePanel(

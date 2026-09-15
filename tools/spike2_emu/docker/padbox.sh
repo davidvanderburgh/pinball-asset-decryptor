@@ -258,11 +258,12 @@ fi
 # literal "0" (it is one character, not empty), which is exactly what the
 # "force it off" answer has to look like on the other side.
 # PAD-149's machine row rides the same list: the CPU board's country DIP
-# switches (PAD_CAB_DIP), the mains (PAD_MAINS_HZ) and which mains the board was
-# built for (PAD_FACTORY_HZ). Unset is the rig's own US machine on 60 Hz.
+# switches (PAD_CAB_DIP), the country stored in the machine (PAD_COUNTRY), the
+# mains (PAD_MAINS_HZ) and which mains the board was built for
+# (PAD_FACTORY_HZ). Unset is the rig's own machine, exactly as it was.
 for v in PAD_GAME PAD_PLAYFIELD PAD_AUDIO PAD_AUTO_ATTRACT \
          PAD_SELECT PAD_SELECT_TIMEOUT PAD_SELECT_MEDIA \
-         PAD_CAB_DIP PAD_MAINS_HZ PAD_FACTORY_HZ LOG; do
+         PAD_CAB_DIP PAD_COUNTRY PAD_MAINS_HZ PAD_FACTORY_HZ LOG; do
     [ -n "${!v:-}" ] && RUN_ARGS+=(-e "$v=${!v}")
 done
 

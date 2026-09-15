@@ -2353,7 +2353,7 @@ class EmulatePanel:
         #: the user's machine, not a project), with fallbacks so the panel
         #: still builds on its own in the tests.
         self._country_var = country_var if country_var is not None \
-            else tk.StringVar(value=self.COUNTRIES[0])
+            else tk.StringVar(value=self.COUNTRY_GAME)
         self._power_var = power_var if power_var is not None \
             else tk.StringVar(value=self.POWER_CHOICES[0][0])
         #: What the probe found for the card now in the box: True it carries a
@@ -4193,6 +4193,12 @@ class EmulatePanel:
     #: 1421..1450, table 0x731aac); the names are the game's, written in
     #: ordinary case.  Index 0 is all switches OFF - a US machine from the
     #: factory, and what the emulator has always reported.
+    #:
+    #: The same number goes into the country the machine is SET to (the
+    #: shim's PAD_COUNTRY, EEPROM 0x140), because that - not the switches - is
+    #: what the game shows on its boot screen: David picked Denmark and D&D
+    #: still said U.S.A., since the switches only ever flag the stored country
+    #: for an operator to confirm.
     COUNTRIES = (
         "U.S.A.", "Austria", "Belgium", "Canada 1", "Netherlands", "Finland",
         "France", "Germany", "Italy", "Denmark", "Norway", "Sweden",
@@ -4200,6 +4206,13 @@ class EmulatePanel:
         "Portugal", "Spain", "Chuck E. Cheese", "South Africa", "Japan",
         "Croatia", "Middle East", "Taiwan", "Russia", "Canada 2", "Lithuania",
         "China", "Indonesia")
+
+    #: The row's untouched choice, and it is NOT "U.S.A.": the country is
+    #: saved in the machine, so a U.S.A. that sent nothing could never undo a
+    #: Denmark picked last week.  This one sends nothing and leaves the
+    #: machine as the game has it - including a country changed in the game's
+    #: own setup - which is how the emulator ran before the row existed.
+    COUNTRY_GAME = "As set in the game"
 
     #: (label, what Start adds).  A Spike 2 CPU board was made in a 60 Hz
     #: version for US games and a 50 Hz version for European ones, and the
@@ -4215,11 +4228,13 @@ class EmulatePanel:
     )
 
     _COUNTRY_TIP = (
-        "The country the CPU board's DIP switches are set to. A real Spike 2 "
-        "CPU board has a bank of eight (SW1) for exactly this, and the game "
-        "reads them when it boots, so a new country here reaches the game the "
-        "way moving the switches would.\n\nU.S.A. is every switch off, which "
-        "is how the emulator has always run. Takes effect at the next Start.")
+        "The country the machine is set to: the one on the boot screen, and "
+        "the coin settings that go with it. A real Spike 2 CPU board also has "
+        "a bank of eight DIP switches (SW1) for the country, and those are set "
+        "to match.\n\n“As set in the game” leaves both alone, which "
+        "is how the emulator has always run: the game keeps the country it "
+        "has stored, U.S.A. unless it was changed in its own setup. A country "
+        "picked here stays set in the machine. Takes effect at the next Start.")
     _POWER_TIP = (
         "Spike 2 CPU boards were made in a 60 Hz version for US games and a "
         "50 Hz version for European ones, and a US board on 50 Hz mains "
@@ -4243,8 +4258,9 @@ class EmulatePanel:
         lbl = ttk.Label(row, text="Country (DIP switches):")
         lbl.pack(side=tk.LEFT)
         self._country_cb = ttk.Combobox(
-            row, textvariable=self._country_var, values=self.COUNTRIES,
-            state="readonly", width=16)
+            row, textvariable=self._country_var,
+            values=(self.COUNTRY_GAME,) + self.COUNTRIES,
+            state="readonly", width=18)
         self._country_cb.pack(side=tk.LEFT, padx=(6, 0))
         _Tooltip(self._country_cb, self._COUNTRY_TIP, self._theme_fn,
                  place="side")
@@ -4258,19 +4274,22 @@ class EmulatePanel:
                  place="side")
 
     def _machine_env(self):
-        """What the machine row adds to Start: nothing for a US machine on
-        60 Hz, which is the rig's own default - so an untouched row hands
+        """What the machine row adds to Start: nothing for "As set in the
+        game" on 60 Hz, the rig's own default - so an untouched row hands
         watch.sh exactly what it handed it before the row existed.
 
-        An unknown saved value (a settings file from a later build, a hand
-        edit) reads as that default rather than as a guess."""
+        A picked country sets BOTH halves, U.S.A. included: the DIP switches
+        (PAD_CAB_DIP), which the game reads at power-up, and the country
+        stored in the machine (PAD_COUNTRY), which is what it shows.  An
+        unknown saved value (a later build's settings, a hand edit) reads as
+        the untouched default rather than as a guess."""
         env = []
         try:
             index = self.COUNTRIES.index(self._country_var.get())
         except ValueError:
-            index = 0
-        if index:
-            env.append("PAD_CAB_DIP=%d" % index)
+            index = None
+        if index is not None:
+            env += ["PAD_CAB_DIP=%d" % index, "PAD_COUNTRY=%d" % index]
         power = self._power_var.get()
         for label, extra in self.POWER_CHOICES:
             if label == power:

@@ -423,7 +423,7 @@ def test_the_machine_row_comes_back_whatever_the_project(tmp_path):
     cabinet does not become a US one because another project was opened -
     and a value this build does not offer is ignored rather than shown."""
     from pinball_decryptor.app import App
-    country, power = _Var("U.S.A."), _Var("60 Hz mains")
+    country, power = _Var("As set in the game"), _Var("60 Hz mains")
     stub = SimpleNamespace(
         _settings={"emulate_country": "Germany",
                    "emulate_power": "50 Hz mains, US machine"},
@@ -472,12 +472,13 @@ def test_an_untouched_machine_row_adds_nothing_to_start(tmp_path):
     what it handed it before the row existed."""
     root, panel = _panel(tmp_path)
     try:
-        assert panel._country_var.get() == "U.S.A."
+        assert panel._country_var.get() == "As set in the game"
         assert panel._power_var.get() == "60 Hz mains"
         assert panel._machine_env() == []
         env = panel._launch_env(["PAD_CARD=/mnt/d/x.raw"])
-        assert not any(e.startswith(("PAD_CAB_DIP=", "PAD_MAINS_HZ=",
-                                     "PAD_FACTORY_HZ=")) for e in env), env
+        assert not any(e.startswith(("PAD_CAB_DIP=", "PAD_COUNTRY=",
+                                     "PAD_MAINS_HZ=", "PAD_FACTORY_HZ="))
+                       for e in env), env
     finally:
         root.destroy()
 
@@ -493,13 +494,31 @@ def test_a_country_is_the_dip_value_the_game_reads(tmp_path):
     root, panel = _panel(tmp_path)
     try:
         assert tuple(panel._country_cb.tk.splitlist(
-            panel._country_cb.cget("values"))) == countries
-        panel._country_var.set("France")
-        assert panel._machine_env() == ["PAD_CAB_DIP=6"]
+            panel._country_cb.cget("values"))) == \
+            ("As set in the game",) + countries
         panel._country_var.set("Indonesia")
-        assert "PAD_CAB_DIP=29" in panel._launch_env(["PAD_CARD=/mnt/d/x.raw"])
-        # A value this build does not offer reads as the default.
+        env = panel._launch_env(["PAD_CARD=/mnt/d/x.raw"])
+        assert "PAD_CAB_DIP=29" in env and "PAD_COUNTRY=29" in env
+        # A value this build does not offer reads as the untouched default.
         panel._country_var.set("Atlantis")
+        assert panel._machine_env() == []
+    finally:
+        root.destroy()
+
+
+def test_a_picked_country_sets_what_the_boot_screen_shows(tmp_path):
+    """David picked Denmark and D&D's boot screen still said U.S.A.: the
+    switches only flag the stored country, and the boot screen reads the
+    stored one.  So a pick sets both - and U.S.A. sends its 0 too, because
+    the stored country outlives the run and a silent U.S.A. could never put
+    a machine back from Denmark."""
+    root, panel = _panel(tmp_path)
+    try:
+        panel._country_var.set("Denmark")
+        assert panel._machine_env() == ["PAD_CAB_DIP=9", "PAD_COUNTRY=9"]
+        panel._country_var.set("U.S.A.")
+        assert panel._machine_env() == ["PAD_CAB_DIP=0", "PAD_COUNTRY=0"]
+        panel._country_var.set("As set in the game")
         assert panel._machine_env() == []
     finally:
         root.destroy()
@@ -518,8 +537,8 @@ def test_power_picks_the_mains_and_the_board(tmp_path):
         assert panel._machine_env() == ["PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=50"]
         panel._power_var.set("50 Hz mains, US machine")
         panel._country_var.set("Germany")
-        assert panel._machine_env() == ["PAD_CAB_DIP=7", "PAD_MAINS_HZ=50",
-                                        "PAD_FACTORY_HZ=60"]
+        assert panel._machine_env() == ["PAD_CAB_DIP=7", "PAD_COUNTRY=7",
+                                        "PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=60"]
     finally:
         root.destroy()
 
@@ -543,12 +562,15 @@ def test_the_rig_carries_the_machine_row_to_the_game():
     assert scans >= 2 and len(applied) == scans
     assert re.search(r"bits\[k\] = idle\[k\];.*?cab_dip_apply\(bits\);\s*"
                      r"have = 1;", shim, re.S)
-    # The board is set on a loaded chip and on a blank one.
-    assert len(re.findall(r"nv_ident_seed\(\);\s*nv_factory_hz_apply\(\);",
+    # The board and the stored country are set on a loaded chip and on a
+    # blank one, after the identity seed and before any probe's poke.
+    assert len(re.findall(r"nv_ident_seed\(\);\s*nv_factory_hz_apply\(\);\s*"
+                          r"nv_country_apply\(\);\s*nv_poke_apply\(\);",
                           shim)) == 2
     box = (_RIG / "docker" / "padbox.sh").read_text(encoding="utf-8")
     forwarded = box.split("for v in PAD_GAME", 1)[1].split("; do", 1)[0]
-    for name in ("PAD_CAB_DIP", "PAD_MAINS_HZ", "PAD_FACTORY_HZ"):
+    for name in ("PAD_CAB_DIP", "PAD_COUNTRY", "PAD_MAINS_HZ",
+                 "PAD_FACTORY_HZ"):
         assert name in forwarded, name
 
 

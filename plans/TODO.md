@@ -7471,19 +7471,22 @@ These have each been violated at least once and each cost a run or a window:
       **Corrected:** message ids resolve through a RUNTIME remap (`msg_lookup`
       `0x34a764`), so v[27] IS the title message - 3242 "TESLA STRIKE" - read live by
       the probe's msgdump; the earlier "not a message row" was the wrong table.
-      **Text and lights, located not proven:** a mode's title is set by its own
-      background layer (`0x44598` -> `0x55c1f4`), so ours needs a screen that takes a
-      message id - the award family `0x3ba540(type,0,0,0x6fa618)` + id at +0xa0 +
-      u64 value at +0xa8 (tesla: type 122) - and its own words by repointing a
-      message group (`0x744c60` is plain .data). Lights are shows started by a
-      condition table (`0x431a44`); tesla's are 95/96/346/356.
-      **Resume:** in the run 3 shape (lock, both .so, PAD_PEEK), first validate
-      `modes/ledact.py` - an LED baseline window against one after forcing tesla
-      (`padmode_trig.sh start 23`) must differ - then with the rebuilt probe try
-      `padmode_trig.sh text "122 3445 1000000"` and `msgset`/`text` for "KAIJU RUSH"
-      with a `shotwin.py` capture, and `show 356`/`showkill 356` under ledact; fold
-      the ones that work into mode.c, then the 10-minute soak and a stock run with
-      no .so.
+      **TEXT EMULATOR-PROVEN (runs 4-5):** the award screen `0x3ba540(122,0,0,
+      0x6fa618)` + message id at +0xa0 + u64 at +0xa8 shows any message over a value,
+      and pointing a message's group (`0x744c60`, plain .data) at our own block gives
+      it our words - KAIJU RUSH now shows "KAIJU RUSH / 1,000,000" at start, each
+      shot's points, and "KAIJU RUSH TOTAL / 15,000,000" at the end (shotwin
+      captures), borrowing tesla's 3159/3160 and restoring them 6 s after. The full
+      countdown is logged (1291; 1287 nth 4..0; 1295).
+      **LEDs:** `modes/ledact.py` validated (per-cell mean level + change rate + fade
+      shapes: two baselines 915 apart, tesla forced on ~4900 with 13 new shapes).
+      **Ruled out:** hand-starting tesla's shows (95/96/344/346/351/356) as lights -
+      show 96's footprint did not repeat and the control show 231 moved more.
+      **Resume:** lights - `lightprobe.sh fx:2000:3:0 ...` (0x185e9c) each twice,
+      then the `blele` runner if that fails too; `modes/soak.sh 10` in a run with
+      `PAD_PEEK=0x7e4968:8,0x7aba5a:2`; then a stock run (no PAD_TRACE_SO /
+      PAD_MODE_SO) compared with `modes/regress.sh stock 60` against
+      `/var/tmp/item125_regress_modded.txt`.
       **Acceptance:** in a played Godzilla Pro 1.15 game in the rig with `PAD_MODE_SO`
       set, the mode starts on its trigger, runs a timer, scores its shots (`PAD_PEEK` on
       the player score), shows its text (`PAD_SCREEN`), runs an existing light show and

@@ -434,8 +434,24 @@ are lamp shows is the next measurement (`modes/ledact.py` against `dump/padled`)
 - Both objects hooked the tick and the shot dispatch at once: `hook.h`'s site check
   follows the sibling's trampoline, and the probe installed 15 hooks, KAIJU RUSH 3.
 
-Not yet: its text, its lights, a 10-minute soak, and the stock regression check with
-the .so absent.
+### Run 5: KAIJU RUSH with its own text (2026-09-15)
+
+`mode.c` borrows messages 3159/3160 for the mode and puts up the award screen (type
+122) at start, on each shot, and at the end. In a played game, `shotwin.py` captures
+read **"KAIJU RUSH / 1,000,000"** at start and **"KAIJU RUSH TOTAL / 15,000,000"** at
+the end, all on tesla's powerline clip. The probe logged `0x3ba540(122)` from `mode.so`
+for each shot and the end, and the display code reading 3160 as "KAIJU RUSH TOTAL".
+
+The whole countdown is now seen:
+- **10 s:** `callout 1291`.
+- **5 s to 1 s:** `request_nth 1287 n=4` down to `n=0`, through `callout_play_nth` (`lr` `0x188060`).
+- **End:** `callout 1295`.
+
+It ran 30,100 ms of wall time. The mode log then said "borrowed messages 3159/3160
+restored", six seconds after the end.
+
+Not yet: its lights, the 10-minute soak, and the stock regression check with the .so
+absent (`modes/soak.sh`, `modes/regress.sh`).
 - **Lights.** `0x185e9c(n, a, b)` (it checks `global_mode_mask & 0x310` and calls
   `0x39fe24(7, ...)`) and the `blele` runner.
 - **There are no free timers, so a mode.so keeps its own clock.** `ctimer_get` has 66

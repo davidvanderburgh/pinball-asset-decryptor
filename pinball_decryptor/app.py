@@ -589,6 +589,32 @@ class App:
         # in via PrereqMsg.
         self._kick_off_prereq_check(mfr)
 
+    def _restore_emulate_machine(self):
+        """PAD-149: the Emulate tab's machine row - the country the CPU
+        board's DIP switches report, and the mains - from the GLOBAL settings,
+        whichever project is open.
+
+        Global and only global, unlike the card beside it: the row describes
+        the cabinet the user plays on, and a European machine does not turn
+        into a US one because another project was opened.  A value this build
+        does not offer (a later build's settings, a hand edit) is ignored, so
+        the row keeps its default rather than holding a choice it cannot make.
+        """
+        from .gui.emulate_tab import EmulatePanel
+        settings = getattr(self, "_settings", None) or {}
+        powers = [label for label, _env in EmulatePanel.POWER_CHOICES]
+        for key, name, allowed in (
+                ("emulate_country", "emulate_country_var",
+                 (EmulatePanel.COUNTRY_GAME,) + EmulatePanel.COUNTRIES),
+                ("emulate_power", "emulate_power_var", powers)):
+            var = getattr(self.window, name, None)
+            value = settings.get(key)
+            if var is not None and value in allowed:
+                try:
+                    var.set(value)
+                except tk.TclError:
+                    pass
+
     def _restore_emulate_card(self, project_folder):
         """Put the Emulate tab's "Card image to run" back after a restart.
 
@@ -644,6 +670,7 @@ class App:
         # what the guest reads.
         if ovr_var is not None:
             ovr_var.set(overrides)
+        App._restore_emulate_machine(self)
 
         # The JJP emulator's game ISO, restored the same way and with the same
         # mapped-drive treatment, from its own key.
@@ -4709,6 +4736,16 @@ class App:
                 self._settings["emulate_overrides"] = bool(ovr_var.get())
             except tk.TclError:
                 pass
+        # PAD-149: the Emulate tab's machine row, globally and only globally
+        # (see _restore_emulate_machine).
+        for key, name in (("emulate_country", "emulate_country_var"),
+                          ("emulate_power", "emulate_power_var")):
+            var = getattr(self.window, name, None)
+            if var is not None:
+                try:
+                    self._settings[key] = var.get()
+                except tk.TclError:
+                    pass
         # Remember the window size + position for next launch, and whether it
         # was maximized — a maximized window has to come back maximized, not
         # as a loose window of the same size (a tester, after every auto

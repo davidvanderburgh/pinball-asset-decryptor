@@ -2137,7 +2137,7 @@ class EmulatePanel:
     def __init__(self, parent, log=None, card_var=None, savestates_var=None,
                  theme_fn=None, badge_fn=None, resize_fn=None,
                  footer_cb=None, assets_var=None, overrides_var=None,
-                 stage_fn=None):
+                 stage_fn=None, country_var=None, power_var=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
         #: Item 78: MainWindow.set_emulate_progress, injected like the log -
@@ -2347,6 +2347,15 @@ class EmulatePanel:
         #: actually has, not hiding a window. On by default, because
         #: that is the machine the code was written for.
         self._topper_var = tk.BooleanVar(value=True)
+        #: PAD-149: the machine the card runs IN - the country its CPU board's
+        #: DIP switches are set to, and the mains it is plugged into.  Window-
+        #: owned when given (the app remembers them globally: they describe
+        #: the user's machine, not a project), with fallbacks so the panel
+        #: still builds on its own in the tests.
+        self._country_var = country_var if country_var is not None \
+            else tk.StringVar(value=self.COUNTRY_GAME)
+        self._power_var = power_var if power_var is not None \
+            else tk.StringVar(value=self.POWER_CHOICES[0][0])
         #: What the probe found for the card now in the box: True it carries a
         #: menu, False it does not, None nobody could tell (no rig, no WSL,
         #: macOS, an unreadable file, or the answer has not come back yet).
@@ -4114,6 +4123,7 @@ class EmulatePanel:
         ttk.Button(row, text="Cache…", width=8,
                    command=self._open_cache_manager).pack(
             side=tk.LEFT, padx=(6, 0))
+        self._build_machine_row(box)
         self._build_overrides_row(box)
         # Item 90: run a multi-image card's boot menu before the game.  It
         # belongs with the CARD because that is what it is about, and it is
@@ -4172,6 +4182,120 @@ class EmulatePanel:
     #: While the answer is on its way.  Said out loud because the box is
     #: showing the PREVIOUS card's answer until it lands.
     _SELECT_TIP_BUSY = "Looking at the card for a boot menu…"
+
+    # ------------------------------------------------------------------
+    # PAD-149: the machine the card runs in - country DIP switches and mains
+
+    #: The game's own country table, IN ITS ORDER, because the position is the
+    #: number: a Spike 2 CPU board's DIP bank (SW1) reports an index into this
+    #: list, and the game's country init reads ``(switches >> 8) & 0x7f`` off
+    #: the cabinet word.  Decoded from stranger_things 1.12.0 (message ids
+    #: 1421..1450, table 0x731aac); the names are the game's, written in
+    #: ordinary case.  Index 0 is all switches OFF - a US machine from the
+    #: factory, and what the emulator has always reported.
+    #:
+    #: The same number goes into the country the machine is SET to (the
+    #: shim's PAD_COUNTRY, EEPROM 0x140), because that - not the switches - is
+    #: what the game shows on its boot screen: David picked Denmark and D&D
+    #: still said U.S.A., since the switches only ever flag the stored country
+    #: for an operator to confirm.
+    COUNTRIES = (
+        "U.S.A.", "Austria", "Belgium", "Canada 1", "Netherlands", "Finland",
+        "France", "Germany", "Italy", "Denmark", "Norway", "Sweden",
+        "Switzerland", "Australia", "U.K.", "Greece", "New Zealand",
+        "Portugal", "Spain", "Chuck E. Cheese", "South Africa", "Japan",
+        "Croatia", "Middle East", "Taiwan", "Russia", "Canada 2", "Lithuania",
+        "China", "Indonesia")
+
+    #: The row's untouched choice, and it is NOT "U.S.A.": the country is
+    #: saved in the machine, so a U.S.A. that sent nothing could never undo a
+    #: Denmark picked last week.  This one sends nothing and leaves the
+    #: machine as the game has it - including a country changed in the game's
+    #: own setup - which is how the emulator ran before the row existed.
+    COUNTRY_GAME = "As set in the game"
+
+    #: (label, what Start adds).  A Spike 2 CPU board was made in a 60 Hz
+    #: version for US games and a 50 Hz version for European ones, and the
+    #: game refuses to run a 60 Hz board on 50 Hz mains.  PAD_MAINS_HZ is the
+    #: mains (run_game.sh), PAD_FACTORY_HZ the board (hwshim.c).  The first
+    #: choice adds nothing: it is the bench the emulator has always been.
+    POWER_CHOICES = (
+        ("60 Hz mains", ()),
+        ("50 Hz mains, European machine",
+         ("PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=50")),
+        ("50 Hz mains, US machine",
+         ("PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=60")),
+    )
+
+    _COUNTRY_TIP = (
+        "The country the machine is set to: the one on the boot screen, and "
+        "the coin settings that go with it. A real Spike 2 CPU board also has "
+        "a bank of eight DIP switches (SW1) for the country, and those are set "
+        "to match.\n\n“As set in the game” leaves both alone, which "
+        "is how the emulator has always run: the game keeps the country it "
+        "has stored, U.S.A. unless it was changed in its own setup. A country "
+        "picked here stays set in the machine. Takes effect at the next Start.")
+    _POWER_TIP = (
+        "Spike 2 CPU boards were made in a 60 Hz version for US games and a "
+        "50 Hz version for European ones, and a US board on 50 Hz mains "
+        "refuses to run: “this machine will not operate in this "
+        "country”.\n\n60 Hz is how the emulator has always run. "
+        "European machine is a 50 Hz board on 50 Hz mains. US machine is the "
+        "refusal a US game gives on European power. Takes effect at the next "
+        "Start.")
+
+    def _build_machine_row(self, box):
+        """Country DIP switches and mains power, under the card (PAD-149).
+
+        IN THE SOURCE BOX, beside the card, because together they are the
+        machine being run: the card is the game, this row is the cabinet it
+        is fitted to.  Two read-only dropdowns and no label of explanation -
+        the box sits on a 1024x768 desktop, so the why rides on tooltips.
+        Read once at Start (``_launch_env``), like Topper.
+        """
+        row = ttk.Frame(box)
+        row.pack(fill=tk.X, padx=8, pady=(0, 6))
+        lbl = ttk.Label(row, text="Country (DIP switches):")
+        lbl.pack(side=tk.LEFT)
+        self._country_cb = ttk.Combobox(
+            row, textvariable=self._country_var,
+            values=(self.COUNTRY_GAME,) + self.COUNTRIES,
+            state="readonly", width=18)
+        self._country_cb.pack(side=tk.LEFT, padx=(6, 0))
+        _Tooltip(self._country_cb, self._COUNTRY_TIP, self._theme_fn,
+                 place="side")
+        ttk.Label(row, text="Power:").pack(side=tk.LEFT, padx=(16, 0))
+        self._power_cb = ttk.Combobox(
+            row, textvariable=self._power_var,
+            values=[label for label, _env in self.POWER_CHOICES],
+            state="readonly", width=30)
+        self._power_cb.pack(side=tk.LEFT, padx=(6, 0))
+        _Tooltip(self._power_cb, self._POWER_TIP, self._theme_fn,
+                 place="side")
+
+    def _machine_env(self):
+        """What the machine row adds to Start: nothing for "As set in the
+        game" on 60 Hz, the rig's own default - so an untouched row hands
+        watch.sh exactly what it handed it before the row existed.
+
+        A picked country sets BOTH halves, U.S.A. included: the DIP switches
+        (PAD_CAB_DIP), which the game reads at power-up, and the country
+        stored in the machine (PAD_COUNTRY), which is what it shows.  An
+        unknown saved value (a later build's settings, a hand edit) reads as
+        the untouched default rather than as a guess."""
+        env = []
+        try:
+            index = self.COUNTRIES.index(self._country_var.get())
+        except ValueError:
+            index = None
+        if index is not None:
+            env += ["PAD_CAB_DIP=%d" % index, "PAD_COUNTRY=%d" % index]
+        power = self._power_var.get()
+        for label, extra in self.POWER_CHOICES:
+            if label == power:
+                env.extend(extra)
+                break
+        return env
 
     def _build_overrides_row(self, box):
         """The "run my edits without rebuilding the card" opt-in (PAD-103).
@@ -5019,7 +5143,7 @@ class EmulatePanel:
         * otherwise -> silence, and the card decides again at Start.
         """
         env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE] + \
-            list(src)
+            list(src) + self._machine_env()
         if self._launch_slot:
             env.append("PAD_SELECT=0")
         elif self._select_touched:

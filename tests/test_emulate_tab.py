@@ -378,6 +378,66 @@ def test_the_global_is_written_on_every_settings_save(tmp_path, monkeypatch):
     assert settings["emulate_card"] == "D:/cards/last.raw"
 
 
+class _Var:
+    """A Tk variable's get/set, without Tk."""
+
+    def __init__(self, value=""):
+        self.value = value
+
+    def get(self):
+        return self.value
+
+    def set(self, value):
+        self.value = value
+
+
+def test_the_machine_row_is_saved_globally(tmp_path, monkeypatch):
+    """PAD-149: the country DIP switches and the mains are the user's
+    machine, so they go into settings.json on every save."""
+    from pinball_decryptor import app as app_mod
+    from pinball_decryptor.app import App
+    monkeypatch.setattr(app_mod, "SETTINGS_FILE",
+                        str(tmp_path / "settings.json"))
+    settings = {}
+    stub = SimpleNamespace(
+        _current_mfr=None,
+        _settings=settings,
+        root=SimpleNamespace(winfo_geometry=lambda: "1x1"),
+        _window_is_maximized=lambda: False,
+        _last_normal_geometry=None,
+        window=SimpleNamespace(
+            _current_theme="dark",
+            _last_browse_dirs=None,
+            emulate_card_var=_Var(""),
+            emulate_country_var=_Var("France"),
+            emulate_power_var=_Var("50 Hz mains, European machine")),
+    )
+    stub.multiboot_state = lambda: App.multiboot_state(stub)
+    App._save_settings(stub)
+    assert settings["emulate_country"] == "France"
+    assert settings["emulate_power"] == "50 Hz mains, European machine"
+
+
+def test_the_machine_row_comes_back_whatever_the_project(tmp_path):
+    """Restored from the GLOBAL value even with a project open - a European
+    cabinet does not become a US one because another project was opened -
+    and a value this build does not offer is ignored rather than shown."""
+    from pinball_decryptor.app import App
+    country, power = _Var("As set in the game"), _Var("60 Hz mains")
+    stub = SimpleNamespace(
+        _settings={"emulate_country": "Germany",
+                   "emulate_power": "50 Hz mains, US machine"},
+        window=SimpleNamespace(emulate_country_var=country,
+                               emulate_power_var=power))
+    App._restore_emulate_machine(stub)
+    assert (country.get(), power.get()) == ("Germany",
+                                            "50 Hz mains, US machine")
+    stub._settings = {"emulate_country": "Atlantis", "emulate_power": "400 Hz"}
+    App._restore_emulate_machine(stub)
+    assert (country.get(), power.get()) == ("Germany",
+                                            "50 Hz mains, US machine")
+
+
 # --------------------------------------------------------------------------
 # Source picker
 # --------------------------------------------------------------------------
@@ -401,6 +461,117 @@ def _panel(tmp_path):
     panel.build(frame)
     root.update()
     return root, panel
+
+
+_RIG = pathlib.Path(__file__).resolve().parents[1] / "tools" / "spike2_emu"
+
+
+def test_an_untouched_machine_row_adds_nothing_to_start(tmp_path):
+    """PAD-149: a US machine on 60 Hz is the rig's own default, so the row
+    says nothing unless it is overruling it - Start hands watch.sh exactly
+    what it handed it before the row existed."""
+    root, panel = _panel(tmp_path)
+    try:
+        assert panel._country_var.get() == "As set in the game"
+        assert panel._power_var.get() == "60 Hz mains"
+        assert panel._machine_env() == []
+        env = panel._launch_env(["PAD_CARD=/mnt/d/x.raw"])
+        assert not any(e.startswith(("PAD_CAB_DIP=", "PAD_COUNTRY=",
+                                     "PAD_MAINS_HZ=", "PAD_FACTORY_HZ="))
+                       for e in env), env
+    finally:
+        root.destroy()
+
+
+def test_a_country_is_the_dip_value_the_game_reads(tmp_path):
+    """The position in the game's own country table IS the number the CPU
+    board's DIP switches report - 6 read back as FRANCE's index off a live
+    stranger_things 1.12.0 - so the list must never be sorted."""
+    countries = emulate_tab.EmulatePanel.COUNTRIES
+    assert len(countries) == len(set(countries)) == 30
+    assert (countries[0], countries[6], countries[14], countries[29]) == \
+        ("U.S.A.", "France", "U.K.", "Indonesia")
+    root, panel = _panel(tmp_path)
+    try:
+        assert tuple(panel._country_cb.tk.splitlist(
+            panel._country_cb.cget("values"))) == \
+            ("As set in the game",) + countries
+        panel._country_var.set("Indonesia")
+        env = panel._launch_env(["PAD_CARD=/mnt/d/x.raw"])
+        assert "PAD_CAB_DIP=29" in env and "PAD_COUNTRY=29" in env
+        # A value this build does not offer reads as the untouched default.
+        panel._country_var.set("Atlantis")
+        assert panel._machine_env() == []
+    finally:
+        root.destroy()
+
+
+def test_a_picked_country_sets_what_the_boot_screen_shows(tmp_path):
+    """David picked Denmark and D&D's boot screen still said U.S.A.: the
+    switches only flag the stored country, and the boot screen reads the
+    stored one.  So a pick sets both - and U.S.A. sends its 0 too, because
+    the stored country outlives the run and a silent U.S.A. could never put
+    a machine back from Denmark."""
+    root, panel = _panel(tmp_path)
+    try:
+        panel._country_var.set("Denmark")
+        assert panel._machine_env() == ["PAD_CAB_DIP=9", "PAD_COUNTRY=9"]
+        panel._country_var.set("U.S.A.")
+        assert panel._machine_env() == ["PAD_CAB_DIP=0", "PAD_COUNTRY=0"]
+        panel._country_var.set("As set in the game")
+        assert panel._machine_env() == []
+    finally:
+        root.destroy()
+
+
+def test_power_picks_the_mains_and_the_board(tmp_path):
+    """The mains (run_game.sh) and the board the machine was built for (the
+    shim) move together: a European machine is a 50 Hz board on 50 Hz, and a
+    US machine on 50 Hz is the refusal Sam described."""
+    root, panel = _panel(tmp_path)
+    try:
+        labels = [label for label, _env in panel.POWER_CHOICES]
+        assert list(panel._power_cb.tk.splitlist(
+            panel._power_cb.cget("values"))) == labels
+        panel._power_var.set("50 Hz mains, European machine")
+        assert panel._machine_env() == ["PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=50"]
+        panel._power_var.set("50 Hz mains, US machine")
+        panel._country_var.set("Germany")
+        assert panel._machine_env() == ["PAD_CAB_DIP=7", "PAD_COUNTRY=7",
+                                        "PAD_MAINS_HZ=50", "PAD_FACTORY_HZ=60"]
+    finally:
+        root.destroy()
+
+
+def test_the_rig_carries_the_machine_row_to_the_game():
+    """The three variables reach the game: the mains in run_game.sh, the
+    board and the DIP switches in the shim, all three across the macOS
+    container."""
+    import re
+    run_game = (_RIG / "run_game.sh").read_text(encoding="utf-8")
+    assert '"${PAD_MAINS_HZ:-}"' in run_game
+    assert "echo $((MAINS_HZ * 100)) >" in run_game
+    assert "echo 6000 >" not in run_game
+    shim = (_RIG / "hwshim.c").read_text(encoding="utf-8")
+    # EVERY cabinet word handed over carries the switches - the first cut of
+    # this knob lived only in the synthesized word, which only a title with
+    # no findable switch table ever reaches.
+    scans = shim.count("have = sw_scan_bytes(0, bits);")
+    applied = re.findall(r"have = sw_scan_bytes\(0, bits\);[^\n]*\n"
+                         r"\s*cab_dip_apply\(bits\);", shim)
+    assert scans >= 2 and len(applied) == scans
+    assert re.search(r"bits\[k\] = idle\[k\];.*?cab_dip_apply\(bits\);\s*"
+                     r"have = 1;", shim, re.S)
+    # The board and the stored country are set on a loaded chip and on a
+    # blank one, after the identity seed and before any probe's poke.
+    assert len(re.findall(r"nv_ident_seed\(\);\s*nv_factory_hz_apply\(\);\s*"
+                          r"nv_country_apply\(\);\s*nv_poke_apply\(\);",
+                          shim)) == 2
+    box = (_RIG / "docker" / "padbox.sh").read_text(encoding="utf-8")
+    forwarded = box.split("for v in PAD_GAME", 1)[1].split("; do", 1)[0]
+    for name in ("PAD_CAB_DIP", "PAD_COUNTRY", "PAD_MAINS_HZ",
+                 "PAD_FACTORY_HZ"):
+        assert name in forwarded, name
 
 
 def test_card_source_becomes_pad_card(tmp_path):

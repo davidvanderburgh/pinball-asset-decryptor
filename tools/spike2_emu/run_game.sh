@@ -626,7 +626,20 @@ echo 7   > "$R/sys/class/backlight/backlight_lvds.28/actual_brightness"
 # ran screen 8 - whose text is about the COUNTRY, which is what sent four
 # passes hunting a country setting that was correct the whole time (the EEPROM
 # says U.S.A. at offset 0x140 and its checksum is valid). 6000 = 60.00 Hz.
-echo 6000 > "$R/sys/bus/iio/devices/iio:device0/in_power_frequency"
+#
+# PAD_MAINS_HZ=50 PLUGS THE MACHINE INTO EUROPEAN MAINS (PAD-149). A 50 Hz
+# reading passes that check only on a board built for 50 Hz, which is hwshim's
+# PAD_FACTORY_HZ - so 50 here with a US board is the refusal a US machine gives
+# in Europe, and 50 with PAD_FACTORY_HZ=50 is a European machine at home.
+# Anything other than 50 or 60 is refused and the bench's 60 kept.
+MAINS_HZ=60
+case "${PAD_MAINS_HZ:-}" in
+    50|60) MAINS_HZ=$PAD_MAINS_HZ ;;
+    "") ;;
+    *) echo "[run] PAD_MAINS_HZ=$PAD_MAINS_HZ is not 50 or 60; the mains stay at 60 Hz" >&2 ;;
+esac
+[ "$MAINS_HZ" = 60 ] || echo "[run] mains: $MAINS_HZ Hz"
+echo $((MAINS_HZ * 100)) > "$R/sys/bus/iio/devices/iio:device0/in_power_frequency"
 # ...AND in_power_input IS A FAULT FLAG, NOT A VOLTAGE. The same thread does
 #     power_fail = (strtol(in_power_input) != 0)          (0x4f28c8/0x4f28d8)
 # and power_sample_get (0x4f205c) reports frequency ZERO whenever that flag is

@@ -667,8 +667,14 @@ def sparse_copy(src, dst, meter=None):
 
 
 # ============================================================================= the hook + conf
+def hook_line_count(text):
+    """Lines that ARE the hook line (MAINT_CALL carries it as a prefix, so a substring
+    count would read 3 on a hooked rungame.sh)."""
+    return sum(1 for ln in (text or "").split("\n") if ln.strip() == HOOK_LINES[2])
+
+
 def has_hook(text):
-    return HOOK_LINES[2] in (text or "")
+    return hook_line_count(text) > 0
 
 
 def mark_maintenance_reboots(text):
@@ -1775,7 +1781,10 @@ def verify_iso(iso, primary=None, extra=None, quick=False, workdir=None):
                 check("every staged file inside root A matches build.json (%d file(s))" % len(build["staged"]),
                       not bad, ", ".join(bad[:5]))
                 rg = (debugfs_cat(raw, RUNGAME) or b"").decode("utf-8", "replace")
-                check("rungame.sh carries the hook exactly once", rg.count(HOOK_LINES[2]) == 1)
+                check("rungame.sh carries the hook exactly once", hook_line_count(rg) == 1)
+                check("rungame.sh's maintenance reboots tell the hook first (%d case(s))"
+                      % rg.count(MAINT_CALL), rg.count(MAINT_CALL) >= 1,
+                      "no '# maintenance reboot' case found: the menu shows again after one")
                 ic = debugfs_cat(raw, PADSELECT_DIR + "/images.conf")
                 check("images.conf inside root A = the ISO's copy",
                       ic is not None and conf is not None and ic.decode("utf-8", "replace") == conf_text)
@@ -2161,7 +2170,7 @@ def selftest(root_dir, selector=None):
         raw = os.path.join(work, "check_sda3.raw")
         restore_pieces(piece_paths(m, vi, ROOT_PART), raw)
     rg = (debugfs_cat(raw, RUNGAME) or b"").decode()
-    expect("rungame.sh hooked once after runonce", rg.count(HOOK_LINES[2]) == 1 and rg.index(RUNONCE_LINE) < rg.index(HOOK_LINES[2]))
+    expect("rungame.sh hooked once after runonce", hook_line_count(rg) == 1 and rg.index(RUNONCE_LINE) < rg.index(HOOK_LINES[2]))
     rgl = rg.split("\n")
     expect("the two maintenance reboots tell the hook first, the update reboot does not",
            rg.count(MAINT_CALL) == 2 and all(rgl[i + 1].strip() == "reboot" for i, ln in enumerate(rgl) if ln.strip() == MAINT_CALL)

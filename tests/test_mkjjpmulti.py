@@ -146,6 +146,7 @@ def test_maintenance_reboots_tell_the_hook_first(mj):
     assert lines[lines.index("    68) # maintenance reboot (hostname set)") + 1].strip() == mj.MAINT_CALL
     assert mj.hook_rungame(hooked) == hooked
     assert mj.strip_hook(hooked) == RUNGAME_CASES
+    assert mj.hook_line_count(hooked) == 1 and hooked.count(mj.HOOK_LINES[2]) == 3   # whole lines, not substrings
     assert mj.mark_maintenance_reboots(RUNGAME) == RUNGAME                # no such cases: untouched
     assert "--maintenance-reboot" in mj.MAINT_CALL and mj.MAINT_CALL.startswith("[ -x ")
 

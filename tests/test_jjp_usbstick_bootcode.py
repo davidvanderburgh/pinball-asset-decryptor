@@ -44,7 +44,8 @@ def test_boot_code_installed_and_checked(tmp_path, monkeypatch):
                         lambda script, timeout=300, log=None, why="":
                         (asked.append((script, why)), (0, "SYSLINUX_RC=0"))[1])
     monkeypatch.setattr(usbstick, "_ps", lambda script, timeout=180: (0, "True"))
-    assert usbstick.make_bootable_windows(root + "\\", r"\\.\PHYSICALDRIVE5",
+    # a mount root with its trailing separator, as Windows hands it over (E:\)
+    assert usbstick.make_bootable_windows(root + os.sep, r"\\.\PHYSICALDRIVE5",
                                           lambda m, lvl="info": logs.append(m)) is True
     assert len(asked) == 1 and "boot code" in asked[0][1]
     assert any("Boot code installed" in m for m in logs)

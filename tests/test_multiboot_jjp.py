@@ -17,9 +17,9 @@ from pinball_decryptor.gui import multiboot_tab as mt
 from pinball_decryptor.gui.multiboot_backend import JJP, STERN, backend_for
 from pinball_decryptor.gui.multiboot_tab import (ImageRow, MultibootForm, wsl)
 
-ISO0 = r"D:\Pinball\images\JJP\GunsNRoses-v03.03.iso"
-ISO1 = r"D:\Pinball\images\JJP\CHAKAs_LOTLJ_V1.0_GNR_LE_3.03.iso"
-OUT = r"D:\Pinball\multi\GunsNRoses-v03.03.multi.iso"
+ISO0 = "D:/Pinball/images/JJP/GunsNRoses-v03.03.iso"          # forward slashes: read on Linux CI too
+ISO1 = "D:/Pinball/images/JJP/CHAKAs_LOTLJ_V1.0_GNR_LE_3.03.iso"
+OUT = "D:/Pinball/multi/GunsNRoses-v03.03.multi.iso"
 
 
 def jjp_form(**kw):
@@ -166,10 +166,14 @@ def test_build_commands_run_the_writing_steps_as_root():
     labels = [c[0] for c in cmds]
     assert labels == ["selector", "prepare", "plan", "build", "verify"]
     argv = dict(cmds)
-    # the JJP steps that mount things are callables (resolved as root just
-    # before the step, root_command's shape); the plan runs as the user
+    # the JJP steps that mount things run as root: on Windows a callable
+    # (resolved as root just before the step, root_command's shape), on a
+    # Linux desktop the rig's `sudo -n` argv; the plan runs as the user
     for label in ("selector", "prepare", "build", "verify"):
-        assert callable(argv[label]), label
+        if sys.platform == "win32":
+            assert callable(argv[label]), label
+        else:
+            assert not callable(argv[label]) and list(argv[label][:2]) == ["sudo", "-n"], label
     assert not callable(argv["plan"]) and argv["plan"][-1].startswith("cd /repo && python3 ")
     # the Stern run keeps MAIN's shape: the plan and verify as the user, the
     # build as root, and the selector as root on Windows (PAD-140, main's
@@ -177,7 +181,10 @@ def test_build_commands_run_the_writing_steps_as_root():
     stern = MultibootForm(images=[ImageRow(path="D:/a.raw"), ImageRow(path="D:/b.raw")], out="D:/o.raw")
     scmds = dict(mt.build_commands(stern, cwd="/repo"))
     assert callable(scmds["selector"]) == (sys.platform == "win32")
-    assert not callable(scmds["plan"]) and callable(scmds["build"])
+    assert not callable(scmds["plan"])
+    assert callable(scmds["build"]) == (sys.platform == "win32")
+    if sys.platform != "win32":
+        assert list(scmds["build"][:2]) == ["sudo", "-n"]
     assert not callable(scmds["verify"])
 
 

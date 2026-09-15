@@ -103,7 +103,10 @@ class MultibootBackend:
         a fact.  Stern's card names carry a version and a build tag
         (``turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw``); a JJP ISO's
         name is the whole title (``CHAKAs_LOTLJ_V1.0_GNR_LE_3.03.iso``)."""
-        b = os.path.basename(path or "")
+        # the name off EITHER kind of path: build.json records the source
+        # the way the building machine spelled it, and a card built on
+        # Windows is read on Linux too (os.path.basename splits only on /)
+        b = re.split(r"[\\/]", path or "")[-1]
         if self.key == "jjp":
             b = re.sub(r"\.(iso|raw|img)$", "", b, flags=re.I)
             return re.sub(r"[_\s]+", " ", b).strip(), ""

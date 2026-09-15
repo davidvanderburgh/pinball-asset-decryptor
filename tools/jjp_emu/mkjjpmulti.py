@@ -321,8 +321,9 @@ def cache_base(iso, cache_dir=None):
 
 
 def default_title(path):
-    """'CHAKAs_LOTLJ_V1.0_GNR_LE_3.03.iso' -> 'CHAKAs LOTLJ V1.0 GNR LE 3.03'."""
-    b = os.path.basename(path or "image")
+    """'CHAKAs_LOTLJ_V1.0_GNR_LE_3.03.iso' -> 'CHAKAs LOTLJ V1.0 GNR LE 3.03' - off a Windows
+    or a POSIX path alike (build.json records the source as the building machine spelled it)."""
+    b = re.split(r"[\\/]", path or "image")[-1] or "image"
     b = re.sub(r"\.[Ii][Ss][Oo]$", "", b)
     return re.sub(r"[_\s]+", " ", b).strip() or "image"
 

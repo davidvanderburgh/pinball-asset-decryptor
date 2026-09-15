@@ -1782,9 +1782,9 @@ def verify_iso(iso, primary=None, extra=None, quick=False, workdir=None):
                       not bad, ", ".join(bad[:5]))
                 rg = (debugfs_cat(raw, RUNGAME) or b"").decode("utf-8", "replace")
                 check("rungame.sh carries the hook exactly once", hook_line_count(rg) == 1)
-                check("rungame.sh's maintenance reboots tell the hook first (%d case(s))"
-                      % rg.count(MAINT_CALL), rg.count(MAINT_CALL) >= 1,
-                      "no '# maintenance reboot' case found: the menu shows again after one")
+                check("rungame.sh's maintenance reboots tell the hook first", rg.count(MAINT_CALL) >= 1,
+                      "%d case(s)" % rg.count(MAINT_CALL) if rg.count(MAINT_CALL)
+                      else "no '# maintenance reboot' case: the menu shows again after one")
                 ic = debugfs_cat(raw, PADSELECT_DIR + "/images.conf")
                 check("images.conf inside root A = the ISO's copy",
                       ic is not None and conf is not None and ic.decode("utf-8", "replace") == conf_text)

@@ -7409,7 +7409,7 @@ These have each been violated at least once and each cost a run or a window:
       menu change in two minutes with nothing else on the machine touched.
 
 - [ ] **125. A NEW game mode of our own, running inside Godzilla Pro 1.15 in the
-      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D5` ← WORKING ON David,
+      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D5` ← WORKING ON ← IN PROGRESS David,
       2026-09-15: "what would it take to add a mode to a game like godzilla?" Plan
       (approved): `plans/spike2_new_mode_plan.md`, pointer under REMAINING item 125 in
       the handoff (both gitignored, local to this machine). **Established at the desk:**
@@ -7427,16 +7427,34 @@ These have each been violated at least once and each cost a run or a window:
       hardware boots, 7-17 KB); subscribing from the .so constructor (the bus is `.bss`
       the game's init fills - subscribe on the first tick); brand-new SOUNDS (a grown
       bank only copies a stock record - reuse or replace spare ones); DnD's "requester
-      0x2a3120 / hook 197 / feature #121" are not Godzilla addresses. **The work, none of
-      it located yet:** mode start/stop and the `cmode` slot roles, `ctimer_manager`,
-      score add, the scene layer, the `blele` runner, play-sound by request id,
-      Godzilla's per-switch descriptor array. Phase 0 traces `cmode_tesla_strike`
-      (smallest leaf, vtable `0x6307b8`, 50 virtuals) under `pad_hook(pass_lr=1)` +
-      `PAD_PEEK` into `plans/spike2_mode_api.md` and `tools/spike2_emu/modes/modeapi.h`
-      (byte-pattern locators only: Pro, LE and 1.16 move everything). Phase 1 builds
-      `tools/spike2_emu/modes/mode.so` (codeselect recipe, `-shared`) behind a
-      `PAD_MODE_SO` alias. `tools/spike2_emu/rtti_tree.py` (the RTTI/vtable dump) is
-      UNTRACKED in the main checkout - copy it into the item's worktree.
+      0x2a3120 / hook 197 / feature #121" are not Godzilla addresses. **Established,
+      Phase 0 static map (2026-09-15, at the desk, nothing run):**
+      `tools/spike2_emu/modes/MODE_API.md` (tracked, instead of the gitignored
+      `plans/spike2_mode_api.md`) holds the 27-id mode table with every class,
+      award and timer; the `cmode` object layout; all 48 base slot roles (v[8]
+      start, v[11] stop(reason, 1 = completed), v[10] end, v[12] running, v[15] ->
+      v[41] shots, v[27/28/29] title msg / started audit / completed audit); and
+      `cmode_timed`'s timer, whose expiry calls stop(0). Engine calls: score_add
+      `0x4b8cf4` (scores `0x7e4968[p-1]` u64, times the multiplier `0x708368`,
+      veto event 161), caward_add `0x2facc`, audit_add `0x422de4`,
+      sound_request_play `0x2a3108` / callout_play `0x187f44`, ctimer_get
+      `0x18b47c`, cmode_manager_get `0xd1c10`. A rule starts a mode as
+      `get(0x79d954, id)->v[8]()` (RulePowerlines -> tesla, `0x166818`), and the
+      manager's started/stopped return at once for id > 26, so a mode.so object
+      can be id 27. New tools: `vtslots.py`, `armxref.py` (dis/xref/args; args
+      matches evmap on `0x312f8`), `patloc.py`; `rtti_tree.py` now recovers
+      vtable-only leaf classes (415 -> 461 on Pro).
+      **Ruled out / corrected:** no null slot to borrow (all 27 are real modes on
+      Pro); `0x25feec` is NOT get_adjustment on Pro 1.15 (`0x45df38` is); evmap.sh
+      misses 60 of the 227 subscribe sites (tail-call `b`).
+      **Not located yet:** how shot masks reach a mode's v[15] (the switch -> shot
+      bit map), the text-screen call (`0x3ba540` / `0x4f34e0` candidates), the
+      `blele` runner, which of the 30 timers are free.
+      **Resume:** find the shot-mask dispatcher and the free timers
+      (`armxref.py args ... 0x18b47c`), then take the rig lock for ONE probe run: a
+      `modes/` .so (codeselect recipe, `-shared`, behind `PAD_MODE_SO`) that forces
+      `get(mgr,23)->v[8]()` once a game is running and logs start / shot / stop,
+      with `PAD_PEEK=0x7e4968:8` on the score.
       **Acceptance:** in a played Godzilla Pro 1.15 game in the rig with `PAD_MODE_SO`
       set, the mode starts on its trigger, runs a timer, scores its shots (`PAD_PEEK` on
       the player score), shows its text (`PAD_SCREEN`), runs an existing light show and

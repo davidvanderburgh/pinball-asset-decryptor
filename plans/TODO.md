@@ -7507,12 +7507,25 @@ These have each been violated at least once and each cost a run or a window:
       the trap: measure in a GAME. A first try started the game 3 s into the guest's
       life, measured attract, and read 59.7/56.1 - a regression that is not there.
       **Progress ~80%:** every acceptance point except the lights is emulator-proven.
-      **Resume:** lights, cheapest first - capture the playfield every 100 ms right
-      after a p255 sweep (it may be a one-shot that ends inside bleletest's 0.8 s);
-      then run the command from inside an event (post one via `0x2551dc` whose
-      handler calls the runner - tesla's has a live `[0x7b7e84]` and cleanup
-      `0x1b6880`); only then read how `--lts 224` becomes lamps. If lights move, put
-      the sweep in `mode.c` at start and `--remove` at the end.
+      **Run 9 (in a game, a live show event borrowed, sets of 120 and 104 lamps in
+      white): still nothing** - six cases, every one returning 1, every distance
+      315-1895 against 607 noise, not one new fade shape or cell.
+      **RUN 10, THE POSITIVE CONTROL, SAYS THE MEASUREMENT WAS THE PROBLEM.** The
+      probe now hooks the parser `0x1c2b6c` (the runner `0x1c3454` is a single `b`
+      into it, not relocatable) and logs the game's own calls: 29 in one game, 24 at
+      game start and **5 during play that were tesla strike's award itself** - the
+      same command runs 6, 7 and 9 sent. Its 4th argument is only a zeroed 8-byte
+      scratch on the caller's stack that the parser fills (`0x1c34cc`), so our 0 was
+      never the difference. And tesla's set 224 is a SINGLE lamp while `ledact`
+      averages the whole playfield: it could not have seen tesla's own award either,
+      so those three "negative" runs were never evidence.
+      **Resume:** read the lamp slots, not the LEDs - a group's array is
+      `group[0] + id*40` with byte `+36` the written flag (`modes/padmode.c`
+      `dump_group_slots`, dumped after ours AND after each of the game's own;
+      `scratchpad/run11_slots.sh` runs the pair in one game). If ours writes the slot
+      and the game's does too, the difference is downstream in the compositor
+      `0x3bfb00`; if ours does not write, it is in the parse. Then put the sweep in
+      `mode.c` at start and `--remove` at the end.
       **Acceptance:** in a played Godzilla Pro 1.15 game in the rig with `PAD_MODE_SO`
       set, the mode starts on its trigger, runs a timer, scores its shots (`PAD_PEEK` on
       the player score), shows its text (`PAD_SCREEN`), runs an existing light show and

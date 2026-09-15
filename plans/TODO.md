@@ -7496,11 +7496,16 @@ These have each been violated at least once and each cost a run or a window:
       allocator `0x3c14d4` as the group's PRIORITY byte (+4, list `0x7dd4ec` ordered
       by it), tesla passes its show's priority from `0x4f3740()`, and the probe
       passed 0 - under every running show. `padmode.blele` now takes `p<prio>`.
-      **Resume:** rebuild, run 7 with `modes/bleletest.sh` on the p255 cases; if
-      lights move, put the sweep in `mode.c` at start and `--remove` at the end;
-      then a stock run (no PAD_TRACE_SO / PAD_MODE_SO, `scratchpad run7_stock.sh`
-      shape) compared with `modes/regress.sh stock 60` against
-      `/var/tmp/item125_regress_modded.txt`.
+      **Run 7: priority 255 did not move them either** (672/1078/1092/1150 against
+      1224 noise, 0 shapes; the current event reads nil from the tick). Virtual
+      playfield captures went 53 -> 22 -> 32 (a pale warm wash) -> 23 inserts lit,
+      within the game's own animation swing, so not attributed.
+      **Resume:** lights, cheapest first - capture the playfield every 100 ms right
+      after a p255 sweep (it may be a one-shot that ends inside bleletest's 0.8 s);
+      then run the command from inside an event (post one via `0x2551dc` whose
+      handler calls the runner - tesla's has a live `[0x7b7e84]` and cleanup
+      `0x1b6880`); only then read how `--lts 224` becomes lamps. If lights move, put
+      the sweep in `mode.c` at start and `--remove` at the end.
       **Acceptance:** in a played Godzilla Pro 1.15 game in the rig with `PAD_MODE_SO`
       set, the mode starts on its trigger, runs a timer, scores its shots (`PAD_PEEK` on
       the player score), shows its text (`PAD_SCREEN`), runs an existing light show and

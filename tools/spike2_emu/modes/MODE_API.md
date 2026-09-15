@@ -393,6 +393,34 @@ The parser has no priority token of its own. It hands the parsed effect to
 `0x1bf2dc(prio, group, arg4)` for a slot, and records the owner per slot in the u16
 vector `0x7a82bc`.
 
+**Run 7: priority 255 made no measurable difference either.** The same four commands
+ran in fresh groups at priority 255. The current event read `nil` from the tick. All
+four returned 1, and they scored 672, 1078, 1092 and 1150 mean-L1 against 1224 of
+noise, again with no new fade shape or cell.
+
+Four `shotwin.py` captures of the virtual playfield, which draws each insert in its
+live colour, did not settle it:
+
+| When | Inserts lit | What the capture showed |
+|---|---|---|
+| Before the first sweep | 53 | The field in its normal colours |
+| Just after the first sweep | 22 | Most of the field dark |
+| 4 s later | 32 | A pale warm wash over the upper inserts |
+| Just after the last `--remove` | 23 | Most of the field dark |
+
+The game's own animation moves the lit count that much, and no capture caught the
+repeat sweep, so the wash is not attributed to the command.
+
+Still open, cheapest first:
+- **A one-shot sweep.** `--sweep 0 --freq 10` may finish inside the 0.8 s before the
+  post window opens. Capture the playfield every 100 ms straight after the command.
+- **The group's event.** The allocator stores `[0x7b7e84]` at `+16`, and from the tick
+  that is `nil`. Tesla's handler runs inside a show fiber with a live event, and
+  attaches the cleanup `0x1b6880` to it through `0x255bb8`. Make the call from inside
+  an event: post one (`0x2551dc`) whose handler runs the command.
+- **The set.** Nothing references the `--lts` string from code or data as a plain
+  pointer, so how set 224 becomes lamps has not been read yet.
+
 ## Measuring lights: `modes/ledact.py`, validated (run 4)
 
 What does NOT see a show: counting LED activity (a game baseline read 52.8 level

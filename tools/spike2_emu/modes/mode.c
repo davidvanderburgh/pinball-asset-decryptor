@@ -114,14 +114,30 @@ static void words_restore(void)
 #define LIGHT_ON    "blele --sweep 0 --lts 224 --red 0 --green 255 --blue 0 --freq 10 --use_alpha 1 --alpha 255"
 #define LIGHT_OFF   "blele --sweep 1 --lts 224 --fade 20 --rgb 0 --freq 10 --delay_start 15 --end 1"
 
+static void *light_group;
+static unsigned light_check_ticks;
+static const char *light_why = "";
+
 static void lights(const char *cmd, const char *why)
 {
     char m[160];
+    light_group = gz_blele(LIGHT_OWNER, cmd);
+    light_why = why;
+    light_check_ticks = TICKS_PER_S / 2;      /* read the lamps back half a second later */
+    snprintf(m, sizeof m, "[rush] lights %s: group %p\n", why, light_group);
+    hk_logs(m);
+}
+
+/* A command writes nothing at parse time - the game's own award wrote its lamps 0.2 s
+ * after the call (run 12) - so the count is read from the tick, not here. */
+static void lights_check(void)
+{
+    char m[160];
     unsigned first = 0, n;
-    void *group = gz_blele(LIGHT_OWNER, cmd);
-    n = gz_group_written(group, &first);
-    snprintf(m, sizeof m, "[rush] lights %s: group %p, %u lamps written (first %u)\n",
-             why, group, n, first);
+    if (!light_check_ticks || --light_check_ticks) return;
+    n = gz_group_written(light_group, &first);
+    snprintf(m, sizeof m, "[rush] lights %s landed: %u lamps written, first %u\n",
+             light_why, n, first);
     hk_logs(m);
 }
 
@@ -237,6 +253,7 @@ static void on_tick(unsigned *r)
         if (hk_read_trigger("/dump/mode.start", v) >= 0) rush_start("trigger");
         if (hk_read_trigger("/dump/mode.stop", v) >= 0) rush_end("trigger");
     }
+    lights_check();                          /* the lamps a command wrote, half a second on */
     if (rush.restore_ticks && --rush.restore_ticks == 0 && !rush.active) {
         words_restore();
         hk_logs("[rush] borrowed messages 3159/3160 restored\n");

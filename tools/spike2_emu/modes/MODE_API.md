@@ -345,6 +345,30 @@ same shape. That reading is not separately proven.
   Every id the remap sends to that index changes with it, so borrow an id nothing
   else is showing; tesla's own award ids qualify while tesla is not running.
 
+## The light-show runner (located 2026-09-15, not yet driven)
+
+The 242 `blele`/`blela` strings are commands for one runner:
+
+- **`0x1c3454(owner, group, command, 0)`** is a one-instruction branch into the parser
+  `0x1c2b6c`, which reads `--lts`/`--sweep`. It has 94 call sites. The owners they pass
+  most often are 325 (15), 538 (12), 236 (9), 540 and 484 (8 each) and 539 (7);
+  `0x1c34cc` is a five-caller variant that takes a list of commands.
+- **The group** comes from `0x4bf294(set, 0, 0, 0)`. That allocates a lamp group
+  (`0x3c14d4`) and, for a non-zero set below `[0x5ec028]`, adds every lamp in the
+  0-terminated u16 list `0x7257a8[set]` (`0x4be448(group, lamp, 255)`).
+- **Tesla's award show** (`0x1cbd2c`) passes set 0, an empty group, and names the lamps
+  inside the command. Its commands are "blele --sweep 0 --lts 224 --red 255 --green 140
+  --blue 55 --freq 10 --use_alpha 1 --alpha 255" (orange), or the green `--red 0
+  --green 255 --blue 0` form, both with owner 538. That handler is a show fiber, and it
+  attaches a cleanup callback to its event (`0x255bb8(event, 0x1b6880, 0, 1)`), so the
+  game's own light commands live and die with a show.
+- **The parser's other tokens** include `--remove`, `--end`, `--once` and
+  `--set_cur_element`.
+
+`padmode.blele "<owner> <command>"` runs one command from the tick, and
+`modes/bleletest.sh` judges it with `ledact.py` from `modes/blele_cases.txt`: a
+command, a `--remove` guess, and a repeat of both.
+
 ## Measuring lights: `modes/ledact.py`, validated (run 4)
 
 What does NOT see a show: counting LED activity (a game baseline read 52.8 level

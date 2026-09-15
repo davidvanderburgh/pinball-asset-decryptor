@@ -1,0 +1,7 @@
+# bleletest.sh cases: "<owner> <command>", one per line, run in order.
+# Owner 538 and the orange --lts 224 sweep are what tesla strike's award handler
+# (0x1cbd2c) passes; the --remove line is a guess at the "off" to be judged.
+538 blele --sweep 0 --lts 224 --red 255 --green 140 --blue 55 --freq 10 --use_alpha 1 --alpha 255
+538 blele --remove --lts 224
+538 blele --sweep 0 --lts 224 --red 255 --green 140 --blue 55 --freq 10 --use_alpha 1 --alpha 255
+538 blele --remove --lts 224

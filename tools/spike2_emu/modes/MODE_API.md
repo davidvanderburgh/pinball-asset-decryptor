@@ -378,6 +378,26 @@ candidate is `0x185e9c(n, a, b)`: the game called it with 2000/3 at game start, 
 in tesla's award and 200/3 on its spinner (`padmode.fx`, `lightprobe.sh fx:n:a:b`).
 Also untested: the `blele` runner.
 
+**`0x185e9c`: inconclusive (run 5).** `lightprobe.sh` fired each call twice:
+
+| Call | Result |
+|---|---|
+| first `(2000, 3, 0)` | **A strong footprint:** 5191 mean-L1, 15 fade shapes and 84 cells the pre window never had, including full-range fades to 255 across node 8 (`8:14-48>255`, `8:14-59>255`, `8:23-35>255`) - a playfield flash |
+| the repeat of `(2000, 3, 0)` | 467 mean-L1, only `9:47-74>` shapes |
+| `(334, 0, 0)` and `(200, 3, 0)` | 809-1909 mean-L1, only `9:47-74>` shapes |
+
+The `9:47-74>` shapes, at random target levels, turned up in every window after the
+first, and that round's two-window noise was 4111 against ~900 before. That reads as
+the ball draining into attract, whose lamp sweep is those shapes. Every call returned
+1. **It is very likely not a light at all.** `0x185e9c` clamps n against a table indexed
+by adjustment 335 and calls `0x39fe24(7, ...)` only when n beats `0x39fd78(7)`.
+`0x39fe24` is the DEVICE driver entry: its 17 callers include `ControlCoil::v[58]`
+(`0x4fc7c`), and it tail-calls `0x39f7fc`. So `0x185e9c` drives device 7 - a coil,
+flasher or motor, whose strength an adjustment limits - and the first window's LED
+flash was most likely the game's, not the call's. The check is the coil-fire counters
+in the same `padled` block (`coil[16][16]` at 1556, `coil_gen` at 2068) around one call:
+`modes/coilact.sh`.
+
 ## Messages: ids go through a RUNTIME remap (corrected 2026-09-15)
 
 `msg_lookup(id)` `0x34a764`: if `id < [0x5ec0c8]` (3949), then

@@ -10425,19 +10425,29 @@ class RestoreToSSDPipeline:
             if n is None:
                 raise PipelineError("Attach", r"Not a physical disk path: %s (expected "
                                     r"\\.\PhysicalDriveN)" % self.device_path)
+            # THE WRITE TAB'S DIRECT-SSD SEQUENCE, kept step for step (it is
+            # what David accepted this on): stale WSL mounts of the disk
+            # cleared first - the specific device, then every disk when that
+            # refuses - the disk taken offline so Windows lets go of its
+            # letters, then the attach, with the one recovery the tab
+            # learned (ALREADY_MOUNTED after a wsl restart: wsl --shutdown,
+            # offline again, one more try).
+            rc_u, _o, _e = self.executor.run_host(
+                'wsl --unmount "%s"' % self.device_path, timeout=15)
+            if rc_u != 0:
+                self.executor.run_host('wsl --unmount', timeout=15)
             before = self._wsl_disks()
             self.log("Taking disk %d offline and handing it to WSL whole "
                      "(wsl --mount --bare)..." % n, "info")
-            rc, out, err = self.executor.run_host(
-                'powershell -NoProfile -Command "Set-Disk -Number %d -IsOffline $true"' % n,
-                timeout=30)
-            if rc == 0:
-                self._offlined = n
-            else:
-                self.log("Warning: could not take disk %d offline: %s"
-                         % (n, (err or out).strip()), "info")
-            rc, out, err = self.executor.run_host(
-                'wsl --mount "%s" --bare' % self.device_path, timeout=60)
+            self._offline(n)
+            mount_cmd = 'wsl --mount "%s" --bare' % self.device_path
+            rc, out, err = self.executor.run_host(mount_cmd, timeout=60)
+            if rc != 0 and "ALREADY_MOUNTED" in (err or out or "").upper():
+                self.log("Stale WSL mount detected - restarting WSL...", "info")
+                self.executor.run_host('wsl --shutdown', timeout=30)
+                self._offline(n)
+                before = self._wsl_disks()
+                rc, out, err = self.executor.run_host(mount_cmd, timeout=60)
             if rc != 0:
                 raise PipelineError("Attach",
                                     "wsl --mount refused the disk:\n%s\n\nThis needs the app "
@@ -10459,6 +10469,16 @@ class RestoreToSSDPipeline:
                             "Writing an install ISO straight onto an SSD needs a Linux block "
                             "device (Windows with WSL, or Linux). On macOS, make a USB install "
                             "stick instead.")
+
+    def _offline(self, n):
+        rc, out, err = self.executor.run_host(
+            'powershell -NoProfile -Command "Set-Disk -Number %d -IsOffline $true"' % n,
+            timeout=30)
+        if rc == 0:
+            self._offlined = n
+        else:
+            self.log("Warning: could not take disk %d offline: %s"
+                     % (n, (err or out).strip()), "info")
 
     def _detach(self):
         if self._attached:

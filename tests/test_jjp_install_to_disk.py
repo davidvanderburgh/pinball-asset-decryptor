@@ -31,13 +31,15 @@ class _Wsl(WslExecutor):
     """The WSL executor with its three outside edges scripted: what lsblk answers before
     and after the attach, what the tool prints, and every host command it runs."""
 
-    def __init__(self, before, after, lines, host_rc=0):
+    def __init__(self, before, after, lines, host_rc=0, mount_first=None):
         super().__init__()
         self._answers = [before, after]
         self._lines = lines
         self.host = []
         self.bash = []
         self.host_rc = host_rc
+        # the answer to the FIRST `wsl --mount` when it should differ: (rc, stdout, stderr)
+        self._mount_first = mount_first
 
     def run(self, bash_cmd, timeout=120):
         self.bash.append(bash_cmd)
@@ -54,7 +56,12 @@ class _Wsl(WslExecutor):
 
     def run_host(self, args, timeout=60):
         self.host.append(args)
-        return self.host_rc, "", ("refused" if self.host_rc else "")
+        if self._mount_first is not None and args.startswith("wsl --mount"):
+            first, self._mount_first = self._mount_first, None
+            return first
+        if args.startswith("wsl --mount") and self.host_rc:
+            return self.host_rc, "", "refused"
+        return 0, "", ""
 
     def to_exec_path(self, host_path):
         return "/mnt/x/" + os.path.basename(host_path)
@@ -91,13 +98,14 @@ def test_physical_drive_number():
 def test_the_disk_goes_to_wsl_whole_and_the_tool_gets_the_new_device(tmp_path):
     ex = _Wsl({"sda", "sdb"}, {"sda", "sdb", "sdc"}, TOOL_LINES)
     p, sink = _run(tmp_path, ex)
-    # offline, attach bare, then - after the tool - detach and back online, in that order
-    assert [h.split()[0] if h.startswith("wsl") else "powershell" for h in ex.host] == \
-        ["powershell", "wsl", "wsl", "powershell"]
-    assert 'Set-Disk -Number 3 -IsOffline $true' in ex.host[0]
-    assert ex.host[1] == 'wsl --mount "%s" --bare' % DISK
-    assert ex.host[2] == 'wsl --unmount "%s"' % DISK
-    assert 'Set-Disk -Number 3 -IsOffline $false' in ex.host[3]
+    # the Write tab's sequence: stale mounts of the disk cleared, offline, attach bare, then -
+    # after the tool - detach and back online, in that order
+    assert ex.host[0] == 'wsl --unmount "%s"' % DISK
+    assert 'Set-Disk -Number 3 -IsOffline $true' in ex.host[1]
+    assert ex.host[2] == 'wsl --mount "%s" --bare' % DISK
+    assert ex.host[3] == 'wsl --unmount "%s"' % DISK
+    assert 'Set-Disk -Number 3 -IsOffline $false' in ex.host[4]
+    assert len(ex.host) == 5
     # the tool: the ISO's WSL path, the device that appeared, --yes (the dialog confirmed)
     cmd = ex.bash[-1]
     assert cmd == "python3 /mnt/x/mkjjpmulti.py install --iso /mnt/x/multi.iso --disk /dev/sdc --yes"
@@ -149,6 +157,20 @@ def test_two_new_disks_is_a_refusal_before_anything_is_written(tmp_path):
     assert "Could not tell which disk" in sink.done[0][1]
     assert not any(b.startswith("python3") for b in ex.bash), "the tool never ran"
     assert any(h.startswith("wsl --unmount") for h in ex.host), "the disk was still handed back"
+
+
+def test_a_stale_wsl_mount_is_cleared_with_the_write_tabs_recovery(tmp_path):
+    """ALREADY_MOUNTED from wsl --mount (a disk WSL still thinks it holds, after a WSL
+    restart): wsl --shutdown, the disk offline again, one more attach - the Write tab's
+    recovery, then the install runs as usual."""
+    ex = _Wsl({"sda"}, {"sda", "sdc"}, TOOL_LINES,
+              mount_first=(1, "", "Error code: Wsl/Service/AttachDisk/WSL_E_DISK_ALREADY_MOUNTED"))
+    ex._answers = [{"sda"}, {"sda"}, {"sda", "sdc"}]          # lsblk: before, before again after the restart, after
+    p, sink = _run(tmp_path, ex)
+    assert sink.done[0][0] is True
+    kinds = [h.split()[1] if h.startswith("wsl") else ("offline" if "$true" in h else "online") for h in ex.host]
+    assert kinds == ["--unmount", "offline", "--mount", "--shutdown", "offline", "--mount", "--unmount", "online"]
+    assert any("Stale WSL mount" in m for _l, m in sink.log)
 
 
 def test_wsl_mount_refused_names_the_administrator_gate(tmp_path):

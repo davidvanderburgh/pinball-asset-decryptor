@@ -7316,7 +7316,11 @@ These have each been violated at least once and each cost a run or a window:
 - [x] **123. The multi-boot install written STRAIGHT ONTO THE GAME'S SSD in a dock on this
       PC: no stick, no install run on the machine.** `S3 D3` **DONE 2026-09-15 on `item/120` -
       emulator-proven; part of the JJP multi-boot family, released with its ONE `/finish`.
-      Owed: David's own dock test on the GNR (see the hardware line).** David, 2026-09-15:
+      The dock test is WAIVED (David, 2026-09-15: "i don't want to confirm by plugging in an
+      actual ssd. let's just assume we're good to go if we followed our write patterns from
+      the write tab") - and the pipeline's disk hand-off is the Write tab's Direct-SSD
+      sequence step for step (stale mounts cleared, offline, attach, the ALREADY_MOUNTED
+      recovery, back online), pinned by tests/test_jjp_install_to_disk.py.** David, 2026-09-15:
       "if we want to write the multi-boot straight to the ssd, we should confirm that works
       next" - the plan's "Direct-SSD write of the same layout" that was "later, not queued".
       What was there: the app's `RestoreToSSDPipeline` (v0.7.0, never wired to a button) took
@@ -7366,8 +7370,8 @@ These have each been violated at least once and each cost a run or a window:
 
 - [x] **124. On a docked SSD, change ONLY the boot menu, or ONLY one image (a new custom
       code), and keep the settings and scores.** `S3 D2` **DONE 2026-09-15 on `item/120` -
-      emulator-proven; part of the JJP multi-boot family, released with its ONE `/finish`.
-      Owed: David's dock test (with 123's).** David, 2026-09-15: "do we have a way to just
+      emulator-proven; part of the JJP multi-boot family, released with its ONE `/finish`;
+      the dock test waived with 123's.** David, 2026-09-15: "do we have a way to just
       make the multi-boot menu changes for direct SSD? how about if i just want to change one
       of the images? (like if there's an update to the custom code)" - "Do both". What closed
       it: two switches on `mkjjpmulti.py install`, both for a disk that ALREADY holds this

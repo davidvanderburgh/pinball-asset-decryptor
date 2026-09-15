@@ -14671,6 +14671,22 @@ class MainWindow:
             # Show the Emulate tab so the start is watched where its status
             # lives, then launch exactly as its own Start button would, with
             # PAD_SELECT=1 so the rig shows the card's menu first.
+            #
+            # A JJP multi-boot ISO (item 118) goes to the Emulate JJP tab: its
+            # rig shows the menu by itself when the image carries one
+            # (run_game.sh asks the image), so the launch is the tab's own.
+            if getattr(self._multiboot_panel, "platform", "stern") == "jjp":
+                jjp = getattr(self, "_jjp_emulate_panel", None)
+                if jjp is None:
+                    self.append_log("[multi-boot] the Emulate JJP tab is not "
+                                    "built; cannot start the rig")
+                    return
+                try:
+                    self._notebook.select(self._tab_jjp_emulate)
+                except tk.TclError:
+                    pass
+                jjp.launch_iso(path)
+                return
             try:
                 self._notebook.select(self._tab_emulate)
             except tk.TclError:
@@ -14684,7 +14700,8 @@ class MainWindow:
             badge_fn=self._make_round_icon,
             resize_fn=self._resize_notebook_to_current_tab,
             flash_fn=lambda p, fresh=False: self._open_flash_dialog(
-                initial_image=p, fresh=fresh),
+                initial_image=p, fresh=fresh,
+                image_titles=self._multiboot_panel.image_titles()),
             emulate_fn=run_emulator,
             phase_fn=self.set_multiboot_phase,
             status_fn=self.set_status)
@@ -14715,7 +14732,11 @@ class MainWindow:
             iso_var=self.jjp_emulate_iso_var,
             theme_fn=lambda: self._current_theme,
             badge_fn=self._make_round_icon,
-            resize_fn=self._resize_notebook_to_current_tab)
+            resize_fn=self._resize_notebook_to_current_tab,
+            # the footer's ladder (EMULATE_PHASES_JJP), driven by the
+            # launch's own step lines and the status poll - item 118
+            footer_cb=lambda k, p=None, t="": self.set_emulate_progress(
+                k, p, t, tab="Emulate JJP"))
         self._jjp_emulate_panel.build(self._tab_jjp_emulate)
 
     def _build_spike1_emulate_tab(self):
@@ -16589,6 +16610,15 @@ class MainWindow:
     #: user's answer ("can I play now?"), not the machine's word for the
     #: screen it happens to be showing.
     EMULATE_PHASES = ("Copy card", "Boot", "Node boards", "Ready")
+    #: ...and the JJP rig's ladder (item 118).  A JJP machine has no node
+    #: bus: the rig restores the ISO's partitions, boots the jail (the key,
+    #: the boards, the display), starts the game - the multi-boot menu
+    #: first, when the image carries one - and is ready when the game is up.
+    #: David, 2026-09-13: "it's talking about node boards on a jjp screen
+    #: which isn't a thing".  Same four slots as the Stern ladder, so
+    #: set_emulate_progress's kinds (copy / boot / techalerts / run) map
+    #: onto it unchanged: the JJP panel sends them by their SLOT.
+    EMULATE_PHASES_JJP = ("Restore image", "Boot", "Game", "Ready")
 
     #: The Multi-boot tab's own stages, named so BOTH of its writing buttons
     #: read honestly on them: Build & verify walks all four (render the
@@ -16719,8 +16749,11 @@ class MainWindow:
             self._write_phases_frame.pack_forget()
             # Spike 1 EXTRACTS the game rather than copying a card, so its first
             # chip reads "Extract"; the other eras keep the default ladder.
+            # ...and the JJP rig has no node bus at all: its own ladder.
             phases = (("Extract", "Boot", "Node boards", "Ready")
-                      if text == "Emulate Spike1" else self.EMULATE_PHASES)
+                      if text == "Emulate Spike1"
+                      else self.EMULATE_PHASES_JJP if text == "Emulate JJP"
+                      else self.EMULATE_PHASES)
             if getattr(self, "_emulate_phases", None) != phases:
                 self._emulate_phases = phases
                 for w in self._emulate_phases_frame.winfo_children():
@@ -17351,6 +17384,13 @@ class MainWindow:
         self._configure_tab("Emulate Spike1",
                             getattr(caps, "emulate_spike1", False))
         self._configure_tab("Multi-boot", getattr(caps, "multiboot", False))
+        # ...and the tab BUILDS FOR THIS MANUFACTURER (item 118): Stern's SD
+        # card or a JJP install ISO, the same panel with the other backend
+        # behind it.  Only a manufacturer that has the tab gets to switch it,
+        # so a plugin without multi-boot never clears a card being edited.
+        mb_panel = getattr(self, "_multiboot_panel", None)
+        if mb_panel is not None and getattr(caps, "multiboot", False):
+            mb_panel.set_platform(getattr(mfr, "key", "stern"))
         # If the tab that was selected just got hidden (e.g. Extract when
         # switching to a capture-only era), move to the first visible tab so the
         # working view is never left showing a blank hidden pane.
@@ -21286,7 +21326,8 @@ class MainWindow:
         if self._help_window is not None:
             self._help_window.refresh(tab_name)
 
-    def _open_flash_dialog(self, initial_image=None, fresh=False):
+    def _open_flash_dialog(self, initial_image=None, fresh=False,
+                           image_titles=None):
         """Open the two-section Build / flash modal.
 
         Section 1 builds a fresh image (the Write tab's normal Build, path
@@ -21357,7 +21398,8 @@ class MainWindow:
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(k, c),
             handed_in=handed_in,
             fresh_image=bool(handed_in and fresh),
-            flashed_fn=self._image_was_flashed)
+            flashed_fn=self._image_was_flashed,
+            image_titles=image_titles)
 
     def _open_read_card_dialog(self):
         """Open the "Save card as image…" modal (card → .raw file).

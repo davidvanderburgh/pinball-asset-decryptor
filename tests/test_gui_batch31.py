@@ -778,3 +778,152 @@ def test_the_multiboot_hand_off_reaches_the_dialog(app, monkeypatch,
     assert [(kw["handed_in"], kw["fresh_image"]) for kw in opened] == [
         ("Multi-boot", True), ("", False)]
     assert opened[0]["initial_image"] == img
+
+
+@pytest.mark.gui
+@gui_only
+def test_a_jjp_iso_can_go_straight_onto_the_games_disk(app, monkeypatch, tmp_path):
+    """Item 123: the dialog's second place for a JJP install ISO - the game's SSD in a
+    dock.  Choosing it swaps the drive picker to disks, words the confirmation as an
+    install that wipes the disk, and hands ``target="disk"`` to the app; the stick, the
+    default, hands nothing new."""
+    import sys
+    from tkinter import messagebox
+    if sys.platform not in ("win32", "linux"):
+        pytest.skip("the disk target is Windows/Linux only")
+    _pick(app, "jjp")
+    img = tmp_path / "GunsNRoses-v03.03.multi.iso"
+    img.write_bytes(b"iso")
+    asked, flashed = [], []
+    monkeypatch.setattr(messagebox, "askyesno",
+                        lambda title, *a, **k: asked.append(title) or True)
+    dlg = _make_dialog(
+        app, monkeypatch, initial_image=str(img), handed_in="Multi-boot",
+        has_pending_changes=False,
+        on_flash=lambda i, d, menu_only=False, **kw: flashed.append((i, d, kw)))
+    try:
+        assert dlg._target_row is not None, "JJP offers the disk as a second place"
+        assert [t[0] for t in dlg._targets] == ["stick", "disk"]
+        assert dlg._target_var.get() == "stick" and not dlg._to_disk()
+        assert dlg._words["target_kind"] == "usb_stick"
+        # the disk: the picker's kind and label follow, the readout says what happens
+        dlg._target_var.set("disk")
+        dlg._on_target_changed()
+        assert dlg._to_disk()
+        assert dlg._words["target_kind"] == "ssd"
+        assert dlg._target_label.cget("text") == "Target disk:"
+        dlg._selected = _reader()
+        dlg._update_readout()
+        assert "erased" in dlg._readout.cget("text")
+        dlg._do_start()
+        assert asked == ["Erase the disk and install onto it?"]
+        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {"target": "disk"})]
+    finally:
+        if dlg._dlg.winfo_exists():
+            dlg._dlg.destroy()
+    # ...and back on the stick nothing new travels
+    asked.clear()
+    flashed.clear()
+    dlg = _make_dialog(
+        app, monkeypatch, initial_image=str(img), handed_in="Multi-boot",
+        has_pending_changes=False,
+        on_flash=lambda i, d, menu_only=False, **kw: flashed.append((i, d, kw)))
+    try:
+        dlg._selected = _reader()
+        dlg._do_start()
+        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {})]
+        assert asked and asked[0].startswith("Erase the USB stick")
+    finally:
+        if dlg._dlg.winfo_exists():
+            dlg._dlg.destroy()
+
+
+@pytest.mark.gui
+@gui_only
+def test_the_disk_target_offers_the_menu_alone_and_one_image_alone(app, monkeypatch, tmp_path):
+    """Item 124: with the disk chosen, a Write choice appears - everything, only the menu,
+    only image 0/1 (named by the tab's titles) from its own ISO - and each reaches the app as
+    ``disk_mode`` (+ ``image`` and ``from_iso``); the image write refuses to start without
+    its ISO."""
+    import sys
+    from tkinter import messagebox
+    if sys.platform not in ("win32", "linux"):
+        pytest.skip("the disk target is Windows/Linux only")
+    _pick(app, "jjp")
+    img = tmp_path / "GunsNRoses-v03.03.multi.iso"
+    img.write_bytes(b"iso")
+    new = tmp_path / "CHAKAs_v2.iso"
+    new.write_bytes(b"iso")
+    asked, flashed, warned = [], [], []
+    monkeypatch.setattr(messagebox, "askyesno", lambda title, *a, **k: asked.append(title) or True)
+    monkeypatch.setattr(messagebox, "showwarning", lambda title, *a, **k: warned.append(title))
+
+    def dialog():
+        return _make_dialog(
+            app, monkeypatch, initial_image=str(img), handed_in="Multi-boot",
+            has_pending_changes=False, image_titles=["GUNS N' ROSES 3.03", "CHAKA'S LOTLJ"],
+            on_flash=lambda i, d, menu_only=False, **kw: flashed.append((i, d, kw)))
+
+    dlg = dialog()
+    try:
+        assert not dlg._disk_mode_row.winfo_manager(), "no Write row for the stick"
+        dlg._target_var.set("disk")
+        dlg._on_target_changed()
+        assert dlg._disk_mode_row.winfo_manager() and not dlg._from_row.winfo_manager()
+        labels = dlg._disk_mode_labels()
+        assert labels[0].startswith("everything") and labels[1].startswith("only the boot menu")
+        assert labels[2] == "only image 0: GUNS N' ROSES 3.03, from its own ISO"
+        assert labels[3] == "only image 1: CHAKA'S LOTLJ, from its own ISO"
+        # the menu alone
+        dlg._disk_mode_combo.current(1)
+        dlg._on_disk_mode_changed()
+        assert dlg._disk_mode() == "menu" and not dlg._from_row.winfo_manager()
+        dlg._selected = _reader()
+        dlg._update_readout()
+        assert "only the boot menu" in dlg._readout.cget("text")
+        dlg._do_start()
+        assert asked == ["Replace the boot menu?"]
+        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {"target": "disk", "disk_mode": "menu"})]
+    finally:
+        if dlg._dlg.winfo_exists():
+            dlg._dlg.destroy()
+    asked.clear()
+    flashed.clear()
+    dlg = dialog()
+    try:
+        dlg._target_var.set("disk")
+        dlg._on_target_changed()
+        dlg._disk_mode_combo.current(3)
+        dlg._on_disk_mode_changed()
+        assert dlg._disk_mode() == "image1" and dlg._from_row.winfo_manager()
+        dlg._selected = _reader()
+        dlg._update_readout()
+        assert "still to pick" in dlg._readout.cget("text")
+        dlg._do_start()
+        assert warned == ["No ISO for the image"] and flashed == []
+        dlg._from_var.set(str(new))
+        assert "CHAKAs_v2.iso" in dlg._readout.cget("text")
+        dlg._do_start()
+        assert asked == ["Replace image 1?"]
+        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9",
+                            {"target": "disk", "disk_mode": "image", "image": 1, "from_iso": str(new)})]
+    finally:
+        if dlg._dlg.winfo_exists():
+            dlg._dlg.destroy()
+    # back on the stick the Write row goes away and nothing new travels
+    flashed.clear()
+    asked.clear()
+    dlg = dialog()
+    try:
+        dlg._target_var.set("disk")
+        dlg._on_target_changed()
+        dlg._target_var.set("stick")
+        dlg._on_target_changed()
+        assert not dlg._disk_mode_row.winfo_manager() and not dlg._from_row.winfo_manager()
+        dlg._selected = _reader()
+        dlg._do_start()
+        assert flashed == [(str(img), r"\\.\PHYSICALDRIVE9", {})]
+    finally:
+        if dlg._dlg.winfo_exists():
+            dlg._dlg.destroy()
+

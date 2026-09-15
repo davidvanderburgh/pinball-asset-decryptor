@@ -1,21 +1,28 @@
 /* audio.c - see audio.h: the WAV loader, the mixer and the sink selection.
  *
- * Single-threaded on purpose: audio_pump() runs from the main loop, mixes
- * exactly as many frames as the sink can take (the FIFO paces to the wall
- * clock with a 200 ms lead, ALSA reports its buffer space - 500 ms requested)
- * and hands them over without ever blocking. A stalled loop (a silent node
- * board on hardware can hold an iteration for a second) becomes a gap, never
- * a crash; the sinks count what they had to drop.
+ * The pump - mix exactly as many frames as the sink can take (the FIFO paces
+ * to the wall clock with a 200 ms lead, ALSA reports its buffer space) and
+ * hand them over without ever blocking - ran from the main loop until
+ * 2026-09-14.  A JJP machine's loop is vsync-paced and hiccups, and its
+ * 60 ms buffer (item 120) underran on every hiccup until the stream through
+ * the pulse plugin stopped restarting: David's GNR, silent.  So the pump now
+ * runs on ITS OWN THREAD every PUMP_MS, started with the sink; the main
+ * loop's audio_pump() is then a no-op, and every entry point takes the
+ * mutex.  A stalled loop (a silent node board on hardware can hold an
+ * iteration for a second) is now no gap at all; a stalled PROCESS still
+ * becomes one, never a crash, and the sinks count what they had to drop.
  */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <pthread.h>
 #include "audio.h"
 #include "log.h"
 
 #define VOICES      4
+#define PUMP_MS     5               /* the pump thread's period: a 60 ms buffer gets 12 visits */
 #define MIX_MAX     4096            /* frames per pump */
 #define FADE_FRAMES 882             /* 20 ms: a stopped voice ramps out instead of clicking */
 #define CLIP_CAP_S  120             /* longer WAVs are cut, with a log line */
@@ -130,8 +137,26 @@ struct audio {
     struct voice v[VOICES];
     long long written, dropped;
     FILE *dump;
+    char missing[200];        /* why a WANTED sink is absent, "" otherwise */
+    pthread_mutex_t lock;     /* the voices, the gain, the dump, the counts */
+    pthread_t th;
+    int th_on, th_stop;       /* the pump thread runs; it is asked to stop */
     short buf[MIX_MAX * 2];
 };
+
+static void pump_locked(struct audio *a, long long now_ms);
+
+static void *pump_thread(void *p)
+{
+    struct audio *a = p;
+    while (!a->th_stop) {
+        pthread_mutex_lock(&a->lock);
+        pump_locked(a, sel_now_ms());
+        pthread_mutex_unlock(&a->lock);
+        sel_sleep_ms(PUMP_MS);
+    }
+    return NULL;
+}
 
 /* the sink used when there is nothing to play into but a --audio-dump: paces
  * to the wall clock like the FIFO and accepts everything */
@@ -179,6 +204,7 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
     struct audio *a = calloc(1, sizeof *a);
     char err[200] = "";
     if (!a) return NULL;
+    pthread_mutex_init(&a->lock, NULL);
     if (volume < 0) volume = 0;
     if (volume > 100) volume = 100;
     a->gain_q8 = volume * 256 / 100;
@@ -188,19 +214,42 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
         sel_log("audio: none (--audio none)");
     } else if (!strcmp(mode, "alsa")) {
         a->sink = audio_alsa_open(err, sizeof err);
-        if (!a->sink) sel_log("audio: none (no alsa: %s)", err);
+        if (!a->sink) {
+            sel_log("audio: none (no alsa: %s)", err);
+            snprintf(a->missing, sizeof a->missing, "no alsa: %s", err);
+        }
+    } else if (!strcmp(mode, "pulse")) {
+#ifdef AUDIO_PULSE
+        a->sink = audio_pulse_open(err, sizeof err);
+        if (!a->sink) {
+            sel_log("audio: none (%s)", err);
+            snprintf(a->missing, sizeof a->missing, "%s", err);
+        }
+#else
+        sel_log("audio: none (this build has no pulse sink)");
+        snprintf(a->missing, sizeof a->missing, "no pulse sink in this build");
+#endif
     } else if (!strncmp(mode, "fifo:", 5)) {
         if (mode[5]) a->sink = audio_fifo_open(mode + 5, fmt_path);
         else sel_log("audio: none (fifo: without a path)");
     } else if (!strcmp(mode, "auto")) {
         const char *play = getenv("PAD_AUDIO_PLAY");
+#ifdef AUDIO_PULSE
+        /* A JJP MACHINE: PulseAudio itself first (audio_pulse.c says why the
+         * ALSA pulse plugin is not enough), ALSA when no server answers */
+        a->sink = audio_pulse_open(err, sizeof err);
+        if (!a->sink) sel_log("audio: no pulse server (%s); trying alsa", err);
+        if (!a->sink) a->sink = audio_alsa_open(err, sizeof err);
+#else
         a->sink = audio_alsa_open(err, sizeof err);
+#endif
         if (!a->sink) {
             if (play && *play) {
                 sel_log("audio: no alsa (%s), using the rig's fifo", err);
                 a->sink = audio_fifo_open(play, fmt_path);
             } else {
                 sel_log("audio: none (no alsa: %s; PAD_AUDIO_PLAY unset)", err);
+                snprintf(a->missing, sizeof a->missing, "no alsa: %s", err);
             }
         }
     } else {
@@ -215,6 +264,14 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
     }
     if (a->sink) sel_log("audio: sink %s, lead %d ms, volume %d (gain %d/256)",
                          a->sink->name, a->sink->lead_ms, volume, a->gain_q8);
+    if (a->sink) {
+        if (pthread_create(&a->th, NULL, pump_thread, a) == 0) {
+            a->th_on = 1;
+            sel_log("audio: pump thread every %d ms", PUMP_MS);
+        } else {
+            sel_log("audio: no pump thread (%s): the main loop pumps", strerror(errno));
+        }
+    }
     return a;
 }
 
@@ -238,7 +295,9 @@ void audio_set_volume(struct audio *a, int volume)
     if (!a) return;
     if (volume < 0) volume = 0;
     if (volume > 100) volume = 100;
+    pthread_mutex_lock(&a->lock);
     a->gain_q8 = volume * 256 / 100;
+    pthread_mutex_unlock(&a->lock);
     if (a->sink) sel_log("audio: volume %d (gain %d/256)", volume, a->gain_q8);
 }
 
@@ -252,10 +311,16 @@ const char *audio_sink_name(const struct audio *a)
     return a && a->sink ? a->sink->name : "none";
 }
 
+const char *audio_missing(const struct audio *a)
+{
+    return a && !a->sink ? a->missing : "";
+}
+
 int audio_play(struct audio *a, const struct audio_clip *c, int loop)
 {
     int i;
     if (!a || !a->sink || !c || c->frames <= 0) return -1;
+    pthread_mutex_lock(&a->lock);
     for (i = 0; i < VOICES; i++) {
         if (!a->v[i].active) {
             a->v[i].clip = c;
@@ -263,6 +328,7 @@ int audio_play(struct audio *a, const struct audio_clip *c, int loop)
             a->v[i].loop = loop;
             a->v[i].active = 1;
             a->v[i].fade_left = 0;
+            pthread_mutex_unlock(&a->lock);
             return i;
         }
     }
@@ -275,19 +341,26 @@ int audio_play(struct audio *a, const struct audio_clip *c, int loop)
     a->v[i].loop = loop;
     a->v[i].active = 1;
     a->v[i].fade_left = 0;
+    pthread_mutex_unlock(&a->lock);
     return i;
 }
 
 void audio_stop(struct audio *a, int voice)
 {
-    if (!a || voice < 0 || voice >= VOICES || !a->v[voice].active) return;
-    if (!a->v[voice].fade_left) a->v[voice].fade_left = FADE_FRAMES;
+    if (!a || voice < 0 || voice >= VOICES) return;
+    pthread_mutex_lock(&a->lock);
+    if (a->v[voice].active && !a->v[voice].fade_left) a->v[voice].fade_left = FADE_FRAMES;
+    pthread_mutex_unlock(&a->lock);
 }
 
 int audio_playing(const struct audio *a, int voice)
 {
+    int r;
     if (!a || voice < 0 || voice >= VOICES) return 0;
-    return a->v[voice].active;
+    pthread_mutex_lock((pthread_mutex_t *)&a->lock);
+    r = a->v[voice].active;
+    pthread_mutex_unlock((pthread_mutex_t *)&a->lock);
+    return r;
 }
 
 int audio_playing_clip(const struct audio *a, int voice, const struct audio_clip *c)
@@ -295,7 +368,13 @@ int audio_playing_clip(const struct audio *a, int voice, const struct audio_clip
     if (!a || !c || voice < 0 || voice >= VOICES) return 0;
     /* a voice fading out was stopped, and one stolen since belongs to
      * whatever clip took it */
-    return a->v[voice].active && !a->v[voice].fade_left && a->v[voice].clip == c;
+    {
+        int r;
+        pthread_mutex_lock((pthread_mutex_t *)&a->lock);
+        r = a->v[voice].active && !a->v[voice].fade_left && a->v[voice].clip == c;
+        pthread_mutex_unlock((pthread_mutex_t *)&a->lock);
+        return r;
+    }
 }
 
 static void mix(struct audio *a, short *out, int frames)
@@ -332,8 +411,16 @@ static void mix(struct audio *a, short *out, int frames)
 
 void audio_pump(struct audio *a, long long now_ms)
 {
+    if (!a || !a->sink || a->th_on) return;     /* the thread pumps */
+    pthread_mutex_lock(&a->lock);
+    pump_locked(a, now_ms);
+    pthread_mutex_unlock(&a->lock);
+}
+
+static void pump_locked(struct audio *a, long long now_ms)
+{
     int want, n;
-    if (!a || !a->sink) return;
+    if (!a->sink) return;
     want = a->sink->space(a->sink, now_ms);
     if (want <= 0) return;
     if (want > MIX_MAX) want = MIX_MAX;
@@ -354,6 +441,11 @@ int audio_lead_ms(const struct audio *a)
 void audio_close(struct audio *a)
 {
     if (!a) return;
+    if (a->th_on) {                      /* the pump first: the sink is closed under nobody */
+        a->th_stop = 1;
+        pthread_join(a->th, NULL);
+        a->th_on = 0;
+    }
     if (a->dump) { fclose(a->dump); a->dump = NULL; }
     if (a->sink) {
         a->sink->close(a->sink);

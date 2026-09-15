@@ -12,6 +12,9 @@ bash "$HERE/killgame.sh" || echo "warning: game processes survived; unmounting a
 for m in /tmp/.X11-unix /mnt/wslg /dev/bus/usb /dev/shm /dev/pts /dev /sys /proc; do
     umount -l "$JJP_JAIL$m" 2>/dev/null
 done
+# Root B's overlay (a multi-boot ISO; item 117) sits inside the jail: it goes first.
+umount -l "$JJP_JAIL$JJP_MULTI_B" 2>/dev/null
+umount -l "$JJP_OVLB" 2>/dev/null
 umount -l "$JJP_JAIL" 2>/dev/null
 umount -l "$JJP_OVL"  2>/dev/null
 echo "remaining jail mounts: $(mount | grep -c "$JJP_JAIL")"

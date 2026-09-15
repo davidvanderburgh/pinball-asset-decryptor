@@ -52,7 +52,12 @@ done
 pkill -9 -f 'jjpsw\.py' 2>/dev/null
 pkill -9 -f "Xephyr $NEST" 2>/dev/null
 
-# 5. The boards.
+# 5. The boards, the volume follower (jjpvol.py, started by audio.sh) and a
+#    matrix waiting on a game that will not come now (jjpsw_launch.sh
+#    --await-game, a multi-boot launch).
+pkill -f 'jjpsw_launch\.sh --await-game' 2>/dev/null
+pkill -f 'jjpvol\.py' 2>/dev/null
+pkill -f 'jjpkeys\.py' 2>/dev/null     # the matrix's key grab on the game's display
 bash "$HERE/jjpcuse.sh" stop 2>/dev/null
 
 # The Sentinel daemons stay up by default (tiny, and they hold the key

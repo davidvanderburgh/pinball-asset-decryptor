@@ -1,17 +1,23 @@
 """Prepare a JJP USB install stick — format FAT32/MBR + copy the ISO's files.
 
-A JJP machine never boots the install stick.  At power-on the game's own boot
-sequence mounts the stick's FAT volume and runs the installer it finds there,
-so a raw-imaged (Etcher/dd) stick is unreadable to it — the machine shows
-"Failed to mount USB stick" and boots the old game (a tester's Sonic report,
-2026-07-29).  JJP's own procedure is Rufus in ISO Image mode on Windows, or
-"format MS-DOS(FAT) + copy the ISO's files" on macOS.  This pipeline is that
-procedure in-app:
+A JJP machine BOOTS the install stick: the ISO is Clonezilla live, with
+syslinux for legacy BIOS and EFI/boot for UEFI, and its boot config runs JJP's
+installer.  A raw-imaged (Etcher/dd) stick is not what JJP ships for - the
+machine shows "Failed to mount USB stick" and boots the old game (a tester's
+Sonic report, 2026-07-29).  JJP's own procedure is Rufus in ISO Image mode on
+Windows (a FAT32 copy of the ISO's files plus syslinux boot code), or "format
+MS-DOS(FAT) + copy the ISO's files" on macOS.  A copy WITHOUT the boot code
+starts only on a UEFI boot: the GNR multi-boot stick stopped on "Reboot and
+Select proper Boot device" on a machine that boots USB in legacy mode (item 119,
+2026-09-13).  This pipeline is that procedure in-app:
 
   1. Check    — sanity: real device (or test dir), ISO present, rough fit.
   2. Format   — one FAT32 primary partition in an MBR table, label JJPUSB
                 (the label JJP's own Mac instructions use).
-  3. Copy     — mount the ISO read-only and copy every file onto the stick.
+  3. Copy     — mount the ISO read-only and copy every file onto the stick,
+                the boot files first so the firmware's reads (loader,
+                kernel, initrd) sit at the start of the volume, not behind
+                13 GB of image pieces (item 121).
   4. Verify   — re-walk the stick: every source file present, same size.
   5. Eject    — flush + OS-eject so it's safe to pull immediately.
 
@@ -103,7 +109,14 @@ def _ps_elevated(script, timeout=300):
     (returncode, output) like :func:`_ps` — returncode 1 with the last
     output when the child never produced a result (declined UAC, crash).
     """
-    ipc = tempfile.mkdtemp(prefix="pad_jjp_usb_")
+    # THE CHILD'S RESULT MUST BE READABLE BY THIS (unelevated) PROCESS.  A
+    # plain mkdtemp is owner-only, and a file the ELEVATED child creates in
+    # it is owned by Administrators - so an unelevated source run formatted
+    # the stick and then died on PermissionError reading result.txt (item
+    # 119, 2026-09-13).  The Stern flash helper paid for this first; its
+    # _ipc_dir grants the user an inheritable ACE before the child exists.
+    from ...core.elevated_flash import _ipc_dir
+    ipc = _ipc_dir("pad_jjp_usb_")
     result_path = os.path.join(ipc, "result.txt")
     script_path = os.path.join(ipc, "job.ps1")
     # The elevated child's stdout is invisible to us, so the wrapper pipes
@@ -135,9 +148,16 @@ def _ps_elevated(script, timeout=300):
             time.sleep(0.2)
         if not os.path.isfile(result_path):
             return 1, "The elevated helper produced no result."
-        with open(result_path, "r", encoding="utf-8-sig",
-                  errors="replace") as f:
-            body = f.read()
+        try:
+            with open(result_path, "r", encoding="utf-8-sig",
+                      errors="replace") as f:
+                body = f.read()
+        except OSError as exc:
+            # The step may well have run: say that, rather than crash the
+            # pipeline with a traceback the person cannot act on.
+            return 1, ("The elevated helper finished, but its result could "
+                       "not be read (%s), so whether this step worked is "
+                       "unknown." % exc)
         rc = 0 if re.search(r"^RC=0\s*$", body, re.M) else 1
         body = re.sub(r"^RC=[01]\s*$", "", body, flags=re.M).strip()
         return rc, body
@@ -145,15 +165,15 @@ def _ps_elevated(script, timeout=300):
         shutil.rmtree(ipc, ignore_errors=True)
 
 
-def _ps_admin(script, timeout=300, log=None):
+def _ps_admin(script, timeout=300, log=None, why="Formatting the stick"):
     """Run a PowerShell script with admin rights — in-process when the app
     is already elevated (the shipped build), else via one UAC prompt."""
     if is_admin():
         return _ps(script, timeout=timeout)
     if log is not None:
-        log("Formatting the stick needs administrator access — approve the "
-            "prompt to continue (the app itself keeps running normally).",
-            "info")
+        log("%s needs administrator access — approve the "
+            "prompt to continue (the app itself keeps running normally)."
+            % why, "info")
     return _ps_elevated(script, timeout=timeout)
 
 
@@ -176,6 +196,77 @@ def _iter_files(root):
     for dirpath, _dirs, files in os.walk(root):
         for name in files:
             yield os.path.join(dirpath, name)
+
+
+def _copy_rank(rel):
+    """Where a file goes in the copy: the BOOT FILES FIRST.
+
+    The machine's firmware reads the loader, its modules, the kernel and the
+    initrd through the BIOS before Linux is up, and a fresh FAT32 volume
+    hands out clusters in copy order - so a plain sorted() copy put every one
+    of those files behind 13 GB of ``home/partimag`` image pieces on the GNR
+    multi-boot stick, and the machine sat on syslinux's "Automatic boot in 1
+    second..." (the moment it reads the kernel) instead of booting (item 121,
+    2026-09-14).  A stock JJP stick never has that shape: its images are
+    small.  Clonezilla sorts its own ISO the same way (syslinux/iso_sort.txt).
+    0: syslinux/ (loader, modules, menu background, config); 1: the kernel
+    and initrd; 2: the rest of the boot trees (UEFI, grub, the squashfs);
+    3: everything else."""
+    rel = rel.replace("\\", "/").lower()
+    top = rel.split("/", 1)[0]
+    if top in ("syslinux", "isolinux"):
+        return 0
+    if rel in ("live/vmlinuz", "live/initrd.img"):
+        return 1
+    if top in ("efi", "boot", "live"):
+        return 2
+    return 3
+
+
+def _copy_order(src_root, paths):
+    """*paths* (under *src_root*) in the order they go onto the stick: boot
+    files first (see _copy_rank), alphabetical within a rank."""
+    return sorted(paths, key=lambda p: (_copy_rank(os.path.relpath(p, src_root)), p))
+
+
+def iso_has_joliet(path):
+    """True / False: does the ISO carry a Joliet directory tree, the long-name
+    tree Windows' Mount-DiskImage reads?  None when *path* is not an ISO 9660
+    image this can read.
+
+    WITHOUT ONE WINDOWS SHOWS THE PLAIN ISO 9660 NAMES: upper case, one dot, the
+    rest underscores - ``sda3.ext4-ptcl-img.gz.aa`` reads as
+    ``SDA3_EXT4_PTCL_IMG_GZ.AA`` - and a stick copied from that view carries
+    names JJP's installer never finds.  The GNR multi-boot ISO was one (xorriso
+    rewrote the stock ISO without ``-joliet on``), and so is a custom ISO made
+    the same way (item 119, 2026-09-13).  Read off the volume descriptor set:
+    sector 16 on, 2048 bytes each; a Supplementary descriptor (type 2) whose
+    escape sequence at offset 88 is ``%/@``, ``%/C`` or ``%/E`` is Joliet."""
+    sector = 2048
+    try:
+        with open(path, "rb") as f:
+            for i in range(16, 64):
+                f.seek(i * sector)
+                vd = f.read(sector)
+                if len(vd) < 91 or vd[1:6] != b"CD001":
+                    return None if i == 16 else False
+                if vd[0] == 255:
+                    return False
+                if vd[0] == 2 and vd[88:91] in (b"%/@", b"%/C", b"%/E"):
+                    return True
+    except OSError:
+        return None
+    return False
+
+
+#: The refusal for an ISO Windows would copy under shortened names.
+NO_JOLIET_TEXT = (
+    "This ISO has no Joliet directory, so Windows shows its files under "
+    "shortened names (sda3.ext4-ptcl-img.gz.aa reads as "
+    "SDA3_EXT4_PTCL_IMG_GZ.AA) and a stick copied from it cannot install: the "
+    "machine's installer looks for the real names. Make the stick with Rufus in "
+    "ISO Image mode, which reads the ISO's full names itself, or rebuild the ISO "
+    "with this version of the app.")
 
 
 def _tree_size(root):
@@ -474,15 +565,129 @@ def mount_iso_linux(iso_path, log):
     return mount, _unmount
 
 
+# ---------------------------------------------------------------------------
+# Boot code: the stick has to START on the machine, in either firmware mode.
+# ---------------------------------------------------------------------------
+
+#: What the stick can do without its boot code, said when it cannot be added.
+UEFI_ONLY_NOTE = (
+    "This stick starts on machines that boot USB in UEFI mode. A machine that "
+    "boots it in legacy BIOS mode also needs the stick's boot code, and stops on "
+    "\"Reboot and Select proper Boot device\" without it. The app installs that "
+    "code on Windows; on this computer run the ISO's utils/linux/makeboot.sh on "
+    "the stick (Linux), or make the stick with Rufus in ISO Image mode.")
+
+
+def _stick_path(root, *parts):
+    """A path on the stick matched case-insensitively, or None.  A copy of a
+    Clonezilla ISO can carry its names upper case (UTILS\\WIN64\\SYSLINUX64.EXE)."""
+    cur = root
+    for part in parts:
+        try:
+            names = os.listdir(cur)
+        except OSError:
+            return None
+        hit = next((n for n in names if n.lower() == part.lower()), None)
+        if hit is None:
+            return None
+        cur = os.path.join(cur, hit)
+    return cur
+
+
+def _win_syslinux_script(tool, letter):
+    """Clonezilla's own boot-code install - the one command its
+    utils\\win64\\makeboot64.bat runs: ``syslinux64.exe -d syslinux -mafi X:``
+    (loader into \\syslinux, MBR boot code, partition active, force).  Run
+    through Start-Process so a line on stderr cannot end the elevated script,
+    and judged by the exit code it prints."""
+    return (
+        "$p = Start-Process -FilePath '%(tool)s' "
+        "-ArgumentList '-d','syslinux','-mafi','%(l)s:' "
+        "-Wait -PassThru -WindowStyle Hidden\n"
+        "'SYSLINUX_RC=' + $p.ExitCode\n" % {"tool": tool, "l": letter})
+
+
+def make_bootable_windows(mount_root, device_path, log):
+    """Install the stick's legacy-BIOS boot code with the ISO's own tool.
+
+    A JJP machine BOOTS the install stick (Clonezilla live).  The ISO carries
+    both ways in: syslinux for legacy BIOS and EFI/boot for UEFI.  A FAT copy
+    of its files is enough for UEFI, but a legacy boot needs boot code in the
+    MBR, an active partition and syslinux's loader - which a copy never
+    writes.  So the GNR multi-boot stick stopped on "Reboot and Select proper
+    Boot device" on David's machine (item 119, 2026-09-13), where JJP's own
+    Windows procedure, Rufus in ISO Image mode, installs that code.  The
+    Clonezilla ISO ships the installer for it, matched to its own syslinux
+    version: utils/win64/syslinux64.exe.  Returns True when the code is in.
+    """
+    letter = mount_root.rstrip(":\\/")
+    tool = _stick_path(mount_root, "utils", "win64", "syslinux64.exe")
+    if tool is None:
+        log(UEFI_ONLY_NOTE + " (This ISO carries no utils/win64/syslinux64.exe.)",
+            "info")
+        return False
+    log("Installing the stick's boot code with the ISO's own syslinux, so a "
+        "machine that boots USB in legacy BIOS mode can start it too...", "info")
+    rc, out = _ps_admin(_win_syslinux_script(tool, letter), timeout=180,
+                        log=log, why="Installing the stick's boot code")
+    m = re.search(r"^SYSLINUX_RC=(-?\d+)\s*$", out or "", re.M)
+    code = int(m.group(1)) if m else None
+    loader = _stick_path(mount_root, "syslinux", "ldlinux.sys")
+    _prc, active = _ps("(Get-Partition -DriveLetter %s).IsActive" % letter,
+                       timeout=60)
+    active = (active or "").strip().lower() == "true"
+    if rc != 0 or code != 0 or loader is None or not active:
+        raise PipelineError(
+            PHASES[3],
+            "The installer's files are on the stick, but its boot code did not "
+            "install (syslinux64 exit %s, syslinux\\ldlinux.sys %s, partition "
+            "%s). A machine that boots USB in legacy BIOS mode will stop on "
+            "\"Reboot and Select proper Boot device\" with this stick; UEFI "
+            "machines are unaffected. Prepare the stick again, or use Rufus in "
+            "ISO Image mode.%s"
+            % (code if code is not None else "unknown",
+               "present" if loader else "missing",
+               "active" if active else "not active",
+               ("\n\n" + _first_line(out)) if rc != 0 else ""))
+    log("Boot code installed: the stick starts in legacy BIOS mode as well as "
+        "UEFI.", "success")
+    return True
+
+
+def make_bootable_other(mount_root, device_path, log):
+    """macOS / Linux: the copy boots in UEFI mode; say what legacy needs."""
+    log(UEFI_ONLY_NOTE, "info")
+    return False
+
+
+def _win_eject_script(letter):
+    """Flush, ask Explorer to eject, and WAIT for the drive letter to go.
+
+    Shell.Application's InvokeVerb('Eject') is asynchronous: it hands the
+    request to the shell and returns, and a PowerShell that exits at once
+    takes the request with it.  The GNR multi-boot stick came back still
+    mounted as F: after the pipeline had logged that it was ejecting (item
+    119, 2026-09-13).  So the script stays until the volume is gone, or 15 s
+    pass, and says which."""
+    return (
+        "Write-VolumeCache -DriveLetter %(l)s\n"
+        "(New-Object -ComObject Shell.Application).Namespace(17)"
+        ".ParseName('%(l)s:').InvokeVerb('Eject')\n"
+        "for ($i = 0; $i -lt 30; $i++) {\n"
+        "  if (-not (Test-Path '%(l)s:\\')) { 'EJECTED=1'; exit 0 }\n"
+        "  Start-Sleep -Milliseconds 500\n"
+        "}\n"
+        "'EJECTED=0'\n" % {"l": letter})
+
+
 def eject_stick_windows(mount_root, device_path, log):
     letter = mount_root.rstrip(":\\/")
-    _ps("Write-VolumeCache -DriveLetter %s" % letter, timeout=120)
-    rc, out = _ps(
-        "(New-Object -ComObject Shell.Application).Namespace(17)"
-        ".ParseName('%s:').InvokeVerb('Eject')" % letter, timeout=60)
-    if rc != 0:
-        log("Could not auto-eject the stick (%s) — use 'Safely Remove "
-            "Hardware' before pulling it." % (out or "unknown error"),
+    rc, out = _ps(_win_eject_script(letter), timeout=120)
+    if rc != 0 or "EJECTED=1" not in (out or ""):
+        log("The stick did not eject by itself (%s) — its files are written "
+            "and flushed, but use 'Safely Remove Hardware' before pulling it."
+            % ("still mounted as %s:" % letter if rc == 0
+               else _first_line(out)),
             "info")
 
 
@@ -533,6 +738,11 @@ class UsbStickPreparePipeline(BasePipeline):
               "darwin": mount_iso_macos}.get(sys.platform, mount_iso_linux)
         return fn(self.iso_path, self._log)
 
+    def _make_bootable(self, mount_root):
+        fn = {"win32": make_bootable_windows}.get(sys.platform,
+                                                  make_bootable_other)
+        return fn(mount_root, self.device_path, self._log)
+
     def _eject_stick(self, mount_root):
         fn = {"win32": eject_stick_windows,
               "darwin": eject_stick_macos}.get(sys.platform,
@@ -559,6 +769,11 @@ class UsbStickPreparePipeline(BasePipeline):
                 PHASES[0], "ISO not found: %r" % self.iso_path)
         iso_size = (_tree_size(self.iso_path) if iso_is_dir
                     else os.path.getsize(self.iso_path))
+        # Windows mounts the ISO to copy it, and without a Joliet tree it
+        # shows names the installer cannot use (see iso_has_joliet).
+        if (sys.platform == "win32" and not iso_is_dir
+                and iso_has_joliet(self.iso_path) is False):
+            raise PipelineError(PHASES[0], NO_JOLIET_TEXT)
         if sys.platform == "win32" and iso_size > _WIN_FAT32_USABLE:
             raise PipelineError(
                 PHASES[0],
@@ -568,9 +783,9 @@ class UsbStickPreparePipeline(BasePipeline):
                 "Image mode'): Rufus formats large FAT32 itself."
                 % (iso_size / 1e9))
         self._log("Preparing a JJP install stick: the stick is formatted "
-                  "FAT32 and the ISO's files are copied onto it (the "
-                  "machine reads the files off the stick — it never boots "
-                  "a raw image).", "info")
+                  "FAT32, the ISO's files are copied onto it and its boot "
+                  "code is installed, the way Rufus prepares one (never a "
+                  "raw image).", "info")
         self._check_cancel()
 
         self._set_phase(1)  # Format stick
@@ -603,10 +818,10 @@ class UsbStickPreparePipeline(BasePipeline):
             self._log("Mounting the ISO to read its files...", "info")
             src_root, unmount = self._mount_iso()
         try:
-            files = sorted(_iter_files(src_root))
+            files = _copy_order(src_root, _iter_files(src_root))
             total = sum(os.path.getsize(p) for p in files)
-            self._log("Copying %d files (%.1f GB) onto the stick..."
-                      % (len(files), total / 1e9), "info")
+            self._log("Copying %d files (%.1f GB) onto the stick, the boot "
+                      "files first..." % (len(files), total / 1e9), "info")
             self._set_band(10, 90)
             copied = 0
             for src in files:
@@ -647,6 +862,15 @@ class UsbStickPreparePipeline(BasePipeline):
         finally:
             unmount()
 
+        # The boot code, last of the Verify step: the files alone boot only in
+        # UEFI mode (see make_bootable_windows).
+        if premounted:
+            self._log("Target is a folder — skipping the boot code (test "
+                      "mode).", "info")
+        else:
+            self._make_bootable(mount_root)
+        self._check_cancel()
+
         self._set_phase(4)  # Eject
         self._set_band(98, 100)
         if premounted:
@@ -659,10 +883,12 @@ class UsbStickPreparePipeline(BasePipeline):
 
         self._done(True,
                    "USB install stick ready (%d files, %.1f GB).\n\n"
-                   "Put it in the USB slot at the front of the machine's "
-                   "cabinet (either Cabinet Board slot), leave the purple "
+                   "Put it in a USB port on the computer in the backbox, leave the purple "
                    "security key plugged in, then turn the machine on — the "
                    "installer starts by itself and offers an optional "
                    "factory reset.\n\n"
+                   "The cabinet's front USB slot works too, but on some machines it "
+                   "runs at a fraction of the speed: the Restore menu then sits for a "
+                   "minute and the install takes hours.\n\n"
                    "Without the security key the installer stops on "
                    "\"Security key not found\"." % (len(files), total / 1e9))

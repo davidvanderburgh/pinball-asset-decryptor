@@ -54,6 +54,22 @@
  *                            the default is 'midnight') or 'custom'
  *   color_<role>=RRGGBB      one colour on top of the theme (the roles are in
  *                            themes.json); a bad value is counted and ignored
+ *   volume_max=<0-100>       the menu's level never goes above this, whatever
+ *                            volume=, --volume or the remembered level say
+ *                            (item 120; the build's own VOLUME_CEILING - 40 on
+ *                            JJP, 100 on Stern - is the most it can be)
+ *   key_left=<byte>.<bit>    JJP only (--input jjpio): where the LEFT flipper
+ *   key_right=<byte>.<bit>   / RIGHT flipper / START / Volume+ / Volume- sit
+ *   key_start=<byte>.<bit>   in the I/O board's 64-byte frame, active low.
+ *   key_plus=<byte>.<bit>    Absent = the places JJP's own installer reads
+ *   key_minus=<byte>.<bit>   (1.0, 1.2, 3.0) and the device table's volume
+ *                            pair (1.5, 1.6); a value that is not
+ *                            <0-63>.<0-7> is warned about and ignored.  A
+ *                            comma and a second <byte>.<bit> is the same
+ *                            button in a second place - the GNR's lockdown-
+ *                            bar Action button beside START is
+ *                            key_start=3.0,3.4 (David, 2026-09-14).  A Stern
+ *                            card ignores them.
  *
  * A GROUP IS NEVER FATAL.  A member index naming no image line is dropped, a
  * group left with no member is dropped, an image named by two groups belongs
@@ -190,10 +206,13 @@ struct conf {
     int mv_key_set;                /* ...(1 when a valid one was given)... */
     int mv_default;                /* ...and the title's factory level (-1 when absent) */
     int mixer_volume;  /* mixer_volume= 0..63 (-1 when absent = leave the mixer alone) */
+    int volume_max;    /* volume_max= 0..100 (-1 when absent = the build's ceiling) */
     char theme[CONF_STR];          /* theme= ("" when absent = the default) */
     unsigned color[TH_N];          /* color_<role>= overrides... */
     unsigned char color_set[TH_N]; /* ...and which roles the conf set */
     int bad_colors;    /* color_ keys with an unknown role or a value that is not RRGGBB: ignored, counted */
+    int jjp_byte[5], jjp_bit[5];   /* key_left/right/start/plus/minus= (byte -1 when absent) */
+    int jjp_byte2[5], jjp_bit2[5]; /* ...and the second position after the comma (byte -1 = none) */
 };
 
 /* 0 ok (c->n >= 1), -1 error with a message in err. */
@@ -238,5 +257,12 @@ int conf_card_roll(const struct conf *c, int k);
 
 /* The choice file: "<index>\n", written atomically (tmp + rename). 0 ok. */
 int conf_write_choice(const char *path, int idx);
+
+/* THE LEVEL THE FRONT VOLUME BUTTONS SET (JJP, item 120): one line
+ * "<0-100>\n" on perm beside the last-choice file, written atomically.
+ * Read: the level, or -1 when the path is empty, the file is missing or it
+ * holds anything but a number 0-100.  Write: 0 ok, -1 with errno. */
+int conf_read_volume(const char *path);
+int conf_write_volume(const char *path, int volume);
 
 #endif

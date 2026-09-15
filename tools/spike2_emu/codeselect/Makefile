@@ -1,22 +1,106 @@
-# Makefile - codeselect, an ARM executable for the Spike 2 card rootfs
-# (glibc 2.21, kernel 3.14.28), built with Ubuntu's arm-linux-gnueabihf-gcc.
+# Makefile - codeselect, the boot-time code selector, for two machines:
 #
-# The card rootfs copy ($(ROOT)) is used as the sysroot BY HAND: the cross
-# gcc searches its own tooldir /usr/arm-linux-gnueabihf/{include,lib}
-# (glibc 2.39) AHEAD of --sysroot, so --sysroot alone silently produces a
-# GLIBC_2.34 binary that the card's loader refuses. -nostdinc/-nostdlib plus
-# explicit paths (recipe D of read_build.md) is the only order that cannot
-# drift; the -U/-fno-* flags are load-bearing, keep them.
+#   make [PLATFORM=stern]   the Spike 2 card: an ARM executable for the card
+#                           rootfs (glibc 2.21, kernel 3.14.28), built with
+#                           Ubuntu's arm-linux-gnueabihf-gcc against $(ROOT)
+#   make PLATFORM=jjp       a JJP machine (item 114): x86-64 for the card's
+#                           Ubuntu 21.10 rootfs (glibc 2.34), built NATIVELY on
+#                           the WSL host, as $(BUILD)/jjpselect.  egl_x11.c,
+#                           input_jjpio.c and stubs_jjp.c stand in for the Stern
+#                           hardware files; the menu sources are the same copy.
+#                           JJPROOT=<mounted card image root> links against the
+#                           card's own libraries and proves every symbol.
 #
-#   make [BUILD=dir]           build $(BUILD)/codeselect
+# THE STERN BUILD.  The card rootfs copy ($(ROOT)) is used as the sysroot BY
+# HAND: the cross gcc searches its own tooldir /usr/arm-linux-gnueabihf/
+# {include,lib} (glibc 2.39) AHEAD of --sysroot, so --sysroot alone silently
+# produces a GLIBC_2.34 binary that the card's loader refuses. -nostdinc/
+# -nostdlib plus explicit paths (recipe D of read_build.md) is the only order
+# that cannot drift; the -U/-fno-* flags are load-bearing, keep them.
+#
+# THE JJP BUILD has the same trap the other way round: the host's glibc 2.39
+# headers redirect strtol/sscanf to __isoc23_* symbols the card's 2.34 lacks
+# (tools/jjp_emu/build.sh met it first).  jjp_glibc.h, force-included, turns
+# the redirect off; test/check_elf_jjp.sh proves it.
+#
+#   make [BUILD=dir]           build $(BUILD)/codeselect  (jjp: $(BUILD)/jjpselect)
 #   make check                 readelf ceiling + headless render + padsw test
-#                              + select.sh syntax/lookup (runs under qemu-arm-static)
-#   make check-hw              fakebus.py node-bus test (pty, no hardware)
-#   make install DESTDIR=dir   install into $(DESTDIR)/usr/local/codeselect
+#                              + select.sh syntax/lookup (stern: under qemu-arm-static;
+#                              jjp: natively, plus the jjpio pty test)
+#   make check-hw              fakebus.py node-bus test (pty, no hardware; stern)
+#   make install DESTDIR=dir   install into $(DESTDIR)$(PREFIX)
 .RECIPEPREFIX := >
+PLATFORM ?= stern
+ifeq ($(PLATFORM),jjp)
+BUILD    ?= build-jjp
+else
+BUILD    ?= build
+endif
 ROOT     ?= /home/david/spike2root
+JJPROOT  ?=
 CROSS    ?= arm-linux-gnueabihf-
+PYTHON   ?= python3
+DESTDIR  ?=
+DEJAVU   ?= /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+TABLES   ?= $(ROOT)/dump/tables/turtles_pro/switch_list.txt
+
+ifeq ($(PLATFORM),jjp)
+# ---- JJP: native x86-64, the host gcc, the card's paths baked in ----
+CC        = gcc
+CROSS     =
+BINNAME   = jjpselect
+PREFIX   ?= /jjpe/gen1/padselect
+# no emulator: the test drivers' "$(QEMU) -L $(ROOT) BIN" becomes "BIN"
+QEMU      = $(CURDIR)/test/native.sh
+export QEMU
+CRTBEGIN := $(shell $(CC) -print-file-name=crtbegin.o)
+CRTEND   := $(shell $(CC) -print-file-name=crtend.o)
+CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
+            -include jjp_glibc.h \
+            -DDEF_CONF='"/jjpe/gen1/padselect/images.conf"' \
+            -DDEF_OUT='"/jjpe/temp/padselect.choice"' \
+            -DDEF_LAST='"/jjpe/perm/padselect.last"' \
+            -DDEF_FONT='"/jjpe/gen1/padselect/font.ttf"' \
+            -DDEF_MEDIA='"/jjpe/gen1/padselect/media"' \
+            -DDEF_VOLFILE='"/jjpe/perm/padselect.volume"' \
+            -DDEF_VOLUME=20 -DVOLUME_CEILING=40 \
+            -DALSA_LATENCY_US=60000 -DALSA_LEAD_MS=60 -DALSA_START_PERIODS=1 -DALSA_REOPEN_ON_XRUN=1 \
+            -DAUDIO_PULSE=1 \
+            -DCARD_FONT='"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"' \
+            -I$(BUILD) $(EXTRA_CFLAGS)
+# THE MENU'S SOUND ON A JJP MACHINE (item 120).  JJP keeps its amplifier chain
+# at full and turns only the game's own stream down, so the menu's software
+# gain IS the volume the speakers get: a quiet default (20), a ceiling nothing
+# can pass (40), and the level the front Volume+/- buttons set remembered on
+# perm.  And a 60 ms ALSA buffer instead of the Stern card's 500 ms, which put
+# every move sound half a second behind the press.
+# libEGL/libGLESv2 are NOT linked: egl_x11.c dlopens them, so a box without
+# Mesa (and the WSL host, which has no libGLESv2) still runs the menu.
+ifneq ($(JJPROOT),)
+# the card's own libraries: every symbol version pinned to what it ships
+JJPLIB    = $(JJPROOT)/usr/lib/x86_64-linux-gnu
+LDPRE     = -nostdlib -nostartfiles $(shell $(CC) -print-file-name=crt1.o) $(shell $(CC) -print-file-name=crti.o) $(CRTBEGIN)
+LDPOST    = $(CRTEND) $(shell $(CC) -print-file-name=crtn.o) -L$(JJPLIB) -Wl,-rpath-link,$(JJPLIB) \
+            -Wl,-rpath-link,$(JJPLIB)/pulseaudio \
+            -l:libX11.so.6 -l:libasound.so.2 -l:libpulse-simple.so.0 -l:libpulse.so.0 \
+            -l:libpthread.so.0 -l:libdl.so.2 -l:libm.so.6 \
+            -l:libc.so.6 $(shell $(CC) -print-file-name=libc_nonshared.a) -l:libgcc_s.so.1 -lgcc
+else
+# the host's runtime libraries by soname (no -dev packages needed)
+LDPRE     =
+LDPOST    = -L/usr/lib/x86_64-linux-gnu -Wl,-rpath-link,/usr/lib/x86_64-linux-gnu/pulseaudio -l:libX11.so.6 -l:libasound.so.2 -l:libpulse-simple.so.0 -l:libpulse.so.0 -lpthread -ldl -lm
+endif
+GLLIBS    =
+AUDLIBS   =
+LIBC      =
+SRCS = codeselect.c conf.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c
+HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h jjp_glibc.h $(BUILD)/theme_table.h
+else
+# ---- Stern: the ARM cross build against the card rootfs ----
 CC        = $(CROSS)gcc
+BINNAME   = codeselect
+PREFIX   ?= /usr/local/codeselect
 # QEMU reaches the test scripts through the ENVIRONMENT, never their argv:
 # the rig's teardown (killgame.sh, watch.sh) does pkill -9 -f 'arm-binfmt|qemu-arm',
 # and `bash test/headless.sh qemu-arm-static ...` matched it - a run torn down
@@ -24,12 +108,6 @@ CC        = $(CROSS)gcc
 # command line matches now.
 QEMU     ?= qemu-arm-static
 export QEMU
-PYTHON   ?= python3
-BUILD    ?= build
-DESTDIR  ?=
-PREFIX   ?= /usr/local/codeselect
-DEJAVU   ?= /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
-TABLES   ?= $(ROOT)/dump/tables/turtles_pro/switch_list.txt
 GCCINC   := $(shell $(CC) -print-file-name=include)
 CRTBEGIN := $(shell $(CC) -print-file-name=crtbegin.o)
 CRTEND   := $(shell $(CC) -print-file-name=crtend.o)
@@ -54,6 +132,11 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 # the rootfs alsa-lib 1.0.28 (GLIBC_2.4 only; its libdl/libpthread/librt are
 # in the rootfs). Hand prototypes in audio_alsa.c: no headers on the box.
 AUDLIBS   = -l:libasound.so.2
+# input_jjpio.c is plain POSIX and rides along: codeselect.c dispatches every
+# backend by name, and on a Stern card `--input jjpio` finds no /dev/jjpio
+SRCS = codeselect.c conf.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
+HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
+endif
 
 # THE PAST-32 BINARY (item 105).  The animation tick used to mark the cards
 # that moved in an `unsigned` bitmask (`1u << i`), which is undefined from
@@ -66,12 +149,10 @@ AUDLIBS   = -l:libasound.so.2
 # Built by `make check`, never installed, never written to a card.
 CAP_N    ?= 40
 CAPBUILD  = $(BUILD)-cap$(CAP_N)
-CAPBIN    = $(CAPBUILD)/codeselect
+CAPBIN    = $(CAPBUILD)/$(BINNAME)
 
-SRCS = codeselect.c conf.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
-HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
 OBJS = $(SRCS:%.c=$(BUILD)/%.o)
-BIN  = $(BUILD)/codeselect
+BIN  = $(BUILD)/$(BINNAME)
 
 all: $(BIN)
 
@@ -97,8 +178,31 @@ $(BIN): $(OBJS)
 
 # a recursive build of the same sources: only BUILD and the cap differ
 capbin:
-> $(MAKE) BUILD="$(CAPBUILD)" EXTRA_CFLAGS=-DCONF_MAX_CARDS=$(CAP_N) "$(CAPBIN)"
+> $(MAKE) PLATFORM=$(PLATFORM) JJPROOT="$(JJPROOT)" BUILD="$(CAPBUILD)" EXTRA_CFLAGS=-DCONF_MAX_CARDS=$(CAP_N) "$(CAPBIN)"
 
+ifeq ($(PLATFORM),jjp)
+check: $(BIN) capbin
+> bash test/check_elf_jjp.sh "$(BIN)" "$(JJPROOT)"
+> bash test/check_elf_jjp_selftest.sh "$(BUILD)/t"
+> CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> $(PYTHON) test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
+> $(PYTHON) test/jjpio_test.py "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> bash -n padselect.sh && bash test/padselect_sh_test.sh
+> @echo "check: OK (jjp)"
+
+check-hw:
+> @echo "check-hw: the node-bus test is Stern's; the JJP board test is part of make check"
+
+# the hook lives with JJP's own scripts, where rungame.sh looks for it
+HOOKDIR  ?= /jjpe/gen1/scripts
+install: $(BIN)
+> install -d "$(DESTDIR)$(PREFIX)" "$(DESTDIR)$(HOOKDIR)"
+> install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/jjpselect"
+> install -m 755 padselect.sh "$(DESTDIR)$(HOOKDIR)/padselect.sh"
+> install -m 644 images.conf.example "$(DESTDIR)$(PREFIX)/images.conf.example"
+> if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the card's DejaVuSans-Bold.ttf will be used"; fi
+> if [ -d media ]; then install -d "$(DESTDIR)$(PREFIX)/media"; for f in media/*; do if [ -f "$$f" ]; then install -m 644 "$$f" "$(DESTDIR)$(PREFIX)/media/"; fi; done; fi
+else
 check: $(BIN) capbin
 > bash test/check_elf.sh "$(CROSS)" "$(BIN)"
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
@@ -118,6 +222,7 @@ install: $(BIN)
 > install -m 644 images.conf.example "$(DESTDIR)$(PREFIX)/images.conf.example"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the card's VeraMono.ttf will be used"; fi
 > if [ -d media ]; then install -d "$(DESTDIR)$(PREFIX)/media"; for f in media/*; do if [ -f "$$f" ]; then install -m 644 "$$f" "$(DESTDIR)$(PREFIX)/media/"; fi; done; fi
+endif
 
 clean:
 > rm -rf "$(BUILD)" "$(CAPBUILD)"

@@ -46,6 +46,9 @@ struct audio_sink {
 struct audio_sink *audio_fifo_open(const char *path, const char *fmt_path);
 /* NULL = no ALSA on this box (snd_pcm_open failed); the reason in err */
 struct audio_sink *audio_alsa_open(char *err, int errlen);
+/* a JJP machine: PulseAudio through libpulse-simple (audio_pulse.c, the JJP
+ * build only - AUDIO_PULSE); NULL with the reason when no server answers */
+struct audio_sink *audio_pulse_open(char *err, int errlen);
 /* the game's codec curve on selem 'PCM' of ctl backbox + cabinet; 0 ok */
 int  audio_alsa_mixer(int v63);
 /* THE MACHINE'S OWN VOLUME as a software gain (0-100): the codec's
@@ -63,6 +66,9 @@ struct audio *audio_open(const char *mode, const char *fmt_path, int volume, con
 int  audio_active(const struct audio *a);            /* 1 when a sink or a dump is live */
 void audio_set_volume(struct audio *a, int volume);  /* the mix gain 0-100, after open */
 const char *audio_sink_name(const struct audio *a);  /* "alsa" | "fifo" | "dump" | "none" */
+/* "" while a sink plays or none was wanted (--audio none, a fifo that opened);
+ * else why the sink the mode ASKED for is missing - what the glass shows */
+const char *audio_missing(const struct audio *a);
 /* start a clip on a free voice; loop = restart at the end. Voice id or -1. */
 int  audio_play(struct audio *a, const struct audio_clip *c, int loop);
 void audio_stop(struct audio *a, int voice);         /* short fade, then free */

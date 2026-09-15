@@ -39,6 +39,7 @@ exactly the part that was learned the hard way.
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import threading
@@ -46,6 +47,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import _rig
+# The Volume / Mute knob is the other Emulate tabs' own: one control file for
+# every rig, so the level is the same whichever tab starts a game (item 118).
+from .emulate_tab import AUDIO_CTL_FILE, _load_audio_ctl, _write_audio_ctl
 from .widgets import _Tooltip
 
 #: The rig ships in the repo next to this package, so it survives a reboot and
@@ -88,6 +92,127 @@ def usbipd_path():
     from shutil import which
     return which("usbipd") or (USBIPD_FALLBACK
                                if os.path.isfile(USBIPD_FALLBACK) else None)
+
+
+def rdp_client_running():
+    """Is WSLg's window layer connected - an ``msrdc.exe`` on this desktop?
+
+    WSLg shows every Linux window through one RDP client process.  With it
+    gone the rig runs perfectly and NOTHING appears: the game draws into
+    Xephyr, Xephyr draws into an X server nobody is looking at, and the CPU
+    climbs while the desktop stays empty (David, 2026-09-13: "i don't see any
+    of the display windows ... i just hear my cpu go crazy" - the client had
+    been killed hours earlier to close a ghost window, and PulseAudio's RDP
+    sink went with it).  ``wsl --shutdown`` (the Fix stuck state button)
+    brings it back.  None when the question cannot be asked (not Windows,
+    no tasklist)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        out = subprocess.run(["tasklist.exe", "/FI", "IMAGENAME eq msrdc.exe", "/NH"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=20, creationflags=_rig.CREATE_FLAGS)
+    except Exception:                                      # noqa: BLE001
+        return None
+    return b"msrdc.exe" in out.stdout.lower()
+
+
+#: The titles the JJP rig's own windows carry on the Windows desktop: the
+#: nested display (display.sh: "JJP <Title> - emulated") and the switch matrix
+#: (jjpsw.py), each with the distro name WSLg appends ("... (Ubuntu)").
+_RIG_WINDOW_RE = re.compile(r"^JJP (?:.+ - emulated|switch matrix)(?: \(.*\))?$")
+
+
+def rig_ghosts(windows):
+    """The rig's windows WSLg is still showing, from ``[(hwnd, title, exe,
+    visible)]``: VISIBLE, one of the rig's titles, and owned by msrdc.exe.
+    Only asked right after a Stop that reported no display and no matrix
+    running, so nothing named here has a live program behind it."""
+    return [h for h, title, exe, visible in windows
+            if visible and (exe or "").lower() == "msrdc.exe"
+            and _RIG_WINDOW_RE.match(title or "")]
+
+
+def stop_left_nothing(text):
+    """Did stop.sh report the display AND the matrix gone?  Its last line reads
+    ``game=0 matrix=0 xephyr=0 cuse=0``; anything else leaves windows alone."""
+    return bool(re.search(r"\bmatrix=0\b", text or "")
+                and re.search(r"\bxephyr=0\b", text or ""))
+
+
+def _desktop_windows():
+    """``[(hwnd, title, exe, visible)]`` for every top-level window (Windows)."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    exe_of = {}
+
+    def exe(pid):
+        if pid not in exe_of:
+            name = ""
+            h = kernel32.OpenProcess(0x1000, False, pid)   # QUERY_LIMITED_INFORMATION
+            if h:
+                buf = ctypes.create_unicode_buffer(1024)
+                size = wintypes.DWORD(1024)
+                if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                    name = os.path.basename(buf.value)
+                kernel32.CloseHandle(h)
+            exe_of[pid] = name
+        return exe_of[pid]
+
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd, _lparam):
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n > 0:
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, buf, n + 1)
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            found.append((int(hwnd), buf.value, exe(pid.value),
+                          bool(user32.IsWindowVisible(hwnd))))
+        return True
+
+    user32.EnumWindows(each, 0)
+    return found
+
+
+def hide_rig_ghosts(windows=None, hide=None):
+    """Hide the windows a stopped rig left on the desktop; how many.
+
+    WSLg sometimes keeps the frame of a Linux window whose program has exited:
+    the game display and the switch matrix stayed on David's desktop after a
+    Stop with nothing running behind them (2026-09-13: "the windows are hanging
+    forever").  A close request does nothing to such a frame - measured, both
+    ignored WM_CLOSE - and ending msrdc.exe, the process that holds it, takes
+    every Linux window and PulseAudio down with it.  Hiding is the one safe
+    thing; the frames go for good at the next WSL restart."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        hwnds = rig_ghosts(_desktop_windows() if windows is None else windows)
+        if hide is None:
+            import ctypes
+            user32 = ctypes.WinDLL("user32")
+
+            def hide(h):
+                user32.ShowWindowAsync(ctypes.c_void_p(h), 0)   # SW_HIDE
+        for h in hwnds:
+            hide(h)
+        return len(hwnds)
+    except Exception:                                      # noqa: BLE001
+        return 0
 
 
 def attach_dongle_cmd():
@@ -218,14 +343,33 @@ class JJPEmulatePanel:
     #: quickly instead of showing "Checking…" for ten seconds.
     POLL_FIRST_MS = 700
 
+    #: The launch's section headers (watch.sh prints one per step) -> the
+    #: footer ladder's slot, as MainWindow.set_emulate_progress names them:
+    #: copy = the first chip (Restore image), boot = the second, techalerts =
+    #: the third (Game: the game, or the multi-boot menu before it), run =
+    #: Ready.  Item 118, David 2026-09-13: the JJP tab showed Stern's ladder
+    #: and never moved it.
+    _FOOTER_STEPS = (("== mount image ==", "copy", 0, "Restoring the image…"),
+                     ("== jail ==", "boot", None, "Booting: the jail…"),
+                     ("== dongle ==", "boot", None, "Booting: the security key…"),
+                     ("== audio ==", "boot", None, "Booting: audio…"),
+                     ("== boards ==", "boot", None, "Booting: the boards…"),
+                     ("== display ==", "boot", None, "Booting: the display…"),
+                     ("== game", "techalerts", None, "Starting the game…"))
+    #: mount.sh's restore progress: "  sda3: 40%".
+    _RESTORE_PCT = re.compile(r"^\s*(sda\d+): (\d+)%$")
+
     def __init__(self, parent, log=None, iso_var=None, theme_fn=None,
-                 badge_fn=None, resize_fn=None):
+                 badge_fn=None, resize_fn=None, footer_cb=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
         self._iso_var = iso_var
         self._theme_fn = theme_fn or (lambda: "dark")
         self._badge_fn = badge_fn
         self._resize_fn = resize_fn or (lambda: None)
+        #: MainWindow.set_emulate_progress for THIS tab, injected like the
+        #: log; None on a panel built alone (every test).
+        self._footer_cb = footer_cb
 
         self._poll_job = None
         self._poll_busy = False
@@ -269,8 +413,66 @@ class JJPEmulatePanel:
         except (tk.TclError, RuntimeError):
             pass
 
+    def _on_volume_change(self, *_args):
+        """Volume / Mute moved: write the live control file the rig follows.
+        ``*_args`` because ``ttk.Scale`` calls back with its value and the
+        Checkbutton with nothing - the variables are already current."""
+        gain = max(0.0, min(1.0, self._volume_var.get() / 100.0))
+        _write_audio_ctl(gain, bool(self._mute_var.get()))
+
+    def _footer(self, kind, pct=None, text=""):
+        """Move the footer's ladder, from ANY thread (the launch streams
+        from a worker; the poll applies on the main loop).  Nothing on a
+        panel built alone."""
+        cb = self._footer_cb
+        if cb is None:
+            return
+
+        def go():
+            try:
+                cb(kind, pct, text)
+            except Exception:                              # noqa: BLE001
+                pass
+        try:
+            self._timer().after(0, go)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _footer_line(self, line):
+        """One streamed launch line -> the ladder: watch.sh's step headers
+        name the slot, mount.sh's ``sdaN: 40%`` lines fill the restore's
+        bar."""
+        for head, kind, pct, text in self._FOOTER_STEPS:
+            if line.startswith(head):
+                self._footer(kind, pct, text)
+                return
+        m = self._RESTORE_PCT.match(line)
+        if m:
+            self._footer("copy", int(m.group(2)),
+                         "Restoring the image… %s %s%%" % (m.group(1), m.group(2)))
+
     def iso_path(self):
         return (self._iso_var.get() if self._iso_var is not None else "").strip()
+
+    def launch_iso(self, path):
+        """Start the rig on *path* - the Multi-boot tab's 'Run in emulator'
+        (item 118), handed a multi-boot install ISO it just built.  Exactly
+        the Start button's launch: the rig itself shows the boot menu when the
+        image carries one (run_game.sh asks the image; JJP_SELECT unset), so
+        nothing here has to know the ISO is a multi-boot one.  Refused, in a
+        log line, while a start or stop is already in flight."""
+        path = (path or "").strip()
+        if not path:
+            return False
+        if self._busy:
+            self._log("JJP: a start or stop is already running - wait for it, "
+                      "then start %s." % os.path.basename(path))
+            return False
+        if self._iso_var is None:
+            self._iso_var = tk.StringVar()
+        self._iso_var.set(path)
+        self._start_async()
+        return True
 
     # ------------------------------------------------------------------
     # construction
@@ -324,6 +526,33 @@ class JJPEmulatePanel:
                  "board devices. Closes ALL WSL sessions and takes ~15s; your "
                  "ISO and settings are untouched.",
                  self._theme_fn)
+
+        # The volume trio, the same as the Spike 2 and Spike 1 tabs' rows and
+        # the same control file.  It is this PC's level for the emulated game
+        # and its boot menu, not the machine's own volume adjustment, and it
+        # is LIVE: tools/jjp_emu/jjpvol.py follows the file while a game runs.
+        vol0, mute0 = _load_audio_ctl()
+        self._volume_var = tk.DoubleVar(value=vol0 * 100)
+        self._mute_var = tk.BooleanVar(value=mute0)
+        ttk.Label(ctl, text="Volume:").pack(side=tk.LEFT, padx=(16, 0))
+        self._vol_scale = ttk.Scale(ctl, from_=0, to=100, length=110,
+                                    orient=tk.HORIZONTAL,
+                                    variable=self._volume_var,
+                                    command=self._on_volume_change)
+        self._vol_scale.pack(side=tk.LEFT, padx=(4, 0))
+        self._mute_chk = ttk.Checkbutton(ctl, text="Mute",
+                                         variable=self._mute_var,
+                                         command=self._on_volume_change)
+        self._mute_chk.pack(side=tk.LEFT, padx=(6, 0))
+        for w in (self._vol_scale, self._mute_chk):
+            _Tooltip(w,
+                     "This PC's volume for the emulated game and its boot "
+                     "menu - not the machine's own volume setting. It changes "
+                     "a running game at once, and it is the same level as the "
+                     "other Emulate tabs.",
+                     self._theme_fn)
+        # Seed the file now, so a first Start plays at what the slider shows.
+        self._on_volume_change()
 
         # --- state headline ----------------------------------------------
         self._state_lbl = ttk.Label(outer, text="Checking…",
@@ -436,12 +665,24 @@ class JJPEmulatePanel:
                 # the one failure worth pulling into the headline (the key IS
                 # plugged in, so "No security key" would mislead) and it is
                 # caught the instant "WRONG KEY" is printed.
+                # PAD_AUDIO_CTL: the Volume / Mute file audio.sh hands to
+                # jjpvol.py, so the knob reaches the running game.
                 rc, saw_wrong_key = self._run_streaming(
-                    rig_cmd_root("watch.sh", *args), timeout=1800)
+                    rig_cmd_root("watch.sh", *args,
+                                 env=["PAD_AUDIO_CTL=" + AUDIO_CTL_FILE]),
+                    timeout=1800)
                 if saw_wrong_key or rc == 7:
                     self._mark_wrong_key()
                 elif rc not in (0, None):
                     self._log("JJP: start failed (exit %d)." % rc)
+                elif rdp_client_running() is False:
+                    # the rig is up and nothing can show it (see
+                    # rdp_client_running) - say so, and name the way out
+                    self._log("JJP: WSLg's window layer is not running (no "
+                              "msrdc.exe on this desktop), so the game's "
+                              "windows cannot appear and sound has nowhere to "
+                              "go. Press 'Fix stuck state' (it restarts WSL) "
+                              "and Start again.")
             except Exception as exc:                       # noqa: BLE001
                 self._log("JJP: start failed: %s" % exc)
             finally:
@@ -492,6 +733,7 @@ class JJPEmulatePanel:
                 if not line:
                     continue
                 self._log("JJP: " + line)
+                self._footer_line(line)
                 verdict = key_failure(line)
                 if verdict and not saw_wrong["v"]:
                     saw_wrong["v"] = True
@@ -682,7 +924,20 @@ class JJPEmulatePanel:
                     rig_cmd_root("stop.sh"),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     timeout=180, creationflags=_rig.CREATE_FLAGS)
-                self._log("JJP: " + out.stdout.decode("utf-8", "replace").strip())
+                text = out.stdout.decode("utf-8", "replace").strip()
+                self._log("JJP: " + text)
+                # A clean stop can still leave frames on the desktop (see
+                # hide_rig_ghosts).  Only when the rig said the display and
+                # the matrix are gone, and after a moment for WSLg to close
+                # the windows that ARE closing.
+                if stop_left_nothing(text):
+                    import time as _time
+                    _time.sleep(1.0)
+                    n = hide_rig_ghosts()
+                    if n:
+                        self._log("JJP: hid %d window(s) the stopped rig left on "
+                                  "the desktop - WSLg kept their frames after "
+                                  "the programs had exited." % n)
             except Exception as exc:                       # noqa: BLE001
                 self._log("JJP: stop failed: %s" % exc)
             finally:
@@ -888,6 +1143,15 @@ class JJPEmulatePanel:
             self._hint_lbl.configure(text=hint)
             if not self._busy:
                 self._go_btn.configure(text="Stop" if self._last_up else "Start")
+                # the footer's ladder follows the rig once no launch is in
+                # flight: a game up is Ready, the boot menu (a multi-boot
+                # image, item 117) is the Game slot, nothing running is idle
+                if self._last_up:
+                    self._footer("run", None, "Game running")
+                elif int(info.get("selector_procs") or 0) > 0:
+                    self._footer("techalerts", None, "Boot menu showing…")
+                else:
+                    self._footer("idle")
 
 
             def yn(k):

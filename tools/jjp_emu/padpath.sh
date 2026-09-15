@@ -54,6 +54,18 @@ fi
 : "${JJP_BOOTP:=$JJP_BASE/boot}"       # sda2 = kernel/initrd
 : "${JJP_PERM:=$JJP_BASE/perm}"        # sda4 = persistent (scores/video)
 
+# Root B of a MULTI-BOOT install ISO (items 116/117): image 1's own root, restored
+# from the ISO's sda5 pieces.  Mounted read-only like the others; jail.sh puts a
+# tmpfs of its own over it at JJP_MULTI_B inside the jail, because root B is rw on
+# the machine and the hook chowns and links inside it.
+: "${JJP_ROOTB_RAW:=$JJP_BASE/sda5.raw}"
+: "${JJP_ROOTB:=$JJP_BASE/rootb}"
+: "${JJP_OVLB:=/var/tmp/jjp_ovlb}"
+: "${JJP_MULTI_B:=/jjpe/multi/b}"     # padselect.sh's MULTI: it looks here before /dev/disk/by-uuid
+# The menu switch, the same three-way as the Spike 2 rig's PAD_SELECT: unset =
+# ask the image (the hook runs when root A carries it), 1 = insist on it, 0 = skip.
+: "${JJP_SELECT:=}"
+
 # The writable jail the game actually runs in.  overlayfs: the image is the
 # read-only lower, a tmpfs is the upper, so a run can NEVER modify the image.
 : "${JJP_JAIL:=/var/tmp/jjp_run}"
@@ -74,6 +86,17 @@ jjp_title() {
         [ -x "$d/game" ] && basename "$d" && return 0
     done
     printf '%s\n' "$JJP_GAME"
+}
+
+# Does the mounted root A carry the boot menu - is this a multi-boot install ISO?
+jjp_multiboot() {
+    [ -x "$JJP_ROOT$JJPEDIR/scripts/padselect.sh" ] && [ -r "$JJP_ROOT$JJPEDIR/padselect/images.conf" ]
+}
+
+# How many selectors are RUNNING.  The menu is a live rig too: a run sits in it
+# for up to the conf's timeout before a single game process exists.
+jjp_select_count() {
+    ps -eo stat,comm 2>/dev/null | awk '$2=="jjpselect" && $1 !~ /Z/ { n++ } END { print n+0 }'
 }
 
 # How many game processes are actually RUNNING.

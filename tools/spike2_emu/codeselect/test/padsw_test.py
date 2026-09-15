@@ -316,6 +316,45 @@ def main():
     print("padsw_test: OK (action id %d: right -> highlight 1, action -> chose 1, %.1f s, exit 0)"
           % (action, dt))
 
+    # --- PLUS still MOVES THE HIGHLIGHT off a JJP cabinet (item 120) ---
+    # On --input jjpio PLUS/MINUS are the cabinet's Volume+/- buttons; on every
+    # other backend - Stern's service Plus/Minus - they must stay what they
+    # were: a second RIGHT/LEFT.  The id is the one this run resolved.
+    m = re.search(r"padsw: ids from [^:]*: .*\bplus (-?\d+)", err)
+    plus = int(m.group(1)) if m else -1
+    if plus < 0:
+        raise SystemExit("padsw_test: FAIL (plus) no plus id in the ids line\n%s" % err)
+    for p in (choice, last):
+        if os.path.exists(p):
+            os.unlink(p)
+    with open(padsw, "wb") as f:
+        f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
+    cmd = [qemu, "-L", root, binp, "--headless", os.path.join(t, "padsw_plus.ppm"), "--conf", conf,
+           "--input", "padsw", "--padsw", padsw, "--tables", tables, "--timeout", "8",
+           "--out", choice, "--last", last, "--log", os.path.join(t, "padsw_plus.log"),
+           "--font", font, "--no-invert", "--media", media, "--audio", "none", "--default", "0"]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    time.sleep(1.0)
+    set_held(padsw, plus, 1)
+    time.sleep(0.1)
+    set_held(padsw, plus, 0)
+    time.sleep(0.4)
+    set_held(padsw, start, 1)
+    try:
+        out, err = proc.communicate(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+        raise SystemExit("padsw_test: FAIL (plus) codeselect did not exit\n%s\n%s" % (out, err))
+    sys.stdout.write(out)
+    got = open(choice).read().strip() if os.path.exists(choice) else None
+    if proc.returncode != 0 or got != "1" or "[select] key: plus" not in out \
+            or "[select] volume:" in out:
+        sys.stderr.write(err)
+        raise SystemExit("padsw_test: FAIL (plus) exit %d, choice %r: PLUS on padsw must move the "
+                         "highlight (expected '1', 'key: plus', no volume step)" % (proc.returncode, got))
+    print("padsw_test: OK (plus id %d moves the highlight off a JJP cabinet: chose 1)" % plus)
+
     # --- how the action id is resolved when the wire is not in the list ---
     # Every switch list on this disk puts the button on node 1 bit 2, so these
     # two are synthetic. First: the wire is absent but the NAME is there, in a

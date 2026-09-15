@@ -6307,8 +6307,12 @@ These have each been violated at least once and each cost a run or a window:
       flipper brings the menu up. After 106, not before.
       — S3: friction. D3: one mechanism on two input paths, needs a run to see.
 
-- [ ] **114. `jjpselect`: the boot selector runs on a JJP rootfs (x86, X11,
-      the cabinet buttons off `/dev/jjpio`).** `S3 D3` *(Filed 2026-09-12 from
+- [x] **114. `jjpselect`: the boot selector runs on a JJP rootfs (x86, X11,
+      the cabinet buttons off `/dev/jjpio`).** `S3 D3` **DONE 2026-09-12 on
+      `item/114` (`cc2cd46`, `ca8fa4f`) — NOT released on its own: it is the
+      base of `feature/jjp-multiboot`, and the family's ONE `/finish` runs
+      after 119 closes (David, 2026-09-13; the rule is written in item 115).
+      See the DONE block at the end of this entry.** *(Filed 2026-09-12 from
       `plans/jjp_multiboot_plan.md`, the JJP multi-boot plan — gitignored like
       the handoff, so it is local to David's machine and these six entries
       carry everything a fresh checkout needs; David has a GNR key, wants an
@@ -6339,9 +6343,46 @@ These have each been violated at least once and each cost a run or a window:
       — S3: a feature; flashing one image at a time is the workaround. D3: a
       known-shape port on a seam that already exists (`struct input_ops`),
       but it needs rig runs to see it draw and take keys.
+      **DONE 2026-09-12 (`cc2cd46`, `ca8fa4f` on item/114).** `make
+      PLATFORM=jjp` builds the SAME menu sources natively as `jjpselect`:
+      `egl_x11.c` (EGL/GLESv2 dlopen'd, never linked - the WSL host has no
+      libGLESv2 - with an XPutImage fallback, `PAD_SELECT_NO_EGL=1` to force
+      it), `input_jjpio.c` (jjpcrt's loop: read 64, write 64 zeros; LEFT 1.0,
+      RIGHT 1.2, START 3.0, active low; `key_*=` conf overrides; `--learn`),
+      `stubs_jjp.c` (codec/input_hw no-ops), `jjp_glibc.h` (the __isoc23
+      redirects off), `STBTT_fmod` local (glibc 2.38's fmod bump).
+      `check_elf_jjp.sh` (GLIBC <= 2.34, NEEDED whitelist, every STRONG
+      undefined symbol resolving against the GNR card's own libs) and its
+      selftest (refuses a host binary needing fmod@GLIBC_2.38). `make check
+      PLATFORM=jjp JJPROOT=/var/tmp/jjp_GunsNRoses-v03.03/root
+      BUILD=/var/tmp/jjp114/build-jjp` green: headless (every Stern case,
+      natively), padsw (14), jjpio (pty board: right/left/right/start ->
+      chose 1, every byte written back zero, remap, no board -> default).
+      **Rig proof twice**, in the GNR 3.03 jail on Xephyr 1920x1080 with CUSE
+      /dev/jjpio100 and shm pokes at jjpcrt's bits: `egl: up after 1
+      attempt(s)` on the card's own Mesa 21.2.6 (188 loops/s), key:
+      right/left/right/start, chose 1, choice=1, exit 0, 1935 frames read /
+      1935 zero frames written; then the XPutImage path (62 loops/s after a
+      60 Hz tick - the first fallback run spun a core at 20 M loops/s).
+      Teardown to cuse 0 / Xephyr 0 / jail mounts 0 / alive 0 both times.
+      **Stern unchanged**: input_jjpio.c rides along in the ARM build; `make
+      check` + `check-hw PLATFORM=stern` green (GLIBC_2.17, headless, padsw,
+      15 select.sh cases, fakebus). DESIGN.md "The JJP build (item 114)".
+      **Traps paid:** BUILD must be a Linux path (DrvFs has no FIFOs);
+      WSL's Ubuntu instance stops when idle and takes the rig's loop mounts
+      with it (a `wsl -e sleep 36000` keeps it up); the image mount is
+      root's, so JJPROOT builds run as root; objdump -T's *UND* column
+      shifts with the flags (the awk in build.sh sees only WEAK symbols).
+      **Not in scope, by design:** sound on the machine (audio_alsa opens
+      `default`; silent is acceptable), a native-resolution canvas (the quad
+      scales 1360x768), the hook (item 115).
 
-- [ ] **115. `padselect.sh`: the JJP hook binds the chosen image's game
+- [x] **115. `padselect.sh`: the JJP hook binds the chosen image's game
       directory over the primary's, and refuses JJP's own updater.** `S3 D3`
+      **DONE 2026-09-13 on `item/115` (`0ff0d55`, `2d8e944`, plus the closing
+      commit) — NOT released on its own: merged into `feature/jjp-multiboot`,
+      and the family's ONE `/finish` runs after 119 closes. Emulator-proven;
+      see the DONE block at the end of this entry.**
       *(Plan §2.2 and §2.5. After 114, not before — its rig gates need the
       selector, though the shell tests do not.)*
       **THE JJP CHAIN'S BRANCH RULE (David, 2026-09-13: "not to release until
@@ -6386,9 +6427,65 @@ These have each been violated at least once and each cost a run or a window:
       `alive.sh` 0 after each.
       — S3: feature. D3: a small script, but the proof is four rig runs and a
       real rw slot mount.
+      **DONE 2026-09-13 (`0ff0d55`, `2d8e944` on item/115, from
+      feature/jjp-multiboot).** `tools/spike2_emu/codeselect/padselect.sh`
+      (dash) is EXECUTED by rungame.sh, not sourced — an `exit` in a sourced
+      file would take rungame.sh down and loop jjp.service — so the line is
+      `[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh`.
+      Order: <2 images → silent; mask updater.sh (bind of a tmpfs script that
+      writes rprogress/pcprogress and exits 1; `jjp_update=allow` lifts it);
+      run jjpselect; token `rootA` / `rootB` / `rootB:<sub>`; root B by
+      `FS_UUID_ROOTB` from the card's OWN fs_uuids.sh at /jjpe/multi/b unless
+      the tree is already there; bind; vf link + chown + chmod; every failure
+      unwinds to image 0 with one line in /jjpe/temp/padselect.log (rotated
+      past 1 MiB). `test/padselect_sh_test.sh`: 16 cases under dash AND sh,
+      green; in `make check PLATFORM=jjp`; `make install PLATFORM=jjp` puts
+      the hook under /jjpe/gen1/scripts. DESIGN.md "The hook: padselect.sh".
+      **Rig proof, three runs in the GNR 3.03 jail** (Xephyr 1920x1080, CUSE
+      /dev/jjpio100, shm pokes at jjpcrt's bits, the REAL hook run from a
+      chroot exactly as rungame.sh runs it, the Chaka ISO's sda3 restored to a
+      rw loop and bound at /jjpe/multi/b the way the rig will pre-mount root
+      B): (1) RIGHT + START → `chose 1 CHAKA'S LOTLJ`; `findmnt
+      /jjpe/gen1/GunsNRoses` = `/dev/loop5[/jjpe/gen1/GunsNRoses]` (the Chaka
+      loop, not the jail's overlay); `vf -> /jjpe/perm/vf`; `game` 0755 root;
+      edata 5398 files at 5.16 GB where stock is 4.45 GB (same file count in
+      both trees — the BYTES are the oracle); `updater.sh` =
+      `overlay[/run/padselect/updater.sh]`, running it → rc 1 and rprogress
+      `update refused: multi-boot install (PAD)`; hook rc 0, two log lines
+      ("updater masked", "image 1: rootB - … bound over … (root B was already
+      at /jjpe/multi/b)"). Unwound → stock edata back. (2) RIGHT + START with
+      the highlight remembered on 1 → wrapped to 0 → "image 0 chosen: the
+      primary, already in place", no bind. (3) START alone on the remembered
+      image 1 with NOTHING at /jjpe/multi/b and no by-uuid node → `no
+      /dev/disk/by-uuid/e1a1fecc-… (root B): booting image 0`, no bind, stock
+      edata, hook rc 0 — the R4 fallback with the real selector. Teardown to
+      cuse 0 / Xephyr 0 / jail mounts 0 / alive 0 after every run; the selector
+      wrote 18763 / 5711 / 5713 zero frames for as many read (no coil
+      driven). Scratch: rig115.sh, rig115b.sh, restore_chaka.sh, chaka_rw.sh.
+      **Traps paid:** the restore attached the Chaka loop READ-ONLY, so
+      `mount -o remount,rw` fails "write-protected" — detach and re-attach the
+      loop rw (chaka_rw.sh); the hook then chowns and links INSIDE the bound
+      tree, so the scratch Chaka restore now carries a `vf` symlink and
+      root:root ownership, exactly as root B will on the machine. `du -sb`
+      inside the jail (the card's coreutils) counts 315 directory inodes the
+      host's does not (+1290240 bytes) — compare file counts and gigabytes,
+      never exact bytes across the two. `--last` remembers the choice in
+      /jjpe/perm, so a second run's RIGHT wraps off 1 onto 0: script the
+      fallback run with START alone.
+      **Scope, honestly:** this proves the hook at the MOUNT level; "the game
+      boots the bound tree" (R2/R3 with the GNR key) is item 117's, because
+      the rig's run_game.sh does not call the hook yet. R1 (one image = stock)
+      is the `<2 images → exit 0` path, shell-tested (single); R6 is the
+      masked-updater check above. Left on the plan: a REAL `updater.sh` run
+      against a fake /mnt/usb delta lands with 117's unshare wiring.
 
-- [ ] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
-      ISO out.** `S3 D3` *(Plan §2.4. After 115, not before; lands with 117.
+- [x] **116. `mkjjpmulti.py`: two JJP install ISOs in, one multi-boot install
+      ISO out.** `S3 D3` **DONE 2026-09-13 on `item/116` (`6b60b1e`,
+      `b9173b7`, plus the closing commit) — NOT released on its own: merged
+      into `feature/jjp-multiboot`, and the family's ONE `/finish` runs after
+      119 closes. Proven at the ISO level on the real GNR pair (plan row R5);
+      booting it is 117. See the DONE block at the end of this entry.**
+      *(Plan §2.4. After 115, not before; lands with 117.
       Branch from and merge into `feature/jjp-multiboot` — the rule is in 115.)*
       Same CLI protocol as `mkmulticard.py` so the tab's parsers hold: `plan /
       build / inject / verify / inspect`, `[card] progress a/b p% what`,
@@ -6426,9 +6523,78 @@ These have each been violated at least once and each cost a run or a window:
       — S3: feature. D3: the largest desk item of the six, over proven
       pieces (partclone/xorriso/selectmedia), with `verify` and one rig boot
       as the run.
+      **DONE 2026-09-13 (`6b60b1e`, `b9173b7` on item/116, from
+      feature/jjp-multiboot).** `tools/jjp_emu/mkjjpmulti.py` (imports mkmulticard.py
+      for the shared pure parts: Refused/say/PROGRESS, media.json planning,
+      themes, the library-path refusal) with `plan / build / inject / verify /
+      inspect / media / selftest`. Root A = image 0's sda3 restored into the
+      rig's cache (`/var/tmp/jjp_<slug>/sda3.raw`, padpath's slug, `.part`
+      until complete), sparse-copied to the workdir, loop-mounted rw, staged
+      (`/jjpe/gen1/padselect/{jjpselect,font.ttf,images.conf,build.json,
+      media.json,media/}`, `scripts/padselect.sh`, ONE hook line after
+      runonce.sh - executed, not sourced), e2fsck -fy, `partclone.ext4 -c |
+      pigz --fast -b 1024 --rsyncable | split -b <the stock's piece size>`;
+      root B = image 1's sda3 pieces mapped in VERBATIM as `sda5.…`; the
+      stick's own installer unsquashed at build time and patched on exactly
+      two lines into `/jjp/pad_install.sh` (a header comment says so); both
+      cfgs get `ocs_live_run="bash /lib/live/mount/medium/jjp/pad_install.sh"`
+      - `bash` because ocs-live-run-menu evals the string, so neither a FAT
+      copy's exec bit nor a noexec medium can matter; `/jjp/padselect/` on
+      the ISO mirrors the staging so `inspect` needs no root and no restore;
+      xorriso `-indev/-outdev -boot_image any replay` (replay only when the
+      input has El Torito records - the selftest's synthetic ISOs have none).
+      The gate: version_info Name+Version, GAMENAME, game and fl.dat sha256 -
+      **the Chaka image PASSES it** (identical game + fl.dat, the retheme
+      forged its CRCs to the shipped list). `verify`: cfg lines, installer =
+      patch(own squashfs copy) byte for byte, every piece present + gunzip -t,
+      every file < 4 GiB (FAT32 stick), sda5 == ISO1's sda3 by sha, sda1/2/4
+      untouched, then root A restored to scratch and every staged file's sha
+      checked against build.json, the hook exactly once. 22 pure tests
+      (`tests/test_mkjjpmulti.py`, Windows) + the root selftest (two synthetic
+      ISOs: build -> inspect -> verify 22/22 -> inject -> verify --quick ->
+      the mismatch refusal -> --allow-version-mismatch) green in 53 s.
+      **Trap paid:** `os.sync()` after staging parked the process in D state
+      for good - under WSL2 a global sync flushes the virtiofs (FUSE) mounts
+      of the Windows drives (`fuse_sync_fs -> request_wait_answer`). Every
+      sync is now `syncfs` (`sync -f <mount>`); mkmulticard.py still has the
+      global one (loose end below).
+      **Scope, honestly:** the art seam is the plaintext
+      `miscfiles/graphics/JJP_logo_message.png` (1360x768) for `--art N=auto`
+      plus any still/video file; the game's fl.dat is ENCRYPTED on disk, so
+      "a PNG decrypted out of edata" and an attract webm need the plugin's
+      Extract output (the tab's job in 118), not this CLI. "The app's stick
+      flow writes it" is exercised in 118 as well; here `verify` proves the
+      FAT32 precondition.
+      **The real run (R5), 2026-09-13, scratch build116.sh under the rig
+      lock:** `media` (auto art = each image's JJP logo at 522x294, synthetic
+      click/chime, 445.6 KB) → `plan` (5.80 GB + 6.52 GB of pieces + 0.64 GB
+      overhead = 13.02 GB estimated, `stick: 16G`, both images GunsNRoses 03.03
+      with game `c4672be7…` and fl.dat `e92e8bcb…`, 8.81 / 9.52 GB used) →
+      `build` in **4 min 38 s** (the cached stock root copied, 11 files staged,
+      e2fsck rc 0, re-partcloned into 6 pieces / 5.81 GB, Chaka's 7 pieces
+      mapped as sda5, ISO written) → `/var/tmp/jjp116/GunsNRoses-v03.03.multi.iso`
+      **12.97 GB** → `inspect` / `--json` read it back (both images, sources,
+      shas, `installer_redirected: true`) → `verify --primary --extra` **PASS
+      33/33 in 5 min 54 s**: both cfg lines, the installer = patch(the ISO's own
+      squashfs copy) with an 11-line diff, mode 755, every piece present and
+      gunzip -t clean, every file under 4 GiB, sda5 byte-identical to Chaka's
+      sda3 (7 vs 7), sda1/2/4 untouched, split size 1000000000 kept, root A
+      restored: all 11 staged shas match build.json, the hook exactly once,
+      images.conf inside = the ISO's copy, the game sha = the record. The rig
+      lock released, alive 0. The Chaka restore now sits at the rig's slug
+      path (`/var/tmp/jjp_CHAKAs_LOTLJ_V1.0_GNR_LE_3.03/sda3.raw`, carrying the
+      `vf` link item 115's hook made - harmless), the stock one unchanged; the
+      ISO, `/var/tmp/jjp116/{sel,media,inspect.json}` wait for 117. The sync()
+      casualty (pid 24913, state D) stays until WSL restarts; it holds nothing.
+      README "Building a multi-boot install ISO (item 116)".
 
-- [ ] **117. The JJP rig boots a multi-boot install ISO and proves the
-      choice.** `S3 D3` *(Plan §2.8. After 115; 116 and this land together —
+- [x] **117. The JJP rig boots a multi-boot install ISO and proves the
+      choice.** `S3 D3` **DONE 2026-09-13 on `item/117` (`9ca367e`,
+      `5b7d768`, plus the closing commit) — NOT released on its own: merged
+      into `feature/jjp-multiboot`, and the family's ONE `/finish` runs after
+      119 closes. Emulator-proven WITH David's GNR key, both images (plan row
+      R3). See the DONE block at the end of this entry.**
+      *(Plan §2.8. After 115; 116 and this land together —
       the rig can start from a hand-staged `sda5.raw` before the builder
       exists. Branch from and merge into `feature/jjp-multiboot` — the rule
       is in 115.)* `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO
@@ -6450,9 +6616,79 @@ These have each been violated at least once and each cost a run or a window:
       JJP twin of `codeselect/DESIGN.md`), `alive.sh` 0 after.
       — S3: feature. D3: rig plumbing over known pieces, but the acceptance
       is a real two-image boot with the GNR key.
+      **DONE 2026-09-13 (`9ca367e`, `5b7d768` on item/117, from
+      feature/jjp-multiboot at 116's close, `868cbaa`).**
+      **Established (rig-proven, `tools/jjp_emu/MULTIBOOT.md` has both tables):**
+      `padpath.sh` gains `JJP_ROOTB_RAW`/`JJP_ROOTB`/`JJP_OVLB`/`JJP_MULTI_B`
+      (`/jjpe/multi/b`), `JJP_SELECT`, `jjp_multiboot()`, `jjp_select_count()`;
+      `mount.sh` restores EVERY `sdaN.ext4-ptcl-img` set an ISO carries (read
+      off the image dir, not a list) and mounts root B ro at `<base>/rootb`,
+      also on its "already mounted" path; `jail.sh` overlays root B (tmpfs
+      upper `/var/tmp/jjp_ovlb`) at `$JJP_JAIL/jjpe/multi/b`, the path the hook
+      checks first; `run_game.sh` runs the RUN under `unshare -m --propagation
+      private`, executes `$JJPEDIR/scripts/padselect.sh` at rungame.sh's point
+      (display up, before ./game, BEFORE the `cd $GAMEDIR` - a shell already
+      inside the directory keeps the old one under the bind), honours
+      `JJP_SELECT` (unset ask / 1 insist, exit 9 without a hook / 0 skip), logs
+      `[rig] game tree: <findmnt SOURCE,OPTIONS>` before ./game, counts a live
+      `jjpselect` as up, and `JJP_SELECT_LOG=1` hands the selector its own log;
+      `status.sh` adds `multiboot= rootb_mounted= selector_procs= choice=
+      bound= bound_lower=` (the bind asked INSIDE the run's namespace with
+      `nsenter -t <leader> -m findmnt`); `alive.sh` counts `jjpselect`;
+      `killgame.sh` kills it; `unjail.sh` takes root B's overlay down first.
+      **The run (no key):** `mount.sh` on the 12.97 GB multi ISO restored
+      sda3+sda2+sda4+sda5 in 2 min 28 s (`multiboot=1`); root A carries the
+      menu, root B Chaka's tree (edata 5.16 GB vs 4.45 GB); choose 1 → selector
+      `chose 1`, hook `image 1: rootB - … bound over … (root B was already at
+      /jjpe/multi/b)`, game log `[rig] game tree: overlay[…]
+      lowerdir=<base>/rootb,…`, `choice=1`; choose 0 → `image 0 chosen`, `no
+      bind: image 0`; `JJP_SELECT=0` → no menu, no bind; `JJP_SELECT=1` → the
+      menu ran; the updater masked every time; the game H0007'd in every run
+      (no Sentinel key attached: `usbipd list` shows four persisted keys, none
+      connected); teardown 0 mounts, alive 0. Two overlays read alike as
+      `overlay[/jjpe/gen1/GunsNRoses]`, so the OPTIONS' `lowerdir=` is the
+      oracle (on the machine it is `/dev/sda5[...]`, unambiguous).
+      **The run WITH the key (R3, the acceptance), 2026-09-13:** David plugged
+      the GNR key in, `usbipd attach --wsl --hardware-id 0529:0001`, `dongle.sh`
+      found it (`kernel=1-1`, `hasplmd ready after 1s`, `dongle_present=1`);
+      `watch.sh` muted (`PAD_AUDIO=0`, `audio.sh` now writes a null-device
+      `asound.conf` for that - `5b7d768`). Choose 1 (RIGHT, START) → selector
+      `chose 1 CHAKA'S LOTLJ`, hook bound root B's tree, `[rig] game tree:
+      overlay[…] lowerdir=<base>/rootb`, `status.sh` `choice=1
+      bound_lower=<base>/rootb game_procs=3` at 168 s up, no H0007, one exit-68
+      restart like every GNR run here, `grab.sh` of attract = Chaka's poster
+      wall behind a COMA MULTIBALL high-score card (99.9 % drawn). Choose 0
+      (START alone from a cleared `perm/padselect.last`) → `chose 0 GUNS N'
+      ROSES 3.03`, `image 0 chosen: the primary, already in place`, `no bind:
+      image 0`, `choice=0`, `bound_lower=` empty, `game_procs=3` at 535 s up,
+      `du -sb edata` inside the run's namespace 4,450,623,016 (stock; Chaka
+      5,157,432,132), attract = the stock playfield render (99.4 % drawn). Both
+      attracts carry `COIN DOOR IS OPEN` (the rig's idle cabinet frame; every
+      GNR run here). `killgame.sh` 3 → 0, `stop.sh --all`, alive 0. Captures
+      and driver output at `C:\tmp\jjp117\`.
+      **Traps paid:** a poke that lands before the menu listens is LOST - the
+      first attempt's first run recorded no choice; scripted runs now wait for
+      the selector log's `menu:` line (`JJP_SELECT_LOG=1`). The menu REMEMBERS
+      (`perm/padselect.last`): the with-key driver's second run started
+      highlighted on 1, so RIGHT, RIGHT wrapped back onto Chaka; clear the
+      memory or read the `menu:` line's `highlight N` before poking. And GNR's
+      game log has NO `Loaded N files (bytes)` line - the oracle this entry
+      named does not exist (the log is NetworkManager and sensor noise);
+      `bound_lower`, the hook log, the `[rig] game tree:` line, `du` of edata
+      in the run's namespace and `grab.sh` are the oracles that do.
+      Item 118 branched from THIS branch's tip (`item/117`), not from the
+      feature branch, because 118 needs this rig wiring; `feature/jjp-multiboot`
+      fast-forwarded to this close, and item/118 merged it in.
 
-- [ ] **118. The Multi-boot tab learns a second platform: JJP declares
-      `multiboot=True` and the tab stops hard-coding Stern.** `S3 D3` *(Plan
+- [x] **118. The Multi-boot tab learns a second platform: JJP declares
+      `multiboot=True` and the tab stops hard-coding Stern.** `S3 D3`
+      **DONE 2026-09-13 on `item/118` (`5cbbdaf` … `eb4570a`, plus the closing
+      commit) — NOT released on its own: merged into `feature/jjp-multiboot`,
+      and the family's ONE `/finish` runs after 119 closes. Emulator-proven:
+      the tab built and verified the GNR multi ISO, and David launched the
+      rig from the tab into its menu and drove it. The stick from the green
+      button moved to 119 (David). See the close note at the end of this
+      entry.** *(Plan
       §2.7. After 116 and 117, not before. Branch from and merge into
       `feature/jjp-multiboot` — the rule is in 115.)* A `MultibootBackend` object
       (Stern today, JJP added) holding everything the 2026-09-12 audit found
@@ -6475,12 +6711,245 @@ These have each been violated at least once and each cost a run or a window:
       launch the rig from the tab and see the menu.
       — S3: feature. D3: a refactor across a 12.8k-line tab plus the JJP
       wiring, with one app-driven build + launch as the run.
+      **DONE 2026-09-13 (item/118, branched from item/117's tip `9ca367e`
+      because it needed 117's rig wiring; it carries 117's close).**
+      **Established:** `gui/multiboot_backend.py` - a frozen `MultibootBackend`
+      per platform (`STERN`, `JJP`, `backend_for()`): the builder and media
+      tool, `--card`/`--iso`, image extensions and dialog filters, the output
+      suffix (`.multi.raw`/`.multi.iso`), every "SD card"/"USB stick" word
+      (path label, size label, flash frame/tick/paragraph, the green button
+      `Build / flash card…`/`Build / make stick…`, the empty-path sentence,
+      the status-check labels `Install ISO`/`Ready for the stick`), the size
+      table (JJP adds 64G), the plan's `fits USB <N>G stick size` and
+      `iso-size` regexes, `rootA/rootB` device tokens, the selector's home
+      (`/var/tmp/jjpselect`, `make install` layout) and a NATIVE preview
+      (jjpselect draws its own `--snapshot`, no qemu, the font beside it),
+      max 2 images, no groups/compact/machine-volume/update/bypass/extract/
+      reader, root steps {selector, prepare, build, verify, inject}.
+      `MultibootForm.platform` (default `stern`) picks it in every builder;
+      `MultibootPanel(platform=)` + `set_platform()` (called from
+      `apply_manufacturer` right after the tab gate) clears the form and
+      swaps the words and the Stern-only controls (`_apply_platform_words`,
+      also at the end of `build()`); `_pk()` passes `platform=` ONLY off
+      Stern, so every Stern call the tests stub keeps its old signature -
+      the 391-test Stern tab suite is green byte for byte (one test renamed:
+      multi-boot is Spike 2 AND JJP now). `plugins/jjp/manufacturer.py`
+      `multiboot=True`; `JJPEmulatePanel.launch_iso()` is 'Run in emulator'
+      for a JJP ISO (the rig shows the menu by itself); the existing flash
+      dialog already makes a FAT32 stick from an ISO for JJP, so `flash_fn`
+      is unchanged. `tools/jjp_emu/ensurejjpselect.sh` (root) builds
+      jjpselect against the ISO's mounted root and installs it in the card
+      layout, printing both the card's and the preview's ready lines.
+      mkjjpmulti: `plan` tolerates root-owned caches (the app's plan runs as
+      the user), the installer comes out of the squashfs by a LOOP MOUNT
+      when unsquashfs is absent, the logo's ISO mount is on the Linux side.
+      Tests: `tests/test_multiboot_jjp.py` (16 pure: argv of every step,
+      the media seams auto→logo / anim auto→none / sounds auto→synth, root
+      vs user steps, the native preview, the conf tokens, the plan rows and
+      the size strip, the two-image/no-group validation, form_from_inspect
+      on the real inspect JSON), `tests/test_multiboot_jjp_panel.py` (2 Tk:
+      a JJP panel's words and hidden controls; switching both ways clears
+      the form); gui smoke 143 green; jjp emulate tab 51 green.
+      **The proof, headless through the REAL tab code (scratch
+      tab118_build.py, a JJP `MultibootPanel` on an invisible root, the two
+      GNR ISOs added by `add_image`, the default output
+      `D:\Pinball\multi\GunsNRoses-v03.03.multi.iso`, then `_build_card`):**
+      selector step `ensurejjpselect.sh` built and installed jjpselect in
+      **17 s**; media (auto art = the JJP logo of each image, synth sounds,
+      445.6 KB); plan (`stick: 16G`); build **585 s** (12.97 GB written to
+      D:); verify **PASS 33/33** (15 min - gunzip and shas of 13 GB on the
+      Windows drive); "Card built and verified", every status check ok; the
+      whole run 1501 s. **The tab's tools run in the app's own distro
+      PAD-Runtime** (`runtime.wsl_head`), not the default Ubuntu: separate
+      /var/tmp, so the first tab build restored both roots again (4 + 4 min)
+      into ITS caches; PAD-Runtime v6 has partclone/xorriso/pigz/e2fsprogs/
+      make/gcc/libc6-dev/ffmpeg but no squashfs-tools (hence the loop mount)
+      and no PIL. Memory: reference_app_runs_tools_in_pad_runtime_distro.
+      **David's first look (2026-09-13, the app from this worktree, JJP,
+      Browse… to the built ISO):** the ISO loaded (2 images, the rows, the
+      16 GB strip) but the PREVIEW NEVER DREW and the caption said "the card
+      path is not a .raw in a folder that exists yet" - `_auto_render`'s
+      gate was hard-coded to Stern's `.raw`/`.img`, so a JJP `.iso` output
+      could never draw by itself. Fixed: the gate reads the backend's
+      `image_exts` and words the refusal with its `out_noun`/`out_ext`
+      (Stern's sentence unchanged). Proven through the real tab code: a
+      loaded ISO now renders in ~1 s - `ensurejjpselect.sh` finds the built
+      `/var/tmp/jjpselect` up to date (no mount), the card's own media is
+      drawn, `jjpselect --snapshot` writes the 1360x768 frame (SELECT GAME
+      CODE, both cards with the JJP logo art, the primary highlighted,
+      "booting GunsNRoses-v03.03 in 15 s"). The other Stern words that
+      showed on the JJP tab went with it: the add row ("Add the second ISO…"
+      instead of "Add image or random…"), the list tip (no RANDOM card, root
+      A/root B), the size strip's tip (a USB stick, the ISOs' pieces, FAT32)
+      - instance attributes swapped by `_apply_platform_words`, the Stern
+      class texts untouched - and the load warning "does not record which
+      .raw" says "install ISO" for a root-slot device. The `plan` on a
+      loaded card prints `game=? fl.dat=? used=?` (it runs as the user and
+      the restores are root's) - cosmetic, left alone.
+      **His Run in emulator (2026-09-13, from the tab, the key attached):**
+      worked end to end - the launch streamed into the Emulate JJP tab, the
+      rig restored the ISO from D: in the default distro, the menu came up
+      ~7.5 min after the click, the 15 s countdown booted image 0, the game
+      ran on the key (`game_procs=3`, `hasplmd=1`, `choice=0`, hook `image 0
+      chosen`). What he saw meanwhile: "it looks stuck?" - the Start button
+      on "Starting…" and the log on `sda3: restoring 6 chunk(s)` for minutes,
+      because `mount.sh` passed partclone `-N` and sent its output to
+      /dev/null - and in partclone 0.3.x **-N means USE the ncurses UI**, not
+      "no curses": the rig was drawing a full-screen UI into nowhere. Fixed:
+      text mode (`-f 1 -B`), the updates filtered to one `  sdaN: 10%` line
+      per ten percent (the tab streams them), each set's compressed size on
+      its "restoring" line, and a `piece sets in image:` line read off the
+      image dir (Clonezilla's `parts` lists the SOURCE machine's sda1-4 and
+      misled on a multi-boot ISO that carries sda5). The builder's
+      `restore_pieces` had the same `-N`: its log was curses escape codes, so
+      a refusal's tail said nothing; now `-f 5 -B`. Proven on the Pirates ISO
+      (3.4 GB) restored for real in the app's distro, and `restore_pieces` on
+      its sda2. Memory: reference_partclone_N_is_ncurses.
+      **His second Start (15:40): "i still can't get the emulator to start
+      it"** - the launch streamed every step, the menu came up, the countdown
+      chose 0, and the log ENDED at `[rig] game tree:` with the tab saying
+      Stopped. Reproduced on the rig as he left it: `./game` exits **255 the
+      instant it starts** when `allegro5.cfg` says `driver=pulseaudio` and
+      WSLg's PulseAudio is dead ("Connection refused" on
+      `/mnt/wslg/PulseServer`; the socket file stays, `pactl info` refuses from
+      the host too - it died some time after his 12:27 run, which had played
+      on the same config). Muted (null ALSA device, no allegro5.cfg) the same
+      launch starts and runs. Fixed three ways: `audio.sh` now ASKS the
+      server from inside the jail before telling Allegro to use it, and a
+      dead one means a muted run that starts, said in two log lines (sound
+      returns after `wsl --shutdown` restarts WSLg); `run_game.sh` logs
+      `[rig] game exit N - not a restart code, stopping` instead of exiting
+      silently; `status.sh` counts only LIVE games for rss/uptime (zombies
+      under WSL's relay process gave the tab "Uptime 249:28" with no game).
+      **And the footer ladder** said Copy card / Boot / Node boards / Ready on
+      the JJP tab and never moved ("node boards on a jjp screen which isn't a
+      thing"): `EMULATE_PHASES_JJP` = Restore image / Boot / Game / Ready,
+      the JJP panel takes `footer_cb` like the other two and drives it from
+      the streamed step headers (`== mount image ==` → Restore image with the
+      `sdaN: NN%` lines as its percent, jail/key/audio/boards/display → Boot,
+      `== game` → Game) and from the poll (game up → Ready, the boot menu up
+      → Game, nothing → idle).
+      **His third Start (16:17): "i don't see any of the display windows
+      ... i just hear my cpu go crazy"** - the launch was perfect (3 game
+      procs, matrix up) and NOTHING could show: WSLg's one RDP client
+      (`msrdc.exe`) had been killed in the morning to close a ghost window
+      (my doing), so every Linux window was invisible from then on and
+      PulseAudio's RDP sink went with it - the dead pulse above was the SAME
+      cause. His Fix stuck state (`wsl --shutdown`) at 16:20 brought both
+      back (pulse answers, a fresh msrdc). The tab now asks tasklist for
+      msrdc.exe after a good launch and, when there is none, says the
+      windows cannot appear and names Fix stuck state (`rdp_client_running`).
+      Memory: feedback_never_kill_msrdc. The CPU is the game on llvmpipe
+      (software GL), as in every run of this rig.
+      **His fourth look (after Fix stuck state): "the emulator did not hand
+      over control of the flipper buttons during the boot menu", "the virtual
+      playfield is not showing up", "missing volume controls on the jjp
+      emulate tab".** The switch matrix (the virtual playfield, and the only
+      place the flipper/Start keys live) opened only after the game step and
+      refused without a running game - on a multi-boot run the menu is up
+      with NO game, so it never opened (the earlier runs had only looked
+      right because zombie `game` processes passed its `pgrep -c -x game`).
+      Fixed: `watch.sh` opens the matrix BEFORE the game step on a
+      multi-boot image (`jjpsw_launch.sh --menu`) from this title's saved
+      tables (right for both images: same game binary), or - a first run with
+      none - a cabinet-only table of the three switches the menu reads (LEFT
+      b1.0, RIGHT b1.2, START b3.0; `jjpsw.py` then leaves the rest frame
+      alone); the post-game step spawns a detached `--await-game` that reads
+      the live tables once the game is up and reopens a cabinet-only matrix
+      onto them; `stop.sh` ends the waiter; the launcher counts live games
+      only. Volume: the JJP tab gets the other Emulate tabs' Volume / Mute
+      (same `audio_ctl.json`), hands it to `watch.sh` as `PAD_AUDIO_CTL`, and
+      `audio.sh` starts `tools/jjp_emu/jjpvol.py`, which holds every
+      PulseAudio stream of `game` / `jjpselect` at that level (pactl inside
+      the jail; cube root of the linear gain; mute at 0), live, until the jail
+      goes or `stop.sh` ends it. **Proven on the rig (muted, scratch
+      proof118menu.sh):** jjpvol on a live silent pacat stream set raw 32768
+      (50 %, gain 0.125) then Mute yes; audio.sh with the file started the
+      follower, stop.sh ended it; watch.sh on the multi ISO opened the matrix
+      in the "switch matrix (for the boot menu)" step (mode cached), xdotool
+      sent Right then 1 to the matrix window and the selector logged `key:
+      right`, `key: start`, `chose 1 CHAKAs LOTLJ`, the game came up on root
+      B (`bound_lower=…/rootb`) and the waiter refreshed the tables
+      (calibration ok); with no saved tables the matrix opened cabinet-only,
+      1 booted image 0, and once the game was up it was reopened onto the
+      game's own tables (297 switches, calibration ok, mode full); teardown
+      alive 0, matrix 0, follower 0, waiter 0. Tests: tests/test_jjpvol.py (8),
+      3 new in test_jjp_emulate_tab.py (62 total), GUI smoke 143. NOTE: the
+      shared audio_ctl.json on David's machine says Mute on at 49 %, so JJP
+      runs from the app start muted until he unticks it.
+      **His fifth look: "still not letting me use the left right arrows" -
+      then "that was the fix, i had to focus on the switch matrix window. i
+      should be able to focus either window".** The matrix keys are Tk
+      bindings on the matrix window; the game and the menu draw into the
+      nested Xephyr display, where a key pressed with the game window focused
+      went unheard. Fixed: the matrix starts `tools/jjp_emu/jjpkeys.py` (a
+      child process, ctypes over libX11, `--game-display :1` from
+      jjpsw_launch.sh) which takes a passive grab on the nested display's root
+      for exactly the matrix's keys and prints one line per press; the matrix
+      applies each with its own handlers (press = pulse, Shift = latch, Space /
+      D = the ball feeder) - one keymap, two windows. A separate process
+      because Xlib exits the process when Xephyr goes away; the matrix restarts
+      a helper that had been working and gives up after three failures to
+      reach the display; stop.sh ends it. **Proven on the rig (muted, scratch
+      proof118keys.sh):** keys typed INTO :1 with XTEST during the menu -
+      Right, Right, 1 - reached the selector (`key: right` twice, `key: start`,
+      chose 0: the highlight wrapped), and with the game running Shift+Left
+      on :1 latched the left flipper (byte 1 ff -> fe -> ff); helper 1 while
+      the game ran, 0 after Stop. The Left sent to the matrix window with
+      `xdotool key --window` in that proof did NOT register: `search --name`
+      returned a 1x1 Tk leader window carrying the same title (a second check
+      found only that one), so that was a bad proof target, not a regression -
+      the matrix window's Tk bindings are unchanged, and David's own presses
+      in it at 19:02 logged six `key: left`. **Also fixed:** the post-game
+      table read wrote straight over `/var/tmp/jjp_devices.json`, so a Stop
+      that landed mid-read left a 23-name, uncalibrated dump over good saved
+      tables and the next menu opened cabinet-only; each read now goes to
+      `<dump>.reading` and replaces the saved tables only when it is complete
+      (or keeps them when it never completes). **Ghost windows:** after a Stop
+      the game window and the matrix window stayed on the desktop with no
+      process behind them (both owned only by msrdc); cause not established -
+      David's 19:02 matrix was the pre-helper code, and exactly two ghosts
+      remained, so one teardown (his 19:08 Stop or the proof's 19:10 one)
+      left them. Both IGNORED WM_CLOSE; hidden with ShowWindowAsync(SW_HIDE),
+      msrdc untouched. So the tab now does that itself: right after a Stop
+      whose output says `matrix=0` and `xephyr=0`, it waits a second and hides
+      every VISIBLE msrdc-owned window titled `JJP <Title> - emulated` or `JJP
+      switch matrix` (`hide_rig_ghosts`, ctypes EnumWindows +
+      QueryFullProcessImageNameW), and logs how many. Run on the real desktop
+      it listed both hidden ghosts as msrdc.exe windows and chose nothing
+      more to hide. The frames only go for good at a WSL restart.
+      **Closed 2026-09-13 (David: "fold it into 119 and close 118").** Of the
+      acceptance, the build from the tab and the launch from the tab are met:
+      the tab built and verified the GNR multi ISO, and David ran the rig from
+      the app into the menu and drove it (the flippers and Start from either
+      window, the game on the key). The stick from the green button - the JJP
+      flash dialog's FAT32 copy of the 12.97 GB ISO, which no part of this
+      item exercised - is now the FIRST step of 119, which needs that stick
+      anyway. NOTE for later runs: the Emulate JJP tab runs its rig in the
+      DEFAULT distro (no `distro=` on its rig commands), and the multi ISO's
+      restore is cached there under `/var/tmp/jjp_GunsNRoses-v03.03.multi`.
+      Merged into `feature/jjp-multiboot` (a fast-forward: item/118 holds
+      item/117's close).
 
-- [ ] **119. First GNR machine boot of a multi-boot install.** `S3 D3` *(Plan
+- [x] **119. First GNR machine boot of a multi-boot install.** `S3 D3`
+      **DONE 2026-09-14 on `item/119` (`0b6b2bf`, `51fafb5`, plus the closing
+      commit) — NOT released on its own: merged into `feature/jjp-multiboot`,
+      and the family's ONE `/finish` now follows item 120 (the boot menu's
+      sound, filed at this close). Hardware-proven on David's GNR: the stick
+      installed, both images boot from the menu, a power-cycle into each.**
+      *(Plan
       §2.9. After 118. David's hardware; whatever it finds is fixed on the
       spot. Branch from and merge into `feature/jjp-multiboot` — the rule is
       in 115 — and this is the item whose close is followed by the ONE
-      `/finish` of the whole family.)* Stick from 118, key in the machine, install (settings/scores
+      `/finish` of the whole family.)* **First, the stick (moved here from
+      118's acceptance, David 2026-09-13):** in the app, Jersey Jack →
+      Multi-boot, Browse… to `D:\Pinball\multi\GunsNRoses-v03.03.multi.iso`
+      (or build it again), then Build / make stick… with the stick tick on a
+      16 GB or larger USB stick. The app's JJP stick maker formats it FAT32
+      and copies the ISO's files (no piece is over 4 GB; `mkjjpmulti.py
+      verify` checked that). Before taking it to the machine, confirm the
+      stick carries `jjp/pad_install.sh` and that both boot configs'
+      `ocs_live_run` line names it (read the files off the stick). Then: key in the machine, install (settings/scores
       are wiped — JJP's installer always does), first boot with the coin door
       OPEN. Expected: the menu on the backglass, flippers move, START
       confirms, 15 s timeout boots image 0, both images play, the key is
@@ -6494,9 +6963,227 @@ These have each been violated at least once and each cost a run or a window:
       into each.
       — S3: feature. D3: hardware-only; what it finds cannot be provoked on
       the desk, and a dead menu still boots stock.
+      **DONE 2026-09-14 (item/119 from feature/jjp-multiboot at 118's
+      close, `0765c3d`).** **The stick is made (step 1 done):** David's USB
+      SanDisk 3.2Gen1 (disk 5, 28.7 GB; he emptied it first) through the app's
+      own JJP stick pipeline (`UsbStickPreparePipeline`, what Build / make
+      stick… runs; scratch makestick119.py re-checks the disk by model, bus,
+      size and emptiness before anything formats): format FAT32/MBR label
+      JJPUSB (one UAC prompt), 637 files / 13.0 GB copied from
+      `D:\Pinball\multi\GunsNRoses-v03.03.multi.iso` in 22.5 min (~10 MB/s),
+      every file's size verified, then checked before the eject:
+      `jjp/pad_install.sh` 14,800 bytes = the ISO's, `syslinux/syslinux.cfg`
+      and `boot/grub/grub.cfg` each carry the one `ocs_live_run` line naming
+      pad_install.sh and no stock line, `version_info.txt` says Guns N Roses;
+      17.8 GB free after. **The pipeline's eject did not happen:** the volume
+      was still mounted as F: afterwards, with nothing logged, because
+      Shell.Application's `InvokeVerb('Eject')` is asynchronous and the
+      PowerShell that asked exited at once; `_win_eject_script` now waits up
+      to 15 s for the drive letter to go and the pipeline says so when it
+      stays. **Bug paid on the way:** the first run's
+      format SUCCEEDED and the pipeline then crashed reading the elevated
+      child's `result.txt` (PermissionError: an owner-only mkdtemp, the child's
+      files owned by Administrators - the trap the Stern flash helper fixed on
+      item/99); `_ps_elevated` now uses `core.elevated_flash._ipc_dir` and an
+      unreadable result is a message (`541a1a7`, tests/test_jjp_usbstick_elevated.py).
+      Only a source run hits it: the shipped build launches elevated.
+      **The first stick did not install (David at the GNR machine,
+      2026-09-13):** the machine's firmware said "Reboot and Select proper
+      Boot device or Insert Boot Media in selected Boot device and press a
+      key" - JJP's installer never started. Read back off the stick, TWO
+      defects the stick maker's size-verify could not see: (1) **no legacy
+      boot code** - the partition not active, no `syslinux/ldlinux.sys`, a
+      zeroed MBR: GNR boots USB in legacy BIOS mode, and JJP's own procedure
+      (their PC PDF: Rufus, default settings) installs syslinux, which a FAT
+      copy never does; (2) **shortened names** - `HOME/PARTIMAG/IMG/
+      SDA3_EXT4_PTCL_IMG_GZ.AA` where the installer globs
+      `sda3.ext4-ptcl-img.gz.a?`: Windows' Mount-DiskImage reads Joliet for
+      long names, the stock GNR ISO has a Joliet tree, the Chaka ISO and our
+      multi ISO do NOT (xorriso `-indev/-outdev` writes only Rock Ridge
+      without `-joliet on`), so Windows showed ISO 9660 names and the stick
+      maker copied them. So even a booting stick could not have installed.
+      **Fixed:** `mkjjpmulti.xorriso_build` passes `-joliet on`, and `verify`
+      checks for a Joliet tree; the stick maker refuses a Joliet-less ISO on
+      Windows before touching the stick (`usbstick.iso_has_joliet`, with a
+      Rufus pointer) and, after the copy, installs the boot code with the
+      ISO's own `utils/win64/syslinux64.exe -d syslinux -mafi X:` (Clonezilla's
+      makeboot64.bat command), then checks `syslinux/ldlinux.sys` and the
+      active flag (`make_bootable_windows`; macOS/Linux say what legacy needs).
+      The multi ISO was re-mastered with a Joliet tree and no file changed
+      (scratch remaster119.sh: file list, El Torito images and three shas
+      compared; the old image kept as `GunsNRoses-v03.03.multi.nojoliet.iso`),
+      and the stick was remade by an ELEVATED run of the pipeline (scratch
+      stickjob119.py, 21:13-21:38): format 7 s, 637 files / 13.0 GB copied
+      in 24 min, sizes verified, boot code installed by syslinux64 in 3 s,
+      then on the stick: `home/partimag/img/sda3.ext4-ptcl-img.gz.aa`,
+      `sda5.ext4-ptcl-img.gz.aa`/`.ag`, `live/filesystem.squashfs`,
+      `live/vmlinuz`, `jjp/pad_install.sh`, `syslinux/syslinux.cfg`,
+      `boot/grub/grub.cfg` all present with their EXACT names,
+      `syslinux/ldlinux.sys` and `EFI/boot/bootx64.efi` present, the
+      partition active, both cfgs naming pad_install.sh only; ejected.
+      RESULT ok. (The re-master's own checks cried wolf twice before that -
+      the El Torito catalog/boot LBAs move 41 sectors when Joliet is added,
+      and isolinux.bin's boot info table (bytes 8..63) is re-patched - both
+      expected; remaster119b.sh compares kinds, sizes, paths and shas
+      instead: efi.img, bootx64.efi, pad_install.sh, both cfgs and a root B
+      piece identical.)
+      Memory: reference_jjp_stick_joliet_and_bootcode.
+      **On the machine (David, 2026-09-14): the install WORKED and the menu
+      came up.** The first image chosen after the install did not load and
+      the machine came back to the menu; the second choice booted as
+      expected. **Diagnosis (JJP's own scripts, read from root A with
+      debugfs; no machine log read):** this is the game's FIRST-RUN
+      maintenance reboot, not a multi-boot fault. A fresh install carries the
+      golden disk's hostname; the game's first start sets the machine's own
+      and exits 68, and `rungame.sh` answers 68 with `reboot` ("maintenance
+      reboot (hostname set)" - the same exit 68 every fresh emulator jail
+      shows once, README "Exit 68 is normal on a first run"). Our hook line
+      sits BEFORE rungame.sh's `while true`, so it runs once per rungame.sh
+      start: a game restart inside the loop (43/44/254/1) never shows the
+      menu again, but a REBOOT (68, 69, 42) or a jjp.service restart does. A
+      stock install reboots the same way on first boot; without a menu it
+      just looks like a longer boot. Expected once per install; again only
+      after a JJP maintenance reboot (69) or a runonce.sh exec-bit repair.
+      **Not changed** (David's call): the hook could carry a chosen image
+      across a game-requested reboot - a guarded line before `reboot` in
+      rungame.sh's 42/68/69 cases writing a one-shot marker to perm that the
+      next boot's hook consumes, booting the same image without the menu -
+      at the cost of a second rungame.sh edit, a rebuilt ISO, a remade stick
+      and a reinstall (which wipes settings and scores again).
+      **Closed 2026-09-14 (David: "yes both worked"; "close 119 and file the
+      audio changes as a new item").** Acceptance met on the machine: the
+      stick installed, the menu drove both images, and each image survived a
+      power-cycle. Two audio observations from that boot - the move sound
+      late, the level very high - are item 120, which now comes before the
+      family's one `/finish`.
 
-- [ ] **120. The JJP boot menu's sound: a safe level, no lag, and the
+- [x] **120. The JJP boot menu's sound: a safe level, no lag, and the
       machine's own volume buttons with feedback on screen.** `S2 D4`
+      **DONE 2026-09-14 on `item/120` - emulator-proven; NOT released on its own: merged into
+      `feature/jjp-multiboot`, and the family's ONE `/finish` can run now. Owed: David's GNR
+      check after a reinstall (the lag, a comfortable level, the front buttons and the
+      indicator on the real glass).** GNR check 1 (2026-09-14 afternoon): the menu came up
+      with NO AUDIBLE SOUND. Rig instrument (scratchpad `pulseprobe120.sh`: the GNR root's own
+      PulseAudio 15 + null sink inside the jail, its monitor recorded): the 60 ms request is
+      granted through the pulse plugin and every click and the chime reach the sink at 60 ms
+      and 500 ms alike - the path works; what was wrong is the LEVEL: volume 20 (-14 dB) on
+      top of the -12 dBFS levelling put the 40 ms click at -26 dBFS, 20 dB under the pre-120
+      menu David called very loud. Fixed on item/120: media levelled to -3 dBFS (default 20 =
+      11 dB under that menu, cap 40 = 5 dB under), `audio_alsa_open` retries a refused buffer
+      at 120/250/500 ms, a menu that wanted a sink and has none draws `SOUND OFF: <why>` on the
+      glass (rig-proven: `C:\tmp\jjp120\pulse\sound_off.png`), and JJP builds carry the
+      selector's bounded log at `/jjpe/temp/jjpselect.log` by default (JJP's own dumplogs.sh
+      copies it to a stick; `--no-machine-log` to leave it off). GNR check 2 (the multi120w
+      ISO): STILL SILENT, even at 40 on the coin-door buttons (so not the level), and the
+      headphone kit's rocker printed `INPUT byte 3 bit 6 / bit 5` on the glass. The mechanism,
+      rig-reproduced with the selector stopped 80 ms of every 200 at 60 ms: an underrun's
+      recover through the pulse plugin reconnects the stream, and a fresh stream pays ~1.1 s
+      before the server pulls again (`audio: alsa took N ms after the first fill to take
+      more`), so frequent underruns chained into silence while 500 ms rode through them.
+      Fixed on item/120: the pump runs on its own thread every 5 ms (`audio.c`; the render
+      loop sleeping 100 ms a pass: 0 recovers, every click at the sink), the JJP build
+      reopens the PCM on an underrun and when nothing was accepted for 3 s
+      (`ALSA_REOPEN_ON_XRUN`, `ALSA_STALL_MS`; a 300 ms or 1 s watchdog reopened into that
+      startup pause forever - rig-bisected), a one-period start threshold, `--learn` watches
+      the whole frame with a chatter guard, and `mkjjpmulti.py build --key-plus 3.6
+      --key-minus 3.5` names the rocker. GNR check 3 (that ISO): the rocker steps the indicator
+      (mapping right), STILL SILENT - the ALSA pulse PLUGIN's stream is what fails on the
+      machine, and the rig reproduces only parts of it. So the JJP build now plays through
+      PulseAudio itself, libpulse-simple (`audio_pulse.c`, the game's own audio library):
+      a blocking stream on the server's terms, an underrun is silence the server inserts,
+      nothing reconnects; paced 60 ms ahead of the wall clock into an 80 ms server buffer,
+      the backlog after a stall dropped; `--audio auto` tries it first, ALSA is the
+      fallback. Rig-proven on the GNR root's own pulse 15: plain, the loop sleeping 100 ms
+      a pass, the process stopped 80 ms of every 200 - every click and the chime at the sink
+      in all three, 0 errors, 0 reconnects. GNR check 4 (that ISO): STILL SILENT, the rocker
+      stepping the indicator. THE CAUSE, read off JJP's own scripts/audio/setup.pl the same
+      evening: PulseAudio's DEFAULT sink on a GNR with the headphone kit is the kit's USB
+      codec (pulse ranks usb above pci), and setup.pl, run once the GAME is up, moves the
+      game's stream to the onboard pci sink and makes it the default; the menu ran before
+      that, into the kit - silent speakers - while every rig proof (ONE sink) heard it, and
+      the one loud boot was a boot after the game had set the default (reinstalls wipe it).
+      FIX: the hook names the pci analog sink for the selector's stream (PULSE_SINK,
+      setup.pl's own match) and says so in the log; the pulse sink logs the sink it was
+      given; hook test cases. Also David's asks that evening: the byte/bit line off the
+      glass (log only), the lockdown-bar Action button a second START (`--key-start
+      3.0,3.4`: a key may sit in two places). Rig instrument: the GNR root's pulse with two
+      null sinks named as the machine's, the usb one the default, both monitors recorded,
+      the HOOK launching the menu - the stick's hook lands the clicks on the usb sink, the
+      fixed hook on the pci sink (20:59: 5 bursts on usb / 0 on pci with the stick's hook, 0 / 5
+      with the fixed one). Then David's ask before testing: the menu must not show TWICE after
+      a fresh install - the game exits 68/69 (JJP's "maintenance reboot") and rungame.sh
+      reboots; the builder now patches those cases to call `padselect.sh
+      --maintenance-reboot` first (a timed mark in /jjpe/perm) and the next boot repeats the
+      last choice silently, once, while the mark is under an hour old (hook test + builder
+      test). His second ask, a menu-only update stick, is item 122. GNR CHECK 5 (2026-09-15):
+      PASSED - David: "finally everything is working as expected on the machine" - so
+      the family's ONE /finish can run. His note: gameplay video frame rate lower than
+      expected. Nothing of ours runs during play (the selector exits at the choice, the
+      hook exits after the bind, the logs are written only while the menu is up); the
+      suspect is JJP's own runonce.sh rendering the 68 MB operator manual with
+      ghostscript in the background on the first boot after every fresh install - the
+      loose end below. On his ask the logs are off by default now (`--machine-log`,
+      `--learn` put them back). The machine's audio facts:
+      [[reference_jjp_front_usb_port_is_slow]], [[reference_jjp_menu_audio_is_pulse]]. The last rig run, on the merged tree
+      (`GunsNRoses-v03.03.multi120v.iso`, a GNR clip on each image): both clips loaded (120
+      frames 5.0 s, 96 frames 4.0 s), every frame cached, 528 played / 528 drawn each, the loop
+      at 326-334 passes/s (longest 71 ms at start, 5 ms after); grabs 400 ms apart differ in
+      87-92% of the highlighted panel; Up drew "VOLUME 25 / 40" with 5 of 8 segments over the
+      playing clips and 3 s later the plain menu (`osd_up.png` / `osd_gone.png` in
+      `C:\tmp\jjp120\`), `25 remembered`. The build path the tab uses throughout.
+      **Established (2026-09-14, item/120):** all seven to-dos are written. Selector: the JJP
+      build asks for a 60 ms ALSA buffer (Stern keeps 500) and logs the one granted
+      (`audio: alsa buffer N frames (M ms)`); `DEF_VOLUME=20`, `VOLUME_CEILING=40` nothing
+      passes, `volume_max=` lowers it; on `--input jjpio` PLUS/MINUS are Volume+/- (byte 1
+      bits 5/6, `key_plus=`/`key_minus=`), step 5 within the cap, play the move sound, draw
+      "VOLUME n / cap" + a bar for 2 s, and the settled level goes to
+      `/jjpe/perm/padselect.volume` (read at the next boot). Tab default 20 / cap 40;
+      mkjjpmulti always writes `volume=` + `volume_max=40`, refuses 41, clamps an inherited 50
+      with a note; `selectmedia prepare --peak-dbfs -12` (the JJP media step passes it);
+      `JJP_SELECT_DUMP=1` gives the rig the menu's mix. GNR's saved device tables (the only
+      title on disk) agree on 0x20/0x40. Stern `make check` OK incl. a new Plus-still-moves
+      check; pytest 468 + 50 green. The first JJP `make check` caught codeselect.c copying only
+      3 of the 5 button places (Volume+/- read off byte 0 bit 0) - fixed; the JJP `make check`
+      is then green, `jjpio_test.py` case 5 pressing the pty board's bits 5/6: clicks peaking
+      [4000, 4750, 4000, 4750] for levels 25/30/25/30 (tone 15999 x gain), 30 kept and read
+      back, the cap, the indicator in the headless frame and gone, `--volume 90` cut to 40.
+      **Rig-proven 2026-09-14 (muted; no Sentinel key plugged in, so watch.sh's steps without
+      the dongle - the menu needs none):** selector + media + `GunsNRoses-v03.03.multi120.iso`
+      built the tab's way (media move/confirm levelled -6.0/-6.9 -> -12.00 dBFS; build 426 s);
+      the menu logged `alsa buffer 2646 frames (60 ms), period 661 frames (14 ms)`, 0 recovers;
+      Up, Up, Down typed into the game's display arrived as plus/plus/minus: 20 -> 25 -> 30 ->
+      25, `indicator off at 25`, `25 remembered`, perm file 25; the mix dump's clicks peaked
+      2058 / 2444 / 2058 (expected 2057 / 2443 / 2057) and the confirm chime 2058; the second
+      launch logged `volume: 25 of 40 (remembered in /jjpe/perm/padselect.volume)`. The grabs
+      failed: grab.sh looked on :0, the menu is on the nested :1 (`JJP_DISPLAY=:1`).
+      **David, 2026-09-14, three more asks:** (a) is the level remembered - yes, above; (b)
+      the JJP work must be ISOLATED FROM STERN; (c) video/animations must play on the JJP
+      menu. For (b): Stern's ALSA lead is back to exactly its own; Stern's libasound exports
+      the new `snd_pcm_get_params`; the family's pre-existing Stern test assertions are all
+      intact; main (37 commits since the family branched, incl. Stern selector audio) is
+      merged in as `item/120-merge` (`8f961a7`) with the four tab conflicts resolved to main's
+      Stern behaviour (install step as root with the user's HOME, PAD-143's flash words in
+      `STERN.flash_tick/flash_detail`). For (c): the Edit image dialog no longer offers "The
+      game's own attract video" on a JJP row (it rendered nothing - no attract clip in the
+      clear); a video file is a JJP image's animation.
+      **Stern isolation, measured on the merged tree:** Stern `make check` OK on main and on
+      main + the family; of 138 headless frames 133 are byte-identical and the 5 that differ
+      are noise, shown two ways - `live.ppm` and the pick LOADING frame differ between two runs
+      of MAIN itself, and the default_card / group LOADING frames print a group's rolled member,
+      which qemu seeds from the clock (`/dev/urandom gave 0 byte(s)`: main rolled CUSTOM 1,
+      merged CUSTOM 2); the two differing padsw logs are reader-loss timing counts. The
+      multi-boot + smoke pytest set on the merged tree: 1206 passed after one fix - the family's
+      JJP test pinned Stern's selector step as a user step, main's PAD-140 made it root on
+      Windows, and the test now asks for main's shape. JJP `make check` OK on the merged tree.
+      **Video:** the first animation run refused `Attract_Montage_1.webm@1` - VIDEO_EXTS (the
+      media step's, the tab's and its file dialog) knew only mp4/mov/mkv/avi, and 629 of the 648
+      GNR clips PAD extracted are VP9 .webm (16 .flv); both lists gain .webm and .flv (only
+      adds choices); the media step then made anim0/anim1 GIFs of the two clips (512x288, 4 s,
+      15.8 MB of the 96 MB budget).
+      **For David's GNR check:** build the ISO from the app (Jersey Jack -> Multi-boot, volume
+      20 is the new default), make the stick, reinstall (settings and scores are wiped), and
+      judge the move sound's lag, the level, and Volume+/- with the indicator; a level set
+      there survives a power cycle.
       *(Found on the first GNR machine boot, item 119. Branch from and merge
       into `feature/jjp-multiboot` - the rule is in 115 - and the family's ONE
       `/finish` now follows this item, not 119.)* On David's GNR
@@ -6572,6 +7259,155 @@ These have each been violated at least once and each cost a run or a window:
       the tab, the builder and the media step, several rig runs to prove
       them, and the final judgement needs the machine.
 
+- [x] **121. A JJP install stick made by the app froze on the machine at syslinux's
+      "Automatic boot in 1 second...": the stick maker put every boot file behind
+      13 GB of image pieces.** `S1 D3` **DONE 2026-09-14 on `item/120` - machine-proven;
+      part of the JJP multi-boot family, released with its ONE `/finish`.** What closed it:
+      the boot-files-first stick (the maker's new copy order, `_copy_rank`/`_copy_order`,
+      with the same win64 boot code as before) left the Restore menu and reached JJP's
+      installer on David's GNR, and the restore ran at 30-50 MB/s from a backbox USB port.
+      What also came out: the cabinet's FRONT USB slot ran the same stick at 1.1 MB/s (USB
+      1.1 speed) - a minute on the Restore menu (the 78 MB kernel + initrd read), minutes
+      of black screen, an install that would take hours - so the app's six port
+      instructions (the stick maker's done message, the manufacturer's install help, the
+      pipeline's two log blocks x Windows/other) now name a backbox port, with the front
+      slot as the slow fallback. RESOLVED by David (2026-09-14 afternoon): this morning's two
+      freezes were the front slot too, and last night's working boot was the backbox - so
+      the port was the whole cause and the layout change a bonus; the copy order stays because
+      the firmware's reads belong at the start of the volume regardless (Clonezilla sorts
+      its own ISO the same way, `syslinux/iso_sort.txt`), pinned by
+      `tests/test_jjp_usbstick_copy_order.py`. **Ruled out on the way:** the syslinux
+      build mix (a matched-build stick froze too) and `ldlinux.sys` placement (13.28 GB and
+      2.1 GB both froze); the boot-code installer rewrites `ldlinux.sys`/`.c32` as new
+      files, so they land after the copy (13.4 GB here) and that is fine. The VM harness
+      (qemu + usbipd; scratchpad `qemuboot120.sh`, `vmmatrix120.sh`, `bootcode120.sh`,
+      `stickjob120b.py`, `vmcheck120b.sh`) boots every variant in 28-34 s and never
+      reproduced the hang; a stick Windows has just written cannot be usbipd-attached
+      ("Device busy (exported)") until it is replugged. Memory:
+      [[reference_jjp_stick_syslinux_build_mismatch]]. Owed: nothing for 121; item 120's
+      GNR check follows this install.
+
+- [ ] **122. A JJP multi-boot MENU UPDATE stick: change the boot menu (selector,
+      media, images.conf, the hook) on an installed machine without a factory
+      install.** `S3 D3` David, 2026-09-14: "we should have a way to do just a
+      multi boot menu update instead of having to do a whole factory install any
+      time we want to change the menu. Nice to have but not required." Today every
+      menu change is a 13 GB install stick, a re-partition and a wiped machine
+      (scores, settings). Design: a SMALL bootable stick from the same pipeline -
+      JJP's clonezilla live (`/live`, ~300 MB, from the game ISO) plus
+      `/jjp/padselect` and a `pad_menu_update.sh` named by `ocs_live_run=` in
+      place of `pad_install.sh`: it mounts root A (sda3, by the UUID the card's
+      own `scripts/fs_uuids.sh` declares), replaces `/jjpe/gen1/padselect` and
+      `/jjpe/gen1/scripts/padselect.sh`, re-applies `hook_rungame` to
+      rungame.sh, fscks, reboots; nothing else on the disk is touched (the store,
+      root B, /jjpe/perm stay). `mkjjpmulti.py menu-update --primary <iso>
+      --selector-dir --media-dir ... --out menu.iso` builds it from `build`'s
+      inputs; the Multi-boot tab gets a "Menu update stick" button beside the
+      install stick, through the existing JJP stick pipeline (boot files first,
+      boot code, verify). NOT the hook scanning a plain FAT stick at boot: the
+      GNR's BIOS boots USB first and stopped on a stick with an active partition
+      and no boot code (item 121), so a plain stick left in a backbox port could
+      keep the machine from booting. Acceptance: on David's GNR a menu-update
+      stick changes the menu (a new title or clip) in under five minutes with the
+      scores and settings intact, and `inspect` of the machine's root A shows the
+      new build.json. (2026-09-15: item 124 does this menu change on the SSD in a dock -
+      `install --menu-only` - so the stick version is for a tester without a dock.)
+
+- [x] **123. The multi-boot install written STRAIGHT ONTO THE GAME'S SSD in a dock on this
+      PC: no stick, no install run on the machine.** `S3 D3` **DONE 2026-09-15 on `item/120` -
+      emulator-proven; part of the JJP multi-boot family, released with its ONE `/finish`.
+      The dock test is WAIVED (David, 2026-09-15: "i don't want to confirm by plugging in an
+      actual ssd. let's just assume we're good to go if we followed our write patterns from
+      the write tab") - and the pipeline's disk hand-off is the Write tab's Direct-SSD
+      sequence step for step (stale mounts cleared, offline, attach, the ALREADY_MOUNTED
+      recovery, back online), pinned by tests/test_jjp_install_to_disk.py.** David, 2026-09-15:
+      "if we want to write the multi-boot straight to the ssd, we should confirm that works
+      next" - the plan's "Direct-SSD write of the same layout" that was "later, not queued".
+      What was there: the app's `RestoreToSSDPipeline` (v0.7.0, never wired to a button) took
+      partimag's `sda-pt.sf`/`parts` at face value - Clonezilla's record of a 4.6 GB golden
+      disk that JJP's installer never reads - so it would have written a wrong table, one root
+      slot, no UUIDs and no temp partition. What closed it: `mkjjpmulti.py install --iso X
+      --disk /dev/sdX [--yes]` runs THE ISO'S OWN INSTALLER'S STEPS, read out of it
+      (`parse_installer`: PART_*, FS_UUID_*, the sgdisk templates by size, the size gate,
+      the six `restore_partition` lines in order, the temp mkfs/UUID - each anchored exactly;
+      an installer that does not parse is refused): a multi-boot ISO's `pad_install.sh` puts
+      image 1 in root B, a stock ISO's `jjp_install.sh` a copy of root A. The table is written
+      FROM JJP'S `backup.sgdisk3` BY HAND (`parse_gpt_backup`/`gpt_layout`/`write_gpt`: MBR +
+      main header + backup header + 128 entries, sized to the disk as `--load-backup` sizes
+      it, every GUID verbatim) because gdisk ends every write with the global `sync()` that
+      hangs under WSL2 - the first proof sat 14 minutes in D state on it, together with a
+      120 GB file on D: that a `truncate` through 9p had left NON-sparse (NTFS zero-filled
+      it; `fsutil sparse setflag` first - memory `reference_ntfs_file_over_9p_not_sparse`).
+      Then the disk is read back (24 checks: the table entry for entry, every slot's
+      UUID, the menu + hook in root A, the game in both roots, `curgrub`=a with root A's UUID,
+      a loader on the EFI partition, mountable perms, an empty temp). Nothing new in the
+      runtime image: partclone, e2fsprogs, util-linux. In the app: the stick dialog's new
+      "Onto:" row (`flash_targets` on the JJP plugin: the USB stick first, "the game's SSD in
+      a dock" second; Windows/Linux) - the disk picker switches to disks, the confirmation
+      says every partition is rewritten, `_start_flash_image(target="disk")` goes through the
+      Direct-SSD Administrator gate to `RestoreToSSDPipeline` (rewritten: Attach = Set-Disk
+      offline + `wsl --mount --bare` + the /dev/sdX found by lsblk diff; Install = the tool
+      streamed, its `[card] progress` lines on the bar; Verify = its ok/FAIL lines; Detach =
+      `wsl --unmount` + online, whatever happened). PROOF: `selftest` installs the synthetic
+      multi ISO onto a 120 GB sparse file on a loop device and reads it back, plus the in-use
+      and too-small refusals (PASS); the rig proof wrote the GNR multi-boot ISO
+      (`GunsNRoses-v03.03.multi120w.iso`, the one on David's stick) onto a 120 GB sparse disk
+      on D: on a loop device in 16 min (984 s, ~30 MB/s through the loop over 9p) (`install verify: PASS`, 24 checks) and
+      then BOOTED under qemu (OVMF UEFI firmware, a SATA disk on q35, KVM, the plain std VGA) to
+      the SELECT GAME CODE menu at 40 s - grub, root A by UUID, the perm generator, jjpxorg, X on
+      the VM's VGA, the hook, jjpselect with its 20 s countdown to GUNS N' ROSES 3.03 (the frames
+      in C:/tmp/jjp120/qemu_ssd123). Tests: tests/test_mkjjpmulti.py (parse_installer on the GNR installer's
+      lines, the size ladder, the prefix rule, five missing-line refusals, the GPT round
+      trip and write/read), tests/test_jjp_install_to_disk.py (the pipeline with a scripted
+      WSL executor: attach/detach order, the tool's lines on the bar/phases/log, FAIL and
+      refusal verdicts, two-disk and wsl --mount refusals, the manufacturer's wiring),
+      tests/test_gui_batch31.py (the dialog's second place). HARDWARE LINE (owed): David
+      puts the GNR's SSD in a dock, picks "the game's SSD in a dock" in the app's stick
+      dialog with the multi ISO, and the machine boots the menu from it; a stock ISO the
+      same way is the plain "reinstall from the PC". Not done: macOS (Docker has no block
+      device - the dialog offers the stick only there); a docked SSD with 4 KiB logical
+      sectors is refused (JJP's table is 512-byte, the machine's installer would fail too).
+
+- [x] **124. On a docked SSD, change ONLY the boot menu, or ONLY one image (a new custom
+      code), and keep the settings and scores.** `S3 D2` **DONE 2026-09-15 on `item/120` -
+      emulator-proven; part of the JJP multi-boot family, released with its ONE `/finish`;
+      the dock test waived with 123's.** David, 2026-09-15: "do we have a way to just
+      make the multi-boot menu changes for direct SSD? how about if i just want to change one
+      of the images? (like if there's an update to the custom code)" - "Do both". What closed
+      it: two switches on `mkjjpmulti.py install`, both for a disk that ALREADY holds this
+      ISO's install (`check_jjp_disk`: the installer's seven slots on the GPT and every slot's
+      UUID, else refused - a full install writes it whole), both leaving perm A and everything
+      else alone. `--menu-only`: the ISO's menu into root A by the same `stage_into_root`
+      that `build`/`inject` use, now on the partition itself (`LoopRW` takes a block device);
+      root A's build.json is the ISO's manifest minus its `staged` map, the bytes `build`
+      staged, so the map's own sha holds; refused when root A is not the ISO's image 0
+      (build.json's game sha). `--image N --from GAME.iso`: slot N restored from GAME.iso's
+      own sda3 pieces with the installer's tail (image 0 gets the menu re-staged), root A's
+      build.json updated with the new source and identity; a multi-boot ISO as `--from` is
+      refused; THE SAME-VERSION GATE against the OTHER root on the disk (`gate_root_pair`:
+      GAME.iso's Name/Version vs build.json's record of the other image, then GAME.iso's
+      root - restored into the rig's cache for its identity - vs that root's GAMENAME, game
+      and fl.dat shas). `verify_disk` grew: every staged menu file in root A is the ISO's,
+      root A's build.json records the replaced image, that slot's game binary is the new
+      ISO's. In the app: the disk target's "Write:" choice (everything / only the boot menu
+      / only image 0 or 1, named by the tab's titles, with a From ISO box) reaches
+      `RestoreToSSDPipeline(menu_only= / image= / from_iso=)`, which passes the tool's
+      flags; the confirmations say what stays. PROOF: `selftest` on the loop disk - a
+      "score" planted on perm A survives the menu write, image 1 from fake0, image 0 from
+      fake1 with the menu re-staged; a 03.04 image, a multi-boot ISO as --from and a blank
+      disk are refused. Rig proof on the item 123 disk (2026-09-15): a copy of the GNR multi ISO injected
+      with new titles, then `--menu-only` (25 checks, 16 s) and `--image 1 --from` the LOTLJ
+      ISO (27 checks, 372 s) - perm A (padselect.last, vf), perm B and the logs on temp the
+      same before and after - and the VM boot showed the menu with the new titles
+      (C:/tmp/jjp120/qemu_ssd124); the first run's one FAIL was the verify's own "temp is
+      empty" check, right for a fresh install only, made a full-install check. Tests: tests/
+      test_mkjjpmulti.py (the mode check, the CLI's refusal before root, the root-side
+      manifest bytes, the gate's words), tests/test_jjp_install_to_disk.py (the flags, the
+      done words, a missing --from refused before the disk is touched, the factory),
+      tests/test_gui_batch31.py (the Write choice, its confirmations and kwargs). Item 122's
+      menu-update STICK is now only for a tester without a dock: the dock route does the
+      menu change in two minutes with nothing else on the machine touched.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own
@@ -6609,6 +7445,28 @@ These have each been violated at least once and each cost a run or a window:
   this machine. The deep detail behind every numbered item above.
 
 ## Loose ends worth a look, not yet worth a queue slot
+
+- **GNR gameplay video frame rate lower than expected on a multi-boot install**
+  (David, 2026-09-15, everything else working). Nothing of ours runs during
+  play: the selector exits at the choice (the LOADING frame is just the last
+  picture painted), the hook exits after the bind, the logs are written only
+  while the menu is up. Suspect: JJP's own `scripts/runonce.sh` starts
+  ghostscript IN THE BACKGROUND on the first boot after a fresh install to
+  render the 68 MB operator manual page by page (`-r360 -dDownScaleFactor=2`,
+  16M-colour PNGs into `ecoredata/graphics/operatormanual`) plus the T&C and
+  beta PDFs, and the factory image carries no `lastrendered` marker - so every
+  reinstall pays it again, minutes to tens of minutes of a CPU core, exactly
+  when a test game is played. The retheme's own video encodes are the other
+  candidate. Check: the frame rate on the SECOND boot after an install (the
+  marker is written as the render starts, so a reboot skips it). If it is the
+  render, the fix is JJP's; the install stick could pre-render or pre-mark it.
+
+- **`mkmulticard.py` still calls the global `os.sync()`** (`LoopMount._detach`,
+  `drop_page_cache` - the Stern `update` / `inject` / `extract` paths). Under
+  WSL2 a global sync also flushes the virtiofs mounts of the Windows drives,
+  and on 2026-09-13 that wait (`fuse_sync_fs -> request_wait_answer`) parked
+  item 116's builder in D state for good; it switched to `sync -f <mount>`
+  (syncfs). No Stern run has hit it yet; the fix is the same three-line helper.
 
 - **NOT EXPLAINED: `[dev] --- ball devices: count=1119174656 ---`** on both
   james_bond_60th runs, 2026-08-14. 1.1 billion is a misparse of something. The

@@ -248,8 +248,8 @@ class Capabilities:
     # onto a physical card/stick.  For Stern/CGC that is a dd-style raw
     # whole-image write of a ``.img``/``.raw``; for JJP the same surface
     # instead formats the USB stick FAT32/MBR and copies the installer ISO's
-    # files onto it (the machine mounts the stick's FAT volume itself — a
-    # raw-imaged stick is unreadable to it).  Distinct from the
+    # files onto it and installs its boot code (the machine boots the stick's
+    # own installer — a raw-imaged stick fails).  Distinct from the
     # asset-modifying Write/Direct-SD paths.  When True, the GUI calls
     # ``make_flash_pipeline`` and the ``flash_*`` wording attributes below
     # label the button/dialog; raw device writes need Administrator/root.
@@ -354,6 +354,12 @@ class Manufacturer(ABC):
     # ``capabilities.flash_image`` is True) — a dd-style raw copy of a
     # pre-built image onto a card.
     flash_phases: Tuple[str, ...] = ()
+    # A second place the flash dialog can put an image (item 123): (key, wording,
+    # drive kind) tuples with the brand's usual medium FIRST; empty = no choice
+    # offered.  JJP's second is the game's own disk in a dock, installed on this
+    # PC by ``make_install_to_disk_pipeline`` under ``install_to_disk_phases``.
+    flash_targets: Tuple = ()
+    install_to_disk_phases: Tuple[str, ...] = ()
     # Phase labels for the read-card path (``capabilities.read_card_image``).
     # The default matches the shared ReadCardPipeline; a plugin only needs to
     # override this if it also overrides ``make_read_card_pipeline``.
@@ -702,6 +708,18 @@ class Manufacturer(ABC):
         """
         raise NotImplementedError(
             f"{self.display} does not implement a flash-image pipeline.")
+
+    def make_install_to_disk_pipeline(self, image_path, device_path,
+                                      log_cb, phase_cb, progress_cb, done_cb,
+                                      menu_only=False, image=None, from_iso=None):
+        """Install *image_path* onto the game's own disk at *device_path* (an
+        OS-native physical-disk path), as the machine's installer would - or,
+        onto a disk that already holds that install, only its boot menu
+        (``menu_only``) or only image ``image`` from ``from_iso``, that image's
+        own install ISO.  Only meaningful when ``flash_targets`` names a second
+        place."""
+        raise NotImplementedError(
+            f"{self.display} does not install an image onto a disk.")
 
     def make_read_card_pipeline(self, device_path, image_path,
                                 log_cb, phase_cb, progress_cb, done_cb):

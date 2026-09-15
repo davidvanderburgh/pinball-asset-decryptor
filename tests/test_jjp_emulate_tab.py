@@ -596,6 +596,116 @@ def test_run_streaming_survives_a_popen_failure(panel, monkeypatch):
     assert rc is None and wrong is False
 
 
+# ----------------------------------------------------------- volume (item 118) --
+
+def test_volume_row_sits_with_start_and_writes_the_shared_file(panel, monkeypatch):
+    """The JJP tab had no Volume / Mute at all (David, 2026-09-13).  It is the
+    other Emulate tabs' knob and their file, beside Start."""
+    wrote = []
+    monkeypatch.setattr(jjp_emulate_tab, "_write_audio_ctl",
+                        lambda gain, muted: wrote.append((gain, muted)))
+    assert panel._vol_scale.master is panel._go_btn.master
+    assert panel._mute_chk.master is panel._go_btn.master
+    panel._volume_var.set(40)
+    panel._mute_var.set(True)
+    panel._on_volume_change()
+    assert wrote[-1] == (0.4, True)
+
+
+def test_start_hands_the_volume_file_to_the_rig(panel, monkeypatch):
+    """audio.sh starts jjpvol.py on PAD_AUDIO_CTL, so the file has to ride
+    into watch.sh or the knob moves nothing."""
+    import time as _t
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(panel, "_attach_dongle", lambda: True)
+    monkeypatch.setattr(jjp_emulate_tab, "rdp_client_running", lambda: True)
+    seen = []
+    monkeypatch.setattr(panel, "_run_streaming",
+                        lambda cmd, timeout=1800: (seen.append(cmd), (0, False))[1])
+    panel._iso_var.set("D:/Pinball/x.iso")
+    panel._start_async()
+    for _ in range(40):
+        if seen:
+            break
+        _t.sleep(0.05)
+    assert seen, "watch.sh was never launched"
+    assert "PAD_AUDIO_CTL=" + jjp_emulate_tab.AUDIO_CTL_FILE in seen[0]
+    assert seen[0][-1] == "D:/Pinball/x.iso"
+
+
+def test_footer_ladder_follows_the_launch_and_the_poll(root):
+    """JJP's own ladder (Restore image / Boot / Game / Ready), not Stern's
+    Node boards, moved by the launch's step lines and by the poll."""
+    import tkinter as tk
+    calls = []
+    frame = tk.Frame(root)
+    p = JJPEmulatePanel(frame, iso_var=tk.StringVar(),
+                        footer_cb=lambda k, pct=None, t="": calls.append((k, pct)))
+    p._schedule_poll = lambda ms=None: None
+    p.build(frame)
+    try:
+        for ln in ("== mount image ==", "  sda3: 40%", "== jail ==",
+                   "== display ==", "== game (GunsNRoses) =="):
+            p._footer_line(ln)
+        root.update()
+        assert calls == [("copy", 0), ("copy", 40), ("boot", None),
+                         ("boot", None), ("techalerts", None)]
+        del calls[:]
+        p._apply({"game_procs": "0", "selector_procs": "1", "dongle_present": "1"})
+        p._apply({"game_procs": "3", "selector_procs": "0", "dongle_present": "1"})
+        root.update()
+        assert [k for k, _ in calls] == ["techalerts", "run"]
+    finally:
+        p._stopped = True
+        frame.destroy()
+
+
+# ------------------------------------------------------ ghost windows (item 118) --
+
+def test_rig_ghosts_are_only_the_rigs_visible_wslg_windows():
+    wins = [(1, "JJP GunsNRoses - emulated (Ubuntu)", "msrdc.exe", True),
+            (2, "JJP switch matrix (Ubuntu)", "MSRDC.EXE", True),
+            (3, "JJP switch matrix (Ubuntu)", "msrdc.exe", False),     # already hidden
+            (4, "JJP GunsNRoses - emulated", "Xephyr.exe", True),      # not WSLg's
+            (5, "Pinball Asset Decryptor", "msrdc.exe", True),
+            (6, "JJP Wonka - emulated", "msrdc.exe", True)]
+    assert jjp_emulate_tab.rig_ghosts(wins) == [1, 2, 6]
+
+
+def test_only_a_stop_that_left_nothing_running_hides_windows():
+    assert jjp_emulate_tab.stop_left_nothing("killed 3\ngame=0 matrix=0 xephyr=0 cuse=0")
+    assert not jjp_emulate_tab.stop_left_nothing("game=0 matrix=1 xephyr=0 cuse=0")
+    assert not jjp_emulate_tab.stop_left_nothing("game=0 matrix=0 xephyr=1 cuse=0")
+    assert not jjp_emulate_tab.stop_left_nothing("")
+
+
+def test_hide_rig_ghosts_hides_what_it_found(monkeypatch):
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+    hidden = []
+    wins = [(7, "JJP switch matrix (Ubuntu)", "msrdc.exe", True),
+            (8, "Notepad", "notepad.exe", True)]
+    assert jjp_emulate_tab.hide_rig_ghosts(windows=wins, hide=hidden.append) == 1
+    assert hidden == [7]
+
+
+def test_stop_hides_the_frames_a_clean_stop_left(panel, monkeypatch):
+    """Right after Stop says the display and the matrix are gone."""
+    import time as _t
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+    calls = []
+    monkeypatch.setattr(jjp_emulate_tab, "hide_rig_ghosts", lambda: calls.append(1) or 2)
+
+    class _Done:
+        stdout = b"killed 3; still running: 0\ngame=0 matrix=0 xephyr=0 cuse=0\n"
+    monkeypatch.setattr(jjp_emulate_tab.subprocess, "run", lambda *a, **k: _Done())
+    panel._stop_async()
+    for _ in range(60):
+        if calls:
+            break
+        _t.sleep(0.05)
+    assert calls == [1]
+
+
 # ------------------------------------------------- key present but not shared --
 
 def test_a_key_in_the_pc_is_not_the_same_as_no_key():

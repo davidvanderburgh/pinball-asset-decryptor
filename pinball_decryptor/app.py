@@ -2135,7 +2135,9 @@ class App:
             self.window.write_filename_var.set(name)
         self._start_write(chain_flash_device=device_path)
 
-    def _start_flash_image(self, image_path, device_path, menu_only=False):
+    def _start_flash_image(self, image_path, device_path, menu_only=False,
+                           target=None, disk_mode=None, image=None,
+                           from_iso=None):
         """Flash a pre-built image onto a card (dd-style whole-image write).
 
         ``menu_only`` writes ONLY the boot menu partition onto a card this
@@ -2152,6 +2154,15 @@ class App:
         mfr = self._current_mfr
         if mfr is None or not mfr.capabilities.flash_image:
             return
+        # ``target`` (item 123): the dialog's second place for the image - the
+        # game's own disk in a dock, installed here.  On Windows that hands the
+        # disk to WSL whole, which is the elevation gate Direct-SSD stands behind.
+        to_disk = bool(target) and target != "stick"
+        if to_disk:
+            if not getattr(mfr, "install_to_disk_phases", ()):
+                return
+            if not self._confirm_admin_for_ssd():
+                return
 
         self._save_settings()
         self._active_mode = "write"
@@ -2166,7 +2177,8 @@ class App:
         # bar status checkpoint need to be changed to the 'write' ones while
         # i'm writing an image"); set_running(False) hands the footer back.
         self.window.set_write_phases(
-            getattr(mfr, "menu_flash_phases", ()) if menu_only
+            getattr(mfr, "install_to_disk_phases", ()) if to_disk
+            else getattr(mfr, "menu_flash_phases", ()) if menu_only
             else getattr(mfr, "flash_phases", ()))
         self.window.show_phase_row("write", borrow=True)
         self.window.set_running(True, mode="write")
@@ -2185,7 +2197,7 @@ class App:
             digest = menu_identity_digest(image_path)
         except Exception:
             digest = None       # no menu partition: nothing worth recording
-        if digest is not None:
+        if digest is not None and not to_disk:
             def done_cb(success, summary, _done=done_cb):
                 if success and not self._cancel_requested:
                     self.msg_queue.put(UiCallMsg(
@@ -2197,9 +2209,18 @@ class App:
         # TypeError out of a plain JJP USB stick (PAD-138).
         extra = {"menu_only": True} if menu_only else {}
         try:
-            self.pipeline = mfr.make_flash_pipeline(
-                image_path, device_path, log_cb, phase_cb, progress_cb,
-                done_cb, **extra)
+            if to_disk:
+                # ``disk_mode`` (item 124): "menu" = only the boot menu,
+                # "image" = only image ``image`` from ``from_iso``; else all.
+                self.pipeline = mfr.make_install_to_disk_pipeline(
+                    image_path, device_path, log_cb, phase_cb, progress_cb,
+                    done_cb, menu_only=(disk_mode == "menu"),
+                    image=(image if disk_mode == "image" else None),
+                    from_iso=(from_iso if disk_mode == "image" else None))
+            else:
+                self.pipeline = mfr.make_flash_pipeline(
+                    image_path, device_path, log_cb, phase_cb, progress_cb,
+                    done_cb, **extra)
         except Exception:
             # Nothing started, so nothing will ever call done_cb - hand the
             # window back here, or it sits on a Cancel with nothing behind it

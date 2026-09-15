@@ -48,6 +48,19 @@ if [ -f "$JJP_PULSE_COOKIE" ]; then
     chmod 600 "$JJP_JAIL/root/.config/pulse/cookie"
 fi
 
+# Root B of a multi-boot install ISO (item 117): its own overlay - the restored
+# sda5 read-only below, a tmpfs above, because root B is mounted rw on the
+# machine and the hook chowns and links inside it - at the path padselect.sh
+# looks FIRST (/jjpe/multi/b), so the hook takes its "already there" branch and
+# never touches /dev/disk/by-uuid.  One script, both worlds.
+if mountpoint -q "$JJP_ROOTB" 2>/dev/null; then
+    mountpoint -q "$JJP_OVLB" || { mkdir -p "$JJP_OVLB"; mount -t tmpfs -o "size=$JJP_OVL_SIZE" tmpfs "$JJP_OVLB"; }
+    mkdir -p "$JJP_OVLB/up" "$JJP_OVLB/work" "$JJP_JAIL$JJP_MULTI_B"
+    mountpoint -q "$JJP_JAIL$JJP_MULTI_B" || mount -t overlay overlay \
+        -o "lowerdir=$JJP_ROOTB,upperdir=$JJP_OVLB/up,workdir=$JJP_OVLB/work" "$JJP_JAIL$JJP_MULTI_B"
+fi
+
 echo "jail    : $JJP_JAIL ($(mountpoint -q "$JJP_JAIL" && echo mounted || echo FAILED))"
 echo "binds   : $(mount | grep -c "$JJP_JAIL")"
 echo "X socket: $(ls "$JJP_JAIL/tmp/.X11-unix" 2>/dev/null | tr '\n' ' ')"
+echo "root B  : $(mountpoint -q "$JJP_JAIL$JJP_MULTI_B" 2>/dev/null && echo "$JJP_JAIL$JJP_MULTI_B (overlay of $JJP_ROOTB)" || echo none)"

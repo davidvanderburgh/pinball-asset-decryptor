@@ -58,8 +58,11 @@ KEYBOARD
 Common controls get keyboard shortcuts, resolved per-title from the switch
 names.  Each one is shown in its OWN switch's row (the Key column) and on the
 ball buttons, rather than in a legend panel repeating the same pairs a second
-time.  Keys work while THIS window is focused (the game itself has no keyboard
-input - a real cabinet has none either).
+time.  Keys work while this window OR the game's window is focused: with
+--game-display, jjpkeys.py grabs the same keys on the game's nested X server and
+reports each press here, where the same handlers apply it - one keymap, two
+windows (David, 2026-09-13).  The game itself reads no keyboard; a real cabinet
+has none.
 
 THE TWO COLUMNS ARE FIXED WIDTHS
 --------------------------------
@@ -106,6 +109,7 @@ import mmap
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 import tkinter as tk
@@ -531,6 +535,23 @@ BALL_KEYS = [
     (('d', 'D'), 'Drain',  'drain'),
 ]
 
+def game_key_actions(keybindings, ball_keys=BALL_KEYS):
+    """``{keysym: ('switch', (fb, mask)) | ('ball', action)}`` - the matrix's
+    own resolved keymap, for the presses jjpkeys.py reports from the game's
+    window.  The first binding of a keysym wins, as it does in ``_bind_keys``
+    where no two share one."""
+    out = {}
+    for keysyms, _label, key in keybindings:
+        if key is None:
+            continue
+        for ks in keysyms:
+            out.setdefault(ks, ('switch', key))
+    for keysyms, _label, action in ball_keys:
+        for ks in keysyms:
+            out.setdefault(ks, ('ball', action))
+    return out
+
+
 _KEY_PRETTY = {'space': 'Space', 'Return': 'Enter', 'KP_Enter': 'Enter',
                'apostrophe': "'", 'Left': '←', 'Right': '→', 'Up': '↑',
                'Down': '↓', 'equal': '=', 'minus': '-', 'BackSpace': 'Bksp',
@@ -539,7 +560,7 @@ _KEY_PRETTY = {'space': 'Space', 'Return': 'Enter', 'KP_Enter': 'Enter',
 
 class MatrixUI:
     def __init__(self, root, devices, shm, pf_png=None, pulse_ms=120,
-                 geom_file=DEFAULT_GEOM, ball_opts=None):
+                 geom_file=DEFAULT_GEOM, ball_opts=None, game_display=None):
         self.root = root
         self.shm = shm
         self.pulse_ms = pulse_ms
@@ -622,6 +643,17 @@ class MatrixUI:
         self.keybindings = self._resolve_keymap()
         self._annotate_tree_keys()
         self._bind_keys()
+        # ...and the same keys in the GAME's window (jjpkeys.py on its nested
+        # display), so either window takes them.
+        self._gk_proc = None
+        self._gk_buf = b''
+        self._gk_ready = False
+        self._gk_fails = 0
+        self._gk_closing = False
+        self._gk_display = game_display
+        self._gk_actions = game_key_actions(self.keybindings)
+        if game_display:
+            self._spawn_game_keys()
 
         self._start_balls(devices)
 
@@ -651,6 +683,22 @@ class MatrixUI:
             anywhere, because the game ejects and then waits for the trough to
             CHANGE, which a static fill can never do.
         """
+        if devices.get('cabinet_only'):
+            # THE BOOT MENU'S MATRIX on a first run (jjpsw_launch.sh --menu, a
+            # multi-boot image whose title has no device tables yet): the
+            # flippers and Start, and nothing else.  The block is NOT idled -
+            # that would wipe the rest frame seed_rest.py laid for a game about
+            # to latch its trough - and there is no trough to seat or coil to
+            # watch.  jjpsw_launch.sh reopens the full matrix once the game is up.
+            # The feeder is still made (over no trough and no coils) so every
+            # button and the tick that ask it for something get an answer.
+            self.feeder = jjpball.Feeder(
+                self.shm, self.switches, [],
+                after=self.root.after, log=self._ball_log, now=time.monotonic,
+                board=BOARD_IO, **self.ball_opts)
+            self._ball_log('cabinet switches only, for the boot menu - the '
+                           'playfield opens once the game is up')
+            return
         self.shm.idle()
         self.latched.clear()
 
@@ -1172,6 +1220,107 @@ class MatrixUI:
         if not self._typing():
             self.toggle(key)
 
+    # ------------------------------------------------------- the game's window
+    def _spawn_game_keys(self):
+        """Start jjpkeys.py on the game's display and read its presses."""
+        names = list(self._gk_actions)
+        if not names or self._gk_closing:
+            return
+        try:
+            self._gk_proc = subprocess.Popen(
+                [sys.executable, os.path.join(HERE, 'jjpkeys.py'),
+                 '--display', self._gk_display] + names,
+                stdout=subprocess.PIPE, stderr=sys.stdout)
+        except (OSError, ValueError) as exc:
+            self._keys_log("cannot start jjpkeys.py: %s" % exc)
+            return
+        self._gk_buf = b''
+        self._gk_ready = False
+        self.root.tk.createfilehandler(self._gk_proc.stdout, tk.READABLE,
+                                       self._game_keys_readable)
+
+    def _keys_log(self, msg):
+        sys.stdout.write('[keys] %s\n' % msg)
+        sys.stdout.flush()
+
+    def _game_keys_readable(self, _file, _mask):
+        proc = self._gk_proc
+        if proc is None:
+            return
+        try:
+            chunk = os.read(proc.stdout.fileno(), 4096)
+        except OSError:
+            chunk = b''
+        if not chunk:
+            # The helper ended: Xephyr went away, or it never reached it.  A
+            # helper that had been working is restarted at once; one that
+            # cannot reach the display gets three tries, then the game window's
+            # keys are said to be off (this window's keep working).
+            self._stop_game_keys_proc()
+            self._gk_fails = 0 if self._gk_ready else self._gk_fails + 1
+            if self._gk_closing:
+                return
+            if self._gk_fails < 3:
+                self.root.after(3000, self._spawn_game_keys)
+            else:
+                self._keys_log("the game window's keys are off: nothing answers on "
+                               "%s (this window's keys still work)" % self._gk_display)
+            return
+        self._gk_buf += chunk
+        *lines, self._gk_buf = self._gk_buf.split(b'\n')
+        for raw in lines:
+            self._game_key_line(raw.decode('utf-8', 'replace').strip())
+
+    def _game_key_line(self, line):
+        """One line from jjpkeys.py, applied as this window's own key would be:
+        a press pulses, Shift+press latches, the ball keys go to the feeder."""
+        parts = line.split()
+        if not parts:
+            return
+        if parts[0] == 'ready':
+            self._gk_ready = True
+            self._keys_log("the game window takes the matrix keys too (%s)"
+                           % ' '.join(parts[1:]))
+            return
+        if parts[0] != 'press' or len(parts) < 2:
+            return
+        act = self._gk_actions.get(parts[1])
+        if act is None:
+            return
+        shift = len(parts) > 2 and parts[2].isdigit() and (int(parts[2]) & 1)
+        kind, what = act
+        if kind == 'ball':
+            if self.feeder is not None:
+                getattr(self.feeder, what)()
+        elif shift:
+            self.toggle(what)
+        else:
+            self.pulse(what)
+
+    def _stop_game_keys_proc(self):
+        proc, self._gk_proc = self._gk_proc, None
+        if proc is None:
+            return
+        try:
+            self.root.tk.deletefilehandler(proc.stdout)
+        except Exception:                               # noqa: BLE001
+            pass
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        try:
+            proc.stdout.close()
+        except OSError:
+            pass
+
+    def stop_game_keys(self):
+        """The window is closing: end the helper, and its grab on the game."""
+        self._gk_closing = True
+        self._stop_game_keys_proc()
+
     @staticmethod
     def _key_label(keysyms):
         names = []
@@ -1487,6 +1636,9 @@ def main(argv=None):
     ap.add_argument('--auto-drain-s', type=float, default=jjpball.AUTO_DRAIN_S,
                     help='a ball nobody is playing comes home after this '
                          '(0 = only the Drain button)')
+    ap.add_argument('--game-display', default=None,
+                    help="the game's nested X display (Xephyr, :1): its window "
+                         "takes this window's keys too (jjpkeys.py)")
     args = ap.parse_args(argv)
 
     if not os.path.exists(args.devices):
@@ -1503,7 +1655,8 @@ def main(argv=None):
                   geom_file=args.geom_file,
                   ball_opts={'flight_ms': args.flight_ms,
                              'min_gap_ms': args.min_gap_ms,
-                             'auto_drain_s': args.auto_drain_s})
+                             'auto_drain_s': args.auto_drain_s},
+                  game_display=args.game_display)
 
     # Close cleanly on BOTH the window's X button and a SIGTERM from the rig's
     # Stop.  A Tk window that is SIGKILL'd never releases its WSLg surface and
@@ -1517,6 +1670,7 @@ def main(argv=None):
 
     def watch_close():
         if closing['now']:
+            ui.stop_game_keys()
             ui.save_geometry()
             try:
                 root.destroy()

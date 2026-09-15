@@ -3,6 +3,7 @@
 import base64
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -4202,11 +4203,14 @@ class ModPipeline(DecryptionPipeline):
                         "   or Rufus DD mode: the machine cannot read a\n"
                         "   raw-imaged stick and shows 'Failed to mount USB\n"
                         "   stick'.\n"
-                        "2. Plug the stick into the USB port at the front of\n"
-                        "   the cabinet (Cabinet Board slot / USB extension\n"
-                        "   near the coin door). Leave the purple security\n"
-                        "   key plugged in: the installer checks for it and\n"
-                        "   stops with \"Security key not found\" without it.\n"
+                        "2. Plug the stick into a USB port on the computer in\n"
+                        "   the backbox. The cabinet's front slot (Cabinet\n"
+                        "   Board slot / USB extension near the coin door)\n"
+                        "   works too but can be 30x slower: a minute on the\n"
+                        "   Restore menu, hours to install. Leave the purple\n"
+                        "   security key plugged in: the installer checks for\n"
+                        "   it and stops with \"Security key not found\"\n"
+                        "   without it.\n"
                         "3. Turn the machine on. The installer starts on its\n"
                         "   own and offers an optional factory reset; the\n"
                         "   Utilities USB-update menu is NOT part of this.",
@@ -4229,10 +4233,11 @@ class ModPipeline(DecryptionPipeline):
                         "   balenaEtcher or dd: the machine cannot read a\n"
                         "   raw-imaged stick and shows 'Failed to mount USB\n"
                         "   stick'.\n"
-                        "2. Plug the stick into the USB port at the front of\n"
-                        "   the cabinet (Cabinet Board slot / USB extension\n"
-                        "   near the coin door) and turn the machine on. The\n"
-                        "   installer starts on its own; the Utilities\n"
+                        "2. Plug the stick into a USB port on the computer in\n"
+                        "   the backbox (the cabinet's front slot works too\n"
+                        "   but can be 30x slower: a minute on the Restore\n"
+                        "   menu, hours to install) and turn the machine on.\n"
+                        "   The installer starts on its own; the Utilities\n"
                         "   USB-update menu is NOT part of this.",
                         "info",
                     )
@@ -5910,11 +5915,14 @@ class StandaloneModPipeline(ModPipeline):
                         "   or Rufus DD mode: the machine cannot read a\n"
                         "   raw-imaged stick and shows 'Failed to mount USB\n"
                         "   stick'.\n"
-                        "2. Plug the stick into the USB port at the front of\n"
-                        "   the cabinet (Cabinet Board slot / USB extension\n"
-                        "   near the coin door). Leave the purple security\n"
-                        "   key plugged in: the installer checks for it and\n"
-                        "   stops with \"Security key not found\" without it.\n"
+                        "2. Plug the stick into a USB port on the computer in\n"
+                        "   the backbox. The cabinet's front slot (Cabinet\n"
+                        "   Board slot / USB extension near the coin door)\n"
+                        "   works too but can be 30x slower: a minute on the\n"
+                        "   Restore menu, hours to install. Leave the purple\n"
+                        "   security key plugged in: the installer checks for\n"
+                        "   it and stops with \"Security key not found\"\n"
+                        "   without it.\n"
                         "3. Turn the machine on. The installer starts on its\n"
                         "   own and offers an optional factory reset; the\n"
                         "   Utilities USB-update menu is NOT part of this.",
@@ -5937,10 +5945,11 @@ class StandaloneModPipeline(ModPipeline):
                         "   balenaEtcher or dd: the machine cannot read a\n"
                         "   raw-imaged stick and shows 'Failed to mount USB\n"
                         "   stick'.\n"
-                        "2. Plug the stick into the USB port at the front of\n"
-                        "   the cabinet (Cabinet Board slot / USB extension\n"
-                        "   near the coin door) and turn the machine on. The\n"
-                        "   installer starts on its own; the Utilities\n"
+                        "2. Plug the stick into a USB port on the computer in\n"
+                        "   the backbox (the cabinet's front slot works too\n"
+                        "   but can be 30x slower: a minute on the Restore\n"
+                        "   menu, hours to install) and turn the machine on.\n"
+                        "   The installer starts on its own; the Utilities\n"
                         "   USB-update menu is NOT part of this.",
                         "info",
                     )
@@ -10271,606 +10280,276 @@ class DirectSSDModPipeline(StandaloneModPipeline):
     _detect_game_via_debugfs = DirectSSDDecryptPipeline._detect_game_via_debugfs
 
 
+def _mkjjpmulti_path():
+    """tools/jjp_emu/mkjjpmulti.py, resolved from this file so a checkout anywhere works;
+    PAD_JJP_EMU_DIR moves it (the Emulate JJP tab's own variable)."""
+    d = os.environ.get("PAD_JJP_EMU_DIR") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))), "tools", "jjp_emu")
+    return os.path.join(d, "mkjjpmulti.py")
+
+
+def _physical_drive_number(device_path):
+    r"""``\\.\PHYSICALDRIVE3`` -> 3; None for anything else."""
+    m = re.search(r"physicaldrive(\d+)\s*$", device_path or "", re.I)
+    return int(m.group(1)) if m else None
+
+
 class RestoreToSSDPipeline:
-    """Restore a Clonezilla ISO directly to a blank (or existing) SSD.
+    r"""A JJP install ISO written STRAIGHT ONTO THE GAME'S SSD in a dock (item 123).
 
-    Reads the partition table and all partition images from the ISO,
-    partitions the target SSD, and writes each partition image via dd.
+    The work is ``tools/jjp_emu/mkjjpmulti.py install``: the same steps the ISO's own
+    installer runs on the machine - the partition table from its sgdisk template, every
+    slot restored with partclone, the filesystem UUIDs grub and fstab expect, the temp
+    partition - read out of that installer and run here, then the disk read back and
+    checked.  A multi-boot ISO lands with image 1 in root B; a stock ISO as JJP's
+    installer would put it.  No stick, no live boot, no security key (that gates the
+    game, not the disk) - and, like every JJP install, the disk's old settings and
+    scores go with its old partitions.
 
-    Phases: Extract > Partition > Restore > Cleanup
+    Phases: Attach > Install > Verify > Detach.  Windows: the disk is taken offline and
+    handed to the WSL VM whole (``wsl --mount --bare`` - Administrator, the Direct-SSD
+    gate), the /dev/sdX that appears is the tool's ``--disk``, and the disk is handed
+    back at the end whatever happened.  Linux: the device is the tool's ``--disk`` as
+    it is.  macOS: refused - the tool wants a Linux block device and Docker there has
+    none; the USB install stick is the way.
     """
 
+    PROGRESS_RE = re.compile(r"^\[card\] progress (\d+)/(\d+) ([\d.]+)% ?(.*)$")
+    CHECK_RE = re.compile(r"^(ok|FAIL): ")
+
     def __init__(self, iso_path, device_path, log_cb, phase_cb, progress_cb,
-                 done_cb):
+                 done_cb, tool_path=None, executor=None, menu_only=False,
+                 image=None, from_iso=None):
         self.iso_path = iso_path
         self.device_path = device_path
+        # Item 124: two partial writes onto a disk that already holds this
+        # ISO's install - the menu alone (`--menu-only`), or one image's root
+        # from its own ISO (`--image N --from ISO`); both keep the settings.
+        self.menu_only = bool(menu_only)
+        self.image = image
+        self.from_iso = from_iso
         self.log = log_cb
         self.on_phase = phase_cb
         self.on_progress = progress_cb
         self.on_done = done_cb
         self.cancelled = False
-        self._succeeded = False
-        self._iso_mount = None
-        self._tmp_dir = None
-        self.executor = _install_robust_run_host(create_executor())
+        self.executor = executor or _install_robust_run_host(create_executor())
+        self._tool = tool_path or _mkjjpmulti_path()
+        self._attached = None       # the Windows disk handed to WSL, until handed back
+        self._offlined = None       # the disk number taken offline, until put back
+        self._verifying = False
+        self._done_ok = False
+        self._fails = 0
 
     def cancel(self):
         self.cancelled = True
 
     def _check_cancel(self):
         if self.cancelled:
-            raise PipelineError("Restore", "Cancelled by user.")
+            raise PipelineError("Install", "Cancelled by user. The disk is half written: "
+                                "install again before it goes into a machine.")
 
-    def _log_system_diagnostics(self):
-        """Log basic system info for debugging."""
-        import platform
-        self.log(f"Platform: {sys.platform} ({platform.machine()})", "info")
-        self.log(f"ISO: {self.iso_path}", "info")
-        self.log(f"Target device: {self.device_path}", "info")
+    @property
+    def mode(self):
+        return "menu" if self.menu_only else ("image" if self.image is not None else "full")
+
+    def _done_words(self):
+        if self.mode == "menu":
+            return ("The boot menu on %s is replaced; the games, settings and scores are as "
+                    "they were.\n\nPut the disk back and power on." % self.device_path)
+        if self.mode == "image":
+            return ("Image %d on %s is now %s; the other image, the menu, the settings and "
+                    "scores are as they were.\n\nPut the disk back and power on."
+                    % (self.image, self.device_path, os.path.basename(self.from_iso or "?")))
+        return ("Installed %s onto %s.\n\nThe disk is ready for the machine: put it back and "
+                "power on. Settings and scores start fresh, as after any JJP install."
+                % (os.path.basename(self.iso_path), self.device_path))
 
     def run(self):
-        """Execute the ISO-to-SSD restore pipeline."""
-        from .executor import WslExecutor, DockerExecutor, NativeExecutor
-        cleanup_phase = len(config.RESTORE_TO_SSD_PHASES) - 1
+        last = len(config.RESTORE_TO_SSD_PHASES) - 1
         try:
-            self._log_system_diagnostics()
-
-            # Phase 0: Extract — mount ISO and parse metadata
+            self.log("ISO: %s" % self.iso_path, "info")
+            self.log("Target disk: %s" % self.device_path, "info")
+            if self.mode == "menu":
+                self.log("Only the boot menu is written; the games, settings and scores stay.", "info")
+            elif self.mode == "image":
+                self.log("Only image %d is written, from %s; the other image, the menu, the settings "
+                         "and scores stay." % (self.image, self.from_iso), "info")
+            if not os.path.isfile(self.iso_path):
+                raise PipelineError("Attach", "ISO not found: %s" % self.iso_path)
+            if self.mode == "image" and not (self.from_iso and os.path.isfile(self.from_iso)):
+                raise PipelineError("Attach", "The image's own install ISO was not found: %s" % self.from_iso)
             self.on_phase(0)
-            self._phase_extract_metadata()
+            disk = self._attach()
             self._check_cancel()
-
-            # Phase 1: Partition — create partition table on SSD
             self.on_phase(1)
-            self._phase_partition()
-            self._check_cancel()
-
-            # Phase 2: Restore — write each partition image
-            self.on_phase(2)
-            self._phase_restore_partitions()
-            self._check_cancel()
-
-            self._succeeded = True
-            self.on_phase(cleanup_phase)
-            self._phase_cleanup()
-            self.on_done(True,
-                f"Restore complete!\n"
-                f"The SSD now matches the ISO image and is ready to use.")
-
+            ok = self._install(disk)
+            self.on_phase(last)
+            self._detach()
+            if ok:
+                self.on_done(True, self._done_words())
+            else:
+                self.on_done(False,
+                             "The install ran, but the disk did not read back as expected "
+                             "(the FAIL lines in the log say what). Do not put this disk "
+                             "in a machine; install again.")
         except PipelineError as e:
             self.log(str(e), "error")
-            self.on_phase(cleanup_phase)
-            self._phase_cleanup()
+            self.on_phase(last)
+            self._detach()
             self.on_done(False, str(e))
         except Exception as e:
-            self.log(f"Unexpected error: {e}", "error")
-            self.on_phase(cleanup_phase)
-            self._phase_cleanup()
-            self.on_done(False, f"Unexpected error: {e}")
+            self.log("Unexpected error: %s" % e, "error")
+            self.on_phase(last)
+            self._detach()
+            self.on_done(False, "Unexpected error: %s" % e)
 
-    def _phase_extract_metadata(self):
-        """Mount the ISO and read partition table + partition image info."""
-        from .executor import WslExecutor, DockerExecutor
+    # -- the disk, to WSL and back -------------------------------------------------------
+    def _wsl_disks(self):
+        try:
+            out = self.executor.run("lsblk -ndo NAME,TYPE", timeout=30)
+        except CommandError as e:
+            raise PipelineError("Attach", "lsblk in WSL failed:\n%s" % e.output) from e
+        names = set()
+        for line in (out or "").splitlines():
+            cols = line.split()
+            if len(cols) >= 2 and cols[1] == "disk":
+                names.add(cols[0])
+        return names
 
-        self.log("Reading ISO contents...", "info")
-
-        # For WSL, copy ISO to Linux filesystem first (loop mount fails on
-        # /mnt/c).  For Docker, the ISO is accessible via bind mount.
+    def _attach(self):
+        from .executor import WslExecutor, NativeExecutor
         if isinstance(self.executor, WslExecutor):
-            self._tmp_dir = f"/var/tmp/jjp_restore_{uuid.uuid4().hex[:8]}"
-            self.executor.run(f"mkdir -p '{self._tmp_dir}'", timeout=10)
-            wsl_iso = self.executor.to_exec_path(self.iso_path)
-            self._local_iso = f"{self._tmp_dir}/source.iso"
-            self.log("Copying ISO to WSL filesystem...", "info")
-            self.executor.run(
-                f"cp '{wsl_iso}' '{self._local_iso}'",
-                timeout=config.EXTRACT_TIMEOUT)
-        elif isinstance(self.executor, DockerExecutor):
-            self._tmp_dir = f"/tmp/jjp_restore_{uuid.uuid4().hex[:8]}"
-            # Start Docker with ISO accessible
-            self.log("Starting Docker container...", "info")
-            cache_dir = self.executor._cache_dir()
-            self.executor.start_container([self.iso_path])
-            self._local_iso = self.executor.to_exec_path(self.iso_path)
-        else:
-            # Native Linux
-            self._tmp_dir = f"/var/tmp/jjp_restore_{uuid.uuid4().hex[:8]}"
-            self.executor.run(f"mkdir -p '{self._tmp_dir}'", timeout=10)
-            self._local_iso = self.iso_path
-
-        # Mount the ISO
-        self._iso_mount = f"{self._tmp_dir}/iso_mnt"
-        self.executor.run(f"mkdir -p '{self._iso_mount}'", timeout=10)
-        try:
-            self.executor.run(
-                f"mount -o loop,ro '{self._local_iso}' '{self._iso_mount}'",
-                timeout=config.MOUNT_TIMEOUT)
-        except CommandError as e:
-            raise PipelineError("Extract",
-                f"Failed to mount ISO:\n{e.output}") from e
-
-        partimag = f"{self._iso_mount}{config.PARTIMAG_PATH}"
-
-        # Read partition list
-        try:
-            parts_raw = self.executor.run(
-                f"cat '{partimag}/parts'", timeout=10).strip()
-        except CommandError as e:
-            raise PipelineError("Extract",
-                f"No 'parts' file in ISO — is this a Clonezilla image?\n"
-                f"{e.output}") from e
-
-        self._partitions = parts_raw.split()
-        self.log(f"Partitions in image: {' '.join(self._partitions)}", "info")
-
-        # Read filesystem types
-        self._part_fs = {}
-        try:
-            devfs = self.executor.run(
-                f"cat '{partimag}/dev-fs.list'", timeout=10)
-            for line in devfs.strip().splitlines():
-                if line.startswith("#") or not line.strip():
-                    continue
-                fields = line.split()
-                if len(fields) >= 2:
-                    # /dev/sda1 vfat → sda1: vfat
-                    name = fields[0].replace("/dev/", "")
-                    self._part_fs[name] = fields[1]
-        except CommandError:
-            pass
-        self.log(f"Filesystems: {self._part_fs}", "info")
-
-        # Read sfdisk partition table
-        try:
-            self._sfdisk_data = self.executor.run(
-                f"cat '{partimag}/sda-pt.sf'", timeout=10)
-        except CommandError as e:
-            raise PipelineError("Extract",
-                f"No partition table (sda-pt.sf) in ISO:\n{e.output}") from e
-        self.log("Partition table (sda-pt.sf) loaded.", "info")
-
-        # Catalogue partition image chunks
-        self._part_chunks = {}
-        for part in self._partitions:
-            try:
-                chunks_raw = self.executor.run(
-                    f"ls -1 '{partimag}/{part}.'*'-ptcl-img.gz.'* 2>/dev/null "
-                    f"| sort",
-                    timeout=10).strip()
-                if chunks_raw:
-                    chunks = chunks_raw.splitlines()
-                    self._part_chunks[part] = chunks
-                    total_size = 0
-                    for c in chunks:
-                        try:
-                            sz = self.executor.run(
-                                f"stat -c%s '{c}'", timeout=5).strip()
-                            total_size += int(sz)
-                        except (CommandError, ValueError):
-                            pass
-                    self.log(f"  {part}: {len(chunks)} chunk(s), "
-                             f"{total_size / (1024**2):.0f} MB compressed",
-                             "info")
-            except CommandError:
-                self.log(f"  {part}: no image chunks found", "info")
-
-        if not self._part_chunks:
-            raise PipelineError("Extract",
-                "No partition images found in ISO.")
-
-        self.log(f"ISO metadata loaded: {len(self._part_chunks)} partition(s) "
-                 f"to restore.", "success")
-
-    def _phase_partition(self):
-        """Create the partition table on the target SSD."""
-        from .executor import WslExecutor, DockerExecutor, NativeExecutor
-
-        device = self.device_path
-        self.log(f"Creating partition table on {device}...", "info")
-
-        if isinstance(self.executor, WslExecutor):
-            # Attach disk to WSL
-            disk_num = device.rstrip().replace("\\\\", "\\").split(
-                "PHYSICALDRIVE")[-1]
-
-            # Take disk offline for WSL access
-            if disk_num.isdigit():
+            n = _physical_drive_number(self.device_path)
+            if n is None:
+                raise PipelineError("Attach", r"Not a physical disk path: %s (expected "
+                                    r"\\.\PhysicalDriveN)" % self.device_path)
+            # THE WRITE TAB'S DIRECT-SSD SEQUENCE, kept step for step (it is
+            # what David accepted this on): stale WSL mounts of the disk
+            # cleared first - the specific device, then every disk when that
+            # refuses - the disk taken offline so Windows lets go of its
+            # letters, then the attach, with the one recovery the tab
+            # learned (ALREADY_MOUNTED after a wsl restart: wsl --shutdown,
+            # offline again, one more try).
+            rc_u, _o, _e = self.executor.run_host(
+                'wsl --unmount "%s"' % self.device_path, timeout=15)
+            if rc_u != 0:
                 self.executor.run_host('wsl --unmount', timeout=15)
-                self.log("Taking disk offline for WSL access...", "info")
-                rc, _, err = self.executor.run_host(
-                    f'powershell -NoProfile -Command '
-                    f'"Set-Disk -Number {disk_num} -IsOffline $true"',
-                    timeout=15)
-                if rc != 0:
-                    self.log(f"Warning: could not take disk offline: {err}",
-                             "info")
-                self._disk_was_offlined = True
-
-            # Attach raw disk to WSL (no partition, whole disk)
-            rc, stdout, stderr = self.executor.run_host(
-                f'wsl --mount "{device}" --bare', timeout=30)
+            before = self._wsl_disks()
+            self.log("Taking disk %d offline and handing it to WSL whole "
+                     "(wsl --mount --bare)..." % n, "info")
+            self._offline(n)
+            mount_cmd = 'wsl --mount "%s" --bare' % self.device_path
+            rc, out, err = self.executor.run_host(mount_cmd, timeout=60)
+            if rc != 0 and "ALREADY_MOUNTED" in (err or out or "").upper():
+                self.log("Stale WSL mount detected - restarting WSL...", "info")
+                self.executor.run_host('wsl --shutdown', timeout=30)
+                self._offline(n)
+                before = self._wsl_disks()
+                rc, out, err = self.executor.run_host(mount_cmd, timeout=60)
             if rc != 0:
-                raise PipelineError("Partition",
-                    f"Failed to attach disk to WSL:\n{stderr or stdout}")
-            self._wsl_mounted_device = device
+                raise PipelineError("Attach",
+                                    "wsl --mount refused the disk:\n%s\n\nThis needs the app "
+                                    "run as Administrator, and a disk no Windows program has "
+                                    "open." % (err or out).strip())
+            self._attached = self.device_path
+            after = self._wsl_disks()
+            new = sorted(after - before)
+            if len(new) != 1:
+                raise PipelineError("Attach",
+                                    "Could not tell which disk WSL just received (%s) - "
+                                    "nothing was written." % (", ".join(new) or "none appeared"))
+            dev = "/dev/" + new[0]
+            self.log("WSL sees the disk as %s" % dev, "info")
+            return dev
+        if isinstance(self.executor, NativeExecutor):
+            return self.device_path
+        raise PipelineError("Attach",
+                            "Writing an install ISO straight onto an SSD needs a Linux block "
+                            "device (Windows with WSL, or Linux). On macOS, make a USB install "
+                            "stick instead.")
 
-            # Find the block device in WSL
-            wsl_dev = self._find_wsl_block_device(device)
-            self._wsl_block_dev = wsl_dev
+    def _offline(self, n):
+        rc, out, err = self.executor.run_host(
+            'powershell -NoProfile -Command "Set-Disk -Number %d -IsOffline $true"' % n,
+            timeout=30)
+        if rc == 0:
+            self._offlined = n
+        else:
+            self.log("Warning: could not take disk %d offline: %s"
+                     % (n, (err or out).strip()), "info")
 
-            # Write partition table via sfdisk
-            sfdisk_b64 = base64.b64encode(
-                self._sfdisk_data.encode()).decode()
-            self.executor.run(
-                f"echo '{sfdisk_b64}' | base64 -d | sfdisk '{wsl_dev}'",
-                timeout=30)
-            # Re-read partition table
-            self.executor.run(
-                f"partprobe '{wsl_dev}' 2>/dev/null; sleep 1; true",
-                timeout=15)
-            self.log(f"Partition table written to {wsl_dev}.", "success")
-
-        elif isinstance(self.executor, DockerExecutor):
-            # macOS: use diskutil to partition, then sgdisk if available
-            # First unmount
+    def _detach(self):
+        if self._attached:
+            rc, out, err = self.executor.run_host(
+                'wsl --unmount "%s"' % self._attached, timeout=60)
+            if rc != 0:
+                self.log("Warning: wsl --unmount: %s" % (err or out).strip(), "info")
+            self._attached = None
+        if self._offlined is not None:
             self.executor.run_host(
-                f"diskutil unmountDisk {device}", timeout=15)
+                'powershell -NoProfile -Command "Set-Disk -Number %d -IsOffline $false"'
+                % self._offlined, timeout=30)
+            self._offlined = None
 
-            # Try sgdisk (from Homebrew e2fsprogs/gptfdisk)
-            # Write sfdisk data to a temp file, convert with sfdisk in Docker
-            # Actually, we can use sgdisk --load-backup on macOS if available,
-            # or use diskutil to partition.
-
-            # Simplest approach: use sfdisk inside Docker if we can pass the
-            # raw device.  Docker can't do that on macOS.
-            # Alternative: write partition table via dd of the GPT backup.
-            # The ISO includes sda-gpt-1st (primary GPT) and sda-gpt-2nd
-            # (backup GPT) and sda-mbr.
-
-            self.log("Writing GPT partition table via raw image...", "info")
-
-            # Write MBR (protective MBR, first 512 bytes)
-            partimag = f"{self._iso_mount}{config.PARTIMAG_PATH}"
-            mbr_path = f"{self._tmp_dir}/sda-mbr"
-            gpt1_path = f"{self._tmp_dir}/sda-gpt-1st"
-            try:
-                self.executor.run(
-                    f"cp '{partimag}/sda-mbr' '{mbr_path}'", timeout=10)
-                self.executor.run(
-                    f"cp '{partimag}/sda-gpt-1st' '{gpt1_path}'", timeout=10)
-            except CommandError as e:
-                raise PipelineError("Partition",
-                    f"MBR/GPT files not found in ISO:\n{e.output}") from e
-
-            # Extract to host filesystem for dd
-            cache_dir = self.executor._cache_dir()
-            host_mbr = os.path.join(cache_dir, "sda-mbr")
-            host_gpt1 = os.path.join(cache_dir, "sda-gpt-1st")
-
-            # Copy from Docker container to host via base64
-            mbr_b64 = self.executor.run(
-                f"base64 '{mbr_path}'", timeout=10).strip()
-            import base64 as _b64
-            with open(host_mbr, 'wb') as f:
-                f.write(_b64.b64decode(mbr_b64))
-            gpt1_b64 = self.executor.run(
-                f"base64 '{gpt1_path}'", timeout=10).strip()
-            with open(host_gpt1, 'wb') as f:
-                f.write(_b64.b64decode(gpt1_b64))
-
-            raw_dev = device.replace("/dev/disk", "/dev/rdisk")
-
-            # Write protective MBR (first 446 bytes only — don't touch
-            # partition entries in the MBR gap)
-            rc, _, err = self.executor.run_host(
-                f"dd if='{host_mbr}' of='{raw_dev}' bs=512 count=1",
-                timeout=30)
-            if rc != 0:
-                raise PipelineError("Partition",
-                    f"Failed to write MBR:\n{err}")
-
-            # Write primary GPT (starts at LBA 1 = byte 512)
-            gpt_size = os.path.getsize(host_gpt1)
-            rc, _, err = self.executor.run_host(
-                f"dd if='{host_gpt1}' of='{raw_dev}' bs=512 seek=1 "
-                f"count={gpt_size // 512}",
-                timeout=30)
-            if rc != 0:
-                raise PipelineError("Partition",
-                    f"Failed to write GPT:\n{err}")
-
-            # Also write backup GPT at the end of the disk
-            # Get disk size first
-            rc, disk_info, _ = self.executor.run_host(
-                f"diskutil info {device}", timeout=10)
-            disk_sectors = None
-            if rc == 0:
-                m = re.search(r'Disk Size:.*\((\d+) Bytes\)', disk_info)
-                if m:
-                    disk_sectors = int(m.group(1)) // 512
-
-            if disk_sectors:
-                try:
-                    host_gpt2 = os.path.join(cache_dir, "sda-gpt-2nd")
-                    gpt2_path = f"{self._tmp_dir}/sda-gpt-2nd"
-                    self.executor.run(
-                        f"cp '{partimag}/sda-gpt-2nd' '{gpt2_path}'",
-                        timeout=10)
-                    gpt2_b64 = self.executor.run(
-                        f"base64 '{gpt2_path}'", timeout=10).strip()
-                    with open(host_gpt2, 'wb') as f:
-                        f.write(_b64.b64decode(gpt2_b64))
-                    gpt2_size = os.path.getsize(host_gpt2)
-                    backup_lba = disk_sectors - (gpt2_size // 512)
-                    rc, _, err = self.executor.run_host(
-                        f"dd if='{host_gpt2}' of='{raw_dev}' bs=512 "
-                        f"seek={backup_lba} count={gpt2_size // 512}",
-                        timeout=30)
-                    if rc == 0:
-                        self.log("Backup GPT written.", "info")
-                except Exception:
-                    self.log("Warning: could not write backup GPT.", "info")
-
-            self.log("Partition table written.", "success")
-
-        elif isinstance(self.executor, NativeExecutor):
-            # Linux: sfdisk directly
-            sfdisk_b64 = base64.b64encode(
-                self._sfdisk_data.encode()).decode()
-            self.executor.run(
-                f"echo '{sfdisk_b64}' | base64 -d | sfdisk '{device}'",
-                timeout=30)
-            self.executor.run(
-                f"partprobe '{device}' 2>/dev/null; sleep 1; true",
-                timeout=15)
-            self.log(f"Partition table written to {device}.", "success")
-
-    def _find_wsl_block_device(self, win_device):
-        """Find the block device path inside WSL for a Windows disk."""
-        # wsl --mount --bare makes the disk available at /dev/sdX
-        # Find it by looking at recently added block devices
-        try:
-            result = self.executor.run(
-                "lsblk -dpno NAME,SIZE 2>/dev/null | grep -v loop",
-                timeout=10)
-            # Pick the last non-loop block device (most recently attached)
-            devices = [l.split()[0] for l in result.strip().splitlines()
-                       if l.strip()]
-            if devices:
-                dev = devices[-1]
-                self.log(f"WSL block device: {dev}", "info")
-                return dev
-        except CommandError:
-            pass
-        raise PipelineError("Partition",
-            "Could not find the attached disk in WSL.")
-
-    def _phase_restore_partitions(self):
-        """Restore each partition image to the SSD."""
-        from .executor import WslExecutor, DockerExecutor, NativeExecutor
-
-        total_parts = len(self._part_chunks)
-        self.on_progress(0, total_parts, "Restoring partitions...")
-
-        for idx, part in enumerate(self._partitions):
-            self._check_cancel()
-
-            if part not in self._part_chunks:
-                self.log(f"Skipping {part} (no image).", "info")
-                continue
-
-            chunks = self._part_chunks[part]
-            # Extract partition number from e.g. "sda3" → 3
-            m = re.search(r'(\d+)$', part)
-            if not m:
-                self.log(f"Skipping {part} (can't parse number).", "info")
-                continue
-            part_num = int(m.group(1))
-
-            fs_type = self._part_fs.get(part, "ext4")
-            self.log(f"Restoring {part} ({fs_type}, "
-                     f"{len(chunks)} chunk(s))...", "info")
-
-            if isinstance(self.executor, WslExecutor):
-                self._restore_partition_wsl(part, part_num, chunks, fs_type)
-            elif isinstance(self.executor, DockerExecutor):
-                self._restore_partition_macos(part, part_num, chunks, fs_type)
-            elif isinstance(self.executor, NativeExecutor):
-                self._restore_partition_linux(part, part_num, chunks, fs_type)
-
-            self.on_progress(idx + 1, total_parts, f"Restored {part}")
-            self.log(f"  {part} restored.", "success")
-
-        self.log(f"All {total_parts} partition(s) restored.", "success")
-
-    def _restore_partition_wsl(self, part, part_num, chunks, fs_type):
-        """Restore a partition via WSL (partclone.restore or dd)."""
-        target_dev = f"{self._wsl_block_dev}{part_num}"
-        # Verify partition device exists
-        self.executor.run(
-            f"test -b '{target_dev}'", timeout=5)
-
-        cat_chunks = " ".join(f"'{c}'" for c in chunks)
-        # Use partclone.restore to decompress and write directly
-        partclone_type = f"partclone.{fs_type}" if fs_type != "vfat" \
-            else "partclone.vfat"
-        # Check if the specific partclone variant exists, fall back to
-        # partclone.restore (generic)
-        try:
-            self.executor.run(f"command -v {partclone_type}", timeout=5)
-        except CommandError:
-            partclone_type = "partclone.restore"
-
-        cmd = (
-            f"cat {cat_chunks} | gunzip -c | "
-            f"{partclone_type} -C -s - -o '{target_dev}' 2>&1"
-        )
-        try:
-            for line in self.executor.stream(cmd,
-                                             timeout=config.EXTRACT_TIMEOUT):
-                self._check_cancel()
-                if "Completed:" in line:
-                    m = re.search(r'Completed:\s*([\d.]+)%', line)
-                    if m:
-                        pct = float(m.group(1))
-                        self.on_progress(int(pct), 100,
-                            f"Restoring {part}: {pct:.0f}%")
-        except CommandError as e:
-            raise PipelineError("Restore",
-                f"Failed to restore {part}:\n{e.output}") from e
-
-    def _restore_partition_macos(self, part, part_num, chunks, fs_type):
-        """Restore a partition on macOS via Docker extract + dd."""
-        device = self.device_path
-        raw_dev = device.replace("/dev/disk", "/dev/rdisk") + f"s{part_num}"
-
-        # Extract partition to raw image inside Docker
-        raw_img = f"{self._tmp_dir}/{part}.raw"
-        cat_chunks = " ".join(f"'{c}'" for c in chunks)
-
-        # Use partclone.restore inside Docker to decompress to raw image
-        cmd = (
-            f"cat {cat_chunks} | gunzip -c | "
-            f"partclone.restore -C -s - -O '{raw_img}' 2>&1"
-        )
-        try:
-            for line in self.executor.stream(cmd,
-                                             timeout=config.EXTRACT_TIMEOUT):
-                self._check_cancel()
-                if "Completed:" in line:
-                    m = re.search(r'Completed:\s*([\d.]+)%', line)
-                    if m:
-                        pct = float(m.group(1))
-                        self.on_progress(int(pct), 100,
-                            f"Extracting {part}: {pct:.0f}%")
-        except CommandError as e:
-            raise PipelineError("Restore",
-                f"Failed to extract {part}:\n{e.output}") from e
-
-        # Get the raw image size
-        try:
-            img_size = int(self.executor.run(
-                f"stat -c%s '{raw_img}'", timeout=10).strip())
-            self.log(f"  Raw image: {img_size / (1024**2):.0f} MB", "info")
-        except (CommandError, ValueError):
-            img_size = 0
-
-        # Copy raw image to host cache dir, then dd to SSD
-        cache_dir = self.executor._cache_dir()
-        host_img = os.path.join(cache_dir, f"{part}.raw")
-
-        # Stream from Docker to host via dd through the bind-mounted cache
-        wsl_img = self.executor.to_exec_path(host_img)
-        self.executor.run(
-            f"cp '{raw_img}' '{wsl_img}'",
-            timeout=config.EXTRACT_TIMEOUT)
-
-        # Unmount disk before writing
-        self.executor.run_host(
-            f"diskutil unmountDisk {device}", timeout=15)
-
-        # dd to the partition
-        self.log(f"  Writing {part} to {raw_dev}...", "info")
-        rc, stdout, stderr = self.executor.run_host(
-            f"dd if='{host_img}' of='{raw_dev}' bs=1m",
-            timeout=3600)
-        if rc != 0:
-            raise PipelineError("Restore",
-                f"Failed to write {part} to SSD:\n{stderr or stdout}")
-
-        # Clean up host image
-        try:
-            os.unlink(host_img)
-        except OSError:
-            pass
-
-    def _restore_partition_linux(self, part, part_num, chunks, fs_type):
-        """Restore a partition on Linux via partclone.restore directly."""
-        device = self.device_path
-        target_dev = f"{device}{part_num}"
-
-        cat_chunks = " ".join(f"'{c}'" for c in chunks)
-        partclone_type = f"partclone.{fs_type}" if fs_type != "vfat" \
-            else "partclone.vfat"
-        try:
-            self.executor.run(f"command -v {partclone_type}", timeout=5)
-        except CommandError:
-            partclone_type = "partclone.restore"
-
-        cmd = (
-            f"cat {cat_chunks} | gunzip -c | "
-            f"{partclone_type} -C -s - -o '{target_dev}' 2>&1"
-        )
-        try:
-            for line in self.executor.stream(cmd,
-                                             timeout=config.EXTRACT_TIMEOUT):
-                self._check_cancel()
-                if "Completed:" in line:
-                    m = re.search(r'Completed:\s*([\d.]+)%', line)
-                    if m:
-                        pct = float(m.group(1))
-                        self.on_progress(int(pct), 100,
-                            f"Restoring {part}: {pct:.0f}%")
-        except CommandError as e:
-            raise PipelineError("Restore",
-                f"Failed to restore {part}:\n{e.output}") from e
-
-    def _phase_cleanup(self):
-        """Unmount ISO and clean up temp files."""
+    # -- the install ---------------------------------------------------------------------
+    def _install(self, disk):
         from .executor import WslExecutor
+        iso = self.executor.to_exec_path(self.iso_path)
+        tool = (self.executor.to_exec_path(self._tool)
+                if isinstance(self.executor, WslExecutor) else self._tool)
+        flags = ""
+        if self.mode == "menu":
+            flags = " --menu-only"
+        elif self.mode == "image":
+            flags = " --image %d --from %s" % (int(self.image), shlex.quote(self.executor.to_exec_path(self.from_iso)))
+        cmd = "python3 %s install --iso %s --disk %s --yes%s" % (
+            shlex.quote(tool), shlex.quote(iso), shlex.quote(disk), flags)
+        self.log("mkjjpmulti.py install --iso %s --disk %s%s"
+                 % (os.path.basename(self.iso_path), disk,
+                    (" --menu-only" if self.mode == "menu" else
+                     " --image %d --from %s" % (int(self.image), os.path.basename(self.from_iso)) if self.mode == "image" else "")),
+                 "info")
+        self._verifying, self._done_ok, self._fails = False, False, 0
+        try:
+            for line in self.executor.stream(cmd, timeout=config.INSTALL_TO_DISK_TIMEOUT):
+                self._check_cancel()
+                self._take_line(line)
+        except CommandError as e:
+            raise PipelineError("Install", "The install did not finish:\n%s" % e.output) from e
+        return self._done_ok and not self._fails
 
-        self.log("Cleaning up...", "info")
-
-        # Unmount ISO
-        if self._iso_mount:
-            try:
-                self.executor.run(
-                    f"umount '{self._iso_mount}' 2>/dev/null; true",
-                    timeout=30)
-            except CommandError:
-                pass
-
-        # Detach disk from WSL
-        if isinstance(self.executor, WslExecutor):
-            if hasattr(self, '_wsl_mounted_device'):
-                self.executor.run_host(
-                    f'wsl --unmount "{self._wsl_mounted_device}"',
-                    timeout=15)
-            if getattr(self, '_disk_was_offlined', False):
-                disk_num = self.device_path.rstrip().replace(
-                    "\\\\", "\\").split("PHYSICALDRIVE")[-1]
-                if disk_num.isdigit():
-                    self.executor.run_host(
-                        f'powershell -NoProfile -Command '
-                        f'"Set-Disk -Number {disk_num} -IsOffline $false"',
-                        timeout=15)
-
-        # Stop Docker container
-        if hasattr(self.executor, 'stop_container'):
-            try:
-                self.executor.stop_container()
-            except Exception:
-                pass
-
-        # Clean up temp directory
-        if self._tmp_dir:
-            try:
-                self.executor.run(
-                    f"rm -rf '{self._tmp_dir}' 2>/dev/null; true",
-                    timeout=30)
-            except CommandError:
-                pass
-            # Also clean up local ISO copy on WSL
-            if hasattr(self, '_local_iso') and '/var/tmp/' in str(self._local_iso):
-                try:
-                    self.executor.run(
-                        f"rm -f '{self._local_iso}' 2>/dev/null; true",
-                        timeout=10)
-                except CommandError:
-                    pass
-
-        self.log("Cleanup complete.", "success")
-
+    def _take_line(self, line):
+        """One line of the tool: its work meter moves the bar (never the log), its verify
+        lines flip the phase, its refusal and its last line say how it ended."""
+        m = self.PROGRESS_RE.match(line)
+        if m:
+            self.on_progress(int(float(m.group(3))), 100, m.group(4).strip() or "Installing")
+            return
+        if self.CHECK_RE.match(line):
+            if not self._verifying:
+                self._verifying = True
+                self.on_phase(2)
+            if line.startswith("FAIL"):
+                self._fails += 1
+                self.log(line, "error")
+            else:
+                self.log(line, "info")
+            return
+        if line.startswith("[card] error:"):
+            self.log(line[len("[card] "):], "error")
+            return
+        if line.startswith("[card] "):
+            line = line[len("[card] "):]
+        if line.startswith("install: DONE"):
+            self._done_ok = True
+            self.log(line, "success")
+            return
+        if line.startswith("install verify:"):
+            self.log(line, "success" if "PASS" in line else "error")
+            return
+        self.log(line, "info")
 
 def export_mod_pack(assets_folder, output_zip, log_cb=None, progress_cb=None):
     """Scan assets folder for modified files and package them into a zip.

@@ -584,3 +584,201 @@ across the hand-off and `alive.sh` read 0 after every run.
 4. Insider Connected: log in from the stock image first (it grades and
    persists P/P/P), then from the 1987 image.
 
+## The JJP build (item 114) — the same menu on a JJP machine
+
+`make PLATFORM=jjp` builds the SAME sources, natively on the WSL host, as
+`build-jjp/jjpselect` for a JJP machine's rootfs (x86-64, Ubuntu 21.10,
+glibc 2.34, Mesa, an X server that `jjp.service` starts through `xinit` for
+`rungame.sh`).  Nothing in the menu, the conf, the media, the themes, the
+groups or the choice contract changes; three files stand in for the Stern
+hardware and one header defends the build:
+
+- **`egl_x11.c`** implements the `egl_stern.h` interface on an X window:
+  override-redirect, at 0,0, sized to the main display (a screen wider than
+  16:9 — a second display — is cut to a 16:9 box of its height).  EGL/GLES2
+  are **dlopen'd, never linked** — the build host has no libGLESv2 at all,
+  and a machine whose Mesa is missing or broken still gets a menu through
+  the second path, **XPutImage** of the canvas, centred (`PAD_SELECT_NO_EGL=1`
+  forces it, for a proof run or a diagnosis; it paces itself to 60 Hz, the
+  vsync a swap would give).  Xlib is declared by hand, like EGL always was;
+  `Visual` and `XSetWindowAttributes` are the two structs laid out by hand.
+  `w`/`h` reported to the menu are the CANVAS (1360x768), so the layout, the
+  snapshot and the picture on the glass are one thing; the quad scales it.
+- **`input_jjpio.c`** (`--input jjpio`) reads the cabinet buttons the way
+  JJP's own installer helper does — `jjpcrt`, unstripped on every install
+  stick: `read(fd, buf, 64)` then `write(fd, 64 zero bytes)` on
+  `/dev/jjpio100` (udev's name; `/dev/jjpio0` is the driver's).  **LEFT =
+  byte 1 bit 0, RIGHT = byte 1 bit 2, START = byte 3 bit 0, active low**,
+  press = released-then-low.  The zero OUT frame is JJP's idle frame, written
+  by their installer on a powered machine, so it drives no coil; it is the
+  only thing ever written.  Paced to 200 Hz behind `poll()` (the rig's CUSE
+  board answers at once).  A missing board is one log line and a menu that
+  times out into the primary.  The front **Volume+ / Volume- buttons are
+  byte 1 bits 5 and 6** (GNR's device table: `dswitch_plus` "Up / Volume+
+  Button" 0x20, `dswitch_minus` "Down / Volume- Button" 0x40 - one title's
+  table, not jjpcrt's) and arrive as `EV_PLUS` / `EV_MINUS`.
+  `key_left=` / `key_right=` / `key_start=` / `key_plus=` / `key_minus=`
+  `<byte>.<bit>` in images.conf move a button; `--learn` logs the four
+  cabinet bytes whenever they change, which is how a machine is calibrated.
+  No Action button, no Select/Back: `input_has()` keeps them off the
+  footer.
+- **The menu's sound on a JJP machine (item 120).**  JJP runs its amplifier
+  chain at full and turns only the game's own stream down, so the menu's
+  software gain is the level the speakers get (volume 50 was "very high" on
+  the first GNR).  The JJP build (Makefile) therefore sets `DEF_VOLUME=20`,
+  `VOLUME_CEILING=40` - nothing passes it: not `volume=`, not `--volume`,
+  not the remembered level; a conf's `volume_max=` can only lower it - and a
+  60 ms ALSA buffer (`ALSA_LATENCY_US`) where the Stern card keeps 500 ms,
+  because `audio_pump()` keeps the buffer full and a new sound joins behind
+  all of it; the buffer the device granted is logged (`audio: alsa buffer N
+  frames (M ms)`).  On `--input jjpio` PLUS/MINUS are the VOLUME buttons, not
+  a second LEFT/RIGHT: each press steps the level by 5 (to the next multiple
+  of 5 that way) within the ceiling, plays the move sound at the new level,
+  restarts the countdown, and draws an indicator over the middle of the card
+  row - "VOLUME n / cap" and a bar, "VOLUME OFF" at 0 - for 2 s after the
+  last press.  When it goes, the level is written to `--volume-file`
+  (`/jjpe/perm/padselect.volume`, beside `padselect.last`; tmp + rename), and
+  a level changed just before START is written at the choice; the next boot
+  starts from it.  Every other backend leaves PLUS/MINUS moving the highlight
+  (`padsw_test.py` checks Stern's).  The media step levels every JJP menu
+  sound and music bed to a -3 dBFS peak (`mkjjpmulti.py media` passes
+  `selectmedia.py prepare --peak-dbfs -3`; it was -12 until 2026-09-14, which
+  with volume 20 put the menu's 40 ms click 20 dB under the pre-120 menu David
+  called very loud, and on the GNR that read as no sound at all).
+- **SOUND OFF on the glass.** A menu that asked for a sink (`--audio auto` or
+  `alsa`) and has none draws `SOUND OFF: <why>` small along the top edge -
+  the reason `audio_open` logged (`audio_missing()`); `--audio none`, a
+  snapshot and the rig's fifo show nothing. And `audio_alsa_open` retries a
+  device that refuses the buffer asked for at 120, 250 and 500 ms before it
+  gives up (`PADSELECT_ALSA_LATENCY_MS` overrides the build's request, for
+  the rig).
+- **A maintenance reboot (JJP).** `padselect.sh --maintenance-reboot`, which the
+  builder makes rungame.sh's 68/69 cases call before their `reboot`, writes the
+  epoch into `$PERM/padselect.maint`; the next run of the hook consumes it and,
+  when it is under `MAINT_MAX_S` old and `$LAST` names an image, takes that
+  index as the choice and skips the selector (the sink lookup with it). Stale,
+  future by more than five minutes, or no last choice: the menu, with a log
+  line saying why. `PADSELECT_MAINT` / `PADSELECT_MAINT_MAX_S` for the test.
+- **THE SINK (JJP).** A machine with the headphone kit has two sinks and the
+  server's default is the kit's USB codec; JJP's `setup.pl` moves the GAME's
+  stream to the onboard pci sink once the game is up. The hook
+  (`padselect.sh`) does the same for the menu before it launches the
+  selector: `pactl list short sinks`, the first line with "pci" in the name
+  and "analog" on it, exported as `PULSE_SINK` (libpulse's default device,
+  read by libpulse-simple and by ALSA's pulse plugin alike), and a hook line
+  saying which. Five silent sticks were this (2026-09-14): the rig has one
+  sink, so no rig proof could see it.
+- **The pulse sink (JJP).** `audio_pulse.c`: libpulse-simple, hand-written
+  prototypes (no headers on the box), `pa_simple_new` with tlength
+  `PULSE_TLENGTH_MS` and prebuf/minreq a quarter of it; `space()` answers
+  from the wall clock (stay `PULSE_LEAD_MS` ahead, drop the backlog after a
+  stall), `write()` is `pa_simple_write` (a failure drops the stream and
+  retries a second later). `--audio auto` on the JJP build (`AUDIO_PULSE`)
+  tries it before ALSA; `--audio pulse` insists. The ALSA pulse plugin left
+  the GNR silent through four sticks; this is the game's own path.
+- **The pump thread.** `audio_pump()` from the main loop was the design until
+  2026-09-14; a JJP machine's vsync-paced loop underran the 60 ms buffer and
+  the stream through the pulse plugin stopped restarting (the GNR, silent).
+  `audio_open` now starts a thread that pumps every `PUMP_MS` (5) under a
+  mutex every entry point takes; the main loop's `audio_pump()` is a no-op
+  while it runs, `audio_close` joins it before the sink closes. The JJP
+  build also REOPENS the PCM on an underrun (`ALSA_REOPEN_ON_XRUN`:
+  `alsa_reopen` = close + `open_pcm` with the same device and buffer, a fresh
+  plugin instance) because after `snd_pcm_recover` the pulse plugin's
+  bookkeeping leaves the stream stalled whatever the start threshold - the
+  rig stopped 80 ms of every 200 recovered 7 times and then wrote almost
+  nothing; a watchdog in `alsa_space` reopens as well when nothing has been
+  accepted for `ALSA_STALL_MS` (3000; a fresh pulse stream pauses ~1.1 s
+  after its first fill on the rig's sink, so not less) while open, since a stuck stream does
+  not always report an underrun; and it sets the start threshold to one
+  period (`ALSA_START_PERIODS`). The Stern card's sink keeps `recover`.
+- **`--learn` (jjpio).** A frame bit that changes and is not one of the
+  mapped buttons is queued as a RAW event (`EV_RAW(byte, bit, pressed)`,
+  coded above `EV_COUNT` so the queue carries it as it is; the whole 64-byte
+  frame, with a chatter guard) and the menu logs `INPUT byte N bit M pressed
+  (not a menu button)`; every changed frame goes to the log as hex,
+  rate-limited (`LEARN_LINES_PER_S`, `LEARN_LINES_MAX`). It drew that line
+  on the glass for 3 s too, until David asked for it to go (2026-09-14
+  evening). The JJP hook passes `--learn` when images.conf carries `learn=1`
+  (the builder's `--learn`; off by default since 2026-09-15): the GNR's outside volume
+  toggle moved no mapped bit and the menu could not say so (2026-09-14).
+- **A button in two places (jjpio).** `key_start=3.0,3.4` - a comma and a
+  second `<byte>.<bit>` - is the same button somewhere else (`jjp_byte2` /
+  `jjp_bit2`): pressed when either line is low, and both places count as
+  mapped for `--learn`. The GNR's lockdown-bar Action button is a second
+  START that way (David, 2026-09-14).
+- **`stubs_jjp.c`**: `codec.c` and `input_hw.c` as no-ops.  A PC has an
+  `/dev/i2c-1` of its own and the SGTL5000 code must never be let near it.
+- **`jjp_glibc.h`**, force-included: the host's glibc 2.39 headers redirect
+  `strtol`/`sscanf` to `__isoc23_*` under `_GNU_SOURCE`, which a 2.34 card
+  lacks (`tools/jjp_emu/build.sh` met it first).  And `STBTT_fmod` is a local
+  one-liner because 2.38 gave `fmod` a new symbol version.
+
+`JJPROOT=<a mounted card image's root>` links against the card's own
+libraries (every symbol version pinned) and lets `test/check_elf_jjp.sh`
+prove that every STRONG undefined symbol resolves there; without it the host's
+runtime libs are linked by soname and the ceiling (GLIBC ≤ 2.34, a NEEDED
+whitelist without libEGL/libGLESv2, the x86-64 interpreter) still holds.
+`test/check_elf_jjp_selftest.sh` builds a host program needing
+`fmod@GLIBC_2.38` and requires the check to refuse it — a ceiling nobody has
+watched say no is not a test.
+
+`make check PLATFORM=jjp` = the ceiling + its selftest + `headless.sh`
+(every case, natively — `test/native.sh` is the `$QEMU` stand-in that drops
+the `-L ROOT`) + `padsw_test.py` + `jjpio_test.py` (a pty plays the board:
+right/left/right/start → `chose 1`, every byte written back zero, a `key_*`
+remap, no board at all → the default boots).  **`BUILD` must be a Linux
+path** — DrvFs has no FIFOs and the padsw test makes one.  The card's paths
+are baked in (`/jjpe/gen1/padselect/{images.conf,font.ttf,media}`,
+`/jjpe/temp/padselect.choice`, `/jjpe/perm/padselect.last`); `make install
+PLATFORM=jjp DESTDIR=…` puts the selector under `/jjpe/gen1/padselect/`.
+The hook that runs it (`padselect.sh`, the bind of the chosen image's game
+directory, the update refusal) is item 115.
+
+**Proven in the JJP rig (2026-09-12)**, inside the GNR 3.03 jail on the
+rig's Xephyr at 1920x1080 with the CUSE `/dev/jjpio100` and the switch shm
+poked at `jjpcrt`'s bits: `egl: up after 1 attempt(s)` on the card's own
+Mesa 21.2.6 (llvmpipe; 188 loops/s), `key: right/left/right/start`, `chose
+1`, choice file 1, exit 0, 1935 frames read and 1935 zero frames written,
+teardown to `alive.sh` 0; then the same run with `PAD_SELECT_NO_EGL=1`
+(XPutImage, 62 loops/s).  The GNR hardware run is item 119.
+
+### The hook: `padselect.sh` (item 115)
+
+The JJP twin of `select.sh`, in dash — the shell `rungame.sh` is written
+for.  The builder adds ONE line to root A's `/jjpe/gen1/scripts/rungame.sh`,
+right after `$JJPEDIR/scripts/runonce.sh` and before `while true`:
+
+```
+[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh
+```
+
+**Executed, never sourced.** `rungame.sh` runs under `jjp.service` with
+`Restart=always`; an `exit` inside a sourced file would take `rungame.sh`
+down and loop the service.  A child's exit is nothing, and its mounts are in
+the same namespace, which is all `rungame.sh` needs.
+
+In order: with fewer than two `image=` lines it is silent.  Otherwise
+**JJP's updater is masked** — `updater.sh` rsyncs or partclones the OTHER
+root slot (image 1) and then `swapgrub.sh -p b`, so a JJP update would
+overwrite the second image and boot it with no menu; a tiny script is
+bind-mounted over `/jjpe/gen1/scripts/updater.sh` for the life of the boot
+(a namespace change, nothing new on the disk) and tells the game's update
+screen why through `rprogress`/`pcprogress`; `jjp_update=allow` in the conf
+leaves the updater alone.  Then `jjpselect` (exit 0 = a choice, else image
+0).  The chosen image's token: `rootA` (nothing), `rootB` (root B mounted rw
+by the UUID in the card's OWN `scripts/fs_uuids.sh` at `/jjpe/multi/b` —
+skipped when the tree is already there, which is how the rig pre-mounts it,
+so one script serves both worlds), `rootB:<sub>` (a directory at root B's
+top holding `<GAMENAME>/`).  Then `mount --bind <tree>/<GAMENAME>
+/jjpe/gen1/<GAMENAME>` and what `runonce.sh` did on the primary's tree, redone
+on the one the game now sees (the `vf` link into `/jjpe/perm`, chown, +x).
+Every failure unwinds the bind and the mount and boots image 0 with one line
+in `/jjpe/temp/padselect.log` (JJP's own log partition; rotated to `.1` past
+1 MiB).  The selector's verbose log only with `log=` in the conf.
+
+`test/padselect_sh_test.sh` drives it under dash and sh with a fake selector,
+fake mount/umount/chown and directories for the partitions — 16 cases, from
+the lookups through every unwind.  `make install PLATFORM=jjp` puts the hook
+under `/jjpe/gen1/scripts/`.
+

@@ -179,6 +179,13 @@ class JJPManufacturer(Manufacturer):
         # ISO intermediate).  Surfaces the "From ISO / From SSD"
         # radio on the Extract + Write tabs.
         direct_ssd=True,
+        # Multi-boot (item 118): the Multi-boot tab with its JJP backend -
+        # two install ISOs of the same game code become ONE install stick
+        # with a boot menu (tools/jjp_emu/mkjjpmulti.py; the menu is the
+        # same code selector the Stern card carries, built for the JJP
+        # root).  The tab hands the ISO to this plugin's own stick maker and
+        # to the Emulate JJP tab.
+        multiboot=True,
         # Dongle-decrypt: run the game under an LD_PRELOAD shim that drives
         # the game's OWN decryption via the plugged-in HASP dongle.  Surfaces
         # the advanced "Decrypt using the game's HASP dongle" checkbox on the
@@ -206,8 +213,8 @@ class JJPManufacturer(Manufacturer):
         # swapped clip round-trips with no special handling.
         replace_video=True,
         # "Flash" surface — for JJP this is NOT a dd write: the machine
-        # never boots the stick, it mounts the stick's FAT volume at
-        # power-on and runs the installer from it, so a raw-imaged
+        # boots the stick's own Clonezilla live system (syslinux or EFI),
+        # which runs the installer from its FAT volume, so a raw-imaged
         # (Etcher/dd) stick fails with "Failed to mount USB stick" (a tester's
         # Sonic report).  make_flash_pipeline formats the stick FAT32/MBR
         # and copies the ISO's files onto it — the working procedure,
@@ -239,6 +246,15 @@ class JJPManufacturer(Manufacturer):
     direct_ssd_write_phases = tuple(config.DIRECT_SSD_MOD_PHASES)
     # USB-stick prep flow (the "flash" surface) — see usbstick.py.
     flash_phases = usbstick.PHASES
+    # Item 123: the same ISO STRAIGHT ONTO THE GAME'S SSD in a dock on this PC - the
+    # flash dialog's second place for it.  The install is what the machine's own
+    # installer would do, run from here (tools/jjp_emu/mkjjpmulti.py install): no
+    # stick, no security key.  The stick stays first: it is what every tester has.
+    install_to_disk_phases = tuple(config.RESTORE_TO_SSD_PHASES)
+    flash_targets = (
+        ("stick", "a USB install stick (the machine installs from it)", "usb_stick"),
+        ("disk", "the game's SSD in a dock on this PC (installed here; no stick, no key)", "ssd"),
+    )
     # The shared Build / flash button + dialog read dd-flavoured by
     # default (Stern/CGC); JJP's operation is a format-and-copy, so every
     # user-facing word says so.
@@ -391,6 +407,17 @@ class JJPManufacturer(Manufacturer):
         return usbstick.UsbStickPreparePipeline(
             image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
 
+    def make_install_to_disk_pipeline(self, image_path, device_path,
+                                      log_cb, phase_cb, progress_cb, done_cb,
+                                      menu_only=False, image=None, from_iso=None):
+        # The ISO onto the disk as the machine's installer would put it - or
+        # only its menu, or only one image from that image's own ISO (item
+        # 124) - see RestoreToSSDPipeline (tools/jjp_emu/mkjjpmulti.py install).
+        from .pipeline import RestoreToSSDPipeline
+        return RestoreToSSDPipeline(image_path, device_path,
+                                    log_cb, phase_cb, progress_cb, done_cb,
+                                    menu_only=menu_only, image=image, from_iso=from_iso)
+
     def write_output_ext(self):
         # A JJP build is always a Clonezilla-derived install ISO; pinning
         # the extension keeps the File Name box (and the Build / make USB
@@ -453,5 +480,8 @@ class JJPManufacturer(Manufacturer):
                 "FAT32/MBR stick (macOS/Linux). Do NOT raw-write the ISO "
                 "with balenaEtcher or dd -- the machine cannot read a "
                 "raw-imaged stick and shows 'Failed to mount USB stick'.\n"
-                "3. Plug the stick into the cabinet's front USB port and "
-                "turn the game on; the installer runs by itself.")
+                "3. Plug the stick into a USB port on the computer in the "
+                "backbox and turn the game on; the installer runs by itself. "
+                "(The cabinet's front USB slot works too, but on some machines "
+                "it is 30x slower: a minute on the Restore menu, hours to "
+                "install.)")

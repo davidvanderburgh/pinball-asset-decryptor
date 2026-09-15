@@ -126,12 +126,19 @@ DIRECT_SSD_MOD_PHASES = [
     "Cleanup",
 ]
 
+# An install ISO straight onto the game's SSD in a dock (item 123): the disk handed to
+# WSL whole, mkjjpmulti.py install (the machine installer's own steps), its read-back,
+# the disk handed back.
 RESTORE_TO_SSD_PHASES = [
-    "Extract",
-    "Partition",
-    "Restore",
-    "Cleanup",
+    "Attach",
+    "Install",
+    "Verify",
+    "Detach",
 ]
+#: Two roots of ~10 GB each through gunzip and partclone onto a docked SSD: minutes on
+#: a USB 3 dock, an hour and more on a slow one - the stick copy of the same bytes took
+#: 25 minutes.  Well past that before the run is called stuck.
+INSTALL_TO_DISK_TIMEOUT = 4 * 3600
 
 # Partition number containing game data (1-indexed for wsl --mount)
 GAME_PARTITION_NUMBER = 3

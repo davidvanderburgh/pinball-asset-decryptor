@@ -182,6 +182,33 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   GNR root's own PulseAudio 15 with a null sink inside the jail, its monitor
   recorded, the selector at 60 ms and at 500 ms - every click and the confirm
   chime reached the sink with the mix's own peaks, 0 dropped, 0 recovers.
+- **THE CAUSE of the GNR's silent menu: the wrong sink (2026-09-14, late
+  evening).** A GNR with JJP's headphone kit has TWO PulseAudio sinks: the
+  kit's USB codec (`alsa_output.usb-C-Media_Electronics_Inc._USB_Audio_Device-00.analog-stereo`)
+  and the onboard codec that drives the speakers
+  (`alsa_output.pci-0000_00_1f.3.analog-stereo`), and PulseAudio ranks usb
+  above pci, so the server's DEFAULT sink is the kit. JJP's own
+  `scripts/audio/setup.pl`, run once the GAME is up, finds the pci analog
+  sink, makes it the default (`pactl set-default-sink`) and moves the game's
+  stream there (`pactl move-sink-input`); `setoutputdevice.pl` moves it to
+  usb / pci / bluez per the operator's output setting. The menu runs BEFORE
+  setup.pl and played into the default sink, i.e. the kit: silent speakers
+  through five sticks - the level, the buffer, the pump thread, the reopens
+  and libpulse-simple were all real fixes to a path that was never the
+  problem, and every rig proof heard them because the rig has ONE sink. The
+  one loud boot (item 119) was a boot after the game had run: setup.pl's
+  default is persisted by module-default-device-restore in /var/lib/pulse,
+  and every reinstall since wiped it. The fix is in the hook: `padselect.sh`
+  names the pci analog sink for the selector's stream (`PULSE_SINK`, the
+  match setup.pl uses - "pci" in the name, "analog" on the line - via
+  `pactl list short sinks`; `PADSELECT_PACTL` for the test) and logs `menu
+  sound to <sink>`; the pulse sink logs `sink <name>` in its `pulse ok`
+  line. No pci sink (the rig) = the default, as before. Rig instrument: the
+  GNR root's pulse in the jail with two null sinks named as the machine's,
+  the usb one the default, both monitors recorded, the HOOK launching the
+  menu (scratchpad `pulseprobe120b.sh`): the stick's hook lands the clicks on
+  the usb sink, the fixed hook on the pci sink. Machine confirmation: GNR
+  check 5.
 - **The JJP build plays through PulseAudio ITSELF** (`audio_pulse.c`,
   libpulse-simple, the library the game's own audio uses): `--audio auto` on a
   JJP build tries the server first and falls back to ALSA when none answers.
@@ -200,7 +227,8 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   the chime reached the sink in all three, 0 errors, 0 reconnects; a single
   resync at 1.2 s in the quiet runs is the rig's null sink taking ~1.1 s to
   start pulling (the write blocks once, the backlog is dropped).
-- **Why the GNR's menu was silent, and the fix (2026-09-14, evening).** The
+- **The first theory of the silence - underruns (2026-09-14, evening; the
+  cause turned out to be the sink, above).** The
   machine's loop is vsync-paced and hiccups; a 60 ms buffer underruns on any
   hiccup over ~45 ms, and after the recover a stream through the pulse plugin
   never restarted: alsa-lib's start threshold is a whole buffer, which the
@@ -229,11 +257,18 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   (+) and 5 (-), and `mkjjpmulti.py build --key-plus 3.6 --key-minus 3.5`
   writes `key_plus=` / `key_minus=` into images.conf (all five `--key-*`
   flags exist; an inject carries them; `inspect` shows `keys=`). The coin
-  door's Up / Down stay the defaults.
+  door's Up / Down are REPLACED by a `key_plus=` / `key_minus=` (the ISO of
+  GNR check 4 left them unmapped, printing the learn line). A comma and a
+  second position is the same button in a second place, so the GNR build
+  names both pairs, `--key-plus 1.5,3.6 --key-minus 1.6,3.5`, and
+  `--key-start 3.0,3.4` makes the lockdown-bar Action button (byte 3 bit 4,
+  read off the log) a second START (David, 2026-09-14 evening).
 - **The machine's buttons are READ, not guessed**: the hook runs the selector
   with `--learn`, so a frame bit that changes and is not one of the five
-  mapped buttons is shown on the glass for 3 s (`INPUT byte N bit M pressed
-  (not a menu button)`) and the changed frame goes to the log as hex (two
+  mapped buttons is written to the log (`INPUT byte N bit M pressed (not a
+  menu button)`; it was on the glass for 3 s as well until David asked for
+  that line to go, 2026-09-14 evening) and the changed frame goes to the
+  log as hex (two
   lines of 32 bytes, at most 4 a second and 300 a run). David's GNR has an
   outside volume toggle that moved no mapped bit (2026-09-14); a press of it
   in the menu now names its byte and bit, which `key_plus=` / `key_minus=`

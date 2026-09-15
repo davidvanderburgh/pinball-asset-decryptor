@@ -652,6 +652,15 @@ hardware and one header defends the build:
   device that refuses the buffer asked for at 120, 250 and 500 ms before it
   gives up (`PADSELECT_ALSA_LATENCY_MS` overrides the build's request, for
   the rig).
+- **THE SINK (JJP).** A machine with the headphone kit has two sinks and the
+  server's default is the kit's USB codec; JJP's `setup.pl` moves the GAME's
+  stream to the onboard pci sink once the game is up. The hook
+  (`padselect.sh`) does the same for the menu before it launches the
+  selector: `pactl list short sinks`, the first line with "pci" in the name
+  and "analog" on it, exported as `PULSE_SINK` (libpulse's default device,
+  read by libpulse-simple and by ALSA's pulse plugin alike), and a hook line
+  saying which. Five silent sticks were this (2026-09-14): the rig has one
+  sink, so no rig proof could see it.
 - **The pulse sink (JJP).** `audio_pulse.c`: libpulse-simple, hand-written
   prototypes (no headers on the box), `pa_simple_new` with tlength
   `PULSE_TLENGTH_MS` and prebuf/minreq a quarter of it; `space()` answers
@@ -676,14 +685,20 @@ hardware and one header defends the build:
   after its first fill on the rig's sink, so not less) while open, since a stuck stream does
   not always report an underrun; and it sets the start threshold to one
   period (`ALSA_START_PERIODS`). The Stern card's sink keeps `recover`.
-- **`--learn` on the glass (jjpio).** A frame bit that changes and is not one
-  of the five mapped buttons is queued as a RAW event (`EV_RAW(byte, bit,
-  pressed)`, coded above `EV_COUNT` so the queue carries it as it is; only the
-  first 8 bytes, the cabinet's) and the menu draws `INPUT byte N bit M
-  pressed (not a menu button)` for `LEARN_OSD_MS`; every changed frame goes
-  to the log as hex, rate-limited (`LEARN_LINES_PER_S`, `LEARN_LINES_MAX`).
-  The JJP hook always passes `--learn`: the GNR's outside volume toggle moved
-  no mapped bit and the menu could not say so (2026-09-14).
+- **`--learn` (jjpio).** A frame bit that changes and is not one of the
+  mapped buttons is queued as a RAW event (`EV_RAW(byte, bit, pressed)`,
+  coded above `EV_COUNT` so the queue carries it as it is; the whole 64-byte
+  frame, with a chatter guard) and the menu logs `INPUT byte N bit M pressed
+  (not a menu button)`; every changed frame goes to the log as hex,
+  rate-limited (`LEARN_LINES_PER_S`, `LEARN_LINES_MAX`). It drew that line
+  on the glass for 3 s too, until David asked for it to go (2026-09-14
+  evening). The JJP hook always passes `--learn`: the GNR's outside volume
+  toggle moved no mapped bit and the menu could not say so (2026-09-14).
+- **A button in two places (jjpio).** `key_start=3.0,3.4` - a comma and a
+  second `<byte>.<bit>` - is the same button somewhere else (`jjp_byte2` /
+  `jjp_bit2`): pressed when either line is low, and both places count as
+  mapped for `--learn`. The GNR's lockdown-bar Action button is a second
+  START that way (David, 2026-09-14).
 - **`stubs_jjp.c`**: `codec.c` and `input_hw.c` as no-ops.  A PC has an
   `/dev/i2c-1` of its own and the SGTL5000 code must never be let near it.
 - **`jjp_glibc.h`**, force-included: the host's glibc 2.39 headers redirect

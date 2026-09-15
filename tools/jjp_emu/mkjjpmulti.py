@@ -187,15 +187,23 @@ KEY_NAMES = ("key_left", "key_right", "key_start", "key_plus", "key_minus")
 
 
 def check_key_pos(name, val):
-    """<byte>.<bit> as conf.c reads it (0-63 . 0-7), or Refused."""
-    parts = str(val).split(".")
-    try:
-        b, bit = int(parts[0]), int(parts[1])
-    except (IndexError, ValueError):
-        raise Refused("%s=%r is not <byte>.<bit>" % (name, val))
-    if len(parts) != 2 or not 0 <= b <= 63 or not 0 <= bit <= 7:
-        raise Refused("%s=%r is not <0-63>.<0-7>" % (name, val))
-    return "%d.%d" % (b, bit)
+    """<byte>.<bit> as conf.c reads it (0-63 . 0-7), or two of them with a comma - the same
+    button in a second place (the GNR's lockdown-bar Action button beside START,
+    key_start=3.0,3.4; David 2026-09-14) - or Refused."""
+    places = str(val).split(",")
+    if not 1 <= len(places) <= 2:
+        raise Refused("%s=%r is not <byte>.<bit> or <byte>.<bit>,<byte>.<bit>" % (name, val))
+    out = []
+    for place in places:
+        parts = place.strip().split(".")
+        try:
+            b, bit = int(parts[0]), int(parts[1])
+        except (IndexError, ValueError):
+            raise Refused("%s=%r is not <byte>.<bit>" % (name, val))
+        if len(parts) != 2 or not 0 <= b <= 63 or not 0 <= bit <= 7:
+            raise Refused("%s=%r is not <0-63>.<0-7>" % (name, val))
+        out.append("%d.%d" % (b, bit))
+    return ",".join(out)
 
 # ---- the installer patch (exact lines of JJP's jjp_install.sh) --------------------------------
 CHECK_ROOT_LINE = 'check_image "ROOT" "sda3.ext4-ptcl-img"'
@@ -2171,9 +2179,11 @@ def _add_conf_flags(s):
     # per boot plus the previous one, 1 MB each, ~8 KB a boot) and JJP's own dumplogs.sh
     # copies /jjpe/temp/*.log* onto a stick, so it can be read without opening the machine.
     for name in KEY_NAMES:
-        s.add_argument("--" + name.replace("_", "-"), dest=name, metavar="BYTE.BIT",
+        s.add_argument("--" + name.replace("_", "-"), dest=name, metavar="BYTE.BIT[,BYTE.BIT]",
                        help="images.conf %s=: where this machine's %s button sits in the I/O board frame "
-                            "(<0-63>.<0-7>, as the menu's --learn line names it); default: the selector's own"
+                            "(<0-63>.<0-7>, as the menu's --learn line names it; a comma and a second "
+                            "position is the same button in a second place, e.g. the GNR's Action "
+                            "button as a second START: --key-start 3.0,3.4); default: the selector's own"
                             % (name, name[4:].upper()))
     s.add_argument("--no-machine-log", dest="debug_log", action="store_false", default=True,
                    help="leave the selector's own log (images.conf log=%s, collected by JJP's "

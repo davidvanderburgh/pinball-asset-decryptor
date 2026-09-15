@@ -47,7 +47,9 @@
  * --learn logs the four cabinet bytes whenever they change, which is how a
  * machine whose buttons sit elsewhere in the frame is calibrated: read the
  * log, write key_left= / key_right= / key_start= / key_plus= / key_minus=
- * (<byte>.<bit>) into images.conf.  The name to the game is /dev/jjpio100 (udev's symlink,
+ * (<byte>.<bit>, or two of them with a comma when a button sits in two
+ * places - the GNR's lockdown-bar Action button is a second START:
+ * key_start=3.0,3.4) into images.conf.  The name to the game is /dev/jjpio100 (udev's symlink,
  * 90-jjp_usb_device.rules); the driver's own node is /dev/jjpio0.
  */
 #define _GNU_SOURCE
@@ -77,6 +79,7 @@ static const char *const DEVS[] = { "/dev/jjpio100", "/dev/jjpio0", NULL };
 static const int DEF_BYTE[NBTN] = { 1, 1, 3, 1, 1 };
 static const int DEF_BIT[NBTN]  = { 0, 2, 0, 5, 6 };
 static const int EV_OF[NBTN]    = { EV_LEFT, EV_RIGHT, EV_START, EV_PLUS, EV_MINUS };
+static const char *const NAME_OF[NBTN] = { "LEFT", "RIGHT", "START", "VOL+", "VOL-" };
 
 struct jj {
     struct input base;
@@ -84,6 +87,7 @@ struct jj {
     const char *opened;          /* which path is open */
     int fd;
     int byte[NBTN], bit[NBTN];
+    int byte2[NBTN], bit2[NBTN];  /* a second place the same button sits (-1 = none) */
     int learn;
     pthread_t th;
     int th_on, th_stop;
@@ -131,7 +135,8 @@ static void learn_frame(struct jj *j, const unsigned char *in)
                     sel_log("jjpio: learn: byte %d bit %d changed %d times - a status bit, ignored from now", b, k, *t);
                 continue;
             }
-            for (m = 0; m < NBTN; m++) if (j->byte[m] == b && j->bit[m] == k) mapped = 1;
+            for (m = 0; m < NBTN; m++)
+                if ((j->byte[m] == b && j->bit[m] == k) || (j->byte2[m] == b && j->bit2[m] == k)) mapped = 1;
             if (!mapped) input_raw(&j->base, EV_RAW(b, k, !(in[b] & (1u << k))));
         }
     }
@@ -152,6 +157,7 @@ static void learn_frame(struct jj *j, const unsigned char *in)
 
 static int try_open(struct jj *j)
 {
+    int k;
     const char *const *cand;
     const char *one[2] = { j->dev, NULL };
     cand = j->dev[0] ? one : DEVS;
@@ -166,6 +172,8 @@ static int try_open(struct jj *j)
             sel_log("jjpio: %s open (LEFT %d.%d, RIGHT %d.%d, START %d.%d, VOL+ %d.%d, VOL- %d.%d, active low)",
                     *cand, j->byte[0], j->bit[0], j->byte[1], j->bit[1], j->byte[2], j->bit[2],
                     j->byte[3], j->bit[3], j->byte[4], j->bit[4]);
+            for (k = 0; k < NBTN; k++)
+                if (j->byte2[k] >= 0) sel_log("jjpio: %s also at %d.%d", NAME_OF[k], j->byte2[k], j->bit2[k]);
             return 0;
         }
         if (!j->open_logged) sel_log("jjpio: cannot open %s: %s", *cand, strerror(errno));
@@ -226,6 +234,7 @@ static int one_pass(struct jj *j)
     for (k = 0; k < NBTN; k++) {
         int b = j->byte[k], bt = j->bit[k];
         int pressed = !(in[b] & (1u << bt));
+        if (j->byte2[k] >= 0 && !(in[j->byte2[k]] & (1u << j->bit2[k]))) pressed = 1;
         input_sample(&j->base, KEY_OF(EV_OF[k]), pressed);
     }
     if (j->learn && (!j->have_direct || memcmp(in, j->last_direct, 4))) {
@@ -312,8 +321,12 @@ struct input *input_jjpio_open(const struct input_cfg *cfg)
     for (k = 0; k < NBTN; k++) {
         int b = cfg->jjp_byte[k], bt = cfg->jjp_bit[k];
         int ok = b >= 0 && b < FRAME_LEN && bt >= 0 && bt < 8;
+        int b2 = cfg->jjp_byte2[k], bt2 = cfg->jjp_bit2[k];
+        int ok2 = b2 >= 0 && b2 < FRAME_LEN && bt2 >= 0 && bt2 < 8;
         j->byte[k] = ok ? b : DEF_BYTE[k];
         j->bit[k] = ok ? bt : DEF_BIT[k];
+        j->byte2[k] = ok2 ? b2 : -1;
+        j->bit2[k] = ok2 ? bt2 : -1;
     }
     j->learn = cfg->jjp_learn;
     /* what this cabinet has: the two flippers, START and the volume pair.  No

@@ -52,6 +52,7 @@ struct input_cfg {
      * (--learn) */
     const char *jjpio;
     int jjp_byte[5], jjp_bit[5];
+    int jjp_byte2[5], jjp_bit2[5];   /* a second place for each (byte -1 = none) */
     int jjp_learn;
 };
 

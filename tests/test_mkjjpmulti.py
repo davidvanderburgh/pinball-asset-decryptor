@@ -216,9 +216,17 @@ def test_key_positions_are_written_parsed_and_carried(mj):
     mj._add_conf_flags(p)
     assert p.parse_args(["--key-plus", "3.6"]).key_plus == "3.6"
     import pytest
-    for bad in ("3", "3.8", "64.0", "x.1"):
+    for bad in ("3", "3.8", "64.0", "x.1", "3.0,", "3.0,3.4,3.5", "3.0,x.1"):
         with pytest.raises(mj.Refused):
             mj.check_key_pos("key_plus", bad)
+    # two places for one button: the GNR's lockdown-bar Action button is a second START
+    # (David, 2026-09-14 evening) - written, parsed and carried as one value
+    assert mj.check_key_pos("key_start", "3.0, 3.4") == "3.0,3.4"
+    two = mj.render_images_conf(["rootA", "rootB"], ["A", "B"], ["", ""], 0, 15, None, [], None, None, 20,
+                                keys={"key_start": "3.0,3.4"})
+    assert "key_start=3.0,3.4\n" in two
+    assert mj.parse_images_conf(two)["keys"] == {"key_start": "3.0,3.4"}
+    assert p.parse_args(["--key-start", "3.0,3.4"]).key_start == "3.0,3.4"
 
 
 def test_the_machine_log_is_on_by_default(mj):

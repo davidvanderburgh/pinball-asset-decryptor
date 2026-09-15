@@ -7095,8 +7095,22 @@ These have each been violated at least once and each cost a run or a window:
       the backlog after a stall dropped; `--audio auto` tries it first, ALSA is the
       fallback. Rig-proven on the GNR root's own pulse 15: plain, the loop sleeping 100 ms
       a pass, the process stopped 80 ms of every 200 - every click and the chime at the sink
-      in all three, 0 errors, 0 reconnects. Owed: GNR check 4 with the multi120w ISO rebuilt
-      on it: audible clicks. The machine's audio facts:
+      in all three, 0 errors, 0 reconnects. GNR check 4 (that ISO): STILL SILENT, the rocker
+      stepping the indicator. THE CAUSE, read off JJP's own scripts/audio/setup.pl the same
+      evening: PulseAudio's DEFAULT sink on a GNR with the headphone kit is the kit's USB
+      codec (pulse ranks usb above pci), and setup.pl, run once the GAME is up, moves the
+      game's stream to the onboard pci sink and makes it the default; the menu ran before
+      that, into the kit - silent speakers - while every rig proof (ONE sink) heard it, and
+      the one loud boot was a boot after the game had set the default (reinstalls wipe it).
+      FIX: the hook names the pci analog sink for the selector's stream (PULSE_SINK,
+      setup.pl's own match) and says so in the log; the pulse sink logs the sink it was
+      given; hook test cases. Also David's asks that evening: the byte/bit line off the
+      glass (log only), the lockdown-bar Action button a second START (`--key-start
+      3.0,3.4`: a key may sit in two places). Rig instrument: the GNR root's pulse with two
+      null sinks named as the machine's, the usb one the default, both monitors recorded,
+      the HOOK launching the menu - the stick's hook lands the clicks on the usb sink, the
+      fixed hook on the pci sink. Owed: GNR check 5 with the multi120w ISO rebuilt on it:
+      audible clicks. The machine's audio facts:
       [[reference_jjp_front_usb_port_is_slow]], [[reference_jjp_menu_audio_is_pulse]]. The last rig run, on the merged tree
       (`GunsNRoses-v03.03.multi120v.iso`, a GNR clip on each image): both clips loaded (120
       frames 5.0 s, 96 frames 4.0 s), every frame cached, 528 played / 528 drawn each, the loop

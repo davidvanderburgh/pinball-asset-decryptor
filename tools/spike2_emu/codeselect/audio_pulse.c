@@ -160,8 +160,12 @@ struct audio_sink *audio_pulse_open(char *err, int errlen)
     p->base.close = pulse_close;
     p->base.lead_ms = PULSE_LEAD_MS;
     lat = pa_simple_get_latency(p->s, &e);
-    sel_log("audio: pulse ok (%d ch, %d Hz; tlength %d ms, lead %d ms, latency %s%llu ms)",
+    /* the sink: libpulse's default device is PULSE_SINK when set - the JJP hook
+     * names the onboard pci sink there (padselect.sh: the machine's default is
+     * the headphone kit's USB codec) - else the server's default */
+    sel_log("audio: pulse ok (%d ch, %d Hz; tlength %d ms, lead %d ms, latency %s%llu ms; sink %s)",
             AUDIO_CH, AUDIO_RATE, PULSE_TLENGTH_MS, PULSE_LEAD_MS, e ? "unreadable " : "",
-            e ? 0ULL : (unsigned long long)(lat / 1000));
+            e ? 0ULL : (unsigned long long)(lat / 1000),
+            getenv("PULSE_SINK") ? getenv("PULSE_SINK") : "the server's default");
     return &p->base;
 }

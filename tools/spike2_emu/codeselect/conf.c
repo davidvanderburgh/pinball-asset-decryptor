@@ -281,7 +281,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     c->volume_max = -1;
     {
         int k;
-        for (k = 0; k < 5; k++) c->jjp_byte[k] = c->jjp_bit[k] = -1;
+        for (k = 0; k < 5; k++) c->jjp_byte[k] = c->jjp_bit[k] = c->jjp_byte2[k] = c->jjp_bit2[k] = -1;
     }
     f = fopen(path, "r");
     if (!f) {
@@ -413,16 +413,30 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             copy_field(c->theme, val);
         } else if (!strcmp(key, "key_left") || !strcmp(key, "key_right") || !strcmp(key, "key_start")
                    || !strcmp(key, "key_plus") || !strcmp(key, "key_minus")) {
-            /* JJP (--input jjpio): <byte>.<bit> in the I/O board frame.  A
-             * value this cannot read is dropped out loud, never fatal - the
+            /* JJP (--input jjpio): <byte>.<bit> in the I/O board frame, and
+             * after a comma a SECOND place the same button sits (the GNR's
+             * lockdown-bar Action button beside START: key_start=3.0,3.4).
+             * A value this cannot read is dropped out loud, never fatal - the
              * backend then uses the default positions */
             int k = !strcmp(key, "key_left") ? 0 : !strcmp(key, "key_right") ? 1
                   : !strcmp(key, "key_start") ? 2 : !strcmp(key, "key_plus") ? 3 : 4;
-            int b = -1, bt = -1;
-            const char *dot = strchr(val, '.');
+            int b = -1, bt = -1, b2 = -1, bt2 = -1;
+            const char *dot = strchr(val, '.'), *comma = strchr(val, ',');
             if (dot && dot > val && dot[1]) {
                 b = atoi(val);
                 bt = atoi(dot + 1);
+            }
+            if (comma) {
+                const char *dot2 = strchr(comma + 1, '.');
+                if (dot2 && dot2 > comma + 1 && dot2[1]) {
+                    b2 = atoi(comma + 1);
+                    bt2 = atoi(dot2 + 1);
+                }
+                if (b2 < 0 || b2 > 63 || bt2 < 0 || bt2 > 7) {
+                    conf_warn(c, "%s:%d: %s=%s: the second position is not <0-63>.<0-7> and is ignored",
+                              path, lineno, key, val);
+                    b2 = bt2 = -1;
+                }
             }
             if (b < 0 || b > 63 || bt < 0 || bt > 7) {
                 conf_warn(c, "%s:%d: %s=%s is not <0-63>.<0-7>: the default position is used",
@@ -430,6 +444,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             } else {
                 c->jjp_byte[k] = b;
                 c->jjp_bit[k] = bt;
+                c->jjp_byte2[k] = b2;
+                c->jjp_bit2[k] = bt2;
             }
         } else if (!strncmp(key, "color_", 6)) {
             /* one colour on top of the theme.  An unknown role or a value

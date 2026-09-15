@@ -65,7 +65,11 @@
  *   key_minus=<byte>.<bit>   (1.0, 1.2, 3.0) and the device table's volume
  *                            pair (1.5, 1.6); a value that is not
  *                            <0-63>.<0-7> is warned about and ignored.  A
- *                            Stern card ignores them.
+ *                            comma and a second <byte>.<bit> is the same
+ *                            button in a second place - the GNR's lockdown-
+ *                            bar Action button beside START is
+ *                            key_start=3.0,3.4 (David, 2026-09-14).  A Stern
+ *                            card ignores them.
  *
  * A GROUP IS NEVER FATAL.  A member index naming no image line is dropped, a
  * group left with no member is dropped, an image named by two groups belongs
@@ -208,6 +212,7 @@ struct conf {
     unsigned char color_set[TH_N]; /* ...and which roles the conf set */
     int bad_colors;    /* color_ keys with an unknown role or a value that is not RRGGBB: ignored, counted */
     int jjp_byte[5], jjp_bit[5];   /* key_left/right/start/plus/minus= (byte -1 when absent) */
+    int jjp_byte2[5], jjp_bit2[5]; /* ...and the second position after the comma (byte -1 = none) */
 };
 
 /* 0 ok (c->n >= 1), -1 error with a message in err. */

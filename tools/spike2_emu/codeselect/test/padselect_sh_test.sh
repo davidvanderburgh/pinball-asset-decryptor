@@ -52,10 +52,20 @@ EOF
 cat > "$W/fakesel" <<'EOF'
 #!/bin/sh
 echo "$*" > "$SELARGS"
+echo "${PULSE_SINK:-}" > "$SELARGS.env"
 out=""
 while [ $# -gt 0 ]; do [ "$1" = "--out" ] && out=$2; shift; done
 [ -n "$FAKE_IDX" ] && echo "$FAKE_IDX" > "$out"
 exit "${FAKE_RC:-0}"
+EOF
+# fake pactl: the GNR's two sinks as `pactl list short sinks` prints them - the
+# headphone kit's USB codec first (the server's default) and the onboard pci one
+cat > "$W/fakepactl" <<'EOF'
+#!/bin/sh
+[ "$1 $2 $3" = "list short sinks" ] || exit 1
+printf '0\talsa_output.usb-C-Media_Electronics_Inc._USB_Audio_Device-00.analog-stereo\tmodule-alsa-card.c\ts16le 2ch 48000Hz\tSUSPENDED\n'
+printf '1\talsa_output.pci-0000_00_1f.3.analog-stereo\tmodule-alsa-card.c\ts16le 2ch 48000Hz\tSUSPENDED\n'
+printf '2\talsa_output.pci-0000_00_1f.3.hdmi-stereo\tmodule-alsa-card.c\ts16le 2ch 48000Hz\tSUSPENDED\n'
 EOF
 # fake mount: logs its arguments; fails when FAKE_FAIL names one of them.
 # A device mount grows root B's trees (jjpe/gen1/GunsNRoses/game, img2/...)
@@ -86,13 +96,17 @@ cat > "$W/fakechown" <<'EOF'
 echo "chown $*" >> "$FAKELOG"
 exit 0
 EOF
-chmod 755 "$W/fakesel" "$W/fakemount" "$W/fakeumount" "$W/fakechown"
+chmod 755 "$W/fakesel" "$W/fakepactl" "$W/fakemount" "$W/fakeumount" "$W/fakechown"
 export FAKELOG="$W/calls" SELARGS="$W/selargs"
 export JJPEDIR="$G" GAMENAME= GAMEDIR=
 export PADSELECT_TEMP="$T" PADSELECT_PERM="$P" PADSELECT_MULTI="$M" PADSELECT_RUNDIR="$R" \
        PADSELECT_BYUUID="$U" PADSELECT_BIN="$W/fakesel" PADSELECT_MOUNT="$W/fakemount" \
        PADSELECT_UMOUNT="$W/fakeumount" PADSELECT_CHOWN="$W/fakechown"
 unset PADSELECT_CONF PADSELECT_UUIDS PADSELECT_UPDATER PADSELECT_SELECT_LOG PADSELECT_NO_BLKCHECK
+unset PULSE_SINK
+# a pactl that fails (no server on the test host) is asked once, not for 10 s a case
+export PADSELECT_PACTL="$W/failpactl" PADSELECT_PACTL_TRIES=1
+printf '#!/bin/sh\nexit 1\n' > "$W/failpactl"; chmod 755 "$W/failpactl"
 
 fail() { echo "padselect_sh_test: FAIL ($1)"; shift; for x in "$@"; do echo "  $x"; done; [ -f "$W/out" ] && cat "$W/out"; [ -f "$FAKELOG" ] && { echo "--- calls:"; cat "$FAKELOG"; }; exit 1; }
 hook() {   # hook LABEL IDX RC FAIL EXPECTED-CALLS...   (the calls log must match exactly)
@@ -215,6 +229,23 @@ head -c 200 /dev/zero | tr '\0' 'x' >> "$T/padselect.log"
 PADSELECT_LOGCAP=100 hook rotate2 0 0 "" "$MASK"
 [ -f "$T/padselect.log.1" ] || fail rotate "no .1 after the cap"
 [ "$(stat -c %s "$T/padselect.log")" -lt 200 ] || fail rotate "the log was not started afresh"
+
+# --- THE SINK (2026-09-14 evening): the selector's stream goes to the pci analog sink,
+# named the way JJP's setup.pl names it for the game; a PULSE_SINK already set is kept;
+# no pci sink (the rig) = the default, and the hook says so
+PADSELECT_PACTL="$W/fakepactl" hook sink 0 0 "" "$MASK"
+[ "$(cat "$SELARGS.env")" = "alsa_output.pci-0000_00_1f.3.analog-stereo" ] || fail sink "PULSE_SINK for the selector: '$(cat "$SELARGS.env")'"
+grep -q "menu sound to alsa_output.pci-0000_00_1f.3.analog-stereo" "$W/out" || fail sink "no hook line naming the sink"
+PULSE_SINK=given PADSELECT_PACTL="$W/fakepactl" hook sinkgiven 0 0 "" "$MASK"
+[ "$(cat "$SELARGS.env")" = "given" ] || fail sinkgiven "a PULSE_SINK already set was replaced: '$(cat "$SELARGS.env")'"
+PADSELECT_PACTL="$W/nosuchpactl" hook sinknone 0 0 "" "$MASK"
+[ -z "$(cat "$SELARGS.env")" ] || fail sinknone "a sink was named with no pactl: '$(cat "$SELARGS.env")'"
+printf '#!/bin/sh\nprintf "0\\tRDPSink\\tmodule-rdp.c\\ts16le 2ch 44100Hz\\tRUNNING\\n"\n' > "$W/fakepactl1"; chmod 755 "$W/fakepactl1"
+PADSELECT_PACTL="$W/fakepactl1" PADSELECT_PACTL_TRIES=20 hook sinkrig 0 0 "" "$MASK"
+[ -z "$(cat "$SELARGS.env")" ] || fail sinkrig "a sink was named with no pci line: '$(cat "$SELARGS.env")'"
+grep -q "no pci sink named by" "$W/out" || fail sinkrig "the hook did not say the default is used"
+[ -z "$(cat "$SELARGS.env")" ] || fail sinknone "a sink was named with no pactl: '$(cat "$SELARGS.env")'"
+grep -q "no pci sink named by" "$W/out" || fail sinknone "the hook did not say the default is used"
 
 # --- no selector binary: image 0, one line
 PADSELECT_BIN="$W/nosuch" hook nobin 0 0 "" "$MASK"

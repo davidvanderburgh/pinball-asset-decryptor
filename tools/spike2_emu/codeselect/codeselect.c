@@ -93,7 +93,6 @@
 #endif
 #define VOL_STEP     5              /* one Volume+/- press */
 #define VOL_OSD_MS   2000           /* the indicator stays this long after the last press */
-#define LEARN_OSD_MS 3000           /* --learn: an unmapped frame bit stays on the glass this long */
 #define HEADLESS_W   1360
 #define HEADLESS_H   768
 #define MAX_VISIBLE  4              /* cards in a row; more = carousel */
@@ -1262,19 +1261,6 @@ static const struct art_image *loading_picture(const struct conf *c,
 
 /* the LOADING frame: the chosen card's picture (when it has one) above the
  * line; this frame stays on the LCD until the game's first frame */
-/* THE --learn LINE (jjpio): an unmapped frame bit, said along the top under
- * the SOUND OFF line's place, in the countdown's colour so it is seen. */
-static void draw_learn(struct gfx *g, struct gfx_font *f, const struct layout *L, const char *msg)
-{
-    float s = L->s;
-    int W = g->w;
-    const int wmax = W - (int)(40 * s);
-    char cut[160];
-    float px = gfx_fit_px(f, msg, wmax, 20 * s, 14 * s);
-    gfx_ellipsize(f, px, msg, wmax, cut, sizeof cut);
-    gfx_text_center(g, f, px, W / 2, (int)(52 * s), cut, TH(L, COUNTDOWN));
-}
-
 static void draw_loading(struct gfx *g, struct gfx_font *f, const struct theme *th,
                          const char *title, const char *subtitle,
                          const struct art_image *pic)
@@ -1508,8 +1494,6 @@ int main(int argc, char **argv)
     int vol_keys, vol_cap, vol_saved = -1, vol_touched = 0;
     const char *vol_how = "default", *vol_file;
     long long osd_until = 0;  /* the volume indicator is up until then; 0 = not up */
-    char learn_msg[96] = "";  /* --learn: the last unmapped frame bit, on the glass until... */
-    long long learn_until = 0;
     int stall_ms = getenv("PADSELECT_STALL_MS") ? atoi(getenv("PADSELECT_STALL_MS")) : 0;
     int audio_up = 0;         /* the bridge brought the audio section up (hw only) */
     int action;                       /* this title has a lockdown-bar ACTION button */
@@ -1765,6 +1749,8 @@ int main(int argc, char **argv)
         for (k = 0; k < (int)(sizeof icfg.jjp_byte / sizeof *icfg.jjp_byte); k++) {
             icfg.jjp_byte[k] = c.jjp_byte[k];
             icfg.jjp_bit[k] = c.jjp_bit[k];
+            icfg.jjp_byte2[k] = c.jjp_byte2[k];
+            icfg.jjp_bit2[k] = c.jjp_bit2[k];
         }
     }
     if (!strcmp(o.input, "hw")) in = input_hw_open(&icfg);
@@ -1867,13 +1853,13 @@ int main(int argc, char **argv)
         while ((ev = input_poll(in, now)) != EV_NONE) {
             if (ev >= EV_RAW_BASE) {
                 /* --learn (jjpio): a frame bit that is not a menu button moved.
-                 * On the glass and in the log, so a machine's own buttons can be
-                 * read off it (the GNR's outside volume toggle, 2026-09-14). */
+                 * To the log, so a machine's own buttons can be read off it - the
+                 * GNR's headphone-kit rocker and its Action button were found this
+                 * way (2026-09-14).  It was on the glass for 3 s as well until David
+                 * asked for that line to go, the same evening. */
                 int code = ev - EV_RAW_BASE, bitno = code >> 1;
-                snprintf(learn_msg, sizeof learn_msg, "INPUT byte %d bit %d %s (not a menu button)",
-                         bitno / 8, bitno % 8, (code & 1) ? "pressed" : "released");
-                sel_say("learn: %s", learn_msg);
-                learn_until = now + LEARN_OSD_MS;
+                sel_say("learn: INPUT byte %d bit %d %s (not a menu button)",
+                        bitno / 8, bitno % 8, (code & 1) ? "pressed" : "released");
                 continue;
             }
             sel_say("key: %s", input_event_name(ev));
@@ -2017,15 +2003,6 @@ int main(int argc, char **argv)
             remember_volume(vol_file, volume, &vol_saved);
         } else if (osd_until) {
             draw_volume(&g, font, &L, volume, vol_cap);
-        }
-        /* the --learn line, the same way: over the frame until LEARN_OSD_MS
-         * after the last unmapped bit, then one repaint takes it away */
-        if (learn_until && now >= learn_until) {
-            learn_until = 0;
-            draw_menu(&g, font, &L, &c, &media, hl, remain, action, audio_missing(au));
-            if (osd_until) draw_volume(&g, font, &L, volume, vol_cap);
-        } else if (learn_until) {
-            draw_learn(&g, font, &L, learn_msg);
         }
         present(&g, &egl, headless, invert);
         /* PADSELECT_STALL_MS: the rig's knob - every pass sleeps this long, the

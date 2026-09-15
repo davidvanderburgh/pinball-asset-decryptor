@@ -26,6 +26,10 @@
 #   3. jjpselect draws the menu on the X server xinit already started, reads
 #      the cabinet buttons off /dev/jjpio100 and writes ONE integer to the
 #      choice file.  Exit 0 = a choice; anything else = boot image 0 untouched.
+#      Its sound goes to the onboard (pci) PulseAudio sink by name - the one
+#      JJP's own scripts/audio/setup.pl moves the game's stream to - because
+#      the server's DEFAULT sink on a machine with the headphone kit is the
+#      kit's USB codec (2026-09-14: five silent sticks).
 #   4. The chosen image's device token, from its image= line:
 #        rootA          the primary's own tree: nothing to mount
 #        rootB          root B (p5), the second JJP install: mounted rw by the
@@ -71,6 +75,7 @@ BYUUID=${PADSELECT_BYUUID:-/dev/disk/by-uuid}
 UPDATER=${PADSELECT_UPDATER:-$JJPEDIR/scripts/updater.sh}
 RUNDIR=${PADSELECT_RUNDIR:-/run/padselect}
 MOUNT=${PADSELECT_MOUNT:-mount}
+PACTL=${PADSELECT_PACTL:-pactl}
 UMOUNT=${PADSELECT_UMOUNT:-umount}
 CHOWN=${PADSELECT_CHOWN:-chown}
 AWK=${AWK:-awk}
@@ -169,9 +174,45 @@ esac
 [ -x "$BIN" ] || { hooklog "no $BIN: booting image 0"; exit 0; }
 [ -n "$GAMENAME" ] || { hooklog "no GAMENAME ($JJPEDIR/setenv.sh): booting image 0"; exit 0; }
 rm -f "$OUT"
-# --learn: the cabinet frame into the log (and an unmapped bit onto the glass) whenever a
-# bit changes - one line a press, nothing while idle - so a machine whose buttons sit
-# elsewhere in the frame (the GNR's outside volume toggle, 2026-09-14) is read, not guessed
+# THE SINK (2026-09-14 evening, the GNR's silent menu).  PulseAudio's default sink on
+# a machine with JJP's headphone kit is the kit's USB codec - pulse ranks usb above
+# pci - and JJP's own scripts/audio/setup.pl, run once the GAME is up, moves the
+# game's stream to the onboard pci sink and makes that the default.  The menu runs
+# before setup.pl, so its stream went to the kit and the speakers stayed silent
+# through five sticks, while every rig proof - one sink - heard it.  So: what
+# setup.pl does, for the selector's stream.  PULSE_SINK is libpulse's default
+# device, honoured by the selector's own pulse sink and by ALSA's pulse plugin
+# alike; the match is setup.pl's ("pci" in the name, "analog" on the line).  No
+# pci sink - the rig, with WSLg's one sink - means the default, as before.
+# jjp.service is After= pulseaudio.service, not after it is READY, and setup.pl itself
+# waits up to 10 s for the daemon: so ask again for that long while pactl FAILS (no
+# server yet) - only when there is a pactl at all, and an answer is final whatever it
+# names (the cards are detected before the socket opens; the rig's one sink must not
+# cost 10 s a run).
+if [ -z "${PULSE_SINK:-}" ]; then
+    pci_sink=
+    if command -v "$PACTL" >/dev/null 2>&1; then
+        tries=${PADSELECT_PACTL_TRIES:-20}
+        while [ "$tries" -gt 0 ]; do
+            if sinks=$($PACTL list short sinks 2>/dev/null); then
+                pci_sink=$(printf '%s\n' "$sinks" | $AWK -F'\t' '$2 ~ /pci/ && $0 ~ /analog/ { print $2; exit }')
+                break
+            fi
+            tries=$((tries - 1))
+            [ "$tries" -gt 0 ] && sleep 0.5
+        done
+    fi
+    if [ -n "$pci_sink" ]; then
+        PULSE_SINK=$pci_sink
+        export PULSE_SINK
+        hooklog "menu sound to $pci_sink (the pci sink, where JJP's setup.pl sends the game's)"
+    else
+        hooklog "no pci sink named by $PACTL: the menu's sound goes to the default sink"
+    fi
+fi
+# --learn: the cabinet frame into the log whenever a bit changes - one line a press,
+# nothing while idle - so a machine whose buttons sit elsewhere in the frame (the GNR's
+# outside volume toggle and its Action button, 2026-09-14) is read, not guessed
 "$BIN" --conf "$CONF" --input jjpio --learn --out "$OUT" --last "$LAST" ${SLOG:+--log "$SLOG"} \
     ${PADSELECT_AUDIO_DUMP:+--audio-dump "$PADSELECT_AUDIO_DUMP"}
 rc=$?

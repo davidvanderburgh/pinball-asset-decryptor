@@ -7409,7 +7409,7 @@ These have each been violated at least once and each cost a run or a window:
       menu change in two minutes with nothing else on the machine touched.
 
 - [ ] **125. A NEW game mode of our own, running inside Godzilla Pro 1.15 in the
-      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D4` ← WORKING ON ← IN PROGRESS David,
+      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D4` ← IN PROGRESS David,
       2026-09-15: "what would it take to add a mode to a game like godzilla?" Plan
       (approved): `plans/spike2_new_mode_plan.md`, pointer under REMAINING item 125 in
       the handoff (both gitignored, local to this machine). **Established at the desk:**
@@ -7500,6 +7500,13 @@ These have each been violated at least once and each cost a run or a window:
       1224 noise, 0 shapes; the current event reads nil from the tick). Virtual
       playfield captures went 53 -> 22 -> 32 (a pale warm wash) -> 23 inserts lit,
       within the game's own animation swing, so not attributed.
+      **STOCK REGRESSION UNCHANGED (run 8), the last acceptance point but the
+      lights:** 60 s of a game in a run launched with no PAD_TRACE_SO and no
+      PAD_MODE_SO - renderer 60.0 fps, video 30.0 NEW/s, guest 58.6 fps (58.7 with
+      both objects loaded), 0 faults, 0 Radium Errors, and neither log written. NOTE
+      the trap: measure in a GAME. A first try started the game 3 s into the guest's
+      life, measured attract, and read 59.7/56.1 - a regression that is not there.
+      **Progress ~80%:** every acceptance point except the lights is emulator-proven.
       **Resume:** lights, cheapest first - capture the playfield every 100 ms right
       after a p255 sweep (it may be a one-shot that ends inside bleletest's 0.8 s);
       then run the command from inside an event (post one via `0x2551dc` whose

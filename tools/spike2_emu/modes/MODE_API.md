@@ -555,8 +555,28 @@ RUSH and played the mode's five shots:
 - The score climbed from 16,475,000 to 233,865,000 within the one game.
 - **0 new `[segv]` lines and 0 new fatal signals.** The guest was still up at the end.
 
-Not yet: its lights, and the stock regression check with the .so absent
-(`modes/regress.sh`).
+### The stock regression bar: unchanged with the .so absent (run 8, 2026-09-15)
+
+`modes/regress.sh stock 60` in a run launched with no `PAD_TRACE_SO` and no
+`PAD_MODE_SO`, measured over 60 s of a game in progress, against the same bar taken
+with both objects loaded:
+
+| | stock (run 8) | with the objects (run 5) |
+|---|---|---|
+| renderer fps | 60.0 (30 samples) | 60.0 (30 samples) |
+| video NEW/s | 30.0 | 30.0 |
+| guest (eglshim) fps | 58.6 (180 samples) | 58.7 (180 samples) |
+| new fault lines | 0 | 0 |
+| new Radium Errors | 0 | 0 |
+| `padmode.log` / `mode.log` | absent / absent | present / present |
+
+**Measure it in a GAME, not in attract.** The first try started the game 3 s into the
+guest's life, while it was still booting, so the coin and Start went nowhere and the
+60 s ran in attract: 59.7 renderer and 56.1 guest fps, which would have read as a
+regression that is not there. `scratchpad/run8_stock.sh` waits for a guest up at
+least 60 s, then proves the mode mask left attract before it measures.
+
+Not yet: its lights.
 - **Lights.** `0x185e9c(n, a, b)` (it checks `global_mode_mask & 0x310` and calls
   `0x39fe24(7, ...)`) and the `blele` runner.
 - **There are no free timers, so a mode.so keeps its own clock.** `ctimer_get` has 66

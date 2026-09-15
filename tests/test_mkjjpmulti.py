@@ -122,6 +122,34 @@ def test_hook_lands_after_runonce_and_strips_back(mj):
     assert mj.strip_hook(RUNGAME) == RUNGAME
 
 
+RUNGAME_CASES = ("#!/bin/dash\nexport JJPEDIR='/jjpe/gen1'\n. $JJPEDIR/setenv.sh\n$JJPEDIR/scripts/runonce.sh\n"
+                 "while true\ndo\n  $GAMEDIR/game\n  result=\"$?\"\n  case \"$result\" in\n"
+                 "    42) # net img or delta update\n        reboot\n        sleep 99 ;;\n"
+                 "    43) # settings restore - need to restart the game\n        ;;\n"
+                 "    68) # maintenance reboot (hostname set)\n        reboot\n        sleep 99 ;;\n"
+                 "    69) # maintenance reboot\n        $jimage 5000 $graphics/JJP_logo_message.png \\\n"
+                 "            \"MAINTENANCE REBOOT\" \"Please wait ...\"\n        reboot\n        sleep 99 ;;\n"
+                 "  esac\ndone\n")
+
+
+def test_maintenance_reboots_tell_the_hook_first(mj):
+    """David, 2026-09-14: the menu must not show twice after a fresh install.  The game
+    exits 68/69 and rungame.sh reboots; the builder's second patch calls the hook with
+    --maintenance-reboot right before those reboots (and not before the update reboot),
+    idempotently, and strip_hook takes it back out."""
+    hooked = mj.hook_rungame(RUNGAME_CASES)
+    lines = hooked.split("\n")
+    at = [i for i, ln in enumerate(lines) if ln.strip() == mj.MAINT_CALL]
+    assert len(at) == 2 and all(lines[i + 1].strip() == "reboot" for i in at)
+    assert all(lines[i].startswith("        [") for i in at)              # indented like the reboot
+    assert lines[lines.index("    42) # net img or delta update") + 1].strip() == "reboot"
+    assert lines[lines.index("    68) # maintenance reboot (hostname set)") + 1].strip() == mj.MAINT_CALL
+    assert mj.hook_rungame(hooked) == hooked
+    assert mj.strip_hook(hooked) == RUNGAME_CASES
+    assert mj.mark_maintenance_reboots(RUNGAME) == RUNGAME                # no such cases: untouched
+    assert "--maintenance-reboot" in mj.MAINT_CALL and mj.MAINT_CALL.startswith("[ -x ")
+
+
 def test_hook_line_is_executed_not_sourced(mj):
     # an `exit` in a sourced file would take rungame.sh down and loop jjp.service (item 115)
     assert mj.HOOK_LINES[-1] == "[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh"

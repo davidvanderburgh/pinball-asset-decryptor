@@ -652,6 +652,13 @@ hardware and one header defends the build:
   device that refuses the buffer asked for at 120, 250 and 500 ms before it
   gives up (`PADSELECT_ALSA_LATENCY_MS` overrides the build's request, for
   the rig).
+- **A maintenance reboot (JJP).** `padselect.sh --maintenance-reboot`, which the
+  builder makes rungame.sh's 68/69 cases call before their `reboot`, writes the
+  epoch into `$PERM/padselect.maint`; the next run of the hook consumes it and,
+  when it is under `MAINT_MAX_S` old and `$LAST` names an image, takes that
+  index as the choice and skips the selector (the sink lookup with it). Stale,
+  future by more than five minutes, or no last choice: the menu, with a log
+  line saying why. `PADSELECT_MAINT` / `PADSELECT_MAINT_MAX_S` for the test.
 - **THE SINK (JJP).** A machine with the headphone kit has two sinks and the
   server's default is the kit's USB codec; JJP's `setup.pl` moves the GAME's
   stream to the onboard pci sink once the game is up. The hook

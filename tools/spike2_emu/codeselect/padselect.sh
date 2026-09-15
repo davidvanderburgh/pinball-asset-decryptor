@@ -44,6 +44,12 @@
 #      /jjpe/perm, chown, +x).  Any failure unwinds the bind and the mount, so
 #      rungame.sh runs image 0 - a dead menu never keeps a pinball machine
 #      from booting.
+#   3a. A MAINTENANCE REBOOT repeats the last choice without the menu: the
+#      game exits 68 / 69 after a fresh install and rungame.sh reboots, and the
+#      menu asked again on the way back (David, 2026-09-14: "too confusing to
+#      see it twice").  The builder's second patch of rungame.sh runs
+#      `padselect.sh --maintenance-reboot` before those reboots - a timed mark
+#      in /jjpe/perm - and the next boot consumes it, once, while it is fresh.
 #   6. One line into /jjpe/temp/padselect.log (JJP's own log partition; the
 #      previous file is kept as .1 once it passes 1 MiB).  The selector's own
 #      verbose log only with a `log=<path>` line in the conf (the builder's
@@ -80,6 +86,8 @@ UMOUNT=${PADSELECT_UMOUNT:-umount}
 CHOWN=${PADSELECT_CHOWN:-chown}
 AWK=${AWK:-awk}
 LOGCAP=${PADSELECT_LOGCAP:-1048576}
+MAINT=${PADSELECT_MAINT:-$PERM/padselect.maint}      # the maintenance-reboot mark (3a)
+MAINT_MAX_S=${PADSELECT_MAINT_MAX_S:-3600}           # ...honoured this long after it was written
 
 # ---- the hook's own one line per boot --------------------------------------
 hooklog() {
@@ -138,6 +146,16 @@ if [ -n "$SLOG" ]; then
     [ "$d" != "$SLOG" ] && mkdir -p "$d" 2>/dev/null
 fi
 
+# ---- rungame.sh's maintenance reboot (the builder's second patch of it) -------
+if [ "${1:-}" = "--maintenance-reboot" ]; then
+    d=${MAINT%/*}
+    [ "$d" != "$MAINT" ] && mkdir -p "$d" 2>/dev/null
+    date +%s > "$MAINT" 2>/dev/null
+    last=$(head -n 1 "$LAST" 2>/dev/null | tr -cd '0-9')
+    hooklog "maintenance reboot: image ${last:-?} again at the next boot, no menu"
+    exit 0
+fi
+
 [ -r "$CONF" ] || exit 0                       # not a multi-boot install: silence
 n=$(count_images)
 [ "$n" -ge 2 ] || exit 0                       # one image: nothing to choose, nothing to mask
@@ -174,51 +192,71 @@ esac
 [ -x "$BIN" ] || { hooklog "no $BIN: booting image 0"; exit 0; }
 [ -n "$GAMENAME" ] || { hooklog "no GAMENAME ($JJPEDIR/setenv.sh): booting image 0"; exit 0; }
 rm -f "$OUT"
-# THE SINK (2026-09-14 evening, the GNR's silent menu).  PulseAudio's default sink on
-# a machine with JJP's headphone kit is the kit's USB codec - pulse ranks usb above
-# pci - and JJP's own scripts/audio/setup.pl, run once the GAME is up, moves the
-# game's stream to the onboard pci sink and makes that the default.  The menu runs
-# before setup.pl, so its stream went to the kit and the speakers stayed silent
-# through five sticks, while every rig proof - one sink - heard it.  So: what
-# setup.pl does, for the selector's stream.  PULSE_SINK is libpulse's default
-# device, honoured by the selector's own pulse sink and by ALSA's pulse plugin
-# alike; the match is setup.pl's ("pci" in the name, "analog" on the line).  No
-# pci sink - the rig, with WSLg's one sink - means the default, as before.
-# jjp.service is After= pulseaudio.service, not after it is READY, and setup.pl itself
-# waits up to 10 s for the daemon: so ask again for that long while pactl FAILS (no
-# server yet) - only when there is a pactl at all, and an answer is final whatever it
-# names (the cards are detected before the socket opens; the rig's one sink must not
-# cost 10 s a run).
-if [ -z "${PULSE_SINK:-}" ]; then
-    pci_sink=
-    if command -v "$PACTL" >/dev/null 2>&1; then
-        tries=${PADSELECT_PACTL_TRIES:-20}
-        while [ "$tries" -gt 0 ]; do
-            if sinks=$($PACTL list short sinks 2>/dev/null); then
-                pci_sink=$(printf '%s\n' "$sinks" | $AWK -F'\t' '$2 ~ /pci/ && $0 ~ /analog/ { print $2; exit }')
-                break
-            fi
-            tries=$((tries - 1))
-            [ "$tries" -gt 0 ] && sleep 0.5
-        done
-    fi
-    if [ -n "$pci_sink" ]; then
-        PULSE_SINK=$pci_sink
-        export PULSE_SINK
-        hooklog "menu sound to $pci_sink (the pci sink, where JJP's setup.pl sends the game's)"
+idx=
+# ---- 3a. a maintenance reboot: the same image again, no menu --------------------
+# The mark is consumed here - once, and only while it is fresh (MAINT_MAX_S), so a
+# mark a power failure left behind cannot hide the menu some other day; a clock a
+# little behind the mark (the RTC at boot) is allowed.  No last choice = the menu.
+if [ -f "$MAINT" ]; then
+    stamp=$(tr -cd '0-9' < "$MAINT" 2>/dev/null)
+    rm -f "$MAINT"
+    now=$(date +%s 2>/dev/null | tr -cd '0-9')
+    age=$(( ${now:-0} - ${stamp:-0} ))
+    last=$(head -n 1 "$LAST" 2>/dev/null | tr -cd '0-9')
+    if [ -n "$last" ] && [ "$age" -ge -300 ] && [ "$age" -le "$MAINT_MAX_S" ]; then
+        idx=$last
+        hooklog "maintenance reboot ${age}s ago: image $idx again, no menu"
     else
-        hooklog "no pci sink named by $PACTL: the menu's sound goes to the default sink"
+        hooklog "maintenance mark ignored (age ${age}s, last choice '${last:-none}'): the menu"
     fi
 fi
-# --learn: the cabinet frame into the log whenever a bit changes - one line a press,
-# nothing while idle - so a machine whose buttons sit elsewhere in the frame (the GNR's
-# outside volume toggle and its Action button, 2026-09-14) is read, not guessed
-"$BIN" --conf "$CONF" --input jjpio --learn --out "$OUT" --last "$LAST" ${SLOG:+--log "$SLOG"} \
-    ${PADSELECT_AUDIO_DUMP:+--audio-dump "$PADSELECT_AUDIO_DUMP"}
-rc=$?
-[ "$rc" -eq 0 ] || { hooklog "selector exit $rc: booting image 0"; exit 0; }
-idx=$(head -n 1 "$OUT" 2>/dev/null | tr -cd '0-9')
-[ -n "$idx" ] || { hooklog "no choice in $OUT: booting image 0"; exit 0; }
+if [ -z "$idx" ]; then
+    # THE SINK (2026-09-14 evening, the GNR's silent menu).  PulseAudio's default sink on
+    # a machine with JJP's headphone kit is the kit's USB codec - pulse ranks usb above
+    # pci - and JJP's own scripts/audio/setup.pl, run once the GAME is up, moves the
+    # game's stream to the onboard pci sink and makes that the default.  The menu runs
+    # before setup.pl, so its stream went to the kit and the speakers stayed silent
+    # through five sticks, while every rig proof - one sink - heard it.  So: what
+    # setup.pl does, for the selector's stream.  PULSE_SINK is libpulse's default
+    # device, honoured by the selector's own pulse sink and by ALSA's pulse plugin
+    # alike; the match is setup.pl's ("pci" in the name, "analog" on the line).  No
+    # pci sink - the rig, with WSLg's one sink - means the default, as before.
+    # jjp.service is After= pulseaudio.service, not after it is READY, and setup.pl itself
+    # waits up to 10 s for the daemon: so ask again for that long while pactl FAILS (no
+    # server yet) - only when there is a pactl at all, and an answer is final whatever it
+    # names (the cards are detected before the socket opens; the rig's one sink must not
+    # cost 10 s a run).
+    if [ -z "${PULSE_SINK:-}" ]; then
+        pci_sink=
+        if command -v "$PACTL" >/dev/null 2>&1; then
+            tries=${PADSELECT_PACTL_TRIES:-20}
+            while [ "$tries" -gt 0 ]; do
+                if sinks=$($PACTL list short sinks 2>/dev/null); then
+                    pci_sink=$(printf '%s\n' "$sinks" | $AWK -F'\t' '$2 ~ /pci/ && $0 ~ /analog/ { print $2; exit }')
+                    break
+                fi
+                tries=$((tries - 1))
+                [ "$tries" -gt 0 ] && sleep 0.5
+            done
+        fi
+        if [ -n "$pci_sink" ]; then
+            PULSE_SINK=$pci_sink
+            export PULSE_SINK
+            hooklog "menu sound to $pci_sink (the pci sink, where JJP's setup.pl sends the game's)"
+        else
+            hooklog "no pci sink named by $PACTL: the menu's sound goes to the default sink"
+        fi
+    fi
+    # --learn: the cabinet frame into the log whenever a bit changes - one line a press,
+    # nothing while idle - so a machine whose buttons sit elsewhere in the frame (the GNR's
+    # outside volume toggle and its Action button, 2026-09-14) is read, not guessed
+    "$BIN" --conf "$CONF" --input jjpio --learn --out "$OUT" --last "$LAST" ${SLOG:+--log "$SLOG"} \
+        ${PADSELECT_AUDIO_DUMP:+--audio-dump "$PADSELECT_AUDIO_DUMP"}
+    rc=$?
+    [ "$rc" -eq 0 ] || { hooklog "selector exit $rc: booting image 0"; exit 0; }
+    idx=$(head -n 1 "$OUT" 2>/dev/null | tr -cd '0-9')
+    [ -n "$idx" ] || { hooklog "no choice in $OUT: booting image 0"; exit 0; }
+fi
 if [ "$idx" -eq 0 ]; then
     hooklog "image 0 chosen: the primary, already in place"
     exit 0

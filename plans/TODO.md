@@ -7109,8 +7109,15 @@ These have each been violated at least once and each cost a run or a window:
       3.0,3.4`: a key may sit in two places). Rig instrument: the GNR root's pulse with two
       null sinks named as the machine's, the usb one the default, both monitors recorded,
       the HOOK launching the menu - the stick's hook lands the clicks on the usb sink, the
-      fixed hook on the pci sink. Owed: GNR check 5 with the multi120w ISO rebuilt on it:
-      audible clicks. The machine's audio facts:
+      fixed hook on the pci sink (20:59: 5 bursts on usb / 0 on pci with the stick's hook, 0 / 5
+      with the fixed one). Then David's ask before testing: the menu must not show TWICE after
+      a fresh install - the game exits 68/69 (JJP's "maintenance reboot") and rungame.sh
+      reboots; the builder now patches those cases to call `padselect.sh
+      --maintenance-reboot` first (a timed mark in /jjpe/perm) and the next boot repeats the
+      last choice silently, once, while the mark is under an hour old (hook test + builder
+      test). His second ask, a menu-only update stick, is item 122. Owed: GNR check 5 with
+      the multi120w ISO rebuilt on it: audible clicks, one menu per install, the Action
+      button booting. The machine's audio facts:
       [[reference_jjp_front_usb_port_is_slow]], [[reference_jjp_menu_audio_is_pulse]]. The last rig run, on the merged tree
       (`GunsNRoses-v03.03.multi120v.iso`, a GNR clip on each image): both clips loaded (120
       frames 5.0 s, 96 frames 4.0 s), every frame cached, 528 played / 528 drawn each, the loop
@@ -7273,6 +7280,31 @@ These have each been violated at least once and each cost a run or a window:
       ("Device busy (exported)") until it is replugged. Memory:
       [[reference_jjp_stick_syslinux_build_mismatch]]. Owed: nothing for 121; item 120's
       GNR check follows this install.
+
+- [ ] **122. A JJP multi-boot MENU UPDATE stick: change the boot menu (selector,
+      media, images.conf, the hook) on an installed machine without a factory
+      install.** `S3 D3` David, 2026-09-14: "we should have a way to do just a
+      multi boot menu update instead of having to do a whole factory install any
+      time we want to change the menu. Nice to have but not required." Today every
+      menu change is a 13 GB install stick, a re-partition and a wiped machine
+      (scores, settings). Design: a SMALL bootable stick from the same pipeline -
+      JJP's clonezilla live (`/live`, ~300 MB, from the game ISO) plus
+      `/jjp/padselect` and a `pad_menu_update.sh` named by `ocs_live_run=` in
+      place of `pad_install.sh`: it mounts root A (sda3, by the UUID the card's
+      own `scripts/fs_uuids.sh` declares), replaces `/jjpe/gen1/padselect` and
+      `/jjpe/gen1/scripts/padselect.sh`, re-applies `hook_rungame` to
+      rungame.sh, fscks, reboots; nothing else on the disk is touched (the store,
+      root B, /jjpe/perm stay). `mkjjpmulti.py menu-update --primary <iso>
+      --selector-dir --media-dir ... --out menu.iso` builds it from `build`'s
+      inputs; the Multi-boot tab gets a "Menu update stick" button beside the
+      install stick, through the existing JJP stick pipeline (boot files first,
+      boot code, verify). NOT the hook scanning a plain FAT stick at boot: the
+      GNR's BIOS boots USB first and stopped on a stick with an active partition
+      and no boot code (item 121), so a plain stick left in a backbox port could
+      keep the machine from booting. Acceptance: on David's GNR a menu-update
+      stick changes the menu (a new title or clip) in under five minutes with the
+      scores and settings intact, and `inspect` of the machine's root A shows the
+      new build.json.
 
 ## Reference material that is NOT in this repo
 

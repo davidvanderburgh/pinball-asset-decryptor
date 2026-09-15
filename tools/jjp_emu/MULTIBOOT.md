@@ -182,6 +182,17 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   GNR root's own PulseAudio 15 with a null sink inside the jail, its monitor
   recorded, the selector at 60 ms and at 500 ms - every click and the confirm
   chime reached the sink with the mix's own peaks, 0 dropped, 0 recovers.
+- **The menu is asked ONCE per install, not twice (David, 2026-09-14 evening).**
+  After a fresh install the game exits 68 or 69 - JJP's own `rungame.sh`
+  calls both "maintenance reboot" - and reboots the machine, and the menu
+  asked again on the way back. The builder's second patch of rungame.sh
+  (`mark_maintenance_reboots`, anchored on JJP's case comment) runs
+  `padselect.sh --maintenance-reboot` right before those reboots: a timed
+  mark in `/jjpe/perm/padselect.maint`. The next boot consumes the mark and
+  boots the last chosen image without the menu (`maintenance reboot Ns ago:
+  image N again, no menu` in the log), once, and only while the mark is
+  under an hour old and a last choice exists; a rungame.sh without such
+  cases is left alone and the menu shows again after such a reboot.
 - **THE CAUSE of the GNR's silent menu: the wrong sink (2026-09-14, late
   evening).** A GNR with JJP's headphone kit has TWO PulseAudio sinks: the
   kit's USB codec (`alsa_output.usb-C-Media_Electronics_Inc._USB_Audio_Device-00.analog-stereo`)

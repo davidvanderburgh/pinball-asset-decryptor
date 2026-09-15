@@ -247,6 +247,30 @@ grep -q "no pci sink named by" "$W/out" || fail sinkrig "the hook did not say th
 [ -z "$(cat "$SELARGS.env")" ] || fail sinknone "a sink was named with no pactl: '$(cat "$SELARGS.env")'"
 grep -q "no pci sink named by" "$W/out" || fail sinknone "the hook did not say the default is used"
 
+# --- a maintenance reboot (2026-09-14): rungame.sh's patched 68/69 cases call the hook
+# with --maintenance-reboot before rebooting; the next boot repeats the last choice
+# without the menu - once, only while the mark is fresh, only with a last choice
+: > "$SELARGS"
+$SH padselect.sh --maintenance-reboot > "$W/out" 2>&1 || fail maint "the mark run exited non-zero"
+[ -s "$P/padselect.maint" ] || fail maint "no mark written"
+grep -q "maintenance reboot: image" "$W/out" || fail maint "no mark line"
+echo 1 > "$P/padselect.last"
+hook maint 0 0 "" "$MASK" "$ROOTB" "mount --bind $M/jjpe/gen1/GunsNRoses $G/GunsNRoses" "chown -R root:root $G/GunsNRoses/game $G/GunsNRoses/vf"
+[ -s "$SELARGS" ] && fail maint "the selector ran on a maintenance boot"
+[ -f "$P/padselect.maint" ] && fail maint "the mark was not consumed"
+grep -q "maintenance reboot .*: image 1 again, no menu" "$W/out" || fail maint "message"
+hook maint2 0 0 "" "$MASK"
+[ -s "$SELARGS" ] || fail maint2 "the selector did not run once the mark was consumed"
+echo 1000 > "$P/padselect.maint"
+hook maintstale 0 0 "" "$MASK"
+[ -s "$SELARGS" ] || fail maintstale "the selector did not run with a stale mark"
+grep -q "maintenance mark ignored" "$W/out" || fail maintstale "message"
+[ -f "$P/padselect.maint" ] && fail maintstale "a stale mark was kept"
+date +%s > "$P/padselect.maint"; rm -f "$P/padselect.last"
+hook maintnolast 0 0 "" "$MASK"
+[ -s "$SELARGS" ] || fail maintnolast "the selector did not run with no last choice"
+rm -f "$P/padselect.last" "$P/padselect.maint"
+
 # --- no selector binary: image 0, one line
 PADSELECT_BIN="$W/nosuch" hook nobin 0 0 "" "$MASK"
 grep -q "no $W/nosuch: booting image 0" "$W/out" || fail nobin "message"

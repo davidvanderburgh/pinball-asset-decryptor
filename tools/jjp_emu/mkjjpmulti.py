@@ -157,6 +157,14 @@ HOOK_LINES = [
     "# PAD multi-boot: a boot menu when this install carries more than one image (padselect.sh)",
     "[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh",
 ]
+#: the SECOND patch of rungame.sh: the game exits 68 / 69 after a fresh install (a
+#: maintenance reboot) and rungame.sh reboots, and the menu asked again on the way back
+#: (David, 2026-09-14: "too confusing to see it twice after a fresh install").  Before the
+#: `reboot` of every case whose label carries JJP's own comment, the hook is told, and the
+#: next boot repeats the last choice without the menu.  A rungame.sh without such cases is
+#: left as it is (the menu then shows again after such a reboot).
+MAINT_CASE_MARK = "# maintenance reboot"
+MAINT_CALL = "[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh --maintenance-reboot"
 #: staged name -> (mode, required); jjpselect + font under PADSELECT_DIR, the hook under scripts/
 SELECTOR_FILES = collections.OrderedDict([
     ("jjpselect", (0o755, True)),
@@ -663,17 +671,39 @@ def has_hook(text):
     return HOOK_LINES[2] in (text or "")
 
 
+def mark_maintenance_reboots(text):
+    """MAINT_CALL before the `reboot` of every case whose label line carries
+    MAINT_CASE_MARK in its comment, indented like that reboot (idempotent); a case that
+    ends without a reboot, or a rungame.sh without such cases, is left alone."""
+    out = []
+    pending = False
+    for ln in text.split("\n"):
+        st = ln.strip()
+        if pending:
+            if st == "reboot":
+                if not out or out[-1].strip() != MAINT_CALL:
+                    out.append(ln[:len(ln) - len(ln.lstrip())] + MAINT_CALL)
+                pending = False
+            elif st.endswith(";;") or st == "esac":
+                pending = False
+        if "#" in st and MAINT_CASE_MARK in st[st.index("#"):] and ")" in st[:st.index("#")]:
+            pending = True
+        out.append(ln)
+    return "\n".join(out)
+
+
 def hook_rungame(text):
-    """rungame.sh with the guarded hook line after runonce.sh (idempotent).  Refused when the
-    anchor is not there: a rungame.sh this tool does not know is not edited blind."""
+    """rungame.sh with the guarded hook line after runonce.sh and the maintenance-reboot
+    cases marked (idempotent).  Refused when the anchor is not there: a rungame.sh this
+    tool does not know is not edited blind."""
     if has_hook(text):
-        return text
+        return mark_maintenance_reboots(text)
     lines = text.split("\n")
     at = [i for i, ln in enumerate(lines) if ln.strip() == RUNONCE_LINE]
     if len(at) != 1:
         raise Refused("rungame.sh: expected exactly one '%s' line to hook after, found %d" % (RUNONCE_LINE, len(at)))
     i = at[0] + 1
-    return "\n".join(lines[:i] + HOOK_LINES + lines[i:])
+    return mark_maintenance_reboots("\n".join(lines[:i] + HOOK_LINES + lines[i:]))
 
 
 def strip_hook(text):
@@ -683,6 +713,9 @@ def strip_hook(text):
     while i < len(lines):
         if lines[i:i + len(HOOK_LINES)] == HOOK_LINES:
             i += len(HOOK_LINES)
+            continue
+        if lines[i].strip() == MAINT_CALL:
+            i += 1
             continue
         out.append(lines[i])
         i += 1
@@ -1963,6 +1996,18 @@ $JJPEDIR/scripts/runonce.sh
 while true
 do
   $GAMEDIR/game
+  result="$?"
+  case "$result" in
+    42) # net img or delta update
+        reboot
+        sleep 99 ;;
+    68) # maintenance reboot (hostname set)
+        reboot
+        sleep 99 ;;
+    69) # maintenance reboot
+        reboot
+        sleep 99 ;;
+  esac
 done
 """
 
@@ -2117,6 +2162,10 @@ def selftest(root_dir, selector=None):
         restore_pieces(piece_paths(m, vi, ROOT_PART), raw)
     rg = (debugfs_cat(raw, RUNGAME) or b"").decode()
     expect("rungame.sh hooked once after runonce", rg.count(HOOK_LINES[2]) == 1 and rg.index(RUNONCE_LINE) < rg.index(HOOK_LINES[2]))
+    rgl = rg.split("\n")
+    expect("the two maintenance reboots tell the hook first, the update reboot does not",
+           rg.count(MAINT_CALL) == 2 and all(rgl[i + 1].strip() == "reboot" for i, ln in enumerate(rgl) if ln.strip() == MAINT_CALL)
+           and rgl[rgl.index("    42) # net img or delta update") + 1].strip() == "reboot")
     expect("strip_hook undoes hook_rungame", strip_hook(rg) == FAKE_RUNGAME)
     expect("jjpselect + hook + font + conf + media staged",
            all(debugfs_cat(raw, p) is not None for p in (PADSELECT_DIR + "/jjpselect", HOOK_PATH, PADSELECT_DIR + "/font.ttf",

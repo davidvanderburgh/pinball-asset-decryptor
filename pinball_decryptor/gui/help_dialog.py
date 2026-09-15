@@ -806,12 +806,29 @@ HELP_CONTENT = {
          "copies the ISO's files onto it — the only stick layout a JJP "
          "machine can read. A stick written with balenaEtcher, dd or Rufus' "
          "DD mode fails on the machine with 'Failed to mount USB stick'. "
-         "Put the finished stick in a front-cabinet USB slot, leave the "
+         "Put the finished stick in a USB port on the computer in the "
+         "backbox (the cabinet's front slot works too, but on some machines "
+         "it is thirty times slower: a minute on the Restore menu, hours to "
+         "install), leave the "
          "purple security key plugged in, and power on: the installer runs "
          "by itself — the Utilities USB-update menu is only for JJP's small "
          "delta updates and ignores install sticks. The installer checks for "
          "the security key first and stops on \"Security key not found\" if "
          "it is missing."),
+        ("Onto the game's SSD instead (JJP)",
+         "The stick dialog's \"Onto:\" row offers the game's SSD in a dock on "
+         "this PC as a second place for a JJP install ISO. The app then does "
+         "what the machine's installer would - the partition table from JJP's "
+         "own template, every partition restored, the machine's filesystem "
+         "IDs - and reads the disk back before it says done. It needs the app "
+         "run as Administrator (the disk is handed to WSL whole), erases the "
+         "disk, and needs no stick and no security key for the write; the key "
+         "is still needed to play. On a disk that already holds this install, "
+         "the \"Write:\" choice replaces only the boot menu (make the change "
+         "to the ISO on the Multi-boot tab first) or only one image from that "
+         "image's own install ISO, and keeps the settings and scores; both "
+         "images must be the same game version, and the dialog checks the "
+         "disk really is this install before a byte is written."),
     ],
     "Mod Pack": [
         ("What it's for",
@@ -1974,6 +1991,22 @@ HELP_CONTENT = {
          "here first, and each image runs as it would on the machine. "
          "Everything runs under WSL and reports into the Log at the foot of "
          "the window, tagged [multi-boot]."),
+        ("A Jersey Jack machine (multi-boot install stick, or the SSD)",
+         "Pick Jersey Jack on the picker and the tab takes two JJP install "
+         "ISOs of the same game code instead of card images - the stock "
+         "code and a retheme built here, say - and Build / make stick... "
+         "writes one multi-boot install ISO and turns it into an install "
+         "stick (use a USB port on the computer in the backbox). The machine "
+         "installs it as it installs any JJP stick, with the purple security "
+         "key in, and from then on shows the menu at power-up: flippers "
+         "choose, START or the Action button boots, the volume buttons set "
+         "the menu's level, and a maintenance reboot boots the same image "
+         "again without the menu. The stick dialog's Onto: row can install "
+         "straight onto the game's SSD in a dock instead, and its Write: "
+         "choice can then replace only the boot menu, or only one image from "
+         "that image's own ISO, keeping the machine's settings and scores. "
+         "Both images must be the same game version (they share one settings "
+         "partition); the build refuses a mismatch and says why."),
     ],
 }
 

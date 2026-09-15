@@ -1314,6 +1314,18 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    not the in-game volume adjustment on the machine's own coin door.
    Both work live, on a run that's already going, with no restart, and
    the level you leave them at is remembered for next time.
+   A **Country (DIP switches)** and **Power** row sits under the card:
+   it is the cabinet the card is fitted to. Pick a country and the
+   machine is set to it — the CPU board's eight country DIP switches are
+   set to match, and so is the country stored in the machine, which is
+   the one the boot screen shows. A game whose country has just changed
+   opens its own Guided Setup to confirm it, as a real machine does. The
+   default, **As set in the game**, changes nothing. **Power** is the
+   mains: 60 Hz, as the emulator has always run; 50 Hz as a European
+   machine (a 50 Hz board, which boots normally); or 50 Hz as a US
+   machine (a 60 Hz board, the combination the game refuses to run on).
+   Both are remembered for every project and take effect at the next
+   Start.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
    app, in `tools/spike2_emu`, and the prerequisites installer pulls in
    what it needs (`qemu-user-static`, an ARM cross-compiler, `gcc` +

@@ -1252,6 +1252,20 @@ HELP_CONTENT = {
          "titles, and a cabinet that has not got it also loses the modes that "
          "need it. The game is not lied to either way; unticked, the window "
          "simply never opens."),
+        ("Country and Power",
+         "The row under the card is the cabinet that card is fitted to. "
+         "Country (DIP switches) is the country the machine is set to: the "
+         "CPU board's eight country DIP switches are set to match, and so is "
+         "the country stored in the machine, which is the one the boot screen "
+         "shows and the coin settings go with. A game whose country has just "
+         "changed opens its own Guided Setup so the operator can confirm it, "
+         "as a real machine does. As set in the game, the default, leaves "
+         "both alone — though a country picked earlier stays stored in the "
+         "machine. Power is the mains. 60 Hz is how the emulator has always "
+         "run. European machine is a 50 Hz board on 50 Hz mains, which runs "
+         "normally. US machine is a 60 Hz board on 50 Hz mains, which the "
+         "game refuses to run. Both are remembered for every project, not per "
+         "project, and take effect at the next Start."),
         ("Reset windows",
          "Puts the emulator's windows back where they started. The rig "
          "remembers where you last dragged each one and restores it on the "

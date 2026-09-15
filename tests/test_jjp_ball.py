@@ -199,6 +199,31 @@ def test_plan_launch_and_drain(b):
     assert not full and "already full" in full.refused
 
 
+def test_plan_drain_refuses_the_ball_still_waiting_in_the_lane(b):
+    """PAD-153: draining the served ball before it was plunged put a sixth
+    ball home while the lane still held one."""
+    tr = b.Trough([(i + 1, k) for i, k in enumerate(TROUGH_KEYS)])
+    served = _closed_from(TROUGH_KEYS[:5] + [LANE])
+    plan = b.plan_drain(tr, served, LANE, True)
+    assert not plan and "shooter lane" in plan.refused
+    # Once it is launched the drain is real; a multiball drains past a waiter.
+    assert b.plan_drain(tr, _closed_from(TROUGH_KEYS[:5]), LANE, False).sets() \
+        == [(TROUGH_KEYS[5], True)]
+    assert b.plan_drain(tr, _closed_from(TROUGH_KEYS[:3] + [LANE]), LANE,
+                        True).sets() == [(TROUGH_KEYS[3], True)]
+
+
+def test_the_drain_button_leaves_a_waiting_ball_where_it_is(b):
+    shm = FakeShm()
+    f = make_feeder(b, shm)
+    f.seat_trough()
+    shm.set_switch(*TROUGH_KEYS[5], False)          # served: five home ...
+    shm.set_switch(*LANE, True)                     # ... and one in the lane
+    assert f.in_play() == 0
+    assert not f.drain()
+    assert f.in_trough() == 5 and f.lane_made()
+
+
 # ------------------------------------------------------------------- feeder
 
 def test_seat_trough_fills_balls_leaves_jam_and_lane_open(b):

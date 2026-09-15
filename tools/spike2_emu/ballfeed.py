@@ -448,7 +448,10 @@ class Feeder:
             return
         t0, _ = self.pending.pop(0)
         mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
-        if self.run_plan(m, ballmodel.plan_drain(self.trough, mrg),
+        lane_made = (self.lane is not None
+                     and bool(padsw.merged(m, self.lane)))
+        if self.run_plan(m, ballmodel.plan_drain(self.trough, mrg, self.lane,
+                                                 lane_made),
                          "way home:"):
             say("launched ball came home untouched (%.1f s, nobody at the "
                 "controls)%s"

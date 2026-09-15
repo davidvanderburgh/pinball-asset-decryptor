@@ -342,9 +342,13 @@ def do_drain(m):
     closes is the LOWEST-numbered OPEN position: a returning ball rolls to the
     back of the stack, which is the same ramp rule as the eject read the other
     way round.
+
+    NOT WHILE THE ONLY BALL OUT IS IN THE SHOOTER LANE (PAD-153): that ball
+    has not been launched, and draining it home leaves the lane holding one
+    more ball than the machine has. ballmodel.plan_drain has the story.
     """
     padsw.take(m, TROUGH)
-    plan = ballmodel.plan_drain(_model(), _mrg(m))
+    plan = ballmodel.plan_drain(_model(), _mrg(m), SHOOTER, _held(m, SHOOTER))
     if plan.refused:
         print(plan.refused)
         return 1

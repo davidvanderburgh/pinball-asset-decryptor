@@ -1,7 +1,10 @@
-# bleletest.sh cases: "<owner> <command>", one per line, run in order.
+# bleletest.sh cases: "<owner> [p<prio>] <command>", one per line, run in order.
 # Owner 538 and the orange --lts 224 sweep are what tesla strike's award handler
 # (0x1cbd2c) passes; the --remove line is a guess at the "off" to be judged.
-538 blele --sweep 0 --lts 224 --red 255 --green 140 --blue 55 --freq 10 --use_alpha 1 --alpha 255
-538 blele --remove --lts 224
-538 blele --sweep 0 --lts 224 --red 255 --green 140 --blue 55 --freq 10 --use_alpha 1 --alpha 255
-538 blele --remove --lts 224
+# p<prio> is the lamp group's priority (the allocator 0x3c14d4 keeps it as byte +4 and
+# orders the group list by it); tesla takes its show's from 0x4f3740(). Run 6 ran these
+# at priority 0: all four returned 1 and none moved the LEDs past the noise.
+538 p255 blele --sweep 0 --lts 224 --red 255 --green 140 --blue 55 --freq 10 --use_alpha 1 --alpha 255
+538 p255 blele --remove --lts 224
+538 p255 blele --sweep 0 --lts 224 --red 255 --green 140 --blue 55 --freq 10 --use_alpha 1 --alpha 255
+538 p255 blele --remove --lts 224

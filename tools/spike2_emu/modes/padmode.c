@@ -266,17 +266,21 @@ static void msg_hijack(unsigned id, int restore)
     hk_logs(m);
 }
 
-/* padmode.blele "<owner> blele --sweep 0 --lts 224 ..." - hand a light command to the
- * runner the game's own shows use: 0x1c3454(owner, group, cmd, 0), group from
- * 0x4bf294(0, ...) = an empty lamp group (the command names its light set, --lts).
+/* padmode.blele "<owner> [p<prio>] blele --sweep 0 --lts 224 ..." - hand a light command
+ * to the runner the game's own shows use: 0x1c3454(owner, group, cmd, 0), group from
+ * 0x4bf294(0, prio, 0, 0) = an empty lamp group (the command names its light set, --lts).
+ * The prio matters: 0x4bf294 passes r1 on to the allocator 0x3c14d4, which keeps it as
+ * the group's byte +4 and links the group into 0x7dd4ec in priority order. Tesla's
+ * award handler passes its show's priority from 0x4f3740(); run 6 passed 0 and its
+ * commands returned 1 without moving the LEDs past the noise.
  * The string stays in a static buffer: nothing says the parser copies it. */
 static char blele_cmd[256];
 
 static void blele_trigger(void)
 {
-    char m[320];
+    char m[360];
     long n;
-    unsigned owner = 0;
+    unsigned owner = 0, prio = 0;
     char *s;
     void *group;
     int rc, fd = open("/dump/padmode.blele", O_RDONLY);
@@ -287,11 +291,16 @@ static void blele_trigger(void)
     blele_cmd[n > 0 ? n : 0] = 0;
     for (s = blele_cmd; *s >= '0' && *s <= '9'; s++) owner = owner * 10 + (unsigned)(*s - '0');
     while (*s == ' ') s++;
+    if (*s == 'p' && s[1] >= '0' && s[1] <= '9') {
+        for (s++; *s >= '0' && *s <= '9'; s++) prio = prio * 10 + (unsigned)(*s - '0');
+        while (*s == ' ') s++;
+    }
     for (n = 0; s[n]; n++) if (s[n] == '\n' || s[n] == '\r') { s[n] = 0; break; }
     if (!owner || !*s) return;
-    group = ((void *(*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)SITE_LAMP_GROUP)(0u, 0u, 0u, 0u);
+    group = ((void *(*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)SITE_LAMP_GROUP)(0u, prio & 0xffu, 0u, 0u);
     rc = ((int (*)(unsigned, void *, const char *, unsigned))(unsigned long)SITE_BLELE_RUN)(owner, group, s, 0u);
-    snprintf(m, sizeof m, "[trigger] blele owner %u group %p \"%.160s\" -> %d\n", owner, group, s, rc);
+    snprintf(m, sizeof m, "[trigger] blele owner %u prio %u group %p event %p \"%.160s\" -> %d\n",
+             owner, prio & 0xffu, group, *(void **)(unsigned long)0x7b7e84u, s, rc);
     hk_logs(m);
 }
 

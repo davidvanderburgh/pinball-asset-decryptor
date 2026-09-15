@@ -7489,9 +7489,17 @@ These have each been violated at least once and each cost a run or a window:
       faults, 0 Radium Errors. **`0x185e9c` inconclusive, very likely a device
       driver** (calls `0x39fe24(7, ...)`, the path `ControlCoil::v[58]` uses), not a
       light.
-      **Resume:** run 6 is `modes/bleletest.sh` (the game's own light runner
-      `0x1c3454` through `padmode.blele`); then a stock run (no PAD_TRACE_SO /
-      PAD_MODE_SO) compared with `modes/regress.sh stock 60` against
+      **Run 6: the game's own light runner `0x1c3454` ran our commands** (tesla's
+      orange `--lts 224` sweep and a `--remove`, each twice, all returned 1) **but
+      lit nothing measurable** (1093/629/1037/1574 mean-L1 against 1472 noise, 0 new
+      fade shapes). The disassembly says why: `0x4bf294`'s r1 reaches the group
+      allocator `0x3c14d4` as the group's PRIORITY byte (+4, list `0x7dd4ec` ordered
+      by it), tesla passes its show's priority from `0x4f3740()`, and the probe
+      passed 0 - under every running show. `padmode.blele` now takes `p<prio>`.
+      **Resume:** rebuild, run 7 with `modes/bleletest.sh` on the p255 cases; if
+      lights move, put the sweep in `mode.c` at start and `--remove` at the end;
+      then a stock run (no PAD_TRACE_SO / PAD_MODE_SO, `scratchpad run7_stock.sh`
+      shape) compared with `modes/regress.sh stock 60` against
       `/var/tmp/item125_regress_modded.txt`.
       **Acceptance:** in a played Godzilla Pro 1.15 game in the rig with `PAD_MODE_SO`
       set, the mode starts on its trigger, runs a timer, scores its shots (`PAD_PEEK` on

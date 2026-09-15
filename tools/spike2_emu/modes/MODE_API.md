@@ -365,9 +365,33 @@ The 242 `blele`/`blela` strings are commands for one runner:
 - **The parser's other tokens** include `--remove`, `--end`, `--once` and
   `--set_cur_element`.
 
-`padmode.blele "<owner> <command>"` runs one command from the tick, and
+`padmode.blele "<owner> [p<prio>] <command>"` runs one command from the tick, and
 `modes/bleletest.sh` judges it with `ledact.py` from `modes/blele_cases.txt`: a
 command, a `--remove` guess, and a repeat of both.
+
+**Run 6: at priority 0 the commands ran and lit nothing measurable.** Tesla's orange
+sweep and the `--remove` guess each ran twice, in a game with a ball in play. All four
+returned 1, each in a fresh lamp group. Their pre-to-post distances were 1093, 629,
+1037 and 1574 mean-L1, against 1472 of noise, and none fired a fade shape or touched
+a cell the pre window had not.
+
+**The group's second argument is a PRIORITY, and run 6 passed 0.** The disassembly
+explains the result:
+- `0x4bf294` never reads r1 itself. It calls the allocator `0x3c14d4(0, r1, ...)` with
+  r1 still in place.
+- The allocator stores r1 as the group's byte `+4` and the current event
+  (`[0x7b7e84]`) at `+16`, then links the group into the list at `0x7dd4ec`, ordered by
+  that byte.
+- Tesla's handler passes the value `0x4f3740()` returns. That function walks the event
+  list `0x7b7e80` for the node with flag `0x20` whose `+150` matches the current event's,
+  and returns its byte `+152`: the running show's lamp priority.
+
+A group at priority 0 sits under every show the game is running. So the probe now
+takes `p<prio>`.
+
+The parser has no priority token of its own. It hands the parsed effect to
+`0x1bf2dc(prio, group, arg4)` for a slot, and records the owner per slot in the u16
+vector `0x7a82bc`.
 
 ## Measuring lights: `modes/ledact.py`, validated (run 4)
 

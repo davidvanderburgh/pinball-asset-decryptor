@@ -421,6 +421,21 @@ Still open, cheapest first:
 - **The set.** Nothing references the `--lts` string from code or data as a plain
   pointer, so how set 224 becomes lamps has not been read yet.
 
+### The lamp and light-set tables (read 2026-09-15)
+
+- **Light sets: `0x7257a8[set]`**, each a 0-terminated u16 list of lamp ids, with the
+  count in `[0x5ec028]` = 12,359. 1,582 sets carry at least one lamp. **Tesla's set 224
+  is a SINGLE lamp (177)**, which matters for measurement: one insert cannot be seen in
+  a playfield-wide average, so every "nothing happened" reading before this was also
+  consistent with the command working. The biggest sets are 548 (120 lamps), 207 (104),
+  208 (101), 210 (100), 211 (99), 209 (96) and 3 (92).
+- **Lamps: `0x71b06c[id]`**, 8 bytes each, `[0x5ec000]` = 260 entries. Byte `+4` is a
+  kind: 162 are kind 2, 90 kind 1, 5 kind 4 and 2 kind 5. `0x4be448(group, lamp, 255)`
+  switches on it, and a kind-3 entry is a composite whose pointer holds sub-lamp ids,
+  each handed to `0x3bef7c` - which takes the mutex at `0x7e36cc` and writes the id and
+  a byte into a slot from `0x3be898`. Set 548's lamps are ordinary kind-1 and kind-2
+  entries, not composites.
+
 ## Measuring lights: `modes/ledact.py`, validated (run 4)
 
 What does NOT see a show: counting LED activity (a game baseline read 52.8 level

@@ -361,6 +361,22 @@ static void blele_trigger(void)
     hk_logs(m);
 }
 
+/* The GAME's own light commands, as a positive control. The parser 0x1c2b6c is hooked
+ * rather than the runner 0x1c3454, which is a single `b` into it and cannot be
+ * relocated into a trampoline. Runs 6, 7 and 9 handed this same parser tesla's own
+ * command - at priority 0, at 255, with a live show event borrowed, and over a
+ * 120-lamp set - and no LED moved. Either our call differs from the game's in a way
+ * not yet seen, or this parser is not what lights the playfield. This says which:
+ * whether the game calls it at all during play, and with what. */
+static void on_blele_parse(unsigned *r)
+{
+    char m[260];
+    const char *cmd = (const char *)(unsigned long)r[2];
+    snprintf(m, sizeof m, "[blele] owner %u group 0x%08x arg3 0x%08x lr 0x%08x \"%.140s\"\n",
+             r[0], r[1], r[3], r[5], cmd ? cmd : "(null)");
+    hk_logs(m);
+}
+
 static void poll_triggers(void)
 {
     unsigned long long v[4];
@@ -503,6 +519,7 @@ static void padmode_init(void)
         { SITE_FX, SITE_FX_W0, SITE_FX_W1, on_fx, "fx" },
         { SITE_MSG, SITE_MSG_W0, SITE_MSG_W1, on_msg, "msg" },
         { SITE_SOUND_NTH, SITE_SOUND_NTH_W0, SITE_SOUND_NTH_W1, on_sound_nth, "sound_nth" },
+        { SITE_BLELE_PARSE, SITE_BLELE_PARSE_W0, SITE_BLELE_PARSE_W1, on_blele_parse, "blele_parse" },
     };
     unsigned i, ok = 1;
     char m[120];

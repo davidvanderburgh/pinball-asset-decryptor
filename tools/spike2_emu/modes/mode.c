@@ -100,6 +100,11 @@ static void words_restore(void)
     }
 }
 
+/* LIGHTS ARE NOT HERE YET, deliberately. The first candidate - starting one of the
+ * shows tesla strike's condition entries start (95/96/344/346/351/356) - left no
+ * reproducible footprint on the LEDs in modes/lightprobe.sh (MODE_API.md, run 4), so
+ * a call that proves nothing is not shipped in a mode. */
+
 static void screen(unsigned msg, unsigned long long value)
 {
     unsigned char *node = ((unsigned char *(*)(unsigned, unsigned, unsigned, unsigned))

@@ -327,11 +327,56 @@ same shape. That reading is not separately proven.
 ## Not located yet
 - **The text screen.** `0x3ba540(n, a, b, 0x6fa618)` → `0x51eab8`/`0x51eb00`, and
   `show_start`, are the candidates.
-- **Which screen shows a message with a value, from outside a mode.** The candidate is
-  the award screen family: `0x3ba540(type, 0, 0, 0x6fa618)` returns a node, then the
-  message id goes at `+0xa0`, a u64 value at `+0xa8` and a count at `+0xb0`. Tesla uses
-  type 122 with 3159/3160, and there are 131 call sites with dozens of types. The
-  probe's `padmode.text` trigger is built to try it; not yet run.
+- **Which award-screen types carry which video.** Type 122 is tesla's powerline tower;
+  `0x3ba540` has 131 call sites across dozens of types, and a Godzilla clip for KAIJU
+  RUSH is one of them.
+
+## Text of our own on the screen: emulator-proven (run 4, 2026-09-15)
+
+- **The screen.** The probe's `padmode.text "122 3445 1000000"` called
+  `0x3ba540(122, 0, 0, 0x6fa618)`, wrote message 3445 at `+0xa0` and 1,000,000 at
+  `+0xa8` (count at `+0xb0`). Its handler started show 231 and looked the message up
+  from `0x10d968`, and a `shotwin.py` capture showed "TIME LEFT" over "1,000,000" on
+  tesla strike's powerline-tower clip, still up 1.2 s later.
+- **Our words.** `padmode.msgset 3159` pointed that id's group (`0x744c60[remap[3159]]`,
+  index 3159) at `{"KAIJU RUSH" x5, 0}`. The same screen with 3159 then read
+  **"KAIJU RUSH" over "5,000,000"** on the capture, and the msg hook logged the display
+  code reading id 3159 as "KAIJU RUSH". `msgrestore` put "TESLA STRIKE AWARD" back.
+  Every id the remap sends to that index changes with it, so borrow an id nothing
+  else is showing; tesla's own award ids qualify while tesla is not running.
+
+## Measuring lights: `modes/ledact.py`, validated (run 4)
+
+What does NOT see a show: counting LED activity (a game baseline read 52.8 level
+changes/s; with tesla forced on, 8.2/s, because a show replaces the ambient animation)
+and the set of cells that move (every insert on nodes 8 and 9 animates in a game).
+
+What does: per-cell **mean level** and **change rate** between windows, plus the **fade
+shapes** fired (node, start, end, target level from the fade ring). Two back-to-back
+8 s baselines were 915 mean-L1 / 11.7 rate-L1 apart with no unique fade shape. With
+tesla forced on the window was 4806-4995 / 84-89 from them, with 13 fade shapes
+neither fired (`9:16-22>0` at 1.25/s). A window after stopping tesla was still ~4800
+from the old baselines, because the lamp state drifts with the game. So
+`modes/lightprobe.sh` takes a fresh pre-window before every show it tests.
+
+**Ruled out (run 4): hand-starting tesla strike's shows as a mode's lights.**
+`lightprobe.sh` tried each show that tesla's condition entries start, each against a
+fresh pre-window, in a game with a ball in play:
+
+| Show | Result |
+|---|---|
+| 95 | 2360 mean-L1, no new fade shape |
+| 96 | 10 new fade shapes on node 9 (2570) on its first window. **It did not repeat:** 716 with 4 shapes, then 2766 with 0, against that round's noise of 2095 |
+| 344 | 3 shapes on the first window, 0 on the repeat |
+| 346 / 351 / 356 | nothing new (351 was already gone when killed) |
+| 231, the award screen's show, as a control | moved more than any of them (4086) |
+
+The `9:76-78` shapes turned up after 96 and 344 alike, so they are the game's own
+animation. With a ball in play the ambient lamp animation drowns these shows, or
+they are not lamp shows, or they need the fields tesla's award sets. The next
+candidate is `0x185e9c(n, a, b)`: the game called it with 2000/3 at game start, 334
+in tesla's award and 200/3 on its spinner (`padmode.fx`, `lightprobe.sh fx:n:a:b`).
+Also untested: the `blele` runner.
 
 ## Messages: ids go through a RUNTIME remap (corrected 2026-09-15)
 

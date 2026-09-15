@@ -258,16 +258,27 @@ def test_key_positions_are_written_parsed_and_carried(mj):
     assert p.parse_args(["--key-start", "3.0,3.4"]).key_start == "3.0,3.4"
 
 
-def test_the_machine_log_is_on_by_default(mj):
-    """2026-09-14: the GNR's menu came up silent and nothing on the machine could say
-    why.  The selector's bounded log now goes on the machine unless asked not to;
-    JJP's own dumplogs.sh copies /jjpe/temp/*.log* to a stick."""
+def test_the_machine_log_and_learn_are_off_by_default(mj):
+    """2026-09-14: the GNR's menu came up silent and the selector's bounded log went on
+    the machine by default; 2026-09-15, everything working, David asked for the logs off.
+    --machine-log puts it back; --learn (learn=1, the hook's --learn) implies it and is
+    carried by an inject."""
     import argparse
     p = argparse.ArgumentParser()
     mj._add_conf_flags(p)
-    assert p.parse_args([]).debug_log is True
+    assert p.parse_args([]).debug_log is False and p.parse_args([]).learn is False
+    assert p.parse_args(["--machine-log"]).debug_log is True
     assert p.parse_args(["--no-machine-log"]).debug_log is False
     assert p.parse_args(["--debug-log"]).debug_log is True     # the old spelling still works
+    assert p.parse_args(["--learn"]).learn is True
+    quiet = mj.conf_for_args(["rootA", "rootB"], argparse.Namespace(), default_titles=["A", "B"])
+    assert "log=" not in quiet and "learn=" not in quiet
+    loud = mj.conf_for_args(["rootA", "rootB"], argparse.Namespace(learn=True), default_titles=["A", "B"])
+    assert "learn=1\n" in loud and "log=/jjpe/temp/jjpselect.log\n" in loud
+    parsed = mj.parse_images_conf(loud)
+    assert parsed["learn"] == "1"
+    carried = mj.conf_for_args(["rootA", "rootB"], argparse.Namespace(), existing=parsed, default_titles=["A", "B"])
+    assert "learn=1\n" in carried and "log=" in carried
 
 
 def test_conf_round_trip_with_jjp_devices_and_policy(mj):

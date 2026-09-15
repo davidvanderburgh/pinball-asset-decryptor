@@ -174,9 +174,10 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   along the top edge (only when a sink was asked for: `--audio none`, a
   snapshot and the rig's fifo show nothing), and a device that refuses the
   60 ms buffer is retried at 120, 250 and 500 ms before the menu gives up on
-  sound. The selector's own log is on the machine by default
-  (`log=/jjpe/temp/jjpselect.log`, bounded; `mkjjpmulti.py build
-  --no-machine-log` leaves it off): JJP's own `dumplogs.sh` copies
+  sound. The selector's own log goes on the machine with `mkjjpmulti.py build
+  --machine-log` (`log=/jjpe/temp/jjpselect.log`, bounded; it was on by
+  default only while the GNR's silence was being chased, and off again since
+  2026-09-15 on David's ask): JJP's own `dumplogs.sh` copies
   `/jjpe/temp/*.log*` onto a stick, so the Utilities log dump carries it.
   Proven silent on the rig (2026-09-14, scratchpad `pulseprobe120.sh`): the
   GNR root's own PulseAudio 15 with a null sink inside the jail, its monitor
@@ -274,8 +275,9 @@ buffer was the Stern card's 500 ms, which `audio_pump()` keeps full.
   names both pairs, `--key-plus 1.5,3.6 --key-minus 1.6,3.5`, and
   `--key-start 3.0,3.4` makes the lockdown-bar Action button (byte 3 bit 4,
   read off the log) a second START (David, 2026-09-14 evening).
-- **The machine's buttons are READ, not guessed**: the hook runs the selector
-  with `--learn`, so a frame bit that changes and is not one of the five
+- **The machine's buttons are READ, not guessed**: with `learn=1` in
+  images.conf (`mkjjpmulti.py build --learn`, which implies the log; off by
+  default since 2026-09-15) the hook runs the selector with `--learn`, so a frame bit that changes and is not one of the five
   mapped buttons is written to the log (`INPUT byte N bit M pressed (not a
   menu button)`; it was on the glass for 3 s as well until David asked for
   that line to go, 2026-09-14 evening) and the changed frame goes to the

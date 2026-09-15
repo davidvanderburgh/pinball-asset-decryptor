@@ -150,7 +150,7 @@ grep -q "update refused: multi-boot install" "$R/updater.sh" || fail primary "th
 if $SH "$R/updater.sh" 2>/dev/null; then fail primary "the mask exited 0"; fi
 grep -q "update refused" "$T/rprogress" && grep -q "update refused" "$T/pcprogress" || fail primary "rprogress/pcprogress"
 argv=$(cat "$SELARGS")
-want="--conf $G/padselect/images.conf --input jjpio --learn --out $T/padselect.choice --last $P/padselect.last"
+want="--conf $G/padselect/images.conf --input jjpio --out $T/padselect.choice --last $P/padselect.last"
 case "$argv" in *"$want"*) ;; *) fail primary "selector argv: $argv" "expected: $want" ;; esac
 case " $argv " in *" --log "*) fail primary "the selector got --log with no log= in the conf" ;; esac
 
@@ -221,6 +221,13 @@ PADSELECT_SELECT_LOG= hook selog_off 0 0 "" "$MASK"
 case " $(cat "$SELARGS") " in *" --log "*) fail selog_off "PADSELECT_SELECT_LOG= did not turn it off" ;; esac
 PADSELECT_SELECT_LOG="$W/log/forced.log" hook selog_on 0 0 "" "$MASK"
 case " $(cat "$SELARGS") " in *" --log $W/log/forced.log "*) ;; *) fail selog_on "the override did not turn it on" ;; esac
+
+# --- learn=1 in the conf (the builder's --learn): the selector gets --learn, else not
+{ cat "$G/padselect/images.conf"; echo "learn=1"; } > "$W/conf.learn"
+PADSELECT_CONF="$W/conf.learn" hook learn 0 0 "" "$MASK"
+case " $(cat "$SELARGS") " in *" --learn "*) ;; *) fail learn "learn=1 did not reach the selector: $(cat "$SELARGS")" ;; esac
+hook nolearn 0 0 "" "$MASK"
+case " $(cat "$SELARGS") " in *" --learn "*) fail nolearn "--learn passed with no learn= in the conf" ;; esac
 
 # --- the hook's log rotates once past the cap
 : > "$T/padselect.log"

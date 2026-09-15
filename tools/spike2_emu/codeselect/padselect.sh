@@ -247,10 +247,14 @@ if [ -z "$idx" ]; then
             hooklog "no pci sink named by $PACTL: the menu's sound goes to the default sink"
         fi
     fi
-    # --learn: the cabinet frame into the log whenever a bit changes - one line a press,
-    # nothing while idle - so a machine whose buttons sit elsewhere in the frame (the GNR's
-    # outside volume toggle and its Action button, 2026-09-14) is read, not guessed
-    "$BIN" --conf "$CONF" --input jjpio --learn --out "$OUT" --last "$LAST" ${SLOG:+--log "$SLOG"} \
+    # --learn only with learn=1 in the conf (the builder's --learn; off by default since
+    # 2026-09-15, everything working): the cabinet frame into the log whenever a bit
+    # changes - one line a press, nothing while idle - so a machine whose buttons sit
+    # elsewhere in the frame (the GNR's outside volume toggle and its Action button,
+    # 2026-09-14) is read, not guessed
+    learn=$(conf_key learn)
+    [ "$learn" = 1 ] || learn=
+    "$BIN" --conf "$CONF" --input jjpio ${learn:+--learn} --out "$OUT" --last "$LAST" ${SLOG:+--log "$SLOG"} \
         ${PADSELECT_AUDIO_DUMP:+--audio-dump "$PADSELECT_AUDIO_DUMP"}
     rc=$?
     [ "$rc" -eq 0 ] || { hooklog "selector exit $rc: booting image 0"; exit 0; }

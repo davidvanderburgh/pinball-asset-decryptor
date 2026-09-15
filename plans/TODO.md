@@ -7115,9 +7115,15 @@ These have each been violated at least once and each cost a run or a window:
       reboots; the builder now patches those cases to call `padselect.sh
       --maintenance-reboot` first (a timed mark in /jjpe/perm) and the next boot repeats the
       last choice silently, once, while the mark is under an hour old (hook test + builder
-      test). His second ask, a menu-only update stick, is item 122. Owed: GNR check 5 with
-      the multi120w ISO rebuilt on it: audible clicks, one menu per install, the Action
-      button booting. The machine's audio facts:
+      test). His second ask, a menu-only update stick, is item 122. GNR CHECK 5 (2026-09-15):
+      PASSED - David: "finally everything is working as expected on the machine" - so
+      the family's ONE /finish can run. His note: gameplay video frame rate lower than
+      expected. Nothing of ours runs during play (the selector exits at the choice, the
+      hook exits after the bind, the logs are written only while the menu is up); the
+      suspect is JJP's own runonce.sh rendering the 68 MB operator manual with
+      ghostscript in the background on the first boot after every fresh install - the
+      loose end below. On his ask the logs are off by default now (`--machine-log`,
+      `--learn` put them back). The machine's audio facts:
       [[reference_jjp_front_usb_port_is_slow]], [[reference_jjp_menu_audio_is_pulse]]. The last rig run, on the merged tree
       (`GunsNRoses-v03.03.multi120v.iso`, a GNR clip on each image): both clips loaded (120
       frames 5.0 s, 96 frames 4.0 s), every frame cached, 528 played / 528 drawn each, the loop
@@ -7343,6 +7349,21 @@ These have each been violated at least once and each cost a run or a window:
   this machine. The deep detail behind every numbered item above.
 
 ## Loose ends worth a look, not yet worth a queue slot
+
+- **GNR gameplay video frame rate lower than expected on a multi-boot install**
+  (David, 2026-09-15, everything else working). Nothing of ours runs during
+  play: the selector exits at the choice (the LOADING frame is just the last
+  picture painted), the hook exits after the bind, the logs are written only
+  while the menu is up. Suspect: JJP's own `scripts/runonce.sh` starts
+  ghostscript IN THE BACKGROUND on the first boot after a fresh install to
+  render the 68 MB operator manual page by page (`-r360 -dDownScaleFactor=2`,
+  16M-colour PNGs into `ecoredata/graphics/operatormanual`) plus the T&C and
+  beta PDFs, and the factory image carries no `lastrendered` marker - so every
+  reinstall pays it again, minutes to tens of minutes of a CPU core, exactly
+  when a test game is played. The retheme's own video encodes are the other
+  candidate. Check: the frame rate on the SECOND boot after an install (the
+  marker is written as the render starts, so a reboot skips it). If it is the
+  render, the fix is JJP's; the install stick could pre-render or pre-mark it.
 
 - **`mkmulticard.py` still calls the global `os.sync()`** (`LoopMount._detach`,
   `drop_page_cache` - the Stern `update` / `inject` / `extract` paths). Under

@@ -175,7 +175,7 @@ JJP_CARD_LOG = "/jjpe/temp/jjpselect.log"
 DEVICES = ("rootA", "rootB")
 DEVICE_RE = re.compile(r"^root([AB])(?::([A-Za-z0-9._-]+))?$")
 CONF_KEYS = ("default", "timeout", "heading", "font", "sound_move", "sound_confirm", "volume",
-             "volume_max", "media", "theme", "jjp_update", "log")
+             "volume_max", "media", "theme", "jjp_update", "log", "learn")
 JJP_UPDATE_POLICIES = ("refuse", "allow")
 #: THE MENU'S VOLUME ON A JJP MACHINE (item 120).  JJP runs its amplifier chain at full
 #: (root A's asound.state holds 0 dB, scripts/audio/mute.pl sets 100%) and turns only the
@@ -744,7 +744,7 @@ def check_jjp_update(policy):
 
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None, media=None,
                        sound_move=None, sound_confirm=None, volume=None, media_dir=None, theme=None,
-                       colors=None, heading=None, jjp_update="refuse", debug_log=False, keys=None):
+                       colors=None, heading=None, jjp_update="refuse", debug_log=False, keys=None, learn=False):
     """images.conf for the JJP hook + selector: the same grammar the Stern builder writes (an
     image line as wide as it needs to be, the global keys after) with JJP's device tokens and
     its one extra key, jjp_update=."""
@@ -820,6 +820,10 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     for name in KEY_NAMES:
         if keys and keys.get(name):
             out.append("%s=%s" % (name, keys[name]))
+    if learn:
+        out.append("# learn: the hook runs the menu with --learn - the I/O board frame's changes and any")
+        out.append("# unmapped bit into the selector log, for reading a new machine's buttons off it")
+        out.append("learn=1")
     if debug_log:
         out.append("# log: the selector's own diagnostics on the machine - one file per boot plus the")
         out.append("# previous one, 1 MB each; JJP's Utilities log dump copies /jjpe/temp/*.log* to a")
@@ -836,7 +840,7 @@ def parse_images_conf(text):
     """-> {'images': [(device, title, subtitle)], 'media': [(art, anim, music, confirm)], the keys}."""
     out = {"images": [], "media": [], "default": None, "timeout": None, "heading": None, "font": None,
            "sound_move": None, "sound_confirm": None, "volume": None, "volume_max": None, "media_dir": None,
-           "theme": None, "colors": {}, "jjp_update": None, "log": None, "keys": {}}
+           "theme": None, "colors": {}, "jjp_update": None, "log": None, "learn": None, "keys": {}}
     for raw in (text or "").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -862,7 +866,7 @@ def parse_images_conf(text):
             out["media_dir"] = val.strip()
         elif key.startswith("color_"):
             out["colors"][key[6:]] = val.strip()
-        elif key in ("heading", "font", "sound_move", "sound_confirm", "theme", "jjp_update", "log"):
+        elif key in ("heading", "font", "sound_move", "sound_confirm", "theme", "jjp_update", "log", "learn"):
             out[key] = val
         elif key in KEY_NAMES:
             out["keys"][key] = check_key_pos(key, val.strip())
@@ -924,10 +928,14 @@ def conf_for_args(devices, args, existing=None, media=None, default_titles=None,
         v = getattr(args, name, None)
         if v is not None:
             keys[name] = check_key_pos(name, v)
+    # learn=1 is carried by an inject (a calibration the operator asked for); the log is
+    # not (inject: log off without the flag) except that --learn needs somewhere to write
+    learn = bool(getattr(args, "learn", False)) or (ex.get("learn") or "") == "1"
     return render_images_conf(devices, titles, subtitles, default, timeout,
                               PADSELECT_DIR + "/font.ttf" if font else None, rows, move, confirm, volume,
                               theme=theme, colors=colors, heading=heading, jjp_update=policy,
-                              debug_log=bool(getattr(args, "debug_log", False)), keys=keys)
+                              debug_log=bool(getattr(args, "debug_log", False)) or learn, keys=keys,
+                              learn=learn)
 
 
 # ============================================================================= the installer
@@ -2232,8 +2240,9 @@ def _add_conf_flags(s):
     s.add_argument("--jjp-update", choices=JJP_UPDATE_POLICIES, dest="jjp_update",
                    help="images.conf jjp_update=: refuse (default) masks JJP's own updater on the machine - it would "
                         "overwrite image 1 and boot it without the menu; allow leaves it alone")
-    # The selector's own log ON THE MACHINE, on by default since 2026-09-14: the GNR's menu
-    # came up silent and nothing on the machine could say why.  It is bounded (one file
+    # The selector's own log ON THE MACHINE - on by default from 2026-09-14, while the GNR's
+    # menu was silent and nothing on the machine could say why, off again since 2026-09-15
+    # (everything working; David: turn the logs off).  It is bounded (one file
     # per boot plus the previous one, 1 MB each, ~8 KB a boot) and JJP's own dumplogs.sh
     # copies /jjpe/temp/*.log* onto a stick, so it can be read without opening the machine.
     for name in KEY_NAMES:
@@ -2243,10 +2252,15 @@ def _add_conf_flags(s):
                             "position is the same button in a second place, e.g. the GNR's Action "
                             "button as a second START: --key-start 3.0,3.4); default: the selector's own"
                             % (name, name[4:].upper()))
-    s.add_argument("--no-machine-log", dest="debug_log", action="store_false", default=True,
-                   help="leave the selector's own log (images.conf log=%s, collected by JJP's "
-                        "Utilities log dump) off the machine" % JJP_CARD_LOG)
+    s.add_argument("--machine-log", dest="debug_log", action="store_true", default=False,
+                   help="the selector's own log on the machine (images.conf log=%s, bounded; JJP's "
+                        "Utilities log dump collects it); off by default" % JJP_CARD_LOG)
+    s.add_argument("--no-machine-log", dest="debug_log", action="store_false", help=argparse.SUPPRESS)
     s.add_argument("--debug-log", dest="debug_log", action="store_true", help=argparse.SUPPRESS)
+    s.add_argument("--learn", action="store_true", default=False,
+                   help="images.conf learn=1: the hook runs the menu with --learn - the I/O board frame's "
+                        "changes and any unmapped bit into the selector log, for reading a new machine's "
+                        "buttons off it (implies --machine-log)")
 
 
 def main(argv=None):

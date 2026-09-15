@@ -699,7 +699,8 @@ hardware and one header defends the build:
   (not a menu button)`; every changed frame goes to the log as hex,
   rate-limited (`LEARN_LINES_PER_S`, `LEARN_LINES_MAX`). It drew that line
   on the glass for 3 s too, until David asked for it to go (2026-09-14
-  evening). The JJP hook always passes `--learn`: the GNR's outside volume
+  evening). The JJP hook passes `--learn` when images.conf carries `learn=1`
+  (the builder's `--learn`; off by default since 2026-09-15): the GNR's outside volume
   toggle moved no mapped bit and the menu could not say so (2026-09-14).
 - **A button in two places (jjpio).** `key_start=3.0,3.4` - a comma and a
   second `<byte>.<bit>` - is the same button somewhere else (`jjp_byte2` /

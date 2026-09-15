@@ -737,6 +737,20 @@ HELP_CONTENT = {
          "go in before you click — it's only a preview: the build does its "
          "own full comparison, so there's no need to wait for the scan to "
          "finish before building."),
+        ("Building again",
+         "A second build onto the same file can be an update. When the file "
+         "in the build folder is the build this app made from this original "
+         "and project, and nothing has touched it since, the Build button "
+         "offers to update it in place: the card image is not copied again, "
+         "replacements already on it stay put, only the ones that changed "
+         "since are written, and anything taken back since gets its stock "
+         "content back. On a mod with hundreds of replaced videos that is "
+         "minutes rather than hours. The build's record lives beside it (a "
+         ".pad-build.json file); answer No, or delete the record, to build "
+         "from the original again. Anything the record can't vouch for — a "
+         "different original, a file changed since, a copy that failed, an "
+         "app update — makes the build start over from the original, and the "
+         "log says why."),
         ("Building from a multi-boot card",
          "The build is the whole card again, so a multi-boot original gives "
          "you a multi-boot build: the first game on it carries your changes "

@@ -1868,13 +1868,19 @@ class App:
         # Collision check: warn before clobbering an existing build with the
         # same name (a re-build, or a name the user picked that's already
         # taken).  Overwriting the original is caught above; everything else is
-        # the user's call.
+        # the user's call.  A build this app made from this same original and
+        # project, untouched since, can be UPDATED in place instead — only
+        # what changed since it was built is written, which on a mod with
+        # hundreds of replaced videos is minutes rather than a rebuild — so
+        # the prompt offers that first when the plugin keeps a build record
+        # (core.registry.Manufacturer.build_update_reason).  This is the ONE
+        # overwrite prompt: the Build button's own click handler used to ask
+        # the same question a second time.
+        update = None
         if os.path.exists(output_path):
-            if not messagebox.askyesno("File Exists",
-                f"A file named:\n\n    {os.path.basename(output_path)}\n\n"
-                f"already exists in:\n{os.path.dirname(output_path)}\n\n"
-                "Building will overwrite it.  Continue?",
-                icon="warning"):
+            update = self._confirm_build_over(original, assets_dir,
+                                              output_path)
+            if update is None:
                 return
 
         # Catch the silent "assigned replacements for one folder, then pointed
@@ -1937,6 +1943,8 @@ class App:
         # before the pipeline reads it (belt and braces: it is also set at
         # startup and on every toggle).
         self._apply_text_grow_env(self.window.text_grow_enabled())
+        if self._current_mfr.supports_build_update():
+            write_kwargs["update"] = update
         self._chain_flash_after_build = (
             (chain_flash_device, output_path) if chain_flash_device else None)
         self.pipeline = self._current_mfr.make_write_pipeline(
@@ -1947,6 +1955,48 @@ class App:
         threading.Thread(
             target=self._run_pipeline_with_audio, args=(assets_dir,),
             daemon=True).start()
+
+    def _confirm_build_over(self, original, assets_dir, output_path):
+        """The prompt for a Build whose output file already exists.
+
+        Returns ``True`` to update that build in place, ``False`` to build
+        whole and overwrite it, ``None`` when the user cancelled.  The update
+        is offered only when the plugin keeps a build record and that record
+        vouches for the file (``build_update_reason`` answers None); otherwise
+        the plain overwrite question is asked, and for a plugin that could
+        have updated, the reason it can't is part of it — "the file has
+        changed since it was built" is the difference between a rebuild the
+        user expected and one they didn't."""
+        name = os.path.basename(output_path)
+        folder = os.path.dirname(output_path)
+        why = None
+        if self._current_mfr.supports_build_update():
+            why = self._current_mfr.build_update_reason(
+                original, assets_dir, output_path)
+            if why is None:
+                choice = messagebox.askyesnocancel(
+                    "Update the last build?",
+                    f"{name}\n\nin {folder}\n\nis a build this app made from "
+                    "this original and project, and it is still exactly as "
+                    "that build left it.\n\n"
+                    "Yes: update it in place. Only what changed since it was "
+                    "built is written, and the card image is not copied "
+                    "again.\n\n"
+                    "No: build it again from the original and overwrite it."
+                    "\n\nCancel: don't build.",
+                    icon="question")
+                return None if choice is None else bool(choice)
+        detail = ""
+        if why:
+            detail = (f"\n\nIt can't be updated in place ({why}), so the "
+                      "build starts from the original.")
+        if not messagebox.askyesno(
+                "File Exists",
+                f"A file named:\n\n    {name}\n\nalready exists in:\n{folder}"
+                f"\n\nBuilding will overwrite it.{detail}\n\nContinue?",
+                icon="warning"):
+            return None
+        return False
 
     # ------------------------------------------------------------------
     # Direct-SSD write (JJP-only as of v0.6.5)

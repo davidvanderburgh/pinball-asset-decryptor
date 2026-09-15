@@ -42,6 +42,8 @@ SITES = [
     ("CALLOUT_NTH", 0x18800C, False), # callout_play_nth(req, n) - called, not hooked
     ("SHOW_KILL", 0x255DD4, False),   # kill every running instance of show id - called
     ("SHOW_RUNNING", 0x255D7C, False),# is show id running - called
+    ("BLELE_RUN", 0x1C3454, False),   # run a blele/blela light command (owner, group, str, 0) - called
+    ("LAMP_GROUP", 0x4BF294, False),  # lamp group from light-set table 0x7257a8 (set 0 = empty) - called
 ]
 
 

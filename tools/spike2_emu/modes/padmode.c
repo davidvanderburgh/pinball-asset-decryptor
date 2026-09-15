@@ -266,12 +266,43 @@ static void msg_hijack(unsigned id, int restore)
     hk_logs(m);
 }
 
+/* padmode.blele "<owner> blele --sweep 0 --lts 224 ..." - hand a light command to the
+ * runner the game's own shows use: 0x1c3454(owner, group, cmd, 0), group from
+ * 0x4bf294(0, ...) = an empty lamp group (the command names its light set, --lts).
+ * The string stays in a static buffer: nothing says the parser copies it. */
+static char blele_cmd[256];
+
+static void blele_trigger(void)
+{
+    char m[320];
+    long n;
+    unsigned owner = 0;
+    char *s;
+    void *group;
+    int rc, fd = open("/dump/padmode.blele", O_RDONLY);
+    if (fd < 0) return;
+    n = read(fd, blele_cmd, sizeof blele_cmd - 1);
+    close(fd);
+    unlink("/dump/padmode.blele");
+    blele_cmd[n > 0 ? n : 0] = 0;
+    for (s = blele_cmd; *s >= '0' && *s <= '9'; s++) owner = owner * 10 + (unsigned)(*s - '0');
+    while (*s == ' ') s++;
+    for (n = 0; s[n]; n++) if (s[n] == '\n' || s[n] == '\r') { s[n] = 0; break; }
+    if (!owner || !*s) return;
+    group = ((void *(*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)SITE_LAMP_GROUP)(0u, 0u, 0u, 0u);
+    rc = ((int (*)(unsigned, void *, const char *, unsigned))(unsigned long)SITE_BLELE_RUN)(owner, group, s, 0u);
+    snprintf(m, sizeof m, "[trigger] blele owner %u group %p \"%.160s\" -> %d\n", owner, group, s, rc);
+    hk_logs(m);
+}
+
 static void poll_triggers(void)
 {
     unsigned long long v[4];
     char m[200];
     int k;
     if (!(*(unsigned *)(unsigned long)GZ_MGR_GUARD & 1)) return;
+
+    blele_trigger();
 
     /* padmode.text "<type> <msgid> <value> [count]" - the award-screen family tesla's
      * award uses: 0x3ba540(type, 0, 0, 0x6fa618), then msg id at +0xa0, u64 value at
@@ -415,6 +446,8 @@ static void padmode_init(void)
         ok &= hk_site_ok(s[i].fn, s[i].w0, s[i].w1, s[i].tag);
     ok &= hk_site_ok(SITE_GET, SITE_GET_W0, SITE_GET_W1, "get");
     ok &= hk_site_ok(SITE_SHOW_KILL, SITE_SHOW_KILL_W0, SITE_SHOW_KILL_W1, "show_kill");
+    ok &= hk_site_ok(SITE_BLELE_RUN, SITE_BLELE_RUN_W0, SITE_BLELE_RUN_W1, "blele_run");
+    ok &= hk_site_ok(SITE_LAMP_GROUP, SITE_LAMP_GROUP_W0, SITE_LAMP_GROUP_W1, "lamp_group");
     if (!ok) {
         hk_logs("[padmode] NOT THIS BUILD - nothing hooked, the game runs stock\n");
         return;

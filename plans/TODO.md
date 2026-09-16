@@ -7630,8 +7630,8 @@ These have each been violated at least once and each cost a run or a window:
       is left is the schema and several confirming runs.
 
 - [ ] **127. A MODES TAB: choreograph a mode in the app and play it in the emulator.**
-      `S3 D3` David, 2026-09-15: "we need some kind of mode editor tab that gives us
-      all the controls we need." A panel class behind a seam method like the other
+      `S3 D3` ← WORKING ON David, 2026-09-15: "we need some kind of mode editor tab
+      that gives us all the controls we need." A panel class behind a seam method like the other
       tabs (`multiboot_tab.py` is the editor-shaped model; `spike1_emulate_tab.py` is
       the size template), editing item 126's mode file: the shot table, the timer, the
       screens, the lights, the callouts, and the assets items 129-132 add - this is

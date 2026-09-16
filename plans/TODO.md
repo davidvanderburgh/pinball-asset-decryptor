@@ -7719,7 +7719,7 @@ These have each been violated at least once and each cost a run or a window:
       - S3: nothing about stock play changes. D3: every fact it needs is already known
       and the delivery exists - it is a build plus one hardware boot to be sure.
 
-- [ ] **130. A mode's OWN AUDIO: a sound the game never shipped.** `S3 D5` David,
+- [ ] **130. A mode's OWN AUDIO: a sound the game never shipped.** `S3 D5` ← WORKING ON David,
       2026-09-15: "we can't just be reusing what already exists". Item 104's grow path
       is merged and appends a record and re-points the play tables, but it REPLACES a
       stock slot - "a grown bank only copies a stock record" - and nothing registers an

@@ -553,6 +553,20 @@ flag is never cleared, so "first" is only the lowest id the group currently hold
 413); the soak proves the mode runs its lights every cycle without faults, not which
 lamps it wrote each time.
 
+### The regression bar, and what the PROBE costs
+
+| 60 s in a game | renderer fps | video NEW/s | guest fps | faults |
+|---|---|---|---|---|
+| stock, no .so at all | 60.0 (30) | 30.0 | 58.6 (180) | 0 |
+| probe + mode, no lights (run 5) | 60.0 (30) | 30.0 | 58.7 (180) | 0 |
+| probe + mode WITH lights, after the soak | 58.3 (28) | 29.1 | 59.4 (170) | 0 |
+
+The last row is about 3% short on the renderer, **and it is not a fair reading of the
+mode**: that probe hooks 17 sites including the light parser and writes slot dumps
+(3,780 log lines in the run), and the measurement followed a 10-minute soak. The probe
+is a debugging tool, not part of a mode. The measurement that matters for a mode is
+`PAD_MODE_SO` alone, with no `PAD_TRACE_SO` - `scratchpad/run15_modeonly.sh`.
+
 ### The lamp and light-set tables (read 2026-09-15)
 
 - **Light sets: `0x7257a8[set]`**, each a 0-terminated u16 list of lamp ids, with the

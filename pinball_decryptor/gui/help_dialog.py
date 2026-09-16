@@ -434,9 +434,10 @@ HELP_CONTENT = {
         ("A bigger picture than the original",
          "Stern Spike 2: a picture inside a game scene (Source \"Radium\", "
          "not a font) can keep its OWN size instead, e.g. a longer name "
-         "banner. Tick \"Keep this picture's own size\" under the preview: "
-         "the build grows the scene to fit it and the game draws it at the "
-         "new size, from the same top-left corner, so a wider picture "
+         "banner. Tick \"Keep this picture's own size\" under the preview, "
+         "or its box in the Keep size column of the list: the build grows "
+         "the scene to fit it and the game draws it at the new size, from "
+         "the same top-left corner, so a wider picture "
          "reaches further right. Needs an image build, not a direct SD "
          "write. Verified in the PC emulator; no machine has run one yet."),
         ("Assets folder + applying",

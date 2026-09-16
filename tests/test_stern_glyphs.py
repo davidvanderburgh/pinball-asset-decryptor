@@ -241,6 +241,17 @@ def test_splice_changed_blocks_no_diff_returns_raw():
 
 # ---- changed-glyph detection + atlas compositing -----------------------------
 
+def _scene_with_atlas(raw, data_off, w=16, h=16):
+    """A scene.radium holding the atlas the way a card does: its record header
+    (``[dispW][dispH][handle][texW][texH][fmt][0][0][length]``) right before
+    the block data at *data_off*.  The writer checks that header is there
+    before it patches (PAD-159), because a project's offsets are only true of
+    the card it was extracted from."""
+    import struct
+    hdr = struct.pack("<9I", w, h, 0x80000002, w, h, 5, 0, 0, len(raw))
+    return b"\x7f" * (data_off - len(hdr)) + hdr + raw + b"\x7f" * 8
+
+
 def _make_glyph_extract(tmp_path, w=16, h=16):
     """An extract with one atlas PNG, one glyph slice of it (rect 4,4 8x8),
     both manifests, and a checksum baseline."""
@@ -250,7 +261,7 @@ def _make_glyph_extract(tmp_path, w=16, h=16):
     gdir.mkdir(parents=True)
     Image.fromarray(rgba, "RGBA").save(tex / "radimg_16x16_cafe0001.png")
     Image.fromarray(rgba[4:12, 4:12], "RGBA").save(gdir / "U+0041_A.png")
-    data_off = 32
+    data_off = 44
     (tex / "radium_images.txt").write_text(
         "# output\tradium card path\tdata offset\tlength\tpad_w\tpad_h\tfmt\n"
         "scene_textures/radimg_16x16_cafe0001.png\t/lz/x/scene.radium\t"
@@ -319,7 +330,7 @@ def test_radium_image_writes_glyph_edit_splices_blocks(tmp_path):
     raw, rgba, data_off, gpng = _make_glyph_extract(tmp_path)
     baseline = read_checksums(str(tmp_path))
     reader = _FakeGlyphReader("/lz/x/scene.radium",
-                              b"\x7f" * data_off + raw + b"\x7f" * 8)
+                              _scene_with_atlas(raw, data_off))
 
     # untouched extract -> no writes at all
     writes, n, ov = engine._radium_image_writes(
@@ -356,7 +367,7 @@ def test_radium_image_writes_atlas_and_glyph_edit_uses_full_reencode(tmp_path):
     raw, rgba, data_off, gpng = _make_glyph_extract(tmp_path)
     baseline = read_checksums(str(tmp_path))
     reader = _FakeGlyphReader("/lz/x/scene.radium",
-                              b"\x7f" * data_off + raw + b"\x7f" * 8)
+                              _scene_with_atlas(raw, data_off))
     atlas_png = (tmp_path / "images" / "scene_textures"
                  / "radimg_16x16_cafe0001.png")
     edited = rgba.copy()
@@ -420,7 +431,7 @@ def test_radium_image_writes_scope_limits_edit_to_chosen_scene(tmp_path):
     baseline = read_checksums(str(tmp_path))
     reader = _FakeTwoSceneReader(
         [("/lz/a/scene.radium", 0), ("/lz/b/scene.radium", 10000)],
-        b"\x7f" * data_off + raw + b"\x7f" * 8)
+        _scene_with_atlas(raw, data_off))
     tile = np.asarray(Image.open(gpng).convert("RGBA")).copy()
     tile[:] = (255, 0, 255, 255)
     Image.fromarray(tile, "RGBA").save(gpng)
@@ -461,7 +472,7 @@ def test_radium_image_writes_scope_naming_absent_scene_warns(tmp_path):
     baseline = read_checksums(str(tmp_path))
     reader = _FakeTwoSceneReader(
         [("/lz/a/scene.radium", 0), ("/lz/b/scene.radium", 10000)],
-        b"\x7f" * data_off + raw + b"\x7f" * 8)
+        _scene_with_atlas(raw, data_off))
     tile = np.asarray(Image.open(gpng).convert("RGBA")).copy()
     tile[:] = (0, 255, 0, 255)
     Image.fromarray(tile, "RGBA").save(gpng)

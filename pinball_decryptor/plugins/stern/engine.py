@@ -4076,6 +4076,50 @@ def _changed_radium_images(assets_dir, baseline, extra_changed=(), scope=None):
     return out
 
 
+def _file_range_bytes(reader, node, off, n):
+    """*n* bytes of the card file *node* from file offset *off*.
+
+    Whole filesystem blocks through the extent map where the reader has one, so
+    a raw SD device is only ever asked for block-aligned reads, and the whole
+    file otherwise (the one door a test double has)."""
+    bs = getattr(reader, "block_size", 0)
+    read = getattr(reader, "_read", None)
+    if bs and read is not None and hasattr(reader, "base"):
+        lo = (off // bs) * bs
+        hi = min(-(-(off + n) // bs) * bs, -(-node["size"] // bs) * bs)
+        buf = bytearray()
+        for disk, cnt in reader.disk_ranges(node, lo, hi - lo):
+            buf += read(disk - reader.base, cnt)
+        return bytes(buf[off - lo:off - lo + n])
+    return reader.read_file_bytes(node)[off:off + n]
+
+
+def _radium_record_at(reader, node, data_off, length, pad_w, pad_h, fmt):
+    """Whether the card's scene *node* holds a picture record exactly where a
+    ``radium_images.txt`` row says: the header before *data_off* names the
+    row's format and block length, and its texture size rounds up to the row's
+    block grid (:func:`parse_radium_images`' own signature).
+
+    The row's offsets were measured on the card the project was EXTRACTED
+    from.  A card whose scene is laid out differently - one already built with
+    a picture kept at its own size or with longer text, which moves every
+    record after it - puts other bytes there, and writing picture blocks over
+    them breaks the scene: the game stops with ``cereal::Exception`` when it
+    loads it (PAD-159)."""
+    if data_off < 36 or data_off + length > node.get("size", 0):
+        return False
+    try:
+        hdr = _file_range_bytes(reader, node, data_off - 36, 36)
+    except Exception:
+        return False
+    if len(hdr) != 36:
+        return False
+    (_dw, _dh, _handle, tex_w, tex_h, f, z0, z1,
+     n) = struct.unpack("<9I", hdr)
+    return (f == fmt and z0 == 0 and z1 == 0 and n == length
+            and _padded4(tex_w) == pad_w and _padded4(tex_h) == pad_h)
+
+
 def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                          grow_dir=None, dest_is_device=False, grown=None):
     """Re-encode each edited radium-embedded image to its format (BC3/DXT5 or
@@ -4206,6 +4250,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                     "would not be followed")
         return ""
 
+    moved = {}                     # card path -> outputs whose record isn't there
     for output, radium_path, staged, data_off, length, pad_w, pad_h, fmt in edits:
         if cancel():
             break
@@ -4213,6 +4258,10 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
         if node is None:
             log("Radium image %s: its scene (%s) wasn't found on the card; "
                 "skipped." % (output, radium_path), "warning")
+            continue
+        if not _radium_record_at(reader, node, data_off, length, pad_w, pad_h,
+                                 fmt):
+            moved.setdefault(radium_path, []).append(output)
             continue
         payload = encoded.get(staged)
         if payload is None:
@@ -4297,6 +4346,19 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
             rest = rest[cnt:]
         overlays.setdefault(bytes(node["i_block"]), (node, {}))[1][data_off] = payload
         patched_outputs.add(output)
+    for radium_path, outs in sorted(moved.items()):
+        # Once per scene: an atlas can have hundreds of occurrences.
+        names = sorted(set(outs))
+        log("Scene %s on this card doesn't have its pictures where this "
+            "project's extract found them, so %d edited picture(s) in it were "
+            "not written (%s%s): writing them there would break the scene, "
+            "and the game stops when it loads a broken scene. This card is "
+            "laid out differently from the one the project was extracted "
+            "from - a card already built with a picture kept at its own size "
+            "or with longer text, or another version of the game. Use the "
+            "card the project was extracted from."
+            % (radium_path, len(names), ", ".join(names[:3]),
+               ", ..." if len(names) > 3 else ""), "warning")
     n = len(patched_outputs)
     if n:
         log("Patching %d edited radium image(s) across %d on-card occurrence(s)."

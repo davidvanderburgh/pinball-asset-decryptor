@@ -239,10 +239,16 @@ def test_parse_radium_images_dxt1_rejects_bad_length():
 # ---- radium-image replace: diff + size-neutral in-place writes --------------
 
 class _FakeRadiumReader:
-    """Yields one scene.radium file; disk_ranges maps file offset 1:1 to disk."""
-    def __init__(self, card_path, size):
+    """Yields one scene.radium file; disk_ranges maps file offset 1:1 to disk.
+    *data* is the scene's bytes, when a test needs the writer to find its
+    picture's record header there (PAD-159)."""
+    def __init__(self, card_path, size, data=None):
         self._path = card_path
         self._size = size
+        self._data = data
+
+    def read_file_bytes(self, node):
+        return self._data if self._data is not None else bytes(self._size)
 
     def iter_regular_files(self, min_size=1):
         yield self._path, 0, {"size": self._size, "mode": 0, "flags": 0,
@@ -274,7 +280,12 @@ def test_changed_and_writes_radium_images_size_neutral(tmp_path):
     edits = engine._changed_radium_images(str(tmp_path), baseline)
     assert len(edits) == 1 and edits[0][3:7] == (data_off, length, pw, ph)
 
-    reader = _FakeRadiumReader("/lz/x/scene.radium", size=data_off + length)
+    import struct
+    scene = (b"\x7f" * 8 + struct.pack("<9I", pw, ph, 0x80000002, pw, ph, 5,
+                                        0, 0, length) + bytes(length))
+    assert len(scene) == data_off + length
+    reader = _FakeRadiumReader("/lz/x/scene.radium", size=len(scene),
+                               data=scene)
     writes, n, _ov = engine._radium_image_writes(
         reader, str(tmp_path), baseline, lambda *a, **k: None, lambda: False)
     assert n == 1

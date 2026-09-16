@@ -7447,6 +7447,146 @@ These have each been violated at least once and each cost a run or a window:
       unknown, reaching an existing mode on demand in the rig is unproven, and it is
       several passes.
 
+- [ ] **126. The mode runtime reads a MODE FILE instead of having its rules compiled
+      in.** `S3 D3` David, 2026-09-15: "we need to be able to choreograph the modes
+      ourselves". Today `mode.c` IS the mode - KAIJU RUSH's trigger, timer, shot table
+      and awards are C constants, so every change is an edit, a cross-compile and a
+      restart. This turns the .so into an interpreter over a file: trigger (shot mask
+      and how many), timer seconds, a shot table (bit -> award and escalation),
+      screens (message id + value, at start / each shot / end), lights (owner plus the
+      on and off commands), callouts (id, at which second, nth variants). Every one of
+      those calls is already emulator-proven and written up in
+      `tools/spike2_emu/modes/MODE_API.md` on `item/125`. The point of the file is HOT
+      RELOAD: re-stat it on the tick and a saved edit lands in the running game inside
+      a second, which is what makes choreography possible at all.
+      **FAMILY RULE, and it governs items 125-132.** David, 2026-09-15: "this is a
+      feature Branch so everything should Branch from this single item like we did for
+      jjp multi boot." They ship as ONE release from **`feature/mode-editor`**, created
+      at item 125's closed tip (`986818e`) and pushed. Each item's worktree is created
+      FROM that branch (`git worktree add -b item/<N> ... feature/mode-editor`), never
+      from main, and at close its branch merges back into it. **`/finish` runs ONCE, on
+      the feature branch, after the family's LAST item closes** - one merge to main,
+      one release. **Item 125 is the SEED and is never `/finish`ed on its own.** Merge
+      main INTO the branch before the last item closes and prove the Stern side
+      unchanged, the way the JJP family did.
+      **Acceptance:** KAIJU RUSH reproduced entirely from a mode file with no C change,
+      logging the same start/shot/end lines as the hand-written one; a value edited
+      while the game runs takes effect within a second with no restart; a 10-minute
+      soak with no SEGV and `alive.sh` 0; the mode-only regression bar still matches
+      stock (59.9 renderer fps / 29.9 video against 60.0 / 30.0).
+      - S3: new capability, nothing about play is broken. D3: it is code we own, the
+      soak and regression instruments already exist, and the calls are proven - what
+      is left is the schema and several confirming runs.
+
+- [ ] **127. A MODES TAB: choreograph a mode in the app and play it in the emulator.**
+      `S3 D3` David, 2026-09-15: "we need some kind of mode editor tab that gives us
+      all the controls we need." A panel class behind a seam method like the other
+      tabs (`multiboot_tab.py` is the editor-shaped model; `spike1_emulate_tab.py` is
+      the size template), editing item 126's mode file: the shot table, the timer, the
+      screens, the lights, the callouts, and the assets items 129-132 add - this is
+      where a mode's own audio, screen and clip get assigned to it. It validates ids
+      against the title rather than letting a typo reach the game. **"Play it" launches a rig run from the tab** -
+      `emulate_tab._launch_env` already hands arbitrary `NAME=value` strings to
+      `rig_cmd`, so pointing a run at a mode file needs no new plumbing - and with 126's
+      hot reload the tab edits a mode while the game is up.
+      **Acceptance:** build a mode from nothing in the GUI, play it in a run started
+      from the tab, edit it while the game runs and watch the change land; a GUI smoke
+      test that reaches no WSL, with the env building exposed as a pure method so the
+      test can read the list without launching anything.
+      - S3: new capability. D3: the tab pattern and its tests are well-trodden here;
+      the unknown is how much control the schema needs to expose, not how to build it.
+
+- [ ] **128. A mode on a CARD THAT BOOTS: the .so and its mode file on p2, loaded by
+      `/etc/init.d/game`.** `S3 D4` The emulator chains a mode in with `PAD_MODE_SO`;
+      hardware needs the bytes on the card and a line in its init script.
+      **The route is settled and has a hardware-proven precedent:** `.sidx` indexes
+      only `<title>/...` on the GAMES partition, so p2 (the ext4 rootfs) is not covered
+      by it at all - which is why `sidx.py` having no append-record writer does not
+      block this. `/usr/local/codeselect` plus its `/etc/init.d/game` hook already ship
+      on p2 through `debugfs -w` (`mkdir`, `write`, `set_inode_field ... 0100755`, then
+      `e2fsck -fn` and an md5 read-back) and boot on real machines.
+      **Acceptance:** a card built with a mode boots on the machine, plays the mode,
+      and shows no Tech Alert after ten minutes; the init-script edit refuses rather
+      than guesses when its anchor is not exactly as expected; removing the mode leaves
+      the card stock. Emulator first, then a hardware boot. (The .so and the mode file
+      go on p2, so this item needs nothing from item 129 - that one is for ASSETS, in
+      the games tree, which is the partition `.sidx` indexes.)
+      - S3: nothing about stock play changes. D4: it spans two partitions and the boot
+      chain, and it is not done until a machine boots it.
+
+- [ ] **129. NEW FILES ON THE GAMES PARTITION: a `.sidx` record APPENDER.** `S3 D3`
+      The foundation under 130-132, and what makes "our own assets" possible at all.
+      A file the card never had needs a record in `/spk/index/<pkg>.sidx` or Stern's
+      `spk` fails SD validation, and `plugins/stern/sidx.py` can only REFRESH records
+      that already exist. **It is arithmetic, not a crack:** the global HMAC-SHA1 key
+      is already in that file (`SIDX_KEY`, recovered from the validator and verified
+      across cards and both layouts), both record formats are mapped with their digest
+      and their two size fields, and the 0x34 header word is proven unenforced by
+      disassembly of all three on-card parsers plus a hardware test. What is missing is
+      only an appender: rewrite the `STRS` path block with the new path, append the
+      record, and fix every offset that moves. Delivery already exists and has simply
+      never been asked - `core/ext4_grow.grow_files` treats a missing target as size 0
+      and creates it, and the macOS debugfs path creates the inode outright.
+      **Acceptance:** a file that was never on the card is written into the games tree
+      with a correct record, the machine boots with no Tech Alert after ten minutes,
+      building the same card twice is byte-identical, and removing the file restores
+      the stock manifest exactly.
+      - S3: nothing about stock play changes. D3: every fact it needs is already known
+      and the delivery exists - it is a build plus one hardware boot to be sure.
+
+- [ ] **130. A mode's OWN AUDIO: a sound the game never shipped.** `S3 D5` David,
+      2026-09-15: "we can't just be reusing what already exists". Item 104's grow path
+      is merged and appends a record and re-points the play tables, but it REPLACES a
+      stock slot - "a grown bank only copies a stock record" - and nothing registers an
+      id the game will resolve. This item registers one: the record, its descriptor,
+      and a request id our `mode.so` can call. Where to start is known: the firmware
+      derives a descriptor's lookup key from its op11 payload as `w1` whole and
+      `(w2 & 0xe0001fff) | ((sid >> 16) << 13)`, and `_repoint_descriptors` already
+      rewrites that payload under the same whitening.
+      **Acceptance:** a mode plays a callout that exists nowhere in the stock game, in
+      the emulator and then on hardware, with the sounds around it unchanged (the
+      neighbours score byte-identical in a rig capture). That boot also clears the
+      hardware boot item 104 has owed since 2026-09-10. If an id the game was not built
+      with turns out to be unresolvable, say so WITH the evidence and fall back to
+      replacing a slot - the fallback is proven, but it is not the target.
+      - S3: new capability. D5: whether the game can resolve an id it never shipped is
+      unknown, it spans the sound container and the descriptor tables, and it carries
+      a hardware boot.
+
+- [ ] **131. A mode's OWN SCREEN: a scene written from scratch.** `S3 D5` David,
+      2026-09-15: "assign new ... image / text / scene data". Today a mode shows text by
+      BORROWING message ids - KAIJU RUSH points tesla's 3159/3160 at its own words and
+      restores them six seconds later, so a tesla award shown in that window reads our
+      words. The scene code PARSES and re-serialises scenes that exist; nothing writes a
+      new `scene.radium`, and the game reaches its own screens by 40-hex literals
+      compiled into the ELF. **But our `mode.so` is the caller**, so OUR scene's id is
+      ours to choose: those literals constrain the game's screens, not a mode's. The
+      work is a serialiser that emits a valid scene (the grammar is mapped - nodes,
+      handles, keyframes, tracks, and the child-count word 12 bytes before the next
+      node's name), a fresh directory under `assets/lcd/*_loaded/`, its records from
+      item 129, and the loader call from the mode.
+      **Acceptance:** a mode shows a screen the stock game does not contain, with our
+      own text and art, in the emulator and then on hardware; no message id is borrowed
+      and nothing else in the game loses its words.
+      - S3: new capability. D5: writing the format is a bigger step than reading it,
+      and whether the loader accepts an id the ELF never names is unproven.
+
+- [ ] **132. A mode's OWN VIDEO: a clip the card never shipped.** `S3 D4` David,
+      2026-09-15: "assign new ... video". Replacing a clip works in both directions
+      today - the intact path copies the whole file into the card's ext4, may grow or
+      shrink the inode, and keeps exact bytes because any re-encode is rejected by
+      content validation - but an entry whose original node is NOT on the card is
+      skipped, so nothing adds one. With item 129 delivering the file and item 131
+      authoring the scene that names it, what is left is the video table entry, whose
+      grammar is already decoded (`[name][HANDLE][N.asset path][u32 size]`, with
+      1360x768 in the Video node header), plus whatever the guest's decoder demands of
+      a clip it was not built for.
+      **Acceptance:** a mode plays a clip that exists nowhere in the stock game, at its
+      start or at its end, in the emulator and then on hardware; every stock clip still
+      plays, byte-identical.
+      - S3: new capability. D4: the grammar is decoded and delivery comes from 129, so
+      the unknowns are the decoder's tolerance and the scene binding.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

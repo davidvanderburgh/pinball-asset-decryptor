@@ -499,6 +499,31 @@ light command writes nothing at parse time - it writes on later frames - and
 A group comes from a pool of 48 (`0x3c1700`), so a mode must not take a fresh one per
 start: `0x3c15cc(group)` frees one, under the lamp mutex.
 
+### RUN 14: KAIJU RUSH LIGHTS ITS OWN SHOW - emulator-proven
+
+The mode fires tesla's own green sweep at its start and the fade at its end, through
+`hook.h`'s `gz_blele`. In a played game, with the mode's shots taken on the RAMPS ONLY
+so tesla strike could not start and light the same lamps behind it:
+
+```
+90348 [blele] owner 538 group 0x007dd6b8 arg3 0x00000000 lr 0x4085ac44 "blele --sweep 0 --lts 224 --red 0 --green 255 ..."
+90349 [rush] lights on: group 0x7dd6b8
+90350 [rush] KAIJU RUSH START (trigger): player 1, 30 s, score 0
+90832 [rush] lights on landed: 6 lamps written, first 413
+...
+120415 [rush] lights off: group 0x7dd6b8
+120415 [rush] KAIJU RUSH END (time ran out): 10 shots, awarded 55000000, 30067 ms wall
+120915 [rush] lights off landed: 4 lamps written, first 353
+```
+
+`lr 0x4085ac44` is our `.so`, so the command is ours. **The tower lamps from 413 were
+written 0.48 s after the call**, and the game's own tesla award did not run until
+92981 - after that window - so nothing else wrote them. After the fade, 413-420 are no
+longer held (what remains is another show's, from 353).
+
+**A count read at call time is always 0.** Run 13 logged exactly that and proved
+nothing; the count has to come from a later tick, which is what `lights_check` does.
+
 ### The lamp and light-set tables (read 2026-09-15)
 
 - **Light sets: `0x7257a8[set]`**, each a 0-terminated u16 list of lamp ids, with the

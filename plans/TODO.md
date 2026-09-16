@@ -7528,10 +7528,16 @@ These have each been violated at least once and each cost a run or a window:
       Recipe in MODE_API.md: make a show event current, `0x4bf294(0, prio, 0, 0)`,
       `0x1c3454(owner, group, cmd, 0)`, restore; groups come from a pool of 48, so
       free with `0x3c15cc` rather than taking a fresh one per mode start.
-      **Resume:** put it in `mode.c` (sweep on at KAIJU RUSH start, the fade-out
-      command at the end), then one run: captures of the virtual playfield at start
-      and end plus the probe's slot dump as the proof. That closes the last
-      acceptance point.
+      **RUN 14: THE LIGHTS ARE IN THE MODE AND EMULATOR-PROVEN.** KAIJU RUSH fires
+      tesla's own green sweep at its start and the fade at its end (`hook.h`'s
+      `gz_blele`). In a played game, shots taken on the RAMPS ONLY so tesla could not
+      start: the mode's command went through the parser at 90348 (`lr 0x4085ac44`,
+      our .so) and the mode read back **6 lamps written, first 413 - the powerline
+      tower - 0.48 s later**; the game's own award did not run until 92981, after
+      that window. At the end the fade left 413-420 unheld. A count read at call time
+      is always 0 (run 13's mistake); it comes from a later tick now.
+      **Resume:** the soak and the stock bar were taken on the PRE-LIGHTS build, so
+      re-soak this one (`modes/soak.sh 10`) before the box goes in.
       **Superseded:** read the lamp slots, not the LEDs - a group's array is
       `group[0] + id*40` with byte `+36` the written flag (`modes/padmode.c`
       `dump_group_slots`, dumped after ours AND after each of the game's own;

@@ -53,7 +53,11 @@ def window(app, manufacturers_by_key, tmp_path):
     w._image_scan_dir = assets
     w._image_slots = scan_image_slots(assets)
     w._image_slots_by_rel = {s.rel_path: s for s in w._image_slots}
-    return w, assets, rep
+    yield w, assets, rep
+    # The row re-pins the tab height on the NOTEBOOK's idle queue; run it
+    # before the app fixture cancels callbacks through the root, which would
+    # leave the notebook holding a command Tk has already deleted.
+    app.root.update()
 
 
 def _shown(w):

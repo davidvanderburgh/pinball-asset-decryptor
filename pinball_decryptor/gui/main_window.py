@@ -10320,9 +10320,21 @@ class MainWindow:
         row = getattr(self, "_image_keep_row", None)
         if row is None:
             return
+
+        def _show(on):
+            was = row.winfo_manager() == "grid"
+            if on:
+                row.grid()
+            else:
+                row.grid_remove()
+            if was != on:
+                # The notebook is pinned to the height the tab had when it
+                # was selected, so a row appearing later would get no space.
+                self._retune_tab_height()
+
         rep = self._image_assignments.get(rel) if rel else None
         if not rep or not self._image_can_keep_size(rel):
-            row.grid_remove()
+            _show(False)
             return
         slot = self._image_slots_by_rel[rel]
         try:
@@ -10332,7 +10344,7 @@ class MainWindow:
             with Image.open(rep) as im:
                 new = im.size
         except Exception:
-            row.grid_remove()
+            _show(False)
             return
         keep = rel in self._image_keep_size
         self.image_keep_size_var.set(keep)
@@ -10345,7 +10357,7 @@ class MainWindow:
             text = ("Your picture is %d×%d, the original %d×%d: it will be "
                     "squeezed to fit." % (new + orig))
         self._image_size_lbl.configure(text=text)
-        row.grid()
+        _show(True)
 
     def _image_on_keep_size_toggle(self):
         rel = self._image_current_rel

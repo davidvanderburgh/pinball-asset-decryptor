@@ -7408,8 +7408,10 @@ These have each been violated at least once and each cost a run or a window:
       menu-update STICK is now only for a tester without a dock: the dock route does the
       menu change in two minutes with nothing else on the machine touched.
 
-- [ ] **125. A NEW game mode of our own, running inside Godzilla Pro 1.15 in the
-      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D4` ← WORKING ON ← IN PROGRESS David,
+- [x] **125. A NEW game mode of our own, running inside Godzilla Pro 1.15 in the
+      emulator: trigger, timer, shots, score, text, lights, callout.** `S3 D4`
+      **EMULATOR-PROVEN 2026-09-15 on `item/125`, every acceptance point met - ready
+      for `/finish`.** David,
       2026-09-15: "what would it take to add a mode to a game like godzilla?" Plan
       (approved): `plans/spike2_new_mode_plan.md`, pointer under REMAINING item 125 in
       the handoff (both gitignored, local to this machine). **Established at the desk:**
@@ -7538,8 +7540,16 @@ These have each been violated at least once and each cost a run or a window:
       proven: they are above the 260-entry lamp table, in the 585-entry slot index,
       and unnamed. Tesla is the powerline mode, so the tower is the guess.) At the end the fade left 413-420 unheld. A count read at call time
       is always 0 (run 13's mistake); it comes from a later tick now.
-      **Resume:** the soak and the stock bar were taken on the PRE-LIGHTS build, so
-      re-soak this one (`modes/soak.sh 10`) before the box goes in.
+      **CLOSED (run 15).** Re-soaked on the build that ships: 14 cycles, 14 starts
+      and 14 ends, 0 new SEGV, 0 fatal signals, guest up, `alive.sh` 0 after. And the
+      bar that matters for a mode - `PAD_MODE_SO` alone, no probe - is **59.9
+      renderer fps / 29.9 video NEW/s / 58.2 guest fps / 0 faults against stock's
+      60.0 / 30.0 / 58.6**: the mode costs nothing measurable, and with the .so absent
+      no log is written. That run also replicated the lights with NO probe loaded
+      ("lights on landed: 6 lamps written, first 413"). The 58.3 fps reading seen
+      earlier was the PROBE's 17 hooks and slot dumps, not the mode.
+      **What is NOT in this item, by its own wording:** its own scene, clips and
+      callouts, and a hardware card. Also unnamed: which inserts 413-420 are.
       **Superseded:** read the lamp slots, not the LEDs - a group's array is
       `group[0] + id*40` with byte `+36` the written flag (`modes/padmode.c`
       `dump_group_slots`, dumped after ours AND after each of the game's own;

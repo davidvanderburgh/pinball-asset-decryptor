@@ -560,12 +560,26 @@ lamps it wrote each time.
 | stock, no .so at all | 60.0 (30) | 30.0 | 58.6 (180) | 0 |
 | probe + mode, no lights (run 5) | 60.0 (30) | 30.0 | 58.7 (180) | 0 |
 | probe + mode WITH lights, after the soak | 58.3 (28) | 29.1 | 59.4 (170) | 0 |
+| **mode only, no probe (run 15)** | **59.9 (30)** | **29.9** | **58.2 (180)** | **0** |
 
-The last row is about 3% short on the renderer, **and it is not a fair reading of the
+The third row is about 3% short on the renderer, **and it is not a reading of the
 mode**: that probe hooks 17 sites including the light parser and writes slot dumps
 (3,780 log lines in the run), and the measurement followed a 10-minute soak. The probe
-is a debugging tool, not part of a mode. The measurement that matters for a mode is
-`PAD_MODE_SO` alone, with no `PAD_TRACE_SO` - `scratchpad/run15_modeonly.sh`.
+is a debugging tool, not part of a mode.
+
+**The mode itself costs nothing measurable**: 59.9 against 60.0 renderer fps, 29.9
+against 30.0 video, 0 faults, with `PAD_MODE_SO` alone and no `PAD_TRACE_SO`
+(`scratchpad/run15_modeonly.sh`).
+
+**And that run replicated the lights with no probe loaded at all** - nothing of ours in
+the process but `mode.so`:
+
+```
+86901 [rush] lights on: group 0x7dd6b8
+86902 [rush] KAIJU RUSH START (trigger): player 1, 30 s, score 0
+87383 [rush] lights on landed: 6 lamps written, first 413
+116885 [rush] KAIJU RUSH END (time ran out): 29984 ms wall
+```
 
 ### The lamp and light-set tables (read 2026-09-15)
 

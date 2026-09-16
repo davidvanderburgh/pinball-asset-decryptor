@@ -2956,6 +2956,33 @@ def test_modes_install_copies_into_the_running_rig(tmp_path):
     assert "no rig" in quiet.install().lower()
 
 
+def test_modes_new_writes_a_mode_the_runtime_would_accept(tmp_path):
+    """New starts a mode from nothing, and the starter is VALID.
+
+    The runtime refuses a mode with no trigger count and no clock (it says so
+    and runs nothing), so a starter missing either would hand the user a file
+    that silently does nothing. It also carries its comments, because those are
+    what explain a mode to whoever opens it next.
+    """
+    from pinball_decryptor.gui import modes_tab
+
+    panel = modes_tab.ModesPanel(None)
+    path = tmp_path / "my_mode.mode"
+    panel.new_mode(str(path))
+
+    mode = modes_tab.ModeFile.load(str(path))
+    # What the runtime checks before it will run anything: seconds and a count.
+    assert mode.get_int("seconds") > 0
+    trigger = mode.get("trigger").split()
+    assert len(trigger) == 2 and int(trigger[0], 0) and int(trigger[1]) > 0
+    # ...and enough of a mode to be worth starting.
+    assert mode.get_int("award") > 0
+    assert mode.get("shots")
+    assert mode.get("name")
+    assert [l for l in path.read_text(encoding="utf-8").splitlines()
+            if l.startswith("#")]
+
+
 def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
     """The Settings tab shows only for Stern, its form builds from decoded
     adjustment rows, and change-detection reports only edited-and-differing

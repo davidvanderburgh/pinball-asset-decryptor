@@ -14687,13 +14687,22 @@ class MainWindow:
 
     def _modes_play(self):
         """'Play it' = the Emulate tab's own launch, with the tab brought
-        forward.  A second launcher would be a second definition of how a run
-        starts."""
+        forward so the user watches the run they asked for.
+
+        It CALLS that panel's start rather than spelling a launch of its own: a
+        second launcher would be a second definition of how a run starts, and
+        the rig's own rule about two scripts defining one fact applies just as
+        well one level up.  ``start()`` guards itself (already starting, already
+        stopping, no rig), so an impatient second click cannot launch twice."""
         self._step_aside_for_jump()
         for tid in self._notebook.tabs():
             if self._tab_key(tid) == "Emulate":
                 self._notebook.select(tid)
                 break
+        panel = getattr(self, "_emulate_panel", None)
+        start = getattr(panel, "start", None) if panel is not None else None
+        if callable(start):
+            start()
 
     def _build_multiboot_tab(self):
         """Build the 'Multi-boot' tab: one SD card carrying several game

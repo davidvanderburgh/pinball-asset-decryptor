@@ -291,6 +291,52 @@ class ModesPanel:
         except OSError:
             return []
 
+    #: What a brand-new mode starts as.  A STARTER, not an empty file: a mode
+    #: with no trigger and no clock is not valid (the runtime says so and
+    #: refuses to run it), and a blank form teaches nobody what a mode is made
+    #: of.  The comments ride along because they are what explain it to whoever
+    #: opens the file next - and the tab keeps them through every edit.
+    STARTER = """\
+# A mode of your own. Every line here is read by the game while it runs, so an
+# edit lands in about a second - there is nothing to rebuild.
+
+name           NEW MODE
+
+# What starts it: a shot mask, and how many of them in one ball.
+# 0x08000000 3 is the Maser Target, three times. MODE_API.md has the map.
+trigger        0x08000000 3
+
+# How long it runs, in seconds.
+seconds        20
+
+# Which shots pay while it runs, and what the first one is worth. The Nth
+# shot pays N times this, and the game's own scoring applies the playfield
+# multiplier exactly as it does to its own shots.
+shots          0x70300000
+award          1000000
+
+# The words on the display, shown behind message ids the game already knows.
+screen_type    122
+title_msg      3159
+total_msg      3160
+title_words    NEW MODE
+total_words    NEW MODE TOTAL
+restore_after  6
+
+# The countdown, in the game's own voice.
+callout_at     10 1291
+callout_count  1287
+callout_end    1295
+"""
+
+    def new_mode(self, path):
+        """Write a starter mode at *path* and open it."""
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(self.STARTER)
+        self.open_mode(path)
+        self._say("created %s" % os.path.basename(path))
+        return path
+
     def open_mode(self, path):
         """Load *path* into the form.  Unknown lines ride along untouched."""
         self._mode = ModeFile.load(path)
@@ -325,6 +371,8 @@ class ModesPanel:
                                   values=self.available())
         self._pick.pack(side=tk.LEFT, padx=(6, 0))
         self._pick.bind("<<ComboboxSelected>>", lambda _e: self._on_pick())
+        ttk.Button(top, text="New…", command=self._on_new).pack(
+            side=tk.LEFT, padx=(6, 0))
         ttk.Button(top, text="Open…", command=self._on_open).pack(
             side=tk.LEFT, padx=(6, 0))
         if self._badge_fn is not None:
@@ -377,6 +425,26 @@ class ModesPanel:
         if name:
             self.open_mode(os.path.join(modes_dir(), name))
             self._set_status("")
+
+    def _on_new(self):
+        """Start a mode from nothing.
+
+        Saved straight away rather than held unsaved: a mode only means
+        anything once it is a file, because a file is what the game reads.
+        """
+        path = filedialog.asksaveasfilename(
+            title="New mode", initialdir=modes_dir(), defaultextension=".mode",
+            initialfile="my_mode.mode",
+            filetypes=[("Mode files", "*.mode")])
+        if not path:
+            return
+        self.new_mode(path)
+        self._pick["values"] = self.available()
+        name = os.path.basename(path)
+        if name in self._pick["values"]:
+            self._pick.set(name)
+        self._set_status("Started a new mode. Edit it, then Install it into a "
+                         "running game to hear and see it.")
 
     def _on_open(self):
         path = filedialog.askopenfilename(

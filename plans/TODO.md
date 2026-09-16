@@ -7629,8 +7629,10 @@ These have each been violated at least once and each cost a run or a window:
       soak and regression instruments already exist, and the calls are proven - what
       is left is the schema and several confirming runs.
 
-- [ ] **127. A MODES TAB: choreograph a mode in the app and play it in the emulator.**
-      `S3 D3` ← WORKING ON David, 2026-09-15: "we need some kind of mode editor tab
+- [x] **127. A MODES TAB: choreograph a mode in the app and play it in the emulator.**
+      `S3 D3` **DONE 2026-09-15 on `item/127`, emulator-proven - MERGED INTO
+      `feature/mode-editor`, not `/finish`ed: the family ships as ONE release when its
+      last item closes.** David, 2026-09-15: "we need some kind of mode editor tab
       that gives us all the controls we need." A panel class behind a seam method like the other
       tabs (`multiboot_tab.py` is the editor-shaped model; `spike1_emulate_tab.py` is
       the size template), editing item 126's mode file: the shot table, the timer, the
@@ -7660,8 +7662,22 @@ These have each been violated at least once and each cost a run or a window:
       from the tab, edit it while the game runs and watch the change land; a GUI smoke
       test that reaches no WSL, with the env building exposed as a pure method so the
       test can read the list without launching anything.
-      **Still owed:** the live half - open a mode in the tab, install it into a running
-      game, and watch the change land on the glass.
+      **THE LIVE HALF IS PROVEN (2026-09-15), through the tab's OWN code** - the script
+      imports `ModesPanel` rather than reimplementing anything, so a wrong seam fails
+      it. Against a running game: the panel opened `kaiju_rush.mode` (name KAIJU RUSH,
+      30 s, award 1000000), `dump_dir()` asked the rig and answered
+      `/home/david/spike2root/dump`, `install()` copied it, and **the running game
+      logged `loaded "TAB EDIT": trigger 08000000 x3, 9 s, shots 00000000_70300000,
+      award 3000000`** - an edit made in the tab landing in a live game. 26 comments
+      survived the edit.
+      **BOTH GAPS CLOSED.** "New…" writes a STARTER mode - not an empty file, because
+      a mode with no trigger count and no clock is one the runtime refuses to run, and
+      a blank form teaches nobody what a mode is made of; it carries its comments, and
+      a test pins that the starter is one the runtime would accept. "Play it" now calls
+      the Emulate panel's own `start()` after bringing that tab forward, rather than
+      spelling a launch of its own - `start()` guards itself (already starting, already
+      stopping, no rig), so an impatient second click cannot launch twice.
+      Five GUI tests pass and none of them reaches WSL.
       - S3: new capability. D3: the tab pattern and its tests are well-trodden here;
       the unknown is how much control the schema needs to expose, not how to build it.
 

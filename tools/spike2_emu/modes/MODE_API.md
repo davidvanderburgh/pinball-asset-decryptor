@@ -311,6 +311,21 @@ the evidence rather than quietly take the fallback. This is that report.
 The appended record is still real, registered and decodable - that half is proven
 above. What is not proven is reaching it by an id the game never shipped.
 
+**The obvious next idea, and why it is NOT established.** The boot-side insert
+(`0x33b310`..`0x33b364`) allocates a 40-byte node and writes: sid at `+16`, then r7 at
+`+24`, r8 at `+28`, ip at `+32`, lr at `+36`. It is tempting to read lr's
+`r6 + r6<<2` / again / `<<4` as "record index x 400", which would make retargeting a
+sid to our record a single reversible word. **It is not that.** Between those shifts,
+at `0x33b0e0`, `r3 = [r6,#32]`, `r3 <<= 1`, and `r6` is RELOADED as the byte at
+`[r6,#42]`, then `ip = r6 * r3` - a product of two fields of a codec object, a size or
+duration rather than an index. The four payload words are still unidentified, and
+`+24`/`+28` come from `[r0,#16]` and `[r6,#20]` of objects the band build is holding.
+
+So the next pass starts here: identify those four fields from the band build's own
+caller context, and only then decide whether a sid can be pointed at our record. Do
+not patch a live tree on the strength of the arithmetic above - it was wrong once
+already tonight, in exactly the same way the `args` header was.
+
 ### PROVEN AT THE DESK: the bank takes a record the card never had (2026-09-15)
 
 `modes/grow_mode_sound.sh` appends one record to a standalone `image.bin` through the

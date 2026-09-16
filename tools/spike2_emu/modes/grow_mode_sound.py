@@ -21,9 +21,17 @@ Everything here runs through the SHIPPED masterdir/emulator/codec code.
 
   grow_mode_sound.py <repo> <game_elf> <stock_image> <out_image> <src_idx|-1> <seconds>
 
-``src_idx`` -1 picks the source itself: the encoder used here is the MONO path, and
-``warm_slots_for_grown`` seeds a grown sound's codec entry from a stock sound of the
-same (scale, chan), so a short mono record satisfies both.
+``src_idx`` -1 picks the source itself: the encoder used here is the MONO path, so a
+short mono record is what it wants.
+
+**THE APPENDED RECORD DOES NOT INHERIT ITS SOURCE'S SCALE** (measured 2026-09-15:
+source idx 1369 is scale 6, the appended record came out scale 13, both chan 1). The
+scale is chosen by the decode CHAIN, not copied from the record - item 104 found the
+same thing and it is why ``warm_slots_for_grown`` seeds from a stock sound of the
+sound's OWN (scale, chan) rather than from its source. There were 51 stock records at
+(13, 1) to seed from, which is why the round trip still came back bit-exact. Do not
+reason as though the appended record shares its source's codec parameters: it shares
+its IDENTITY bytes (record[4:16] + record[20:24]), which is a different thing.
 
 Prints the appended record's key, which is what a mode file's ``sound_key`` wants.
 """

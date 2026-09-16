@@ -361,6 +361,16 @@ video steady at 30.0-30.4 fps, and `/dump/audio.raw` growing past 37 MB - the ga
 plays normally with a record in its sound bank that the card never shipped and no
 descriptor names. `install_mode_sound.sh on|off|status` swaps the banks by rename.
 
+**`pgrep -x game` IS NOT A RELIABLE GUEST CHECK, and believing it started a second
+run on top of a live one.** `run_game.sh` launches the guest through
+`/usr/libexec/qemu-binfmt/arm-binfmt-P` inside a PID namespace (`unshare -r -m -p
+-f`), so what the process is called from outside varies between runs - it answered to
+`pgrep -x game` in one run and not in the next, where the same guest was plainly alive
+at 57.9 fps with `mode.so` armed. A false "NO GUEST" invites exactly the wrong action:
+starting another run against the same rootfs, which is what the rig lock exists to
+prevent. **Ask `alive.sh`, or scan `/proc/*/maps` for the title's game ELF** - that
+also catches the two-guests case loudly instead of silently measuring one of them.
+
 **A trap that cost a run, and it is about the LOG, not the sound.** `hk_log_open`
 opens `/dump/mode.log` with `O_WRONLY|O_CREAT|O_APPEND`. An earlier run left that
 file owned by **root** while the guest runs as **uid 1000**, so the open returned

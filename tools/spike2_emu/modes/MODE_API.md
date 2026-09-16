@@ -532,6 +532,14 @@ own award writes.
 **A count read at call time is always 0.** Run 13 logged exactly that and proved
 nothing; the count has to come from a later tick, which is what `lights_check` does.
 
+**The written flag is never cleared, so the COUNT drifts.** Over a soak the same mode
+reports "7 lamps written, first 412", then "first 353": a group keeps whatever earlier
+commands left in it, and `gz_group_written` counts slots the group currently holds, not
+what the last command wrote. Run 14's reading is still clean - that group had just been
+allocated, and the game's own award ran after the window - but the evidence is WHICH
+lamps appear, not how many. A test that needs the count to be exact must start from a
+fresh group.
+
 ### The lamp and light-set tables (read 2026-09-15)
 
 - **Light sets: `0x7257a8[set]`**, each a 0-terminated u16 list of lamp ids, with the

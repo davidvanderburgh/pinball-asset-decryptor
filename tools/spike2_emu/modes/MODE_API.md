@@ -233,7 +233,10 @@ class without touching the table or the audits.**
 | `audit_add(id, n)` | `0x422de4` | table `0x715104` ×16 |
 | `get_adjustment(id)` | `0x45df38` | table `0x70a570` ×44. **The handoff's `0x25feec` is not this on Pro 1.15**: it lands mid-function. |
 | `error_log(code)` | `0x457e00` | |
-| `sound_request_play(req)` | `0x2a3108` | The 20-byte request table at `0x771530` (the one `sound_requests.py` mines); 8 channels ×196 B at `0x7b8a9c` |
+| `sound_request_play(req)` | `0x2a3108` | A thin wrapper: bumps a serial at `0x7b930c` and tail-calls the worker `0x2a26f4`. The 20-byte request table at `0x771530` (the one `sound_requests.py` mines); 8 channels ×196 B at `0x7b8a9c` |
+| `sound_play_worker(req, out, n, x)` | `0x2a26f4` | The real thing, and the whole play chain (below). Bounds-checks `req` against `[0x60bd34]`, walks the NUL-terminated sid list at `0x771530[req*20 + 8]`, resolves, arbitrates a channel, `hook_dispatch(0xac)`, `0x2a2044`. 9 callers - every `sound_request_*` and `callout_*` entry point funnels here |
+| `sid_descriptor(sid, &keystream)` | `0x2a1f54` | sid → its descriptor. `sid >> 16` picks the table via `0x481af4`; the returned bytes are whitened by the vf2 keystream at `0x700bf4` (`VF2_VA`), and the first byte de-whitens to **5** or it is not a descriptor. This is `sfx_names.resolve_descriptor`'s function, in the game rather than under Unicorn |
+| `sound_lookup(map, key8)` | `0x33c0d8` | **The container lookup, and the way in for a sound of our own.** `bucket = 0x5beea0(key.w1, map[1])`, then `find` `0x2a25e0`, then `*node` = the entry, else 0. Two arguments, no insert path, no mutex. The map is `0x7b9464` and its bucket count `0x7b9468`, both built by the static ctor `0x33c514` |
 | `sound_request_play_nth(req, n)` / `_variants(req)` / `_active(req)` | `0x2a32bc` / `0x2a3c98` / `0x2a387c` | |
 | `callout_play(req)` / `_nth` | `0x187f44` / `0x18800c` | Swaps in RuleCities' city variant (`0x188308`, table `0x7a7268`), then plays |
 | `event_post(id, handler, flags)` | `0x2551dc` | (handoff) |
@@ -245,6 +248,54 @@ class without touching the table or the audits.**
 | `cmode_manager_started(mgr, id)` | `0xd246c` | |
 | `cmode_manager_stopped(mgr, id, reason)` | `0xd24c4` | |
 | `hook_subscribe` / `hook_dispatch` | `0x4bb380` / `0x4bb42c` | (handoff) Score events 161/162 above |
+
+## A sound the game never shipped: the play chain, read 2026-09-15 (item 130)
+
+Every `callout_play` / `sound_request_play` in this file ends in one worker, and the
+worker reaches the card's audio through a hash map keyed on eight bytes. Read off
+`godzilla_pro/game` with `armxref.py` (`dis`, `xref`, `args`), no rig:
+
+```
+callout_play(req)        0x187f44   swaps a city variant, then
+sound_request_play(req)  0x2a3108   serial++, then
+  sound_play_worker      0x2a26f4   req -> the sid list at 0x771530[req*20+8]
+    sid_descriptor       0x2a1f54   sid -> descriptor (vf2-whitened, magic 5)
+      key.w1 = payload.w1
+      key.w2 = (payload.w2 & 0xe0001fff) | ((sid >> 16) << 13)
+    sound_lookup         0x33c0d8   key -> ENTRY, via find 0x2a25e0 (all 64 bits)
+    channel arbitration  0x7b8a9c   8 x 196 B, priority at +0x98
+    hook_dispatch(0xac)  0x4bb42c   the engine's own veto
+    start                0x2a2044
+```
+
+**The load-bearing fact, and it was already measured on another card:** the boot-time
+band build registers EVERY record in `image.bin` with this map, under a key that moves
+with the record's geometry. So an APPENDED record registers as its own entry, distinct
+from the record it was copied from - Led Zeppelin idx 44 stock `0xf3e13d92`, its
+appended copy `0xb0c13c9e`, both live, and the Sound Test played the stock one because
+nothing NAMES the appended key. Item 104 solved that by re-pointing a descriptor, which
+retires the stock slot. **A mode does not have to.** `mode.so` is a hook, so it can
+answer `sound_lookup` itself: when the lookup key is the one the mode's chosen request
+would resolve to, hand back OUR entry instead. The card keeps every stock byte, no
+descriptor is re-pointed, and the neighbours are unchanged by construction.
+
+`0x33c0d8` is a good hook site for the same reasons `0x1c2b6c` was for lights: two
+arguments, a single return value, no allocation, and it is the ONLY non-band-build
+reader of the map (`xref 0x7b9464` = 8 sites, 6 in the band build, 2 in its ctor).
+
+**Not yet proven, and it is the item's real risk:** whether an entry the engine builds
+for an appended record plays identically when it is reached this way, and whether the
+derive that yields the appended record's key runs on this build at all - Godzilla Pro
+1.15's bank is 1.65 GB, `md_off` `0x6262cfca`, **2534 records** (`0x9e6`).
+
+### The measurement, and a correction to an old note
+
+`PAD_AUDIO_OUT=/dump/audio.raw` is set by `run_game.sh` on every run, card 0, with the
+centre channel beside it as `.center`. After item 127's run both files held 294,400
+bytes = 1.53 s at 48 kHz stereo, **84.6% non-zero, peak 9088, rms 1930** - real audio.
+The item 104 note that "the Ubuntu-side rig's PCM capture is dead (28800 bytes always)"
+has not been true since; measure with `pcmstat.py`, and score against a reference with
+`audioscore.py`.
 
 ## Tesla strike, as the worked example
 

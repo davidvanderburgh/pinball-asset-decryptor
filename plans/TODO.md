@@ -7569,8 +7569,9 @@ These have each been violated at least once and each cost a run or a window:
       call, the lights.
 
 - [ ] **126. The mode runtime reads a MODE FILE instead of having its rules compiled
-      in.** `S3 D3` David, 2026-09-15: "we need to be able to choreograph the modes
-      ourselves". Today `mode.c` IS the mode - KAIJU RUSH's trigger, timer, shot table
+      in.** `S3 D3` ← WORKING ON David, 2026-09-15: "we need to be able to choreograph
+      the modes ourselves". Today `mode.c` IS the mode - KAIJU RUSH's trigger, timer,
+      shot table
       and awards are C constants, so every change is an edit, a cross-compile and a
       restart. This turns the .so into an interpreter over a file: trigger (shot mask
       and how many), timer seconds, a shot table (bit -> award and escalation),

@@ -54,7 +54,7 @@ SETTINGS = os.path.join(os.environ["APPDATA"], "pinball_decryptor",
 SETTINGS_BAK = SETTINGS + ".pad161bak"
 GEOM = None
 #: How much of the window the Emulate tab keeps; the log pane gets the rest.
-NB_H = 272
+NB_H = 306
 
 os.makedirs(OUT, exist_ok=True)
 os.environ["PINBALL_SKIP_DISCLAIMER"] = "1"

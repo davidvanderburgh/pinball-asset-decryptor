@@ -150,6 +150,25 @@ def test_image_refs_ignore_a_lookalike_inside_pixel_data():
         radium_grow.image_refs(data, banner)
 
 
+def test_image_refs_ignore_a_lookalike_in_another_pictures_header():
+    """PAD-159: a record's ``[texW][texH][fmt]`` has the triple's shape.  A
+    40x20 picture with handle 5 "matched" the header of the next 40x20 BC3
+    picture (format 5), and growing the first rewrote the second's size."""
+    first = _record(40, 20, 5)
+    second = _record(40, 20, 7, rgba=(200, 30, 30, 255))
+    data = bytes(b"\x7f" * 8 + first + b"\x7f" * 4 + second)
+    first_off = 8 + radium_grow.IMAGE_HEADER_LEN
+    second_off = 8 + len(first) + 4 + radium_grow.IMAGE_HEADER_LEN
+    lookalike = second_off - radium_grow.IMAGE_HEADER_LEN + 12
+    assert struct.unpack_from("<3I", data, lookalike) == (40, 20, 5)
+    assert radium_grow.image_refs(data, first_off) == []
+    payload = dds.encode_bc3(_pixels(90, 22, (255, 0, 255, 255)))
+    r = radium_grow.regrow(data, images={first_off: (90, 22, payload)})
+    imgs = {i["data_off"]: i for i in engine.parse_radium_images(r["data"])}
+    assert (imgs[r["shift"](second_off)]["tex_w"],
+            imgs[r["shift"](second_off)]["tex_h"]) == (40, 20)
+
+
 def test_grow_keeps_its_text_only_signature():
     from tests.test_stern_radium import _make_radium
     buf = _make_radium("REPLAY", 2)
@@ -261,6 +280,73 @@ def test_a_font_atlas_never_changes_size(tmp_path, monkeypatch):
     _w, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
     assert n == 0 and grown == {}
     assert any("font atlas" in m for _l, m in msgs)
+
+
+def _grown_card(data, banner):
+    """The same scene as a card BUILT with the banner kept at 90x22: every
+    record after the banner has moved."""
+    return radium_grow.regrow(data, images={banner: (
+        90, 22, dds.encode_bc3(_pixels(90, 22, (255, 0, 255, 255))))})["data"]
+
+
+def test_a_picture_is_not_written_where_this_card_has_no_such_record(tmp_path):
+    """PAD-159: a project's offsets belong to the card it was extracted from.
+    On a card whose scene moved (built with a picture kept at its own size),
+    the icon's stock offset is the middle of something else, and its blocks
+    written there broke the scene - the game stopped with cereal::Exception.
+    Nothing is written, and the log says why once per scene."""
+    data, banner, icon = _scene()
+    png = _project(tmp_path, data, icon, 16, 16, name="icon")
+    Image.new("RGBA", (16, 16), (0, 200, 0, 255)).save(png)
+    writes, n, ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
+    assert n == 1 and [w[0] for w in writes] == [icon]     # the stock card
+
+    writes, n, ov, grown, msgs = _writes(
+        tmp_path, _Reader(RAD_PATH, _grown_card(data, banner)))
+    assert (writes, n, ov, grown) == ([], 0, {}, {})
+    said = [m for l, m in msgs
+            if l == "warning" and "where this project's extract found" in m]
+    assert len(said) == 1 and RAD_PATH in said[0] and "icon" in said[0]
+
+
+def test_nor_is_a_resize_grown_from_a_record_that_moved(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "_image_grow_gate", lambda d: (True, ""))
+    data, banner, _icon = _scene()
+    png = _project(tmp_path, data, banner, 40, 20)
+    Image.new("RGBA", (120, 30), (255, 0, 255, 255)).save(png)
+    _w, n, _ov, grown, msgs = _writes(
+        tmp_path, _Reader(RAD_PATH, _grown_card(data, banner)))
+    assert n == 0 and grown == {}
+    assert any("where this project's extract found" in m for _l, m in msgs)
+
+
+def test_a_header_is_read_in_whole_blocks_off_a_real_ext4():
+    """The record check reads 36 bytes; through a card reader that is whole
+    filesystem blocks (a raw SD device takes nothing else), and the bytes are
+    the file's own across block and extent boundaries."""
+    import gzip
+    import os
+    import sys
+    from pinball_decryptor.plugins.stern import ext4
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.join(here, "fixtures"))
+    import treesync_tiny as tiny
+    with gzip.open(os.path.join(here, "fixtures",
+                                "treesync_tiny.ext4.gz"), "rb") as g:
+        raw = g.read()
+    import io
+    reader = ext4.Ext4Reader(io.BytesIO(raw), 0, len(raw))
+    node = {rel: nd for rel, _k, _i, nd in reader.iter_tree(2)}["d/multi.bin"]
+    want = tiny.multi_bytes()
+    asked = []
+    real = reader._read
+    reader._read = lambda off, n: (asked.append((off, n)), real(off, n))[1]
+    bs = reader.block_size
+    for off in (0, 36, bs - 20, 5 * bs - 1, tiny.MULTI_LEN - 36):
+        asked.clear()
+        assert engine._file_range_bytes(reader, node, off, 36) == \
+            want[off:off + 36]
+        assert asked and all(n % bs == 0 for _o, n in asked)
 
 
 def test_a_texture_size_png_is_padded_and_patched_in_place(tmp_path,

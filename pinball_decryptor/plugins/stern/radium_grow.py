@@ -77,14 +77,20 @@ def image_refs(data, data_off, images=None):
     """File offsets of every sprite-instance triple that draws the image at
     *data_off* (``[dispW][dispH][handle & 0xFFFFFF]``, or the texture size in
     the dims' place, both of which ``scene_layout`` accepts).  Matches inside
-    any image's own block data are not references and are left out;
-    *images* is ``engine.parse_radium_images(data)`` when the caller already
-    has it."""
+    any image's own record - its block data, or its 36-byte header - are not
+    references and are left out; *images* is
+    ``engine.parse_radium_images(data)`` when the caller already has it.
+
+    The header half matters because a record's ``[texW][texH][fmt]`` has the
+    triple's shape, and handles are small: on Godzilla's scenes a 1360x768
+    BC3 picture with handle 4 "matched" the header of a 1360x768 BC1 one
+    (format 4), and resizing the first rewrote the second's texture size."""
     if images is None:
         from .engine import parse_radium_images
         images = parse_radium_images(data)
     rec = image_record(data, data_off)
-    blocks = [(im["data_off"], im["data_off"] + im["length"]) for im in images]
+    blocks = [(im["data_off"] - IMAGE_HEADER_LEN, im["data_off"] + im["length"])
+              for im in images]
     h = rec["handle"] & 0xFFFFFF
     out = []
     for w, hh in {(rec["disp_w"], rec["disp_h"]), (rec["tex_w"], rec["tex_h"])}:

@@ -444,9 +444,12 @@ struct sbent {
     unsigned long asked, fromdisk;
     unsigned int calls, fills;
     int verbose;
+    long tid;               /* the thread that read it, taken on its first read */
+    unsigned long seq;      /* sb_seq at its latest read */
     char path[176];
 };
 static struct sbent sbs[SBMAX];
+static unsigned long sb_seq;
 
 static struct sbent *sb_find(void *rdbuf, int off)
 {
@@ -478,6 +481,8 @@ static void sb_register(void *rdbuf, const char *path)
             sbs[i].rdbuf = rdbuf;
             sbs[i].asked = sbs[i].fromdisk = 0;
             sbs[i].calls = sbs[i].fills = 0;
+            sbs[i].tid = 0;
+            sbs[i].seq = 0;
             copystr(sbs[i].path, path, sizeof sbs[i].path);
             {   /* PAD_SCENE_VERBOSE=<substring of a scene path> dumps every
                  * field cereal pulls out of that one scene, which is how the
@@ -560,6 +565,11 @@ int shim_fb_xsgetn(void *self, char *s, int n)
                 *p = 0;
                 logmsg(b);
             }
+            /* Which thread, once per scene (a gettid per read would be
+             * thousands of syscalls per scene): a load reads its stream on
+             * one thread, and a new ifstream re-registers with calls at 0. */
+            if (!e->calls) e->tid = syscall(224);
+            e->seq = ++sb_seq;
             e->asked += (unsigned long)r;
             e->calls++;
         }
@@ -637,12 +647,53 @@ int shim_bf_xsgetn(void *self, char *s, int n)
  * exception caught per scene looks like. __cxa_throw carries the type_info, so
  * the type name and (for anything deriving from std::runtime_error) the
  * message can both be printed here. */
+/* A SCENE THE GAME COULD NOT READ, BY NAME (PAD-159). A user's run ended in
+ *   terminate called after throwing an instance of 'cereal::Exception'
+ *     what(): Error while trying to deserialize a polymorphic pointer.
+ *             Could not find type id 993416120
+ * and nothing in the log said WHICH of 194 scene.radium files it was, or
+ * whether it was one PAD had written into his override set. cereal throws on
+ * the thread that is reading the stream, so the scene this thread read last is
+ * the one that broke, and `asked` is how far into it cereal got. Always said,
+ * outside the [throw] budget below: the game throws other things first. */
+static void scenefail_report(const char *msg)
+{
+    static int budget = 20;
+    struct sbent *mine = 0, *any = 0;
+    long me = syscall(224);
+    char b[520];
+    int i;
+    if (budget-- <= 0) return;
+    for (i = 0; i < SBMAX; i++) {
+        struct sbent *e = &sbs[i];
+        if (!e->rdbuf || !e->seq) continue;
+        if (!any || e->seq > any->seq) any = e;
+        if (e->tid == me && (!mine || e->seq > mine->seq)) mine = e;
+    }
+    if (mine)
+        snprintf(b, sizeof b, "[scenefail] %s at byte %lu: %s\n",
+                 mine->path, mine->asked, msg);
+    else if (any)
+        snprintf(b, sizeof b, "[scenefail] %s at byte %lu (read last, on "
+                 "another thread): %s\n", any->path, any->asked, msg);
+    else
+        snprintf(b, sizeof b, "[scenefail] (no scene read yet): %s\n", msg);
+    logmsg(b);
+}
+
 void shim_cxa_throw(void *obj, void *tinfo, void *dest) __asm__("__cxa_throw");
 void shim_cxa_throw(void *obj, void *tinfo, void *dest)
 {
     static void (*real_throw)(void *, void *, void *);
     static int budget = 6;
     if (!real_throw) real_throw = dlsym(RTLD_NEXT, "__cxa_throw");
+    if (tinfo) {
+        const char *name = *(const char **)((char *)tinfo + 4);
+        if (name && strstr(name, "cereal")) {
+            const char *m = obj ? *(const char **)((char *)obj + 4) : 0;
+            scenefail_report(m > (const char *)0x10000 ? m : "");
+        }
+    }
     if (budget-- > 0) {
         char b[400];
         const char *name = "?";

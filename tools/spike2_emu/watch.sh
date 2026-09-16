@@ -2547,6 +2547,14 @@ while :; do
             echo "[watch] the guest left a crash report in game.out:"
             grep -a '\[segv\]' "$ROOT/dump/game.out" | grep -av scenebytes | head -40
         fi
+        # A SCENE FILE THE GAME COULD NOT READ, BY NAME (PAD-159) - see
+        # pad_scenefail_report. A PAD_PIVOT guest writes to game.out, any
+        # other straight into $LOG.
+        if [ -n "${PAD_PIVOT:-}" ]; then
+            pad_scenefail_report "$ROOT/dump/game.out" "${PAD_OVERRIDE_DIR:-}" "$GAME"
+        else
+            pad_scenefail_report "$LOG" "${PAD_OVERRIDE_DIR:-}" "$GAME"
+        fi
         # A CLEAN EXIT HAS ITS REASON IN THE GAME'S OWN DEBUG LOG, NOT OURS (item
         # 111): the game's FATAL routine writes "** FATAL: error N (text)." to
         # /dump/debug_log.txt and exit(4)s, and the pane showed only the VPU

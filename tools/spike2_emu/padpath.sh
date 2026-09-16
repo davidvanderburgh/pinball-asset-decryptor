@@ -958,6 +958,39 @@ pad_renderer_advice() {
     esac
 }
 
+# A SCENE FILE THE GAME COULD NOT READ, BY NAME (PAD-159).
+#
+#   pad_scenefail_report <game log> <override set dir, or ""> <title>
+#
+# A user's Godzilla run showed the Stern logo and stopped, and the pane ended
+# on libstdc++'s own words - "terminate called after throwing an instance of
+# 'cereal::Exception' / what(): ... Could not find type id 993416120" - with
+# nothing to say which of the title's 194 scene.radium files it was, or whether
+# it was one PAD had written into the override set bound over the card. The
+# shim now writes a [scenefail] line for every cereal exception: the scene the
+# throwing thread was reading and the byte cereal got to (hwshim.c). This says
+# the last one, and whether that path is in the override set. Silent when there
+# is no such line, so an ordinary exit reads as it always has.
+pad_scenefail_report() {
+    local log=${1:-} ovr=${2:-} title=${3:-} line path
+    [ -n "$log" ] && [ -f "$log" ] || return 0
+    line=$(grep -a '^\[scenefail\] ' "$log" 2>/dev/null | tail -1)
+    [ -n "$line" ] || return 0
+    echo "[watch] the game could not read one of its scene files:"
+    printf '%s\n' "$line" | cut -c1-300 | sed 's/^\[scenefail\] /[watch]   /'
+    path=$(printf '%s\n' "$line" \
+           | sed -n 's/^\[scenefail\] \(\.\/[^ ]*\.radium\) at byte .*/\1/p')
+    [ -n "$path" ] || return 0
+    if [ -n "$ovr" ] && [ -n "$title" ] && [ -f "$ovr/$title/${path#./}" ]; then
+        echo "[watch]   that file is one of YOUR EDITS: PAD rebuilt it from what you replaced"
+        echo "[watch]   in that scene. Start again with \"Apply my replaced assets on top\""
+        echo "[watch]   unticked - if the game starts, that scene's edit is what it could not"
+        echo "[watch]   read."
+    else
+        echo "[watch]   that file is the card image's own, not one of the edits applied on top."
+    fi
+}
+
 # Do it. Root only, and only when there is genuinely something to bind: this
 # mount ADDS the socket WSL itself put there, so it cannot take anything away,
 # but a bind over a directory that already works would still be a change made

@@ -7760,12 +7760,37 @@ These have each been violated at least once and each cost a run or a window:
       `key.w2 & ~0xe0001fff == 0` rejects our appended key AND the ordinary stock
       record it copies (idx 1369, `w2 = 0x94000020`), which some descriptor plainly
       names. The formula is Led Zeppelin 1.22's; re-derive it on Godzilla first.
-      **Resume:** identify the four words the boot-side insert writes past the sid
-      (`0x33b310`: sid `+16`, then r7 `+24`, r8 `+28`, ip `+32`, lr `+36`) from the
-      band build's caller context - `+36` is a product of two codec-object fields
-      (`[r6,#32]<<1` times the byte at `[r6,#42]`), NOT an index, so do not patch a
-      live tree on that arithmetic. Then decide between binding a sid to our record
-      at boot and re-deriving the descriptor key formula for this build.
+      **Established - the sid -> record binding, read from a LIVE guest.** The node
+      payload was measured against the derive's 2535 rows with each prediction made
+      BEFORE the read (sids 4, 2, 19, 22, 1998): `+24` is **body_off** (2581/2581),
+      `+32` is **length x 2 x chan** (2581/2581), `+36` is 400 mono / 800 stereo with
+      no exceptions, `+28` is always 0, and `+20` is NOT `key0` (0/2581, still
+      unidentified). 2581 nodes cover 2497 records; **38 records are named by no sid**,
+      and ours is one of them. `guest_base` was confirmed the same way rather than
+      assumed (`[0x7b10b4]` = 585 at `0x10000`, 1 at 0). Tools: `treewalk130` /
+      `nodepatch130` in the session scratchpad; retargeting a sid is a **three-word
+      reversible write** that lands and reads back clean.
+      **Ruled out - the city-variant swap.** `callout_play` does NOT remap 1295: the
+      probe shows `callout 1295` followed in the same millisecond by `request 1295`,
+      and req 1295's sid list is `[1998]`, the node that was patched.
+      **Ruled out - the scale mismatch.** "It read our bytes with sid 1998's scale-1
+      keystream and emitted noise" predicts a flat-spectrum burst at the callout. The
+      capture has none: the tail envelope is uniform game audio and its spectral
+      flatness is 0.137-0.208 (tonal) against 0.8+ for noise. The game never read our
+      body. Correlation against the clip was 0.026 / 0.033 / 0.032 over three runs.
+      **Ruled out as a name - `0x2a2044` is not the channel start.** It was hooked as
+      one; its body zeroes flags at `+188`/`+191` and 21 of 23 events came from
+      `0x2a2160` / `0x2a212c` (the latter a mutex-wrapped wrapper), not the play
+      worker. Treat it as a channel STOP.
+      **The open lead, and it is concrete:** exactly two events came from INSIDE the
+      worker (`lr=0x2a2be4`), and one lands in the same millisecond as `request 1283`
+      while `request 1295` produces none. The worker takes a different path for the
+      two, though both arrive identically through `callout_play` -> `sound_request_play`.
+      **Resume:** hook `error_log` (`0x457e00`) and read why 1295 bails where 1283 does
+      not - its early returns are codes 100/101/102 at `0x2a276c`, `0x2a28b0`,
+      `0x2a2934`. Measure it; three passes have each turned on an inferred name or
+      arithmetic that looked obvious and was wrong, while everything predicted first
+      and then read back off a live guest has held.
       Full record in `tools/spike2_emu/modes/MODE_API.md`.
 
 - [ ] **131. A mode's OWN SCREEN: a scene written from scratch.** `S3 D5` David,

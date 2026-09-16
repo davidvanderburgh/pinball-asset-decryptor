@@ -327,9 +327,36 @@ argument:
 - the sound was VETOED before the decode - `hook_dispatch(0xac)` at `0x2a2abc` sits
   between the channel arbitration and the start call `0x2a2044`.
 
-**Next pass: hook `0x2a2044` and see whether the channel start is reached for that
-callout at all.** A sound that never starts cannot be changed by retargeting any
-record, and that has to be settled before any more of this is built on.
+**Pass 3 hooked `0x2a2044`, and the result corrects the SITE NAME first.** It was
+added as "the channel START"; that was inferred from its position after the
+arbitration, and the data says otherwise. Its body zeroes flags at `+188`/`+191`,
+walks eight slots and calls `0x458674` - cleanup shape - and 21 of the 23 events in
+the window carry `lr=0x2a221c` or `lr=0x2a2148`, which are the calls from `0x2a2160`
+and `0x2a212c`, not from the play worker. **Treat `0x2a2044` as a channel STOP/release
+until something proves otherwise**, and do not rest a veto conclusion on it.
+
+**What the run DID establish, and it is the first concrete divergence:** exactly two
+events came from inside the play worker (`lr=0x2a2be4`, the call at `0x2a2be0`), and
+one of them lands in the SAME MILLISECOND as `request 1283`:
+
+```
+171276 [sound] callout 1283      171277 [sound] request 1283
+171277 [sound] START ch=0x007b8e70 r1=0x2 r2=0x0 r3=0x2  lr=0x2a2be4   <- the worker
+...
+174994 [sound] callout 1295      174994 [sound] request 1295
+(nothing from the worker at all)
+```
+
+So the worker handles 1283 and 1295 **differently**: one reaches the worker's own call
+at `0x2a2be0`, the other does not. Both were requested identically, through the same
+`callout_play` -> `sound_request_play` path, from our mode.
+
+**Next instrument: `error_log` (`0x457e00`).** The worker's early returns are codes
+100, 101 and 102 (`0x2a276c`, `0x2a28b0`, `0x2a2934`), so hooking it names exactly why
+1295 bails out where 1283 does not - measurement rather than another inferred name.
+Three passes have now each turned on a name or an arithmetic reading that looked
+obvious and was wrong; the ones that held were the ones predicted first and then read
+back off a live guest.
 
 ### MEASURED FALSE: `sound_lookup` is BOOT-ONLY, so a play-time hook never fires
 

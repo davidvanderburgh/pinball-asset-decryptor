@@ -2869,6 +2869,93 @@ def test_partition_explorer_tab_gated_by_capability(app, manufacturers_by_key):
     assert _state("Partition Explorer") == "hidden"
 
 
+def test_modes_tab_gated_by_capability(app, manufacturers_by_key):
+    """The Modes tab (item 127) shows for Stern and hides for a plugin without
+    the capability - a mode runtime is Spike 2's, not every manufacturer's."""
+    w = app.window
+
+    def _state(label):
+        for tid in w._notebook.tabs():
+            if w._tab_key(tid) == label:
+                return str(w._notebook.tab(tid, "state"))
+        return None
+
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update(); app.root.update()
+    assert _state("Modes") == "normal"
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update(); app.root.update()
+    assert _state("Modes") == "hidden"
+
+
+def test_mode_file_round_trip_keeps_what_the_tab_does_not_know(tmp_path):
+    """Editing a mode keeps everything the tab does not understand.
+
+    A mode file is COMMENTED, and those comments are what explain a mode to the
+    next person who opens it. ModeFile keeps the file as lines for exactly that
+    reason, so this pins it: change two values, and the comments, the blank
+    line and a key from a newer editor all survive - the same forgiveness the
+    runtime shows an unknown key (it logs it and carries on).
+    """
+    from pinball_decryptor.gui import modes_tab
+
+    src = tmp_path / "test.mode"
+    src.write_text(
+        "# what this mode is for\n"
+        "name           TEST MODE\n"
+        "\n"
+        "# how long it runs\n"
+        "seconds        30\n"
+        "award          1000000\n"
+        "future_key     something a newer editor wrote\n",
+        encoding="utf-8")
+
+    mode = modes_tab.ModeFile.load(str(src))
+    assert mode.get("name") == "TEST MODE"
+    assert mode.get_int("seconds") == 30
+    mode.set("trigger", "0x08000000 3")      # 0x hex, as the runtime parses it
+    mode.set("seconds", "12")
+    mode.save(str(src))
+
+    text = src.read_text(encoding="utf-8")
+    assert "# what this mode is for" in text
+    assert "# how long it runs" in text
+    assert "future_key     something a newer editor wrote" in text
+    again = modes_tab.ModeFile.load(str(src))
+    assert again.get_int("seconds") == 12
+    assert again.get("trigger") == "0x08000000 3"
+    assert again.get("name") == "TEST MODE"
+
+
+def test_modes_install_copies_into_the_running_rig(tmp_path):
+    """Install is a COPY into the guest's dump directory, and nothing more.
+
+    That is the whole reason the tab can change a mode while a game is up: the
+    runtime polls the file twice a second, so arriving is all that is needed.
+    It must also be honest when there is no rig rather than pretending it
+    worked.
+    """
+    from pinball_decryptor.gui import modes_tab
+
+    panel = modes_tab.ModesPanel(None, dump_dir_fn=lambda: "/home/d/spike2root/dump")
+    cmd = panel.install_cmd(str(tmp_path / "x.mode"))
+    assert cmd and cmd[-1] == "/home/d/spike2root/dump/mode.cfg"
+    assert "cp" in cmd
+
+    # No rig: no command, and the caller is told rather than left guessing.
+    # The mode has to be SAVED first - install answers that before it answers
+    # anything about a rig, because an unsaved mode has no bytes to copy.
+    saved = tmp_path / "x.mode"
+    saved.write_text("name  X\nseconds  10\n", encoding="utf-8")
+    quiet = modes_tab.ModesPanel(None, dump_dir_fn=lambda: "",
+                                 rig_cmd_fn=lambda *a, **k: ["bash", "x", "y"])
+    quiet._dump_cache = ""          # the rig was asked and had no answer
+    assert quiet.install_cmd(str(saved)) == []
+    assert "save the mode first" in quiet.install().lower()
+    quiet._path = str(saved)
+    assert "no rig" in quiet.install().lower()
+
+
 def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
     """The Settings tab shows only for Stern, its form builds from decoded
     adjustment rows, and change-detection reports only edited-and-differing

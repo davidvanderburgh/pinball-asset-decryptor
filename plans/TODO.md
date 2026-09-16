@@ -7640,10 +7640,28 @@ These have each been violated at least once and each cost a run or a window:
       `emulate_tab._launch_env` already hands arbitrary `NAME=value` strings to
       `rig_cmd`, so pointing a run at a mode file needs no new plumbing - and with 126's
       hot reload the tab edits a mode while the game is up.
+      **BUILT (2026-09-15), the desk half.** `gui/modes_tab.py` holds `ModeFile` (the
+      mode file as LINES, not a dict - a mode file is commented, and the comments are
+      what explain it to the next person, so every line the tab does not understand is
+      kept in order and written back untouched) and `ModesPanel` (a form over the
+      file's keys, Save, "Install into the running game", and "Play it" which hands
+      off to the Emulate tab rather than being a second launcher). Its own `modes`
+      capability, set by Spike 2 only, for the same reason `emulate` is: the runtime
+      is a preloaded .so against that era's binary. **Install is a COPY into the
+      guest's dump directory and nothing more** - the runtime polls twice a second, so
+      arriving is all that is needed, which is exactly why it works while a game is up.
+      **Where the guest reads its mode from is ASKED OF THE RIG** (`padpath.sh`, which
+      resolves whose rig it is - `$HOME` is `/root` under `wsl -u root`, where no rig
+      has ever lived); a first attempt wired it to a `dump_dir` method the Emulate
+      panel does not have, which would have made Install silently never work.
+      Tests: the capability gate (shows for Stern, hidden without it), the round trip
+      that pins comments and an unknown key surviving an edit, and the install command.
       **Acceptance:** build a mode from nothing in the GUI, play it in a run started
       from the tab, edit it while the game runs and watch the change land; a GUI smoke
       test that reaches no WSL, with the env building exposed as a pure method so the
       test can read the list without launching anything.
+      **Still owed:** the live half - open a mode in the tab, install it into a running
+      game, and watch the change land on the glass.
       - S3: new capability. D3: the tab pattern and its tests are well-trodden here;
       the unknown is how much control the schema needs to expose, not how to build it.
 

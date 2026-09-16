@@ -2584,6 +2584,7 @@ class MainWindow:
         self._tab_jjp_emulate = ttk.Frame(self._notebook)
         self._tab_spike1_emulate = ttk.Frame(self._notebook)
         self._tab_multiboot = ttk.Frame(self._notebook)
+        self._tab_modes = ttk.Frame(self._notebook)
 
         # Order: Extract → the Replace tabs → Default Settings (set defaults
         # before building) → Write → Mod Pack → Partitions.  Display labels are
@@ -2617,6 +2618,12 @@ class MainWindow:
             # Emulate or Write: it makes a CARD out of several images, and
             # neither of those tabs is about that.
             (self._tab_multiboot, "Multi-boot", "Multi-boot"),
+            # Item 127: the Modes tab - choreograph a mode of our own and play
+            # it in the emulator.  Last in the strip because it is the newest
+            # and the most specialised: a mode is a thing you author for a
+            # game you already have running, so it sits after the tabs that
+            # get you there.  Gated by ``modes`` (Stern Spike 2).
+            (self._tab_modes, "Modes", "Modes"),
         ]
         self._tab_keys = {}
         for _frame, _label, _key in _tabs:
@@ -14653,6 +14660,41 @@ class MainWindow:
                 k, p, t, tab="Emulate"))
         self._emulate_panel.build(self._tab_emulate)
 
+    def _build_modes_tab(self):
+        """Build the 'Modes' tab: choreograph a game mode of our own and play
+        it in the emulator (item 127).
+
+        The seam only - the substance is in :mod:`..gui.modes_tab`, and the
+        mode itself is a FILE the rig's ``mode.so`` interprets (item 126).
+
+        The panel's seams are injected rather than imported, so a test can
+        drive it with WSL nowhere near: ``rig_cmd_fn`` spells a command, and
+        ``emulate_fn`` hands 'Play it' to the Emulate tab rather than starting
+        a second launcher of its own.  WHERE THE GUEST READS ITS MODE FROM is
+        NOT passed in: the panel asks the rig's own ``padpath.sh``, which
+        already resolves whose rig it is (``$HOME`` is ``/root`` under
+        ``wsl -u root``, where no rig has ever lived).  Deciding it here as
+        well would be two places owning one fact."""
+        from .modes_tab import ModesPanel
+        self._modes_panel = ModesPanel(
+            self._tab_modes,
+            log=self.append_log,
+            theme_fn=lambda: self._current_theme,
+            badge_fn=self._make_round_icon,
+            resize_fn=self._resize_notebook_to_current_tab,
+            emulate_fn=self._modes_play)
+        self._modes_panel.build(self._tab_modes)
+
+    def _modes_play(self):
+        """'Play it' = the Emulate tab's own launch, with the tab brought
+        forward.  A second launcher would be a second definition of how a run
+        starts."""
+        self._step_aside_for_jump()
+        for tid in self._notebook.tabs():
+            if self._tab_key(tid) == "Emulate":
+                self._notebook.select(tid)
+                break
+
     def _build_multiboot_tab(self):
         """Build the 'Multi-boot' tab: one SD card carrying several game
         images and a menu at power-up (item 90).
@@ -17384,6 +17426,7 @@ class MainWindow:
         self._configure_tab("Emulate Spike1",
                             getattr(caps, "emulate_spike1", False))
         self._configure_tab("Multi-boot", getattr(caps, "multiboot", False))
+        self._configure_tab("Modes", getattr(caps, "modes", False))
         # ...and the tab BUILDS FOR THIS MANUFACTURER (item 118): Stern's SD
         # card or a JJP install ISO, the same panel with the other backend
         # behind it.  Only a manufacturer that has the tab gets to switch it,

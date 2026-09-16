@@ -540,6 +540,19 @@ allocated, and the game's own award ran after the window - but the evidence is W
 lamps appear, not how many. A test that needs the count to be exact must start from a
 fresh group.
 
+### The soak on the build that ships (lights included)
+
+`modes/soak.sh 10` again, on the build with the lights in it: **14 cycles, 14 starts
+and 14 ends, 0 new `[segv]`, 0 fatal signals, guest still up**, one game climbing to
+258,580,000. The mode fired its lights on every cycle (16 "lights on", 15 landings).
+
+**What those landings do NOT show.** The lowest written lamp read 300 ten times, 353
+three times, and 413 or 412 once each - because one group is reused and the written
+flag is never cleared, so "first" is only the lowest id the group currently holds. Run
+14 is the clean proof (a freshly allocated group, no game command in the window, first
+413); the soak proves the mode runs its lights every cycle without faults, not which
+lamps it wrote each time.
+
 ### The lamp and light-set tables (read 2026-09-15)
 
 - **Light sets: `0x7257a8[set]`**, each a 0-terminated u16 list of lamp ids, with the

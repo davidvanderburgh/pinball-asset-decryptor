@@ -1132,6 +1132,21 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    find type id ...`), the log now says which scene file it was reading,
    how far in, and whether that file is one of your edits; if it is,
    untick *Apply my replaced assets on top* and run again to confirm.
+   **And your edits run on top of a card PAD built** (v0.217.4). Every
+   spot in an extract - where each scene picture sits, which lines of
+   text are the stock ones - was measured on the card the project was
+   extracted from. A card PAD built already carries earlier edits, and a
+   picture kept at its own size or a longer line of text moves
+   everything after it in its scene, so edits prepared from the built
+   card went where its scenes no longer had them: the game stopped at the
+   Stern logo (v0.217.2), or the pictures in that scene were skipped and
+   the run was refused (v0.217.3). When the card you pick is the same
+   game and version as the card your project was extracted from, the
+   edits are now prepared from that original and run over the card you
+   picked, and the log says so. The result is what a fresh build would
+   put on the card. A card of another title or version is still used as
+   it is, with a note in the log, and so is a picked card whose original
+   is no longer where the extract found it.
    A **virtual playfield** window opens beside the game: the title's own
    artwork with every switch, coil and insert drawn on it, inserts lit
    live off the node bus, and switches you can click or press and hold

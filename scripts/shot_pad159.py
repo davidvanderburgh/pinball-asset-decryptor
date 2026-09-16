@@ -2,7 +2,7 @@
 
     python scripts/shot_pad159.py <out_dir> <before|after>
 
-THE REPORT.  DragonRR's Godzilla LE run showed the Stern logo and stopped, and
+THE REPORT.  A field report's Godzilla LE run showed the Stern logo and stopped, and
 the pane ended on libstdc++'s own words: "terminate called after throwing an
 instance of 'cereal::Exception' / what(): Error while trying to deserialize a
 polymorphic pointer. Could not find type id 993416120".  That is a scene.radium

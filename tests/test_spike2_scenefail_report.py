@@ -1,6 +1,6 @@
 """A scene the game could not read is named in the exit report (PAD-159).
 
-THE REPORT, 2026-09-16, DragonRR on Godzilla LE: "won't start emulator.. well
+THE REPORT, 2026-09-16, a field report on Godzilla LE: "won't start emulator.. well
 it does, I see the Stern logo and then it stops", and the pane ended on::
 
     terminate called after throwing an instance of 'cereal::Exception'

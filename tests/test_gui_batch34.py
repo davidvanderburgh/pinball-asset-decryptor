@@ -229,11 +229,16 @@ class _ImageMetaStub:
     # No scan dir on the stub, so it falls back to the bare mark.
     _changed_on_disk_cell = MainWindow._changed_on_disk_cell
     _remembered_rep_name = MainWindow._remembered_rep_name
+    # PAD-158: the row also carries the Keep size cell.
+    _image_keep_cell = MainWindow._image_keep_cell
+    _image_keep_state = MainWindow._image_keep_state
+    _image_can_keep_size = MainWindow._image_can_keep_size
 
     def __init__(self, rel, changed=(), assigned=None, foreign=()):
         self._image_scan_id = 7
         slot = _Slot(rel)
         self._image_slots_by_rel = {rel: slot}
+        self._image_keep_size = set()
         self._image_assignments = dict(assigned or {})
         self._image_changed_on_disk = set(changed)
         self._image_foreign_rels = set(foreign)

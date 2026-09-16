@@ -5477,10 +5477,13 @@ class MainWindow:
             self._audio_toggle_keep(row)
 
     def _audio_tree_col_name(self, display_col):
+        return self._tree_col_name(self._audio_tree, display_col)
+
+    @staticmethod
+    def _tree_col_name(tree, display_col):
         """Map a Treeview display-column id ('#1', '#2', …) to its data-column
         NAME, honoring the current displaycolumns.  Returns None for '#0' or an
         out-of-range id."""
-        tree = self._audio_tree
         if not display_col or display_col == "#0":
             return None
         disp = tree["displaycolumns"]
@@ -8955,14 +8958,20 @@ class MainWindow:
         # clear replacement… I currently have 48 replacements".  Sorting by
         # Replacement already puts them together; a range selection is what
         # makes that useful.
+        # "keep" (Keep size) is the preview's "Keep this picture's own size"
+        # tick as a clickable column, so every pick says whether it will be
+        # squeezed without selecting it (PAD-158: "Perhaps make it a little
+        # more obvious are incorporate into the window as another column?").
+        # Inserted before "rep" so the Replacement cell stays values[-1].
         self._image_tree = ttk.Treeview(
-            list_frame, columns=("n", "res", "fmt", "src", "rep"),
+            list_frame, columns=("n", "res", "fmt", "src", "keep", "rep"),
             height=9, selectmode="extended")
         self._image_tree.heading("#0", text="Original Image", anchor=tk.W)
         self._image_tree.heading("n", text="Images", anchor=tk.W)
         self._image_tree.heading("res", text="Resolution", anchor=tk.W)
         self._image_tree.heading("fmt", text="Format", anchor=tk.W)
         self._image_tree.heading("src", text="Source", anchor=tk.W)
+        self._image_tree.heading("keep", text="Keep size", anchor=tk.CENTER)
         self._image_tree.heading("rep", text="Replacement", anchor=tk.W)
         self._image_tree.column("#0", width=300, minwidth=160)
         self._image_tree.column("n", width=70, minwidth=50, anchor=tk.W,
@@ -8971,15 +8980,18 @@ class MainWindow:
         self._image_tree.column("fmt", width=140, minwidth=80)
         self._image_tree.column("src", width=100, minwidth=70, anchor=tk.W,
                                 stretch=False)
+        self._image_tree.column("keep", width=80, minwidth=64,
+                                anchor=tk.CENTER, stretch=False)
         self._image_tree.column("rep", width=200, minwidth=110)
         self._image_tree["displaycolumns"] = ("res", "fmt", "src", "rep")
         self._persist_tree_columns(
-            self._image_tree, "image", ("#0", "n", "res", "fmt", "src", "rep"))
+            self._image_tree, "image",
+            ("#0", "n", "res", "fmt", "src", "keep", "rep"))
         self._image_sort_cfg = [
             ("#0", "Original Image", False), ("n", "Images", True),
             ("res", "Resolution", True),
             ("fmt", "Format", False), ("src", "Source", False),
-            ("rep", "Replacement", False)]
+            ("keep", "Keep size", True), ("rep", "Replacement", False)]
         self._wire_sort_headings(self._image_tree, self._image_sort_cfg,
                                  "_image_sort", self._refresh_image_list)
         image_scroll = ttk.Scrollbar(
@@ -8992,6 +9004,9 @@ class MainWindow:
         for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
             self._image_tree.bind(seq, self._image_on_tree_right)
         self._image_tree.bind("<<TreeviewSelect>>", self._image_on_tree_select)
+        self._image_tree.bind("<Motion>", self._image_on_tree_motion, add="+")
+        self._image_tree.bind(
+            "<Leave>", lambda _e: self._hide_audio_loop_tip(), add="+")
 
         self._image_empty = ttk.Label(
             list_frame,
@@ -9033,14 +9048,8 @@ class MainWindow:
             variable=self.image_keep_size_var,
             command=self._image_on_keep_size_toggle)
         self._image_keep_cb.pack(side=tk.LEFT)
-        _Tooltip(
-            self._image_keep_cb,
-            "Off: the replacement is scaled to the original picture's size, "
-            "which squeezes a longer name. On: it keeps its own width and "
-            "height, and the build grows the scene to fit it. The game draws "
-            "it from the same top-left corner, so a wider picture reaches "
-            "further right. Needs an image build (not a direct SD write).",
-            lambda: self._current_theme)
+        _Tooltip(self._image_keep_cb, self._IMAGE_KEEP_TIP_TEXT,
+                 lambda: self._current_theme)
         self._image_size_lbl = ttk.Label(
             self._image_keep_row, text="", font=(_SANS_FONT, 9),
             wraplength=560, justify=tk.LEFT)
@@ -9242,7 +9251,8 @@ class MainWindow:
             rep_disp = "Choose…"
         tree.item(rel, values=("", slot.resolution_str(),
                                slot.format_summary(),
-                               self._image_source_label(rel), rep_disp))
+                               self._image_source_label(rel),
+                               self._image_keep_cell(rel), rep_disp))
 
     def _select_first_tree_row(self, tree, on_select=None):
         """Select (and reveal) the first row of *tree* so a fresh scan shows a
@@ -9559,8 +9569,11 @@ class MainWindow:
         # The per-group "Images" count column only exists in grouped mode
         # (a tester: a sortable count column beats a count baked into the
         # header text); flat mode hides it rather than show an empty column.
-        tree["displaycolumns"] = (("n", "res", "fmt", "src", "rep") if grouped
-                                  else ("res", "fmt", "src", "rep"))
+        # "Keep size" likewise only shows on a scan with a picture that can
+        # keep its size (a Stern Spike 2 scene picture).
+        tree["displaycolumns"] = (
+            (("n",) if grouped else ()) + ("res", "fmt", "src")
+            + (("keep",) if self._image_offers_keep_size() else ()) + ("rep",))
         changed = self._image_changed_on_disk
         touched = set(self._image_assignments) | changed
 
@@ -9601,6 +9614,10 @@ class MainWindow:
             if col == "src":
                 return (self._image_source_label(s.rel_path),
                         s.rel_path.lower())
+            if col == "keep":
+                # Kept, then offered but squeezed, then everything else.
+                state = self._image_keep_state(s.rel_path)
+                return (0 if state is None else 1 + state, s.rel_path.lower())
             if col == "rep":
                 rep = self._image_assignments.get(s.rel_path)
                 if rep:
@@ -9633,7 +9650,7 @@ class MainWindow:
             tree.insert(parent, tk.END, iid=s.rel_path, text=disp,
                         values=("", res, s.format_summary(),
                                 self._image_source_label(s.rel_path),
-                                rep_disp),
+                                self._image_keep_cell(s.rel_path), rep_disp),
                         tags=(tag,) if tag else ())
 
         if grouped:
@@ -9704,7 +9721,7 @@ class MainWindow:
                 + self._change_scan_note("image"))
             self._image_empty.place_forget()
         self._autosize_tree_columns(
-            tree, "image", ("#0", "res", "fmt", "src", "rep"))
+            tree, "image", ("#0", "res", "fmt", "src", "keep", "rep"))
         self._update_clear_all_btn("image")
 
     def _maybe_rescan_image(self):
@@ -9792,14 +9809,34 @@ class MainWindow:
         self._image_assign_rel(rel)
 
     def _image_on_tree_click(self, event):
+        # A click in the Replacement column opens the picker; one on a tick in
+        # the Keep size column flips it.  Resolved by column NAME: grouped mode
+        # and the Keep size column both shift the display positions.
         tree = self._image_tree
         if tree.identify_region(event.x, event.y) != "cell":
             return
         row = tree.identify_row(event.y)
-        col = tree.identify_column(event.x)  # cols=(res,fmt,src,rep) -> #1..#4
-        if row and col == "#4" and not row.startswith(_IMG_GROUP_IID):
+        if not row or row.startswith(_IMG_GROUP_IID):
+            return
+        name = self._tree_col_name(tree, tree.identify_column(event.x))
+        if name == "rep":
             tree.selection_set(row)
             self._image_assign_rel(row)
+        elif name == "keep":
+            state = self._image_keep_state(row)
+            if state is not None:
+                self._image_set_keep_size(row, not state)
+
+    def _image_on_tree_motion(self, event):
+        """Explain the Keep size column while hovering it."""
+        tree = self._image_tree
+        name = (self._tree_col_name(tree, tree.identify_column(event.x))
+                if tree.identify_region(event.x, event.y) in ("cell", "heading")
+                else None)
+        if name == "keep":
+            self._show_audio_loop_tip(event, self._IMAGE_KEEP_TIP_TEXT)
+        else:
+            self._hide_audio_loop_tip()
 
     def _image_on_tree_right(self, event):
         tree = self._image_tree
@@ -10313,6 +10350,41 @@ class MainWindow:
         stem = os.path.splitext(os.path.basename(rel))[0]
         return stem not in self._image_font_atlas_stems()
 
+    _IMAGE_KEEP_TIP_TEXT = (
+        "Off: the replacement is scaled to the original picture's size, "
+        "which squeezes a longer name. On: it keeps its own width and "
+        "height, and the build grows the scene to fit it. The game draws "
+        "it from the same top-left corner, so a wider picture reaches "
+        "further right. Needs an image build (not a direct SD write).")
+
+    def _image_keep_state(self, rel):
+        """``True`` / ``False`` for a pick that may keep its own size (kept or
+        not), ``None`` where there is no such choice: no replacement, or a
+        picture whose size cannot change."""
+        if not (self._image_assignments.get(rel)
+                and self._image_can_keep_size(rel)):
+            return None
+        return rel in self._image_keep_size
+
+    def _image_keep_cell(self, rel):
+        """The Keep size column's glyph for *rel*: a tick box only where the
+        choice exists, so an empty cell means the picture will be fitted."""
+        state = self._image_keep_state(rel)
+        return "" if state is None else ("☑" if state else "☐")
+
+    def _image_offers_keep_size(self):
+        """Whether the last scan holds any picture that can keep its own size,
+        i.e. whether the Keep size column has anything to say.  Cached per
+        scan (a scan replaces the list) so a search keystroke is not a pass
+        over every slot."""
+        slots = self._image_slots
+        cache = getattr(self, "_image_keep_col_cache", None)
+        if cache is None or cache[0] is not slots:
+            cache = (slots, any(self._image_can_keep_size(s.rel_path)
+                                for s in slots))
+            self._image_keep_col_cache = cache
+        return cache[1]
+
     def _image_refresh_keep_row(self, rel):
         """Show the keep-size tick under the preview for a resizable picture
         with a replacement assigned, with both sizes spelled out; hide it
@@ -10377,6 +10449,9 @@ class MainWindow:
                 rel, "keeps its replacement's own size" if value
                 else "scales its replacement to the original size"), "info")
         self._save_staged_changes()
+        tree = getattr(self, "_image_tree", None)
+        if tree is not None and tree.exists(rel):
+            tree.set(rel, "keep", self._image_keep_cell(rel))
         if rel == self._image_current_rel:
             self._image_refresh_keep_row(rel)
 

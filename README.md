@@ -1165,7 +1165,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    row is gone: Start Button and Left Coin are clickable rows in the key
    list, the BALLS section reads trough, lane, in play and fed on one
    line above Plunge, Drain and Reset balls, and Clear alerts is
-   **Clear switch alerts** under SERVICE.
+   **Clear switch alerts** under SERVICE. Drain is greyed out until a
+   ball is actually in play: a ball still waiting in the shooter lane
+   has to be plunged first, because draining it there told the game a
+   ball had come home while one still sat in the lane, and the machine
+   could never serve its next ball.
    **A one-screen cabinet now draws at its own panel size.** The
    machines that carry a single screen instead of a backbox-and-topper
    pair — James Bond 60th, Star Wars Home Edition, Jurassic Park The

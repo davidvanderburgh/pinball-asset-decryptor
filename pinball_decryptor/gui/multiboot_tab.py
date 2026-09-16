@@ -2489,10 +2489,21 @@ def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
     one and does install a selector, because nothing can be compiled until
     it has.  No ``$``: wsl.exe would eat it."""
     if backend_for(platform).key == "jjp":
-        # ONE STEP SERVES BOTH on JJP: ensurejjpselect.sh builds jjpselect
-        # against the ISO's own root and installs it where the builder looks,
-        # and prints the preview's line as well as the card's (item 118).
-        return install_selector_line(selector_dir, card, platform=platform)
+        # ensurejjpselect.sh builds jjpselect, installs it where the builder
+        # looks and prints the preview's line as well as the card's (item
+        # 118).  --PREVIEW, because this step runs on every load and redraw
+        # and must never restore an image: it used to hand a loaded
+        # multi-boot ISO to the rig's mount.sh, which restored all 13 GB of
+        # it to compile a program the ISO already carries (David, 2026-09-15:
+        # "it should just be touching the multi-boot menu portion, not the
+        # whole entire image").  With no JJP root on this PC the preview
+        # draws with the ISO's own jjpselect, or the installed one; a writing
+        # run's step (install_selector_line) still builds a current one.  No
+        # ISO is no refusal here: an installed program draws a form that has
+        # none yet.
+        be = backend_for(platform)
+        return "bash %s --preview %s %s" % (_q(be.ensure_tool), _q(card or ""),
+                                           _q(jjp_selector_dir(selector_dir)))
     rootfs = rootfs or rootfs_for(selector_dir)
     built = build_dir.rstrip("/") + "/codeselect"
     installed = (selector_dir or DEFAULT_SELECTOR_DIR).rstrip("/") \

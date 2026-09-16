@@ -250,6 +250,37 @@ def test_a_full_trough_cannot_drain_because_nothing_is_in_play(ballmodel, tr):
     assert not plan and "full" in plan.refused
 
 
+def test_a_ball_waiting_in_the_lane_cannot_drain_before_it_is_plunged(
+        ballmodel, tr):
+    """PAD-153, DragonRR: "I drained before I plunged.. and that forces an
+    endless cycle." Five home and the sixth in the lane left position 6 open,
+    and closing it put seven balls on a six-ball machine."""
+    served = mrg_with(71, 70, 69, 68, 67, 62)
+    plan = ballmodel.plan_drain(tr, served, lane_id=62, lane_made=True)
+    assert not plan and "shooter lane" in plan.refused
+    assert plan.switches() == []
+    assert ballmodel.in_play(tr, served, 62, True) == 0
+
+
+def test_a_launched_ball_drains_and_a_multiball_drains_past_a_waiting_one(
+        ballmodel, tr):
+    launched = mrg_with(71, 70, 69, 68, 67)
+    assert ballmodel.plan_drain(tr, launched, lane_id=62,
+                                lane_made=False).switches() == [(66, 1)]
+    # Three home, one waiting in the lane, two out there: a drain is real.
+    multi = mrg_with(71, 70, 69, 62)
+    assert ballmodel.in_play(tr, multi, 62, True) == 2
+    assert ballmodel.plan_drain(tr, multi, lane_id=62,
+                                lane_made=True).switches() == [(68, 1)]
+
+
+def test_a_title_with_no_lane_switch_drains_on_the_trough_alone(ballmodel, tr):
+    """No lane to read is not a lane with a ball in it."""
+    plan = ballmodel.plan_drain(tr, mrg_with(71, 70, 69, 68, 67), lane_id=None,
+                                lane_made=True)
+    assert plan.switches() == [(66, 1)]
+
+
 def test_three_ejects_and_three_drains_come_back_to_where_they_started(
         ballmodel, tr):
     """A multiball, in miniature, played against the array itself.

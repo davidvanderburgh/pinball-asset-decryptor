@@ -191,8 +191,13 @@ def test_build_commands_run_the_writing_steps_as_root():
 def test_selector_step_is_ensurejjpselect():
     line = mt.install_selector_line("/var/tmp/jjpselect", wsl(ISO0), platform="jjp")
     assert line == "bash tools/jjp_emu/ensurejjpselect.sh %s /var/tmp/jjpselect" % wsl(ISO0)
+    # the PREVIEW's line (a load, a redraw) never restores an image: --preview
     assert mt.ensure_selector_line("/var/tmp/jjpselect", "/repo/tools/spike2_emu/codeselect",
-                                   card=wsl(ISO0), platform="jjp") == line
+                                   card=wsl(ISO0), platform="jjp") == \
+        "bash tools/jjp_emu/ensurejjpselect.sh --preview %s /var/tmp/jjpselect" % wsl(ISO0)
+    # ...and has a line with no ISO too: an installed program or a root on disk draws it
+    assert mt.ensure_selector_line("", "/repo/tools/spike2_emu/codeselect", card="", platform="jjp") == \
+        "bash tools/jjp_emu/ensurejjpselect.sh --preview '' /var/tmp/jjpselect"
     no_card = mt.install_selector_line("", "", platform="jjp")
     assert no_card.startswith("echo ") and "[selector] error:" in no_card and no_card.endswith("exit 1")
     # the Stern line is the rig's own ensureselect.sh, as before
@@ -351,3 +356,12 @@ def test_ensurejjpselect_prints_both_lines():
     assert '[preview] selector: $BIN' in text
     assert '[selector] error:' in text
     assert "make -C" in text and "PLATFORM=jjp" in text and "DESTDIR=" in text
+    # a load or a redraw restores nothing, and a writing run restores the root
+    # partition alone, into a file renamed only when whole (2026-09-15)
+    assert 'if [ "${1:-}" = "--preview" ]' in text and "jjpselect_sysroot" in text
+    calls = [ln for ln in text.splitlines() if "mount.sh" in ln and not ln.lstrip().startswith("#")]
+    assert calls and all("--root-only" in ln for ln in calls), calls
+    with open(os.path.join(os.path.dirname(here), "mount.sh"), encoding="utf-8") as f:
+        mount = f.read()
+    assert 'if [ "${1:-}" = "--root-only" ]' in mount
+    assert '-o "$dest.part"' in mount and 'mv -f "$dest.part" "$dest"' in mount

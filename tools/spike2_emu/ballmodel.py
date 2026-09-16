@@ -194,7 +194,19 @@ def plan_launch(lane_id, lane_made):
                   "shooter lane %d opened (ball launched)" % lane_id)])
 
 
-def plan_drain(tr, mrg):
+def in_play(tr, mrg, lane_id=None, lane_made=False):
+    """Balls the game believes are out on the playfield - DERIVED, never counted.
+
+    installed - trough - lane. A ball waiting in the shooter lane is not in
+    play until it is launched (PAD-153, plan_drain). Clamped at zero: a latched
+    trough switch can make the arithmetic negative, and that is a display
+    fault, not a machine state. jjpball.Feeder.in_play is the JJP twin.
+    """
+    lane = 1 if lane_id is not None and lane_made else 0
+    return max(0, len(tr.positions) - tr.count(mrg) - lane)
+
+
+def plan_drain(tr, mrg, lane_id=None, lane_made=False):
     """A ball in play drained. It arrives at the FAR end of the trough.
 
     THIS IS THE HALF NOTHING CAN OBSERVE, so it is an action and not an event.
@@ -202,11 +214,24 @@ def plan_drain(tr, mrg):
     stays in play until something says otherwise - and until that something
     exists, a multiball can start but can never end, which would make the
     game's ball counter walk away from the rig's within one game.
+
+    ★ PAD-153, DRAGONRR: "I drained before I plunged.. and that forces an
+    endless cycle." At ball start the feeder lands the ball in the shooter
+    lane and the trough reads 5 of 6, so there WAS an open position to close -
+    and closing it told the game a ball had come home while the lane still
+    held one: seven balls on a six-ball machine. The eject the game fires next
+    meets an occupied lane, which plan_eject rightly holds, and nothing can
+    move again. So a drain needs a ball IN PLAY, and the lane's ball is not one
+    until it is launched. `lane_id` None (a title with no lane switch, or a
+    caller that has none) keeps the trough-only answer.
     """
     if not tr.positions:
         return Plan(refused="no trough switches for this title")
     home = tr.arriving(mrg)
     if home is None:
         return Plan(refused="the trough is already full - no ball is in play")
+    if not in_play(tr, mrg, lane_id, lane_made):
+        return Plan(refused="the ball is still in the shooter lane - "
+                            "Plunge it first")
     return Plan([("set", home, 1,
                   "trough switch %d closed (ball drained home)" % home)])

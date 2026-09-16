@@ -126,6 +126,7 @@ import tkinter.font as tkfont
 from tkinter import ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ballmodel
 import coilact
 import coilmap
 import devicexy
@@ -1667,15 +1668,38 @@ def ball_line(watch, fed=None):
         return "balls -   waiting for the switch block"
     flags = watch.closed()
     home = sum(1 for f in flags if f)
-    lane_id = getattr(watch, "lane_id", None)
-    lane = 1 if lane_id is not None and watch.is_made(lane_id) else 0
     txt = "balls %d/%d trough" % (home, len(flags))
-    if lane:
+    if _lane_made(watch):
         txt += "   lane 1"
-    txt += "   in play %d" % max(0, len(flags) - home - lane)
+    txt += "   in play %d" % balls_in_play(watch)
     if fed is not None:
         txt += "   fed %d" % fed
     return txt
+
+
+def _lane_made(watch):
+    lane_id = getattr(watch, "lane_id", None)
+    return lane_id is not None and bool(watch.is_made(lane_id))
+
+
+def balls_in_play(watch):
+    """How many balls are out on the playfield, by ballmodel.in_play's rule -
+    the one plunge.py's drain refuses on, so the line and the button agree."""
+    return ballmodel.in_play(ballmodel.Trough(watch.positions), watch.mrg,
+                             getattr(watch, "lane_id", None), _lane_made(watch))
+
+
+def drain_ready(watch):
+    """Is Drain a real action right now? Only with a ball IN PLAY (PAD-153).
+
+    DragonRR: "I drained before I plunged.. and that forces an endless cycle.
+    Is it possible to grey out the drain until it is valid?" A ball waiting in
+    the shooter lane is not in play, and a full trough has nothing out; both
+    grey the button. Nothing read yet is not a yes either.
+    """
+    if not watch.positions or watch.mrg is None:
+        return False
+    return balls_in_play(watch) > 0
 
 
 def new_lines(prev, cur):
@@ -2045,9 +2069,23 @@ class KeyPanel:
     #: The JJP window's button colours (jjpsw.py BTN_BG/BTN_FG/BTN_ACTIVE), so
     #: the two virtual playfields' ball controls read as one design.
     BALL_BTN = ("#33507a", "#eaf2ff", "#456ba1")
+    #: A ball button with nothing to do (PAD-153): background, text.
+    BALL_BTN_OFF = ("#2a2e35", "#6b7280")
     NOTE_FG = "#8a93a2"
     #: How many of the newest ball messages the section shows.
     NOTE_LINES = 3
+
+    def set_drain(self, live):
+        """Grey Drain out, or light it - change-gated like every draw here.
+
+        A disabled Tk button still wears its bg, so the grey is set as well as
+        the state, or a dead Drain would look like the two live buttons."""
+        if live == self._drain_live:
+            return
+        self._drain_live = live
+        bg = self.BALL_BTN[0] if live else self.BALL_BTN_OFF[0]
+        self.drain_btn.config(state="normal" if live else "disabled", bg=bg,
+                              relief="raised" if live else "flat")
 
     def add_trough(self, positions, how, on_ball):
         """The BALLS section, at the panel's bottom - in the JJP window's shape.
@@ -2115,10 +2153,16 @@ class KeyPanel:
                           pady=3, bg=bg, fg=fg, activebackground=active,
                           activeforeground=fg, relief="raised", bd=1,
                           highlightthickness=0,
+                          disabledforeground=self.BALL_BTN_OFF[1],
                           command=lambda w=what: on_ball(w))
             self.cv.create_window(self.PAD + k * (bw + gap), y, anchor="nw",
                                   window=b, width=bw)
             self.ball_btns.append(b)
+        # Drain starts greyed and show_balls() lights it once a read shows a
+        # ball in play (drain_ready, PAD-153).
+        self.drain_btn = self.ball_btns[1]
+        self._drain_live = None
+        self.set_drain(False)
         y += 34
         self.ball_note = self.cv.create_text(self.PAD, y, anchor="nw",
                                              fill=self.NOTE_FG, font=self._f8,
@@ -2144,6 +2188,7 @@ class KeyPanel:
         if text != self._ball_drawn:
             self._ball_drawn = text
             self.cv.itemconfig(self.ball_state, text=text)
+        self.set_drain(drain_ready(sw))
         fresh = new_lines(self._feed_seen, feeder_lines)
         self._feed_seen = list(feeder_lines)
         if fresh:

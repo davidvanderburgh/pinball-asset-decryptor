@@ -279,6 +279,85 @@ answer `sound_lookup` itself: when the lookup key is the one the mode's chosen r
 would resolve to, hand back OUR entry instead. The card keeps every stock byte, no
 descriptor is re-pointed, and the neighbours are unchanged by construction.
 
+### The sid -> record binding, MEASURED from a live guest (2026-09-15)
+
+The play-time map at `0x7b92c4` is keyed by sid, and its node payload was read out of
+a running game and checked against the derive's 2535 rows - predictions made BEFORE
+each read, on sids 4, 2, 19, 22 and 1998:
+
+| field | meaning | evidence |
+|---|---|---|
+| `+16` | sid (the key) | the game's own comparison |
+| `+24` | **body_off** | 2581 / 2581 nodes |
+| `+32` | **length x 2 x chan** (bytes) | 2581 / 2581 (`length*2` fits only the 1667 mono nodes) |
+| `+36` | 400 mono / 800 stereo | 1667 / 914, no exceptions |
+| `+28` | always 0 | 2581 / 2581 |
+| `+20` | **unidentified**, and NOT `key0` | 0 / 2581 |
+
+2581 nodes cover 2497 distinct records; **38 records are named by no sid at all**, and
+our appended record is named by none, as expected. `guest_base` was confirmed the same
+way rather than assumed: `[0x7b10b4]` reads 585 at base `0x10000` and 1 at base 0.
+
+So retargeting a sid is a three-word write (`+24`, `+32`, `+36`), reversible, and it
+lands and reads back clean. **It is not sufficient on its own.** With sid 1998 pointed
+at our appended record, `callout_play(1295)` fired and the capture correlated at
+**0.026 / 0.033** over two runs - our clip did not play.
+
+**And the city-variant swap is INNOCENT**, which the probe settled instead of
+inference: `callout 1295 lr=0x4085c590` (our mode.so trampoline) is followed
+immediately by `request 1295 lr=0x187f90`. Request 1295 reaches the worker unchanged,
+and its sid list is `[1998]` - the node that was patched. The binding WAS exercised.
+
+**The obvious explanation was tested and is ALSO false.** The node says WHERE the
+bytes are, not HOW to decode them; our appended record is scale 13 and sid 1998's
+record (idx 1560) is scale 1, so "it read our body with the wrong keystream and
+emitted noise" was the natural reading. It predicts a loud, spectrally FLAT ~4 s burst
+at the callout. The capture says otherwise: over the last 12 s the envelope is uniform
+game audio (100 ms frames, mean 4933, no anomaly at the callout), and the spectral
+flatness of the closing seconds is **0.137 - 0.208** - tonal, near our clip's own
+0.087, and nowhere near the 0.8+ of noise. **The game did not read our body at all.**
+
+So, measured and not yet explained: request 1295 reaches the worker, its sid list is
+`[1998]`, that node was patched and verified live at fire time, and nothing read it.
+Two candidates remain, and they are distinguishable with the probe rather than by
+argument:
+
+- the worker resolves the record through something other than this node (the map may
+  be a cache, or a second map exists and the play path walks that one);
+- the sound was VETOED before the decode - `hook_dispatch(0xac)` at `0x2a2abc` sits
+  between the channel arbitration and the start call `0x2a2044`.
+
+**Pass 3 hooked `0x2a2044`, and the result corrects the SITE NAME first.** It was
+added as "the channel START"; that was inferred from its position after the
+arbitration, and the data says otherwise. Its body zeroes flags at `+188`/`+191`,
+walks eight slots and calls `0x458674` - cleanup shape - and 21 of the 23 events in
+the window carry `lr=0x2a221c` or `lr=0x2a2148`, which are the calls from `0x2a2160`
+and `0x2a212c`, not from the play worker. **Treat `0x2a2044` as a channel STOP/release
+until something proves otherwise**, and do not rest a veto conclusion on it.
+
+**What the run DID establish, and it is the first concrete divergence:** exactly two
+events came from inside the play worker (`lr=0x2a2be4`, the call at `0x2a2be0`), and
+one of them lands in the SAME MILLISECOND as `request 1283`:
+
+```
+171276 [sound] callout 1283      171277 [sound] request 1283
+171277 [sound] START ch=0x007b8e70 r1=0x2 r2=0x0 r3=0x2  lr=0x2a2be4   <- the worker
+...
+174994 [sound] callout 1295      174994 [sound] request 1295
+(nothing from the worker at all)
+```
+
+So the worker handles 1283 and 1295 **differently**: one reaches the worker's own call
+at `0x2a2be0`, the other does not. Both were requested identically, through the same
+`callout_play` -> `sound_request_play` path, from our mode.
+
+**Next instrument: `error_log` (`0x457e00`).** The worker's early returns are codes
+100, 101 and 102 (`0x2a276c`, `0x2a28b0`, `0x2a2934`), so hooking it names exactly why
+1295 bails out where 1283 does not - measurement rather than another inferred name.
+Three passes have now each turned on a name or an arithmetic reading that looked
+obvious and was wrong; the ones that held were the ones predicted first and then read
+back off a live guest.
+
 ### MEASURED FALSE: `sound_lookup` is BOOT-ONLY, so a play-time hook never fires
 
 Run 1 of the mode with a `sound_key`: the mode ran its full 30 s, scored ten shots,
@@ -360,6 +439,16 @@ First run on it: guest up 4m 32s, **0 `[segv]` lines and 0 fatal signals**, attr
 video steady at 30.0-30.4 fps, and `/dump/audio.raw` growing past 37 MB - the game
 plays normally with a record in its sound bank that the card never shipped and no
 descriptor names. `install_mode_sound.sh on|off|status` swaps the banks by rename.
+
+**`pgrep -x game` IS NOT A RELIABLE GUEST CHECK, and believing it started a second
+run on top of a live one.** `run_game.sh` launches the guest through
+`/usr/libexec/qemu-binfmt/arm-binfmt-P` inside a PID namespace (`unshare -r -m -p
+-f`), so what the process is called from outside varies between runs - it answered to
+`pgrep -x game` in one run and not in the next, where the same guest was plainly alive
+at 57.9 fps with `mode.so` armed. A false "NO GUEST" invites exactly the wrong action:
+starting another run against the same rootfs, which is what the rig lock exists to
+prevent. **Ask `alive.sh`, or scan `/proc/*/maps` for the title's game ELF** - that
+also catches the two-guests case loudly instead of silently measuring one of them.
 
 **A trap that cost a run, and it is about the LOG, not the sound.** `hk_log_open`
 opens `/dump/mode.log` with `O_WRONLY|O_CREAT|O_APPEND`. An earlier run left that

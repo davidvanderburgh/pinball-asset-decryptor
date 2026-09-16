@@ -2019,6 +2019,11 @@ class MainWindow:
         self._image_slots = []           # list[ImageSlot] from last scan
         self._image_slots_by_rel = {}    # rel_path -> ImageSlot
         self._image_assignments = {}     # rel_path -> replacement file path
+        # Radium pictures whose replacement keeps its own size instead of
+        # being squeezed into the slot's (PAD-154: a longer kaiju name in a
+        # name banner).  The Write re-serialises the scene around it.
+        self._image_keep_size = set()
+        self.image_keep_size_var = tk.BooleanVar(value=False)
         # Manifest-derived grouping from the last scan (see
         # _scan_image_groups): rel_path -> (group_key, label_base, order).
         self._image_groups = {}
@@ -9017,6 +9022,32 @@ class MainWindow:
             panes, width=320, height=214, highlightthickness=1, bd=0,
             background="#000000")
         self._image_canvas_rep.grid(row=1, column=1, padx=(4, 0))
+        # Only for a scene picture whose size CAN change (a radium image that
+        # is not a font atlas) with a replacement assigned — see
+        # _image_refresh_keep_row.  Without it a longer name is squeezed into
+        # the old banner (PAD-154: "There is no way I can shrink the
+        # characters down to fit because they would be just too pixellated").
+        self._image_keep_row = ttk.Frame(panes)
+        self._image_keep_cb = ttk.Checkbutton(
+            self._image_keep_row, text="Keep this picture's own size",
+            variable=self.image_keep_size_var,
+            command=self._image_on_keep_size_toggle)
+        self._image_keep_cb.pack(side=tk.LEFT)
+        _Tooltip(
+            self._image_keep_cb,
+            "Off: the replacement is scaled to the original picture's size, "
+            "which squeezes a longer name. On: it keeps its own width and "
+            "height, and the build grows the scene to fit it. The game draws "
+            "it from the same top-left corner, so a wider picture reaches "
+            "further right. Needs an image build (not a direct SD write).",
+            lambda: self._current_theme)
+        self._image_size_lbl = ttk.Label(
+            self._image_keep_row, text="", font=(_SANS_FONT, 9),
+            wraplength=560, justify=tk.LEFT)
+        self._image_size_lbl.pack(side=tk.LEFT, padx=(10, 0))
+        self._image_keep_row.grid(row=2, column=0, columnspan=2, sticky="w",
+                                  pady=(6, 0))
+        self._image_keep_row.grid_remove()
 
         self._image_note_lbl = ttk.Label(
             f, text="", font=(_SANS_FONT, 8, "italic"),
@@ -9128,6 +9159,9 @@ class MainWindow:
             staged = self._load_staged_changes(scan_dir)
             self._image_assignments = staged_changes.live_assignments(
                 staged.get("image"), self._image_slots_by_rel)
+            self._image_keep_size = {
+                r for r in (staged.get("image_keep_size") or ())
+                if r in self._image_assignments}
             self._warn_dropped_assignments(
                 "image", staged.get("image"), self._image_slots_by_rel,
                 scan_dir)
@@ -9738,6 +9772,7 @@ class MainWindow:
             self._image_render_thumb(
                 getattr(self, "_image_canvas_rep", None), None,
                 "_image_preview_img_rep")
+            self._image_refresh_keep_row(None)
             return
         if rel == self._image_current_rel:
             return
@@ -10238,6 +10273,112 @@ class MainWindow:
                 "image", rel,
                 "(no replacement assigned — double-click the row to pick one)")
                 if slot else ""))
+        self._image_refresh_keep_row(rel)
+
+    def _image_font_atlas_stems(self):
+        """File stems of the scanned project's font atlases (the glyph
+        slicer's folders and manifest), cached per scan.  An atlas never
+        changes size: its letters are measured in its pixels."""
+        scan = self._image_scan_dir or ""
+        cache = getattr(self, "_image_atlas_cache", None)
+        if cache and cache[0] == scan:
+            return cache[1]
+        stems = set()
+        tex = os.path.join(scan, "images", "scene_textures")
+        try:
+            stems.update(os.listdir(os.path.join(tex, "glyphs")))
+        except OSError:
+            pass
+        try:
+            with open(os.path.join(tex, "glyph_images.txt"),
+                      encoding="utf-8") as f:
+                for line in f:
+                    cols = line.rstrip("\r\n").split("\t")
+                    if len(cols) >= 2 and not line.startswith("#"):
+                        stems.add(os.path.splitext(
+                            os.path.basename(cols[1]))[0])
+        except OSError:
+            pass
+        self._image_atlas_cache = (scan, stems)
+        return stems
+
+    def _image_can_keep_size(self, rel):
+        """Whether *rel*'s replacement may keep its own size: a picture
+        embedded in a Stern scene (the Write re-serialises the scene around
+        it), not a font atlas."""
+        if not rel or rel not in self._image_slots_by_rel:
+            return False
+        if self._image_source_label(rel) != "Radium":
+            return False
+        stem = os.path.splitext(os.path.basename(rel))[0]
+        return stem not in self._image_font_atlas_stems()
+
+    def _image_refresh_keep_row(self, rel):
+        """Show the keep-size tick under the preview for a resizable picture
+        with a replacement assigned, with both sizes spelled out; hide it
+        otherwise."""
+        row = getattr(self, "_image_keep_row", None)
+        if row is None:
+            return
+
+        def _show(on):
+            was = row.winfo_manager() == "grid"
+            if on:
+                row.grid()
+            else:
+                row.grid_remove()
+            if was != on:
+                # The notebook is pinned to the height the tab had when it
+                # was selected, so a row appearing later would get no space.
+                self._retune_tab_height()
+
+        rep = self._image_assignments.get(rel) if rel else None
+        if not rep or not self._image_can_keep_size(rel):
+            _show(False)
+            return
+        slot = self._image_slots_by_rel[rel]
+        try:
+            from PIL import Image
+            with Image.open(slot.abs_path) as im:
+                orig = im.size
+            with Image.open(rep) as im:
+                new = im.size
+        except Exception:
+            _show(False)
+            return
+        keep = rel in self._image_keep_size
+        self.image_keep_size_var.set(keep)
+        if new == orig:
+            text = "Same size as the original (%d×%d)." % orig
+        elif keep:
+            text = ("Kept at %d×%d (the original is %d×%d): the scene grows "
+                    "to fit it." % (new + orig))
+        else:
+            text = ("Your picture is %d×%d, the original %d×%d: it will be "
+                    "squeezed to fit." % (new + orig))
+        self._image_size_lbl.configure(text=text)
+        _show(True)
+
+    def _image_on_keep_size_toggle(self):
+        rel = self._image_current_rel
+        if rel:
+            self._image_set_keep_size(rel, bool(self.image_keep_size_var.get()))
+
+    def _image_set_keep_size(self, rel, value):
+        """Keep (or stop keeping) *rel*'s replacement at its own size."""
+        if not self._image_can_keep_size(rel):
+            return
+        if value:
+            self._image_keep_size.add(rel)
+        else:
+            self._image_keep_size.discard(rel)
+        self.append_log(
+            "Replace Images: %s %s." % (
+                rel, "keeps its replacement's own size" if value
+                else "scales its replacement to the original size"), "info")
+        self._save_staged_changes()
+        if rel == self._image_current_rel:
+            self._image_refresh_keep_row(rel)
 
     def _image_set_orig_header(self, text):
         hdr = getattr(self, "_image_hdr_orig", None)
@@ -10251,6 +10392,7 @@ class MainWindow:
         """Reset the static previews entirely (used on manufacturer switch)."""
         self._image_current_rel = None
         self._image_set_orig_header("Original")
+        self._image_refresh_keep_row(None)
         self._image_preview_img_orig = None
         self._image_preview_img_rep = None
         for attr in ("_image_canvas", "_image_canvas_rep"):
@@ -10281,7 +10423,8 @@ class MainWindow:
                        if rep and rel in self._image_slots_by_rel}
         if not assignments:
             return None
-        return (dict(self._image_slots_by_rel), assignments)
+        return (dict(self._image_slots_by_rel), assignments,
+                frozenset(r for r in self._image_keep_size if r in assignments))
 
     # ---- Staged-changes persistence (survives quit / relaunch) -------
     # The Replace tabs keep each assignment in memory and apply it at Write;
@@ -10910,6 +11053,10 @@ class MainWindow:
             hist += history_log.diff_assignments(
                 "image", data.get("image"), self._image_assignments)
             data["image"] = dict(self._image_assignments)
+            # Read back by the build (app._sidecar_pending); a flag whose pick
+            # was cleared goes with it.
+            data["image_keep_size"] = sorted(
+                r for r in self._image_keep_size if r in self._image_assignments)
             data["image_change_filter"] = self.image_change_filter_var.get()
             data["image_group_by_scene"] = bool(
                 self.image_group_by_scene_var.get())
@@ -17515,6 +17662,7 @@ class MainWindow:
         self._image_slots = []
         self._image_slots_by_rel = {}
         self._image_assignments = {}
+        self._image_keep_size = set()
         self._image_scan_dir = ""
         self._image_clear_preview()
         self._refresh_image_list()

@@ -236,10 +236,13 @@ def _prep_mode(im, fmt, alpha):
     return im.convert("RGBA" if _has_alpha(im) else "RGB")
 
 
-def transcode_image_to(src_path, dst_path, original_info):
+def transcode_image_to(src_path, dst_path, original_info, keep_size=False):
     """Scale *src_path* to *original_info*'s pixel dimensions and save it into
     *dst_path*, whose extension selects the output format.  Preserves alpha
-    where the target format supports it.  Returns ``(ok, detail)``."""
+    where the target format supports it.  Returns ``(ok, detail)``.
+
+    *keep_size* skips the scaling: the picture keeps its own dimensions (a
+    slot whose Write can re-size it, PAD-154)."""
     if not _PIL_OK:
         return False, "need Pillow to convert images"
     ext = os.path.splitext(dst_path)[1].lower()
@@ -251,7 +254,7 @@ def transcode_image_to(src_path, dst_path, original_info):
             im.load()
             actions = []
             alpha = bool(original_info and original_info.has_alpha)
-            if (original_info and original_info.width > 0
+            if (not keep_size and original_info and original_info.width > 0
                     and original_info.height > 0
                     and (im.width != original_info.width
                          or im.height != original_info.height)):

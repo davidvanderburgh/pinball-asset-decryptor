@@ -46,6 +46,11 @@ SITES = [
     ("LAMP_GROUP", 0x4BF294, False),  # lamp group from light-set table 0x7257a8 (set 0 = empty) - called
     ("SHOW_PRIO", 0x4F3740, False),   # the running show's lamp priority, off the current event - called
     ("GROUP_FREE", 0x3C15CC, False),  # give a lamp group back (the pool is 48, 0x3c1700) - called
+    ("SOUND_LOOKUP", 0x33C0D8, True), # sound_lookup(map, key8) -> the sound container entry.
+                                      # bucket = uidivmod(key.w1, map[1]), then find 0x2a25e0.
+                                      # HOOKED so a mode can point r1 at a key of its OWN: the
+                                      # bucket is computed INSIDE this function from *r1, so the
+                                      # substitution has to happen here and not at the find (item 130)
     ("BLELE_PARSE", 0x1C2B6C, True),  # the light command parser itself. The runner 0x1c3454 is a
                                       # single `b` into it, which cannot be relocated into a
                                       # trampoline, so the GAME's own light commands are watched here

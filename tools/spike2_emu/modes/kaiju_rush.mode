@@ -49,3 +49,21 @@ light_off      blele --sweep 1 --lts 224 --fade 20 --rgb 0 --freq 10 --delay_sta
 callout_at     10 1291
 callout_count  1287
 callout_end    1295
+
+# ITEM 130: A SOUND THE GAME NEVER SHIPPED.
+#
+# sound_key is the 8-byte sound-container key of a record APPENDED to image.bin:
+# audio that exists nowhere in the stock game and that no descriptor names. The
+# boot-time band build registers EVERY record in the bank under a key of its own,
+# so an appended record is already a live entry - it is simply one nothing asks for.
+#
+# When the mode signs off it fires sound_callout as an ordinary request and, while
+# that request resolves, points the container lookup (0x33c0d8) at THIS key. The
+# game finds our entry and plays it through its own channels, priority and veto.
+# No descriptor is re-pointed and no stock slot is retired: every other sound on
+# the card stays byte-identical.
+#
+# Build the bank with modes/grow_mode_sound.sh, which prints the key it appended.
+# A mode file with no sound_key is unaffected - the mode speaks the stock callout.
+sound_key      45df2b8b01000084
+sound_callout  1295

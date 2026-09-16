@@ -283,10 +283,47 @@ descriptor is re-pointed, and the neighbours are unchanged by construction.
 arguments, a single return value, no allocation, and it is the ONLY non-band-build
 reader of the map (`xref 0x7b9464` = 8 sites, 6 in the band build, 2 in its ctor).
 
-**Not yet proven, and it is the item's real risk:** whether an entry the engine builds
-for an appended record plays identically when it is reached this way, and whether the
+### PROVEN AT THE DESK: the bank takes a record the card never had (2026-09-15)
+
+`modes/grow_mode_sound.sh` appends one record to a standalone `image.bin` through the
+SHIPPED `masterdir` + `emulator` + `codec` code - no card build, because the rig boots
+the extracted title, so the bank is a plain file. On Godzilla Pro 1.15, in 80 seconds:
+
+| | stock | grown |
+|---|---|---|
+| records | 2534 | **2535** |
+| file | 1,649,655,138 | 1,650,008,450 |
+| rows with a findkey | 2534 / 2534 | 2535 / 2535, **all distinct** |
+| stock records that moved | - | **0** |
+
+The appended record (idx 2534, `body_off 0x6253bd92`, length 176,600 = 4.00 s) copies
+idx 1369's identity but its own geometry, so it registers under **its own key**
+`45df2b8b01000084` against the source's `44be2bed20000094` - the two entries coexist
+and nothing names ours. Our four-second three-tone figure encodes into it and decodes
+back at **peak error 0, corr 1.00000**.
+
+Two things that make this work and are easy to get wrong:
+- **`plan_grow_records` only ever APPENDS** (`new_length` must exceed `old_length`); it
+  never edits a record in place, because changing a length word shifts every later
+  record's decode parameters including its container key.
+- **The scaffold body must be real card audio**, not zeros: the codec is driven over
+  those bytes to recover the keystream, and a degenerate body gives a degenerate one.
+  `warm_slots_for_grown` must also run before the encode, or the round trip silently
+  fails to reproduce what it was given.
+
+**Still to prove in a run:** whether an entry reached this way plays identically, and
 derive that yields the appended record's key runs on this build at all - Godzilla Pro
-1.15's bank is 1.65 GB, `md_off` `0x6262cfca`, **2534 records** (`0x9e6`).
+1.15's bank is 1,649,655,138 bytes, `md_off` **`0x6252cfca`** (1,649,594,314),
+**2534 records** (`0x9e6`). The arithmetic that confirms all three:
+filesize - md_off = 60,824 = `masterdir.tail_len(2534)` exactly. The count is
+EVEN, which is the case `tail_len` exists for: appending flips the parity and the
+tail grows by 32 bytes (60,824 -> 60,856), not 24.
+
+**The derive runs, and it is cheap** (measured 2026-09-15): boot 0.8 s, then
+`derive_params` returns **2534 rows in 38.5 s**, every row carrying a findkey and
+**all 2534 distinct**. `generic=True`, `FIND_BL=0x33baf8`. A key reads
+`69cdade0 02020000`: `w1` a hash of the body, `w2` a small fragment id living in
+the low 13 bits - consistent with `(payload.w2 & 0xe0001fff)` and `sid >> 16 == 0`.
 
 ### The measurement, and a correction to an old note
 

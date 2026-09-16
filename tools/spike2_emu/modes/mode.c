@@ -1,86 +1,224 @@
-/* mode.c - ITEM 125 PHASE 1: KAIJU RUSH, a new mode of our own inside Godzilla Pro 1.15.
+/* mode.c - ITEM 126: A MODE IS DATA.
  *
- * THE RULES OF THE MODE
- *   - Hit the MASER TARGET three times in one ball: KAIJU RUSH starts.
- *   - For 30 seconds every POWERLINE target (left/center/right) and both RAMPS
- *     score an escalating award: 1,000,000 for the first shot, 2,000,000 for the
- *     second, and so on.
- *   - The countdown speaks with the callouts the game's own timed modes use
- *     (cmode_timed's defaults): 1291 at 10 s, 1287's variants from 5 to 1, and
- *     1295 when time runs out.
- *   - It ends when the timer runs out, when the ball ends, or if the player changes.
+ * Item 125 proved a mode of our own can run inside Godzilla Pro 1.15, but the mode
+ * WAS this file: KAIJU RUSH's trigger, clock, shot table, awards, screens, lights and
+ * callouts were C constants, so changing any of them meant an edit, a cross-compile
+ * and a restart. Now they all come from a mode file (modes/kaiju_rush.mode is the
+ * same mode, written as data), and this object is the interpreter.
  *
- * HOW, ALL OF IT EMULATOR-MAPPED IN MODE_API.md
- *   - shots:  a hook on cmode_manager::v[7] (0xd1a9c) sees every shot mask the game
- *             hands its modes, before any of them - the Maser Target is 0x08000000,
- *             the powerlines 0x10/0x20/0x40000000, the ramps 0x00100000/0x00200000.
- *   - clock:  a hook on the 60 Hz tick (0x4ec828). No game timer is free (all 30 are
- *             taken), and a tick clock stops when the game does, like the game's own.
- *   - score:  score_add(player, value) (0x4b8cf4), which applies the playfield
- *             multiplier and the event-161 veto exactly as the game's shots do.
- *   - sound:  callout_play / callout_play_nth (0x187f44 / 0x18800c).
- *   - end:    a hook on the end-of-ball broadcast (0xd3dcc), which is how tesla
- *             strike learns its ball is over.
- * It is NOT registered with cmode_manager: our mode is not one of the 27, and the
- * manager ignores ids above 26 anyway. Text and lights are the next step.
+ * HOT RELOAD is the point. The file is re-read twice a second and re-parsed whenever
+ * its bytes change, so an edit lands in a RUNNING game inside a second - which is what
+ * makes choreographing a mode possible instead of rebuild-and-restart.
  *
- * TRIGGERS for testing (a rig run only): /dump/mode.start starts it now, /dump/mode.stop
- * ends it. LOG: /dump/mode.log. Loaded by PAD_MODE_SO=/lib/mode.so; built by
- * modes/build_modes.sh; hook.h has the three rules every hook here obeys.
+ * WHY THE FILE IS NOT JSON: this object is built -nostdlib, with libc declared by hand
+ * in hook.h and no allocator at all. A key-per-line format parses in a few dozen lines
+ * against fixed buffers, stays hand-editable, and is trivial for the Modes tab (item
+ * 127) to write. For the same reason the reload check re-reads and byte-compares
+ * rather than calling stat(): hook.h declares no stat, and the file is under 4 KB.
+ *
+ * EVERY GAME CALL HERE IS EMULATOR-PROVEN AND MAPPED IN MODE_API.md
+ *   - shots:  cmode_manager::v[7] (0xd1a9c), every shot mask before any mode sees it
+ *   - clock:  the 60 Hz tick (0x4ec828); no game timer is free, all 30 are taken
+ *   - score:  score_add (0x4b8cf4), so the multiplier and the event-161 veto apply
+ *   - text:   the award screen (0x3ba540) over message ids we point at our own words
+ *   - lights: the game's own light runner, through hook.h's gz_blele
+ *   - sound:  callout_play / callout_play_nth (0x187f44 / 0x18800c)
+ *   - end:    the end-of-ball broadcast (0xd3dcc)
+ * It is NOT registered with cmode_manager: ours is not one of the 27, and the manager
+ * ignores ids above 26 anyway.
+ *
+ * FILES: the mode file is /dump/mode.cfg (the rig copies one there). /dump/mode.start
+ * and /dump/mode.stop still force a start or an end for testing. LOG: /dump/mode.log.
  */
 #include "hook.h"
 
-#define MASER_BIT       0x0000000008000000ull
-#define RUSH_SHOT_BITS  0x0000000070300000ull   /* powerlines 28-30, ramps 20-21 */
-#define MASER_TO_START  3
-#define RUSH_SECONDS    30
+#define MODE_FILE       "/dump/mode.cfg"
 #define TICKS_PER_S     60
-#define AWARD_STEP      1000000ull
-#define CALLOUT_10S     1291u
-#define CALLOUT_COUNT   1287u    /* variant n = seconds - 1 */
-#define CALLOUT_OVER    1295u
+#define CFG_MAX         4096
+#define STR_MAX         224
+#define CALLOUT_AT_MAX  8
+#define RELOAD_TICKS    30      /* twice a second */
 
+/* ---- the mode, as loaded from the file ---------------------------------------- */
+static struct {
+    int valid;
+    char name[64];
+    unsigned long long trigger_bits, shot_bits, award;
+    unsigned trigger_count, seconds;
+    unsigned screen_type, title_msg, total_msg, restore_after;
+    char title_words[STR_MAX], total_words[STR_MAX];
+    unsigned light_owner;
+    char light_on[STR_MAX], light_off[STR_MAX];
+    unsigned at_secs[CALLOUT_AT_MAX], at_id[CALLOUT_AT_MAX], n_at;
+    unsigned callout_count, callout_end;
+} cfg;
+
+/* ---- the run, while it is running ---------------------------------------------- */
 static struct {
     int active;
     unsigned player, ticks_left, secs_shown, hits;
     unsigned long long total, score_at_start;
     unsigned long started_ms;
-    unsigned maser[5];
-    unsigned restore_ticks;      /* after the end, when to put the borrowed words back */
-} rush;
+    unsigned trig[5];
+    unsigned restore_ticks;
+} run;
 
-/* ---- the screen: text of our own on a screen the game already has ---------------
- * Emulator-proven with the probe (run 4): the award screen family 0x3ba540(type, 0,
- * 0, 0x6fa618) shows the message id at +0xa0 over the u64 value at +0xa8 - type 122,
- * tesla strike's award, is "TESLA STRIKE AWARD / 2,000,000" over its powerline clip.
- * Our words go in by pointing a message's group at a block of our own: the table
- * 0x744c60 is plain .data. We borrow tesla's 3159 (AWARD) and 3160 (COMPLETED) for
- * the length of the mode and a few seconds after, so a tesla award screen shown in
- * that window would read our words - the one visible cost, and only while ours runs. */
-#define SCREEN_TYPE       122u
-#define MSG_TITLE         3159u
-#define MSG_TOTAL         3160u
-#define RESTORE_AFTER_S   6
+/* ---- parsing: no allocator, no libc string functions --------------------------- */
+static int is_space(int c) { return c == ' ' || c == '\t' || c == '\r'; }
 
-static const char *const title_group[6] = {
-    "KAIJU RUSH", "KAIJU RUSH", "KAIJU RUSH", "KAIJU RUSH", "KAIJU RUSH", 0
-};
-static const char *const total_group[6] = {
-    "KAIJU RUSH TOTAL", "KAIJU RUSH TOTAL", "KAIJU RUSH TOTAL", "KAIJU RUSH TOTAL", "KAIJU RUSH TOTAL", 0
-};
+/* Matches `word` at the start of a line and returns what follows it, else 0. */
+static const char *key_is(const char *line, const char *word)
+{
+    while (*word) {
+        if (*line != *word) return 0;
+        line++;
+        word++;
+    }
+    if (*line && !is_space(*line)) return 0;      /* "seconds" must not match "secondsx" */
+    while (is_space(*line)) line++;
+    return line;
+}
 
-static struct borrowed { unsigned id, idx; const char **old; int held; } borrow[2] = {
-    { MSG_TITLE, 0, 0, 0 }, { MSG_TOTAL, 0, 0, 0 },
-};
+/* Decimal, or 0x hex. Advances *p past the number. */
+static unsigned long long num(const char **p)
+{
+    const char *s = *p;
+    unsigned long long x = 0;
+    int base = 10;
+    while (is_space(*s)) s++;
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
+    for (;;) {
+        int d = -1;
+        if (*s >= '0' && *s <= '9') d = *s - '0';
+        else if (base == 16 && *s >= 'a' && *s <= 'f') d = *s - 'a' + 10;
+        else if (base == 16 && *s >= 'A' && *s <= 'F') d = *s - 'A' + 10;
+        if (d < 0) break;
+        x = x * (unsigned)base + (unsigned)d;
+        s++;
+    }
+    while (is_space(*s)) s++;
+    *p = s;
+    return x;
+}
+
+/* The rest of the line, trailing blanks trimmed. Text values are taken verbatim:
+ * a light command is full of '-' and digits and must not be tokenised. */
+static void rest_of_line(char *dst, unsigned cap, const char *src)
+{
+    unsigned n = 0;
+    while (src[n] && src[n] != '\n' && n + 1 < cap) { dst[n] = src[n]; n++; }
+    while (n && is_space(dst[n - 1])) n--;
+    dst[n] = 0;
+}
+
+static void cfg_line(const char *line)
+{
+    const char *a;
+    char m[120];
+    if ((a = key_is(line, "name")) != 0)              { rest_of_line(cfg.name, sizeof cfg.name, a); return; }
+    if ((a = key_is(line, "trigger")) != 0)           { cfg.trigger_bits = num(&a); cfg.trigger_count = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "seconds")) != 0)           { cfg.seconds = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "shots")) != 0)             { cfg.shot_bits = num(&a); return; }
+    if ((a = key_is(line, "award")) != 0)             { cfg.award = num(&a); return; }
+    if ((a = key_is(line, "screen_type")) != 0)       { cfg.screen_type = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "title_msg")) != 0)         { cfg.title_msg = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "total_msg")) != 0)         { cfg.total_msg = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "title_words")) != 0)       { rest_of_line(cfg.title_words, STR_MAX, a); return; }
+    if ((a = key_is(line, "total_words")) != 0)       { rest_of_line(cfg.total_words, STR_MAX, a); return; }
+    if ((a = key_is(line, "restore_after")) != 0)     { cfg.restore_after = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "light_owner")) != 0)       { cfg.light_owner = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "light_on")) != 0)          { rest_of_line(cfg.light_on, STR_MAX, a); return; }
+    if ((a = key_is(line, "light_off")) != 0)         { rest_of_line(cfg.light_off, STR_MAX, a); return; }
+    if ((a = key_is(line, "callout_count")) != 0)     { cfg.callout_count = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "callout_end")) != 0)       { cfg.callout_end = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "callout_at")) != 0) {
+        if (cfg.n_at < CALLOUT_AT_MAX) {
+            cfg.at_secs[cfg.n_at] = (unsigned)num(&a);
+            cfg.at_id[cfg.n_at] = (unsigned)num(&a);
+            cfg.n_at++;
+        }
+        return;
+    }
+    /* An unknown key is LOGGED AND SKIPPED, never fatal: a newer editor writing a
+     * newer key must not break an older mode.so. */
+    snprintf(m, sizeof m, "[mode] unknown key, skipped: %.80s\n", line);
+    hk_logs(m);
+}
+
+/* The words a message id is pointed at, five language slots plus the terminator. */
+static const char *title_group[6], *total_group[6];
+
+static void cfg_parse(const char *buf, long len)
+{
+    char line[STR_MAX + 64];
+    long i = 0;
+    unsigned k;
+    char m[200];
+    for (k = 0; k < sizeof cfg; k++) ((char *)&cfg)[k] = 0;
+    while (i < len) {
+        long j = 0;
+        while (i < len && buf[i] != '\n') {
+            if (j + 1 < (long)sizeof line) line[j++] = buf[i];
+            i++;
+        }
+        i++;                                        /* past the newline */
+        line[j] = 0;
+        {
+            char *s = line;
+            while (is_space(*s)) s++;
+            if (*s && *s != '#') cfg_line(s);
+        }
+    }
+    for (k = 0; k < 5; k++) {
+        title_group[k] = cfg.title_words;
+        total_group[k] = cfg.total_words;
+    }
+    title_group[5] = total_group[5] = 0;
+    cfg.valid = cfg.seconds && cfg.trigger_count;
+    snprintf(m, sizeof m,
+             "[mode] loaded \"%s\": trigger %08x x%u, %u s, shots %08x_%08x, award %llu%s\n",
+             cfg.name, (unsigned)cfg.trigger_bits, cfg.trigger_count, cfg.seconds,
+             (unsigned)(cfg.shot_bits >> 32), (unsigned)cfg.shot_bits, cfg.award,
+             cfg.valid ? "" : "  - NOT VALID, it needs seconds and a trigger count");
+    hk_logs(m);
+}
+
+/* Re-read and byte-compare; re-parse only when it changed. 1 = it changed. */
+static char cfg_raw[CFG_MAX];
+static long cfg_raw_len = -1;
+
+static int cfg_reload(void)
+{
+    char buf[CFG_MAX];
+    long n, i;
+    int fd = open(MODE_FILE, O_RDONLY);
+    if (fd < 0) return 0;
+    n = read(fd, buf, sizeof buf);
+    close(fd);
+    if (n < 0) return 0;
+    if (n == cfg_raw_len) {
+        for (i = 0; i < n && buf[i] == cfg_raw[i]; i++) ;
+        if (i == n) return 0;
+    }
+    for (i = 0; i < n; i++) cfg_raw[i] = buf[i];
+    cfg_raw_len = n;
+    cfg_parse(cfg_raw, n);
+    return 1;
+}
+
+/* ---- the words: our strings behind a message id the screen already knows -------- */
+static struct borrowed { unsigned id, idx; const char **old; int held; } borrow[2];
 
 static void words_borrow(void)
 {
     unsigned count = *(unsigned *)(unsigned long)GZ_MSG_COUNT, i;
     unsigned short *remap = *(unsigned short **)(unsigned long)GZ_MSG_REMAP;
+    borrow[0].id = cfg.title_msg;
+    borrow[1].id = cfg.total_msg;
     for (i = 0; i < 2; i++) {
         struct borrowed *b = &borrow[i];
         const char ***slot;
-        if (b->held || !remap || b->id >= count || remap[b->id] >= count) continue;
+        if (b->held || !b->id || !remap || b->id >= count || remap[b->id] >= count) continue;
         b->idx = remap[b->id];
         slot = (const char ***)(unsigned long)(GZ_MSG_PTRS + 4u * b->idx);
         b->old = *slot;
@@ -100,22 +238,7 @@ static void words_restore(void)
     }
 }
 
-/* ---- the lights: the game's own light runner (emulator-proven, run 12) ----------
- * KAIJU RUSH lights the same eight lamps (413-420) tesla strike's own award lights,
- * with tesla's own pair of commands through hook.h's gz_blele: a green sweep on at the
- * start, and the fade to black at the end. (Which inserts those are is not established
- * - the ids are above the 260-entry lamp table, in the 585-entry slot index, and
- * nothing names them; tesla is the powerline mode, so the tower is the guess.)
- *
- * Three earlier candidates are ruled out in MODE_API.md: starting tesla's shows
- * (95/96/344/346/351/356), 0x185e9c (a device driver, not a light), and this same
- * runner called WITHOUT a live show event current - which is what made runs 6, 7 and
- * 9 read as nothing. gz_blele makes a show event current, which is what the game's
- * own handler does, and then the lamps are written 0.2 s later. */
-#define LIGHT_OWNER 538u
-#define LIGHT_ON    "blele --sweep 0 --lts 224 --red 0 --green 255 --blue 0 --freq 10 --use_alpha 1 --alpha 255"
-#define LIGHT_OFF   "blele --sweep 1 --lts 224 --fade 20 --rgb 0 --freq 10 --delay_start 15 --end 1"
-
+/* ---- the lights ---------------------------------------------------------------- */
 static void *light_group;
 static unsigned light_check_ticks;
 static const char *light_why = "";
@@ -123,30 +246,34 @@ static const char *light_why = "";
 static void lights(const char *cmd, const char *why)
 {
     char m[160];
-    light_group = gz_blele(LIGHT_OWNER, cmd);
+    if (!cfg.light_owner || !*cmd) return;
+    light_group = gz_blele(cfg.light_owner, cmd);
     light_why = why;
-    light_check_ticks = TICKS_PER_S / 2;      /* read the lamps back half a second later */
-    snprintf(m, sizeof m, "[rush] lights %s: group %p\n", why, light_group);
+    light_check_ticks = TICKS_PER_S / 2;
+    snprintf(m, sizeof m, "[mode] lights %s: group %p\n", why, light_group);
     hk_logs(m);
 }
 
 /* A command writes nothing at parse time - the game's own award wrote its lamps 0.2 s
- * after the call (run 12) - so the count is read from the tick, not here. */
+ * after the call (item 125, run 12) - so the count is read from the tick, not here. */
 static void lights_check(void)
 {
     char m[160];
     unsigned first = 0, n;
     if (!light_check_ticks || --light_check_ticks) return;
     n = gz_group_written(light_group, &first);
-    snprintf(m, sizeof m, "[rush] lights %s landed: %u lamps written, first %u\n",
+    snprintf(m, sizeof m, "[mode] lights %s landed: %u lamps written, first %u\n",
              light_why, n, first);
     hk_logs(m);
 }
 
+/* ---- the game calls ------------------------------------------------------------ */
 static void screen(unsigned msg, unsigned long long value)
 {
-    unsigned char *node = ((unsigned char *(*)(unsigned, unsigned, unsigned, unsigned))
-                           (unsigned long)SITE_TEXT)(SCREEN_TYPE, 0u, 0u, 0x6fa618u);
+    unsigned char *node;
+    if (!cfg.screen_type || !msg) return;
+    node = ((unsigned char *(*)(unsigned, unsigned, unsigned, unsigned))
+            (unsigned long)SITE_TEXT)(cfg.screen_type, 0u, 0u, 0x6fa618u);
     if (!node) return;
     *(unsigned short *)(node + 0xa0) = (unsigned short)msg;
     *(unsigned long long *)(node + 0xa8) = value;
@@ -165,126 +292,132 @@ static unsigned long long score_add(unsigned p, unsigned long long v)
 
 static void callout(unsigned req)
 {
-    ((void (*)(unsigned))(unsigned long)SITE_CALLOUT)(req);
+    if (req) ((void (*)(unsigned))(unsigned long)SITE_CALLOUT)(req);
 }
 
 static void callout_nth(unsigned req, unsigned n)
 {
-    ((void (*)(unsigned, unsigned))(unsigned long)SITE_CALLOUT_NTH)(req, n);
+    if (req) ((void (*)(unsigned, unsigned))(unsigned long)SITE_CALLOUT_NTH)(req, n);
 }
 
-static void rush_start(const char *why)
+/* ---- the mode ------------------------------------------------------------------ */
+static void mode_start(const char *why)
 {
     char m[200];
-    if (rush.active || !gz_in_game()) return;
-    rush.active = 1;
-    rush.player = gz_player();
-    rush.ticks_left = RUSH_SECONDS * TICKS_PER_S;
-    rush.secs_shown = RUSH_SECONDS;
-    rush.hits = 0;
-    rush.total = 0;
-    rush.score_at_start = score_now(rush.player);
-    rush.started_ms = hk_ms();
-    rush.maser[rush.player] = 0;
-    rush.restore_ticks = 0;
+    if (run.active || !cfg.valid || !gz_in_game()) return;
+    run.active = 1;
+    run.player = gz_player();
+    run.ticks_left = cfg.seconds * TICKS_PER_S;
+    run.secs_shown = cfg.seconds;
+    run.hits = 0;
+    run.total = 0;
+    run.score_at_start = score_now(run.player);
+    run.started_ms = hk_ms();
+    run.trig[run.player] = 0;
+    run.restore_ticks = 0;
     words_borrow();
-    lights(LIGHT_ON, "on");                 /* the powerline tower, green */
-    screen(MSG_TITLE, AWARD_STEP);          /* "KAIJU RUSH / 1,000,000" - the first shot's worth */
-    snprintf(m, sizeof m, "[rush] KAIJU RUSH START (%s): player %u, %u s, score %llu\n",
-             why, rush.player, RUSH_SECONDS, rush.score_at_start);
+    lights(cfg.light_on, "on");
+    screen(cfg.title_msg, cfg.award);
+    snprintf(m, sizeof m, "[mode] %s START (%s): player %u, %u s, score %llu\n",
+             cfg.name, why, run.player, cfg.seconds, run.score_at_start);
     hk_logs(m);
 }
 
-static void rush_end(const char *why)
+static void mode_end(const char *why)
 {
     char m[240];
-    if (!rush.active) return;
-    rush.active = 0;
-    lights(LIGHT_OFF, "off");               /* fade the tower back to black */
-    screen(MSG_TOTAL, rush.total);          /* "KAIJU RUSH TOTAL / 15,000,000" */
-    rush.restore_ticks = RESTORE_AFTER_S * TICKS_PER_S;
-    snprintf(m, sizeof m, "[rush] KAIJU RUSH END (%s): %u shots, awarded %llu, score %llu -> %llu, %lu ms wall\n",
-             why, rush.hits, rush.total, rush.score_at_start, score_now(rush.player),
-             hk_ms() - rush.started_ms);
+    if (!run.active) return;
+    run.active = 0;
+    lights(cfg.light_off, "off");
+    screen(cfg.total_msg, run.total);
+    run.restore_ticks = cfg.restore_after * TICKS_PER_S;
+    snprintf(m, sizeof m, "[mode] %s END (%s): %u shots, awarded %llu, score %llu -> %llu, %lu ms wall\n",
+             cfg.name, why, run.hits, run.total, run.score_at_start,
+             score_now(run.player), hk_ms() - run.started_ms);
     hk_logs(m);
 }
 
-/* ---- the shot dispatch: cmode_manager::v[7](mgr, _, mask64, x) --------------- */
+/* ---- the shot dispatch: cmode_manager::v[7](mgr, _, mask64, x) ------------------ */
 static void on_dispatch(unsigned *r)
 {
     unsigned long long mask = ((unsigned long long)r[3] << 32) | r[2];
     unsigned p = gz_player();
     char m[200];
-    if (!gz_in_game()) return;
-    if (!rush.active) {
-        if (mask & MASER_BIT) {
-            rush.maser[p]++;
-            snprintf(m, sizeof m, "[rush] maser target %u of %u (player %u)\n", rush.maser[p], MASER_TO_START, p);
+    if (!cfg.valid || !gz_in_game()) return;
+    if (!run.active) {
+        if (cfg.trigger_bits && (mask & cfg.trigger_bits) && p >= 1 && p <= 4) {
+            run.trig[p]++;
+            snprintf(m, sizeof m, "[mode] trigger %u of %u (player %u)\n",
+                     run.trig[p], cfg.trigger_count, p);
             hk_logs(m);
-            if (rush.maser[p] >= MASER_TO_START) rush_start("maser target x3");
+            if (run.trig[p] >= cfg.trigger_count) mode_start("trigger shot");
         }
         return;
     }
-    if (p == rush.player && (mask & RUSH_SHOT_BITS)) {
-        unsigned long long asked = AWARD_STEP * ++rush.hits, got = score_add(p, asked);
-        rush.total += got;
-        screen(MSG_TITLE, got);             /* "KAIJU RUSH / 3,000,000" */
-        snprintf(m, sizeof m, "[rush] shot %08x_%08x: +%llu (asked %llu), %u shots, %llu awarded\n",
-                 (unsigned)(mask >> 32), (unsigned)mask, got, asked, rush.hits, rush.total);
+    if (p == run.player && (mask & cfg.shot_bits)) {
+        unsigned long long asked = cfg.award * ++run.hits, got = score_add(p, asked);
+        run.total += got;
+        screen(cfg.title_msg, got);
+        snprintf(m, sizeof m, "[mode] shot %08x_%08x: +%llu (asked %llu), %u shots, %llu awarded\n",
+                 (unsigned)(mask >> 32), (unsigned)mask, got, asked, run.hits, run.total);
         hk_logs(m);
     }
 }
 
-/* ---- the end-of-ball broadcast --------------------------------------------- */
+/* ---- the end-of-ball broadcast -------------------------------------------------- */
 static void on_ballend(unsigned *r)
 {
     (void)r;
-    rush_end("ball ended");
-    rush.maser[1] = rush.maser[2] = rush.maser[3] = rush.maser[4] = 0;
+    mode_end("ball ended");
+    run.trig[1] = run.trig[2] = run.trig[3] = run.trig[4] = 0;
 }
 
-/* ---- the clock --------------------------------------------------------------- */
+/* ---- the clock ------------------------------------------------------------------ */
 static void on_tick(unsigned *r)
 {
     static unsigned ticks;
     unsigned long long v[4];
-    unsigned secs;
+    unsigned secs, i;
     char m[80];
     (void)r;
-    if (++ticks % 30 == 0) {
-        if (hk_read_trigger("/dump/mode.start", v) >= 0) rush_start("trigger");
-        if (hk_read_trigger("/dump/mode.stop", v) >= 0) rush_end("trigger");
+    if (++ticks % RELOAD_TICKS == 0 && cfg_reload() && run.active)
+        hk_logs("[mode] reloaded while running - the new file is live\n");
+    if (ticks % 30 == 0) {
+        if (hk_read_trigger("/dump/mode.start", v) >= 0) mode_start("trigger file");
+        if (hk_read_trigger("/dump/mode.stop", v) >= 0) mode_end("trigger file");
     }
-    lights_check();                          /* the lamps a command wrote, half a second on */
-    if (rush.restore_ticks && --rush.restore_ticks == 0 && !rush.active) {
+    lights_check();
+    if (run.restore_ticks && --run.restore_ticks == 0 && !run.active) {
         words_restore();
-        hk_logs("[rush] borrowed messages 3159/3160 restored\n");
+        hk_logs("[mode] borrowed messages restored\n");
     }
-    if (!rush.active) return;
-    if (!gz_in_game() || gz_player() != rush.player) {
-        rush_end("left the game, or the player changed");
+    if (!run.active) return;
+    if (!gz_in_game() || gz_player() != run.player) {
+        mode_end("left the game, or the player changed");
         return;
     }
-    if (rush.ticks_left) rush.ticks_left--;
-    secs = (rush.ticks_left + TICKS_PER_S - 1) / TICKS_PER_S;
-    if (secs != rush.secs_shown) {
-        rush.secs_shown = secs;
-        if (secs == 10) callout(CALLOUT_10S);
-        else if (secs >= 1 && secs <= 5) callout_nth(CALLOUT_COUNT, secs - 1);
+    if (run.ticks_left) run.ticks_left--;
+    secs = (run.ticks_left + TICKS_PER_S - 1) / TICKS_PER_S;
+    if (secs != run.secs_shown) {
+        run.secs_shown = secs;
+        for (i = 0; i < cfg.n_at; i++)
+            if (secs == cfg.at_secs[i]) callout(cfg.at_id[i]);
+        if (secs >= 1 && secs <= 5) callout_nth(cfg.callout_count, secs - 1);
         if (secs % 10 == 0 || secs <= 5) {
-            snprintf(m, sizeof m, "[rush] %u s left\n", secs);
+            snprintf(m, sizeof m, "[mode] %u s left\n", secs);
             hk_logs(m);
         }
     }
-    if (rush.ticks_left == 0) {
-        callout(CALLOUT_OVER);
-        rush_end("time ran out");
+    if (run.ticks_left == 0) {
+        callout(cfg.callout_end);
+        mode_end("time ran out");
     }
 }
 
 __attribute__((constructor))
 static void mode_init(void)
 {
+    char m[120];
     int ok;
     if (!hk_is_game_process(SITE_TICK)) return;
     hk_log_open("/dump/mode.log");
@@ -299,11 +432,14 @@ static void mode_init(void)
        & hk_site_ok(SITE_LAMP_GROUP, SITE_LAMP_GROUP_W0, SITE_LAMP_GROUP_W1, "lamp_group")
        & hk_site_ok(SITE_SHOW_PRIO, SITE_SHOW_PRIO_W0, SITE_SHOW_PRIO_W1, "show_prio");
     if (!ok) {
-        hk_logs("[rush] NOT THIS BUILD - KAIJU RUSH is not installed, the game runs stock\n");
+        hk_logs("[mode] NOT THIS BUILD - no mode is installed, the game runs stock\n");
         return;
     }
     hk_install(SITE_TICK, on_tick);
     hk_install(SITE_DISPATCH, on_dispatch);
     hk_install(SITE_BALLEND, on_ballend);
-    hk_logs("[rush] KAIJU RUSH armed: three maser target hits start it\n");
+    if (!cfg_reload())
+        hk_logs("[mode] no mode file at " MODE_FILE " yet - polling for one\n");
+    snprintf(m, sizeof m, "[mode] armed, reading %s twice a second\n", MODE_FILE);
+    hk_logs(m);
 }

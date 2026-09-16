@@ -1,0 +1,51 @@
+# kaiju_rush.mode - KAIJU RUSH, written as DATA (item 126).
+#
+# This is the same mode item 125 proved in the emulator, with nothing left in C:
+# the trigger, the clock, the shot table, the screens, the lights and the callouts
+# all come from here. mode.so reads it, and re-reads it whenever it changes, so an
+# edit lands in a running game inside a second.
+#
+# THE FORMAT is one key per line, key first, arguments after it, '#' starts a
+# comment. Deliberately NOT JSON: mode.so is built -nostdlib with libc declared by
+# hand and no allocator, so this parses in a few dozen lines and stays something a
+# person can edit by hand and the Modes tab (item 127) can write.
+#
+# Numbers may be decimal or 0x hex. A line the parser does not know is logged and
+# skipped, so a newer editor writing a newer key cannot break an older mode.so.
+
+name           KAIJU RUSH
+
+# What starts it: a shot mask, and how many of them in one ball.
+# 0x08000000 is the Maser Target (the switch -> shot bit map is in MODE_API.md).
+trigger        0x08000000 3
+
+# How long it runs, in seconds, on the 60 Hz tick clock. No game timer is free.
+seconds        30
+
+# The shots that score while it runs: powerlines 28-30 and both ramps, 20-21.
+shots          0x70300000
+
+# The first shot is worth this, the second twice this, and so on.
+award          1000000
+
+# The screen: the award-screen family (type 122) shows a message id over a u64.
+# Our words go in by pointing those message ids at our own strings for the length
+# of the mode, and restoring them this many seconds after it ends.
+screen_type    122
+title_msg      3159
+title_words    KAIJU RUSH
+total_msg      3160
+total_words    KAIJU RUSH TOTAL
+restore_after  6
+
+# The lights: the game's own light runner, with a live show event made current.
+# Owner 538 and these two commands are tesla strike's own award pair.
+light_owner    538
+light_on       blele --sweep 0 --lts 224 --red 0 --green 255 --blue 0 --freq 10 --use_alpha 1 --alpha 255
+light_off      blele --sweep 1 --lts 224 --fade 20 --rgb 0 --freq 10 --delay_start 15 --end 1
+
+# The countdown, in the game's own voice: one callout at N seconds left, the
+# counting callout whose variant is (seconds - 1) for 5 down to 1, and one at the end.
+callout_at     10 1291
+callout_count  1287
+callout_end    1295

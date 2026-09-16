@@ -12,6 +12,51 @@ name means its role was inferred from its callers.
 - **LE and 1.16 move every address.** The LE `game_real` has `cmode_tesla_strike` at
   `0x5d0818`, not `0x6307b8`. A mode.so must locate by pattern; see `patloc.py`.
 
+## A MODE IS A FILE (item 126, emulator-proven 2026-09-15)
+
+`mode.so` holds no rule of its own any more. It is an interpreter over a mode file -
+`/dump/mode.cfg` in the rig, `modes/kaiju_rush.mode` in the repo - which it re-reads
+**twice a second** and re-parses whenever the bytes change, so an edit lands in a
+RUNNING game inside a second. That is what makes a mode something you choreograph
+rather than rebuild.
+
+```
+name           KAIJU RUSH
+trigger        0x08000000 3      # shot mask, and how many in one ball
+seconds        30                # the tick clock; no game timer is free
+shots          0x70300000        # what scores while it runs
+award          1000000           # first shot; the Nth shot is N times this
+screen_type    122               # the award-screen family
+title_msg      3159              # message ids our words are put behind
+total_msg      3160
+title_words    KAIJU RUSH
+total_words    KAIJU RUSH TOTAL
+restore_after  6                 # seconds after the end to give the ids back
+light_owner    538
+light_on       blele --sweep 0 --lts 224 --red 0 --green 255 ...
+light_off      blele --sweep 1 --lts 224 --fade 20 --rgb 0 ...
+callout_at     10 1291           # id at N seconds left (up to 8 lines)
+callout_count  1287              # variant (seconds - 1), for 5 down to 1
+callout_end    1295
+```
+
+- **Key per line, `#` comments, decimal or `0x`.** A value that is text (a light
+  command, a name) is taken verbatim to end of line, because a blele command is full
+  of dashes and digits and must not be tokenised.
+- **An unknown key is logged and skipped**, never fatal, so a newer editor writing a
+  newer key cannot break an older `mode.so`.
+- **Not JSON, and no `stat`.** The object is built `-nostdlib` with libc declared by
+  hand in `hook.h`: there is no allocator and no `stat`, so the format parses against
+  fixed buffers in a few dozen lines and the reload check byte-compares a re-read.
+- **Proven (run 1):** the file's own values ran the mode - lights landed 6 lamps from
+  413, shots scored 1M..5M - and then the file was rewritten mid-game: "reloaded while
+  running - the new file is live", and the next start obeyed the new name, 12 s and 7M
+  award, ending at 11,984 ms. A 10-minute soak on this build ran 14 starts and 14 ends
+  with no SEGV.
+- **The log prefix is `[mode]`, not `[rush]`** - the mode's name is data now. Anything
+  still grepping `[rush]` matches nothing; `soak.sh` counts on the NAME, which the file
+  supplies, so it keeps working.
+
 ## The instruments (all read-only, all in `tools/spike2_emu/`)
 
 | Tool | What it answers |

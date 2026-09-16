@@ -12,6 +12,8 @@ for sw in "$@"; do
   echo "== switch $sw: $(grep -E "^$sw " "$TABLES/${PAD_GAME:-godzilla_pro}/switch_list.txt" | cut -c 23-)"
   tail -n +$((n + 1)) "$LOG" | grep -E 'dispatch|tesla|\[(score|award|mode|trigger|callout|ball)\]' | head -24
   if [ -f "$ROOT/dump/mode.log" ]; then
-    tail -n 3 "$ROOT/dump/mode.log" | grep -E "^ *[0-9]+ \[rush\]" | tail -2
+    # [mode] since item 126: the mode's name is data now, so the object's lines are
+    # not KAIJU RUSH's. Anything still grepping [rush] matches nothing.
+    tail -n 3 "$ROOT/dump/mode.log" | grep -E "^ *[0-9]+ \[mode\]" | tail -2
   fi
 done

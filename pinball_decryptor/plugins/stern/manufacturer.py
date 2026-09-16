@@ -227,6 +227,11 @@ class SternManufacturer(Manufacturer):
         # power-up.  Spike 2 only: the layout (the extra images' partition
         # appended as p7, the selector injected into p2) is this era's.
         multiboot=True,
+        # Item 127: the Modes tab - choreograph a mode of our own and play it in
+        # the emulator.  Spike 2 only, for the same reason the Emulate tab is:
+        # the mode runtime is a preloaded .so against THIS era's game binary,
+        # mapped in tools/spike2_emu/modes/MODE_API.md.
+        modes=True,
         # Audio is loose per-sound idxNNNN.wav in the extract output, so the
         # per-slot Replace Audio tab works: assignments are staged over those
         # WAVs and the Write pipeline re-encodes the changed ones into image.bin

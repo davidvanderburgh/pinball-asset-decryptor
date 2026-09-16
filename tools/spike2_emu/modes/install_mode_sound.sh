@@ -15,8 +15,13 @@ set -e
 D=$ROOT/games/${PAD_GAME:-godzilla_pro}
 case "${1:-status}" in
   on)
-    [ -f "$D/image.grown.bin" ] || { echo "no $D/image.grown.bin - run grow_mode_sound.sh" >&2; exit 1; }
+    # ALREADY-INSTALLED IS CHECKED FIRST, and the order is the whole point: once the
+    # grown bank is installed it IS image.bin and there is no image.grown.bin any
+    # more, so asking for that file first reports "run grow_mode_sound.sh" about a
+    # bank that is already live - and under `set -e` that aborts the caller's staging
+    # and the run never starts.
     if [ -f "$D/image.stock.bin" ]; then echo "already installed (image.stock.bin exists)"; exit 0; fi
+    [ -f "$D/image.grown.bin" ] || { echo "no $D/image.grown.bin - run grow_mode_sound.sh" >&2; exit 1; }
     mv "$D/image.bin" "$D/image.stock.bin"
     mv "$D/image.grown.bin" "$D/image.bin"
     echo "grown bank installed; stock kept as image.stock.bin"

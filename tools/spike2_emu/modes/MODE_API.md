@@ -311,6 +311,25 @@ Two things that make this work and are easy to get wrong:
   `warm_slots_for_grown` must also run before the encode, or the round trip silently
   fails to reproduce what it was given.
 
+### The grown bank BOOTS and runs clean (2026-09-15)
+
+First run on it: guest up 4m 32s, **0 `[segv]` lines and 0 fatal signals**, attract
+video steady at 30.0-30.4 fps, and `/dump/audio.raw` growing past 37 MB - the game
+plays normally with a record in its sound bank that the card never shipped and no
+descriptor names. `install_mode_sound.sh on|off|status` swaps the banks by rename.
+
+**A trap that cost a run, and it is about the LOG, not the sound.** `hk_log_open`
+opens `/dump/mode.log` with `O_WRONLY|O_CREAT|O_APPEND`. An earlier run left that
+file owned by **root** while the guest runs as **uid 1000**, so the open returned
+EACCES, `hk_log_fd` stayed -1, and every single `hk_logs` call returned silently -
+a fully loaded, correctly hooked `mode.so` that said nothing at all. It looks
+exactly like a refusal at the gate, which is the expensive part: `hk_is_game_process`
+returns BEFORE `hk_log_open`, so a real gate failure is also silent. Tell them apart
+by reading the guest's own `/proc/self/maps` dump in `game.out` - if `/lib/mode.so`
+is mapped there, the constructor ran and the gate passed. **Delete `mode.log` before
+a run; never truncate it**, and note the tick site `0x4ec828` falls in a `rwxp`
+mapping, which satisfies the gate's `r..x` test.
+
 **Still to prove in a run:** whether an entry reached this way plays identically, and
 derive that yields the appended record's key runs on this build at all - Godzilla Pro
 1.15's bank is 1,649,655,138 bytes, `md_off` **`0x6252cfca`** (1,649,594,314),

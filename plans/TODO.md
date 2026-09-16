@@ -7591,6 +7591,21 @@ These have each been violated at least once and each cost a run or a window:
       one release. **Item 125 is the SEED and is never `/finish`ed on its own.** Merge
       main INTO the branch before the last item closes and prove the Stern side
       unchanged, the way the JJP family did.
+      **BOTH CLAIMS EMULATOR-PROVEN (run 1, 2026-09-15), in one game.** The mode file
+      is `modes/kaiju_rush.mode`, read from `/dump/mode.cfg`; `mode.c` is now the
+      interpreter and holds no rule of its own. (1) It loaded `"KAIJU RUSH": trigger
+      08000000 x3, 30 s, shots 00000000_70300000, award 1000000` - every value from the
+      file - then ran it: lights on landed 6 lamps first 413, and five shots scored
+      1M, 2M, 3M, 4M, 5M on the powerlines and both ramps. (2) **Hot reload works:** the
+      file was rewritten WHILE the game ran, and the object logged `loaded "KAIJU
+      BLITZ" ... 12 s ... award 7000000` plus "reloaded while running - the new file is
+      live" within its half-second poll; the next start obeyed it, scoring 7M then 14M
+      and ending "time ran out" at 11,984 ms of wall time, which is the new 12 s and
+      not the old 30. No SEGV, guest up.
+      **The format:** key per line, `#` comments, decimal or 0x numbers, an unknown key
+      logged and skipped so a newer editor cannot break an older `mode.so`. NOT JSON
+      and no `stat`: the object is `-nostdlib` with libc declared by hand and has
+      neither an allocator nor `stat`, so it byte-compares a re-read instead.
       **Acceptance:** KAIJU RUSH reproduced entirely from a mode file with no C change,
       logging the same start/shot/end lines as the hand-written one; a value edited
       while the game runs takes effect within a second with no restart; a 10-minute

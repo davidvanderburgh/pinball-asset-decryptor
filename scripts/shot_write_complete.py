@@ -23,6 +23,13 @@ the modal the Write pops when it finishes.  Three scenarios:
     modes here are the values two REAL James Bond Premium 1.06.0 writes
     returned -- before the grow-source fix, and after it.
 
+``recave``
+    A blip-free Write from a card an earlier blip-free Write had already
+    patched (PAD-160: Godzilla Pro 1.16, V1.8 -> V1.81).  "before" is the
+    reason the modder's own dialog carried; "after" is what rebuilding the
+    cave returned on his real Godzilla Premium 1.16 V1.6 card, which carries
+    one (264 carried windows, integrity derive passed).
+
 Either way the summary is built by the SAME pipeline helpers the real Write
 uses, so the shot is the dialog a user actually gets, not mocked-up text.
 
@@ -43,7 +50,7 @@ if not (3 <= len(sys.argv) <= 4) or sys.argv[2] not in ("before", "after"):
     sys.exit(__doc__)
 OUT_DIR, WHEN = sys.argv[1], sys.argv[2]
 SCENARIO = sys.argv[3] if len(sys.argv) == 4 else "validator"
-if SCENARIO not in ("validator", "blipfree", "jaws"):
+if SCENARIO not in ("validator", "blipfree", "jaws", "recave"):
     sys.exit(__doc__)
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -102,6 +109,18 @@ if SCENARIO in ("validator", "jaws"):
     amode = ("blip-free", "")
     counts = (1, 0, 2, 0)          # the reporter's card: one sound + two images
     out_path = r"C:\Users\david\Desktop\jaws_modded.raw"
+elif SCENARIO == "recave":
+    # --- the modder's V1.81 write, before and after the rebuild -------------
+    vmode = ("bypassed", "")
+    counts = (4, 11, 12, 0)        # his dialog: 4 sounds, 11 videos, 12 images
+    out_path = (r"D:\Heisei Custom Pinball\Heisei Custom Images\Godzilla Pro "
+                r"1.16 Heisei Custom V1.81 Standard Edition.raw")
+    amode = (("blip-free", "") if WHEN == "after" else
+             ("standard",
+              "window-read function not located (prologue signature absent or "
+              "ambiguous) -- this firmware isn't supported by the blip-free "
+              "cave."))
+    print("scenario=recave %s: audio_mode=%r" % (WHEN, amode), flush=True)
 else:
     # --- what two real James Bond Premium 1.06.0 writes actually returned ---
     vmode = ("bypassed", "")
@@ -198,7 +217,8 @@ def capture_then_close():
         name = "%s_%s.png" % (
             WHEN, {"validator": "write_complete",
                    "blipfree": "blipfree_write_complete",
-                   "jaws": "jaws_validator"}[SCENARIO])
+                   "jaws": "jaws_validator",
+                   "recave": "blipfree_recave"}[SCENARIO])
         snap_hwnd(hwnd, name)
         user32.PostMessageW(hwnd, 0x0010, 0, 0)     # WM_CLOSE
     root.after(600, root.destroy)

@@ -9708,6 +9708,135 @@ def _cave_entry_patch(fn, cave_va):
     return struct.pack("<II", 0xE51FF004, cave_va)
 
 
+# --------------------------------------------------------------------------
+# Rebuilding the cave on a card an earlier blip-free Write already caved.
+#
+# A modder who extracts his OWN built card and writes the next version from it
+# hands the Write a firmware whose window-read function starts with our branch
+# instead of its prologue, so the signature locator found nothing and every
+# such build fell back to the standard one, reporting "this firmware isn't
+# supported" about a firmware it had caved itself (PAD-160, Godzilla Pro 1.16
+# V1.8 -> V1.81; the same modder's V1.6 Premium card carries the cave).
+#
+# Reading the caved firmware straight is right for everything the build
+# MEASURES: with the old cave in place the derive reads stock bytes for every
+# window it redirects, so the params, the consumed map (which then leaves those
+# windows out, bar the 4-16 bytes the signature check reads before redirecting)
+# and FIRST_OFF all come out as they would on stock.  Only the bytes the new
+# cave is BUILT into have to lose the old one: the prologue goes back, the
+# program header goes back to PT_GNU_STACK and the cave's pages come out of the
+# file.  Its table is carried into the new cave -- the bodies it covers are
+# still the old build's audio on this card, and the stock bytes for their
+# windows now exist nowhere else.
+# --------------------------------------------------------------------------
+_CAVE_CMP_R2 = 0xE3520C02        # cave word 2: cmp r2,#0x200
+
+
+def _cut_file_extent(raw, off, size):
+    """Remove *size* bytes at file offset *off* from the ELF *raw* and pull
+    every PT_LOAD stored after them down by as much.  Whole pages past the
+    section headers only (an appended segment), so every ``p_offset`` stays
+    congruent with its ``p_vaddr``; raises ``RuntimeError`` otherwise."""
+    shoff = struct.unpack_from("<I", raw, 0x20)[0]
+    shend = shoff + (struct.unpack_from("<H", raw, 0x2e)[0]
+                     * struct.unpack_from("<H", raw, 0x30)[0])
+    if (off % _EXT_PAGE or size % _EXT_PAGE or off < shend
+            or off + size > len(raw)):
+        raise RuntimeError("the firmware's appended segment at file+0x%x "
+                           "(%d bytes) can't be taken back out." % (off, size))
+    del raw[off:off + size]
+    for ph, _va, p_off, _fz, _mz, _fl in _iter_phdrs(raw):
+        if p_off >= off + size:
+            struct.pack_into("<I", raw, ph + 4, p_off - size)
+
+
+def _cave_table(raw, va, off, size):
+    """``[(lo, hi, stock_bytes)]`` from the redirect table of the cave mapped
+    at *va* (file offset *off*, *size* bytes), or ``None`` when an entry does
+    not describe a window whose copy lies inside the cave."""
+    out = []
+    t = off + _CAVE_NCODE * 4
+    while t + 12 <= off + size:
+        lo, hi, sb = struct.unpack_from("<III", raw, t)
+        if lo == 0:                                    # the zero sentinel
+            return out
+        if not (lo < hi and va <= sb and sb + (hi - lo) <= va + size):
+            return None
+        out.append((lo, hi, bytes(raw[off + sb - va:off + sb - va + hi - lo])))
+        t += 12
+    return None
+
+
+def _find_pad_cave(raw):
+    """The blip-free cave an earlier Write left in *raw*, or ``None``:
+    ``{"fn", "va", "off", "size", "phdr", "windows"}``, *windows* being the
+    carried ``[(lo, hi, stock_bytes)]``.
+
+    Recognised by the layout :func:`_asm_derive_redirect_cave` emits (a
+    PF_RWX PT_LOAD opening with the replicated prologue and the ``cmp r2``,
+    literals naming its own BASEVAR / SIG / table, the RET literal) and by the
+    function it returns to really branching into it.  A cave from before the
+    long-hop layout (PAD-56) has no RET literal and is not recognised."""
+    xva, xoff, xfz = _exec_seg(raw)
+    for ph, va, off, fz, _mz, fl in _iter_phdrs(raw):
+        if fl != 7 or fz < _CAVE_NCODE * 4 or off + fz > len(raw):
+            continue
+        w = struct.unpack_from("<%dI" % _CAVE_NCODE, raw, off)
+        if ((w[0], w[1], w[43]) != _CAVE_SIG or w[2] != _CAVE_CMP_R2
+                or w[45] != va + 49 * 4 or w[46] != va + 50 * 4
+                or w[48] != va + _CAVE_NCODE * 4):
+            continue
+        fn = w[54] - 12
+        if not xva <= fn <= xva + xfz - 12:
+            continue
+        fo = xoff + (fn - xva)
+        entry = _cave_entry_patch(fn, va)
+        if (bytes(raw[fo:fo + len(entry)]) != entry
+                or struct.unpack_from("<I", raw, fo + 8)[0] != _CAVE_SIG[2]):
+            continue
+        windows = _cave_table(raw, va, off, fz)
+        if windows is None:
+            continue
+        return {"fn": fn, "va": va, "off": off, "size": fz, "phdr": ph,
+                "windows": windows}
+    return None
+
+
+def _strip_pad_cave(raw):
+    """Take an earlier Write's cave back out of the ELF *raw* in place --
+    prologue restored, its program header back to the stock advisory
+    PT_GNU_STACK, its pages cut from the file -- and return what
+    :func:`_find_pad_cave` found (``None``, *raw* untouched, when there is
+    none)."""
+    cave = _find_pad_cave(raw)
+    if cave is None:
+        return None
+    xva, xoff, _xfz = _exec_seg(raw)
+    struct.pack_into("<III", raw, xoff + cave["fn"] - xva, *_CAVE_SIG)
+    struct.pack_into("<8I", raw, cave["phdr"],
+                     _PT_GNU_STACK, 0, 0, 0, 0, 0, 7, 0x10)
+    _cut_file_extent(raw, cave["off"], cave["size"])
+    return cave
+
+
+def _text_segment_to_eof(raw):
+    """Move the program-text extension segment back to the end of *raw* when
+    something was appended after it, so a longer string can still extend it
+    (:func:`_extend_extension_segment` only grows a segment at EOF).  A cave
+    built from a firmware that already carried longer text lands after it."""
+    from . import progreloc
+    seg = progreloc.extension_segment(raw)
+    if seg is None or seg["seg_off"] + seg["capacity"] == len(raw):
+        return
+    off, size = seg["seg_off"], seg["capacity"]
+    data = bytes(raw[off:off + size])
+    _cut_file_extent(raw, off, size)
+    new_off = (len(raw) + _EXT_PAGE - 1) & ~(_EXT_PAGE - 1)
+    raw.extend(b"\0" * (new_off - len(raw)))
+    raw.extend(data)
+    struct.pack_into("<I", raw, seg["hdr_off"] + 4, new_off)
+
+
 def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
                                 out_dir, progress=None, extra_fw_writes=None):
     """Build the blip-free firmware cave for the replaced sounds in *patches*
@@ -9725,6 +9854,11 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
     firmware, so the caller must write it through the ext4 grow path and refresh
     the file's ``.sidx`` size as well as its digests.
 
+    A firmware an earlier blip-free Write already caved is rebuilt rather than
+    refused: the old cave comes out and its windows are carried into the new
+    one alongside this build's (see the section comment above
+    :func:`_find_pad_cave`).
+
     Raises ``RuntimeError`` (caught by the caller, which then falls back to the
     standard restore build) if the window-read function can't be located, the
     consumed-window map is missing, no unclaimed address space is large enough
@@ -9732,40 +9866,67 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
     function turns out not to be the window reader."""
     from .spike2.elf import parse_elf
     raw = bytearray(open(gr_path, "rb").read())
+
+    # Locate the window-read function by its unique prologue signature (address
+    # differs per firmware; the routine itself is identical).
+    fn = _locate_window_read_fn(raw)
+    carried = []   # (lo, hi, stock bytes) an earlier Write's cave redirected
+    if fn is None:
+        prev = _strip_pad_cave(raw)
+        if prev is not None:
+            fn, carried = prev["fn"], sorted(prev["windows"],
+                                             key=lambda w: w[0])
+            log("Blip-free cave: this card's game program already carries one "
+                "from an earlier build (%d window(s)); rebuilding it with "
+                "this build's sounds added." % len(carried), "info")
+        elif any(fl == 7 for *_x, fl in _iter_phdrs(raw)):
+            raise RuntimeError(
+                "this card's game program already carries a blip-free patch "
+                "from an older version of PAD, which this version can't "
+                "rebuild -- write from the stock card image for a blip-free "
+                "card")
+    if fn is None:
+        raise RuntimeError(
+            "window-read function not located (prologue signature absent or "
+            "ambiguous) -- this firmware isn't supported by the blip-free cave.")
     segs, _relocs = parse_elf(bytes(raw))   # relocs no longer used: the cave has its own segment
 
     def va2off(va):
         return _cave_va2off(segs, va)
 
-    # Locate the window-read function by its unique prologue signature (address
-    # differs per firmware; the routine itself is identical).
-    fn = _locate_window_read_fn(raw)
-    if fn is None:
-        raise RuntimeError(
-            "window-read function not located (prologue signature absent or "
-            "ambiguous) -- this firmware isn't supported by the blip-free cave.")
     ret = fn + 12
     log("Blip-free cave: window-read function located at 0x%x." % fn, "info")
 
     # The exact bytes the boot-derive consumes for each replaced sound == the
     # window ranges to redirect (from the Extract cache, or a fresh derive).
+    # Read off the firmware as it is on the card: a carried window is served
+    # from the old cave, so only the signature check's first bytes of it show
+    # up here, and those are dropped in favour of the carried entry.
     per_body = _replaced_consumed_offsets(gr_path, img_path, patches, np, log,
                                           progress)
-    windows = []   # (lo, hi) image file-offset ranges (2 per mono sound)
+    c_lo = np.array([w[0] for w in carried], np.int64)
+    c_hi = np.array([w[1] for w in carried], np.int64)
+    entries = list(carried)
     with open(img_path, "rb") as f:
-        stock_chunks = []
         for off in sorted(patches):
             wcon = per_body.get(off)
             if wcon is None or not len(wcon):
                 continue
+            if len(c_lo):
+                i = np.searchsorted(c_lo, wcon, "right") - 1
+                wcon = wcon[~((i >= 0) & (wcon < c_hi[np.maximum(i, 0)]))]
+                if not len(wcon):
+                    continue
             brk = np.where(np.diff(wcon) != 1)[0]
             starts = np.concatenate(([0], brk + 1))
             ends = np.concatenate((brk, [len(wcon) - 1]))
             for s, e in zip(starts, ends):
                 a0, b0 = int(wcon[s]), int(wcon[e]) + 1
-                windows.append((a0, b0))
                 f.seek(a0)
-                stock_chunks.append(f.read(b0 - a0))
+                entries.append((a0, b0, f.read(b0 - a0)))
+    entries.sort(key=lambda w: w[0])
+    windows = [(a0, b0) for a0, b0, _s in entries]   # (lo, hi) image file-offset ranges (2 per mono sound)
+    stock_chunks = [s for _a, _b, s in entries]
     if not windows:
         raise RuntimeError("no master-directory windows found for the replaced "
                            "sound(s) -- nothing to redirect.")
@@ -9834,16 +9995,22 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
     # a separate in-place write against the old inode would just be overwritten.
     for fo, b in (extra_fw_writes or {}).items():
         raw[fo:fo + len(b)] = b
+    _text_segment_to_eof(raw)
+    append_off = next(o for _ph, v, o, _fz, _mz, _fl in _iter_phdrs(raw)
+                      if v == cave_va)
 
     patched_gr = os.path.join(out_dir, "game_real_pathA")
     with open(patched_gr, "wb") as f:
         f.write(bytes(raw))
 
     log("Blip-free cave built: %d window(s) across %d replaced sound(s) "
-        "redirected to stock; fn=0x%x FIRST_OFF=0x%x; cave@0x%x in its own "
+        "redirected to stock%s; fn=0x%x FIRST_OFF=0x%x; cave@0x%x in its own "
         "%d-byte segment (file+0x%x), placed in %d bytes of unclaimed address "
         "space %s; game_real %d -> %d bytes."
-        % (len(windows), len(patches), fn, first_off, cave_va, len(blob),
+        % (len(windows), len(patches),
+           (" (%d of them carried from the earlier build's cave)"
+            % len(carried) if carried else ""),
+           fn, first_off, cave_va, len(blob),
            append_off, gap,
            "in branch reach" if len(entry) == 4 else
            "reached by an absolute jump",

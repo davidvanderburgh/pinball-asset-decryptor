@@ -3092,6 +3092,26 @@ def _text_grow_gate(dest_is_device):
     return True, ""
 
 
+def _image_grow_gate(dest_is_device):
+    """``(ok, why)`` — may this write give a scene's embedded image a new SIZE
+    (the scene re-serialised around it, :func:`radium_grow.regrow`)?  The same
+    conditions as longer scene text: an image build, and a host that can grow
+    a file inside an ext4 image.  ``PAD_STERN_IMAGE_GROW=0`` is the kill
+    switch (on by default: nothing resizes unless the user kept a replacement's
+    own size)."""
+    if os.environ.get("PAD_STERN_IMAGE_GROW", "1") == "0":
+        return False, "PAD_STERN_IMAGE_GROW=0"
+    if dest_is_device:
+        return False, ("a direct-SD write can't change a scene's size; build an "
+                       "image file")
+    from ...core import ext4_grow
+    ok, why = ext4_grow.available()
+    if not ok:
+        return False, ("this system can't grow files inside an ext4 image "
+                       "(%s)" % why)
+    return True, ""
+
+
 def _audio_grow_gate(dest_is_device, gr_path=None):
     """``(ok, why)`` — may this write place a replacement callout LONGER than
     its stock slot in new space at the end of the sound bank?
@@ -3325,28 +3345,41 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
 
 
 def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log):
-    """Re-serialise every scene in *grown_radium* (``{card_path: (node,
-    {original: replacement})}``, from :func:`_radium_text_writes`) with its
-    longer text and stage the result whole under *grow_dir*.
+    """Re-serialise every scene in *grown_radium* and stage the result whole
+    under *grow_dir*.  An entry is ``{card_path: (node, {original:
+    replacement}[, {data_off: (width, height, block bytes)}])}``: the longer
+    text from :func:`_radium_text_writes` and the resized images from
+    :func:`_radium_image_writes`, either of which may be empty.
 
     Composition: the scene's OTHER in-place edits this write makes (colours,
     layout, embedded images — all computed at stock-file offsets) are taken
     out of *radium_overlays* and applied to the stock bytes FIRST, then the
-    text is grown, so the staged file carries everything and the ``.sidx``
+    scene is grown, so the staged file carries everything and the ``.sidx``
     digest comes from the file rather than from an overlay.  Returns
     ``(jobs, grown_files)``: the ``(card_rel, staged)`` grow jobs and
     ``{i_block: staged}`` for the manifest refresh."""
     from . import radium_grow
     jobs, grown_files = [], {}
-    for i, (card_path, (node, edits)) in enumerate(sorted(grown_radium.items())):
+    for i, (card_path, entry) in enumerate(sorted(grown_radium.items())):
+        node, edits = entry[0], entry[1]
+        images = entry[2] if len(entry) > 2 else {}
         ib = bytes(node["i_block"])
         buf = bytearray(reader.read_file_bytes(node))
         ov = radium_overlays.pop(ib, None)
         if ov:
             for off, b in ov[1].items():
                 buf[off:off + len(b)] = b
-        new, occ, _shift = radium_grow.grow(bytes(buf), edits)
-        if not occ:
+        try:
+            got = radium_grow.regrow(bytes(buf), texts=edits or None,
+                                     images=images or None)
+        except ValueError as e:
+            log("Scene %s couldn't be re-serialised (%s); it is left "
+                "unchanged." % (card_path, e), "warning")
+            if ov:
+                radium_overlays[ib] = ov
+            continue
+        new, occ = got["data"], got["texts"]
+        if not occ and not got["images"]:
             log("Display text in %s: none of the longer lines were found when "
                 "re-serialising; the scene is left unchanged." % card_path,
                 "warning")
@@ -3358,12 +3391,23 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log):
             f.write(new)
         jobs.append((card_path.lstrip("/"), staged))
         grown_files[ib] = staged
-        log("Display text in %s: re-serialised %d line(s) at their new length "
-            "(%d occurrence(s)); the scene grows %d -> %d bytes and is "
-            "written whole. Whether the game loads a longer scene this way is "
-            "proven in the PC emulator only." %
-            (card_path, len(occ), sum(occ.values()), len(buf), len(new)),
-            "warning")
+        if occ:
+            log("Display text in %s: re-serialised %d line(s) at their new "
+                "length (%d occurrence(s)); the scene grows %d -> %d bytes and "
+                "is written whole. Whether the game loads a longer scene this "
+                "way is proven in the PC emulator only." %
+                (card_path, len(occ), sum(occ.values()), len(buf), len(new)),
+                "warning")
+        elif edits:
+            log("Display text in %s: none of the longer lines were found when "
+                "re-serialising." % card_path, "warning")
+        for off, refs in sorted(got["images"].items()):
+            w, h = images[off][:2]
+            log("Scene image in %s at %#x: now %dx%d, with the %d sprite "
+                "reference(s) that draw it resized to match; the scene grows "
+                "%d -> %d bytes and is written whole. Whether the game draws a "
+                "resized image this way is proven in the PC emulator only."
+                % (card_path, off, w, h, refs, len(buf), len(new)), "warning")
     return jobs, grown_files
 
 
@@ -3979,15 +4023,28 @@ def _changed_radium_images(assets_dir, baseline, extra_changed=(), scope=None):
     return out
 
 
-def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
+def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
+                         grow_dir=None, dest_is_device=False, grown=None):
     """Re-encode each edited radium-embedded image to its format (BC3/DXT5 or
     BC1/DXT1) and resolve it to a flat ``[(disk_offset, bytes), ...]`` list
     patching the bytes in place inside the ``scene.radium`` inode (same form
     ``_compute_patches`` collects, like the display-text writes).  Returns
     ``(writes, n_images)``.
 
-    Size-neutral by construction: the PNG is the full padded block grid, so
-    re-encoding yields exactly ``length`` bytes at ``data_offset``.
+    Size-neutral when the PNG is the stock padded block grid, so re-encoding
+    yields exactly ``length`` bytes at ``data_offset``.  A PNG whose own size
+    rounds up to that grid is padded out with transparency and patched the
+    same way.
+
+    A PNG of any OTHER size (PAD-154: a replacement the user kept at its own
+    size, because a longer name squeezed into the stock banner was unreadable)
+    is not patched in place.  When the caller offers *grow_dir* and a *grown*
+    dict and :func:`_image_grow_gate` passes, its encoded block data is
+    recorded as ``grown[card_path] = (node, {data_off: (width, height,
+    bytes)})`` for :func:`_stage_grown_radiums` to re-serialise the scene
+    around; otherwise it is skipped with the reason.  A font atlas never
+    changes size (its glyph rectangles are measured in its pixels), and
+    neither does an image no sprite in its scene draws by size.
 
     Returns ``(writes, n_images, overlays)`` where ``overlays`` is
     ``{i_block: (node, {file_offset: bytes})}`` for every patched ``scene.radium``
@@ -4042,7 +4099,38 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
     writes = []
     overlays = {}                  # i_block -> (node, {file_off: bytes})
     encoded = {}                   # staged PNG path -> block bytes (one PNG, many occurrences)
+    resized = {}                   # (staged, fmt) -> (w, h, block bytes) at the PNG's own size
+    gate = []                      # _image_grow_gate, asked once and only if needed
+    scenes = {}                    # card path -> (atlas offsets, {data_off: refs})
     patched_outputs = set()
+
+    def _resize_refusal(radium_path, node, data_off):
+        """Why the image at *data_off* can't take a new size, or ``""``."""
+        if radium_path not in scenes:
+            from . import radium as _radium, radium_grow as _rg
+            try:
+                data = reader.read_file_bytes(node)
+                imgs = parse_radium_images(data)
+                atlas = {g["atlas"]["data_off"]
+                         for t in _radium.parse_glyph_tables(data, imgs)
+                         for g in t["glyphs"] if g.get("atlas") is not None}
+                refs = {im["data_off"]: len(_rg.image_refs(
+                            data, im["data_off"], imgs)) for im in imgs}
+                scenes[radium_path] = (atlas, refs)
+            except Exception:
+                scenes[radium_path] = None
+        facts = scenes[radium_path]
+        if facts is None:
+            return "its scene couldn't be read"
+        atlas, refs = facts
+        if data_off in atlas:
+            return ("it is a font atlas, and its letters are measured in its "
+                    "pixels")
+        if not refs.get(data_off):
+            return ("nothing in its scene draws it by size, so a new size "
+                    "would not be followed")
+        return ""
+
     for output, radium_path, staged, data_off, length, pad_w, pad_h, fmt in edits:
         if cancel():
             break
@@ -4061,10 +4149,42 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
                 log("Radium image %s: can't read PNG (%s); skipped."
                     % (output, e), "warning")
                 continue
+            w, h = im.size
+            if (im.size != (pad_w, pad_h)
+                    and (_padded4(w), _padded4(h)) == (pad_w, pad_h)):
+                # The texture's own size rather than its padded grid: the
+                # same blocks, so pad with transparency and patch in place.
+                grid = Image.new("RGBA", (pad_w, pad_h), (0, 0, 0, 0))
+                grid.paste(im, (0, 0))
+                im = grid
             if im.size != (pad_w, pad_h):
-                log("Radium image %s is %dx%d but must stay %dx%d; skipped "
-                    "(don't resize — edit in place)."
-                    % (output, im.size[0], im.size[1], pad_w, pad_h), "warning")
+                why = "don't resize — edit in place"
+                if override is None and grown is not None and grow_dir:
+                    if not gate:
+                        gate.append(_image_grow_gate(dest_is_device))
+                    ok, why = gate[0]
+                    if ok:
+                        why = _resize_refusal(radium_path, node, data_off)
+                        ok = not why
+                    if ok:
+                        got = resized.get((staged, fmt))
+                        if got is None:
+                            grid = Image.new("RGBA", (_padded4(w), _padded4(h)),
+                                             (0, 0, 0, 0))
+                            grid.paste(im, (0, 0))
+                            arr = np.asarray(grid, dtype=np.uint8)
+                            got = resized[(staged, fmt)] = (
+                                w, h, _dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
+                                else _dds.encode_bc3(arr))
+                        grown.setdefault(radium_path, (node, {}))[1][data_off] = got
+                        patched_outputs.add(output)
+                        log("Radium image %s is %dx%d, not the original %dx%d: "
+                            "the scene (%s) is re-serialised around its new "
+                            "size." % (output, w, h, pad_w, pad_h, radium_path),
+                            "info")
+                        continue
+                log("Radium image %s is %dx%d but must stay %dx%d; skipped (%s)."
+                    % (output, w, h, pad_w, pad_h, why), "warning")
                 continue
             arr = np.asarray(im, dtype=np.uint8)
             if (override is not None
@@ -4863,24 +4983,36 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # bytes) writes (patched in place inside the scene.radium inode).
         radimg_writes = []
         n_radimg = 0
+        # Images kept at a size of their own (PAD-154): {card path: (node,
+        # {data_off: (w, h, block bytes)})}, re-serialised below with the
+        # scenes whose text grew.
+        grown_images = {}
         if radimg_edits:
             if progress:
                 progress(96, 100, "Preparing radium images...")
+            grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             radimg_writes, n_radimg, _i_ov = _radium_image_writes(
-                reader, assets_dir, baseline, log, cancel)
+                reader, assets_dir, baseline, log, cancel,
+                grow_dir=grow_work, dest_is_device=dest_is_device,
+                grown=grown_images)
             _merge_radium_overlays(radium_overlays, _i_ov)
             if cancel():
                 return None, None, None, None
 
-        # Scenes whose text outgrew its slot are re-serialised now, AFTER the
-        # colour / layout / image writers, so their in-place edits (all at
-        # stock offsets) fold into the grown bytes; the grown scene is then
-        # written whole and its in-place writes are dropped.
+        # Scenes whose text outgrew its slot, or whose image changed size,
+        # are re-serialised now, AFTER the colour / layout / image writers,
+        # so their in-place edits (all at stock offsets) fold into the grown
+        # bytes; the grown scene is then written whole and its in-place
+        # writes are dropped.
         radium_grow_jobs, grown_files = [], {}
-        if grown_text and grown_text.get("radium"):
+        grown_radium = {cp: (node, texts, {}) for cp, (node, texts)
+                        in ((grown_text or {}).get("radium") or {}).items()}
+        for cp, (node, imgs) in grown_images.items():
+            grown_radium.setdefault(cp, (node, {}, {}))[2].update(imgs)
+        if grown_radium:
             radium_grow_jobs, grown_files = _stage_grown_radiums(
-                reader, grown_text["radium"], radium_overlays, grow_work, log)
-            for _gnode, _gedits in grown_text["radium"].values():
+                reader, grown_radium, radium_overlays, grow_work, log)
+            for _gnode, *_gedits in grown_radium.values():
                 if bytes(_gnode["i_block"]) not in grown_files:
                     continue
                 text_writes = _drop_writes_in(text_writes, reader, _gnode)

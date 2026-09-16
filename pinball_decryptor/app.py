@@ -3573,7 +3573,9 @@ class App:
                     {rel: bool(v) for rel, v
                      in (saved.get("video_asis_slots") or {}).items()
                      if rel in assignments})
-        return (slots_by_rel, assignments)
+        return (slots_by_rel, assignments,
+                frozenset(r for r in (saved.get("image_keep_size") or ())
+                          if r in assignments))
 
     def _stage_pending_audio(self, assets_dir):
         """Convert + write the user's assigned replacement tracks over the
@@ -3673,7 +3675,10 @@ class App:
                 or self._sidecar_pending(assets_dir, "image"))
         if not pend:
             return (0, 0, [])
-        slots_by_rel, assignments = pend
+        slots_by_rel, assignments = pend[:2]
+        # Pictures the user kept at their own size (PAD-154); the Write
+        # re-serialises their scene around them.
+        keep_size = pend[2] if len(pend) > 2 else frozenset()
         from .core.image_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         self.msg_queue.put(LogMsg(
@@ -3681,7 +3686,8 @@ class App:
             f"assets folder...", "info"))
         try:
             staged, failures = stage_replacements(
-                slots_by_rel, assignments, log_cb=log_cb, assets_dir=assets_dir)
+                slots_by_rel, assignments, log_cb=log_cb, assets_dir=assets_dir,
+                keep_size=keep_size)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} image replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."

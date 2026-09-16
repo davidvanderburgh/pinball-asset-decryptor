@@ -725,9 +725,16 @@ def test_sidecar_pending_fallback_without_tab_scan(app, manufacturers_by_key,
     # ...but the sidecar fallback rebuilds the pending tuple for the build.
     pend = app._sidecar_pending(str(assets), "image")
     assert pend is not None
-    slots_by_rel, assignments = pend
+    slots_by_rel, assignments, keep_size = pend
     assert assignments == {"images/backglass.png": str(repl)}
     assert "images/backglass.png" in slots_by_rel
+    assert keep_size == frozenset()
+    # A kept-size flag recorded for the pick reaches the build (PAD-154).
+    staged_changes.save(str(assets), {
+        "image": {"images/backglass.png": str(repl)},
+        "image_keep_size": ["images/backglass.png", "images/gone.png"]})
+    assert app._sidecar_pending(str(assets), "image")[2] == frozenset(
+        {"images/backglass.png"})
 
 
 def test_back_returns_to_picker(app, manufacturers_by_key):

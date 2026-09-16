@@ -108,13 +108,15 @@ def scan_image_slots(assets_dir: str, roots=None, exts=None,
     return slots
 
 
-def stage_replacement(slot: ImageSlot, replacement_path: str):
+def stage_replacement(slot: ImageSlot, replacement_path: str,
+                      keep_size: bool = False):
     """Stage a single replacement over *slot*.
 
-    The replacement is scaled to the slot's pixel dimensions, saved in the
-    slot's format, and written atomically over ``slot.abs_path``.  Returns
-    ``(ok, detail)`` — on success *detail* summarises the conversions (may be
-    empty); on failure it's an error message.
+    The replacement is scaled to the slot's pixel dimensions (unless
+    *keep_size*), saved in the slot's format, and written atomically over
+    ``slot.abs_path``.  Returns ``(ok, detail)`` — on success *detail*
+    summarises the conversions (may be empty); on failure it's an error
+    message.
     """
     if not os.path.isfile(replacement_path):
         return False, "replacement file not found"
@@ -124,7 +126,10 @@ def stage_replacement(slot: ImageSlot, replacement_path: str):
     tmp = slot.abs_path + ".stage" + slot.ext
     try:
         info = slot.info or detect_image_info(slot.abs_path)
-        ok, detail = transcode_image_to(replacement_path, tmp, info)
+        ok, detail = transcode_image_to(replacement_path, tmp, info,
+                                        keep_size=keep_size)
+        if ok and keep_size:
+            detail = ", ".join(d for d in (detail, "own size kept") if d)
         if not ok:
             if os.path.exists(tmp):
                 try:
@@ -145,11 +150,13 @@ def stage_replacement(slot: ImageSlot, replacement_path: str):
 
 def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
                        assignments: Dict[str, str],
-                       log_cb=None, progress_cb=None, assets_dir=None):
+                       log_cb=None, progress_cb=None, assets_dir=None,
+                       keep_size=frozenset()):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
     *slots_by_rel* maps the same rel_path keys to their ImageSlot.  Returns
     ``(staged, failures)`` where *failures* is a list of ``(rel_path, error)``.
+    Rel paths in *keep_size* are staged at the replacement's own dimensions.
 
     *assets_dir*, when given, snapshots each slot's pristine bytes under
     ``.orig/`` before the first overwrite so the edit can be reverted without a
@@ -173,7 +180,7 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
             log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
-        ok, detail = stage_replacement(slot, rep)
+        ok, detail = stage_replacement(slot, rep, keep_size=rel in keep_size)
         if ok:
             staged += 1
             if log_cb:

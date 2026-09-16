@@ -279,6 +279,58 @@ answer `sound_lookup` itself: when the lookup key is the one the mode's chosen r
 would resolve to, hand back OUR entry instead. The card keeps every stock byte, no
 descriptor is re-pointed, and the neighbours are unchanged by construction.
 
+### The sid -> record binding, MEASURED from a live guest (2026-09-15)
+
+The play-time map at `0x7b92c4` is keyed by sid, and its node payload was read out of
+a running game and checked against the derive's 2535 rows - predictions made BEFORE
+each read, on sids 4, 2, 19, 22 and 1998:
+
+| field | meaning | evidence |
+|---|---|---|
+| `+16` | sid (the key) | the game's own comparison |
+| `+24` | **body_off** | 2581 / 2581 nodes |
+| `+32` | **length x 2 x chan** (bytes) | 2581 / 2581 (`length*2` fits only the 1667 mono nodes) |
+| `+36` | 400 mono / 800 stereo | 1667 / 914, no exceptions |
+| `+28` | always 0 | 2581 / 2581 |
+| `+20` | **unidentified**, and NOT `key0` | 0 / 2581 |
+
+2581 nodes cover 2497 distinct records; **38 records are named by no sid at all**, and
+our appended record is named by none, as expected. `guest_base` was confirmed the same
+way rather than assumed: `[0x7b10b4]` reads 585 at base `0x10000` and 1 at base 0.
+
+So retargeting a sid is a three-word write (`+24`, `+32`, `+36`), reversible, and it
+lands and reads back clean. **It is not sufficient on its own.** With sid 1998 pointed
+at our appended record, `callout_play(1295)` fired and the capture correlated at
+**0.026 / 0.033** over two runs - our clip did not play.
+
+**And the city-variant swap is INNOCENT**, which the probe settled instead of
+inference: `callout 1295 lr=0x4085c590` (our mode.so trampoline) is followed
+immediately by `request 1295 lr=0x187f90`. Request 1295 reaches the worker unchanged,
+and its sid list is `[1998]` - the node that was patched. The binding WAS exercised.
+
+**The obvious explanation was tested and is ALSO false.** The node says WHERE the
+bytes are, not HOW to decode them; our appended record is scale 13 and sid 1998's
+record (idx 1560) is scale 1, so "it read our body with the wrong keystream and
+emitted noise" was the natural reading. It predicts a loud, spectrally FLAT ~4 s burst
+at the callout. The capture says otherwise: over the last 12 s the envelope is uniform
+game audio (100 ms frames, mean 4933, no anomaly at the callout), and the spectral
+flatness of the closing seconds is **0.137 - 0.208** - tonal, near our clip's own
+0.087, and nowhere near the 0.8+ of noise. **The game did not read our body at all.**
+
+So, measured and not yet explained: request 1295 reaches the worker, its sid list is
+`[1998]`, that node was patched and verified live at fire time, and nothing read it.
+Two candidates remain, and they are distinguishable with the probe rather than by
+argument:
+
+- the worker resolves the record through something other than this node (the map may
+  be a cache, or a second map exists and the play path walks that one);
+- the sound was VETOED before the decode - `hook_dispatch(0xac)` at `0x2a2abc` sits
+  between the channel arbitration and the start call `0x2a2044`.
+
+**Next pass: hook `0x2a2044` and see whether the channel start is reached for that
+callout at all.** A sound that never starts cannot be changed by retargeting any
+record, and that has to be settled before any more of this is built on.
+
 ### MEASURED FALSE: `sound_lookup` is BOOT-ONLY, so a play-time hook never fires
 
 Run 1 of the mode with a `sound_key`: the mode ran its full 30 s, scored ten shots,

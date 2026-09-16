@@ -3790,6 +3790,16 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel):
             skipped += 1
             continue
         arr = np.asarray(im, dtype=np.uint8)
+        pw, ph = ((w + 3) // 4) * 4, ((h + 3) // 4) * 4
+        try:
+            stock = (_dds.decode_bc1 if fmt == _DXT1_FORMAT
+                     else _dds.decode_bc3)(reader.read_file_bytes(node), pw, ph)
+        except Exception:
+            stock = None
+        arr, premult = _premultiply_like_stock(arr, stock)
+        if premult:
+            log("Texture %s: colours premultiplied by alpha, the way the game "
+                "blends scene textures." % output, "info")
         payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
                    else _dds.encode_bc3(arr))
         if len(payload) != node["size"]:
@@ -3897,6 +3907,49 @@ def _atlas_png_changed(assets_dir, staged, baseline, output):
     if base is None:
         return True
     return _scan_md5(assets_dir, staged) != base
+
+
+#: Slack when testing premultiplied data's RGB <= A: a BC block's four colours
+#: are shared, so a stock texel decodes up to a few dozen levels past its
+#: alpha (Godzilla's language-screen date: up to 28 on transparent texels,
+#: 2.2% of its pixels past a slack of 12).  Straight art misses by far more:
+#: a white edge sits ~150 above its alpha, a white "transparent" pixel 255.
+_PREMULT_TOL = 48
+
+
+def _straight_alpha_share(arr):
+    """Share of *arr*'s pixels (uint8 RGBA) whose colour is brighter than their
+    alpha -- which premultiplied data never is, a transparent pixel included."""
+    import numpy as np
+    a = arr[..., 3].astype(np.int16)
+    return float((arr[..., :3].max(axis=2).astype(np.int16)
+                  > a + _PREMULT_TOL).mean())
+
+
+def _premultiply_like_stock(arr, stock):
+    """``(pixels, changed)``: *arr* (uint8 RGBA) with its colour multiplied by
+    its alpha when the slot's *stock* pixels are premultiplied and *arr* is
+    not.
+
+    Stern's compressed pictures are premultiplied (PAD-154 census of Godzilla
+    LE 1.16 at this slack: all 180 sampled scene pictures, every font atlas
+    and all 250 sampled scene textures keep RGB <= A; 70 of the 77 plain PNG
+    files with soft edges do not), and the game blends them that way.  A picture saved by an image editor keeps its colour
+    unmultiplied, so on the machine its soft edges draw too bright and a
+    transparent pixel that isn't black draws as a solid box (a white
+    "transparent" background became a white bar in the emulator).  An
+    extracted picture edited in place is premultiplied already and is left
+    alone, as is a slot whose own stock pixels are not premultiplied."""
+    import numpy as np
+    if stock is not None and _straight_alpha_share(stock) > 0.005:
+        return arr, False
+    if _straight_alpha_share(arr) <= 0.005:
+        return arr, False
+    out = np.array(arr, dtype=np.uint8, copy=True)
+    a = arr[..., 3:4].astype(np.uint16)
+    out[..., :3] = ((arr[..., :3].astype(np.uint16) * a + 127) // 255).astype(
+        np.uint8)
+    return out, True
 
 
 def _splice_changed_blocks(raw, target, pad_w, pad_h, fmt):
@@ -4102,14 +4155,36 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
     resized = {}                   # (staged, fmt) -> (w, h, block bytes) at the PNG's own size
     gate = []                      # _image_grow_gate, asked once and only if needed
     scenes = {}                    # card path -> (atlas offsets, {data_off: refs})
+    scene_bytes = {}               # card path -> the stock scene.radium
     patched_outputs = set()
+
+    def _scene(radium_path, node):
+        if radium_path not in scene_bytes:
+            scene_bytes[radium_path] = reader.read_file_bytes(node)
+        return scene_bytes[radium_path]
+
+    def _premultiplied(arr, output, radium_path, node, data_off, length,
+                       pad_w, pad_h, fmt):
+        """*arr* premultiplied when its slot's stock pixels are (see
+        :func:`_premultiply_like_stock`)."""
+        try:
+            raw = _scene(radium_path, node)[data_off:data_off + length]
+            stock = (_dds.decode_bc1 if fmt == _DXT1_FORMAT
+                     else _dds.decode_bc3)(raw, pad_w, pad_h)
+        except Exception:
+            stock = None
+        arr, changed = _premultiply_like_stock(arr, stock)
+        if changed:
+            log("Radium image %s: colours premultiplied by alpha, the way the "
+                "game blends scene pictures." % output, "info")
+        return arr
 
     def _resize_refusal(radium_path, node, data_off):
         """Why the image at *data_off* can't take a new size, or ``""``."""
         if radium_path not in scenes:
             from . import radium as _radium, radium_grow as _rg
             try:
-                data = reader.read_file_bytes(node)
+                data = _scene(radium_path, node)
                 imgs = parse_radium_images(data)
                 atlas = {g["atlas"]["data_off"]
                          for t in _radium.parse_glyph_tables(data, imgs)
@@ -4172,7 +4247,10 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                             grid = Image.new("RGBA", (_padded4(w), _padded4(h)),
                                              (0, 0, 0, 0))
                             grid.paste(im, (0, 0))
-                            arr = np.asarray(grid, dtype=np.uint8)
+                            arr = _premultiplied(
+                                np.asarray(grid, dtype=np.uint8), output,
+                                radium_path, node, data_off, length, pad_w,
+                                pad_h, fmt)
                             got = resized[(staged, fmt)] = (
                                 w, h, _dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
                                 else _dds.encode_bc3(arr))
@@ -4187,6 +4265,9 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                     % (output, w, h, pad_w, pad_h, why), "warning")
                 continue
             arr = np.asarray(im, dtype=np.uint8)
+            if override is None:
+                arr = _premultiplied(arr, output, radium_path, node, data_off,
+                                     length, pad_w, pad_h, fmt)
             if (override is not None
                     and not _atlas_png_changed(assets_dir, staged, baseline,
                                                output)):

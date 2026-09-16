@@ -281,6 +281,77 @@ def test_a_texture_size_png_is_padded_and_patched_in_place(tmp_path,
 
 
 # ---------------------------------------------------------------------------
+# premultiplied alpha: how the game blends scene pictures
+# ---------------------------------------------------------------------------
+
+def _straight_text(w, h):
+    """What an image editor saves: white "ink" with soft edges, and a
+    transparent background whose colour is white, not black."""
+    arr = np.zeros((h, w, 4), dtype=np.uint8)
+    arr[..., :3] = 255
+    arr[:, : w // 2, 3] = 255
+    arr[:, w // 2: w // 2 + 4, 3] = 96          # anti-aliased edge
+    return arr
+
+
+def _is_premultiplied(arr, tol=16):
+    return bool((arr[..., :3].max(axis=2).astype(int)
+                 <= arr[..., 3].astype(int) + tol).all())
+
+
+def test_premultiply_only_where_slot_and_picture_call_for_it():
+    stock = np.zeros((20, 40, 4), dtype=np.uint8)
+    stock[..., :3] = 90
+    stock[..., 3] = 255                         # premultiplied (opaque)
+    straight = _straight_text(40, 20)
+    out, changed = engine._premultiply_like_stock(straight, stock)
+    assert changed and _is_premultiplied(out, tol=0)
+    assert (out[..., :3][straight[..., 3] == 0] == 0).all()
+    assert (out[:, :20] == 255).all()           # opaque ink untouched
+
+    again, changed = engine._premultiply_like_stock(out, stock)
+    assert not changed and again is out         # never multiplied twice
+
+    loud = np.full((20, 40, 4), 200, dtype=np.uint8)
+    loud[..., 3] = 40                           # a slot that is NOT premultiplied
+    kept, changed = engine._premultiply_like_stock(straight, loud)
+    assert not changed and kept is straight
+
+
+def test_compression_noise_does_not_hide_a_premultiplied_slot():
+    """Godzilla's language-screen date decodes with colour up to 28 on some
+    transparent texels (2.2% of it past a slack of 12): still premultiplied."""
+    stock = np.zeros((20, 40, 4), dtype=np.uint8)
+    stock[:, :20] = 255
+    stock[:1, 20:, :3] = 28                     # 20 of 800 px = 2.5%, A == 0
+    _out, changed = engine._premultiply_like_stock(_straight_text(40, 20), stock)
+    assert changed
+
+
+def test_an_editor_picture_is_premultiplied_in_place(tmp_path):
+    data, banner, _icon = _scene()
+    png = _project(tmp_path, data, banner, 40, 20)
+    Image.fromarray(_straight_text(40, 20), "RGBA").save(png)
+    writes, n, _ov, _grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
+    assert n == 1 and [w[0] for w in writes] == [banner]
+    assert _is_premultiplied(dds.decode_bc3(writes[0][1], 40, 20))
+    assert any("premultiplied by alpha" in m for _l, m in msgs)
+
+
+def test_an_editor_picture_is_premultiplied_when_resized(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "_image_grow_gate", lambda d: (True, ""))
+    data, banner, _icon = _scene()
+    png = _project(tmp_path, data, banner, 40, 20)
+    Image.fromarray(_straight_text(90, 22), "RGBA").save(png)
+    _w, _n, _ov, grown, _msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
+    (_node, imgs), = grown.values()
+    w, h, payload = imgs[banner]
+    decoded = dds.decode_bc3(payload, 92, 24)[:h, :w]
+    assert _is_premultiplied(decoded)
+    assert decoded[:, 60:, :3].max() <= 16      # the "transparent" white is gone
+
+
+# ---------------------------------------------------------------------------
 # the Write
 # ---------------------------------------------------------------------------
 

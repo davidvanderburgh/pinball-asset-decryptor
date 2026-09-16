@@ -481,8 +481,14 @@ made current, priority 145 from that show), then the same group re-read over 12 
 | +2 s on | lamp 515 at `+8 31` |
 
 Those are **the same eight lamps the game's own tesla award writes** (seen in the same
-run, group `0x7dd730`, `+3 255` `+8 20`): the powerline tower. Ours differs only in
-`+8` (fade), because the game's sweep carries `--fade 20` in its second line.
+run, group `0x7dd730`, `+3 255` `+8 20`). Ours differs only in `+8` (fade), because the
+game's sweep carries `--fade 20` in its second line.
+
+**What 413-420 ARE is not proven.** They are above the 260-entry lamp table
+`0x71b06c`, so they are ids in the 585-entry slot index, and nothing read so far names
+them. Tesla strike is the powerline mode, so its own award lighting them makes the
+powerline tower the obvious guess - but it is a guess, and a playfield capture did not
+settle it either.
 
 **So the command works, and every earlier "nothing happened" was the instrument.** A
 light command writes nothing at parse time - it writes on later frames - and
@@ -516,10 +522,12 @@ so tesla strike could not start and light the same lamps behind it:
 120915 [rush] lights off landed: 4 lamps written, first 353
 ```
 
-`lr 0x4085ac44` is our `.so`, so the command is ours. **The tower lamps from 413 were
-written 0.48 s after the call**, and the game's own tesla award did not run until
-92981 - after that window - so nothing else wrote them. After the fade, 413-420 are no
-longer held (what remains is another show's, from 353).
+`lr 0x4085ac44` is our `.so`, so the command is ours. **Six lamps from 413 were written
+0.48 s after the call**, and the game's own tesla award did not run until 92981 - after
+that window - so nothing else wrote them. After the fade, 413-420 are no longer held
+(what remains is another show's, from 353). Which inserts those are is not established
+(see run 12 above): what is proven is that our command writes the same lamps the game's
+own award writes.
 
 **A count read at call time is always 0.** Run 13 logged exactly that and proved
 nothing; the count has to come from a later tick, which is what `lights_check` does.

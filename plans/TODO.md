@@ -7532,9 +7532,11 @@ These have each been violated at least once and each cost a run or a window:
       tesla's own green sweep at its start and the fade at its end (`hook.h`'s
       `gz_blele`). In a played game, shots taken on the RAMPS ONLY so tesla could not
       start: the mode's command went through the parser at 90348 (`lr 0x4085ac44`,
-      our .so) and the mode read back **6 lamps written, first 413 - the powerline
-      tower - 0.48 s later**; the game's own award did not run until 92981, after
-      that window. At the end the fade left 413-420 unheld. A count read at call time
+      our .so) and the mode read back **6 lamps written, first 413 - the same lamps
+      the game's own tesla award writes - 0.48 s later**; the game's own award did
+      not run until 92981, after that window. (WHICH inserts 413-420 are is not
+      proven: they are above the 260-entry lamp table, in the 585-entry slot index,
+      and unnamed. Tesla is the powerline mode, so the tower is the guess.) At the end the fade left 413-420 unheld. A count read at call time
       is always 0 (run 13's mistake); it comes from a later tick now.
       **Resume:** the soak and the stock bar were taken on the PRE-LIGHTS build, so
       re-soak this one (`modes/soak.sh 10`) before the box goes in.

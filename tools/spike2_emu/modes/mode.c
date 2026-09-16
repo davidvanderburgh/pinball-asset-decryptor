@@ -101,9 +101,11 @@ static void words_restore(void)
 }
 
 /* ---- the lights: the game's own light runner (emulator-proven, run 12) ----------
- * KAIJU RUSH lights the POWERLINE TOWER, the same eight lamps (413-420) tesla
- * strike's award lights, with tesla's own pair of commands through hook.h's gz_blele:
- * a green sweep on at the start, and the fade to black at the end.
+ * KAIJU RUSH lights the same eight lamps (413-420) tesla strike's own award lights,
+ * with tesla's own pair of commands through hook.h's gz_blele: a green sweep on at the
+ * start, and the fade to black at the end. (Which inserts those are is not established
+ * - the ids are above the 260-entry lamp table, in the 585-entry slot index, and
+ * nothing names them; tesla is the powerline mode, so the tower is the guess.)
  *
  * Three earlier candidates are ruled out in MODE_API.md: starting tesla's shows
  * (95/96/344/346/351/356), 0x185e9c (a device driver, not a light), and this same

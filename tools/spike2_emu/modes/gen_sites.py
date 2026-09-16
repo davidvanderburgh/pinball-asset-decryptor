@@ -46,6 +46,12 @@ SITES = [
     ("LAMP_GROUP", 0x4BF294, False),  # lamp group from light-set table 0x7257a8 (set 0 = empty) - called
     ("SHOW_PRIO", 0x4F3740, False),   # the running show's lamp priority, off the current event - called
     ("GROUP_FREE", 0x3C15CC, False),  # give a lamp group back (the pool is 48, 0x3c1700) - called
+    ("SOUND_START", 0x2A2044, True),  # the channel START, after the arbitration and after
+                                      # hook_dispatch(0xac)'s veto at 0x2a2abc. Hooked to answer
+                                      # the one question left in item 130: when a callout is
+                                      # fired and its sid's tree node has been retargeted, is a
+                                      # channel ever started at all? A sound that never starts
+                                      # cannot be changed by retargeting any record.
     ("SOUND_LOOKUP", 0x33C0D8, True), # sound_lookup(map, key8) -> the sound container entry.
                                       # bucket = uidivmod(key.w1, map[1]), then find 0x2a25e0.
                                       # HOOKED so a mode can point r1 at a key of its OWN: the

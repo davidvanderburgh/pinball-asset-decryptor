@@ -157,6 +157,23 @@ static void on_callout(unsigned *r)
     hk_logs(m);
 }
 
+/* ITEM 130: the channel START (0x2a2044). It is reached only after the channel
+ * arbitration and only after hook_dispatch(0xac) at 0x2a2abc has declined to veto,
+ * so a request can be logged by on_sound and still never start.
+ *
+ * That distinction is the whole question left in item 130: with a sid's tree node
+ * retargeted at a record the card never had, the callout was requested, nothing of
+ * ours was read, and the capture showed no misdecoded burst either. If no channel
+ * starts for that callout, then no amount of retargeting a record changes what is
+ * heard, and the retarget is not the thing to keep working on. r0 is the channel. */
+static void on_sound_start(unsigned *r)
+{
+    char m[200];
+    snprintf(m, sizeof m, "[sound] START ch=0x%08x r1=0x%x r2=0x%x r3=0x%x  lr=0x%x\n",
+             r[0], r[1], r[2], r[3], r[5]);
+    hk_logs(m);
+}
+
 static void on_show(unsigned *r)
 {
     static struct last l;
@@ -563,6 +580,8 @@ static void padmode_init(void)
         { SITE_SCORE_ADD, SITE_SCORE_ADD_W0, SITE_SCORE_ADD_W1, on_score, "score_add" },
         { SITE_CAWARD_ADD, SITE_CAWARD_ADD_W0, SITE_CAWARD_ADD_W1, on_caward, "caward_add" },
         { SITE_SOUND, SITE_SOUND_W0, SITE_SOUND_W1, on_sound, "sound" },
+        { SITE_SOUND_START, SITE_SOUND_START_W0, SITE_SOUND_START_W1,
+          on_sound_start, "sound_start" },
         { SITE_CALLOUT, SITE_CALLOUT_W0, SITE_CALLOUT_W1, on_callout, "callout" },
         { SITE_SHOW, SITE_SHOW_W0, SITE_SHOW_W1, on_show, "show" },
         { SITE_EVPOST, SITE_EVPOST_W0, SITE_EVPOST_W1, on_evpost, "evpost" },

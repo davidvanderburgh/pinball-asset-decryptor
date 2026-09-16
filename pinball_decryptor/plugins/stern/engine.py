@@ -6311,6 +6311,36 @@ def _writes_by_file(reader, writes):
     return by_file, unmapped
 
 
+def card_title_index(path):
+    """The ``.sidx`` names in ``/spk/index`` on the games partition
+    :func:`write_overrides` would edit on the card image at *path*, sorted —
+    which title, edition and version the card is
+    (``("godzilla_le-1_16_0.sidx",)``) — or ``()`` when it can't be read.
+
+    Only directory blocks are read, so it costs milliseconds on a multi-GB
+    image.  PAD-161 asks it of two cards to decide whether an override set may
+    be prepared from one and run over the other: a card PAD built keeps its
+    title's index name, another version of the game does not.
+    """
+    from .ext4 import S_IFDIR, S_IFMT
+    try:
+        with open(_lp(str(path)), "rb") as f:
+            reader, _fw, _img = _locate(f, _linux_partitions(path))
+            node = reader.read_inode(2)
+            for name in ("spk", "index"):
+                ino = next((c for n, c, _t in reader._iter_dir(node)
+                            if n == name), None)
+                if ino is None:
+                    return ()
+                node = reader.read_inode(ino)
+                if node["mode"] & S_IFMT != S_IFDIR:
+                    return ()
+            return tuple(sorted(n for n, _c, _t in reader._iter_dir(node)
+                                if n.lower().endswith(".sidx")))
+    except Exception:
+        return ()
+
+
 def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                     cancel=None, label=None):
     """Build an OVERRIDE SET: the card files the user's edits touch, patched,

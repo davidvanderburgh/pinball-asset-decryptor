@@ -520,6 +520,105 @@ def test_the_set_is_staged_where_the_app_already_cleans_up():
 
 
 # --------------------------------------------------------------------------
+# PAD-161: which card the set is prepared FROM
+# --------------------------------------------------------------------------
+
+def test_the_title_index_is_read_off_the_games_partition(card):
+    assert engine.card_title_index(str(card.img)) == ("turtles_pro.sidx",)
+
+
+def test_a_card_with_no_title_index_reads_as_unknown(card, monkeypatch,
+                                                     tmp_path):
+    bare = _Reader({"turtles_pro": {"image.bin": b"S", "game": b"G"}})
+    monkeypatch.setattr(engine, "_locate", lambda f, p: (bare, None, None))
+    assert engine.card_title_index(str(card.img)) == ()
+    assert engine.card_title_index(str(tmp_path / "gone.raw")) == ()
+
+
+def _cards(tmp_path):
+    """A stock card, a build of it (PAD's builds are the stock card's size),
+    and an extract folder that records the stock card as its source."""
+    from pinball_decryptor.core.extract_source import write_extract_source
+    stock = tmp_path / "godzilla_le-1_16_0.raw"
+    stock.write_bytes(b"s" * 64)
+    (tmp_path / "out").mkdir()
+    built = tmp_path / "out" / "godzilla_le-1_16_0-modified.raw"
+    built.write_bytes(b"b" * 64)
+    assets = tmp_path / "gz"
+    assets.mkdir()
+    write_extract_source(str(assets), str(stock))
+    return str(stock), str(built), str(assets)
+
+
+def _index(**by_name):
+    def title_index(path):
+        return by_name[os.path.basename(path).split(".")[0].replace("-", "_")]
+    return title_index
+
+
+LE = ("godzilla_le-1_16_0.sidx", "godzilla_le.sidx")
+
+
+def test_a_built_card_runs_edits_prepared_from_the_card_they_came_from(
+        tmp_path):
+    """The ticket: a card PAD built, with the box ticked, and newer pictures.
+
+    Every offset in the extract was measured on the stock card, and the built
+    one had a scene that grew, so the set has to be prepared from the stock
+    card - and the log has to say which card that was."""
+    stock, built, assets = _cards(tmp_path)
+    base, note = emulate_tab.override_base_card(
+        built, assets, _index(godzilla_le_1_16_0=LE,
+                              godzilla_le_1_16_0_modified=LE))
+    assert base == stock
+    assert stock in note and "extracted from" in note
+
+
+def test_the_card_the_extract_came_from_is_taken_as_it_is(tmp_path):
+    stock, _built, assets = _cards(tmp_path)
+
+    def never(path):
+        raise AssertionError("no card needs opening for this")
+
+    assert emulate_tab.override_base_card(stock, assets, never) == (stock, "")
+
+
+def test_another_version_is_prepared_from_the_card_picked(tmp_path):
+    """Bytes from one version bound over another are a broken title of their
+    own, so the old behaviour stands - and the user is told."""
+    stock, built, assets = _cards(tmp_path)
+    base, note = emulate_tab.override_base_card(
+        built, assets, _index(
+            godzilla_le_1_16_0=LE,
+            godzilla_le_1_16_0_modified=("godzilla_pro-1_16_0.sidx",
+                                         "godzilla_pro.sidx")))
+    assert base == built
+    assert "godzilla_pro-1_16_0" in note and "godzilla_le-1_16_0" in note
+
+
+def test_nothing_known_about_either_card_changes_nothing(tmp_path):
+    stock, built, assets = _cards(tmp_path)
+    assert emulate_tab.override_base_card(
+        built, assets, lambda p: ()) == (built, "")
+    # ...and neither does an extract with no record of its source.
+    os.remove(os.path.join(assets, ".extract_source.json"))
+    assert emulate_tab.override_base_card(
+        built, assets, lambda p: LE) == (built, "")
+
+
+def test_a_missing_original_is_said_out_loud_unless_it_just_moved(tmp_path):
+    stock, built, assets = _cards(tmp_path)
+    (tmp_path / "moved").mkdir()
+    moved = tmp_path / "moved" / os.path.basename(stock)
+    os.replace(stock, moved)
+    base, note = emulate_tab.override_base_card(built, assets, lambda p: LE)
+    assert base == built and "not there any more" in note
+    # Same name, same size: the original, somewhere else.
+    assert emulate_tab.override_base_card(
+        str(moved), assets, lambda p: LE) == (str(moved), "")
+
+
+# --------------------------------------------------------------------------
 # The tab
 # --------------------------------------------------------------------------
 
@@ -736,6 +835,41 @@ def test_staging_that_raises_never_starts_a_run(tmp_path, monkeypatch):
         assert panel._prepare_overrides(img, assets) is None
         root.update()
         assert "NAS went away" in panel._ovr_hint.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_start_prepares_the_set_from_the_card_the_extract_came_from(
+        tmp_path, monkeypatch):
+    """PAD-161 end to end on the tab: the reuse test and the build are both
+    asked about the extract's card, never the built one picked to run."""
+    from pinball_decryptor.core.extract_source import write_extract_source
+    lines = []
+    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch,
+                                            log=lines.append)
+    stock = tmp_path / "stock.raw"
+    stock.write_bytes(bytes(64))
+    write_extract_source(assets, str(stock))
+    monkeypatch.setattr(engine, "card_title_index",
+                        lambda p: ("godzilla_le-1_16_0.sidx",))
+    asked, built = [], []
+
+    def reason(manifest, card, assets_dir, fp):
+        asked.append(card)
+        return "there is no set staged yet"
+
+    def write_overrides(card, assets_dir, out, log=None, cancel=None):
+        built.append(card)
+        return (0, 0, 1, 0), None, None, [("/gz/scene.radium", 9)]
+
+    monkeypatch.setattr(emulate_tab, "overrides_reason", reason)
+    monkeypatch.setattr(engine, "write_overrides", write_overrides)
+    try:
+        extra = panel._prepare_overrides(img, assets)
+        assert extra and extra[0].startswith("PAD_OVERRIDE_DIR=")
+        assert asked == [str(stock)] and built == [str(stock)]
+        root.update()
+        assert any("prepared from %s" % stock in ln for ln in lines)
     finally:
         root.destroy()
 

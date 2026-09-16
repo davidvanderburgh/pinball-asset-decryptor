@@ -51,6 +51,12 @@ static struct {
     char light_on[STR_MAX], light_off[STR_MAX];
     unsigned at_secs[CALLOUT_AT_MAX], at_id[CALLOUT_AT_MAX], n_at;
     unsigned callout_count, callout_end;
+    /* ITEM 130: a sound of our OWN. `sound_key` is the 8-byte container key of a
+     * record appended to image.bin - audio the card never shipped and no descriptor
+     * names. `sound_callout` is the stock request the mode fires to carry it. */
+    unsigned char sound_key[8];
+    int has_sound_key;
+    unsigned sound_callout;
 } cfg;
 
 /* ---- the run, while it is running ---------------------------------------------- */
@@ -131,6 +137,22 @@ static void cfg_line(const char *line)
     if ((a = key_is(line, "light_off")) != 0)         { rest_of_line(cfg.light_off, STR_MAX, a); return; }
     if ((a = key_is(line, "callout_count")) != 0)     { cfg.callout_count = (unsigned)num(&a); return; }
     if ((a = key_is(line, "callout_end")) != 0)       { cfg.callout_end = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "sound_callout")) != 0)     { cfg.sound_callout = (unsigned)num(&a); return; }
+    if ((a = key_is(line, "sound_key")) != 0) {
+        /* 16 hex digits, the key exactly as the derive prints it (a byte string,
+         * NOT two words) - so it is copied in order and never byte-swapped. */
+        unsigned n = 0;
+        while (is_space(*a)) a++;
+        while (n < 8) {
+            int hi = hk_hex(a[2 * n] | 0x20), lo = hk_hex(a[2 * n + 1] | 0x20);
+            if (hi < 0 || lo < 0) break;
+            cfg.sound_key[n++] = (unsigned char)((hi << 4) | lo);
+        }
+        cfg.has_sound_key = (n == 8);
+        if (!cfg.has_sound_key)
+            hk_logs("[mode] sound_key needs 16 hex digits - ignored\n");
+        return;
+    }
     if ((a = key_is(line, "callout_at")) != 0) {
         if (cfg.n_at < CALLOUT_AT_MAX) {
             cfg.at_secs[cfg.n_at] = (unsigned)num(&a);
@@ -295,6 +317,46 @@ static void callout(unsigned req)
     if (req) ((void (*)(unsigned))(unsigned long)SITE_CALLOUT)(req);
 }
 
+/* ---- ITEM 130: a sound the game never shipped ----------------------------------
+ * The play chain is request -> sid -> descriptor -> an 8-byte key -> sound_lookup
+ * -> the entry the engine built from a record in image.bin. The boot-time band
+ * build registers EVERY record under a key of its own, so a record we APPENDED is
+ * already a live entry - it is simply one that no descriptor names.
+ *
+ * So the mode does not re-point anything on the card. It arms a one-shot, fires an
+ * ordinary callout, and while that callout resolves, the hook points the lookup's
+ * key pointer at OUR key. The game then finds our entry and plays it through its
+ * own channel arbitration, priority and veto.
+ *
+ * TWO THREADS. The arm happens on the tick (the scheduler thread) and the lookup
+ * runs on whatever thread the audio path uses, so this is a handoff and not a lock.
+ * It FAILS CLOSED on purpose: if some other sound's lookup consumes the one-shot
+ * first, that sound plays ours and ours plays stock - wrong audio for one callout,
+ * never a bad pointer. `sound_armed` is only ever set immediately before the call
+ * it is meant for, and cleared by the first lookup that sees it. */
+static volatile int sound_armed;
+static unsigned sound_subs, sound_misses;
+
+static void callout_ours(unsigned req)
+{
+    if (!req || !cfg.has_sound_key) { callout(req); return; }
+    sound_armed = 1;
+    callout(req);
+    if (sound_armed) {                 /* nothing looked anything up: stock played */
+        sound_armed = 0;
+        sound_misses++;
+    }
+}
+
+/* sound_lookup(map, key_ptr): repoint r1 at our key while the one-shot is armed. */
+static void on_lookup(unsigned *r)
+{
+    if (!sound_armed) return;
+    sound_armed = 0;
+    r[1] = (unsigned)(unsigned long)cfg.sound_key;
+    sound_subs++;
+}
+
 static void callout_nth(unsigned req, unsigned n)
 {
     if (req) ((void (*)(unsigned, unsigned))(unsigned long)SITE_CALLOUT_NTH)(req, n);
@@ -335,6 +397,11 @@ static void mode_end(const char *why)
              cfg.name, why, run.hits, run.total, run.score_at_start,
              score_now(run.player), hk_ms() - run.started_ms);
     hk_logs(m);
+    if (cfg.has_sound_key) {
+        snprintf(m, sizeof m, "[mode] own sound: %u substitution(s), %u miss(es)\n",
+                 sound_subs, sound_misses);
+        hk_logs(m);
+    }
 }
 
 /* ---- the shot dispatch: cmode_manager::v[7](mgr, _, mask64, x) ------------------ */
@@ -409,7 +476,11 @@ static void on_tick(unsigned *r)
         }
     }
     if (run.ticks_left == 0) {
-        callout(cfg.callout_end);
+        /* The mode signs off in a voice of its own when the file gives it one. */
+        if (cfg.has_sound_key && cfg.sound_callout)
+            callout_ours(cfg.sound_callout);
+        else
+            callout(cfg.callout_end);
         mode_end("time ran out");
     }
 }
@@ -430,7 +501,9 @@ static void mode_init(void)
        & hk_site_ok(SITE_TEXT, SITE_TEXT_W0, SITE_TEXT_W1, "award_screen")
        & hk_site_ok(SITE_BLELE_RUN, SITE_BLELE_RUN_W0, SITE_BLELE_RUN_W1, "blele_run")
        & hk_site_ok(SITE_LAMP_GROUP, SITE_LAMP_GROUP_W0, SITE_LAMP_GROUP_W1, "lamp_group")
-       & hk_site_ok(SITE_SHOW_PRIO, SITE_SHOW_PRIO_W0, SITE_SHOW_PRIO_W1, "show_prio");
+       & hk_site_ok(SITE_SHOW_PRIO, SITE_SHOW_PRIO_W0, SITE_SHOW_PRIO_W1, "show_prio")
+       & hk_site_ok(SITE_SOUND_LOOKUP, SITE_SOUND_LOOKUP_W0, SITE_SOUND_LOOKUP_W1,
+                    "sound_lookup");
     if (!ok) {
         hk_logs("[mode] NOT THIS BUILD - no mode is installed, the game runs stock\n");
         return;
@@ -438,6 +511,7 @@ static void mode_init(void)
     hk_install(SITE_TICK, on_tick);
     hk_install(SITE_DISPATCH, on_dispatch);
     hk_install(SITE_BALLEND, on_ballend);
+    hk_install(SITE_SOUND_LOOKUP, on_lookup);
     if (!cfg_reload())
         hk_logs("[mode] no mode file at " MODE_FILE " yet - polling for one\n");
     snprintf(m, sizeof m, "[mode] armed, reading %s twice a second\n", MODE_FILE);

@@ -7719,7 +7719,7 @@ These have each been violated at least once and each cost a run or a window:
       - S3: nothing about stock play changes. D3: every fact it needs is already known
       and the delivery exists - it is a build plus one hardware boot to be sure.
 
-- [ ] **130. A mode's OWN AUDIO: a sound the game never shipped.** `S3 D5` David,
+- [ ] **130. A mode's OWN AUDIO: a sound the game never shipped.** `S3 D4` David,
       2026-09-15: "we can't just be reusing what already exists". Item 104's grow path
       is merged and appends a record and re-points the play tables, but it REPLACES a
       stock slot - "a grown bank only copies a stock record" - and nothing registers an
@@ -7734,9 +7734,39 @@ These have each been violated at least once and each cost a run or a window:
       hardware boot item 104 has owed since 2026-09-10. If an id the game was not built
       with turns out to be unresolvable, say so WITH the evidence and fall back to
       replacing a slot - the fallback is proven, but it is not the target.
-      - S3: new capability. D5: whether the game can resolve an id it never shipped is
-      unknown, it spans the sound container and the descriptor tables, and it carries
-      a hardware boot.
+      - S3: new capability. D4, down from D5: the half that was unknown is now
+      measured. The bank half is DONE and the play half has a named next step.
+      **IN PROGRESS 2026-09-15 on `item/130` (5 commits, pushed). Half of this item
+      is proven; the other half is measured FALSE and needs a different design.**
+      **Established - the bank takes a record the card never had.**
+      `modes/grow_mode_sound.sh` appends one to a standalone `image.bin` through the
+      shipped `masterdir`/`emulator`/`codec` code - no card build, because the rig
+      boots the extracted title so the bank is a plain file. Godzilla Pro 1.15, 80 s:
+      2534 -> 2535 records, all 2535 container keys DISTINCT, **zero stock records
+      moved**, and a 4 s clip encodes into the appended body and decodes back at
+      **peak error 0, corr 1.00000** (appended idx 2534, key `45df2b8b01000084`).
+      The grown bank BOOTS: 4m32s, 0 segv, 0 fatal, video steady at 30 fps.
+      `install_mode_sound.sh on|off` swaps banks by rename. Artefacts kept:
+      `$ROOT/games/godzilla_pro/image.grown.bin` and `mode_own_sound.wav`.
+      **Ruled out - the container lookup cannot be hooked at play time.** `mode.so`
+      hooked `sound_lookup` (`0x33c0d8`), armed a one-shot, fired a callout, and
+      logged `own sound: 0 substitution(s), 1 miss(es)`. That function is BOOT-ONLY:
+      its four callers are all in the band build (`xref 0x7b9464` said so from the
+      start; the misread came from `armxref.py args` printing its `N call site(s)`
+      header AFTER the list). **Play-time resolution is a `std::map` at `0x7b92c4`
+      keyed by sid**, built once at boot, so an id the game was not built with is
+      unreachable. This is the "say so WITH the evidence" the acceptance asked for.
+      **Ruled out as written - item 104's representability test does not transfer.**
+      `key.w2 & ~0xe0001fff == 0` rejects our appended key AND the ordinary stock
+      record it copies (idx 1369, `w2 = 0x94000020`), which some descriptor plainly
+      names. The formula is Led Zeppelin 1.22's; re-derive it on Godzilla first.
+      **Resume:** identify the four words the boot-side insert writes past the sid
+      (`0x33b310`: sid `+16`, then r7 `+24`, r8 `+28`, ip `+32`, lr `+36`) from the
+      band build's caller context - `+36` is a product of two codec-object fields
+      (`[r6,#32]<<1` times the byte at `[r6,#42]`), NOT an index, so do not patch a
+      live tree on that arithmetic. Then decide between binding a sid to our record
+      at boot and re-deriving the descriptor key formula for this build.
+      Full record in `tools/spike2_emu/modes/MODE_API.md`.
 
 - [ ] **131. A mode's OWN SCREEN: a scene written from scratch.** `S3 D5` David,
       2026-09-15: "assign new ... image / text / scene data". Today a mode shows text by

@@ -7568,8 +7568,10 @@ These have each been violated at least once and each cost a run or a window:
       validated probe): what is left is several runs - our own mode object, the text
       call, the lights.
 
-- [ ] **126. The mode runtime reads a MODE FILE instead of having its rules compiled
-      in.** `S3 D3` ← WORKING ON David, 2026-09-15: "we need to be able to choreograph
+- [x] **126. The mode runtime reads a MODE FILE instead of having its rules compiled
+      in.** `S3 D3` **DONE 2026-09-15 on `item/126`, emulator-proven - MERGED INTO
+      `feature/mode-editor`, not `/finish`ed: the family ships as ONE release when its
+      last item closes.** David, 2026-09-15: "we need to be able to choreograph
       the modes ourselves". Today `mode.c` IS the mode - KAIJU RUSH's trigger, timer,
       shot table
       and awards are C constants, so every change is an edit, a cross-compile and a
@@ -7611,6 +7613,18 @@ These have each been violated at least once and each cost a run or a window:
       while the game runs takes effect within a second with no restart; a 10-minute
       soak with no SEGV and `alive.sh` 0; the mode-only regression bar still matches
       stock (59.9 renderer fps / 29.9 video against 60.0 / 30.0).
+      **ALL FOUR MET.** The soak on this build ran **14 cycles, 14 starts and 14 ends,
+      0 new SEGV, 0 fatal signals**, guest up, `alive.sh` 0 after. The bar with
+      `PAD_MODE_SO` alone and no probe is **59.8 renderer fps / 29.8 video / 59.2 guest
+      / 0 faults** against stock's 60.0 / 30.0 / 58.6 and the hand-written mode's 59.9
+      / 29.9 / 58.2 - reading and parsing the file twice a second costs nothing
+      measurable. Also fixed here, because the mode's name became data: two item 125
+      drivers that assumed KAIJU RUSH (`padmode_drive.sh` grepped a prefix that no
+      longer exists; `rush_test.sh` poked the maser switch three times and waited 36 s
+      for a clock the file now owns).
+      **For item 127:** the tab edits this file, and hot reload is what lets it edit a
+      mode while the game is up. A trigger given as a shot MASK cannot be poked by
+      switch id - start it through `/dump/mode.start`, which is what the drivers do.
       - S3: new capability, nothing about play is broken. D3: it is code we own, the
       soak and regression instruments already exist, and the calls are proven - what
       is left is the schema and several confirming runs.

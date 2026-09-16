@@ -279,9 +279,37 @@ answer `sound_lookup` itself: when the lookup key is the one the mode's chosen r
 would resolve to, hand back OUR entry instead. The card keeps every stock byte, no
 descriptor is re-pointed, and the neighbours are unchanged by construction.
 
-`0x33c0d8` is a good hook site for the same reasons `0x1c2b6c` was for lights: two
-arguments, a single return value, no allocation, and it is the ONLY non-band-build
-reader of the map (`xref 0x7b9464` = 8 sites, 6 in the band build, 2 in its ctor).
+### MEASURED FALSE: `sound_lookup` is BOOT-ONLY, so a play-time hook never fires
+
+Run 1 of the mode with a `sound_key`: the mode ran its full 30 s, scored ten shots,
+ended on its clock - and logged **`own sound: 0 substitution(s), 1 miss(es)`**. The
+one-shot armed, `callout_play(1295)` fired, and `sound_lookup` was never called.
+
+**The reading error that caused it, because it is easy to repeat.** `armxref.py args`
+prints its `NAME : N call site(s)` header **AFTER** the list it belongs to. Read as a
+header-first listing, `0x33c0d8` appears to be called from `0x2a26f4` (the play
+worker). It is not. Its four callers are `0x33a394`, `0x33a89c`, `0x33b094`,
+`0x33b4b8` - **all inside the band build**, which agrees with `xref 0x7b9464` (8
+sites: 6 band build, 2 in the static ctor). The sites under the play worker belong to
+`0x2a1f54`, the descriptor resolver.
+
+**So how a sid reaches audio at PLAY time** (`0x2a2c34`..`0x2a2fc4`): a `std::map`
+rooted at `0x7b92c4`, keyed by sid. The worker walks it comparing the sid against
+`[node+16]` and following `[node+8]` / `[node+12]`, and `0x2a2ff8` is
+`_Rb_tree_increment`, so the nodes are ordinary `_Rb_tree_node`: colour `+0`, parent
+`+4`, left `+8`, right `+12`, payload from `+16`. The binding sid -> entry is built
+ONCE at boot - the band build resolves each descriptor (`0x2a1f54`), computes the key,
+looks the entry up (`0x33c0d8`), and inserts it into this tree. After that, playing a
+sound never consults the container again.
+
+**What this means for the item as written.** Item 130's target was "a request id our
+`mode.so` can call" for a sound the game was never built with. Measured: an id the
+game does not already have a tree node for is unreachable, because nothing resolves an
+unknown sid at play time. The item anticipated exactly this and says to report it with
+the evidence rather than quietly take the fallback. This is that report.
+
+The appended record is still real, registered and decodable - that half is proven
+above. What is not proven is reaching it by an id the game never shipped.
 
 ### PROVEN AT THE DESK: the bank takes a record the card never had (2026-09-15)
 

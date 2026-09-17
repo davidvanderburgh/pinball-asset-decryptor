@@ -39,6 +39,8 @@ virtualisation.  These are the checks that *are* feasible and would
 have caught both shipped bugs.
 """
 
+import fnmatch
+import os
 import re
 import shutil
 import subprocess
@@ -1140,6 +1142,155 @@ def test_both_installers_ship_beside_the_repair_they_call():
     assert '"installer", "install_prerequisites_linux.sh"' in search, (
         "app.py no longer looks in installer/, which is where the AppImage "
         "puts it")
+
+
+def _iss_excluded(rel, patterns):
+    """Inno Setup's ``Excludes:`` match for ``rel`` (backslash-separated).
+
+    A pattern starting with a backslash matches the START of the path, any
+    other pattern its END, component by component; Inno tests directories as
+    well as files, so a matched directory takes everything under it."""
+    parts = rel.split("\\")
+    for pat in patterns:
+        pp = pat.lstrip("\\").split("\\")
+        if len(pp) > len(parts):
+            continue
+        cand = parts[:len(pp)] if pat.startswith("\\") else parts[-len(pp):]
+        if all(fnmatch.fnmatchcase(c.lower(), p.lower())
+               for c, p in zip(cand, pp)):
+            return True
+    return False
+
+
+def _iss_tools_entries():
+    """``{rig: (flags, excludes)}`` for every ``{#ProjectDir}\\tools\\<rig>``
+    Source line, with Inno's backslash continuations joined."""
+    text = ISS.read_text(encoding="utf-8", errors="replace")
+    text = re.sub(r"\\\r?\n", " ", text)
+    out = {}
+    for line in text.splitlines():
+        m = re.match(r'\s*Source:\s*"\{#ProjectDir\}\\tools\\([^\\"]+)\\\*"'
+                     r'\s*;\s*DestDir:\s*"\{app\}\\tools\\([^"]+)"', line)
+        if not m or m.group(1) != m.group(2):
+            continue
+        flags = re.search(r"Flags:\s*([^;]*)", line)
+        excl = re.search(r'Excludes:\s*"([^"]*)"', line)
+        out[m.group(1)] = (
+            flags.group(1).split() if flags else [],
+            [p.strip() for p in (excl.group(1) if excl else "").split(",")
+             if p.strip()])
+    return out
+
+
+def _rigs_the_app_names():
+    """Every ``tools/<rig>`` the app's own code resolves, spelled any way."""
+    pat = re.compile(r"""["']tools["']\s*[/,]\s*["']([a-z0-9_]+)["']"""
+                     r"""|["']tools/([a-z0-9_]+)""")
+    rigs = set()
+    for path in (REPO / "pinball_decryptor").rglob("*.py"):
+        for m in pat.finditer(path.read_text(encoding="utf-8",
+                                             errors="replace")):
+            rigs.add(m.group(1) or m.group(2))
+    return rigs
+
+
+def test_the_iss_exclude_matcher_reads_patterns_the_way_inno_does():
+    """The check below is only as good as this, so both directions."""
+    assert _iss_excluded("__pycache__\\x.pyc", ["__pycache__\\*"])
+    assert _iss_excluded("codeselect\\__pycache__\\x.pyc", ["__pycache__\\*"])
+    assert _iss_excluded("a\\b\\shot.png", ["*.png"])
+    assert _iss_excluded("games", ["games\\*"]) is False
+    assert _iss_excluded("games\\godzilla", ["games\\*"])
+    assert not _iss_excluded("sub\\games", ["\\games"])
+    assert _iss_excluded("games", ["\\games"])
+    assert not _iss_excluded("status.sh", ["*.pyc", "*.log", "rootfs\\*"])
+
+
+def test_the_windows_installer_ships_every_rig_the_app_looks_for():
+    """A rig the app resolves beside its package must be in the installer.
+
+    tools\\jjp_emu never had a [Files] line, so on every installed copy the
+    Emulate JJP tab said "The JJP emulator rig is missing from tools/jjp_emu -
+    this checkout looks incomplete" and greyed out Start; the JJP Multi-boot
+    tab and installing an ISO onto a game SSD run mkjjpmulti.py from the same
+    folder and could not work either (PAD-162, a Pinside user: "In \\tools
+    there are only spike1 and spike2 emu. No jjp.").  A checkout always has
+    every rig, so nothing short of installing the app shows this - hence a
+    check on the manifest, driven by what the CODE names rather than a list
+    here that the next rig would also be missing from.
+
+    Every script ships, too: an Excludes pattern that caught a .sh or .py
+    would leave the same "missing" tab behind a line that looks right.
+    """
+    rigs = _rigs_the_app_names()
+    assert {"spike2_emu", "jjp_emu", "spike1_emu"} <= rigs, (
+        "the scan no longer finds the rigs the app resolves: %s" % sorted(rigs))
+    entries = _iss_tools_entries()
+    missing = sorted(r for r in rigs if r not in entries)
+    assert not missing, (
+        "pinball_decryptor.iss does not ship %s, so an installed app reports "
+        "the rig missing" % ", ".join("tools\\" + r for r in missing))
+
+    dropped = []
+    for rig in sorted(rigs):
+        flags, excludes = entries[rig]
+        assert "recursesubdirs" in flags, (
+            "tools\\%s ships without recursesubdirs" % rig)
+        base = str(REPO / "tools" / rig)
+        for dirpath, dirnames, filenames in os.walk(base):
+            here = os.path.relpath(dirpath, base).replace(os.sep, "\\")
+            here = "" if here == "." else here + "\\"
+            # a directory left out takes its contents with it, as in Inno
+            dirnames[:] = [d for d in dirnames
+                           if not _iss_excluded(here + d, excludes)]
+            dropped += ["tools\\%s\\%s%s" % (rig, here, f) for f in filenames
+                        if f.endswith((".sh", ".py"))
+                        and _iss_excluded(here + f, excludes)]
+    assert not dropped, ("the installer's Excludes drop scripts the rig "
+                         "runs:\n  " + "\n  ".join(dropped))
+
+
+def test_the_appimage_ships_the_rigs_its_multiboot_tab_runs():
+    """On a Linux desktop the Multi-boot tab runs its tool with python3 from
+    beside the package, for Stern and JJP alike (multiboot_backend.py), and a
+    JJP ISO onto a game SSD runs mkjjpmulti.py the same way.  The Emulate JJP
+    and Spike 1 tabs are WSL-only, so the AppImage needs no more than these."""
+    linux_build = (INSTALLER / "build_linux.sh").read_text(encoding="utf-8")
+    for rig in ("spike2_emu", "jjp_emu"):
+        assert "tools/%s:tools/%s" % (rig, rig) in linux_build, (
+            "the AppImage does not carry tools/%s" % rig)
+
+
+def test_the_jjp_rig_can_run_from_program_files():
+    """Shipping it puts it at ``C:\\Program Files\\Pinball Asset Decryptor\\
+    tools\\jjp_emu``: read-only for the user, and a SPACE in every path.
+
+    The Spike 2 rig carries both checks (test_spike2_emu_paths.py); the JJP
+    rig spells its own directory ``$HERE``, which that lint does not read.
+    """
+    from tests.test_spike2_emu_paths import _unquoted
+
+    rig = REPO / "tools" / "jjp_emu"
+    split = re.compile(r"(?<=[ \t])\$\{?(?:HERE|SRC|BUILD|SEL|JJP_[A-Z_]+)\}?/")
+    write = re.compile(r"""(?:>>?|\btee(?:\s+-a)?|\s-o)\s*"?\$\{?HERE\}?/""")
+    pywrite = re.compile(r"""open\(\s*os\.path\.join\(\s*HERE\s*,[^)]*\)\s*,"""
+                         r"""\s*['"][wa]""")
+    bad = []
+    for path in sorted(rig.glob("*.sh")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if split.search(_unquoted(line)):
+                bad.append("%s:%d: unquoted path: %s" % (path.name, n, line.strip()))
+            if write.search(line):
+                bad.append("%s:%d: writes into the rig: %s"
+                           % (path.name, n, line.strip()))
+    for path in sorted(rig.glob("*.py")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if pywrite.search(line):
+                bad.append("%s:%d: writes into the rig: %s"
+                           % (path.name, n, line.strip()))
+    assert not bad, "\n  ".join(["the JJP rig breaks once installed:"] + bad)
 
 
 def test_wsl_probe_does_not_traverse_the_windows_path():

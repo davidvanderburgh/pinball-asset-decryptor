@@ -80,6 +80,16 @@ Source: "{#ProjectDir}\tools\spike2_emu\*"; DestDir: "{app}\tools\spike2_emu"; \
 Source: "{#ProjectDir}\tools\spike1_emu\*"; DestDir: "{app}\tools\spike1_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.raw,*.cap,*.bin,rootfs\*,game\*"
+; The JJP rig (tools/jjp_emu) is three features, not one: the Emulate JJP tab,
+; the JJP Multi-boot tab (mkjjpmulti.py, ensurejjpselect.sh) and installing an
+; ISO straight onto a game SSD (mkjjpmulti.py install).  It had no line here,
+; so every installed copy said "The JJP emulator rig is missing from
+; tools/jjp_emu" and greyed out Start (PAD-162).  Sources only, like the two
+; above: the shim, the CUSE daemon and the selector are built under /var/tmp
+; inside WSL, and the restored game lives there too.
+Source: "{#ProjectDir}\tools\jjp_emu\*"; DestDir: "{app}\tools\jjp_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.raw,*.iso,*.img"
 
 ; --- Entry point + bundled launcher --------------------------------------
 Source: "{#ProjectDir}\Pinball Asset Decryptor.pyw"; DestDir: "{app}"; Flags: ignoreversion

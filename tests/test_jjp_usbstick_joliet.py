@@ -64,7 +64,12 @@ def _run(tmp_path, monkeypatch, joliet):
 def test_an_iso_without_joliet_is_refused_before_the_stick_is_touched(tmp_path, monkeypatch):
     done, formatted = _run(tmp_path, monkeypatch, joliet=False)
     assert done["ok"] is False
-    assert "Joliet" in done["msg"] and "Rufus" in done["msg"]
+    assert "Joliet" in done["msg"]
+    # The way out is building the ISO again — that phase now passes xorriso
+    # '-joliet on' (test_jjp_iso_joliet_build).  It used to send the user to
+    # Rufus, whose stick stopped in GRUB on "'/live/vmlinuz' not found".
+    assert "build yours again" in done["msg"]
+    assert "Rufus" not in done["msg"]
     assert formatted == []
 
 

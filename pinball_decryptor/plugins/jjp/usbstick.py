@@ -260,13 +260,21 @@ def iso_has_joliet(path):
 
 
 #: The refusal for an ISO Windows would copy under shortened names.
+#
+# It used to send the user to Rufus first.  That advice sent a tester in a
+# circle (Pirates, 2026-09-17): the app's own Build ISO step was writing the
+# Joliet-less ISOs (it did not pass xorriso '-joliet on' - see
+# pipeline._phase_build_iso), so "rebuild with this version" could not help,
+# and the Rufus stick he fell back to stopped in GRUB on
+# "file '/live/vmlinuz' not found".  Building the ISO again IS the fix now, so
+# that is what this says.
 NO_JOLIET_TEXT = (
     "This ISO has no Joliet directory, so Windows shows its files under "
     "shortened names (sda3.ext4-ptcl-img.gz.aa reads as "
     "SDA3_EXT4_PTCL_IMG_GZ.AA) and a stick copied from it cannot install: the "
-    "machine's installer looks for the real names. Make the stick with Rufus in "
-    "ISO Image mode, which reads the ISO's full names itself, or rebuild the ISO "
-    "with this version of the app.")
+    "machine's installer looks for the real names. ISOs built by older "
+    "versions of this app have no Joliet directory — build yours again with "
+    "this version, which writes one, then make the stick from the new ISO.")
 
 
 def _tree_size(root):

@@ -9,26 +9,33 @@ one command that handles every mistake-prone step in the right order
 so we never again ship a tag where `__version__` lags the tag string
 (see v0.3.0 vs v0.3.1).
 
-**Async by design — and tests + builds run CONCURRENTLY.**  Since
-2026-08-31 the tag goes out in the SAME attended turn as the push:
-LOCAL pytest green (joined in step 6, before the commit) is the ship
-gate, and the Tests CI run is a post-tag TRIPWIRE that runs in
-parallel with the installer builds instead of serializing ~5 minutes
-ahead of them (David chose this trade explicitly: a rare post-tag
-yank beats a 5-minute wait on every release).  The waits that remain
-(local pytest ~2 min, tests CI ~3 min, fast installer builds ~3.5 min,
-Intel mac backfill ~8 min in its own un-watched workflow) are ALL
-backgrounded:
-- The local test suite runs as a background task underneath the
-  bump/README work and is joined just before the commit (step 6).
+**THE TARGET IS FIVE MINUTES from the moment David triggers this
+command to the Windows installer being downloadable** (David,
+2026-09-17: "i want released assets out within 5 minutes of triggering
+the release. if we have to turn off tests then so be it").  The budget:
+the attended part of this command (bump, README/tips audit, commit,
+push, tag, draft) is ONE MINUTE, the Windows build is ~2.5 minutes from
+the tag, and what is left (~1.5 minutes) is for the asset upload and
+its retries.  So:
+- **No test run happens in this command.**  Since 2026-08-31 the tag
+  already went out in the same attended turn as the push, with local
+  pytest as the ship gate; since 2026-09-17 that local gate is gone
+  too, because its ~2 minutes were most of the budget.  The Tests CI
+  run is the only gate, applied after the fact as a post-tag TRIPWIRE
+  (step 7b): red means a yank, not a shipped regression.  Test
+  discipline belongs to the work itself (/next, /finish, targeted runs
+  while iterating), never to this command.
 - Push, tag, and draft release (steps 7-9) all happen in one attended
   turn; the background `gh run watch` tasks (tests tripwire +
-  installer run) re-invoke this session as they finish, and the
-  publish/report steps happen in those background-notified turns.
+  installer run) and the asset watchers (step 9b) re-invoke this
+  session as they finish, and the publish/report steps happen in those
+  background-notified turns.
+- The Windows-asset watcher carries the 5-minute DEADLINE (step 9b): a
+  late asset is reported, diagnosed and re-attached from the job's
+  artifact in that turn, never silently waited out.
 The attended portion ends after step 9's draft with the interim
 report — target well under a minute of foreground waiting.  Never
-foreground-block on pytest or a CI run, and never poll in a sleep
-loop.
+foreground-block on a CI run, and never poll in a sleep loop.
 
 ## Steps (do these in order)
 
@@ -42,17 +49,19 @@ loop.
    - Latest tag from `git tag --sort=-v:refname | head -1`.
    - The two SHOULD match the same `vX.Y.Z`.  If they don't, surface the mismatch.
 
-3. **Start the test suite in the background** — do NOT wait for it here:
-   ```
-   python -m pytest tests/ --ignore=tests/test_gui_smoke.py
-   ```
-   Launch this as a background task NOW and keep going — it takes
-   ~2 minutes and nothing in steps 4-5 depends on it.  The result is
-   collected in step 6, before anything is committed.  The
-   `test_gui_smoke.py` Tcl error is pre-existing infrastructure noise —
-   ignore it via the `--ignore` flag, NOT by skipping the whole run.
-
-   **Local green is the SHIP GATE.**  CI still catches what local can't — CI runners often have less installed than the dev env (Pillow lived in my dev env but not the CI pip-install step, which silently broke Williams plugin discovery for the entire v0.4.0 release) — but since 2026-08-31 that check runs as a post-tag tripwire in PARALLEL with the installer builds, not as a gate ahead of them.  See step 7b: red CI after the tag means an immediate yank, not a shipped regression.
+3. **Do NOT run the test suite.**  Until 2026-09-17 this step started
+   the full local pytest run in the background and step 6 joined it
+   before the commit; David removed it to hit the 5-minute target ("if
+   we have to turn off tests then so be it").  Do not run pytest, and
+   do not run `scripts/testpick.py` in its place: any local run puts
+   minutes back on the critical path, and a background run that is not
+   joined is a second yank source that tells us nothing the CI tripwire
+   won't.  The Tests CI run (step 7b) is the gate, after the fact.  It
+   also catches what a local run can't — CI runners have less installed
+   than the dev env (Pillow lived in my dev env but not the CI
+   pip-install step, which silently broke Williams plugin discovery for
+   the entire v0.4.0 release).  Red CI after the tag means an immediate
+   yank, not a shipped regression.
 
 4. **Decide the bump.**
    - Default to **patch** for bugfixes / small tweaks.
@@ -162,12 +171,8 @@ loop.
    When the fix isn't obvious, ask the user: *"This release renamed
    <control>; the <Tab> tip still calls it <old name> — update it?"*
 
-6. **Join the test suite, then stage + commit.**  Before staging
-   anything, collect the result of the background pytest task from
-   step 3.  If it hasn't finished yet, stop and wait for its completion
-   notification — do NOT busy-poll it and do NOT commit ahead of it.
-   Abort the release if anything failed.  Then commit.  Commit message
-   format:
+6. **Stage + commit.**  Nothing is joined here any more (step 3): the
+   commit goes straight out.  Commit message format:
    ```
    vN.N.N - <one-line summary of what this release does>
 
@@ -245,16 +250,17 @@ loop.
 7b. **Start the Tests-CI TRIPWIRE watch — then proceed STRAIGHT to
     step 8.  The tag does not wait for this run.**
 
-    Local green (step 6) already gated the push; from here the tests
-    CI run and the installer builds run in PARALLEL (2026-08-31: David
-    chose this over the old serialize-tests-first flow — a rare
-    post-tag yank beats a 5-minute wait on every release).  What CI
-    still buys us is the environment check local can't do — v0.4.0
-    shipped a broken Williams plugin because Pillow lived in my local
-    Python but wasn't in the CI pip-install step; `load_plugins()`
-    swallowed the ImportError on all three runner OSes.  So the run is
-    still watched — as a tripwire that yanks the release if it fires,
-    not as a gate.
+    Nothing gated the push (step 3); from here the tests CI run and
+    the installer builds run in PARALLEL (2026-08-31: David chose this
+    over the old serialize-tests-first flow — a rare post-tag yank
+    beats a 5-minute wait on every release; 2026-09-17: the local gate
+    went the same way).  This run is now the ONLY test run a release
+    gets, and it is watched as a tripwire that yanks the release if it
+    fires, not as a gate ahead of the tag.  (It also does the
+    environment check a local run can't — v0.4.0 shipped a broken
+    Williams plugin because Pillow lived in my local Python but wasn't
+    in the CI pip-install step; `load_plugins()` swallowed the
+    ImportError on all three runner OSes.)
 
     Resolve the run id in the foreground (fast):
     ```bash
@@ -316,7 +322,11 @@ loop.
    EOF
    )"
    git push origin vN.N.N
+   date +%s   # TAG_AT: step 9b's 5-minute deadline counts from this second
    ```
+   Note the epoch second the tag push returns and paste it into
+   watcher 2 (step 9b) as `TAG_AT` — each watcher is its own shell, so
+   a variable set here does not reach it.
 
 9. **Create the GitHub release as a DRAFT.**  A published release is
    visible to `releases/latest` the instant it's created, but the
@@ -353,38 +363,76 @@ loop.
 
 9b. **Publish at the FIRST asset, then background-watch the rest.**
     Each platform's installer job attaches its own asset independently
-    (fastest first: Linux ~2 min in, Windows + Apple Silicon ~3.5 min;
-    the Intel Mac DMG arrives ~8 min in from its own separate
+    (fastest first: Linux ~2 min in, Windows + Apple Silicon ~2.5-3.5
+    min; the Intel Mac DMG arrives ~8 min in from its own separate
     `release-intel-mac.yml` run, which NOTHING gates on).  Flip the
     release live the moment the first asset exists so users on the
     ready platforms download immediately; the per-platform client gate
     (step 9) keeps the not-yet-built platforms silent.
 
+    Every attach on CI goes through
+    `.github/scripts/attach_release_asset.sh`: a deadline per upload of
+    60 s plus 0.2 s per MB (74 s for the Windows installer, 104 s for
+    the AppImage), up to 5 fresh-connection retries, then the step
+    fails (~7 min at worst), and the job's Actions artifact is uploaded
+    BEFORE the attach so it is there to fall back on.  (2026-09-17:
+    GitHub's upload endpoint went erratic, a bare `gh release upload`
+    sat 16-30 minutes per try, and v0.218.0 had no Windows asset for an
+    hour.)  The same script is the fallback here, run locally.
+
     Start FOUR background tasks — in the SAME attended turn as steps
     7-9 — then print the interim report and END THE TURN:
     1. A "publish at first asset" watcher — polls the release and flips
-       it live as soon as one asset is attached, then exits:
+       it live as soon as one asset is FULLY uploaded (an asset appears
+       in the list, in "starter" state, the moment its upload starts),
+       then exits:
        ```bash
-       until [ "$(gh release view vN.N.N --json assets \
-                    --jq '.assets | length' 2>/dev/null)" -ge 1 ]; do
+       until gh release view vN.N.N --json assets \
+               --jq '.assets[] | select(.state == "uploaded") | .name' \
+               2>/dev/null | grep -q .; do
          sleep 15
        done
        gh release edit vN.N.N --draft=false
        ```
-    2. A **Windows-asset watcher** — the primary tester is on
-       Windows, so the moment `*_Windows.exe` attaches is the moment the
-       final report + forward-to-tester message (step 10) go out.  Do
-       NOT hold that message for the macOS builds (the Intel Mac build
-       is ~4x slower and the tester can't use it anyway):
+    2. A **Windows-asset watcher WITH THE 5-MINUTE DEADLINE** — the
+       primary tester is on Windows, so the moment `*_Windows.exe`
+       attaches is the moment the final report + forward-to-tester
+       message (step 10) go out.  Do NOT hold that message for the
+       macOS builds (the Intel Mac build is ~4x slower and the tester
+       can't use it anyway).  `TAG_AT` is the epoch second from step 8:
        ```bash
        until gh release view vN.N.N --json assets \
-               --jq '.assets[].name' 2>/dev/null | grep -q '_Windows\.exe$'; do
+               --jq '.assets[] | select(.state == "uploaded") | .name' \
+               2>/dev/null | grep -q '_Windows\.exe$'; do
+         [ $(( $(date +%s) - TAG_AT )) -ge 300 ] && exit 2
          sleep 15
        done
        ```
-       When THIS watcher completes: make sure the release is live
+       When THIS watcher completes GREEN: make sure the release is live
        (watcher 1 may have already flipped it; if not, flip it now),
        then print the **final report + tester message** in that turn.
+
+       When it exits 2 — **the asset is LATE.  Say so in the first line
+       of that turn**, then in the same turn:
+       - Read the run: `gh run view <installer run id> --json jobs` and
+         name the Windows job's state (queued for a runner? still
+         building? in "Attach to release" with warnings?).
+       - **Still queued or building** → nothing to attach yet; restart
+         this watcher with a further 5-minute deadline and report the
+         cause (a runner queue is the one delay this flow cannot fix).
+       - **Build done, asset missing** (attach retrying or failed) →
+         run the fallback NOW, from this machine, whose upload path is
+         not the runners' (2026-09-17: a manual upload from here took 4
+         seconds while the runner's had failed twice):
+         ```bash
+         gh run download <installer run id> -n windows-installer -D "$SCRATCH/vN.N.N"
+         ATTACH_KEEP_EXISTING=1 bash .github/scripts/attach_release_asset.sh vN.N.N "$SCRATCH/vN.N.N"/*.exe
+         ```
+         `ATTACH_KEEP_EXISTING=1` makes it leave the asset alone if the
+         runner's retry lands first; the runner's script does the same
+         in reverse, so the two never fight.  Then continue as for a
+         green watcher: publish, final report, tester message, plus one
+         line saying the asset came from the artifact.
     3. The installer-run watch (`gh run watch <id> --exit-status`,
        `--workflow=release.yml`) so the three fast assets finish
        attaching to the now-live release.
@@ -397,12 +445,17 @@ loop.
     When the installer-run watch (task 3) completes — this is AFTER
     the tester message has usually gone out; it's a backfill
     confirmation, not a gate:
-    - If an upload step failed on a transient GitHub error,
+    - If an attach step failed (its retries ran out): first check
+      whether that platform's asset is on the release anyway — the
+      fallback above may have attached it — and if so do NOTHING (a
+      rerun would rebuild and replace an asset that is already right).
+      If the asset is missing, either run the fallback above with that
+      platform's artifact (`macos-dmg-arm64` / `linux-appimage`) or
       `gh run rerun <id> --failed` — builds are per-job, so only the
-      failed uploads redo.  Start a fresh background watch on the rerun.
-      (The release is already live with whatever assets DID build; the
-      rerun just backfills the missing one — a partial-platform release
-      is acceptable per the publish-early policy, but always backfill.)
+      failed jobs redo — and start a fresh background watch on the
+      rerun.  (The release is already live with whatever assets DID
+      attach; a partial-platform release is acceptable per the
+      publish-early policy, but always backfill.)
     - When green, verify the three fast assets are attached and print a
       short confirmation with the URL:
     ```
@@ -507,9 +560,11 @@ step-7b/9b watches are running (this is where the user walks away):
 - New version + previous version, and the commit count since last tag.
 - Confirmation the release commit is pushed and tagged, which runs are
   being watched in the background, and what happens next without the
-  user ("publishes at the first asset; tests CI is a tripwire — if it
-  goes red the release is yanked and I'll say so loudly; Intel DMG
-  backfills on its own — no action needed").
+  user ("publishes at the first asset; the Windows asset has a 5-minute
+  deadline and gets re-attached from the artifact if it misses it;
+  tests CI is a tripwire — if it goes red the release is yanked and
+  I'll say so loudly; Intel DMG backfills on its own — no action
+  needed").
 - Any item worktree(s) cleaned up in step 7a — or, if none qualified,
   say so in one clause rather than silently skipping it.
 
@@ -523,6 +578,11 @@ backfill confirmation later when the installer-run watch finishes:
 - Number of commits since last tag.
 - Tag SHA.
 - Release URL.
+- **Tag-to-Windows-asset time**: from `TAG_AT` (step 8) to the
+  Windows asset's `updatedAt` in `gh release view vN.N.N --json
+  assets`.  This is the number the 5-minute target is measured by, so
+  it goes in every final report; over 5 minutes gets its reason next
+  to it (runner queue, upload retries, fallback used).
 
 So the user sees a clean final summary like:
 
@@ -531,4 +591,5 @@ Shipped v0.3.1 (was v0.3.0).
 1 commit since v0.3.0.
 Tag: 4245e42
 Release: https://github.com/davidvanderburgh/pinball-asset-decryptor/releases/tag/v0.3.1
+Windows asset: 3m20s after the tag.
 ```

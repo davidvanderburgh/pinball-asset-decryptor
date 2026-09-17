@@ -1,22 +1,39 @@
 name: Build Release Installers
 
-# Builds the installers when a v* tag is pushed and uploads them to a
+# Builds the installers when a v* tag is pushed and attaches them to a
 # GitHub release of the same tag.  The in-app updater (core/updater.py)
 # polls the same release endpoint, so a new release auto-notifies users.
 #
-# Each build job attaches its own asset to the release as soon as it
-# finishes -- there is deliberately NO aggregator job.  A single
-# "download everything then publish" job gates every asset on the
-# slowest build and turns any one job's failure into zero assets
-# published.  With per-job attach, Windows/Linux/Apple Silicon are
-# downloadable ~3 minutes after the tag.
+# THE TARGET IS FIVE MINUTES from the developer triggering /release to the
+# Windows installer being downloadable (David, 2026-09-17), and everything
+# in here is shaped by that:
 #
-# The Intel mac DMG is NOT here: it takes ~4x the other builds (slow
-# free-tier x64 runner), so it lives in release-intel-mac.yml on the
-# same tag trigger and backfills its asset to the same release a few
-# minutes later.  The release flow watches THIS workflow only; the
-# in-app updater gates per-platform (updater._release_ready), so an
-# Intel iMac never sees the update banner until its DMG has attached.
+# - Each build job attaches its own asset the moment it finishes -- there
+#   is deliberately NO aggregator job.  A "download everything then
+#   publish" job gates every asset on the slowest build and turns one
+#   job's failure into zero assets published.
+#
+# - The attach goes through .github/scripts/attach_release_asset.sh, which
+#   puts a deadline of about a minute (sized to the file) on each upload
+#   and retries on a fresh connection.  A bare `gh release upload` has no
+#   time limit: on
+#   2026-09-17 GitHub's upload endpoint went erratic, single uploads sat
+#   16-30 minutes before failing, and v0.218.0 had no Windows asset for an
+#   hour.  The step and the job carry timeouts as well, so nothing can hold
+#   a release run open for the 6-hour default.
+#
+# - The Actions artifact is uploaded BEFORE the attach, on purpose: it is
+#   the fallback source when the attach's retries run out (/release
+#   re-attaches from it, from the developer's machine, whose upload path is
+#   not the runners'), so it has to exist by the time the attach starts
+#   struggling.  Its 3-8 seconds are the price of that.
+#
+# - The Intel mac DMG is NOT here: it takes ~4x the other builds (slow
+#   free-tier x64 runner), so it lives in release-intel-mac.yml on the same
+#   tag trigger and backfills its asset to the same release a few minutes
+#   later.  The release flow watches THIS workflow only; the in-app updater
+#   gates per-platform (updater._release_ready), so an Intel iMac never
+#   sees the update banner until its DMG has attached.
 #
 # Tag a release locally with:
 #   git tag v0.1.0
@@ -34,6 +51,8 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    # Healthy: under 3 minutes.  The critical path of every release.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -61,14 +80,11 @@ jobs:
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
+        timeout-minutes: 10
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "$GITHUB_REF_NAME" --json id >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
-            || true
-          gh release upload "$GITHUB_REF_NAME" installer/Output/*.exe --clobber
+        run: bash .github/scripts/attach_release_asset.sh "$GITHUB_REF_NAME" installer/Output/*.exe
 
   build-macos:
     # PyInstaller builds for the host arch only and macos-latest has been
@@ -77,6 +93,7 @@ jobs:
     # x86_64 DMG for Intel iMacs builds in release-intel-mac.yml (see
     # the header comment).
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -102,17 +119,15 @@ jobs:
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
+        timeout-minutes: 10
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "$GITHUB_REF_NAME" --json id >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
-            || true
-          gh release upload "$GITHUB_REF_NAME" installer/Output/*.dmg --clobber
+        run: bash .github/scripts/attach_release_asset.sh "$GITHUB_REF_NAME" installer/Output/*.dmg
 
   build-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -139,11 +154,8 @@ jobs:
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
+        timeout-minutes: 10
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "$GITHUB_REF_NAME" --json id >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
-            || true
-          gh release upload "$GITHUB_REF_NAME" installer/Output/*.AppImage --clobber
+        run: bash .github/scripts/attach_release_asset.sh "$GITHUB_REF_NAME" installer/Output/*.AppImage

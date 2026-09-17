@@ -9,6 +9,12 @@ name: Build Intel Mac Installer
 # (updater._release_ready), so an Intel iMac simply doesn't see the
 # update banner until this asset has attached.
 #
+# The attach is the same bounded, retried script release.yml uses (see the
+# header there): an upload that GitHub leaves hanging is killed after
+# about a minute and a half (sized to the 155 MB DMG) and retried on a
+# fresh connection, and the artifact uploaded just before it is the
+# fallback source if the retries run out.
+#
 # macos-15-intel is a standard (free-tier) x64 label, unlike -large.
 # Note the Intel wheel floors: onnxruntime resolves to 1.23.x there
 # (last release with a macOS x86_64 wheel), which needs macOS 13+.
@@ -25,6 +31,8 @@ permissions:
 jobs:
   build-macos-intel:
     runs-on: macos-15-intel
+    # Healthy: 8-10 minutes, all of it the build.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -50,11 +58,8 @@ jobs:
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
+        timeout-minutes: 10
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "$GITHUB_REF_NAME" --json id >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
-            || true
-          gh release upload "$GITHUB_REF_NAME" installer/Output/*.dmg --clobber
+        run: bash .github/scripts/attach_release_asset.sh "$GITHUB_REF_NAME" installer/Output/*.dmg

@@ -30,6 +30,19 @@ UninstallDisplayIcon={app}\pinball_decryptor\icon.ico
 LicenseFile={#ProjectDir}\LICENSE
 Compression=lzma2/ultra64
 SolidCompression=yes
+; The compile is the longest single stretch of the Windows release job (90 s
+; of a 2m50s job with one compressor thread), and that job is the critical
+; path of every release, so the LZMA2 stream is compressed as parallel
+; blocks: two block threads (each LZMA2 thread already runs two match-finder
+; threads, so two is the documented fit for the runner's four cores), 64 MB
+; blocks so a ~300 MB payload splits into enough of them to keep both busy,
+; and the compressor in its own 64-bit process because two ultra64 blocks
+; need ~1.7 GB, more than the 32-bit compiler can address.  It costs a
+; little ratio (no matches across blocks): an installer a few percent larger
+; for a release a minute sooner.
+LZMANumBlockThreads=2
+LZMABlockSize=65536
+LZMAUseSeparateProcess=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin

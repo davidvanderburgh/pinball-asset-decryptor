@@ -1955,6 +1955,79 @@ def test_a_failed_wsl_install_is_not_reported_as_installed(tmp_path):
     assert "will install after the Windows restart" not in said, said
 
 
+#: Shadows the real cmdlet so the machine under test answers, not this box.
+#: PowerShell resolves functions before cmdlets, so defining this after the
+#: definitions are in scope is enough.  -Online has to be a SWITCH: as a value
+#: parameter it swallows the next argument, the call throws, and the probe's
+#: catch answers "don't know" — which would quietly test nothing.
+_FEATURE_STUB = """
+function Get-WindowsOptionalFeature {
+    param([switch]$Online, $FeatureName, $ErrorAction)
+    [PSCustomObject]@{ FeatureName = $FeatureName; State = "%s" }
+}
+"""
+
+
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell not available")
+def test_a_lying_restart_marker_does_not_cost_another_restart(tmp_path):
+    """★ PAD-164, what the broken releases LEFT BEHIND.
+
+    The restart marker (PAD-16) is a claim that `wsl --install` succeeded in
+    this boot session, and every release up to this one wrote it whether the
+    install had worked or not.  So the markers already on users' disks can be
+    lies, and a fix that trusts them answers a machine that installed nothing
+    with "you have not restarted yet" — the dead end, one release later.
+
+    Windows settles it: `wsl --install` turns features ON, and a feature reads
+    Disabled only if nothing ever enabled it.  Disabled plus a marker for this
+    session means the marker is a lie, so the install runs instead.  Enabled
+    (or a cmdlet that cannot answer) means the marker is believed and the
+    restart really is the missing step, which must not regress.
+    """
+    ps1 = PS1.read_text(encoding="utf-8")
+    section = ps1[ps1.index("$needsWsl = $wslPlan.Count -gt 0"):
+                  ps1.index("# 2b. The repair for an apt")]
+    (tmp_path / "section2.ps1").write_text(section, encoding="utf-8")
+
+    def body(state):
+        return (
+            # The old release's marker: this boot session, nothing installed.
+            'New-Item -ItemType Directory -Force '
+            '(Split-Path -Parent $script:RestartMarker) | Out-Null\n'
+            'Set-Content -LiteralPath $script:RestartMarker '
+            '-Value (Get-BootSessionId)\n'
+            + (_FEATURE_STUB % state) +
+            '$wslPlan = @(@{ label="e2fsprogs/debugfs"; pkg="e2fsprogs";'
+            ' probe="debugfs" })\n'
+            '. "%s"\n' % (tmp_path / "section2.ps1"))
+
+    # A boot id is what makes the marker comparable at all; without one
+    # (non-Windows pwsh) the branch under test is unreachable and there is
+    # nothing to assert.
+    probe, _ = _run_ps(tmp_path, 'Write-Host ("boot=" + (Get-BootSessionId))',
+                       "legacy", _LEGACY_ONLINE, name="boot")
+    if "boot=" not in probe or probe.split("boot=")[1].strip() == "":
+        pytest.skip("no boot session id on this platform")
+
+    # Disabled: the marker cannot be true, so install rather than re-restart.
+    said, _ = _run_ps(tmp_path, body("Disabled"), "legacy", _LEGACY_ONLINE,
+                      name="lying")
+    assert "waiting on a Windows restart" not in said, (
+        "a marker left by a release that wrote it after a FAILED install "
+        "still costs the user a pointless restart (PAD-164):\n" + said)
+    assert "that install did not actually happen" in said, said
+    assert "[INSTALLED] WSL2 + Ubuntu-22.04 (restart required)" in said, said
+
+    # EnablePending: the install really did happen and the restart is the
+    # missing step.  This is PAD-16 and it must survive the fix.
+    said, _ = _run_ps(tmp_path, body("EnablePending"), "legacy",
+                      _LEGACY_ONLINE, name="truthful")
+    assert "[SKIP] WSL2 + Ubuntu (waiting on a Windows restart)" in said, (
+        "a TRUE restart-pending marker is no longer believed, so the run "
+        "reinstalls instead of naming the restart (PAD-16):\n" + said)
+    assert "Installing WSL2 + Ubuntu" not in said, said
+
+
 def test_iss_repairs_python_permissions():
     """Regression guard — faster-whisper [Errno 13], install-over fix.
 

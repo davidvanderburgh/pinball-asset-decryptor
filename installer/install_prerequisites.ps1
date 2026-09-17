@@ -355,6 +355,31 @@ function Write-VirtualizationBanner {
 $script:RestartMarker = Join-Path $env:ProgramData `
     "Pinball Asset Decryptor\wsl_restart_pending.txt"
 
+# --- Did an install ever actually enable anything? -----------------------
+# The marker above is a CLAIM, and releases before PAD-164 wrote it whether
+# `wsl --install` had worked or not - so a machine that installed nothing was
+# told, run after run, that a Windows restart was the only step left.  Those
+# lying markers are on users' disks now, and the fix must not trust them.
+#
+# Windows knows the answer: `wsl --install` turns Windows features ON, and a
+# feature reads Disabled only if nothing ever enabled it (Enabled once it is
+# on, EnablePending between the enable and the restart).  Either feature being
+# on is enough to believe the marker - VirtualMachinePlatform in particular
+# can have been switched on by something else entirely, and a wrong "your
+# marker is a lie" would re-run an install that really was only waiting.
+# A missing or erroring cmdlet means "don't know", never "disabled".
+function Test-WslFeatureEnabled {
+    try {
+        foreach ($name in @("Microsoft-Windows-Subsystem-Linux",
+                            "VirtualMachinePlatform")) {
+            $f = Get-WindowsOptionalFeature -Online -FeatureName $name `
+                -ErrorAction Stop
+            if ($f -and $f.State -ne "Disabled") { return $true }
+        }
+        return $false
+    } catch { return $true }
+}
+
 function Get-BootSessionId {
     # LastBootUpTime only changes on a real restart (a Fast Startup
     # "Shut down" resumes the same kernel session) — which is exactly
@@ -823,7 +848,8 @@ if ($needsWsl) {
             # boots cannot start until the firmware setting changes.
             Write-VirtualizationBanner
             Write-FAIL "WSL2 + Ubuntu (virtualization disabled in BIOS/UEFI)"
-        } elseif ($bootId -and $pendingSince -eq $bootId) {
+        } elseif ($bootId -and $pendingSince -eq $bootId -and
+                  (Test-WslFeatureEnabled)) {
             # Same boot session as the run that installed WSL2: the restart
             # hasn't happened yet, so running `wsl --install` again is a
             # no-op.  Say what's actually missing instead.
@@ -836,6 +862,16 @@ if ($needsWsl) {
             # User already approved the install plan, which listed "WSL2 + Ubuntu"
             # as required.  Just install it - asking again would be a useless
             # confirmation that, if declined, leaves nothing to install.
+            if ($bootId -and $pendingSince -eq $bootId) {
+                # The marker says this session installed WSL2 and Windows
+                # disagrees, which is a marker written by a release that wrote
+                # it whether or not the install worked (PAD-164).  Do the
+                # install instead of asking for a second pointless restart.
+                Write-Host "  A previous run recorded that it installed WSL2 in this Windows" -ForegroundColor Yellow
+                Write-Host "  session, but the Windows component is still switched off - so"  -ForegroundColor Yellow
+                Write-Host "  that install did not actually happen.  Installing it now"       -ForegroundColor Yellow
+                Write-Host "  rather than asking for another restart."                        -ForegroundColor Yellow
+            }
             Write-Host "  Installing WSL2 + Ubuntu (this may take several minutes)..." -ForegroundColor Cyan
             $plan = Get-WslInstallPlan
             if ($plan.Stale) {

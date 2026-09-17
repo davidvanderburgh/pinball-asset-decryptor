@@ -26,6 +26,10 @@ answers exactly like the reporter's:
   * storefail - a wsl.exe that offers the pinned release and then fails every
               install (a blocked / signed-out Microsoft Store), which is where
               the false green is the whole of what the user is told.
+  * the third shot is the state the old release LEAVES BEHIND on the
+              reporter's disk: its restart-pending marker naming this boot
+              session, with no Windows feature ever enabled - the machine on
+              which "just install the update" has to heal itself.
 
 Only the package plan is stubbed (it is built by the interactive manufacturer
 picker in section 1) and $env:ProgramData is redirected at a temp dir so the
@@ -102,8 +106,13 @@ $wslPlan = @(
 """
 
 
-def harness_body(text):
-    """The definitions + section 2 of the real script, with the plan stubbed."""
+def harness_parts(text):
+    """(definitions, section 2) of the real script, as two separate pieces.
+
+    Separate, because a shot that needs to set the machine up further - seed
+    the restart marker, shadow a Windows cmdlet - has to do it AFTER the
+    definitions are in scope and BEFORE the section runs.
+    """
     # Everything down to the last reporting helper: functions and constants
     # only, so running it has no effect beyond defining them.
     defs_end = text.index("\n", text.index("function Write-SKIP($n)"))
@@ -113,7 +122,26 @@ def harness_body(text):
     defs = defs[:gate] + defs[defs.index('$ErrorActionPreference = "Continue"'):]
     section = text[text.index("$needsWsl = $wslPlan.Count -gt 0"):
                    text.index("# 2b. The repair for an apt")]
-    return defs + WSL_PLAN + section
+    return defs, section
+
+
+#: What the old release left on disk: the marker naming THIS boot session, so
+#: the run reads "a previous run installed WSL2 and you have not restarted",
+#: while every Windows feature it would have enabled is still off.  A function
+#: shadows the real cmdlet - PowerShell resolves functions before cmdlets - so
+#: this box's own answer is never the one under photograph.
+STALE_MARKER = """
+New-Item -ItemType Directory -Force (Split-Path -Parent $script:RestartMarker) | Out-Null
+Set-Content -LiteralPath $script:RestartMarker -Value (Get-BootSessionId)
+function Get-WindowsOptionalFeature {
+    # -Online is a SWITCH on the real cmdlet: declared as a value parameter
+    # here it swallows the next argument, the call throws, and the probe's
+    # catch answers "don't know" - which silently photographs the old
+    # behaviour instead of the new one.
+    param([switch]$Online, $FeatureName, $ErrorAction)
+    [PSCustomObject]@{ FeatureName = $FeatureName; State = "Disabled" }
+}
+"""
 
 
 # ----------------------------------------------------------------------
@@ -318,7 +346,11 @@ $env:PATH = "%(fake)s;" + $env:PATH
 $env:ProgramData = "%(data)s"
 Write-Host "Pinball Asset Decryptor - Prerequisite Installer" -ForegroundColor White
 Write-Host "%(caption)s" -ForegroundColor DarkGray
-. "%(block)s"
+$script:results = @()
+. "%(defs)s"
+%(prelude)s
+%(plan)s
+. "%(section)s"
 Write-Host ""
 Write-Host "Summary:" -ForegroundColor White
 $script:results | ForEach-Object { Write-Host ("  {0,-10} {1}" -f $_.Status, $_.Name) }
@@ -326,23 +358,28 @@ Start-Sleep -Seconds 600
 """
 
 
-def shoot(mode, online, rows, caption, name):
-    root = tempfile.mkdtemp(prefix="pad164_%s_" % mode)
+def shoot(mode, online, rows, caption, name, prelude=""):
+    root = tempfile.mkdtemp(prefix="pad164_%s_" % name)
     fake = make_machine(root, mode)
     data = os.path.join(root, "ProgramData")
     os.makedirs(data, exist_ok=True)
 
-    block = os.path.join(root, "wslsection.ps1")
-    with open(block, "w", encoding="utf-8") as fh:
-        fh.write(harness_body(script_text()))
+    defs, section = harness_parts(script_text())
+    defs_file = os.path.join(root, "defs.ps1")
+    section_file = os.path.join(root, "wslsection.ps1")
+    with open(defs_file, "w", encoding="utf-8") as fh:
+        fh.write(defs)
+    with open(section_file, "w", encoding="utf-8") as fh:
+        fh.write(section)
 
-    title = "PAD164-%s-%s" % (WHEN, mode)
+    title = "PAD164-%s-%s" % (WHEN, name)
     harness = os.path.join(root, "harness.ps1")
     with open(harness, "w", encoding="utf-8") as fh:
         fh.write(HARNESS % {
             "title": title, "rows": rows, "caption": caption,
             "fake": fake.replace('"', ''), "data": data,
-            "block": block,
+            "defs": defs_file, "section": section_file,
+            "prelude": prelude, "plan": WSL_PLAN,
         })
 
     env = dict(os.environ)
@@ -372,4 +409,7 @@ shoot("legacy", LEGACY_ONLINE, 24,
 shoot("storefail", MODERN_ONLINE, 34,
       "Simulated machine: every wsl --install fails (a blocked Microsoft Store).",
       "prereq_wsl_install_fails")
+shoot("legacy", LEGACY_ONLINE, 30,
+      "Simulated machine: the old release's restart marker, and no Windows "
+      "feature ever enabled.", "prereq_wsl_stale_marker", prelude=STALE_MARKER)
 print("done", flush=True)

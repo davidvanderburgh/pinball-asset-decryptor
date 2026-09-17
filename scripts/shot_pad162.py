@@ -2,9 +2,9 @@
 
     python scripts/shot_pad162.py <out_dir> <before|after>
 
-A Windows user (Pinside, "michus") installed the release and the Emulate JJP
+A Windows user (a field report) installed the release and the Emulate JJP
 tab said "The JJP emulator rig is missing from tools/jjp_emu - this checkout
-looks incomplete", with Start greyed out.  His tools folder held spike1_emu
+looks incomplete", with Start greyed out.  Their tools folder held spike1_emu
 and spike2_emu and nothing else: pinball_decryptor.iss never had a [Files]
 line for tools\\jjp_emu, so no installed copy has ever had the JJP rig.
 

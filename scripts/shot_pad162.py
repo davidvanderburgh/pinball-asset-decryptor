@@ -18,9 +18,13 @@ backslash), copies into ``c:\\tmp\\pad162\\<when>\\Pinball Asset Decryptor``
 is the same code under the before and after manifest.
 
 ``emulate_jjp``
-    The Emulate JJP tab after its first status poll.  Nothing on the machine
-    is changed: the poll runs status.sh, which only reads.  In the after shot
-    that poll is the staged rig itself, run by WSL from a path with a space.
+    The Emulate JJP tab four seconds after it is selected, in both runs.  The
+    shot does not wait for the first status poll: that is a WSL round trip
+    whose answer depends on the machine (on 2026-09-17 this box's WSL did not
+    answer at all, and a poll that times out fills the grid with "no"s that
+    read like real facts).  Four seconds is before any poll can land, so the
+    pair differs only by what the installed tree holds.  Nothing on the
+    machine is changed: the poll runs status.sh, which only reads.
 
 settings.json is backed up and restored, and the session log is sandboxed.
 """
@@ -33,7 +37,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import traceback
 from ctypes import wintypes
 
@@ -184,8 +187,6 @@ def inner(app_dir, out_png):
             img.crop((border, 0, w - border, h - border)).save(out_png)
             log("snapped %s (%dx%d)" % (out_png, w - 2 * border, h - border))
 
-        started = [0.0]
-
         def select_tab():
             sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
             geom[0] = "%dx%d+20+10" % (min(1100, sw - 60), min(760, sh - 70))
@@ -194,17 +195,7 @@ def inner(app_dir, out_png):
             fit = getattr(win, "_resize_notebook_to_current_tab", None)
             if fit:
                 fit()
-            started[0] = time.time()
-            root.after(1000, wait_poll)
-
-        def wait_poll():
-            panel = win._jjp_emulate_panel
-            done = (getattr(panel, "_polled_once", False)
-                    or not jjp_emulate_tab.rig_available())
-            if not done and time.time() - started[0] < 90:
-                root.after(1000, wait_poll)
-                return
-            root.after(3000 if done else 0, snap_and_quit)
+            root.after(4000, snap_and_quit)
 
         def snap_and_quit():
             try:

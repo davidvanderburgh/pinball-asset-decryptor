@@ -22,9 +22,9 @@ Pick a manufacturer on launch — each card lists every supported game:
 ![The manufacturer picker: one card per manufacturer with its supported games and input formats](docs/screenshots/picker.png)
 
 Point the Extract tab at a card image (or the SD card itself) and pull
-the assets out — here a Stern Godzilla Pro card:
+the assets out — here a Stern Godzilla LE card:
 
-![The Extract tab with a Stern Godzilla Pro SD-card image detected and per-type extract checkboxes](docs/screenshots/stern-extract.png)
+![The Extract tab with a Stern Godzilla LE SD-card image detected and per-type extract checkboxes](docs/screenshots/stern-extract.png)
 
 Replace Audio lists every sound slot with side-by-side seekable
 spectrograms to A/B the original against your replacement; Replace
@@ -39,8 +39,8 @@ the card is untouched. It is off by default — proven in the PC emulator,
 but no machine has booted a card built that way yet.
 
 <p>
-  <a href="docs/screenshots/replace-audio.png"><img src="docs/screenshots/replace-audio.png" width="49%" alt="The Replace Audio tab: 2,534 sound slots from a Godzilla Pro card with a spectrogram preview of the selected sound"></a>
-  <a href="docs/screenshots/replace-images.png"><img src="docs/screenshots/replace-images.png" width="49%" alt="The Replace Images tab: searching 5,877 on-card images for 'logo' with a preview of the game-logo art"></a>
+  <a href="docs/screenshots/replace-audio.png"><img src="docs/screenshots/replace-audio.png" width="49%" alt="The Replace Audio tab: 2,540 sound slots from a Godzilla LE card with a spectrogram preview of the selected sound"></a>
+  <a href="docs/screenshots/replace-images.png"><img src="docs/screenshots/replace-images.png" width="49%" alt="The Replace Images tab: searching 5,809 on-card images for 'logo' with a preview of the game-logo art"></a>
 </p>
 
 And the Partition Explorer browses the raw card image's ext4 filesystem
@@ -49,7 +49,7 @@ alongside text files, tracking which files you've replaced on that image
 in a **Changed** column, and right-click **Replace with…** swaps any file
 on the card for one of your own, at any size:
 
-![The Partition Explorer tab browsing the 6.4 GB game partition of a Godzilla Pro card image](docs/screenshots/partition-explorer.png)
+![The Partition Explorer tab browsing the 6.4 GB game partition of a Godzilla LE card image](docs/screenshots/partition-explorer.png)
 
 The Multi-boot tab builds one SD card that carries several complete Spike 2
 game images — stock code beside a custom build — and shows a menu at
@@ -934,8 +934,9 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    slot changed some other way (copied over by hand, or built before the
    app kept a saved original) keeps its bytes, which is what
    *Revert all changes…* is for.
-   A whole set reworked outside the app (every clip made black and white,
-   say) goes in the same way with **Replace from folder…**, beside it:
+   From v0.218.0 a whole set reworked outside the app (every clip made
+   black and white, say) goes in the same way with
+   **Replace from folder…**, beside it:
    choose the folder holding your files and each one is picked for the
    slot with its name. The file type and capital letters don't have to
    match — a converter that writes `.mp4` for everything still fills the

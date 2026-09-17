@@ -269,6 +269,20 @@ def pytest_collection_modifyitems(config, items):
     # why), so CI is ubuntu + macOS.  One group stays because it has not
     # been measured otherwise on THOSE runners; the numbers above are
     # Windows numbers and must not be read as a macOS result.
+    #
+    # 2026-09-17: CI no longer RUNS the lane at all.  Every item the sniff
+    # catches also gets the `tk` marker (registered in pytest.ini), and
+    # test.yml deselects it with -m "not tk".  David's call, after the
+    # v0.218.2 release's tripwire went red on 23 test_multiboot_tab Tk tests
+    # whose only fault was pytest's unraisable-exception hook crashing on the
+    # macOS runner (a tracemalloc circular import) - an identical tree had
+    # passed a minute earlier - and a string of the same kind before it:
+    # "they are extremely flaky".  Since the release flow has no local gate
+    # either (see /release), the Tk tests now run only when a developer runs
+    # them; -m "not tk" is a CI setting, not a pytest.ini default.  The
+    # xdist_group marker stays for local runs, where the lane still rides
+    # its own workers.  Same hook, same sniff, so a new GUI test file is
+    # both grouped and excluded the day it appears.
     single_group = bool(os.environ.get("CI"))
     for item in items:
         if _touches_tk(item.path):
@@ -277,6 +291,7 @@ def pytest_collection_modifyitems(config, items):
             else:
                 group = "tk-app" if "test_gui" in str(item.path) else "tk-emu"
             item.add_marker(pytest.mark.xdist_group(group))
+            item.add_marker(pytest.mark.tk)
 
 
 def make_tk_root(tk_mod, attempts=4):

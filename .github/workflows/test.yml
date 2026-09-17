@@ -4,6 +4,19 @@ name: Tests
 # and macOS.  Per-platform setup installs whatever extra tooling those
 # tests need (gpg, xvfb).
 #
+# THE GUI (Tk) TESTS DO NOT RUN HERE, by decision (David, 2026-09-17: "they
+# are extremely flaky").  Both legs pass -m "not tk"; conftest.py stamps
+# that marker on every test in a module that reaches tkinter, the same set
+# it puts on the serial xdist lane.  The last straw was v0.218.2's tripwire:
+# 23 test_multiboot_tab Tk tests red on macOS because pytest's own
+# unraisable-exception hook crashed (a tracemalloc circular import on the
+# runner), on a tree identical to one that had passed a minute earlier.
+# This run is the release flow's only test gate and its yank tripwire, so a
+# red it cannot mean is worse than a lane it does not run.  The Tk lane was
+# also ~3 of the 4 minutes each leg took.  xvfb stays on the Linux leg: the
+# sniff is by module source, and a test that reaches Tk only through a GUI
+# module import still needs a display there.
+#
 # THERE IS NO WINDOWS LEG, by decision (David, 2026-09-13).  The release
 # flow's ship gate is the full suite green on the developer's own Windows
 # box - the same OS and the same Tk build - so a Windows CI run repeated
@@ -45,8 +58,9 @@ jobs:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     # A wedged or looping test should fail the job, not hang for the
-    # 6-hour default and hold up a release.  Healthy runs finish in 3-4
-    # minutes on both legs (the macOS Tk lane, one worker, is ~3m of that).
+    # 6-hour default and hold up a release.  Healthy runs finished in 3-4
+    # minutes on both legs with the Tk lane (one worker, ~3m of that); the
+    # lane is deselected since 2026-09-17, see the header.
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -94,15 +108,13 @@ jobs:
       # suite exercises the picker / mfr-switch / log persistence behaviour
       # through the same code.
       #
-      # --dist loadgroup honours the xdist_group marker conftest.py stamps on
-      # every tkinter-touching module: on CI all real-Tk tests ride ONE
-      # worker, while the others parallelize the rest.  Window
-      # create/map/destroy serializes at the desktop layer however many
-      # processes ask, so splitting the lane buys nothing measurable --
-      # tests/conftest.py carries the numbers.
+      # -m "not tk" leaves out every test conftest.py marks as Tk-touching
+      # (the header says why).  --dist loadgroup stays: the xdist_group
+      # marker rides on the same sniff and is inert for deselected items,
+      # and a local run still uses it to keep the lane on its own workers.
       - name: Run tests (Linux, under xvfb)
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py
+        run: xvfb-run -a python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py -m "not tk"
 
       # The multi-boot card builder's own end-to-end test (item 93): real ext4
       # through debugfs/mke2fs/e2fsck, and - as root, which the hosted runner
@@ -114,4 +126,4 @@ jobs:
 
       - name: Run tests (macOS)
         if: runner.os == 'macOS'
-        run: python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py
+        run: python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py -m "not tk"

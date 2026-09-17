@@ -463,6 +463,25 @@ HELP_CONTENT = {
          "instead of rounding them to 0:00, which reads as an empty slot. "
          "The preview posters the first frame of a clip that short, "
          "because it is the whole clip."),
+        ("Checking a card you already built",
+         "\"Check card…\" on the toolbar asks the other question: not what "
+         "you are about to put on, but how the clips ALREADY on a card came "
+         "out. Point it at a built card image and it measures every clip on "
+         "it and lists the ones low enough in bitrate to look blocky — the "
+         "same test a build applies to a replacement, applied after the fact. "
+         "It reads the image only, takes a few seconds, and needs no "
+         "extract.\n\n"
+         "The list separates two very different problems, because the fix is "
+         "different. A clip marked \"squeezed to fit\" was too big for the "
+         "slot it replaced and the build shrank it to fit: build an image "
+         "file (not a direct-SD write) with WSL working and it goes on whole "
+         "instead, no re-export needed. A clip that is just low in bitrate "
+         "was never touched — it is on the card exactly as your own file "
+         "was, so rebuilding changes nothing and only a better export will "
+         "improve it.\n\n"
+         "A handful of the game's own clips sit under the bar by design "
+         "(long attract loops are encoded lean), so a card with nothing of "
+         "yours on it is not expected to come back empty."),
     ],
     "Replace Images": [
         ("Scan and assign",

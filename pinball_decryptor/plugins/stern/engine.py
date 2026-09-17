@@ -541,32 +541,34 @@ def _remove_renamed_video_twins(vid_dir, prev, written, log=None):
     return removed
 
 
-def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
-    """Extract every directly-stored video (H.264 in an MP4/QuickTime ``ftyp``
-    container) from the card's asset tree to ``output_dir/video/``.
+def find_card_videos(reader, cancel=None):
+    """One filesystem pass -> ``([(path, node, brand), ...], {dir: radium node})``.
 
-    Spike 2 stores LCD videos verbatim as ``.asset`` files; this sniffs the
-    ``ftyp`` magic so it catches them regardless of name/extension, and names
-    each one from its scene's ``scene.radium`` (e.g. ``Cowabunga_Background``).
-    A ``manifest.txt`` records each output name -> original card path."""
-    log = log or (lambda *a, **k: None)
+    Spike 2 stores LCD videos verbatim as ``.asset`` files, so there is no name
+    or extension to go on: the sniff is the 12-byte ``ftyp`` magic, which
+    catches them whatever they are called.  The ``scene.radium`` inodes come
+    back from the same walk because they are what names the clips
+    (:func:`video_titler`), and walking the tree twice for them would double
+    the cost of every caller.
+    """
     cancel = cancel or (lambda: False)
-    log("Scanning for video assets...", "info")
     vids = []
     radiums = {}   # hash-dir path -> scene.radium inode
-    for path, ino, node in reader.iter_regular_files(min_size=1):
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
         if cancel():
-            return 0
+            break
         if path.endswith("/scene.radium"):
             radiums[path[:-len("/scene.radium")]] = node
         elif node["size"] >= 0x1000:
             b = reader.peek(node, 12)
             if len(b) >= 12 and b[4:8] == b"ftyp":
                 vids.append((path, node, b[8:12]))
-    if not vids:
-        log("No video assets found.", "info")
-        return 0
+    return vids, radiums
 
+
+def video_titler(reader, radiums):
+    """A ``card path -> clip name`` lookup, parsing each ``scene.radium`` at
+    most once (they are megabytes and several hundred clips share one)."""
     radium_cache = {}
 
     def _title_for(path):
@@ -583,6 +585,29 @@ def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
             except Exception:
                 radium_cache[hashdir] = {}
         return radium_cache[hashdir].get(ref)
+
+    return _title_for
+
+
+def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
+    """Extract every directly-stored video (H.264 in an MP4/QuickTime ``ftyp``
+    container) from the card's asset tree to ``output_dir/video/``.
+
+    Spike 2 stores LCD videos verbatim as ``.asset`` files; this sniffs the
+    ``ftyp`` magic so it catches them regardless of name/extension, and names
+    each one from its scene's ``scene.radium`` (e.g. ``Cowabunga_Background``).
+    A ``manifest.txt`` records each output name -> original card path."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    log("Scanning for video assets...", "info")
+    vids, radiums = find_card_videos(reader, cancel)
+    if cancel():
+        return 0
+    if not vids:
+        log("No video assets found.", "info")
+        return 0
+
+    _title_for = video_titler(reader, radiums)
 
     vid_dir = os.path.join(output_dir, "video")
     os.makedirs(vid_dir, exist_ok=True)
@@ -617,6 +642,77 @@ def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
     log("Extracted %d video(s) to %s (%d named from scene data)."
         % (len(manifest), vid_dir, named), "success")
     return len(manifest)
+
+
+def scan_video_quality(reader, log=None, progress=None, cancel=None):
+    """Measure every clip already on the card -> ``[core.video_quality.ClipQuality]``.
+
+    The same discovery and naming as :func:`extract_videos`, but nothing is
+    written and no clip is read whole: each one's ``moov`` is picked out of the
+    middle of the ``.asset`` through :meth:`ext4.Ext4Reader.read_range`, which
+    is why a 658-clip card answers in seconds instead of the minute an extract
+    of several GB of video takes.
+
+    This is the after-the-fact form of the Write-time "it will look very
+    blocky" warning: it tells a user which clips on a FINISHED card are below
+    that bar, long after the log that would have said so has gone.
+    """
+    from ...core import video_quality
+
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    log("Scanning for video assets...", "info")
+    vids, radiums = find_card_videos(reader, cancel)
+    if cancel() or not vids:
+        if not vids:
+            log("No video assets found on this card.", "info")
+        return []
+
+    _title_for = video_titler(reader, radiums)
+    log("Measuring %d clip(s)..." % len(vids), "info")
+    used = {}
+    clips = []
+    for i, (path, node, brand) in enumerate(vids):
+        if cancel():
+            break
+        if progress:
+            progress(i, len(vids), "Checking clip %d/%d" % (i + 1, len(vids)))
+        # Same naming rule as the extract, so a row in this report and a file
+        # in the user's video/ folder are recognisably the same clip.
+        ext = ".mov" if brand == b"qt  " else ".mp4"
+        title = _title_for(path)
+        base = _sanitize_title(title) if title else ("video_%04d" % (i + 1))
+        k = used.get(base, 0)
+        used[base] = k + 1
+        name = (base if k == 0 else "%s_%d" % (base, k + 1)) + ext
+
+        clips.append(video_quality.read_clip_quality(
+            lambda off, n, _nd=node: reader.read_range(_nd, off, n),
+            node["size"], name=name, card_path=path))
+
+    total, blocky, squeezed, _both, bad = video_quality.summarize(clips)
+    log("Checked %d clip(s): %d below the quality bar, %d squeezed into their "
+        "slot by a Write%s."
+        % (total, blocky, squeezed,
+           (", %d unreadable" % bad) if bad else ""),
+        "warning" if blocky else "success")
+    return clips
+
+
+def card_video_quality(image_path, log=None, progress=None, cancel=None):
+    """:func:`scan_video_quality` for a card image file on disk.
+
+    The games partition is picked by :func:`_locate` — the same
+    ``image.bin``-next-to-the-firmware test the Extract uses — so the report
+    reads the clips off exactly the partition a Write put them on (on a
+    multi-image card, game 1: see the Multi-boot tab's own note).
+    """
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    with open(_lp(image_path), "rb") as disk_f:
+        reader, _fw_node, _img_node = _locate(disk_f,
+                                              _linux_partitions(image_path))
+        return scan_video_quality(reader, log, progress, cancel)
 
 
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tga", ".webp")
@@ -2521,14 +2617,17 @@ def _fit_video_payload(staged_path, target, work_dir, log):
     # blocky/scrambled — the on-card slot is fixed-size, so a big clip in a
     # tiny slot (e.g. a 456 KB attract background) can't keep its quality.
     # Judge by bits-per-pixel-per-second (resolution-aware): H.264 looks poor
-    # below ~0.03 bpp regardless of absolute bitrate.
+    # below ~0.03 bpp regardless of absolute bitrate.  The bar lives in
+    # core.video_quality, which re-measures finished cards by the same rule —
+    # a report that disagreed with this warning would be worse than none.
+    from ...core.video_quality import BLOCKY_BPP
     if info and info.width > 0 and info.height > 0:
         dur = info.duration if info.duration and info.duration > 0 else 0
         if dur > 0:
             bitrate = len(shrunk) * 8 / dur
             fps = info.fps if info.fps and info.fps > 0 else 30.0
             bpp = bitrate / (info.width * info.height * fps)
-            if bpp < 0.03:
+            if bpp < BLOCKY_BPP:
                 slot_str = ("%.1f MB" % (target / 1e6) if target >= 1e6
                             else "%d KB" % (target / 1024))
                 log("Video %s: the on-card slot is only %s, so this clip had "

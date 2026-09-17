@@ -91,6 +91,13 @@ class FakeExt4Reader:
     def read_file_bytes(self, node):
         return node.get("_data", b"")
 
+    def read_range(self, node, file_off, length):
+        """Bytes out of the middle of a file, clamped like the real reader's
+        (a container probe walks box headers and reads past the end)."""
+        if file_off < 0 or length <= 0:
+            return b""
+        return node.get("_data", b"")[file_off:file_off + length]
+
     def peek(self, node, n=16):
         """First *n* bytes, like Ext4Reader.peek (magic sniffing)."""
         return node.get("_data", b"")[:n]

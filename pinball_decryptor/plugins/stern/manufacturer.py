@@ -281,6 +281,13 @@ class SternManufacturer(Manufacturer):
         # cards' own validation digests + firmware tables, no Extract needed
         # (a tester's wish list).
         compare=True,
+        # Video quality report: Spike 2 clips live in fixed-size .asset slots a
+        # size-neutral Write squeezes a big replacement into, and the "it will
+        # look very blocky" warning that says so is a build-time log line.  A
+        # tester rebuilding editions for a year wanted to ask the question of a
+        # FINISHED card instead — engine.card_video_quality reads every clip's
+        # moov off the image in seconds and reports the ones under the bar.
+        video_quality_report=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.
@@ -636,6 +643,16 @@ class SternManufacturer(Manufacturer):
                                 "yet — pick two Spike 2 card images.")])]
         from .compare import compare_cards
         return compare_cards(path_a, path_b, assets_a, assets_b)
+
+    def video_quality(self, path, log=None, progress=None, cancel=None):
+        # Spike 2 cards only — the clips are ftyp assets on an ext4 games
+        # partition, which neither a Whitestar ROM zip nor a Spike 1 card has.
+        if path.lower().endswith(".zip"):
+            return []
+        if detect_spike1_game(path) is not None:
+            return []
+        from .engine import card_video_quality
+        return card_video_quality(path, log, progress, cancel)
 
     def extract_report_file(self, image_path, ref, out_dir):
         from .compare import extract_ref

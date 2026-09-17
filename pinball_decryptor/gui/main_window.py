@@ -1999,6 +1999,9 @@ class MainWindow:
         self._video_pane_rep = None
         self._video_select_job = None    # debounce: load preview on select
         self._video_current_rel = None   # slot loaded in the preview panes
+        # The "Check card…" report window, kept so a second click raises the
+        # open one instead of starting a second scan of the same card.
+        self._video_quality_dlg = None
         self.video_search_var.trace_add(
             "write", lambda *a: self._refresh_video_list())
         self.video_change_filter_var.trace_add(
@@ -6867,6 +6870,21 @@ class MainWindow:
             "replacement and changed-on-disk status — for tracking a big "
             "replacement project in a spreadsheet.",
             lambda: self._current_theme)
+        # …and the other direction: this table is about the clips going ON,
+        # while a user with a shelf of built cards wants to know about the
+        # clips already THERE (PAD-167).  Built here, packed by
+        # apply_manufacturer for plugins advertising video_quality_report —
+        # the row is per-plugin but its builder is shared.
+        self._video_card_check_btn = ttk.Button(
+            tools, text="Check card…",
+            command=self._open_video_quality_report)
+        _Tooltip(
+            self._video_card_check_btn,
+            "Measure every clip already written to a card image and list the "
+            "ones low enough in bitrate to look blocky — the Write-time \"it "
+            "will look very blocky\" check, asked of a finished card. Reads "
+            "the image only; nothing is written.",
+            lambda: self._current_theme)
 
         # Slot list.
         list_frame = ttk.Frame(f)
@@ -7759,6 +7777,45 @@ class MainWindow:
         # Option toggles funnel through here and can flip a cached verdict
         # instantly — keep the callout under the preview in step.
         self._video_update_preview_note()
+
+    def _video_quality_default_card(self):
+        """The card image the report should open on.
+
+        The project's OWN recorded source first (``.extract_source.json``):
+        someone asking "are the clips on my card blocky" means the card this
+        folder came off, which for a user who extracts a card he built is the
+        built card itself.  The Extract tab's current pick is the fallback —
+        it is what is in front of them — and an empty box is fine, the dialog
+        has a Browse.
+        """
+        from ..core.extract_source import read_extract_source
+        rec = read_extract_source((self.write_assets_var.get() or "").strip())
+        recorded = (rec or {}).get("input_path") or ""
+        if recorded and os.path.isfile(recorded):
+            return recorded
+        picked = (self.extract_input_var.get() or "").strip()
+        return picked if os.path.isfile(picked) else ""
+
+    def _open_video_quality_report(self):
+        """Open the "check the videos on a card" report window (PAD-167)."""
+        if self._current_mfr is None:
+            return
+        # Already open: raise it rather than stacking a second scan of the
+        # same multi-GB card on top of the first.
+        dlg = self._video_quality_dlg
+        if dlg is not None and dlg.raise_window():
+            return
+        from .video_quality_dialog import open_video_quality_dialog
+        card = self._video_quality_default_card()
+        self._video_quality_dlg = open_video_quality_dialog(
+            self.root, self._current_mfr, self._current_theme,
+            card_path=card,
+            initial_dir=(os.path.dirname(card) if card else None),
+            # The scan logs from its worker thread, and append_log writes
+            # straight into the Tk Text — every line has to take the guarded
+            # hop or the card read raises inside the worker.
+            on_log=lambda msg, level="info": self._post_ui(
+                self.append_log, msg, level))
 
     def _video_export_csv(self):
         """Save the video table as a CSV — the audio tab's Export CSV, mirrored
@@ -18270,6 +18327,17 @@ class MainWindow:
             self._read_card_btn.pack(side=tk.LEFT, padx=(6, 0))
         else:
             self._read_card_btn.pack_forget()
+
+        # "Check card…" on the Replace Video toolbar — plugins whose clips sit
+        # in fixed-size slots a Write can squeeze them into
+        # (caps.video_quality_report).  Packed left of Export CSV; side=RIGHT
+        # means the one packed LAST sits furthest left, so the counter that
+        # follows it still lands leftmost.
+        if caps.video_quality_report:
+            self._video_card_check_btn.pack(side=tk.RIGHT, padx=(0, 8),
+                                            after=self._video_csv_btn)
+        else:
+            self._video_card_check_btn.pack_forget()
 
         # Card diagnostics — manufacturers that can read a failed install's
         # on-card log back (CGC's diagnose_card).  Beside Flash, so it can

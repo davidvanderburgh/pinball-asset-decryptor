@@ -299,6 +299,15 @@ class Capabilities:
     # boards.  The plugin implements ``compare_images``.  Stern Spike 2 only
     # (plugins.stern.compare).
     compare: bool = False
+    # Video-quality report: surfaces a "Check card…" button on the Replace
+    # Video tab that measures every clip ALREADY on a card image and lists the
+    # ones below the bitrate the Write-time "it will look very blocky" warning
+    # uses.  Only for plugins whose clips sit in fixed-size slots a Write can
+    # squeeze them into — the report's whole point is telling a squeezed clip
+    # apart from one that is simply a small file (a tester with a year of
+    # built editions and no build logs left).  The plugin implements
+    # ``video_quality``.  Stern Spike 2 only.
+    video_quality_report: bool = False
 
 
 @dataclass(frozen=True)
@@ -590,6 +599,19 @@ class Manufacturer(ABC):
         Called on a worker thread by the Compare tab; must stay read-only.
         Only meaningful for plugins advertising ``capabilities.compare`` —
         the default contributes nothing.
+        """
+        return []
+
+    def video_quality(self, path, log=None, progress=None, cancel=None):
+        """Measure every video clip already on the card image *path* ->
+        ``[core.video_quality.ClipQuality]``.
+
+        The after-the-fact form of the Write's "it will look very blocky"
+        warning, for a user asking about a card that was built long ago.  Must
+        stay read-only and answer without extracting the card (it runs while
+        the user waits); *log* / *progress* / *cancel* are the usual pipeline
+        callbacks, all optional.  Only meaningful for plugins advertising
+        ``capabilities.video_quality_report`` — the default finds nothing.
         """
         return []
 

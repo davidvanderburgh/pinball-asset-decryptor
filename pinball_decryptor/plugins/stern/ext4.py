@@ -283,6 +283,31 @@ class Ext4Reader:
             remaining -= take
         return out
 
+    def read_range(self, inode, file_off, length):
+        """Bytes ``[file_off, file_off+length)`` of a regular file.
+
+        The reading counterpart of :meth:`disk_ranges`, and deliberately more
+        forgiving than it: an unallocated hole reads as zeros (what a mounted
+        filesystem would serve) and the range is clamped to the inode's size,
+        so a caller chasing a container's box headers can ask past the end
+        without having to know where the end is.  Lets a probe read a few
+        hundred bytes out of the middle of a multi-megabyte asset instead of
+        streaming the whole thing (see :mod:`core.video_quality`)."""
+        size = inode["size"]
+        if file_off >= size or length <= 0:
+            return b""
+        length = min(length, size - file_off)
+        out = bytearray(length)
+        bs = self.block_size
+        for log, phys, cnt in self._runs(inode):
+            run_start, run_end = log * bs, (log + cnt) * bs
+            lo, hi = max(file_off, run_start), min(file_off + length, run_end)
+            if lo >= hi:
+                continue
+            out[lo - file_off:hi - file_off] = self._read(
+                phys * bs + (lo - run_start), hi - lo)
+        return bytes(out)
+
     # ---- file content -------------------------------------------------------
     def read_file_bytes(self, inode):
         buf = bytearray(inode["size"])

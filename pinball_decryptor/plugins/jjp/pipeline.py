@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from . import config, ecoredata
+from . import config, ecoredata, usbstick
 from .resources import DECRYPT_C_SOURCE, ENCRYPT_C_SOURCE, STUB_C_SOURCE
 from .executor import (CommandError, create_executor, find_usbipd,
                        _decode_output as _exec_decode_output,
@@ -5043,9 +5043,22 @@ class ModPipeline(DecryptionPipeline):
         # Build xorriso command:
         #   -indev  : read original ISO (preserves all structure)
         #   -outdev : write modified ISO
+        #   -joliet on             : keep the long-name tree (see below)
         #   -boot_image any replay : preserve ALL boot records from original
         #   -find … -exec remove   : delete old partition chunks
         #   -map …                 : add new partition chunks
+        #
+        # -JOLIET ON IS NOT OPTIONAL.  xorriso -indev/-outdev writes Rock Ridge
+        # only unless told otherwise, so rewriting a stock JJP ISO (which
+        # carries a Joliet tree) DROPPED it, and Windows then shows the plain
+        # ISO 9660 names - live/vmlinuz as LIVE/VMLINUZ,
+        # sda3.ext4-ptcl-img.gz.aa as SDA3_EXT4_PTCL_IMG_GZ.AA.  A stick copied
+        # from that view carries names JJP's installer never finds, so the app's
+        # own stick maker refuses such an ISO outright (usbstick.iso_has_joliet)
+        # - i.e. the ISO this phase built could not be turned into a stick by
+        # the very next step (a tester's Pirates ISO, 2026-09-17).  The
+        # multi-boot builder learned this first (item 119); the boot records
+        # replay unharmed alongside it.
         rm_cmd = (
             f"-find '{partimag}' "
             f"-name '{game_part}.ext4-ptcl-img.gz.*' "
@@ -5066,6 +5079,7 @@ class ModPipeline(DecryptionPipeline):
             f"xorriso \\\n"
             f"  -indev '{wsl_iso}' \\\n"
             f"  -outdev '{output_iso}' \\\n"
+            f"  -joliet on \\\n"
             f"  -boot_image any replay \\\n"
             f"  {rm_cmd} \\\n"
             f"  {map_str} \\\n"
@@ -5152,8 +5166,35 @@ class ModPipeline(DecryptionPipeline):
 
         # Verify the modified ISO actually contains different partition data
         self.on_progress(0, 0, "Verifying ISO...")
+        self._verify_iso_joliet(win_iso_path)
         self._verify_iso_partition(output_iso, wsl_iso, partimag, game_part)
         self.on_progress(100, 100, "ISO build complete")
+
+    def _verify_iso_joliet(self, iso_path):
+        """Say so in the log when the built ISO has no long-name tree.
+
+        Without one the next step (make a USB install stick) refuses the ISO,
+        and a stick copied from it by hand carries names JJP's installer never
+        finds — see the ``-joliet on`` note in :meth:`_phase_build_iso`.  The
+        output ISO lands in the assets folder, a host path, so this reads it
+        directly whichever executor built it.
+        """
+        try:
+            joliet = usbstick.iso_has_joliet(iso_path)
+        except Exception as e:       # never fail a good build on a read error
+            self.log(f"Joliet check skipped: {e}", "info")
+            return
+        if joliet is True:
+            self.log("Verified: the ISO carries its long file names "
+                     "(Joliet), so a USB stick made from it installs.",
+                     "success")
+        elif joliet is False:
+            self.log(
+                "WARNING: the ISO has no Joliet directory — Windows would "
+                "show its files under shortened names "
+                "(SDA3_EXT4_PTCL_IMG_GZ.AA) and a stick made from it cannot "
+                "install. Update xorriso (it must accept '-joliet on') and "
+                "build again.", "error")
 
     def _verify_iso_partition(self, output_iso, orig_iso, partimag, game_part):
         """Verify the modified ISO has different partition data than the original.

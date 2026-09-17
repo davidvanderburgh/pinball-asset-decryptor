@@ -61,6 +61,11 @@ pyinstaller \
     `# the playfield as a Windows process, the audio bridge - are WSL` \
     `# workarounds the Linux path skips.` \
     --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \
+    `# The JJP rig, for the same reason: the JJP Multi-boot tab and installing` \
+    `# an ISO onto a game SSD both run tools/jjp_emu/mkjjpmulti.py with python3` \
+    `# from beside the package, exactly as they run Spike 2's mkmulticard.py.` \
+    `# Neither installer carried it, so both said it was missing (PAD-162).` \
+    --add-data "$ROOT_DIR/tools/jjp_emu:tools/jjp_emu" \
     `# THE PREREQUISITE INSTALLER ITSELF, which this AppImage has never` \
     `# carried. The gear menu's "Install Prerequisites" looks for it beside` \
     `# the package (app.py::_find_prereqs_script_linux) and an AppImage user` \

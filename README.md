@@ -934,6 +934,19 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    slot changed some other way (copied over by hand, or built before the
    app kept a saved original) keeps its bytes, which is what
    *Revert all changes…* is for.
+   A whole set reworked outside the app (every clip made black and white,
+   say) goes in the same way with **Replace from folder…**, beside it:
+   choose the folder holding your files and each one is picked for the
+   slot with its name. The file type and capital letters don't have to
+   match — a converter that writes `.mp4` for everything still fills the
+   card's `.mov` clips, each converted to suit its slot — and subfolders
+   are fine. Leave the extract's own files where they are: a file dropped
+   into the project folder only counts under the card's exact name, and a
+   Replace tab row reading **not on this card** says which card file it
+   was meant for. Scene pictures and font glyphs are named with a
+   fingerprint of the card they came off, so copies from another card's
+   extract never pair by name; **Transfer Mods to New Version** carries
+   those over by content.
 8. **Mod Pack tab** — share just your changed files as a zip, or apply
    someone else's mod pack on top of an extracted folder. A pack holds
    **every change made since that folder's last Extract**, not just the

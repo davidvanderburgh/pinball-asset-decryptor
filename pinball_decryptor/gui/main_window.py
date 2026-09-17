@@ -4766,13 +4766,15 @@ class MainWindow:
         if not assets_path or not os.path.isdir(assets_path) or not rels:
             setattr(self, "_%s_changed_on_disk" % kind, set())
             setattr(self, "_%s_foreign_rels" % kind, set())
+            setattr(self, "_%s_foreign_twins" % kind, {})
             self._mark_change_scan(kind, False)
             return
         self._mark_change_scan(kind, True)
         root = self.root
 
         def _work():
-            foreign = set()
+            from ..core import folder_match
+            foreign, twins = set(), {}
             try:
                 baseline = checksums.read_baseline_any(assets_path)
                 rel_set = set(rels)
@@ -4782,7 +4784,9 @@ class MainWindow:
                 changed = snaps | checksums.changed_rels(
                     assets_path, to_hash, baseline=baseline)
                 if baseline:
-                    foreign = {r for r in rels if r not in baseline}
+                    # ...and which strays are a slot's own file under another
+                    # file type, so the row can say that (PAD-163).
+                    foreign, twins = folder_match.foreign_twins(rels, baseline)
             except Exception:
                 changed = set()
 
@@ -4794,8 +4798,9 @@ class MainWindow:
                 # or the preview that the next build puts them on the card
                 # (see _slot_not_on_card).
                 setattr(self, "_%s_foreign_rels" % kind, foreign)
+                setattr(self, "_%s_foreign_twins" % kind, twins)
                 self._mark_change_scan(kind, False)
-                self._note_foreign_slots(kind, assets_path, foreign)
+                self._note_foreign_slots(kind, assets_path, foreign, twins)
                 if refresh:
                     refresh()       # rewrites the count line without the note
             # A busy main thread (>1 s inside one callback — big tree
@@ -4823,7 +4828,7 @@ class MainWindow:
         except (tk.TclError, RuntimeError):
             pass
 
-    def _note_foreign_slots(self, kind, assets_path, foreign):
+    def _note_foreign_slots(self, kind, assets_path, foreign, twins=None):
         """Log once when *kind*'s list holds files this extract never produced.
 
         The Replace tabs list every audio/video/image file in the folder, so a
@@ -4850,9 +4855,21 @@ class MainWindow:
         self.append_log(
             "%s: %d file(s) in this folder aren't part of this extract (%s). "
             "They are listed here, but nothing on the card matches them so a "
-            "build can't use them — usually a mod pack built from a different "
-            "card. Importing that pack again takes them back out."
+            "build can't use them — usually files copied in from a different "
+            "extract, or a mod pack built from a different card (importing "
+            "that pack again takes them back out)."
             % (label, len(foreign), shown), "warning")
+        twins = twins or {}
+        if twins:
+            rel = sorted(twins)[0]
+            self.append_log(
+                "%s: %d of them are named like one of the card's files but "
+                "are a different file type (%s where the card has %s), so "
+                "they sit beside their slot instead of in it. Keep your files "
+                "in a folder of their own and use \"Replace from folder…\": "
+                "it matches names whatever the file type."
+                % (label, len(twins), os.path.basename(rel),
+                   os.path.basename(twins[rel])), "warning")
 
     def _slot_not_on_card(self, kind, rel):
         """Whether *kind*'s row *rel* is a file this extract never produced —
@@ -4903,14 +4920,37 @@ class MainWindow:
         if rel is None or not self._slot_changed_on_disk(kind, rel):
             return default
         if self._slot_not_on_card(kind, rel):
+            # A converted copy of the slot's own file under another type is
+            # not a mod pack's stray, and saying so sent a modder looking for
+            # the wrong cause: they had dropped black and white clips in by
+            # name and could see nothing wrong with the names (PAD-163).
+            twin = (getattr(self, "_%s_foreign_twins" % kind, None)
+                    or {}).get(rel)
+            if twin:
+                slots = getattr(self, "_%s_slots_by_rel" % kind, None) or {}
+                fix = ("keep your files in a folder of their own and use "
+                       "\"Replace from folder…\" above, which matches names "
+                       "whatever the file type." if twin in slots else
+                       "extract the card again into a fresh folder, keep your "
+                       "files in a folder of their own, and use \"Replace "
+                       "from folder…\" there, which matches names whatever "
+                       "the file type.")
+                return ("this file is not part of this extract. The card's "
+                        "file is %s and this one is %s: a file dropped into "
+                        "the project folder only counts under the card's "
+                        "exact name, file type included, so the next build "
+                        "cannot use it. Instead, %s"
+                        % (os.path.basename(twin), os.path.basename(rel), fix))
             return ("this file is not part of this extract — nothing on the "
-                    "card matches its name, so no original was overwritten "
-                    "and the next build cannot put it anywhere. It is usually "
-                    "a mod pack made from an older extract, whose names for "
-                    "some files have since changed. Importing that pack again "
-                    "takes the stray files back out; use \"Transfer Mods to "
-                    "New Version\" on the Mod Pack tab to carry the change "
-                    "over by content instead of by name.")
+                    "card matches its name, so the next build cannot put it "
+                    "anywhere. Files copied in from a different extract do "
+                    "this (a scene picture's or glyph's name ends in a "
+                    "fingerprint of the card it came from, so a copy from "
+                    "another card, or from one already built with changes, "
+                    "is named differently), and so does a mod pack made from "
+                    "an older extract. Use \"Transfer Mods to New Version\" on "
+                    "the Mod Pack tab to carry changes over by content instead "
+                    "of by name.")
         scan_dir = getattr(self, "_%s_scan_dir" % kind, None)
         if staged_originals.snapshot_path(scan_dir, rel):
             return default            # the pair is showing properly already
@@ -8194,6 +8234,179 @@ class MainWindow:
             btn.configure(state=tk.NORMAL if live else tk.DISABLED)
         except tk.TclError:
             pass
+
+    #: File types "Replace from folder…" picks up on each tab -- the same list
+    #: the tab's one-slot picker offers.
+    _FOLDER_MATCH_EXTS = {
+        "audio": (".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac", ".opus",
+                  ".wma", ".aiff", ".aif"),
+        "video": (".mp4", ".mov", ".m4v", ".webm", ".ogv", ".avi", ".mkv",
+                  ".mpg", ".mpeg", ".wmv", ".flv", ".ts", ".3gp", ".gif"),
+    }
+
+    @staticmethod
+    def _folder_match_list(names, cap=10):
+        shown = ", ".join(names[:cap])
+        if len(names) > cap:
+            shown += ", and %d more" % (len(names) - cap)
+        return shown
+
+    def _replace_from_folder(self, kind):
+        """The Replace from folder… button: pick a folder, and every file in
+        it becomes the replacement for the slot with its name.
+
+        A modder had converted every clip they extracted to black and white
+        and wanted to "just drop the converted video files into the video folder
+        and voila".  Dropping them in put a third of them BESIDE their slots
+        -- their converter wrote .mp4 for the card's .mov clips -- and the only
+        other way in was a replacement pick per clip, a hundred of them
+        (PAD-163).  Names pair ignoring file type and letter case (see
+        core.folder_match), and each pair is an ordinary pick, so the build
+        converts it to suit its slot and Clear replacements… takes it out."""
+        from ..core import folder_match
+        if self._is_running():
+            return
+        label = self._REPLACE_LABELS.get(kind, kind)
+        slots = getattr(self, "_%s_slots_by_rel" % kind, None) or {}
+        foreign = getattr(self, "_%s_foreign_rels" % kind, ()) or ()
+        slot_rels = [rel for rel in slots if rel not in foreign]
+        if not slot_rels:
+            messagebox.showinfo(
+                "Replace from folder",
+                "There are no slots on this tab to match files to yet. Set "
+                "the project folder on the Extract tab and Scan first.")
+            return
+        if kind == "image":
+            from ..core.image import REPLACEMENT_EXTS
+            exts = REPLACEMENT_EXTS
+        else:
+            exts = self._FOLDER_MATCH_EXTS[kind]
+        key = "%s_replacement" % kind
+        folder = filedialog.askdirectory(
+            title="Choose a folder of replacement files",
+            initialdir=self.last_browse_dir(key), mustexist=True)
+        if not folder:
+            return
+        folder = os.path.normpath(folder)
+        project = (self.write_assets_var.get() or "").strip()
+        if project:
+            a = os.path.normcase(os.path.abspath(folder))
+            b = os.path.normcase(os.path.abspath(project))
+            if a == b or a.startswith(b.rstrip(os.sep) + os.sep) \
+                    or b.startswith(a.rstrip(os.sep) + os.sep):
+                messagebox.showwarning(
+                    "Replace from folder",
+                    "That folder is part of the project folder, and the "
+                    "files in the project folder are the card's own. Keep "
+                    "your replacement files in a folder of their own, "
+                    "outside the project, and choose that one.")
+                return
+        self.remember_browse_dir(key, folder)
+        found = folder_match.match_folder(folder, slot_rels, exts)
+        pairs = found["pairs"]
+        fingerprinted = [f for f in found["unmatched"]
+                         if folder_match.FINGERPRINT_RE.search(f)]
+        fingerprint_note = (
+            "\n\nScene pictures and font glyphs are named with a fingerprint "
+            "of the card they were extracted from (the 8 letters and digits "
+            "at the end, like _bba78124), so the same picture from a "
+            "different card, or from a card that was already built with "
+            "changes, has a different name. To carry those over, use "
+            "\"Transfer Mods to New Version\" on the Mod Pack tab with that "
+            "extract's whole folder as the old extract."
+            if fingerprinted else "")
+        if not pairs:
+            messagebox.showinfo(
+                "Replace from folder",
+                "None of the %d file(s) in that folder is named like a slot "
+                "on this tab. Files pair by name: the file type and capital "
+                "letters don't matter, and subfolders are fine.%s"
+                % (found["files"], fingerprint_note))
+            return
+
+        assigns = self._replace_assignments(kind)
+        n = len(pairs)
+        lines = ["Use %d file(s) from\n%s\nas replacements, each for the slot "
+                 "with its name?" % (n, folder)]
+        # A clip set to go on as-is has to BE the slot's file type, so the
+        # retyped ones are set to be converted -- what answering Yes to the
+        # one-clip picker's same question does.
+        to_convert = ([rel for rel in found["retyped"]
+                       if self._video_asis_for(rel)]
+                      if kind == "video" else [])
+        if found["retyped"]:
+            slot = found["retyped"][0]
+            lines.append(
+                "%d of them are a different file type from their slot (%s "
+                "for %s). That's fine: each is converted to suit its slot, "
+                "like any other pick.%s"
+                % (len(found["retyped"]),
+                   os.path.basename(pairs[slot]), os.path.basename(slot),
+                   (" %d of those clips were set to go on as-is, which "
+                    "needs the slot's own file type, so just those are set "
+                    "to be converted." % len(to_convert))
+                   if to_convert else ""))
+        already = [rel for rel in pairs if assigns.get(rel)]
+        if already:
+            lines.append("%d of those slots already have a replacement "
+                         "picked; it is swapped for the file from this "
+                         "folder." % len(already))
+        left = (len(found["unmatched"]) + len(found["ambiguous"])
+                + len(found["duplicates"]))
+        if left:
+            lines.append("%d file(s) in the folder are left out; the log "
+                         "names them." % left)
+        if not messagebox.askyesno("Replace from folder",
+                                   "\n\n".join(lines) + fingerprint_note):
+            return
+
+        assigns.update(pairs)
+        for rel in to_convert:
+            self._video_asis_flags[rel] = False
+        self._save_staged_changes()
+        self.append_log(
+            "%s: picked %d replacement(s) by name from %s%s."
+            % (label, n, folder,
+               (" (%d of a different file type, converted to suit their "
+                "slot)" % len(found["retyped"])) if found["retyped"] else ""),
+            "info")
+        if to_convert:
+            self.append_log(
+                "%s: %s set to be converted, whatever the box below says — "
+                "a clip that goes on as-is has to be the slot's own file type."
+                % (label, self._folder_match_list(to_convert)), "info")
+        if found["unmatched"]:
+            self.append_log(
+                "%s: %d file(s) named like no slot on this tab: %s"
+                % (label, len(found["unmatched"]),
+                   self._folder_match_list(found["unmatched"])), "warning")
+        if found["ambiguous"]:
+            self.append_log(
+                "%s: %d file(s) named like more than one slot, so left out "
+                "(put each in a subfolder named like its slot's to say "
+                "which): %s"
+                % (label, len(found["ambiguous"]),
+                   self._folder_match_list(found["ambiguous"])), "warning")
+        if found["duplicates"]:
+            self.append_log(
+                "%s: %d file(s) left out because another file in the folder "
+                "has the same name: %s"
+                % (label, len(found["duplicates"]),
+                   self._folder_match_list(found["duplicates"])), "warning")
+        if fingerprinted:
+            self.append_log(
+                "%s: %d of the left-out files are scene pictures or glyphs "
+                "named for a different card's contents; \"Transfer Mods to "
+                "New Version\" carries those over by content."
+                % (label, len(fingerprinted)), "warning")
+        refresh = getattr(self, "_refresh_%s_list" % kind, None)
+        if refresh is not None:
+            try:
+                refresh()
+            except tk.TclError:
+                pass
+        self._rerender_cleared_preview(kind, set(pairs))
+        self._update_clear_all_btn(kind)
 
     def refresh_after_revert(self):
         """Re-sync the Replace tabs + Write preview after a revert changed the
@@ -20338,6 +20551,28 @@ class MainWindow:
         # filtered view above.  The Text tab is not a Replace tab — its edits
         # go straight to the manifest and it has its own "Clear all edits".
         if tab_key in ("audio", "video", "image"):
+            # Beside it for the same reason: a whole folder of picks at once
+            # belongs to this folder too (PAD-163).
+            if not hasattr(self, "_from_folder_btns"):
+                self._from_folder_btns = {}
+            folder_btn = ttk.Button(
+                row, text="Replace from folder…",
+                command=lambda k=tab_key: self._replace_from_folder(k))
+            folder_btn.pack(side=tk.LEFT, padx=(8, 0))
+            self._from_folder_btns[tab_key] = folder_btn
+            _Tooltip(
+                folder_btn,
+                "Pick a folder of your own files and each one becomes the "
+                "replacement for the slot with the same name — for a whole "
+                "set you reworked outside the app, like every clip made black "
+                "and white. The file type and capital letters don't have to "
+                "match (Intro.mp4 is used for Intro.mov and converted to suit "
+                "it), and subfolders are fine. Nothing changes until you "
+                "confirm, and every file left out is named in the log.\n\n"
+                "Keep the extract's own files where they are: files dropped "
+                "into the project folder only count under the card's exact "
+                "name.",
+                lambda: self._current_theme)
             if not hasattr(self, "_clear_all_btns"):
                 self._clear_all_btns = {}
             btn = ttk.Button(

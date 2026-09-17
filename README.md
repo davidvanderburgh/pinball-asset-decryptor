@@ -570,6 +570,17 @@ wsl --set-default Ubuntu-24.04
 The old distro is left exactly where it is, and `wsl --export <name>
 backup.tar` still gets its files out.
 
+If that command answers `Invalid distribution name: 'Ubuntu-24.04'`, the
+machine's own `wsl.exe` is older than that release and its catalogue has no
+entry for it — nothing is installed, and restarting Windows changes nothing.
+Run `wsl --update` first, or `wsl --list --online` to see which names it does
+accept and install one of the Ubuntu entries from that list. **Install
+Prerequisites** now does all of this itself: it asks the machine which names
+it accepts, updates `wsl.exe` when the catalogue is out of date, installs the
+newest Ubuntu that machine offers if it still cannot have the pinned one, and
+— the thing it used to get wrong — reports a failed install as missing
+instead of green with a restart request.
+
 **Which Ubuntu release is up to you.** PAD works on any current one —
 22.04, 24.04, and whatever comes next — and it is never refused on a
 version number: what decides whether a machine can do the work is the

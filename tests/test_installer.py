@@ -1692,6 +1692,342 @@ def test_ubuntu_install_failure_names_a_manual_route():
         "the no-command-line fallback route.")
 
 
+# ---------------------------------------------------------------------------
+# PAD-164: a wsl.exe that will not install the name we ask for
+# ---------------------------------------------------------------------------
+#: The catalogue an inbox (pre-Store) wsl.exe answers `--list --online` with.
+#: Real shape: two preamble sentences, a header whose column titles are
+#: localized, then NAME / FRIENDLY NAME rows — and no 24.04, which is the
+#: whole of the reporter's problem.
+_LEGACY_ONLINE = """The following is a list of valid distributions that can be installed.
+Install using 'wsl.exe --install -d <Distro>'.
+
+NAME            FRIENDLY NAME
+Ubuntu          Ubuntu
+Debian          Debian GNU/Linux
+kali-linux      Kali Linux Rolling
+Ubuntu-18.04    Ubuntu 18.04 LTS
+Ubuntu-20.04    Ubuntu 20.04 LTS
+Ubuntu-22.04    Ubuntu 22.04 LTS
+openSUSE-Tumbleweed openSUSE Tumbleweed
+"""
+
+_MODERN_ONLINE = _LEGACY_ONLINE.replace(
+    "Ubuntu-22.04    Ubuntu 22.04 LTS\n",
+    "Ubuntu-22.04    Ubuntu 22.04 LTS\nUbuntu-24.04    Ubuntu 24.04 LTS\n")
+
+#: No --no-launch and no --web-download: the flags a wsl.exe old enough to
+#: miss 24.04 has never heard of.  The PAD-19 capability probe reads this.
+_LEGACY_HELP = """Usage: wsl.exe [Argument] [Options...] [CommandLine]
+
+Arguments for managing Windows Subsystem for Linux:
+    --install [Distro]
+    --list, -l [Options]
+    --set-default, -s <Distro>
+    --status
+    --update
+"""
+
+_FAKE_WSL = r'''"""A wsl.exe that answers like the PAD-164 reporter's."""
+import os
+import sys
+
+MODE = os.environ.get("PAD164_MODE", "legacy")
+ONLINE = os.environ.get("PAD164_ONLINE", "")
+HELP = os.environ.get("PAD164_HELP", "")
+a = sys.argv[1:]
+
+
+def out(s, code=0):
+    sys.stdout.write(s + "\n")
+    sys.exit(code)
+
+
+if "--help" in a:
+    out(HELP)
+if "--status" in a:
+    # No WSL on this machine at all: the reporter's state, and the branch
+    # that used to throw the install's exit code away.
+    out("Windows Subsystem for Linux has no installed distributions.", 1)
+if "--update" in a:
+    # An inbox wsl.exe the Store build cannot reach: reports success, and
+    # the catalogue it offers does not change.
+    out("The most recent version of Windows Subsystem for Linux is already "
+        "installed.")
+if ("--list" in a or "-l" in a) and ("--online" in a or "-o" in a):
+    if MODE == "nocatalogue":
+        out("The service cannot be started.", 1)
+    out(ONLINE)
+if "--list" in a or "-l" in a:
+    out("Windows Subsystem for Linux has no installed distributions.", 1)
+if "--install" in a:
+    want = None
+    if "-d" in a and a.index("-d") + 1 < len(a):
+        want = a[a.index("-d") + 1]
+    names = [ln.split()[0] for ln in ONLINE.splitlines()
+             if ln[:1].strip() and len(ln.split()) > 1]
+    if want is not None and want not in names:
+        out("Invalid distribution name: '%s'.\n"
+            "To get a list of valid distributions, use 'wsl --list --online'.\n"
+            "The parameter is incorrect." % want, 87)
+    if MODE == "storefail":
+        out("The operation could not be started because a required feature "
+            "is not installed.", 1)
+    out("%s has been installed.\n"
+        "The requested operation is successful. Changes will not be "
+        "effective until the system is rebooted." % (want or "Ubuntu"))
+out("", 1)
+'''
+
+
+def _fake_wsl_dir(tmp_path):
+    """A directory to put first on PATH, holding a fake wsl.exe."""
+    fake = tmp_path / "fakewsl"
+    fake.mkdir(exist_ok=True)
+    (fake / "fakewsl.py").write_text(_FAKE_WSL, encoding="utf-8")
+    (fake / "wsl.cmd").write_text(
+        '@echo off\r\n"%s" "%%~dp0fakewsl.py" %%*\r\n' % sys.executable,
+        encoding="ascii")
+    # ...and a Unix-executable twin, so this runs under pwsh on the macOS /
+    # Linux runners too (a .cmd is not executable there).
+    wsl_sh = fake / "wsl"
+    wsl_sh.write_text('#!/bin/sh\nexec "%s" "%s" "$@"\n'
+                      % (sys.executable, (fake / "fakewsl.py").as_posix()),
+                      encoding="ascii")
+    try:
+        wsl_sh.chmod(0o755)
+    except OSError:
+        pass
+    return fake
+
+
+def _run_ps(tmp_path, body, mode, online, name="h"):
+    """Run `body` with the installer's own definitions in scope.
+
+    Everything down to the last reporting helper is functions and constants,
+    so dot-sourcing it has no effect beyond defining them — except the admin
+    gate, which is cut out because a fake wsl.exe needs no admin.
+    """
+    ps1 = PS1.read_text(encoding="utf-8")
+    defs = ps1[:ps1.index("\n", ps1.index("function Write-SKIP($n)")) + 1]
+    gate = defs.index("$currentPrincipal = New-Object")
+    defs = defs[:gate] + defs[defs.index('$ErrorActionPreference = "Continue"'):]
+    block = tmp_path / ("defs_%s.ps1" % name)
+    block.write_text(defs, encoding="utf-8")
+
+    fake = _fake_wsl_dir(tmp_path)
+    data = tmp_path / ("ProgramData_%s" % name)
+    data.mkdir(exist_ok=True)
+    harness = tmp_path / ("harness_%s.ps1" % name)
+    harness.write_text(
+        '$env:PATH = "%s" + [IO.Path]::PathSeparator + $env:PATH\n'
+        '$env:ProgramData = "%s"\n'
+        '$script:results = @()\n'
+        '. "%s"\n%s\n' % (fake, data, block, body), encoding="utf-8")
+
+    env = dict(os.environ)
+    env["PAD164_MODE"] = mode
+    env["PAD164_ONLINE"] = online
+    env["PAD164_HELP"] = _LEGACY_HELP
+    r = subprocess.run(
+        [_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-File", str(harness)],
+        input=b"\n", capture_output=True, timeout=180, env=env)
+    said = r.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert r.returncode == 0, (said, r.stderr.decode("utf-8", "replace"))
+    return said, data
+
+
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell not available")
+def test_wsl_install_asks_for_a_distro_name_this_machine_accepts(tmp_path):
+    """★ PAD-164, the root cause.
+
+    The pinned release (PAD-114) is a NAME, and a name is only installable if
+    the machine's own wsl.exe has it in its catalogue.  An inbox wsl.exe
+    carries an older one, and it validates -d BEFORE it enables anything, so
+    `--install -d Ubuntu-24.04` there installs nothing at all:
+
+        Invalid distribution name: 'Ubuntu-24.04'.
+        To get a list of valid distributions, use 'wsl --list --online'.
+        The parameter is incorrect.
+
+    So the name is asked of the machine, not assumed.  The pin still wins
+    wherever it is offered (that is PAD-114 and it must not regress); an old
+    catalogue gets the newest Ubuntu release it does list; and a catalogue
+    that cannot be read at all means "don't know", never "not offered", so
+    the pin is kept and the retry ladder decides.
+    """
+    body = ('$p = Get-WslInstallPlan\n'
+            'Write-Host ("distro=" + $p.Distro)\n'
+            'Write-Host ("stale=" + $p.Stale)\n'
+            'Write-Host ("args=" + ($p.InstallArgs -join " "))\n'
+            'Write-Host ("online=" + ((Get-WslOnlineDistros) -join ","))\n')
+
+    said, _ = _run_ps(tmp_path, body, "legacy", _LEGACY_ONLINE, name="old")
+    assert "distro=Ubuntu-22.04" in said, (
+        "on a wsl.exe whose catalogue stops at 22.04 the installer still "
+        "asks for a name that machine will refuse (PAD-164):\n" + said)
+    assert "stale=True" in said, said
+    assert "args=--install -d Ubuntu-22.04" in said, said
+    # The catalogue is read as names, not as prose: the two preamble
+    # sentences must not come back as distros.
+    online = [ln for ln in said.splitlines() if ln.startswith("online=")][0]
+    assert "Ubuntu-22.04" in online and "Ubuntu" in online, online
+    assert "The" not in online.replace("The following", "XX"), online
+    assert "Install" not in online, online
+
+    said, _ = _run_ps(tmp_path, body, "legacy", _MODERN_ONLINE, name="new")
+    assert "distro=Ubuntu-24.04" in said, (
+        "the pinned release must still be what a machine that offers it "
+        "gets (PAD-114):\n" + said)
+    assert "stale=False" in said, said
+
+    said, _ = _run_ps(tmp_path, body, "nocatalogue", "", name="none")
+    assert "distro=Ubuntu-24.04" in said, (
+        "a catalogue that cannot be read means 'don't know' — the pin is "
+        "kept and the retry ladder takes over:\n" + said)
+    assert "stale=False" in said, said
+
+
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell not available")
+def test_a_failed_wsl_install_is_not_reported_as_installed(tmp_path):
+    """★ PAD-164, the loop the reporter was actually stuck in.
+
+    The WSL2 branch that runs on a machine with NO WSL never looked at
+    `wsl --install`'s exit code.  Whatever happened, it printed
+
+        [INSTALLED] WSL2 + Ubuntu (restart required)
+
+    and wrote the boot-session marker the app reads as "a restart is
+    pending".  So a machine where the install failed outright was told to
+    restart, came back, and got the identical green line — "I don't know how
+    many times I tried", in the reporter's words.
+
+    Runs the real branch against a fake wsl.exe rather than grepping the
+    script, because the next version of this bug will not be spelled the same
+    way.  Two machines: one whose catalogue is merely old (a distro it does
+    offer gets installed), and one where every install fails (nothing is
+    claimed, and nothing is left waiting on a restart).
+    """
+    ps1 = PS1.read_text(encoding="utf-8")
+    section = ps1[ps1.index("$needsWsl = $wslPlan.Count -gt 0"):
+                  ps1.index("# 2b. The repair for an apt")]
+    (tmp_path / "section.ps1").write_text(section, encoding="utf-8")
+    body = ('$wslPlan = @(@{ label="e2fsprogs/debugfs"; pkg="e2fsprogs";'
+            ' probe="debugfs" })\n'
+            '. "%s"\n'
+            'Write-Host "--- results ---"\n'
+            '$script:results | ForEach-Object { "{0}={1}" -f $_.Name, $_.Status }\n'
+            % (tmp_path / "section.ps1"))
+
+    # 1. The reporter's machine: an old catalogue, and an install that works
+    #    once it is asked for a name that catalogue has.
+    said, data = _run_ps(tmp_path, body, "legacy", _LEGACY_ONLINE, name="old")
+    assert "Ubuntu-22.04" in said, said
+    assert "[INSTALLED] WSL2 + Ubuntu-22.04 (restart required)" in said, (
+        "the WSL2 step no longer names the release it installed:\n" + said)
+    assert "Invalid distribution name" not in said, (
+        "the installer still asks this machine's wsl.exe for a name it "
+        "refuses (PAD-164):\n" + said)
+    # A real install really is waiting on a restart, so the marker is written.
+    assert any(p.is_file() for p in data.rglob("*")), (
+        "a successful install must still record the boot session, or a "
+        "pre-restart re-run cannot say the restart is the missing step "
+        "(PAD-16):\n" + said)
+
+    # 2. A machine where nothing can be installed at all.
+    said, data = _run_ps(tmp_path, body, "storefail", _MODERN_ONLINE,
+                         name="fail")
+    assert "[INSTALLED]" not in said, (
+        "an install that FAILED is still reported as installed — this is the "
+        "PAD-164 loop:\n" + said)
+    assert "WSL2 + Ubuntu (wsl --install exit" in said and "[MISSING]" in said, said
+    assert "=Missing" in said, said
+    # ...and nothing is waiting on a restart, so nothing says one is.
+    assert "Restarting Windows will not change this" in said, (
+        "a failed install must say so, rather than leave the user restarting "
+        "for nothing:\n" + said)
+    assert not any(p.is_file() for p in data.rglob("*")), (
+        "a FAILED install still wrote the restart-pending marker, so the app "
+        "and the next run both claim a restart is all that is missing "
+        "(PAD-164):\n" + said)
+    # The next step must not promise the distro either.
+    assert "will install after the Windows restart" not in said, said
+
+
+#: Shadows the real cmdlet so the machine under test answers, not this box.
+#: PowerShell resolves functions before cmdlets, so defining this after the
+#: definitions are in scope is enough.  -Online has to be a SWITCH: as a value
+#: parameter it swallows the next argument, the call throws, and the probe's
+#: catch answers "don't know" — which would quietly test nothing.
+_FEATURE_STUB = """
+function Get-WindowsOptionalFeature {
+    param([switch]$Online, $FeatureName, $ErrorAction)
+    [PSCustomObject]@{ FeatureName = $FeatureName; State = "%s" }
+}
+"""
+
+
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell not available")
+def test_a_lying_restart_marker_does_not_cost_another_restart(tmp_path):
+    """★ PAD-164, what the broken releases LEFT BEHIND.
+
+    The restart marker (PAD-16) is a claim that `wsl --install` succeeded in
+    this boot session, and every release up to this one wrote it whether the
+    install had worked or not.  So the markers already on users' disks can be
+    lies, and a fix that trusts them answers a machine that installed nothing
+    with "you have not restarted yet" — the dead end, one release later.
+
+    Windows settles it: `wsl --install` turns features ON, and a feature reads
+    Disabled only if nothing ever enabled it.  Disabled plus a marker for this
+    session means the marker is a lie, so the install runs instead.  Enabled
+    (or a cmdlet that cannot answer) means the marker is believed and the
+    restart really is the missing step, which must not regress.
+    """
+    ps1 = PS1.read_text(encoding="utf-8")
+    section = ps1[ps1.index("$needsWsl = $wslPlan.Count -gt 0"):
+                  ps1.index("# 2b. The repair for an apt")]
+    (tmp_path / "section2.ps1").write_text(section, encoding="utf-8")
+
+    def body(state):
+        return (
+            # The old release's marker: this boot session, nothing installed.
+            'New-Item -ItemType Directory -Force '
+            '(Split-Path -Parent $script:RestartMarker) | Out-Null\n'
+            'Set-Content -LiteralPath $script:RestartMarker '
+            '-Value (Get-BootSessionId)\n'
+            + (_FEATURE_STUB % state) +
+            '$wslPlan = @(@{ label="e2fsprogs/debugfs"; pkg="e2fsprogs";'
+            ' probe="debugfs" })\n'
+            '. "%s"\n' % (tmp_path / "section2.ps1"))
+
+    # A boot id is what makes the marker comparable at all; without one
+    # (non-Windows pwsh) the branch under test is unreachable and there is
+    # nothing to assert.
+    probe, _ = _run_ps(tmp_path, 'Write-Host ("boot=" + (Get-BootSessionId))',
+                       "legacy", _LEGACY_ONLINE, name="boot")
+    if "boot=" not in probe or probe.split("boot=")[1].strip() == "":
+        pytest.skip("no boot session id on this platform")
+
+    # Disabled: the marker cannot be true, so install rather than re-restart.
+    said, _ = _run_ps(tmp_path, body("Disabled"), "legacy", _LEGACY_ONLINE,
+                      name="lying")
+    assert "waiting on a Windows restart" not in said, (
+        "a marker left by a release that wrote it after a FAILED install "
+        "still costs the user a pointless restart (PAD-164):\n" + said)
+    assert "that install did not actually happen" in said, said
+    assert "[INSTALLED] WSL2 + Ubuntu-22.04 (restart required)" in said, said
+
+    # EnablePending: the install really did happen and the restart is the
+    # missing step.  This is PAD-16 and it must survive the fix.
+    said, _ = _run_ps(tmp_path, body("EnablePending"), "legacy",
+                      _LEGACY_ONLINE, name="truthful")
+    assert "[SKIP] WSL2 + Ubuntu (waiting on a Windows restart)" in said, (
+        "a TRUE restart-pending marker is no longer believed, so the run "
+        "reinstalls instead of naming the restart (PAD-16):\n" + said)
+    assert "Installing WSL2 + Ubuntu" not in said, said
+
+
 def test_iss_repairs_python_permissions():
     """Regression guard — faster-whisper [Errno 13], install-over fix.
 

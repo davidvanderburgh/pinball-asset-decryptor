@@ -2414,18 +2414,32 @@ def test_the_installer_puts_a_machine_on_the_release_the_app_names():
     The plain name survives as the FALLBACK, and it has two jobs: a Store with
     no entry for this exact release, and a machine where this exact name is
     already registered (the dead distro this installer reports just above),
-    where the pinned install can only answer "already exists"."""
+    where the pinned install can only answer "already exists".
+
+    Since PAD-164 the name is chosen rather than hardcoded, because a name the
+    machine's own wsl.exe has never heard of installs nothing at all - so what
+    is asserted here is that the pin still WINS whenever the machine offers
+    it, which is the property this test was written for."""
     ps1 = (pathlib.Path(DEFAULT_RIG_DIR).parent.parent / "installer"
            / "install_prerequisites.ps1").read_text(encoding="utf-8")
     assert '$PadKnownGoodDistro = "%s"' % emulate_tab.KNOWN_GOOD_DISTRO in ps1
-    assert '@("--install", "-d", $PadKnownGoodDistro)' in ps1
+    assert ("if (@($Online) -contains $PadKnownGoodDistro) "
+            "{ return $PadKnownGoodDistro }") in ps1, (
+        "the pinned release must still be what gets installed on any machine "
+        "whose wsl.exe offers it (PAD-114)")
+    assert '@("--install", "-d", $distro)' in ps1
     assert '@("--install", "-d", "Ubuntu")' in ps1, "the fallback is still there"
     # ...and it is reached only after a non-zero exit, so an install that
     # merely wants its first-run setup finished never becomes a second distro.
-    tail = ps1[ps1.index("$plan.FallbackArgs"):]
-    guard = ps1[:ps1.index("& wsl $plan.FallbackArgs")]
-    assert "-not (Test-WslHasApt) -and $installExit -ne 0" in guard, guard[-400:]
-    assert tail, "the fallback is actually run"
+    # Checked at EVERY call site: PAD-164 added a second one, in the branch
+    # that runs on a machine with no WSL at all.
+    runs = [i for i in range(len(ps1))
+            if ps1.startswith("& wsl $plan.FallbackArgs", i)]
+    assert runs, "the fallback is actually run"
+    for i in runs:
+        # The nearest `if (` above the call is the block it lives in.
+        cond = ps1[:i][ps1[:i].rindex("if ("):]
+        assert "$installExit -ne 0" in cond, cond
     # No hint anywhere still sends a person to the tracking name by hand.
     assert "wsl --install -d Ubuntu\"" not in ps1
     assert "wsl --set-default Ubuntu\"" not in ps1

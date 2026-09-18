@@ -318,7 +318,7 @@ def test_the_two_preview_boxes_no_longer_read_identically(app, tmp_path):
 
 def _fake_stage(store):
     def _stage(slot, rep, trim_to_length=False, no_conversion=False,
-               cancel_cb=None, byte_budget=None):
+               cancel_cb=None, byte_budget=None, match_bitrate=None):
         store.append((slot.rel_path, no_conversion))
         return True, ""
     return _stage

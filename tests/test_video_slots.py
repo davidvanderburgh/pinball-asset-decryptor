@@ -1021,7 +1021,7 @@ def _budget_seen(monkeypatch, tmp_path, **kw):
     got = {}
 
     def fake_stage(slot, rep, trim_to_length=False, no_conversion=False,
-                   cancel_cb=None, byte_budget=None):
+                   cancel_cb=None, byte_budget=None, match_bitrate=None):
         got["budget"] = byte_budget
         return True, ""
 
@@ -1070,3 +1070,195 @@ def test_only_the_plugins_that_pin_a_slot_ask_for_a_budget():
 
     assert Manufacturer.video_pins_byte_size(object()) is False
     assert JJPManufacturer().video_pins_byte_size(None) is True
+
+
+# --------------------------------------------------------------------------
+# A conversion is held to the bitrate of the clip it replaces (PAD-171)
+#
+# With no byte budget the H.264 conversion ran at x264's default constant
+# quality, which is a statement about the SOURCE: a user's 3.7 Mbps export
+# for Godzilla's 7.6 Mbps magnagrab.mp4 came out at 967 kbps, under the
+# blocky bar, and all 533 replaced clips on their card were conversions like it.
+# --------------------------------------------------------------------------
+
+def _match_cmd(monkeypatch, tmp_path, match_bitrate, *, max_bytes=None,
+               codec="h264", ext=".mp4", has_audio=False, size=b"x" * 7500,
+               width=1360, height=768, fps=30.0):
+    """Run transcode_video_to under a fake ffmpeg; return (ok, detail, cmds)."""
+    from pinball_decryptor.core import video as V
+    from pinball_decryptor.core.video import VideoInfo
+
+    seen = []
+
+    def fake_run(cmd, limit, cancel_cb=None):
+        seen.append(list(cmd))
+        with open(cmd[-1], "wb") as fh:
+            fh.write(size)
+        return 0, b"", None
+
+    monkeypatch.setattr(V, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(V, "_run_ffmpeg_watched", fake_run)
+    monkeypatch.setattr(V, "probe_duration", lambda p: 5.0)
+
+    slot = VideoInfo(path="slot" + ext, vcodec=codec, width=width,
+                     height=height, fps=fps, duration=5.0,
+                     has_audio=has_audio, profile="Main", level=32)
+    ok, detail = V.transcode_video_to(
+        str(tmp_path / "in.mov"), str(tmp_path / ("out" + ext)), slot,
+        max_bytes=max_bytes, match_bitrate=match_bitrate)
+    return ok, detail, seen
+
+
+def test_an_h264_conversion_runs_at_the_replaced_clips_bitrate(monkeypatch,
+                                                               tmp_path):
+    ok, detail, cmds = _match_cmd(monkeypatch, tmp_path, 7_600_000)
+    assert ok and len(cmds) == 1
+    cmd = cmds[0]
+    assert cmd[cmd.index("-b:v") + 1] == "7600000"
+    # Capped, not just targeted: a bare -b:v overshot that clip by a quarter,
+    # which is enough to miss the slot's bytes on a fit-in-place write.
+    assert cmd[cmd.index("-maxrate") + 1] == "7600000"
+    assert cmd[cmd.index("-bufsize") + 1] == "15200000"
+    assert "-crf" not in cmd
+    # The profile ceiling still rides along.
+    assert cmd[cmd.index("-profile:v") + 1] == "main"
+    # What came out, beside what the slot had: the two numbers they compared.
+    assert "encoded at 12 kbps (the clip it replaces is 7.6 Mbps)" in detail
+
+
+def test_the_audio_reserve_comes_out_of_the_matched_rate(monkeypatch,
+                                                         tmp_path):
+    _ok, _d, cmds = _match_cmd(monkeypatch, tmp_path, 7_600_000,
+                               has_audio=True)
+    cmd = cmds[0]
+    assert cmd[cmd.index("-b:v") + 1] == str(7_600_000 - 96_000)
+
+
+def test_a_lean_original_does_not_drag_the_conversion_under_the_bar(
+        monkeypatch, tmp_path):
+    """A project extracted from a card an older version built has one of those
+    crushed conversions as its "original" -- matching it would repeat it."""
+    from pinball_decryptor.core.video import CONVERT_FLOOR_BPP
+    from pinball_decryptor.core.video_quality import BLOCKY_BPP
+
+    _ok, detail, cmds = _match_cmd(monkeypatch, tmp_path, 820_000)
+    rate = int(cmds[0][cmds[0].index("-b:v") + 1])
+    assert rate == pytest.approx(CONVERT_FLOOR_BPP * 1360 * 768 * 30, abs=1)
+    assert rate / (1360 * 768 * 30) > BLOCKY_BPP
+    assert "(the clip it replaces is 820 kbps)" in detail
+
+
+def test_a_budget_still_wins_over_the_matched_rate(monkeypatch, tmp_path):
+    _ok, _d, cmds = _match_cmd(monkeypatch, tmp_path, 7_600_000,
+                               max_bytes=1_000_000, size=b"x" * 10)
+    cmd = cmds[0]
+    assert cmd[cmd.index("-b:v") + 1] == str(int(1_000_000 * 8 * 0.92 / 5.0))
+
+
+def test_other_codecs_keep_their_own_rate_control(monkeypatch, tmp_path):
+    _ok, detail, cmds = _match_cmd(monkeypatch, tmp_path, 7_600_000,
+                                   codec="vp8", ext=".webm")
+    cmd = cmds[0]
+    assert cmd[cmd.index("-crf") + 1] == "32"
+    assert "encoded at" not in detail
+
+
+def test_no_known_bitrate_keeps_the_old_encode(monkeypatch, tmp_path):
+    _ok, detail, cmds = _match_cmd(monkeypatch, tmp_path, None)
+    assert "-b:v" not in cmds[0] and "-maxrate" not in cmds[0]
+    assert "encoded at" not in detail
+
+
+def _rate_seen(monkeypatch, tmp_path, measured=7_600_000, **kw):
+    """Stage one assignment; return (match_bitrate passed, paths measured)."""
+    from pinball_decryptor.core import video_slots as VS
+
+    got, measured_paths = {}, []
+
+    def fake_stage(slot, rep, trim_to_length=False, no_conversion=False,
+                   cancel_cb=None, byte_budget=None, match_bitrate=None):
+        got["rate"] = match_bitrate
+        return True, ""
+
+    def fake_rate(path):
+        measured_paths.append(path)
+        return measured
+
+    monkeypatch.setattr(VS, "stage_replacement", fake_stage)
+    monkeypatch.setattr(VS, "_clip_bitrate", fake_rate)
+    if not (tmp_path / "clip.mp4").exists():
+        (tmp_path / "clip.mp4").write_bytes(b"\x00" * 900)
+    (tmp_path / "rep.mp4").write_bytes(b"\x00" * 10)
+    slots = {s.rel_path: s for s in scan_video_slots(str(tmp_path),
+                                                     probe=False)}
+    VS.stage_replacements(slots, {"clip.mp4": str(tmp_path / "rep.mp4")},
+                          assets_dir=str(tmp_path), **kw)
+    return got.get("rate"), measured_paths
+
+
+def test_staging_hands_the_pristine_clips_bitrate_to_the_encoder(
+        monkeypatch, tmp_path):
+    """Measured off the .orig snapshot, not the slot on disk: re-staging over
+    an earlier (crushed) replacement must not match THAT one's bitrate."""
+    from pinball_decryptor.core import staged_originals
+
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 900)
+    staged_originals.snapshot(str(tmp_path), "clip.mp4", None)
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 120)
+
+    rate, paths = _rate_seen(monkeypatch, tmp_path)
+    assert rate == 7_600_000
+    assert paths == [staged_originals.snapshot_path(str(tmp_path),
+                                                    "clip.mp4")]
+
+
+def test_a_pinned_slot_keeps_its_old_encode(monkeypatch, tmp_path):
+    """JJP holds a clip to its slot's bytes; there the budget (with the length
+    matched) or the old encode decides, and the build fits what overshoots."""
+    for trim in (True, False):
+        rate, paths = _rate_seen(monkeypatch, tmp_path, pin_byte_size=True,
+                                 trim_to_length=trim)
+        assert rate is None and paths == []
+
+
+def test_clip_bitrate_reads_a_real_clip_and_refuses_anything_else(tmp_path):
+    from pinball_decryptor.core.video_slots import _clip_bitrate
+
+    clip = str(tmp_path / "c.mp4")
+    if not _make_testsrc(clip, seconds=2.0):
+        pytest.skip("ffmpeg not available")
+    rate = _clip_bitrate(clip)
+    assert rate == pytest.approx(os.path.getsize(clip) * 8 / 2.0, rel=0.05)
+    (tmp_path / "junk.mp4").write_bytes(b"not a clip at all")
+    assert _clip_bitrate(str(tmp_path / "junk.mp4")) is None
+    assert _clip_bitrate(str(tmp_path / "missing.mp4")) is None
+
+
+def test_a_real_conversion_lands_near_the_slots_bitrate(tmp_path):
+    """End to end through ffmpeg: a replacement that has to be converted (a
+    different size) comes out near the slot clip's bitrate, not at whatever
+    the encoder's default quality makes of the source."""
+    from pinball_decryptor.core.video import find_ffmpeg
+    from pinball_decryptor.core.video_quality import quality_of_file
+
+    rep = str(tmp_path / "rep.mp4")
+    if not _make_testsrc(rep, seconds=2.0, width=320, height=240, fps=10):
+        pytest.skip("ffmpeg not available")
+    # A slot clip encoded rich, the way Stern's are.
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    slot_path = str(proj / "clip.mp4")
+    r = subprocess.run([find_ffmpeg(), "-y", "-f", "lavfi", "-i",
+                        "testsrc=size=160x120:rate=10:duration=2",
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                        "-b:v", "600k", "-maxrate", "600k",
+                        "-bufsize", "1200k", slot_path],
+                       capture_output=True)
+    assert r.returncode == 0
+    slot_rate = quality_of_file(slot_path).bitrate
+    slots = {s.rel_path: s for s in scan_video_slots(str(proj))}
+    staged, failures = stage_replacements(slots, {"clip.mp4": rep},
+                                          assets_dir=str(proj))
+    assert staged == 1 and not failures
+    out_rate = quality_of_file(slot_path).bitrate
+    assert out_rate > 0.6 * slot_rate, (out_rate, slot_rate)

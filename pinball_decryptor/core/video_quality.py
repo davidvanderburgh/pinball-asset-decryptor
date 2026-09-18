@@ -391,9 +391,10 @@ def summary_lines(clips):
 
     The split between "below the bar" and "squeezed into its slot" is the
     whole point of the report: a clip PAD had to squeeze is one a rebuild can
-    fix, while a clip that is simply a small file went on the card exactly as
-    the user's own encoder made it, and re-running the build will change
-    nothing.
+    fix.  A clip that is simply small is EITHER the user's own file, which a
+    rebuild will not change, or PAD's format-matched conversion, which it will
+    -- and the card cannot say which (Stern's own clips carry the same x264
+    signature PAD's conversions do), so the line names both.
     """
     total, blocky, squeezed, both, bad = summarize(clips)
     if not total:
@@ -412,10 +413,20 @@ def summary_lines(clips):
                    "file (not a direct-SD write) with WSL working puts them on "
                    "at full quality instead." % (squeezed, both))
     elif blocky:
-        out.append("None of them were squeezed by a Write — they are on the "
-                   "card at the size your own files were, so re-building will "
-                   "not change them. Re-export those clips at a higher bitrate "
-                   "to improve them.")
+        # This used to say they were the user's own files at their own size
+        # and to re-export them.  On the card that reported it (PAD-171) all
+        # 533 replaced clips were the app's own conversions: a replacement
+        # that isn't an exact match for its slot goes on as a converted copy,
+        # and that conversion ran at x264's default quality.  The user
+        # re-exported at a higher bitrate as told, and the build converted it
+        # straight back down.
+        out.append("None of them were squeezed to fit their slot. A "
+                   "replacement that isn't an exact match for its slot goes "
+                   "on as a converted copy, and older versions converted at "
+                   "far below Stern's bitrate; build again from your original "
+                   "replacement files to convert them at the bitrate of the "
+                   "clip they replace. A clip that went on as your own file "
+                   "keeps the bitrate you exported it at.")
     if bad:
         out.append("%d clip(s) could not be read." % bad)
     return out

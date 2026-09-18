@@ -1410,8 +1410,9 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    default, **As set in the game**, changes nothing. **Power** is the
    mains: 60 Hz, as the emulator has always run; 50 Hz as a European
    machine (a 50 Hz board, which boots normally); or 50 Hz as a US
-   machine (a 60 Hz board, the combination the game refuses to run on).
-   Both are remembered for every project and take effect at the next
+   machine (a 60 Hz board, the combination the game refuses to run on;
+   from v0.219.4 the emulator leaves that refusal up instead of pressing
+   past it). Both are remembered for every project and take effect at the next
    Start.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
    app, in `tools/spike2_emu`, and the prerequisites installer pulls in

@@ -1784,6 +1784,8 @@ if [ "${PAD_SELECT:-}" = 1 ]; then
 else
     rm -f "$ROOT/dump/selecting" "$ROOT/dump/vidroot"
 fi
+# PAD-170: the last run's edits, until run_game.sh binds this run's (if any).
+rm -f "$ROOT/dump/vidoverride"
 # 0 = the flag has outlived the selector: stop waiting on it. 1 = keep
 # waiting (and the selector is alive, or was seen alive less than SEL_GAP s
 # ago, or has not appeared yet and SEL_WAIT has not run out). Only ever

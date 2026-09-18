@@ -99,6 +99,18 @@ def test_the_overlay_is_one_nop_and_locating_is_idempotent():
     assert valpatch.sound_count_overlay(bytes(patched)) == {off: valpatch._NOP}
 
 
+def test_a_grown_bank_builds_count_patch_is_recognised():
+    """PAD-172 names this patch in the log when it carries a built card's
+    program into an override set: stock no, patched yes, no site no."""
+    elf = _elf([(10, _block())])
+    off = (10 + 1 + 4) * 4
+    patched = bytearray(elf)
+    patched[off:off + 4] = valpatch._NOP
+    assert valpatch.sound_count_patched(elf) is False
+    assert valpatch.sound_count_patched(bytes(patched)) is True
+    assert valpatch.sound_count_patched(_elf([])) is False
+
+
 def test_an_unlocated_count_is_a_warning_not_a_failure():
     msgs = []
     ov = valpatch.sound_count_overlay(_elf([]), lambda m, lvl="info": msgs.append((lvl, m)))

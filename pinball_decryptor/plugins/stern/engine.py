@@ -6441,7 +6441,7 @@ def card_title_index(path):
 
 
 def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
-                    cancel=None, label=None):
+                    cancel=None, label=None, run_card=None):
     """Build an OVERRIDE SET: the card files the user's edits touch, patched,
     and nothing else — so the emulator can run those edits without a rebuild.
 
@@ -6471,6 +6471,14 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     to copy over 9p, on every Start.  :data:`OVERRIDE_DELTA` is written beside
     the manifest so the staging script can be just as narrow
     (``tools/spike2_emu/overrides.sh``).
+
+    *run_card* is the card the set will be bound over, when that is not
+    *original_path* (a card PAD built from this project: PAD-161 prepares the
+    set from the original, and PAD-172 is what that cost).  The set's game
+    program then keeps what that card's own build changed in it and these
+    edits do not - see :func:`_carry_run_card_program`.  Recorded in the
+    manifest, because a set carrying one card's program is not the set for
+    another.
 
     *out_dir* is emptied first when it cannot be patched, and only if it is
     empty or already an override set (it carries :data:`OVERRIDE_MANIFEST`)
@@ -6531,6 +6539,9 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                     "instead." % (len(unmapped), unmapped[0]))
             _stage_done(log, "tracing the edits back to the card files they "
                         "live in", t0)
+            if run_card is not None:
+                _carry_run_card_program(reader, _fw_node, by_file, grow_plan,
+                                        original_path, run_card, log)
 
             # UPDATE WHAT IS THERE, or lay a new set down.  Building whole
             # means re-extracting a 1.4 GB image.bin because one callout
@@ -6686,6 +6697,9 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         # cache uses (item 34: David keeps byte-identical cards at two paths).
         "card": {"path": os.path.abspath(str(original_path)),
                  "size": st.st_size, "mtime": int(st.st_mtime)},
+        # ...and the card they are bound OVER, whose game program the set's
+        # carries (PAD-172).  The same card when no other one was named.
+        "run_card": _card_identity(run_card or original_path),
         "assets": os.path.abspath(str(assets_dir)),
         "created": time.strftime("%Y-%m-%d %H:%M:%S"),
         "counts": {"audio": counts[0], "video": counts[1],
@@ -6718,6 +6732,170 @@ def _override_path(out_dir, card_path):
     """
     rel = card_path.strip("/").split("/")
     return os.path.join(out_dir, *rel)
+
+
+def _card_identity(path):
+    """``{path, size, mtime}`` - the identity an override manifest keeps for a
+    card, the same size+mtime the rig's own card cache keys on."""
+    st = os.stat(_lp(str(path)))
+    return {"path": os.path.abspath(str(path)), "size": st.st_size,
+            "mtime": int(st.st_mtime)}
+
+
+#: More differing bytes than this between the picked card's game program and
+#: the original's is not a build of the same program with PAD's in-place edits
+#: in it (the validator bypass is 8 bytes, the sound count 4, a program text a
+#: few hundred), so none of it is carried.
+_CARRY_LIMIT = 256 * 1024
+
+
+def _program_diff_runs(a, b, block=4096):
+    """``[(offset, length), ...]`` where the equal-length *a* and *b* differ.
+    Compared a block at a time first: two copies of one game program differ in
+    a few words out of 8 MB, and a byte loop over all of it costs seconds."""
+    runs = []
+    for base in range(0, len(a), block):
+        if a[base:base + block] == b[base:base + block]:
+            continue
+        i, end = base, min(base + block, len(a))
+        while i < end:
+            if a[i] == b[i]:
+                i += 1
+                continue
+            j = i
+            while j < end and a[j] != b[j]:
+                j += 1
+            runs.append((i, j - i))
+            i = j
+    return _merge_ranges(runs)
+
+
+def _minus_ranges(runs, cover):
+    """*runs* with every byte that *cover* spans taken out."""
+    cover = _merge_ranges(cover)
+    out = []
+    for off, n in runs:
+        pos, end = off, off + n
+        for c_off, c_n in cover:
+            if c_off + c_n <= pos or c_off >= end:
+                continue
+            if c_off > pos:
+                out.append((pos, c_off - pos))
+            pos = max(pos, c_off + c_n)
+            if pos >= end:
+                break
+        if pos < end:
+            out.append((pos, end - pos))
+    return out
+
+
+def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
+                            original_path, run_card, log):
+    """Keep the game-program bytes the card the set RUNS ON was built with.
+
+    Returns how many bytes were carried into the set's copy of the program.
+
+    PAD-172 (DragonRR, v0.219.1): "if I uncheck the assets box it works, and
+    if I recheck it, it fails again" - the game put up GAME VALIDATION ERROR,
+    UPDATE SD CARD over attract, on a card PAD had built, but only with his
+    edits applied on top.  Every override set carries the game program,
+    because the validator bypass is written on every build, and since PAD-161
+    that program is prepared from the card the project was EXTRACTED from:
+    the stock program plus the bypass.  Bound over a built card, it replaced
+    that card's own program, and with it everything the card's build had
+    changed there for the rest of the card.  A card built with longer sounds
+    is the case that shows: its grown sound bank counts every appended
+    record as failed unless the program's count store is patched out
+    (``valpatch.sound_count_overlay``), and nothing else in the program can
+    stop that count raising the banner - the bypassed validator only reads
+    it back.  Measured on the emulator, Godzilla LE 1.16, looking at Ball 1
+    of a started game (attract never shows it): stock plus a set of ten
+    pictures and a video is clean; that card built with two longer callouts
+    is clean on its own; the set over the built card shows the banner; the
+    set with this carry over the built card is clean again.
+
+    So when *run_card* is another card than the original and its program is
+    the same size (every in-place edit PAD makes to a program keeps its
+    size), each byte it has that differs from the original's, and that none
+    of this set's own program writes touch, is laid into the set's copy
+    first.  The set's writes still go on top, so where both changed a byte,
+    these edits win - the same rule as every other file on that card: what
+    the edits change is theirs, what they leave alone is the card's.  The
+    carried bytes join the file's write list, so the manifest's ranges hold
+    them, the next build lays the original's bytes back over them before it
+    decides again (the picked card may be another one by then), and the rig
+    stages them with everything else.
+
+    A program rebuilt whole - by that card's build (blip-free sounds, longer
+    program text) or by these edits - has no offsets the other side shares,
+    so nothing is carried and the log says what that can cost.  The set's
+    ``.sidx`` record for the program is left as prepared: a card run never
+    binds the ``.sidx`` (it sits beside the title), and only the bypassed
+    validator ever reads it.
+    """
+    if fw_node is None or not run_card:
+        return 0
+    if (os.path.normcase(os.path.abspath(str(run_card)))
+            == os.path.normcase(os.path.abspath(str(original_path)))):
+        return 0
+    fw_ib = bytes(fw_node["i_block"])
+    key = next((p for p, (n, _w) in by_file.items()
+                if bytes(n["i_block"]) == fw_ib), None)
+    fw_rel = key.lstrip("/") if key else _card_rel_path(reader, fw_node)
+    rebuilt = bool(fw_rel) and any(
+        rel.lstrip("/") == fw_rel
+        for rel, _src in (grow_plan or {}).get("jobs", ()))
+    if key is None and not rebuilt:
+        return 0            # no program in the set: the card's own one runs
+    name = os.path.basename(str(run_card))
+    try:
+        with open(_lp(str(run_card)), "rb") as f:
+            run_reader, run_fw, _img = _locate(f, _linux_partitions(run_card))
+            picked = bytes(run_reader.read_file_bytes(run_fw))
+    except Exception as e:                              # noqa: BLE001
+        log("The game program on %s could not be read (%s), so this run uses "
+            "the one prepared from %s. If that card was built with changes of "
+            "its own to the program, they are not in this run."
+            % (name, e, os.path.basename(str(original_path))), "warning")
+        return 0
+    stock = bytes(reader.read_file_bytes(fw_node))
+    if picked == stock:
+        return 0
+    if rebuilt or len(picked) != len(stock):
+        log("%s carries a game program its own build changed, and %s, so "
+            "this run uses the one your edits bring. Anything that card's "
+            "build needed in its program (longer sounds, blip-free sounds, "
+            "longer program text) is not in it: if the game shows GAME "
+            "VALIDATION ERROR or those come out wrong, build the card image "
+            "to test the two together."
+            % (name, "your edits rebuild the program" if rebuilt
+               else "the two are different sizes"), "warning")
+        return 0
+    node, writes = by_file[key]
+    runs = _minus_ranges(_program_diff_runs(picked, stock),
+                         [(o, len(b)) for o, b in writes])
+    total = sum(n for _o, n in runs)
+    if not total:
+        return 0
+    if total > _CARRY_LIMIT:
+        log("%s carries a game program that differs from the original's in "
+            "%d bytes, which is not a build of the same program, so this run "
+            "uses the one prepared from %s." % (
+                name, total, os.path.basename(str(original_path))), "warning")
+        return 0
+    by_file[key] = (node, [(o, picked[o:o + n]) for o, n in runs]
+                    + list(writes))
+    from . import valpatch
+    count = valpatch.sound_count_patched(picked) \
+        and not valpatch.sound_count_patched(stock)
+    log("Kept %d byte(s) of the game program, in %d place(s), that %s was "
+        "built with and your edits do not change: the rest of that card was "
+        "built to run with them%s."
+        % (total, len(runs), name,
+           " (among them the sound-count patch its longer sounds need; "
+           "without it the game shows GAME VALIDATION ERROR)" if count
+           else ""), "info")
+    return total
 
 
 def _write_override_manifest(out_dir, data):

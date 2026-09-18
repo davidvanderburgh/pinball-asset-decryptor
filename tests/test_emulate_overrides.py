@@ -446,6 +446,188 @@ def test_the_manifest_names_the_card_it_was_built_from(card, tmp_path):
     assert engine.read_override_manifest(str(out))["card"]["size"] == st.st_size
 
 
+# --------------------------------------------------------------------------
+# PAD-172: the game program of the card the set runs ON
+# --------------------------------------------------------------------------
+# DragonRR ran a card PAD had built with his edits applied on top: GAME
+# VALIDATION ERROR, UPDATE SD CARD.  Unticked, the same card was clean.  The
+# set's program was the stock one plus the bypass, and it replaced the built
+# card's own - which carried the sound-count patch its grown sound bank needs.
+
+from tests.test_stern_sound_count import _block, _elf  # noqa: E402
+
+BYPASS_AT = 40 * 4                   # where the "bypass" of these tests goes
+BYPASS = b"\x1e\xff\x2f\xe1"         # bx lr
+COUNT_AT = (10 + 1 + 4) * 4          # the failed store of _block()
+NOP = b"\x00\x00\xa0\xe1"
+
+
+def _program(count_nop=False, bypass=False):
+    """A game program with a sound-count block in it, optionally carrying a
+    grown-bank build's NOP and the validator bypass."""
+    elf = bytearray(_elf([(10, _block())]))
+    if count_nop:
+        elf[COUNT_AT:COUNT_AT + 4] = NOP
+    if bypass:
+        elf[BYPASS_AT:BYPASS_AT + 4] = BYPASS
+    return bytes(elf)
+
+
+def _tree(program):
+    tree = {k: dict(v) if isinstance(v, dict) else v
+            for k, v in CARD_TREE.items()}
+    tree["turtles_pro"] = dict(CARD_TREE["turtles_pro"], game=program)
+    return tree
+
+
+class _ProgReader(_Reader):
+    """The fake with an extent block of its own per file, as a real card has:
+    the program is told apart from every other file by it."""
+
+    def __init__(self, spec):
+        super().__init__(spec)
+        for ino, node in self._inodes.items():
+            if "_data" in node:
+                node["i_block"] = ino.to_bytes(4, "little") + b"\x00" * 56
+
+
+@pytest.fixture()
+def built(card, monkeypatch, tmp_path):
+    """The card fixture, with a program in it, and a second card PAD 'built'
+    from it whose program is *built.program* (set before the build)."""
+    stock = _ProgReader(_tree(_program()))
+    materialize_files(str(card.img), _tree(_program()))
+    other = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard-modified.raw"
+    other.write_bytes(bytes(4096))
+    ctx = type("Built", (), {"img": other, "stock": stock,
+                             "program": _program(count_nop=True, bypass=True)})
+
+    def locate(f, _parts):
+        if "modified" in os.path.basename(getattr(f, "name", "")):
+            r = _ProgReader(_tree(ctx.program))
+            return r, r.node("/turtles_pro/game"), None
+        return stock, stock.node("/turtles_pro/game"), None
+
+    monkeypatch.setattr(engine, "_locate", locate)
+    # The set's own program write: the bypass, exactly as every build has it.
+    card.state["writes"] = [
+        (_disk(stock, "/turtles_pro/game", BYPASS_AT), BYPASS)]
+    return ctx
+
+
+def _logged():
+    lines = []
+    return lines, lambda msg, level="info": lines.append((level, msg))
+
+
+def test_a_built_cards_own_program_bytes_go_into_the_set(card, built,
+                                                          tmp_path):
+    """The ticket: the built card's sound-count NOP is kept under the edits,
+    and the log names it."""
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    game = (out / "turtles_pro" / "game").read_bytes()
+    assert game == _program(count_nop=True, bypass=True)
+    kept = [m for lvl, m in lines if m.startswith("Kept ")]
+    assert kept and "4 byte(s)" in kept[0] and "1 place(s)" in kept[0]
+    assert "sound-count" in kept[0] and "GAME VALIDATION ERROR" in kept[0]
+    # the carried bytes are recorded like any write, so a later build can
+    # lay the original's bytes back over them
+    rec = {f["path"]: f for f in engine.read_override_manifest(
+        str(out))["files"]}["/turtles_pro/game"]
+    assert [COUNT_AT, 4] in rec["ranges"] and [BYPASS_AT, 4] in rec["ranges"]
+    run = engine.read_override_manifest(str(out))["run_card"]
+    assert os.path.normcase(run["path"]) == os.path.normcase(str(built.img))
+
+
+def test_before_the_fix_the_set_threw_the_built_cards_program_away(
+        card, built, tmp_path):
+    """The same build without being told which card it runs on is the
+    v0.219.1 set: stock program plus the bypass, the count patch gone."""
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(bypass=True)
+
+
+def test_the_edits_win_where_both_changed_the_program(card, built, tmp_path):
+    built.program = _program(count_nop=True, bypass=True)[:BYPASS_AT] \
+        + b"OLD!" + _program()[BYPASS_AT + 4:]
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           run_card=str(built.img))
+    game = (out / "turtles_pro" / "game").read_bytes()
+    assert game[BYPASS_AT:BYPASS_AT + 4] == BYPASS
+    assert game[COUNT_AT:COUNT_AT + 4] == NOP
+
+
+def test_a_built_card_with_only_the_bypass_adds_nothing(card, built,
+                                                        tmp_path):
+    """Most built cards: the program differs by the bypass alone, which the
+    set writes anyway - nothing to carry and nothing to say."""
+    built.program = _program(bypass=True)
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(bypass=True)
+    assert not [m for _l, m in lines if "game program" in m]
+
+
+def test_running_on_the_original_again_takes_the_carried_bytes_back(
+        card, built, tmp_path):
+    """Patched in place, the next set for the original card must not keep
+    the built card's program bytes."""
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           run_card=str(built.img))
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           run_card=str(card.img))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(bypass=True)
+    ranges = dict((kind, rest) for kind, rest in _delta(out))
+    assert ranges["parent"] != "-"          # it was patched, not rebuilt
+
+
+def test_a_program_of_another_size_is_not_mixed_in(card, built, tmp_path):
+    """A built card whose program was rebuilt (blip-free, longer text) shares
+    no offsets with the original's: nothing is carried, and the log says what
+    that costs."""
+    built.program = _program(count_nop=True, bypass=True) + b"CAVE" * 8
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(bypass=True)
+    warn = [m for lvl, m in lines if lvl == "warning"]
+    assert warn and "different sizes" in warn[0] \
+        and "build the card image" in warn[0]
+
+
+def test_a_card_that_cannot_be_read_costs_a_warning_not_the_run(
+        card, built, tmp_path, monkeypatch):
+    real = engine._locate
+
+    def locate(f, parts):
+        if "modified" in os.path.basename(getattr(f, "name", "")):
+            raise FileNotFoundError("no image.bin")
+        return real(f, parts)
+
+    monkeypatch.setattr(engine, "_locate", locate)
+    lines, log = _logged()
+    out = tmp_path / "ovr"
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out),
+                           log=log, run_card=str(built.img))
+    assert (out / "turtles_pro" / "game").read_bytes() \
+        == _program(bypass=True)
+    assert any(lvl == "warning" and "could not be read" in m
+               for lvl, m in lines)
+
+
 def test_no_manifest_reads_as_no_set(tmp_path):
     assert engine.read_override_manifest(str(tmp_path)) == {}
     (tmp_path / engine.OVERRIDE_MANIFEST).write_text("{ truncated")
@@ -495,6 +677,30 @@ def test_a_stale_set_says_why(tmp_path, what):
         expect = "no set staged"
     why = emulate_tab.overrides_reason(man, str(img), str(assets), "1 2.0")
     assert expect in why
+
+
+def test_a_set_prepared_for_another_card_to_run_on_is_rebuilt(tmp_path):
+    """PAD-172: the set's program carries the picked card's own, so the same
+    edits run on another card are a different set."""
+    img = tmp_path / "card.raw"
+    img.write_bytes(b"x" * 32)
+    built = tmp_path / "card-modified.raw"
+    built.write_bytes(b"y" * 32)
+    other = tmp_path / "card-modified-2.raw"
+    other.write_bytes(b"z" * 32)
+    assets = tmp_path / "gz"
+    assets.mkdir()
+    man = _manifest(img, assets)
+    # a set from before PAD-172 recorded no run card: it ran on its own card
+    assert emulate_tab.overrides_reason(
+        man, str(img), str(assets), "1 2.0", run_card=str(img)) == ""
+    assert "run on a different card" in emulate_tab.overrides_reason(
+        man, str(img), str(assets), "1 2.0", run_card=str(built))
+    man["run_card"] = _manifest(built, assets)["card"]
+    assert emulate_tab.overrides_reason(
+        man, str(img), str(assets), "1 2.0", run_card=str(built)) == ""
+    assert "run on a different card" in emulate_tab.overrides_reason(
+        man, str(img), str(assets), "1 2.0", run_card=str(other))
 
 
 def test_the_fingerprint_moves_for_any_edit(tmp_path):
@@ -854,12 +1060,13 @@ def test_start_prepares_the_set_from_the_card_the_extract_came_from(
                         lambda p: ("godzilla_le-1_16_0.sidx",))
     asked, built = [], []
 
-    def reason(manifest, card, assets_dir, fp):
-        asked.append(card)
+    def reason(manifest, card, assets_dir, fp, run_card=None):
+        asked.append((card, run_card))
         return "there is no set staged yet"
 
-    def write_overrides(card, assets_dir, out, log=None, cancel=None):
-        built.append(card)
+    def write_overrides(card, assets_dir, out, log=None, cancel=None,
+                        run_card=None):
+        built.append((card, run_card))
         return (0, 0, 1, 0), None, None, [("/gz/scene.radium", 9)]
 
     monkeypatch.setattr(emulate_tab, "overrides_reason", reason)
@@ -867,7 +1074,9 @@ def test_start_prepares_the_set_from_the_card_the_extract_came_from(
     try:
         extra = panel._prepare_overrides(img, assets)
         assert extra and extra[0].startswith("PAD_OVERRIDE_DIR=")
-        assert asked == [str(stock)] and built == [str(stock)]
+        # ...and both are told which card the set RUNS on (PAD-172): its
+        # game program is that card's, with the edits on top.
+        assert asked == [(str(stock), img)] and built == [(str(stock), img)]
         root.update()
         assert any("prepared from %s" % stock in ln for ln in lines)
     finally:

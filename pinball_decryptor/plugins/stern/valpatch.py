@@ -175,6 +175,14 @@ def find_sound_count_failed_store(elf):
     return sites[0][0] if len(sites) == 1 else None
 
 
+def sound_count_patched(elf):
+    """True when *elf*'s one ``failed`` count store is already the NOP a
+    grown-bank build writes (see the note above) - the mark such a build
+    leaves in the program, which a card run with another program loses."""
+    off = find_sound_count_failed_store(elf)
+    return off is not None and bytes(elf[off:off + 4]) == _NOP
+
+
 def sound_count_overlay(elf_bytes, log=None):
     """``{file_off: bytes}`` that keeps the sound engine's ``failed`` count at
     zero inside *elf_bytes* -- empty, with a warning on *log*, when the site

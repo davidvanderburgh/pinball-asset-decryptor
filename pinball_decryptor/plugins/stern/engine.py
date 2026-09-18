@@ -6795,7 +6795,7 @@ def _carry_run_card_program(reader, fw_node, by_file, grow_plan,
 
     Returns how many bytes were carried into the set's copy of the program.
 
-    PAD-172 (DragonRR, v0.219.1): "if I uncheck the assets box it works, and
+    PAD-172 (a field report, v0.219.1): "if I uncheck the assets box it works, and
     if I recheck it, it fails again" - the game put up GAME VALIDATION ERROR,
     UPDATE SD CARD over attract, on a card PAD had built, but only with his
     edits applied on top.  Every override set carries the game program,

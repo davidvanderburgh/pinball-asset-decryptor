@@ -1196,6 +1196,18 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    plays each clip you replaced from them, and the log marks every such
    play `(your edit)`; a run without edits plays the card's own clips as
    before.
+   **And a built card keeps its own game program** (v0.219.3). Your
+   edits carry a copy of the game program, prepared from the card your
+   project was extracted from, and that copy replaced the program of the
+   built card you picked, along with everything its build had changed
+   there. A card built with longer sounds then showed GAME VALIDATION
+   ERROR, UPDATE SD CARD once a game started, but only with your edits
+   on top. The edits now keep every program byte the picked card's build
+   changed and they leave alone, the log says how many, and your own
+   edits still win where both changed the same byte. A card whose
+   program was rebuilt whole (blip-free sounds, longer program text) is
+   named in the log and runs with the prepared program as before. A set
+   prepared for another card is rebuilt at the next Start.
    A **virtual playfield** window opens beside the game: the title's own
    artwork with every switch, coil and insert drawn on it, inserts lit
    live off the node bus, and switches you can click or press and hold

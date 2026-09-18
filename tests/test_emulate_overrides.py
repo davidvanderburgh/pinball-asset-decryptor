@@ -449,7 +449,7 @@ def test_the_manifest_names_the_card_it_was_built_from(card, tmp_path):
 # --------------------------------------------------------------------------
 # PAD-172: the game program of the card the set runs ON
 # --------------------------------------------------------------------------
-# DragonRR ran a card PAD had built with his edits applied on top: GAME
+# A field report ran a card PAD had built with their edits applied on top: GAME
 # VALIDATION ERROR, UPDATE SD CARD.  Unticked, the same card was clean.  The
 # set's program was the stock one plus the bypass, and it replaced the built
 # card's own - which carried the sound-count patch its grown sound bank needs.

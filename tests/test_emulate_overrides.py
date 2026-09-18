@@ -1011,3 +1011,102 @@ def test_run_game_skips_a_set_file_a_card_run_does_not_mount():
     # them is the stock card, run while the tab says it is testing the edits.
     assert 'if [ "$ovr_n" = 0 ]; then' in body
     assert body.count("exit 1") >= 2
+
+
+# --------------------------------------------------------------------------
+# PAD-170: the video host serves the edited clip
+# --------------------------------------------------------------------------
+
+def _load_padvidhost(monkeypatch, rootfs):
+    """padvidhost.py, loaded against a scratch rootfs.  PAD_ROOT as a Windows
+    path is taken as it is (padpath.win_root), so no WSL is asked anything."""
+    import importlib.util
+    import sys
+    monkeypatch.setenv("PAD_ROOT", str(rootfs))
+    monkeypatch.setenv("PAD_GAME", "godzilla_le")
+    monkeypatch.syspath_prepend(str(RIG))
+    spec = importlib.util.spec_from_file_location(
+        "padvidhost_pad170", RIG / "padvidhost.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod, "log", lambda msg: None)
+    return mod
+
+
+@pytest.fixture()
+def vidhost(monkeypatch, tmp_path):
+    """The card's title directory, the staged set's, and the host between."""
+    rootfs = tmp_path / "spike2root"
+    (rootfs / "dump").mkdir(parents=True)
+    clip = pathlib.Path("assets", "lcd", "auto_loaded", "ab12", "2.asset")
+    other = pathlib.Path("assets", "lcd", "auto_loaded", "cd34", "2.asset")
+    card = tmp_path / "cards" / "godzilla_le"
+    for rel in (clip, other):
+        (card / rel).parent.mkdir(parents=True, exist_ok=True)
+        (card / rel).write_bytes(b"STOCK")
+    stage = tmp_path / "override" / "godzilla_le"
+    (stage / clip).parent.mkdir(parents=True)
+    (stage / clip).write_bytes(b"EDITED")
+    mod = _load_padvidhost(monkeypatch, rootfs)
+    monkeypatch.setattr(mod, "HOST_ROOT", str(card))
+    return mod, rootfs / "dump" / "vidoverride", stage, card, clip, other
+
+
+def test_a_replaced_clip_is_served_from_the_set(vidhost):
+    """DragonRR, v0.219.0: match.mp4 replaced, "Apply my replaced assets on
+    top" ticked, and the emulator played the stock match clip.  The set was
+    bound over the card inside the guest's namespace, and the video host reads
+    clips outside it."""
+    mod, flag, stage, card, clip, other = vidhost
+    want = "./" + clip.as_posix()
+    # Before run_game.sh says where the set is: the card's own clip.
+    assert mod.host_path(want) == os.path.normpath(str(card / clip))
+    flag.write_text(str(stage) + "\n")
+    got = mod.host_path(want)
+    assert got == os.path.normpath(str(stage / clip))
+    assert mod.from_edits(got)
+    # A clip the edits did not touch still comes off the card.
+    got = mod.host_path("./" + other.as_posix())
+    assert got == os.path.normpath(str(card / other))
+    assert not mod.from_edits(got)
+
+
+def test_a_set_that_is_gone_is_not_served(vidhost):
+    """A flag naming a folder that no longer exists is no set at all."""
+    mod, flag, stage, card, clip, _other = vidhost
+    flag.write_text(str(stage.parent / "nothing_here") + "\n")
+    assert mod.host_path("./" + clip.as_posix()) \
+        == os.path.normpath(str(card / clip))
+
+
+def test_the_set_never_serves_outside_its_own_tree(vidhost, tmp_path):
+    """The path comes from the guest, so it is untrusted input here too."""
+    mod, flag, stage, _card, _clip, _other = vidhost
+    (tmp_path / "override" / "secret").write_bytes(b"x")
+    flag.write_text(str(stage) + "\n")
+    assert mod.host_path("./../secret") is None
+
+
+def test_run_game_tells_the_video_host_where_the_edits_are():
+    body = (RIG / "run_game.sh").read_text(encoding="utf-8", errors="replace")
+    clear = body.index('rm -f "$R/dump/vidoverride"')
+    block = body.index('if [ -n "$OVERRIDE_SRC" ]; then', clear)
+    applied = body.index('echo "[run] your edits: $ovr_n file(s) applied')
+    publish = body.index('> "$R/dump/vidoverride"')
+    # Cleared before the set is looked at, so a run with no set (or one that
+    # fails on a bind) leaves no flag behind; published only once the binds
+    # are on, and it names the booted title's directory in the staged set.
+    assert clear < block < applied < publish
+    assert 'printf \'%s\\n\' "$OVERRIDE_SRC/$GAME" > "$R/dump/vidoverride"' \
+        in body
+    for bail in ("could not apply $ovr_bad", "nothing in this set belongs"):
+        assert block < body.index(bail) < publish
+
+
+def test_watch_clears_the_last_runs_edits_before_every_run():
+    body = (RIG / "watch.sh").read_text(encoding="utf-8", errors="replace")
+    clear = body.index('rm -f "$ROOT/dump/vidoverride"')
+    assert clear < body.index('bash "$RIG/run_game.sh" > "$LOG" 2>&1 &')
+    # Not inside the boot selector's if/else: every run clears it.
+    line = body[body.rindex("\n", 0, clear) + 1:clear]
+    assert line == ""

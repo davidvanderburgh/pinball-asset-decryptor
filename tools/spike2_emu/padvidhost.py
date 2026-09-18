@@ -113,6 +113,42 @@ def host_root():
     return HOST_ROOT
 
 
+# PAD-170: THE USER'S OWN EDITS ARE INVISIBLE FROM HERE FOR THE SAME REASON.
+# "Apply my replaced assets on top" (PAD-103) binds each file of the override
+# set over the card INSIDE the guest's namespace, and this process resolves
+# clips against the card mount outside it - so every replaced video played the
+# stock clip, while replaced sounds and pictures (read by the guest itself)
+# worked. DragonRR, v0.219.0: a spec-matched match.mp4 on Godzilla LE 1.16,
+# ticked, and the old match clip on the glass. run_game.sh publishes the
+# staged set's title directory in dump/vidoverride once its binds have gone
+# on, and a clip the set has is served from there. Read per clip like
+# dump/vidroot, and cleared by every run before its binds, so an old set
+# cannot outlive the run it was bound for.
+_VIDOVR_FILE = os.path.join(padpath.root(), "dump", "vidoverride")
+_vidovr_said = [None]
+
+
+def override_root():
+    """The staged override set's title directory, or "" when there is none."""
+    try:
+        with open(_VIDOVR_FILE) as f:
+            r = f.read().strip()
+    except OSError:
+        r = ""
+    if r and os.path.isdir(r):
+        if _vidovr_said[0] != r:
+            _vidovr_said[0] = r
+            log("your edits are applied on top from %s" % r)
+        return r
+    return ""
+
+
+def from_edits(full):
+    """Whether *full* is a clip out of the override set, for the log line."""
+    r = _vidovr_said[0]
+    return bool(r and full and full.startswith(os.path.normpath(r) + os.sep))
+
+
 _T0 = time.monotonic()
 _LOGLOCK = threading.Lock()
 
@@ -156,6 +192,13 @@ def host_path(p):
         p = p[len(GUEST_ROOT) + 1:]
     elif p.startswith("/"):
         return None
+    # The edited copy first: the guest sees it bound over this same path.
+    ovr = override_root()
+    if ovr:
+        mine = os.path.normpath(os.path.join(ovr, p))
+        if mine.startswith(os.path.normpath(ovr) + os.sep) \
+                and os.path.isfile(mine):
+            return mine
     root = host_root()
     full = os.path.normpath(os.path.join(root, p))
     if not full.startswith(os.path.normpath(root) + os.sep):
@@ -1026,9 +1069,10 @@ def chan_loop(m, c, resume=False):
         # Log what was actually ASKED FOR. The basename of the parent directory
         # is "2.asset" for every video in the game, so the old form made two
         # different clips look like the same clip served twice.
-        log("ch%d serving %dx%d %d frames (acked %.1f ms after notice) %s%s"
+        log("ch%d serving %dx%d %d frames (acked %.1f ms after notice) %s%s%s"
             % (c, w, h, n, (time.monotonic() - t_notice) * 1000.0, want,
-               "  (RESCALED from %dx%d)" % native if (w, h) != native else ""))
+               "  (RESCALED from %dx%d)" % native if (w, h) != native else "",
+               "  (your edit)" if from_edits(full) else ""))
         note_serve(c, want)
         try:
             serve(m, c, full, w, h, native, req, old_read)

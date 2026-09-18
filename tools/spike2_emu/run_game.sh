@@ -922,6 +922,14 @@ fi
 # set built for another card) - those ARE the user's edits, and running without
 # them is the outcome this feature must not have. Nor may a set be ALL skips:
 # that would be the stock card, run while the tab says it is testing edits.
+#
+# AND THE VIDEO HOST IS TOLD (PAD-170). It decodes clips OUTSIDE this
+# namespace, off the card mount, so none of these binds reach it: every
+# replaced video played the stock clip while replaced sounds and pictures
+# worked. dump/vidoverride names the staged set's title directory once the
+# binds are on (padvidhost.override_root reads it per clip), and it goes
+# first thing so a run with no set, or one that fails here, leaves none.
+rm -f "$R/dump/vidoverride"
 if [ -n "$OVERRIDE_SRC" ]; then
     ovr_n=0
     ovr_bad=""
@@ -965,6 +973,9 @@ if [ -n "$OVERRIDE_SRC" ]; then
     fi
     echo "[run] your edits: $ovr_n file(s) applied on top of the card (nothing"
     echo "[run]   was rebuilt and the card image itself is untouched)"
+    if [ -d "$OVERRIDE_SRC/$GAME" ]; then
+        printf '%s\n' "$OVERRIDE_SRC/$GAME" > "$R/dump/vidoverride"
+    fi
     if [ -n "$ovr_skip" ]; then
         echo "[run]   not applied, and not needed here:$ovr_skip"
         echo "[run]   those sit beside the title on the card (the SD-validation"

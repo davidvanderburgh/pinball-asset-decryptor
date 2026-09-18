@@ -574,6 +574,94 @@ def test_the_rig_carries_the_machine_row_to_the_game():
         assert name in forwarded, name
 
 
+def test_the_mains_lock_is_not_shown_as_tech_alerts():
+    """PAD-173: the refusal runs no light show, so the rig reads it as Tech
+    Alerts - and "press a switch to carry on" is the advice that walks the
+    game past the lock the user picked Power to see."""
+    label, hint = state_text({"state": "techalerts", "auto": "0",
+                              "auto_result": "mainslock"})
+    assert label != "At Tech Alerts"
+    assert "50 Hz" in label and "US" in label
+    assert "will not operate in this country" in hint.lower()
+    assert "60 Hz mains" in hint
+    # Only at the Tech Alerts reading: a game past it is running, whatever
+    # the helper said at the start.
+    label, _ = state_text({"state": "attract", "auto": "0",
+                           "auto_result": "mainslock"})
+    assert label == "Game running"
+
+
+def _without_comments(text):
+    return "\n".join(ln for ln in text.splitlines()
+                     if not ln.lstrip().startswith("#"))
+
+
+def test_auto_advance_stands_down_on_a_us_machine_on_50_hz():
+    """PAD-173, measured on stranger_things_le 1.12.0: the refusal was on the
+    glass, autoattract.sh pressed Service Back into it, and the game went on
+    to Guided Setup.  The helper must stand down before its first press, say
+    so in the line status.sh reads, and watch.sh must say it in the pane."""
+    import re
+    auto = _without_comments(
+        (_RIG / "autoattract.sh").read_text(encoding="utf-8"))
+    lock = auto.index("if pad_mains_lock; then")
+    assert lock < auto.index('echo "[auto] waiting for the game')
+    assert lock < auto.index('press "$HOLD"')
+    block = auto[lock:auto.index("\nfi", lock)]
+    assert "exit 0" in block
+    said = re.search(r'echo "(\[auto\] mains lock[^"]*)"', block).group(1)
+    status = _without_comments(
+        (_RIG / "status.sh").read_text(encoding="utf-8"))
+    grep = re.search(r"elif grep -aq '([^']*)' \"\$AUTOLOG\"; then\n"
+                     r"\s*echo \"auto_result=mainslock\"", status)
+    assert grep, "status.sh no longer reports the stand-down"
+    assert re.search(grep.group(1), said), (grep.group(1), said)
+    # ...and before the "ok" test, which a stand-down line must not reach.
+    assert status.index("auto_result=mainslock") < status.index(
+        "auto_result=ok")
+    for ok in ("past Tech Alerts", "already past", "nothing to do"):
+        assert ok not in block, ok
+    # The one definition, in padpath.sh, which both scripts source.
+    pad = (_RIG / "padpath.sh").read_text(encoding="utf-8")
+    assert "pad_mains_lock() {" in pad
+    watch = _without_comments((_RIG / "watch.sh").read_text(encoding="utf-8"))
+    launch = watch[watch.index('if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then'):]
+    launch = launch[:launch.index("PAD_SW_EXERCISE")]
+    assert "if pad_mains_lock; then" in launch
+    # A run with no helper must not inherit the last run's verdict.
+    assert '\nelse\n    : > "$HOME/padauto.log"' in launch
+
+
+@pytest.mark.skipif(not HAS_BASH, reason="no working bash")
+def test_pad_mains_lock_is_a_us_board_on_50_hz():
+    """The truth table, off the function itself: 50 Hz mains with anything
+    but a 50 Hz board (an unset board is the saved one, US by default).  Fed
+    on stdin with the variables set inside the script, because `bash` here
+    may be the WSL launcher, which does not carry the caller's environment."""
+    import subprocess
+    pad = (_RIG / "padpath.sh").read_text(encoding="utf-8")
+    fn = pad[pad.index("pad_mains_lock() {"):]
+    fn = fn[:fn.index("\n}") + 2]
+
+    def locked(mains, board):
+        sets = "".join("%s=%s\n" % (k, v) for k, v in
+                       (("PAD_MAINS_HZ", mains), ("PAD_FACTORY_HZ", board))
+                       if v is not None)
+        script = ("unset PAD_MAINS_HZ PAD_FACTORY_HZ\n%s\n%s"
+                  "pad_mains_lock && echo yes || echo no\n" % (fn, sets))
+        # Bytes, not text: text mode on Windows would hand bash CRLFs.
+        out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                             stdout=subprocess.PIPE, timeout=60).stdout
+        return out.decode("utf-8", "replace").strip() == "yes"
+
+    assert locked("50", "60")
+    assert locked("50", None)
+    assert not locked("50", "50")
+    assert not locked("60", "60")
+    assert not locked(None, None)
+    assert not locked(None, "60")
+
+
 def test_card_source_becomes_pad_card(tmp_path):
     """A card image is handed to the rig as PAD_CARD, in WSL form."""
     img = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"

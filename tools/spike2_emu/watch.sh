@@ -2238,6 +2238,19 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
         echo "[watch] auto-advance on: it will press Service Back until the game"
         echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
     fi
+    # PAD-173: said here too, because the lines above are what the app's log
+    # pane shows and the helper's own stand-down goes only to padauto.log.
+    if pad_mains_lock; then
+        echo "[watch] ...except on this run: a US machine on 50 Hz mains. The game"
+        echo "[watch] refuses to run (THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY),"
+        echo "[watch] that is the screen this run was set to show, and nothing will"
+        echo "[watch] press past it. Pick 60 Hz mains on the Emulate tab to play."
+    fi
+else
+    # No helper this run, so no verdict from one: status.sh reads this file
+    # for auto_result, and the LAST run's "mains lock" (PAD-173) or "past
+    # Tech Alerts" would otherwise be reported about this one.
+    : > "$HOME/padauto.log" 2>/dev/null
 fi
 
 # THE SWITCH EXERCISER (item 59). The `CHECK SWITCH #n` rows on Tech Alerts are

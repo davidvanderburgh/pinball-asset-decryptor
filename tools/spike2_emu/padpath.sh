@@ -722,6 +722,40 @@ pad_select_wanted() {
     return 1
 }
 
+# ---- A US MACHINE ON EUROPEAN POWER (PAD-173) ----------------------------
+#
+# Is this run a US CPU board on 50 Hz mains - the combination the game answers
+# with "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY"? run_game.sh's
+# PAD_MAINS_HZ is the mains, hwshim's PAD_FACTORY_HZ the board; the Emulate
+# tab's "50 Hz mains, US machine" sends 50 and 60.
+#
+# autoattract.sh asks, and the answer is why this exists: the helper presses
+# Service Back as soon as the node bus goes quiet, and the game only decides
+# the mains question once its frequency sampler is full, ~16 s in. MEASURED
+# with PAD_MAINS_HZ=50 PAD_FACTORY_HZ=60 (Sam, PAD-173: "doesn't block code
+# execution or prevent the game from starting"):
+#
+#   godzilla_pro 1.15.0  the press landed at t=12 s, BEFORE the check, and
+#                        the game went to attract with credits; the refusal
+#                        never reached the glass. Without the press: locked.
+#   stranger_things_le   the sampler held 24 samples of 50 Hz at t=16 s
+#   1.12.0               (0x7bff8c), the cached identity record said 0 Hz
+#                        (= a US board) and the refusal was on the glass.
+#
+# A LOCKED GAME IGNORES ITS SERVICE BUTTONS (ST, 50 Hz: ten PLUS presses and a
+# SELECT did nothing for 90 s; the same presses at 60 Hz walked the menu). On
+# this rig the game also opens Guided Setup ~30 s in on every boot, at 60 Hz
+# too, and that screen covers the refusal text - but frozen, so the machine
+# still does not run. That is the saved machine's own state, not this lock.
+#
+# An UNSET PAD_FACTORY_HZ counts as US: the board is then whatever the saved
+# EEPROM holds, and that is a US board unless an earlier run made it European
+# (the rig's seeded identity record carries 0). Guessing wrong there costs a
+# run that waits at Tech Alerts for a human, which is the safe way round.
+pad_mains_lock() {
+    [ "${PAD_MAINS_HZ:-}" = 50 ] && [ "${PAD_FACTORY_HZ:-}" != 50 ]
+}
+
 if pad_is_wsl; then IS_WSL=1; else IS_WSL=0; fi
 
 # ---- IS THERE A DISPLAY TO PUT THE GAME WINDOW ON? -----------------------

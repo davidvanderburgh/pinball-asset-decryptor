@@ -3591,6 +3591,14 @@ class App:
         if not pend:
             return (0, 0, [])
         slots_by_rel, assignments, trim, keep_full = pend
+        if trim and self.window._audio_grow_active():
+            # A longer replacement is the engine's to place: it grows the
+            # sound bank, or, when this write can't, fits the clip to its slot
+            # itself (and pads a shorter one).  Trimming it here first threw
+            # away the very part the growth was for, so a whole song assigned
+            # to a 38 s music loop still went on the card at 38 s with the
+            # option ticked (PAD-174).
+            trim = False
         from .core.audio_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         self.msg_queue.put(LogMsg(

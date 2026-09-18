@@ -2246,6 +2246,11 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
         echo "[watch] that is the screen this run was set to show, and nothing will"
         echo "[watch] press past it. Pick 60 Hz mains on the Emulate tab to play."
     fi
+else
+    # No helper this run, so no verdict from one: status.sh reads this file
+    # for auto_result, and the LAST run's "mains lock" (PAD-173) or "past
+    # Tech Alerts" would otherwise be reported about this one.
+    : > "$HOME/padauto.log" 2>/dev/null
 fi
 
 # THE SWITCH EXERCISER (item 59). The `CHECK SWITCH #n` rows on Tech Alerts are

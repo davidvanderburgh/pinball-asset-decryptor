@@ -628,6 +628,8 @@ def test_auto_advance_stands_down_on_a_us_machine_on_50_hz():
     launch = watch[watch.index('if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then'):]
     launch = launch[:launch.index("PAD_SW_EXERCISE")]
     assert "if pad_mains_lock; then" in launch
+    # A run with no helper must not inherit the last run's verdict.
+    assert '\nelse\n    : > "$HOME/padauto.log"' in launch
 
 
 @pytest.mark.skipif(not HAS_BASH, reason="no working bash")

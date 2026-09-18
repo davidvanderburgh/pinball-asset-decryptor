@@ -184,15 +184,18 @@ _GAVEUP_HINT = ("Auto-advance pressed Service Back several times and the "
                 "it leaves toward attract, from Tech Alerts it clears them.")
 
 #: Replaces the Tech Alerts hint when auto-advance stood down because Power
-#: is "50 Hz mains, US machine" (PAD-173).  It used to press Service Back into
-#: the refusal like any Tech Alerts screen, and the game carried on past it.
+#: is "50 Hz mains, US machine" (PAD-173).  Its press used to land before the
+#: game had measured the mains, and the game went to attract instead of
+#: refusing.  The Guided Setup sentence is measured: the rig's saved machines
+#: open it on every boot, and a locked game ignores its buttons there.
 _MAINSLOCK_HINT = ("Power is set to 50 Hz mains with a US machine, and a US "
                    "game refuses to run on 50 Hz power: “This machine "
                    "will not operate in this country”. The emulator "
-                   "leaves that screen up instead of pressing past it. A game "
-                   "with no mains check waits at Tech Alerts instead; press a "
-                   "switch in the game window to carry on. To play, set Power "
-                   "to 60 Hz mains or a European machine and Start again.")
+                   "leaves the game locked instead of pressing past it. Its "
+                   "service buttons stop working, and on some games its "
+                   "Guided Setup screen comes up over the message. To play, "
+                   "set Power to 60 Hz mains or a European machine and Start "
+                   "again.")
 
 #: The token killgame.sh prints (WSL only) when leftovers survived everything
 #: it can do from inside the VM - the measured case is a dead guest held as a

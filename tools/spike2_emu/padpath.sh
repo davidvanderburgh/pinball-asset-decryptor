@@ -729,15 +729,24 @@ pad_select_wanted() {
 # PAD_MAINS_HZ is the mains, hwshim's PAD_FACTORY_HZ the board; the Emulate
 # tab's "50 Hz mains, US machine" sends 50 and 60.
 #
-# autoattract.sh asks, and the answer is why this exists: the refusal runs no
-# light show, so to the helper it looks exactly like Tech Alerts, and it
-# pressed Service Back into it. MEASURED on stranger_things_le 1.12.0 with
-# PAD_MAINS_HZ=50 PAD_FACTORY_HZ=60: the game sampled 50 Hz at t=16 s (the
-# accumulator at 0x7bff8c held 24 samples of 0x32), its cached identity
-# record said 0 Hz (= a US board), and the refusal was on the glass; the
-# helper's 2000 ms press landed at t=27 s and the next shot, 15 s later, was
-# Guided Setup. A user who picked the lock to see it saw the game start
-# anyway (Sam, PAD-173).
+# autoattract.sh asks, and the answer is why this exists: the helper presses
+# Service Back as soon as the node bus goes quiet, and the game only decides
+# the mains question once its frequency sampler is full, ~16 s in. MEASURED
+# with PAD_MAINS_HZ=50 PAD_FACTORY_HZ=60 (Sam, PAD-173: "doesn't block code
+# execution or prevent the game from starting"):
+#
+#   godzilla_pro 1.15.0  the press landed at t=12 s, BEFORE the check, and
+#                        the game went to attract with credits; the refusal
+#                        never reached the glass. Without the press: locked.
+#   stranger_things_le   the sampler held 24 samples of 50 Hz at t=16 s
+#   1.12.0               (0x7bff8c), the cached identity record said 0 Hz
+#                        (= a US board) and the refusal was on the glass.
+#
+# A LOCKED GAME IGNORES ITS SERVICE BUTTONS (ST, 50 Hz: ten PLUS presses and a
+# SELECT did nothing for 90 s; the same presses at 60 Hz walked the menu). On
+# this rig the game also opens Guided Setup ~30 s in on every boot, at 60 Hz
+# too, and that screen covers the refusal text - but frozen, so the machine
+# still does not run. That is the saved machine's own state, not this lock.
 #
 # An UNSET PAD_FACTORY_HZ counts as US: the board is then whatever the saved
 # EEPROM holds, and that is a US board unless an earlier run made it European

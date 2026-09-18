@@ -1181,6 +1181,13 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    put on the card. A card of another title or version is still used as
    it is, with a note in the log, and so is a picked card whose original
    is no longer where the extract found it.
+   **And a replaced video plays** (v0.219.1). The video decoder runs on
+   the PC, outside the folder your edits are laid over, so a clip you
+   replaced used to play as the stock one while every other edit
+   showed. The run now tells the video player where your edits are, it
+   plays each clip you replaced from them, and the log marks every such
+   play `(your edit)`; a run without edits plays the card's own clips as
+   before.
    A **virtual playfield** window opens beside the game: the title's own
    artwork with every switch, coil and insert drawn on it, inserts lit
    live off the node bus, and switches you can click or press and hold

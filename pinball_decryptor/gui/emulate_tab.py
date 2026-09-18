@@ -183,6 +183,17 @@ _GAVEUP_HINT = ("Auto-advance pressed Service Back several times and the "
                 "out here. Click the game window and press Esc: from the menu "
                 "it leaves toward attract, from Tech Alerts it clears them.")
 
+#: Replaces the Tech Alerts hint when auto-advance stood down because Power
+#: is "50 Hz mains, US machine" (PAD-173).  It used to press Service Back into
+#: the refusal like any Tech Alerts screen, and the game carried on past it.
+_MAINSLOCK_HINT = ("Power is set to 50 Hz mains with a US machine, and a US "
+                   "game refuses to run on 50 Hz power: “This machine "
+                   "will not operate in this country”. The emulator "
+                   "leaves that screen up instead of pressing past it. A game "
+                   "with no mains check waits at Tech Alerts instead; press a "
+                   "switch in the game window to carry on. To play, set Power "
+                   "to 60 Hz mains or a European machine and Start again.")
+
 #: The token killgame.sh prints (WSL only) when leftovers survived everything
 #: it can do from inside the VM - the measured case is a dead guest held as a
 #: zombie by a WSL interop relay, which ignores SIGKILL from inside.  Stop
@@ -854,6 +865,11 @@ def state_text(info):
             return "Bringing up node boards…", _ADVANCING_HINT
         if info.get("auto_result") == "gaveup":
             return "Stuck at Tech Alerts", _GAVEUP_HINT
+        if info.get("auto_result") == "mainslock":
+            # PAD-173: the refusal runs no light show, so the rig reads it as
+            # Tech Alerts - and "press a switch to carry on" is the advice
+            # that walks the game past the lock the user asked to see.
+            return "Locked: US machine on 50 Hz", _MAINSLOCK_HINT
     return label, hint
 
 
@@ -4303,7 +4319,8 @@ class EmulatePanel:
         "refuses to run: “this machine will not operate in this "
         "country”.\n\n60 Hz is how the emulator has always run. "
         "European machine is a 50 Hz board on 50 Hz mains. US machine is the "
-        "refusal a US game gives on European power. Takes effect at the next "
+        "refusal a US game gives on European power, and the emulator leaves "
+        "it on screen rather than pressing past it. Takes effect at the next "
         "Start.")
 
     def _build_machine_row(self, box):

@@ -95,11 +95,15 @@ echo "auto=$(n -f autoattract.sh)"
 #   gaveup  - the presses did not clear it (the game may be on the service menu)
 #   working - still going
 #   none    - it was never started (Skip to attract mode unticked)
+#   mainslock - it stood down on purpose: a US machine on 50 Hz mains, whose
+#             refusal screen the run was set to show (PAD-173)
 AUTOLOG=$HOME/padauto.log
 if [ "$(n -f autoattract.sh)" != 0 ]; then
     echo "auto_result=working"
 elif [ ! -r "$AUTOLOG" ]; then
     echo "auto_result=none"
+elif grep -aq '\[auto\] mains lock' "$AUTOLOG"; then
+    echo "auto_result=mainslock"
 elif grep -aq 'past Tech Alerts\|already past\|nothing to do' "$AUTOLOG"; then
     echo "auto_result=ok"
 elif grep -aq 'presses did not clear it\|gave up' "$AUTOLOG"; then

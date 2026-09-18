@@ -722,6 +722,31 @@ pad_select_wanted() {
     return 1
 }
 
+# ---- A US MACHINE ON EUROPEAN POWER (PAD-173) ----------------------------
+#
+# Is this run a US CPU board on 50 Hz mains - the combination the game answers
+# with "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY"? run_game.sh's
+# PAD_MAINS_HZ is the mains, hwshim's PAD_FACTORY_HZ the board; the Emulate
+# tab's "50 Hz mains, US machine" sends 50 and 60.
+#
+# autoattract.sh asks, and the answer is why this exists: the refusal runs no
+# light show, so to the helper it looks exactly like Tech Alerts, and it
+# pressed Service Back into it. MEASURED on stranger_things_le 1.12.0 with
+# PAD_MAINS_HZ=50 PAD_FACTORY_HZ=60: the game sampled 50 Hz at t=16 s (the
+# accumulator at 0x7bff8c held 24 samples of 0x32), its cached identity
+# record said 0 Hz (= a US board), and the refusal was on the glass; the
+# helper's 2000 ms press landed at t=27 s and the next shot, 15 s later, was
+# Guided Setup. A user who picked the lock to see it saw the game start
+# anyway (Sam, PAD-173).
+#
+# An UNSET PAD_FACTORY_HZ counts as US: the board is then whatever the saved
+# EEPROM holds, and that is a US board unless an earlier run made it European
+# (the rig's seeded identity record carries 0). Guessing wrong there costs a
+# run that waits at Tech Alerts for a human, which is the safe way round.
+pad_mains_lock() {
+    [ "${PAD_MAINS_HZ:-}" = 50 ] && [ "${PAD_FACTORY_HZ:-}" != 50 ]
+}
+
 if pad_is_wsl; then IS_WSL=1; else IS_WSL=0; fi
 
 # ---- IS THERE A DISPLAY TO PUT THE GAME WINDOW ON? -----------------------

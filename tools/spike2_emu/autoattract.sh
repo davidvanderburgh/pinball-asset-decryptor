@@ -171,6 +171,18 @@ operator() { grep -aqE '\[sw\] [0-9]+ ms [+-][0-9]+[fkp]' "$LOG"; }
 # press does, as the header above records. Same swpoke.py, retagged.
 press()   { resolve_back; PAD_SW_SRC=a python3 "$S/swpoke.py" "$BACK" "$1" >/dev/null 2>&1; }
 
+# A US MACHINE ON 50 Hz MAINS - STAND DOWN BEFORE THE FIRST PRESS (PAD-173).
+# The game's refusal screen is what this run was set up to show, it runs no
+# light show, so `past` never comes true and the loop below pressed Service
+# Back into it - which carried the game off the refusal and on into Guided
+# Setup. See pad_mains_lock (padpath.sh) for the measurement. status.sh keys
+# on "mains lock" in the first line.
+if pad_mains_lock; then
+    echo "[auto] mains lock: a US machine on 50 Hz mains refuses to run, and that"
+    echo "[auto] screen is what this run was set to show - standing down, nothing pressed"
+    exit 0
+fi
+
 echo "[auto] waiting for the game to reach its boot screen"
 
 waited=0

@@ -381,12 +381,27 @@ def assets_fingerprint(assets_dir):
     return "%d %.6f" % (count, newest)
 
 
-def overrides_reason(manifest, card_path, assets_dir, fingerprint):
+def _is_card(rec, st, path):
+    """Does a manifest's ``{path, size, mtime}`` name the card at *path*?"""
+    return (os.path.normcase(str(rec.get("path") or ""))
+            == os.path.normcase(os.path.abspath(path))
+            and rec.get("size") == st.st_size
+            and int(rec.get("mtime") or 0) == int(st.st_mtime))
+
+
+def overrides_reason(manifest, card_path, assets_dir, fingerprint,
+                     run_card=None):
     """Why the staged override set cannot be reused, or ``""`` if it can.
 
     A sentence rather than a bool: every one of these is worth saying out loud
     in the log, and "rebuilding your edits" with no reason is what makes a
     30-second wait look like the app doing nothing.
+
+    *run_card* is the card the set is bound over, when that is not
+    *card_path* (the one it is prepared from): the set's game program carries
+    that card's own (PAD-172), so a set prepared to run on one card is not
+    reused on another.  A set from before that was recorded ran on the card
+    it came from.
     """
     if not manifest:
         return "there is no set staged yet"
@@ -395,11 +410,15 @@ def overrides_reason(manifest, card_path, assets_dir, fingerprint):
         st = os.stat(card_path)
     except OSError:
         return "the card image could not be read"
-    if os.path.normcase(str(card.get("path") or "")) \
-            != os.path.normcase(os.path.abspath(card_path)) \
-            or card.get("size") != st.st_size \
-            or int(card.get("mtime") or 0) != int(st.st_mtime):
+    if not _is_card(card, st, card_path):
         return "it was built from a different card image"
+    if run_card is not None:
+        try:
+            run_st = os.stat(run_card)
+        except OSError:
+            return "the card image could not be read"
+        if not _is_card(manifest.get("run_card") or card, run_st, run_card):
+            return "it was prepared to run on a different card"
     if os.path.normcase(str(manifest.get("assets") or "")) \
             != os.path.normcase(os.path.abspath(assets_dir)):
         return "it was built from a different assets folder"
@@ -4985,7 +5004,10 @@ class EmulatePanel:
 
         # PAD-161: prepared from the card the extract measured, which is not
         # the one picked to run when that is a card PAD built.  Everything
-        # below, the reuse test included, is about THAT card.
+        # below, the reuse test included, is about THAT card - except the
+        # game program, which keeps what the picked card's own build changed
+        # in it (PAD-172), so the picked card goes along as well.
+        picked = card
         card, note = override_base_card(card, assets,
                                         stern_engine.card_title_index)
         if note:
@@ -4994,7 +5016,7 @@ class EmulatePanel:
         out = overrides_dir()
         fp = assets_fingerprint(assets)
         why = overrides_reason(stern_engine.read_override_manifest(out),
-                               card, assets, fp)
+                               card, assets, fp, run_card=picked)
         if not why:
             self._log("[emulate] your edits are unchanged since the override "
                       "set in %s was built — reusing it" % out)
@@ -5006,7 +5028,8 @@ class EmulatePanel:
             counts, _mode, _val, files = stern_engine.write_overrides(
                 card, assets, out,
                 log=lambda msg, level="info": self._log("[emulate] " + msg),
-                cancel=lambda: self._stopping or self._stopped)
+                cancel=lambda: self._stopping or self._stopped,
+                run_card=picked)
         except FileNotFoundError as exc:
             # The engine's "nothing to write": every asset still matches the
             # baseline.  Not a failure — there is nothing to apply, and the

@@ -89,6 +89,44 @@ def test_gate_is_off_unless_asked_for(monkeypatch):
     assert "no machine has booted" in why
 
 
+def test_the_off_reason_names_the_option_the_dialog_really_has(monkeypatch):
+    """Off is the default, so this is the reason nearly every trim gives, and
+    it is the only place a Write tells the user the option exists (PAD-174:
+    a whole song cut to its slot's 38 s loop, found by extracting the card).
+    It quotes the checkbox, so the quote has to be the checkbox's text."""
+    import inspect
+
+    from pinball_decryptor.gui.main_window import MainWindow
+    monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
+    _ok, why = engine._audio_grow_gate(False)
+    label = "Allow replacements longer than the original"
+    assert '"%s"' % label in why and "Advanced" in why
+    src = inspect.getsource(MainWindow._open_audio_advanced)
+    assert 'text="%s' % label in src
+
+
+def test_the_trim_notice_names_every_clip_biggest_cut_first():
+    """A count alone told nobody WHICH replacement lost its tail."""
+    grows = {7: (44100, 44100 + 4410),               # a callout 0.1 s long
+             1145: (1692642, 5078244),               # a song on a 38 s loop
+             13: (69300, 138600)}
+    msg, level = engine._trimmed_notice(grows, "because")
+    assert msg.startswith("3 replacement(s) run past their original sound's "
+                          "length and are trimmed to fit: because.")
+    assert "idx 1145 (115.15 s cut to 38.38 s)" in msg
+    assert (msg.index("idx 1145") < msg.index("idx 13 ")
+            < msg.index("idx 7 "))
+    assert level == "warning"
+
+
+def test_a_callout_that_runs_a_little_long_stays_a_note():
+    """The trim exists for this case; a warning on every build would teach
+    users to ignore the one that matters."""
+    msg, level = engine._trimmed_notice({7: (44100, 44100 + 4410)}, "off")
+    assert "idx 7 (1.10 s cut to 1.00 s)" in msg
+    assert level == "info"
+
+
 def test_gate_refuses_direct_sd_and_a_host_that_cannot_grow(monkeypatch):
     monkeypatch.setenv("PAD_STERN_AUDIO_GROW", "1")
     ok, why = engine._audio_grow_gate(True)
@@ -473,6 +511,9 @@ def test_a_closed_gate_trims_and_says_why(monkeypatch, tmp_path, device, flag,
                                 if r == IMG_PATH.lstrip("/")]
     trimmed = _said(msgs, "are trimmed to fit")
     assert len(trimmed) == 1 and needle in trimmed[0]
+    # it names the clip, and a second lost is worth a warning
+    assert "idx 0 (2.00 s cut to 1.00 s)" in trimmed[0]
+    assert [lvl for lvl, m in msgs if m == trimmed[0]] == ["warning"]
     # and the sound still landed, in place, exactly as before
     img_lo = _CardReader.IMG_DISK
     assert [d for d, _b in writes if img_lo <= d < img_lo + 0x40000]
@@ -520,3 +561,38 @@ def test_the_gui_option_is_the_only_thing_that_opens_the_gate(monkeypatch):
     # Both defaults tables agree, so the dialog and the engine can't drift.
     assert App._AUDIO_ADV_DEFAULTS["audio_grow"] is False
     assert MainWindow._AUDIO_ADV_DEFAULTS["audio_grow"] is False
+
+
+@pytest.mark.parametrize("grow,seconds", [(True, 3.0), (False, 1.0)])
+def test_the_replace_tab_hands_a_longer_clip_to_the_build_whole(
+        tmp_path, grow, seconds):
+    """PAD-174: a whole song assigned to a 38 s music loop went on the card
+    at 38 s with the option ticked.  Stern forces the Replace tab's trim/pad
+    on, and staging cut the clip to its slot before the build could grow the
+    bank for it.  With the option on, the build gets the clip whole (and
+    fits it itself if this write can't grow); with it off, nothing changes."""
+    import queue
+    from types import SimpleNamespace
+
+    from pinball_decryptor.app import App
+    from pinball_decryptor.core.audio_slots import scan_audio_slots
+
+    assets = tmp_path / "project"
+    (assets / "audio").mkdir(parents=True)
+    _wav(assets / "audio" / "idx1145.wav", 1.0, chan=2)
+    song = _wav(tmp_path / "song.wav", 3.0, chan=2)
+    slots = {s.rel_path: s for s in scan_audio_slots(str(assets))}
+    app = object.__new__(App)
+    app.msg_queue = queue.Queue()
+    app.window = SimpleNamespace(
+        # Stern's forced trim, exactly as the tab reports it.
+        pending_audio_assignments=lambda d: (
+            slots, {"audio/idx1145.wav": song}, True, frozenset()),
+        _audio_grow_active=lambda: grow)
+
+    pending, staged, failures = App._stage_pending_audio(app, str(assets))
+
+    assert (pending, staged, failures) == (1, 1, [])
+    with wave.open(str(assets / "audio" / "idx1145.wav"), "rb") as w:
+        assert w.getnframes() / w.getframerate() == pytest.approx(seconds,
+                                                                  abs=0.02)

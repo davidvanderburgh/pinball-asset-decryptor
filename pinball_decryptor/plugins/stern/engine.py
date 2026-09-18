@@ -3224,8 +3224,14 @@ def _audio_grow_gate(dest_is_device, gr_path=None):
     range at all.  A closed gate is never an error: the sound is fitted to its
     slot exactly as it is today and the log says why."""
     if os.environ.get("PAD_STERN_AUDIO_GROW") != "1":
+        # Name the switch: the default is off, so this is the reason nearly
+        # every trim gives, and a user who handed over a whole song has no
+        # other way to learn the option exists (PAD-174).
         return False, ("longer replacements are off (no machine has booted a "
-                       "grown sound bank yet)")
+                       "grown sound bank yet); to keep them whole, tick "
+                       "\"Allow replacements longer than the original\" "
+                       "under the Audio tab's Advanced... and build an "
+                       "image file")
     if dest_is_device:
         return False, ("a direct-SD write can't grow the sound bank; build an "
                        "image file")
@@ -3244,6 +3250,32 @@ def _audio_grow_gate(dest_is_device, gr_path=None):
                        "whose sounds can't be driven past their original "
                        "length")
     return True, ""
+
+
+#: A trim that cuts at least this much (card samples) off a replacement is a
+#: warning rather than a note: that is part of a song gone, not the tail of a
+#: callout that ran a little long, which is the everyday case the trim is for.
+_TRIM_WARN_SAMPLES = 44100
+
+
+def _trimmed_notice(grows, why):
+    """``(message, level)`` for the replacements in *grows* (idx -> ``(room,
+    wanted)`` in samples, from :func:`_classify_audio_edits`) that this write
+    trims because it can't grow the bank; *why* is the gate's reason.
+
+    Every trimmed sound is named with its length before and after, the
+    biggest cut first.  The line used to give only a count, so a user who
+    replaced a looping music bed with a whole song found out it had been cut
+    to the loop's length by extracting the card (PAD-174)."""
+    order = sorted(grows, key=lambda i: (grows[i][0] - grows[i][1], i))
+    names = ", ".join("idx %d (%.2f s cut to %.2f s)"
+                      % (i, grows[i][1] / 44100.0, grows[i][0] / 44100.0)
+                      for i in order)
+    worst = max(want - room for room, want in grows.values())
+    return ("%d replacement(s) run past their original sound's length and "
+            "are trimmed to fit: %s. Trimmed: %s."
+            % (len(grows), why, names),
+            "warning" if worst >= _TRIM_WARN_SAMPLES else "info")
 
 
 def _asset_path(assets_dir, wav):
@@ -4928,9 +4960,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         if _gok:
                             grows = _grows
                         else:
-                            log("%d replacement(s) run past their original "
-                                "sound's length and are trimmed to fit: %s."
-                                % (len(_grows), _gwhy), "info")
+                            log(*_trimmed_notice(_grows, _gwhy))
                     desc_sites = []
                     if grows:
                         # A longer copy is only worth appending if a play

@@ -1074,8 +1074,24 @@ def _run_ffmpeg_watched(cmd, limit, cancel_cb=None):
     return proc.returncode, bytes(tail), abort
 
 
+# The fewest bits per pixel per second an H.264 conversion is given, whatever
+# the clip it replaces was encoded at: twice the bar the Write warning and the
+# Check-card report call blocky (core.video_quality.BLOCKY_BPP).  It only
+# decides anything when that clip is itself lean -- a few of Stern's long
+# attract loops, or a project extracted from a card an older version built.
+CONVERT_FLOOR_BPP = 0.06
+
+
+def _rate_str(bps):
+    """``7.4 Mbps`` / ``820 kbps`` for a log line."""
+    if bps >= 1e6:
+        return "%.1f Mbps" % (bps / 1e6)
+    return "%d kbps" % round(bps / 1000)
+
+
 def transcode_video_to(src_path, dst_path, original_info,
-                       match_length=False, cancel_cb=None, max_bytes=None):
+                       match_length=False, cancel_cb=None, max_bytes=None,
+                       match_bitrate=None):
     """Transcode *src_path* into *dst_path*, whose extension selects the
     output container / codec.
 
@@ -1105,6 +1121,15 @@ def transcode_video_to(src_path, dst_path, original_info,
     if the budget still can't be met the oversized result is returned anyway
     (with a note), because the build's own fit is a better place to fail than
     a staging step that would otherwise drop the user's clip entirely.
+
+    *match_bitrate*, when given and there is no budget, is the bitrate of the
+    clip being replaced, and an H.264 encode is held to it (never below
+    :data:`CONVERT_FLOOR_BPP`) instead of left on x264's default constant
+    quality.  That default (CRF 23) is a statement about the SOURCE, not the
+    slot: a user's 3.7 Mbps export for a 7.6 Mbps Godzilla clip came out at
+    967 kbps, under the blocky bar, and every one of the 533 replaced clips on
+    that user's card was such a conversion (PAD-171).  The rate is capped, not
+    just targeted: a bare ``-b:v`` overshot that clip by a quarter.
 
     Requires ffmpeg.
     """
@@ -1165,8 +1190,9 @@ def transcode_video_to(src_path, dst_path, original_info,
     if silent:
         actions.append("no audio (slot has none)")
 
-    # Rate control.  Without a budget this is a fixed-quality encode and the
-    # muxed size falls where it falls.  With one, the budget buys bitrate ×
+    # Rate control.  Without a budget this is the replaced clip's own bitrate
+    # (H.264, when it is known) or a fixed-quality encode whose muxed size
+    # falls where it falls.  With one, the budget buys bitrate ×
     # the seconds actually being produced (enc_dur, AFTER any trim/pad — the
     # source's own length would set the rate by the wrong clip), and the
     # result is measured and retried smaller if it overshoots.
@@ -1175,6 +1201,20 @@ def transcode_video_to(src_path, dst_path, original_info,
     abps = 0 if silent else 96_000       # reserve bits for an audio track
     limit = _encode_timeout(enc_dur)
     over = ""
+
+    # Without a budget, an H.264 encode is held to the bitrate of the clip it
+    # replaces (see the docstring).  The floor is judged on the slot's own
+    # geometry, which is what the output has.
+    vmatch = None
+    if (not budget and "libx264" in vargs
+            and match_bitrate and match_bitrate > 0):
+        floor = 0
+        if (original_info and original_info.width > 0
+                and original_info.height > 0):
+            fps = original_info.fps if original_info.fps > 0 else 30.0
+            floor = CONVERT_FLOOR_BPP * (original_info.width
+                                         * original_info.height * fps)
+        vmatch = int(max(match_bitrate - abps, floor))
 
     for hr in ([0.92, 0.80, 0.62] if budget else [None]):
         cmd = [ffmpeg, "-y", "-i", src_path]
@@ -1189,6 +1229,9 @@ def transcode_video_to(src_path, dst_path, original_info,
             vbps = max(40_000, int(budget * 8 * hr / enc_dur) - abps)
             cmd += ["-b:v", str(vbps), "-maxrate", str(vbps),
                     "-bufsize", str(vbps * 2)]
+        elif vmatch:
+            cmd += ["-b:v", str(vmatch), "-maxrate", str(vmatch),
+                    "-bufsize", str(vmatch * 2)]
         elif _is_vpx(vargs):
             # Pin constant-quality mode: with no explicit rate control the
             # libvpx default varies by ffmpeg build (older ones target
@@ -1223,6 +1266,12 @@ def transcode_video_to(src_path, dst_path, original_info,
         if not budget or size <= budget:
             if budget:
                 actions.append(f"fitted to the slot's {budget} bytes")
+            elif vmatch and enc_dur:
+                # The number a user compares against their own export and the
+                # stock clip, so it is what came out, not what was asked for.
+                actions.append("encoded at %s (the clip it replaces is %s)"
+                               % (_rate_str(size * 8 / enc_dur),
+                                  _rate_str(match_bitrate)))
             return True, ", ".join(a for a in actions if a)
         over = (f"still {size} bytes against the slot's {budget} — "
                 f"the build will re-encode it to fit")

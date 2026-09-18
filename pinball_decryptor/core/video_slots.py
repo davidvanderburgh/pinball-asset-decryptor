@@ -170,6 +170,19 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None,
     return slots
 
 
+def _clip_bitrate(path: str) -> Optional[float]:
+    """Bits per second of the clip at *path* (trailing padding discounted), or
+    ``None`` when it isn't an MP4/QuickTime clip that can be measured.  Read
+    from the ``moov`` box alone, so it costs no ffprobe."""
+    if not path or not os.path.isfile(path):
+        return None
+    from .video_quality import quality_of_file
+    q = quality_of_file(path)
+    if q.error or q.bitrate <= 0:
+        return None
+    return q.bitrate
+
+
 def _remove(path: str) -> None:
     """Delete *path* if it's there, ignoring an OS that says otherwise."""
     if os.path.exists(path):
@@ -304,7 +317,8 @@ def _remux_verdict(slot: VideoSlot, replacement_path: str,
 
 def stage_replacement(slot: VideoSlot, replacement_path: str,
                       trim_to_length: bool = False, no_conversion: bool = False,
-                      cancel_cb=None, byte_budget: Optional[int] = None):
+                      cancel_cb=None, byte_budget: Optional[int] = None,
+                      match_bitrate: Optional[float] = None):
     """Stage a single replacement over *slot*.
 
     With *no_conversion* set, the replacement is copied through verbatim and
@@ -328,6 +342,10 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
     because the slot's byte length is pinned.  Only the re-encode branch can
     honour it; a copy-through or a remux is lossless and is left alone, and
     the build's own fit still backstops all three.
+
+    *match_bitrate*, when given, is the bitrate of the clip the slot shipped
+    with, and a re-encode with no budget is held to it (see
+    :func:`core.video.transcode_video_to`).  Copies and remuxes ignore it.
 
     Returns ``(ok, detail)`` — on success *detail* summarises the conversions
     applied (may be empty, or note a copy-through); on failure it's an error
@@ -397,7 +415,7 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                 ok, detail = transcode_video_to(
                     replacement_path, tmp, slot.info,
                     match_length=trim_to_length, cancel_cb=cancel_cb,
-                    max_bytes=byte_budget)
+                    max_bytes=byte_budget, match_bitrate=match_bitrate)
                 if not ok:
                     _remove(tmp)
                     return False, detail
@@ -503,18 +521,27 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         # replacement would otherwise budget against that one and ratchet the
         # quality down on every pass.  The snapshot above guarantees the
         # ``.orig/`` copy exists by now whenever assets_dir is known.
+        orig = (staged_originals.snapshot_path(assets_dir, rel)
+                if assets_dir else None)
         budget = None
         if pin_byte_size and trim_to_length:
-            orig = (staged_originals.snapshot_path(assets_dir, rel)
-                    if assets_dir else None)
             if orig:
                 budget = os.path.getsize(orig)
             elif slot.size > 0:
                 budget = slot.size
+        # A slot that is NOT held to its byte length gets a conversion at the
+        # bitrate of the clip it shipped with -- the pristine one, for the same
+        # ratchet reason as the budget.  A pinned slot keeps the old encode:
+        # without the length matched its bytes are no guide, and a clip the
+        # build then has to fit would pay a second generation for it.
+        rate = None
+        if not pin_byte_size:
+            rate = _clip_bitrate(orig or slot.abs_path)
         ok, detail = stage_replacement(slot, rep, trim_to_length=trim_to_length,
                                        no_conversion=slot_noconv,
                                        cancel_cb=cancel_cb,
-                                       byte_budget=budget)
+                                       byte_budget=budget,
+                                       match_bitrate=rate)
         if ok:
             staged += 1
             if log_cb:

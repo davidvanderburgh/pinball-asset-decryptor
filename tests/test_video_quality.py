@@ -211,9 +211,22 @@ def test_summary_separates_squeezed_from_simply_small():
 
     own = [_clip("a.mp4", True), _clip("b.mp4", False)]
     text = " ".join(vq.summary_lines(own))
-    # The distinction that stops a user re-encoding for nothing.
     assert "None of them were squeezed" in text
-    assert "re-building will not change them" in text
+
+
+def test_an_unsqueezed_blocky_clip_is_not_blamed_on_the_users_export():
+    """PAD-171: the report said an unpadded clip was the user's own file at
+    its own size, that a rebuild would not change it, and to re-export.  On
+    the card it said that about, every replaced clip was the app's own
+    format-matched conversion; the user re-exported at twice the bitrate and
+    the build converted it straight back under the bar.  The card cannot tell
+    the two apart, so the line must name the one a rebuild does fix."""
+    text = " ".join(vq.summary_lines([_clip("a.mp4", True)]))
+    assert "will not change them" not in text
+    assert "Re-export" not in text
+    assert "converted copy" in text
+    assert "build again from your original replacement files" in text
+    assert "keeps the bitrate you exported it at" in text
 
 
 def test_summary_says_so_when_everything_is_fine():

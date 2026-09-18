@@ -36,7 +36,10 @@ starts, and lengthening one in place would strand all the rest. An
 Advanced Audio option instead appends your audio past the end of the bank
 and points a copy of that sound's record at it, so every other sound on
 the card is untouched. It is off by default — proven in the PC emulator,
-but no machine has booted a card built that way yet.
+but no machine has booted a card built that way yet. Before v0.219.5 the
+option never reached a clip assigned on the Replace Audio tab (the tab cut
+it to its slot first); it now does, and a build that can't grow the bank
+logs each trimmed sound with its length before and after.
 
 <p>
   <a href="docs/screenshots/replace-audio.png"><img src="docs/screenshots/replace-audio.png" width="49%" alt="The Replace Audio tab: 2,540 sound slots from a Godzilla LE card with a spectrogram preview of the selected sound"></a>

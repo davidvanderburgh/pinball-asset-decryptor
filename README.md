@@ -890,15 +890,23 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    the shape it was converted to. The **Convert**
    column tells you which of the three you are getting — `As-is`,
    `Repackage` or `Re-encode` — before you build.
+   From v0.219.2 a `Re-encode` is made at the bitrate of the clip it
+   replaces (never below a floor well clear of blocky), still inside
+   that slot's size, and the build log names both rates ("encoded at
+   … (the clip it replaces is …)"). Older versions used
+   the encoder's default quality, which put most converted clips on
+   the card at around 1 Mbps however well you had exported them.
    From v0.219.0 the toolbar also answers the other question — how do
    the clips ALREADY on a finished card look? **Check card…** opens a
    report over any card image and measures every clip on it by the same
    rule the build warning uses, worst first, so a card you built a year
    ago can be checked without its build log. It separates the two cases
    that matter: a clip the app squeezed into its slot, which a rebuild
-   puts on whole, and a clip that is simply a small file, which is on the
-   card exactly as your own encoder made it and will not improve by
-   rebuilding. Nothing is written — the card is opened read-only.
+   puts on whole, and a clip that is simply small. A small clip is
+   either your own file, on the card exactly as your encoder made it,
+   or a converted copy an older version made far below Stern's bitrate
+   — and building again from your original replacement files fixes
+   those. Nothing is written — the card is opened read-only.
 7. **Write tab** — the original image and project folder carry over
    from the Extract tab (shown read-only), and a single **Build
    Image** line shows the exact file the build will produce; click

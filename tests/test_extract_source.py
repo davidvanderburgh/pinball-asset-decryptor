@@ -5,9 +5,10 @@ import json
 import os
 
 from pinball_decryptor.core.extract_source import (
-    SIDE_CAR, amend_extract_source, find_extract_for, other_card_recorded,
-    read_extract_source, stale_source_message, version_for_dir,
-    version_hint_for_dir, version_hint_from_name, write_extract_source)
+    BUILD_RECORD_SUFFIX, SIDE_CAR, amend_extract_source, built_card_source,
+    find_extract_for, other_card_recorded, read_extract_source,
+    stale_source_message, version_for_dir, version_hint_for_dir,
+    version_hint_from_name, write_extract_source)
 
 
 def _make_image(path, data=b"\x00" * 4096):
@@ -304,3 +305,42 @@ def test_the_build_asks_before_dropping_the_baked_mods(tmp_path):
     assert "other_card_message(assets_dir, other, original)" in src
     # and the same thing lands in the log, for a log posted days later
     assert src.index("other_card_recorded") < src.index("log_cb(")
+
+
+def test_a_folder_extracted_from_a_built_card_is_named(tmp_path):
+    """A build record beside the card is what says "this folder's content
+    already carries mods" — the transfer's pending route leaves those
+    behind, so it has to be able to tell (PAD-176)."""
+    built = tmp_path / "Godzilla Pro 1.16 Custom V1.91.raw"
+    _make_image(str(built))
+    out = tmp_path / "V1.92"
+    out.mkdir()
+    write_extract_source(str(out), str(built))
+    # no record beside it yet: a stock card, nothing to say
+    assert built_card_source(str(out)) is None
+
+    (tmp_path / ("Godzilla Pro 1.16 Custom V1.91.raw"
+                 + BUILD_RECORD_SUFFIX)).write_text("{}", encoding="utf-8")
+    assert built_card_source(str(out)) == "Godzilla Pro 1.16 Custom V1.91.raw"
+    assert built_card_source(str(tmp_path)) is None      # no sidecar at all
+
+
+def test_the_build_record_suffix_matches_the_engine_s():
+    """Duplicated to keep this module plugin-free; pinned so it can't drift."""
+    from pinball_decryptor.plugins.stern import engine
+    assert BUILD_RECORD_SUFFIX == engine.BUILD_MANIFEST_SUFFIX
+
+
+def test_the_transfer_says_baked_mods_are_not_coming(tmp_path):
+    """The pending route carries this folder's replacements only; when the
+    folder came off a built card, say so before it runs."""
+    import inspect
+
+    from pinball_decryptor import app as app_mod
+
+    src = inspect.getsource(app_mod.App._transfer_plan_ready)
+    assert "built_card_source(source_dir)" in src
+    assert "NOT included" in src
+    assert "intro=intro" in src
+    # and it says it in the log too, not only in a dialog that is dismissed
+    assert 'append_log(intro' in src

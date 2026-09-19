@@ -615,6 +615,36 @@ if [ -z "${PAD_NB_OBJS:-}" ]; then
     fi
 fi
 #
+# WHICH GAME VALIDATION ERROR IS UP (PAD-178). "Game validation error, Update
+# SD card" is one banner for six checks, and a log that cannot say which one is
+# up cost PAD-172 a deduction and PAD-178 a second report. valsite.py derives
+# where this title keeps them (the validation module, and the sound bank's
+# failed count) from its own code, the shim reports the raised ones by number
+# (val_watch), and this line says whether the program the run USES can raise
+# anything but the sound-bank count: an override set carries its own copy of
+# the program, and that copy is the one that runs. Both set in the environment
+# win, as with PAD_NB_OBJS; nothing derived = no line and no report.
+if [ -z "${PAD_VAL_MOD:-}" ] && [ -z "${PAD_VAL_AUD:-}" ]; then
+    VAL_RUN_ELF=""
+    VAL_WHOSE=""
+    if [ -n "${PAD_OVERRIDE_DIR:-}" ] && [ -f "$PAD_OVERRIDE_DIR/$GAME/game" ]; then
+        VAL_RUN_ELF="$PAD_OVERRIDE_DIR/$GAME/game"
+        VAL_WHOSE=" (the copy your edits bring)"
+    fi
+    VAL_SITES=$(python3 "$RIG/valsite.py" "$GAME_ELF" ${VAL_RUN_ELF:+"$VAL_RUN_ELF"} 2>/dev/null)
+    if [ -n "$VAL_SITES" ]; then
+        read -r VAL_MOD_D VAL_AUD_D VAL_TICK <<< "$VAL_SITES"
+        export PAD_VAL_MOD="$VAL_MOD_D" PAD_VAL_AUD="$VAL_AUD_D"
+        case "$VAL_TICK" in
+        off)  VAL_WHAT="its validator is switched off (PAD's bypass), so the sound-bank count (#4) is the only one it can raise" ;;
+        live) VAL_WHAT="its validator runs, so it checks the card's files as the machine does" ;;
+        *)    VAL_WHAT="whether its validator runs could not be read" ;;
+        esac
+        echo "[watch] validation: the game program this run uses$VAL_WHOSE -" \
+             "$VAL_WHAT; a GAME VALIDATION ERROR the game raises is named in this log"
+    fi
+fi
+#
 # THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table
 # cannot be parsed at all. star_wars_le is why: it yields ZERO device records,
 # so the census declined and the title kept the fault - David's 2026-08-10
@@ -2468,6 +2498,10 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # the source - the first eight and every 4096th - so forwarding it is
         # free, and a title that needs it says so on the pane.
         /\[align\]/              { print "[event] " $0; fflush(); next }
+        # [validation] names the GAME VALIDATION ERROR the game is raising, by
+        # its number and the values Tech Alerts shows (hwshim val_watch,
+        # PAD-178). One line per change, and none on a clean run.
+        /\[validation\]/         { print "[event] " $0; fflush(); next }
         /SEGV|Segmentation|FATAL/{ print "[event] " $0; fflush(); next }
     ' &
     EVTPG=$!

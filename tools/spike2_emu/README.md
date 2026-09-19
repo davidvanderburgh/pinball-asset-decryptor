@@ -81,6 +81,19 @@ thing that ever does, and the same set's firmware patch is what turns that off.
 A set that turns out to be nothing BUT those still fails the run, because that
 would be the stock card running while the app says it is testing your edits.
 
+**Which GAME VALIDATION ERROR is up** (PAD-178). "Game validation error, Update
+SD card" is one red banner for six checks, and the log used to say nothing
+about which. `valsite.py` derives where the title keeps them (the validation
+module and the sound bank's failed count, each found two ways that must agree;
+53 of the 57 cards on hand resolve, and the four that print nothing - Jaws LE
+1.01/1.02, Jurassic Park The Pin, Star Wars ELG - are the ones valpatch finds
+no validator in either), `watch.sh` exports them and says whether the
+program the run uses - the set's own copy, when there is one - has its
+validator switched off, and the shim logs one `[validation]` line whenever the
+set of raised checks changes, by number and with the values Tech Alerts shows
+(`#4 2534:2` = 2534 sound records passed, 2 failed). With the bypass in the
+program, #4 is the only one it can raise.
+
 ## Boot selector (item 90)
 
 ```bash

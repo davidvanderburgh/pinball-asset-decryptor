@@ -9508,6 +9508,88 @@ static void val_maybe_dump(void)
     val_dump_changed();
 }
 
+/* ══ WHICH GAME VALIDATION ERROR IS UP (PAD-178) ═════════════════════════
+ *
+ * "Game validation error, Update SD card" is ONE red banner for the SIX checks
+ * the provider above reads, and nothing in a run's log ever said which one was
+ * up. PAD-172 was closed on a deduction - "#4 is the only one a bypassed
+ * program leaves, so his card must have longer sounds" - and the same user came
+ * back with the same banner on the stock card and a log that could not settle
+ * it either way. So the run says it: one line, forwarded to the app's log by
+ * watch.sh, whenever the set of raised checks changes, naming each with the
+ * values the game itself puts on Tech Alerts.
+ *
+ * Only when watch.sh EXPORTED both addresses (valsite.py derives them from the
+ * title's own code): the compiled-in defaults are Godzilla Pro 1.15's, and on
+ * any other title they are mapped memory that means something else, which is
+ * worse than no line at all. A change is reported once it has HELD for 2 s: the
+ * band build counts the sound bank over the first seconds of boot, so the #4
+ * numbers are final by then, and a stock card's live tick passes through E
+ * ("checking") on its tracks without that being worth a line each time. */
+static void val_watch(void)
+{
+    /* the module's own letters (0x66d9d8 on Pro 1.15); 1 is a PASS - the
+     * init writes it - and 3 is a track whose handler is still running */
+    static const char *track[4] = { "S", "P (passed)", "F (failed)",
+                                    "E (still checking)" };
+    static int armed = -1;
+    static unsigned shown, pend;
+    static unsigned long since;
+    char line[480];
+    const unsigned char *o;
+    unsigned v, mask = 0, valid, failed;
+    int k;
+
+    if (armed == -1)
+        armed = getenv("PAD_VAL_MOD") && getenv("PAD_VAL_AUD")
+                && VAL_MOD && VAL_AUD;
+    if (!armed) return;
+    v = *(const unsigned *)(unsigned long)VAL_V;
+    if (v < 0x8000u || v >= 0x10000000u || !addr_readable((const void *)
+                                                          (unsigned long)v))
+        return;                         /* the module has not started yet */
+    o = (const unsigned char *)(unsigned long)v;
+    valid  = *(const unsigned *)(unsigned long)(VAL_AUD - 4);
+    failed = *(const unsigned *)(unsigned long)VAL_AUD;
+    if (o[42] == 2 || o[42] == 3) mask |= 1u;
+    if (o[43] == 2 || o[43] == 3) mask |= 2u;
+    if (o[44] == 2 || o[44] == 3) mask |= 4u;
+    if (failed) mask |= 8u;
+    if (*(const unsigned *)(o + 24) || o[41] == 1) mask |= 16u;
+    if (*(const unsigned *)(o + 12) || *(const unsigned *)(o + 16)) mask |= 32u;
+
+    if (mask != pend) { pend = mask; since = pad_ms(); return; }
+    if (mask == shown || pad_ms() - since < 2000ul) return;
+    shown = mask;
+    if (!mask) {
+        logmsg("[validation] the game raises no GAME VALIDATION ERROR now\n");
+        return;
+    }
+    k = snprintf(line, sizeof line, "[validation] the game raises GAME "
+                 "VALIDATION ERROR:");
+    if (mask & 7u)
+        k += snprintf(line + k, sizeof line - k, " #1-#3 its own file check"
+                      " (GE %s, CE %s, ZK %s - only a program whose validator"
+                      " runs grades these);", track[o[42] & 3],
+                      track[o[43] & 3], track[o[44] & 3]);
+    if ((mask & 8u) && k < (int)sizeof line)
+        k += snprintf(line + k, sizeof line - k, " #4 %u:%u - the sound bank,"
+                      " %u record(s) failed the game program's own check (a"
+                      " bank this program was not built with);", valid,
+                      failed, failed);
+    if ((mask & 16u) && k < (int)sizeof line)
+        k += snprintf(line + k, sizeof line - k, " #5 %u:%u;",
+                      *(const unsigned *)(o + 20), *(const unsigned *)(o + 24));
+    if ((mask & 32u) && k < (int)sizeof line)
+        k += snprintf(line + k, sizeof line - k, " #6 %u:%u:%u;",
+                      *(const unsigned *)(o + 8), *(const unsigned *)(o + 12),
+                      *(const unsigned *)(o + 16));
+    if (k >= (int)sizeof line - 1) k = (int)sizeof line - 2;
+    line[k] = '\n';
+    line[k + 1] = 0;
+    logmsg(line);
+}
+
 /* ══ THE SCREEN ORACLE ═══════════════════════════════════════════════════
  *
  * PAD_SCREEN=1: log every distinct line of text the game draws, as it draws
@@ -12692,6 +12774,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         nb_maybe_dump();
         alert_maybe_dump();
         val_maybe_dump();
+        val_watch();            /* PAD-178: name any validation error up */
         sw_maybe_dump();
         return (long)n;
     }

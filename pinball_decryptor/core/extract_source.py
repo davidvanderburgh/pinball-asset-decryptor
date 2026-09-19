@@ -168,6 +168,34 @@ def find_extract_for(image_path: str, roots) -> Optional[str]:
     return None
 
 
+def other_card_recorded(assets_dir: str, image_path: str) -> Optional[str]:
+    """The card *assets_dir* was extracted from, when a build is about to
+    patch a DIFFERENT one; ``None`` when it is the same card or the folder
+    records no source at all.
+
+    A build applies the replacements the folder has, not the folder's whole
+    contents: every sound, video, image and line of text it does not replace
+    comes from the card being built.  So building a folder extracted from an
+    already-modded card onto a stock card produces a stock card plus that
+    build's replacements, and every mod baked in by the earlier builds is
+    gone.  A modder lost several editions' worth of work to exactly this,
+    trying to get back to a card without longer audio (PAD-176), and nothing
+    in the app said a word.  The carry-over route is Transfer mods, which
+    reads the baked mods out by comparing against a stock extract.
+
+    Returns the recorded card's NAME (for the warning) rather than a bool, so
+    the caller can name both cards.
+    """
+    rec = read_extract_source(assets_dir)
+    if not rec:
+        return None
+    name = (rec.get("input_name")
+            or os.path.basename(rec.get("input_path") or ""))
+    if not name or not image_path:
+        return None
+    return None if _names_this_image(rec, image_path) else name
+
+
 def version_hint_from_name(name: Optional[str]) -> Optional[str]:
     """A human version label parsed from a card-image filename, or ``None``.
 

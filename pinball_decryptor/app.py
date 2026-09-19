@@ -84,6 +84,37 @@ def _resolve_startup_manufacturer(manufacturers, settings):
 MISMATCH_TITLE = "Replacements from another folder"
 
 
+#: Title for "this folder came off a different card than the one you picked".
+OTHER_CARD_TITLE = "Different card than this folder came from"
+
+
+def other_card_message(assets_dir, recorded_name, card_path):
+    """Body text for the Build warning that the project folder was extracted
+    from a card OTHER than the one being built onto.
+
+    Legitimate and common on its own (that is how a mod moves to a new game
+    version), so this is a confirm and not a refusal.  What it has to say is
+    the thing the Write never spelled out: a build carries the folder's
+    REPLACEMENTS, not the folder's contents, so mods baked into the card the
+    folder came off are not in it and do not come along.  A modder rebuilt
+    his project onto the stock card to escape a grown sound bank and got a
+    stock card back, several editions of work apparently gone, and asked
+    three times over whether that was supposed to happen (PAD-176).
+    """
+    return (f"This project folder was extracted from a different card than "
+            f"the one you're building onto.\n\n"
+            f"Folder extracted from:\n        {recorded_name}\n\n"
+            f"Building onto:\n        {card_path}\n\n"
+            f"A build applies this folder's replacements and any file you "
+            f"changed in it since the extract.  Everything it does not "
+            f"replace comes from the card you're building onto, so mods that "
+            f"earlier builds baked into \"{recorded_name}\" will NOT be on "
+            f"this card.\n\n"
+            f"To carry those earlier mods over, use \"Transfer mods → new "
+            f"version...\" with this folder as the old extract.\n\n"
+            f"Build anyway?")
+
+
 def recorded_replacement_counts(assets_dir, kinds):
     """``{kind: n}`` of replacements *assets_dir* has recorded in its own
     ``.staged_changes.json``, for each of *kinds* that has any.
@@ -1938,6 +1969,16 @@ class App:
                                              action="build")):
                 return
 
+        # A build carries the folder's replacements, not the folder's
+        # contents, so building an extract of a modded card onto a different
+        # card silently drops every mod that was baked into the first one.
+        from .core.extract_source import other_card_recorded
+        other = other_card_recorded(assets_dir, original)
+        if other and not messagebox.askyesno(
+                OTHER_CARD_TITLE,
+                other_card_message(assets_dir, other, original)):
+            return
+
         # Validate a manual update-version date (BOF, Auto unchecked).
         if getattr(self._current_mfr.capabilities,
                    "write_version_date", False):
@@ -1957,6 +1998,14 @@ class App:
         self.window.reset_steps(mode="write")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        if other:
+            # In the log as well as the dialog: this is the line that answers
+            # "why is my card stock again?" in a log posted days later.
+            log_cb("This project folder was extracted from \"%s\", not from "
+                   "the card being built (\"%s\"). Only this folder's "
+                   "replacements are applied, so any mod baked into \"%s\" "
+                   "by an earlier build is not on this card."
+                   % (other, os.path.basename(original), other), "warning")
 
         write_kwargs = {}
         if getattr(self._current_mfr.capabilities,

@@ -1901,6 +1901,10 @@ class MainWindow:
         # rel_path -> int dB, this replacement's loudness relative to whatever
         # the build-wide setting does (Stern; audio_level_offset capability).
         self._audio_level_db = {}
+        # Ordered rel_paths the user chose to keep whole when a grown sound
+        # bank can't hold every longer song (Stern Spike 2; item PAD-181). The
+        # order is the priority the write's budget honors.
+        self._audio_grow_keep_whole = []
         self._audio_level_render_job = None   # debounced preview re-render
         self._audio_loop_tip = None      # Loop/keep-column hover tooltip Toplevel
         self._audio_scan_id = 0          # bump-counter to drop stale scans
@@ -4446,6 +4450,7 @@ class MainWindow:
         saved_loops = {}
         saved_keep = {}
         saved_levels = None
+        saved_keep_whole = None
         # Trim/pad value to restore when the plugin doesn't force the lock:
         # a new folder restores its saved choice (default off); a same-folder
         # re-scan preserves the current one.
@@ -4460,6 +4465,7 @@ class MainWindow:
             saved_loops = staged.get("audio_loop") or {}
             saved_keep = staged.get("audio_keep") or {}
             saved_levels = staged.get("audio_levels") or {}
+            saved_keep_whole = list(staged.get("grow_keep_whole") or [])
             persisted_trim = bool(staged.get("audio_trim", False))
             self._restore_change_filter("audio", staged)
             # "Group duplicates" is NOT persisted/restored: it's off by
@@ -4505,6 +4511,13 @@ class MainWindow:
                 continue
             if db:
                 self._audio_level_db[rel] = max(min(db, 12), -12)
+        # Per-slot "keep whole" priority (Stern; item PAD-181): a new folder
+        # takes the sidecar's order, a re-scan keeps the live list. Either way
+        # drop any rel that no longer names a slot.
+        keep_whole = (self._audio_grow_keep_whole if saved_keep_whole is None
+                      else saved_keep_whole)
+        self._audio_grow_keep_whole = [r for r in keep_whole
+                                       if r in self._audio_slots_by_rel]
         self._audio_scan_dir = scan_dir
         # Now that the real extract folder is known, lock the Trim/pad toggle
         # for plugins whose Write is size-neutral for THIS extract (CGC's Pulp
@@ -5879,6 +5892,18 @@ class MainWindow:
             menu.add_separator()
             menu.add_command(label="Remove replacement",
                              command=self._audio_clear_selected)
+        # "Keep this song whole" (Stern Spike 2, longer-replacements on):
+        # when the grown sound bank can't hold every longer song, the ones
+        # marked here win the room first (item PAD-181). Only for cat-0
+        # idx#### slots — the sounds the grow path lengthens.
+        if self._audio_grow_active() and re.match(
+                r"idx\d+", os.path.basename(row) or ""):
+            on = row in self._audio_grow_keep_whole
+            menu.add_separator()
+            menu.add_command(
+                label=("☑  Keep this song whole if the bank fills up" if on
+                       else "☐  Keep this song whole if the bank fills up"),
+                command=lambda r=row: self._audio_toggle_keep_whole(r))
         slot = self._audio_slots_by_rel.get(row)
         if slot is not None:
             menu.add_separator()
@@ -5899,6 +5924,17 @@ class MainWindow:
         menu.add_command(
             label="Find in Partition Explorer",
             command=lambda k=kind, r=rel: self._asset_find_in_partition(k, r))
+
+    def _audio_toggle_keep_whole(self, rel):
+        """Toggle *rel*'s "keep whole" priority (item PAD-181). Appending keeps
+        the user's click order as the priority the write's budget honors, so
+        the first songs marked are the first kept when the bank can't hold them
+        all. Persisted in the folder's sidecar; the Stern write reads it back."""
+        if rel in self._audio_grow_keep_whole:
+            self._audio_grow_keep_whole.remove(rel)
+        else:
+            self._audio_grow_keep_whole.append(rel)
+        self._save_staged_changes()
 
     def _audio_clear_selected(self):
         """One row's "Remove replacement" — the shared bulk path with a
@@ -11168,16 +11204,16 @@ class MainWindow:
 
         _rule()
 
-        # Blip-free callouts (the master-directory scrap fix).  OFF by default
-        # since v0.104.0: the firmware cave has now boot-looped the same machine
-        # on three releases and has never been confirmed to boot on any, so it
-        # is offered as an experiment rather than shipped as the standard build.
+        # Blip-free callouts (the master-directory scrap fix).  Confirmed
+        # working on real machines (many, per field reports), but kept OPT-IN:
+        # it needs an image build and rebuilds the game binary, so it is offered
+        # as a choice rather than forced on every write.
         blip_var = tk.BooleanVar(value=bool(cfg.get("blip_free_optin", False)))
         ttk.Checkbutton(
             dlg, variable=blip_var,
             text="Blip-free callouts: patch the game firmware so a replaced "
-                 "sound plays your audio for its whole length (default off, "
-                 "hardware-unverified)"
+                 "sound plays your audio for its whole length (image builds "
+                 "only)"
         ).pack(anchor=tk.W, padx=12)
         ttk.Label(
             dlg, justify=tk.LEFT, wraplength=wrap,
@@ -11209,30 +11245,27 @@ class MainWindow:
                  "Every build re-derives all the sounds' settings from the "
                  "patched firmware first and falls back to the plain "
                  "stock-byte restore if anything would drift. "
-                 "Why it is off. On the one machine this has ever been tried "
-                 "on, a card built this way reboots partway through the "
-                 "startup screen and loops there. Two faults in the added code "
-                 "were found and fixed in v0.102.5 and the same machine still "
-                 "does it, so the cause is something not yet identified, and "
-                 "no card built this way has been confirmed to boot on any "
-                 "machine. Everything that says otherwise is a test on this PC, "
-                 "which cannot see how a real machine loads a patched game "
-                 "binary. Leaving it off costs you a ~6 ms scrap of the "
+                 "Why it is opt-in. This has been confirmed working on real "
+                 "machines, so it is safe to use; it is left as a choice "
+                 "because it needs an image build (with the Linux filesystem "
+                 "driver) rather than a direct-SD write, and it rebuilds the "
+                 "game binary. Leaving it off costs you a ~6 ms scrap of the "
                  "original sound at two points inside each replacement, which "
-                 "at least one tester listening for it could not hear. Tick it "
-                 "only if you want to help find the fault and are willing to "
-                 "rebuild the card from your original image afterwards.").pack(
+                 "at least one tester listening for it could not hear. As with "
+                 "any image build, keep your original image so you can rebuild "
+                 "the card if you want to.").pack(
             anchor=tk.W, padx=12, pady=(2, 8))
 
         _rule()
 
-        # Longer-than-stock replacements.  Off by default for the same reason
-        # the blip-free cave is: no machine has booted a card built this way.
+        # Longer-than-stock replacements.  Opt-in like blip-free: confirmed
+        # playing on a real machine (longer orchestral cues, no loop, correct
+        # cut-off), and left as a choice because it needs an image build.
         grow_var = tk.BooleanVar(value=bool(cfg.get("audio_grow", False)))
         ttk.Checkbutton(
             dlg, variable=grow_var,
             text="Allow replacements longer than the original (grows the "
-                 "sound bank; image builds only, hardware-unverified)"
+                 "sound bank; image builds only)"
         ).pack(anchor=tk.W, padx=12)
         ttk.Label(
             dlg, justify=tk.LEFT, wraplength=wrap,
@@ -11249,12 +11282,16 @@ class MainWindow:
                  "the one that plays. The file gets bigger, so this needs the "
                  "Linux filesystem driver, the same as full-size video "
                  "replacement, and it is skipped for a direct-SD write. "
-                 "Why it is off. It is proven on this PC: a grown sound "
-                 "decodes and re-encodes exactly at its new length, and no "
-                 "other sound's settings move. But no real machine has booted "
-                 "a card with a grown sound bank, so tick it only if you are "
-                 "willing to rebuild the card from your original image. "
-                 "Leaving it off trims longer clips exactly as before.").pack(
+                 "Why it is opt-in. This has been confirmed on a real machine "
+                 "(longer cues play, do not loop, and cut off correctly), so "
+                 "it is safe to use; it is left as a choice because it needs "
+                 "an image build. There is a limit: the game can only open a "
+                 "sound bank up to about 2 GB, and every lengthened sound is "
+                 "added on top of the original bank, so a build can hold "
+                 "roughly 45 minutes of lengthened stereo sound in total (the "
+                 "whole length of each counts, not just the extra). Anything "
+                 "over that is trimmed and named in the log. Leaving this off "
+                 "trims longer clips exactly as before.").pack(
             anchor=tk.W, padx=12, pady=(2, 8))
 
         _rule()
@@ -11410,6 +11447,12 @@ class MainWindow:
             # to walk on every build.
             data["audio_levels"] = {rel: int(db) for rel, db
                                     in self._audio_level_db.items() if db}
+            # Ordered "keep whole" picks (item PAD-181); only slots still
+            # present, so a cleared/renamed-away pick drops out. The Stern
+            # write reads this back out of the sidecar like audio_levels.
+            data["grow_keep_whole"] = [
+                r for r in self._audio_grow_keep_whole
+                if r in self._audio_slots_by_rel]
             data["audio_trim"] = bool(self.audio_trim_var.get())
             data["audio_change_filter"] = self.audio_change_filter_var.get()
         if _live(self._video_scan_dir):

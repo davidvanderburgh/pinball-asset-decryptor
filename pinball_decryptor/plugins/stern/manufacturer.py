@@ -515,8 +515,8 @@ class SternManufacturer(Manufacturer):
                 "its original slot length (longer is trimmed, shorter padded "
                 "with silence) and amplitude-limited into the codec's range. "
                 "Advanced audio options can let a longer replacement grow the "
-                "sound bank instead of being trimmed — image builds only, and "
-                "no machine has booted a card built that way yet.")
+                "sound bank instead of being trimmed — image builds only, up "
+                "to about 45 minutes of lengthened stereo sound per build.")
 
     def video_length_note(self):
         return ("Video is patched into the SD-card image in place, so each "

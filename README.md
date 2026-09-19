@@ -954,7 +954,18 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    Folder** on the Extract tab, the only editable copy of that path),
    and, when the folder being built has replacements recorded of its
    own, says the build applies those instead of calling the image
-   unmodified. The **Modified Files** list sorts on any
+   unmodified. From v0.221.1 a build onto a card the project folder
+   was *not* extracted from asks first as well: it names both cards and
+   spells out what a build carries — this folder's replacements and the
+   files you changed in it, with everything else coming from the card
+   being built — so mods an earlier build baked into the recorded card
+   are not on this one, and points at **Transfer mods → new
+   version...** as the route that does carry them over. Building onto
+   another card stays legal (it is how a mod moves to a new game
+   version), so it is a confirm rather than a refusal, and the same
+   sentence goes into the build log, where it answers "why is my card
+   stock again?" in a log posted days later. The **Modified Files**
+   list sorts on any
    column header (File, Type, Status — click again to flip, a third
    time to restore the scan's own Pending-above-Modified order) and an
    **Export CSV** button saves the whole list, so two projects that

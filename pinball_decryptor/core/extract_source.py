@@ -196,6 +196,32 @@ def other_card_recorded(assets_dir: str, image_path: str) -> Optional[str]:
     return None if _names_this_image(rec, image_path) else name
 
 
+#: Mirrors ``plugins.stern.engine.BUILD_MANIFEST_SUFFIX``: the record a Build
+#: leaves beside the card it wrote.  Duplicated rather than imported so this
+#: module stays plugin-free; a test pins the two together.
+BUILD_RECORD_SUFFIX = ".pad-build.json"
+
+
+def built_card_source(assets_dir: str) -> Optional[str]:
+    """The card *assets_dir* was extracted from, when that card is one this
+    app BUILT; ``None`` for a stock card, an unknown one, or no sidecar.
+
+    A build record sits beside every card a Build writes, so this answers
+    "does this folder's own content already carry mods?" with one ``stat``
+    and no reading of the card.  It is the difference that decides what a mod
+    transfer can carry: an extract of a built card holds that card's mods as
+    its BASELINE, and a transfer driven by the folder's pending replacements
+    leaves every one of them behind (PAD-176).
+    """
+    rec = read_extract_source(assets_dir)
+    if not rec:
+        return None
+    path = rec.get("input_path") or ""
+    if not path or not os.path.isfile(path + BUILD_RECORD_SUFFIX):
+        return None
+    return rec.get("input_name") or os.path.basename(path)
+
+
 def version_hint_from_name(name: Optional[str]) -> Optional[str]:
     """A human version label parsed from a card-image filename, or ``None``.
 

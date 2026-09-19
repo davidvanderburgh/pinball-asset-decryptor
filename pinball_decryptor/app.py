@@ -2913,7 +2913,27 @@ class App:
                 self._transfer_baked_mods(source_dir, target_dir)
             return
 
-        self._confirm_apply_transfer(source_dir, target_dir, plan)
+        # This route carries the folder's PENDING replacements only.  When
+        # the folder is an extract of a card this app built, that card's own
+        # mods are the folder's baseline and stay behind — the same trap the
+        # Build warning covers, one step further along the road out of it
+        # (PAD-176).  The baked route is the way to carry those, and it needs
+        # a folder with no pending edits of its own.
+        from .core.extract_source import built_card_source
+        intro = None
+        built = built_card_source(source_dir)
+        if built:
+            intro = (
+                "Only this folder's own replacements transfer.\n\n"
+                "It was extracted from \"%s\", a card this app built, so the "
+                "mods already baked into that card are its starting point "
+                "rather than replacements, and they are NOT included "
+                "below.\n\n"
+                "To carry those as well, run this from a fresh extract of "
+                "that card (a folder with no replacements of its own) and "
+                "fill \"Stock extract of the OLD version\"." % built)
+            self.window.append_log(intro.replace("\n\n", "  "), "warning")
+        self._confirm_apply_transfer(source_dir, target_dir, plan, intro=intro)
 
     def _transfer_baked_mods(self, modded_dir, target_dir):
         """Route the baked-in-mods case (old extract has no pending Replace

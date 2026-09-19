@@ -93,7 +93,10 @@ case "$cmd" in
         shift
         for n in "$@"; do       # every name checked BEFORE anything is written
             case "$n" in
-                ""|*[!a-z0-9_]*) die "a code mode's trigger name is [a-z0-9_] only, not '$n'" ;;
+                # letters spelled out, not a-z: macOS's bash 3.2 matches a range by the
+                # locale's collation, where a-z also takes capitals
+                ""|*[!abcdefghijklmnopqrstuvwxyz0123456789_]*)
+                    die "a code mode's trigger name is [a-z0-9_] only, not '$n'" ;;
             esac
         done
         touch "$DUMP/mode.stop" || die "could not write $DUMP/mode.stop"

@@ -11,3 +11,8 @@
 # so a Windows checkout must NOT rewrite these to CRLF.
 Dockerfile text eol=lf
 **/Dockerfile text eol=lf
+
+# The pinned Mode SDK runtime the app ships (item 127): never line-ending converted.
+# The rule that takes effect is in tools/spike2_emu/.gitattributes (a deeper file
+# wins, and that one says `* text eol=lf`); this line alone did nothing.
+tools/spike2_emu/modes/sdk/prebuilt/mode.so binary

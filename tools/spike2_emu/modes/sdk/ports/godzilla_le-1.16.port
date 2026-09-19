@@ -1,0 +1,364 @@
+# godzilla_le 1.16 - DRAFTED by port_tool.py from godzilla_pro-1.15.port, then proven (item 135).
+# Every address moved from Pro 1.15. In the emulator on this build (card
+# godzilla_le-1_16_0_spike2) the runtime matched all 24 functions, armed with every
+# capability, and template_mode.c ran unchanged: started on three Maser shots, scored both
+# ramps by name, ended on time. A shot census pressed every playfield switch.
+# UNVERIFIED on this build, and marked where they are: the callout ids (the run was
+# muted) and the struct offsets no run exercised (lights, screens, award screen).
+game           godzilla_le
+version        1.16
+
+# ---- functions: site <name> <address> <first two instruction words> --------------------
+# hooked by the runtime
+site tick             0x003b5420 0xe92d4038 0xe3a00037
+site shot_dispatch    0x000d3e2c 0xe92d41f0 0xe24dd008
+site ball_end         0x000d615c 0xe92d40f8 0xe3036fa0
+site sound_lookup     0x004d6460 0xe92d4038 0xe1a05000
+# called
+site score_add        0x002b25b8 0xe301116a 0xe340107d
+site callout          0x0018bafc 0xe3003f60 0xe340307b
+site callout_nth      0x0018bbc4 0xe3003f60 0xe340307b
+site light_run        0x001c78b0 0xeafffdc4 0xe92d40f0
+site lamp_group       0x003e828c 0xe92d4038 0xe1a04000
+site show_priority    0x001f3734 0xe306327c 0xe340307d
+site award_screen     0x00405908 0xe92d4070 0xe24dd008
+site string_new       0x00016954 0xe28fc606 0xe28ccaf3
+site dynamic_cast     0x00016348 0xe28fc606 0xe28ccaf3
+site resource_get     0x00538484 0xe92d43f0 0xe1a04000
+site find_node        0x00588b8c 0xe92d4070 0xe24dd008
+site find_text        0x00588628 0xe92d4070 0xe24dd008
+site set_text         0x0056c354 0xe92d47f0 0xe1a06000
+site clip_play        0x000529f4 0xe92d43f0 0xe24dd014
+site clip_stop        0x00052c54 0xe92d4008 0xebfffeea
+site video_player     0x000527e4 0xe92d4010 0xe3014d94
+site video_surface    0x00052808 0xe92d4070 0xe3015d94
+site surface_state    0x0057b8b8 0xe5900550 0xe2800008
+site player_advance   0x00405d00 0xe2501000 0x012fff1e
+site display_draw     0x002a5c7c 0xe3520001 0x812fff1e
+
+# ---- globals: data <name> <address> - each derived from two places the code loads it -----------
+data cur_player             0x00713b94
+data scores                 0x007ca4e8
+data mode_mask              0x007d116a
+data event_head             0x007d6278
+data event_current          0x007d627c
+data resource_manager       0x007f5250
+data typeinfo_resource      0x00630f1c
+data typeinfo_scene_player  0x006662dc
+data display_holder         0x007f51d0
+data message_count          0x005fc258
+data message_remap          0x007d3d00
+data message_table          0x00757640
+data award_screen_arg       0x0070c378
+
+# ---- offsets, flags and ids: value <name> <number> - COPIED from Pro 1.15 ------------------------
+# proven here: mode_mask_busy (pm_in_game held while the game was played)
+value mode_mask_busy        0x210
+# unverified on this build (the clip started, but lost the video surface to the game's own
+# Maser clip, so the draw loop's values were never seen on the glass)
+value surface_playing       2
+value clip_layer            0
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value light_owner           538
+value light_lts             224
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value display_at            0x7c
+value award_message_at      0xa0
+value award_value_at        0xa8
+value award_count_at        0xb0
+value award_screen_type     122
+
+# ---- shots: shot <mask> <name> - from the census on this build (switch ids from its own table) ----
+shot 0x00100000    Left ramp
+shot 0x00200000    Right ramp
+shot 0x00400000    Building
+shot 0x00080000    Godzilla target
+shot 0x08000000    Maser target
+shot 0x10000000    Powerline left
+shot 0x20000000    Powerline center
+shot 0x40000000    Powerline right
+# LE has THREE shield targets; Pro 1.15's "Shield target right" bit is LE's centre one
+shot 0x80000000    Shield target left
+shot 0x100000000   Shield target center
+shot 0x200000000   Shield target right
+shot 0x400000000   Skill shot
+shot 0x1000000000  Big loop
+# on LE only, or new to the census
+shot 0x2           Slingshot
+shot 0x4           Left return lane
+shot 0x10          Right return lane
+shot 0x40          Pop bumper
+shot 0x10000000000 Mecha exit bottom
+# not listed: the three spinners (Left, Top, Shield ramp) each send THREE bits a spin
+# (0x80 0x200 0x400 / 0x800 0x2000 0x4000 / 0x8000 0x20000 0x40000); Mecha exit top,
+# Building exit and the VUK send only 0x1
+
+# ---- callouts by role - COPIED from Pro 1.15, unverified (the run was muted) ------------------------
+callout countdown           1287
+callout ten_seconds         1291
+callout time_up             1295
+
+# ---- scenes by role - the SAME FILES as Pro 1.15 on this card (same ids, same md5) ---------------
+scene hud                   32e6ae280ddaec08e203a02289bb39a04968e7b0
+scene video_bank            60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene attract               394c4a037fb26e12f536c42b2677bfed831f5c98
+
+# ---- examples a template mode can use on this game ------------------------------------------------
+text example_start_shot     Maser target
+text example_clip           Mothra_godzilla_attack20
+text example_lights_on      blele --sweep 0 --lts 224 --red 0 --green 255 --blue 0 --freq 10 --use_alpha 1 --alpha 255
+text example_lights_off     blele --sweep 1 --lts 224 --fade 20 --rgb 0 --freq 10 --delay_start 15 --end 1
+
+# ---- sound requests (item 150) - located by port_tool.py from Pro 1.15's, words read from this ELF --
+# sound_play(req) / sound_nth(req, n) start a request, sound_stop(req) stops every channel playing
+# it (0 = all), sound_active(req) is 1 while a channel plays it. sound_worker is what every entry
+# point funnels into; only the census instrument (sdk/sound_census.c) hooks it.
+site sound_play       0x0043d2ac 0xe92d4010 0xe307ed28
+site sound_nth        0x0043d460 0xe92d4010 0xe307ed28
+site sound_active     0x0043da20 0xe59f3034 0xe2831e62
+site sound_stop       0x0043db78 0xe92d40f8 0xe1a06000
+site sound_worker     0x0043c898 0xe92d4ff0 0xe2507000
+# 8 channels x 196 B (+180 serial, +184 request, +188 voices playing), 8 x 20 B delayed queue,
+# RuleCities' request -> request hash map
+data sound_channels         0x007f7e34
+data sound_queue            0x007f86a8
+data city_variants          0x007ba680
+# the request table (20 B a request: +8 sid list, +16 priority, +17 steal flag) and the u32
+# holding how many requests it has - both read by the worker (pm_sound_priority)
+data sound_requests         0x00784844
+data sound_request_count    0x0061c28c
+# item 150 follow-up (pad_mode.h pm_sound_playing / pm_sound_fade): the channel struct and its
+# voices, read off the worker (0x43c898 on Premium 1.16) and the release (+0x5c: eight voice
+# pointers, one per bit of +188); a voice's u16 at +48 is the codec's volume step (1/3 dB each)
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+
+# ---- the game's own modes (item 140): cmode_manager's own queries, CALLED, never hooked -------------
+# Placed by port_tool.py from godzilla_pro-1.15.port: every site by a strict signature, the manager
+# derived from 2 places. The manager's code on this build is instruction-for-instruction Pro 1.15's
+# (only cmode virtual offsets past slot 48 differ), with the same 27 mode ids and kinds.
+# Emulator-proven (item 140, run 3, card godzilla_le-1_16_0): all four verified at boot; all three
+# answered 0 in plain play; battle and any answered 1 while a natural battle (id 12, Ebirah) was
+# active, multiball and any while a Godzilla multiball (id 1) was, and 0 again once each ended.
+# v[10]: any active mode not flagged 0x20
+site stock_any_running 0x000d41b0 0xe92d4070 0xe30f66a0
+# v[15]: an active mode with kind & 0x8 (the kaiju battles, and Megalon and Gigan multiball)
+site stock_battle_running 0x000d43d0 0xe92d4070 0xe30f66a0
+# v[22]: an active mode with (kind & 0x21) == 1 (every multiball)
+site stock_multiball_running 0x000d45a8 0xe92d40f8 0xe30f66a0
+data stock_mode_manager       0x007b0ce4
+
+# ---- events (item 147): MODE_SDK.md, Events ----------------------------------------------------
+# The ids are Pro 1.15's, and every function that dispatches them has the same shape here
+# (armxref.py args: 267 dispatch sites against Pro's 265, only ids 0x0a/0x0b differ). The
+# site events were placed by port_tool.py and each lines up with its Pro function's callers
+# (11 multiball starts, 16 multiball stops, 7 calls from RuleSkillShot::v[25]).
+# Measured on this build (item 147, run3c and run3d, 2026-09-17, the runtime with these lines
+# and event_probe.c beside it, one marked game each): game_start and ball_start fired at the
+# Start and in no other window, and a mode file with `starts_on event ball_start` started in
+# the same millisecond; skill_shot fired within 50 ms of switch 46 closing 1 s after the
+# plunge, and not for a hit 11 s later; multiball_start fired on a forced godzilla multiball
+# (the glass showed its start screen) and started a mode file; multiball_end fired when the
+# probe called the stop function by hand (the game's own call at a multiball's end was not
+# seen on this build); tilt_warning fired on the first two pendulum hits and tilt on the
+# third. NOT measured here: ball_end, bonus_start, bonus_end and game_over - run3c's drain
+# after four switch hits did not end the ball (a control boot without these lines did the
+# same), so no ball ended but by the tilt; item 150's run1 ended balls on this build after
+# about 46 switch hits per ball.
+site hook_dispatch    0x003fcdf8 0xe35000cf 0xe92d4038
+event game_start      0x4d
+event ball_start      0x25
+event ball_end        0x34
+event bonus_start     0x27
+event bonus_end       0x28
+event tilt_warning    0xc8
+event tilt            0xc6
+event game_over       0x47
+site skill_shot_award 0x00171910 0xe92d4ff0 0xe24dd03c
+site mball_start      0x000d75e0 0xe92d40f8 0xe1a04000
+site mball_stop       0x000d76bc 0xe92d4010 0xe1a04000
+event skill_shot      site skill_shot_award
+event multiball_start site mball_start
+event multiball_end   site mball_stop
+
+# ---- item 146: the battle roster (Godzilla only) --------------------------------------------------
+# Drafted by port_tool.py from the Pro 1.15 port and read at the desk; EMULATOR-PROVEN (item 146 run5,
+# 2026-09-17, a godzilla_le-1_16_0 card copy with MOTHRA in slot 0): a claimed pick started the mode, its end
+# lit the ramps again, and a stock pick (Megalon) started the game's battle through the same hook.
+# RuleBattle::start_slot is 0x124980 here (`cmp r1,#6` bound, the same 12-byte slot records), called by
+# the selector's pick at 0x190cac with the singleton 0x7b0c70; it loads the battle's START at 0x1249c8.
+# The constructor copies the seven records from the rodata table at 0x64272c. roster_done (0x124924) is
+# Pro's 0x122014: clear the qualified byte, then the re-light at 0x1248cc.
+site roster_start      0x001249c8 0xe5903000 0xe5933020
+site roster_done       0x00124924 0xe92d4010 0xe1a04000
+data rule_battle            0x007b0c70
+value roster_slots          7
+value roster_vec_at         8
+value roster_record_size    12
+value roster_id_at          4
+value roster_qualified_at   83
+# the start of a picked mode waits this long (mode_file.c): the selection screen fades and plays its intro clip,
+# gone by +2.4 s (run4, Pro 1.15); at +3.3 s the mode's start screen showed (run5, this build)
+value roster_start_after_ms 3000
+# the selection screen's slot table (derived by port_tool.py from 2 places; the same seven records and callout ids as
+# Pro 1.15, read from both programs): a claimed slot is made silent (pm_roster_callout; item 146 fix-1). Run on this build
+# in item 146 run7: slot 0's id read 1888 -> 0 at the claim, 207 by `roster_callout 207`, 1888 at release (PAD_PEEK)
+data roster_screen_table     0x0070e62c
+value roster_screen_record_size 32
+value roster_callout_at      28
+# RuleCities' "done in this city" (0x1387ac, Pro's 0x135394; the battle stop at 0x125568 calls it with bit 1 on the
+# singleton 0x7b0e78, derived by port_tool.py from 2 places): pm_roster_done does the same (item 146 fix-2). Run7 on
+# this build: a picked mode's end logged player 1's city 0 mask 0 -> 2, and a watcher read the same from the game
+site roster_city_done  0x001387ac 0xe92d4070 0xe24dd010
+data rule_cities             0x007b0e78
+value roster_city_bit        1
+value roster_city_index_at   20
+value roster_city_vec_at     44
+value roster_city_record_size 16
+
+# ---- display priority (item 154 display; MODE_SDK.md "Display priority") --------------------------------------
+# Placed by signature from Pro 1.15 (strict); the effect and layered tables match Pro's record for record. Run here
+# with display_probe.c (r1): the layered display is effect 29 (priority 1); shot awards are layered displays 37-48,
+# 101 (110-117) or effects 126 / 128 through waiters at 176; jackpots effect 79 (184); tilt warning 33 (241).
+site display_effect_start 0x00439194 0xe92d47f0 0xe2516000
+site display_effect_next  0x00439578 0xe30735a4 0xe340307f
+site display_priority_now 0x00439a0c 0xe5d0000e 0xe12fff1e
+site layered_priority     0x0003cfcc 0xe92d4008 0xe5903058
+# item 157: the layered display's WAITER (the process body its start tail-calls: r0 the display, r1 the frames it
+# may wait, r2 its priority). A display a hold would keep waiting is dropped here: while one waits the game draws
+# no frames (MODE_SDK.md "A waiting layered display freezes the glass").
+site layered_waiter      0x00052ea4 0xe92d4ff0 0xe304c4f8
+data display_effects         0x007f75a4
+data layered_displays        0x0070bc3c
+value display_host           29
+value display_mode_level     184
+value display_now_at         0xc
+value display_priority_at    0xe
+value layered_record_size    16
+value layered_priority_at    12
+value layered_wait_for_at    0xa0
+value layered_waiter_call    0x00052efc
+value effect_waiter_call     0x00052d58
+value layered_fg_at          0x58
+value layered_fg_flags_at    0x60
+
+# ---- named inserts (item mode-leds): MODE_SDK.md "Lights: named inserts" ----------------------------
+# The game's lamp LAYERS (lamp groups): the active list's head is the word after the free list's at
+# lamp_layers; each group holds a pointer to one 40-byte slot per light (+0), its priority (+4), its
+# event (+16) and the next group (+20). Every frame the compositor walks the list bottom to top and
+# each slot whose byte +3 is set gives its light the level at +2 (fade at +8). Read at the desk off
+# this build (allocator 0x3a6010, pool 0x3a623c, compositor 0x4d7d04) (the allocator, the pool, the compositor).
+data lamp_layers            0x007d408c
+data light_count            0x007d38f0
+value lamp_slot_size        40
+value lamp_slot_level       2
+value lamp_slot_alpha       3
+value lamp_slot_fade        8
+value lamp_slot_used        36
+value lamp_group_prio       4
+value lamp_group_next       20
+# the fade time a held insert's level carries: the game's own in-play inserts carry 3 (read live, RUN 2)
+value lamp_fade             3
+# Every playfield insert, by the game's own name (its device table), with the shots the game's own
+# shot table (cshot) ties to it. A 0 in R,G,B = the fixture has no such colour; ONE id = one colour.
+# EMULATOR-PROVEN on this build (item mode-leds): see MODE_SDK.md for the run.
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# 88 inserts on the playfield picture; light table 0x773370, device table 0x777a50, lamp table 0x72cdf0 (267 lamps)
+# shot masks: read from 43 cshot objects built by 0x18b10c
+lamp 285          0x8            LEFT OUTLANE  # lamp 98, I/O group 6 index 7, at 29,498
+lamp 286          0x4            LEFT RETURN LANE  # lamp 99, I/O group 6 index 6, at 53,472
+lamp 287          0x20           RIGHT OUTLANE  # lamp 100, I/O group 6 index 5, at 264,498
+lamp 288          0x10           RIGHT RETURN LANE  # lamp 101, I/O group 6 index 4, at 242,472
+lamp 289          0              SHOOT AGAIN (X2)  # lamp 102, I/O group 6 index 53, at 0,0
+lamp 290          0              ADV FIGHTER LEFT  # lamp 103, I/O group 6 index 52, at 69,537
+lamp 291          0              FIGHTER LEFT 1  # lamp 104, I/O group 6 index 49, at 57,549
+lamp 292          0              FIGHTER LEFT 2  # lamp 105, I/O group 6 index 50, at 69,558
+lamp 293          0              FIGHTER LEFT 3  # lamp 106, I/O group 6 index 51, at 80,566
+lamp 294          0              ADV FIGHTER RIGHT  # lamp 107, I/O group 6 index 12, at 225,537
+lamp 295          0              FIGHTER RIGHT 1  # lamp 108, I/O group 6 index 9, at 239,549
+lamp 296          0              FIGHTER RIGHT 2  # lamp 109, I/O group 6 index 10, at 227,558
+lamp 297          0              FIGHTER RIGHT 3  # lamp 110, I/O group 6 index 11, at 215,566
+lamp 298          0x8000000      MASER  # lamp 111, I/O group 6 index 62, at 51,417
+lamp 299          0              MASER READY  # lamp 112, I/O group 6 index 63, at 67,425
+lamp 300,301,302  0x800000000    LEFT SPINNER  # lamp 113, I/O group 6 index 56, at 55,373
+lamp 303          0              TANK 1  # lamp 114, I/O group 6 index 55, at 69,391
+lamp 304          0              ADV RAMPAGE  # lamp 115, I/O group 6 index 54, at 77,405
+lamp 305          0              RODAN  # lamp 116, I/O group 6 index 41, at 178,421
+lamp 306          0              MOTHRA  # lamp 117, I/O group 6 index 27, at 199,424
+lamp 307          0              ANGUIRUS  # lamp 118, I/O group 6 index 47, at 186,439
+lamp 308,309,310  0              TOP SAUCER  # lamp 119, I/O group 6 index 28, at 209,410
+lamp 311,312,313  0              BOTTOM SAUCER  # lamp 120, I/O group 6 index 17, at 215,436
+lamp 314          0              SAUCER  # lamp 121, I/O group 6 index 8, at 225,450
+lamp 315          0              ATTACK MECHA  # lamp 122, I/O group 6 index 23, at 200,381
+lamp 316          0              TANK 6  # lamp 123, I/O group 6 index 22, at 227,394
+lamp 317          0x2000000000   SELECT CITY  # lamp 124, I/O group 6 index 21, at 236,380
+lamp 318,319,320  0x4000000000   MECHA LANE  # lamp 125, I/O group 6 index 24, at 282,393
+lamp 321,322,323  0x40           POP BUMPER  # lamp 126, I/O group 6 index 42, at 251,413
+lamp 324,325,326  0x80000000     SHIELD LEFT  # lamp 127, I/O group 6 index 31, at 189,335
+lamp 327,328,329  0x100000000    SHIELD CENTER  # lamp 128, I/O group 6 index 34, at 199,346
+lamp 330,331,332  0x200000000    SHIELD RIGHT  # lamp 129, I/O group 6 index 37, at 215,356
+lamp 333          0              TANKS  # lamp 130, I/O group 7 index 39, at 107,386
+lamp 334          0              KAIJU  # lamp 131, I/O group 7 index 8, at 127,392
+lamp 335          0              BRIDGE  # lamp 132, I/O group 7 index 9, at 146,392
+lamp 336          0              POWER  # lamp 133, I/O group 7 index 10, at 166,386
+lamp 337          0              NY  # lamp 134, I/O group 7 index 30, at 118,360
+lamp 338          0              LONDON  # lamp 135, I/O group 7 index 38, at 128,374
+lamp 339          0              PARIS  # lamp 136, I/O group 7 index 15, at 145,374
+lamp 340          0              TOKYO  # lamp 137, I/O group 7 index 16, at 155,360
+lamp 341          0              PLANET X  # lamp 138, I/O group 7 index 26, at 137,353
+lamp 342          0              MONSTER ZERO WIZ  # lamp 139, I/O group 7 index 29, at 114,328
+lamp 343          0              KING OF THE MONSTERS WIZ  # lamp 140, I/O group 7 index 28, at 137,331
+lamp 344          0              MECHA WIZ  # lamp 141, I/O group 7 index 27, at 160,328
+lamp 345          0x400000000    SKILL SHOT  # lamp 142, I/O group 7 index 47, at 49,284
+lamp 346,347,348  0x100000       LEFT RAMP  # lamp 143, I/O group 7 index 48, at 69,272
+lamp 349          0              TANK 2  # lamp 144, I/O group 7 index 40, at 76,287
+lamp 350          0              ADV TRAIN  # lamp 145, I/O group 7 index 41, at 83,304
+lamp 351          0x80000        MAGNA GRAB  # lamp 146, I/O group 7 index 44, at 89,260
+lamp 352          0              TANK 3  # lamp 147, I/O group 7 index 43, at 95,276
+lamp 353          0              ATTACK BRIDGE  # lamp 148, I/O group 7 index 42, at 102,292
+lamp 354,355,356  0xc00000       BUILDING  # lamp 149, I/O group 7 index 76, at 123,202
+lamp 357,358,359  0x1800         TOP SPINNER  # lamp 150, I/O group 7 index 67, at 165,207
+lamp 360          0x10000000     POWERLINE LEFT  # lamp 151, I/O group 7 index 79, at 104,219
+lamp 361          0              LITE DESTRUCTION JACKPOT  # lamp 152, I/O group 7 index 71, at 124,220
+lamp 362          0x20000000     POWERLINE CENTER  # lamp 153, I/O group 7 index 70, at 144,216
+lamp 363          0              TANK 4  # lamp 154, I/O group 7 index 66, at 162,223
+lamp 364          0              TESLA STRIKE  # lamp 155, I/O group 7 index 62, at 159,242
+lamp 365,366,0    0              BUILDING FIRE LEFT 1  # lamp 156+157, I/O group 7 index 86, at 118,267
+lamp 367,368,0    0              BUILDING FIRE LEFT 2  # lamp 158+159, I/O group 7 index 72, at 117,254
+lamp 369,370,0    0              BUILDING FIRE LEFT 3  # lamp 160+161, I/O group 7 index 74, at 116,239
+lamp 371,372,0    0              BUILDING FIRE RIGHT 1  # lamp 162+163, I/O group 7 index 84, at 137,265
+lamp 373,374,0    0              BUILDING FIRE RIGHT 2  # lamp 164+165, I/O group 7 index 82, at 136,254
+lamp 375,376,0    0              BUILDING FIRE RIGHT 3  # lamp 166+167, I/O group 7 index 80, at 135,238
+lamp 377          0              HEAT RAY L1  # lamp 168, I/O group 7 index 22, at 169,184
+lamp 378          0              HEAT RAY L2  # lamp 169, I/O group 7 index 23, at 172,172
+lamp 379          0              HEAT RAY L3  # lamp 170, I/O group 7 index 24, at 176,159
+lamp 380          0              HEAT RAY  # lamp 171, I/O group 7 index 25, at 180,144
+lamp 381,382,383  0x200000       RIGHT RAMP  # lamp 172, I/O group 7 index 17, at 199,189
+lamp 384          0              TANK 5  # lamp 173, I/O group 7 index 20, at 192,205
+lamp 385          0x40000000     POWERLINE RIGHT  # lamp 174, I/O group 7 index 21, at 212,204
+lamp 386,387,388  0x1000000000   BIG LOOP  # lamp 175, I/O group 7 index 31, at 195,251
+lamp 389          0              DESTRUCTION JACKPOT  # lamp 176, I/O group 7 index 34, at 170,273
+lamp 390          0              TAIL WHIP  # lamp 177, I/O group 7 index 35, at 176,297
+lamp 400          0              SCOOP BB-BATTLE  # lamp 187, I/O group 6 index 14, at 254,346
+lamp 401          0              SCOOP BB-GODZILLA PWR UP  # lamp 188, I/O group 6 index 15, at 254,346
+lamp 402          0              SCOOP BB-SUMMON ALLY  # lamp 189, I/O group 6 index 16, at 254,346
+lamp 404          0              LOWER PLAYFIELD GI-RED(X4)  # lamp 191, I/O group 6 index 0, at 0,0
+lamp 405          0              LOWER PLAYFIELD GI-WHT(X9)  # lamp 192, I/O group 6 index 1, at 0,0
+lamp 406          0              UPPER PLAYFIELD GI-RED(X9)  # lamp 193, I/O group 7 index 0, at 0,0
+lamp 407          0              UPPER PLAYFIELD GI-WHT(X12)  # lamp 194, I/O group 7 index 1, at 0,0
+lamp 408          0              MASER FIRE FLASH  # lamp 195, I/O group 6 index 48, at 91,438
+lamp 409          0x200          MASER FLASH  # lamp 196, I/O group 6 index 59, at 30,388
+lamp 410          0              BUILDING SPOT  # lamp 197, I/O group 6 index 60, at 57,382
+lamp 411          0              SCOOP BB MECHA SPOT  # lamp 198, I/O group 6 index 13, at 259,337
+lamp 412          0              GODZILLA SPOT  # lamp 199, I/O group 7 index 55, at 33,205
+lamp 413          0              GLOBE FLASH  # lamp 200, I/O group 7 index 36, at 287,206
+lamp 414          0x2000         TOP SPINNER FLASH  # lamp 201, I/O group 7 index 60, at 172,100

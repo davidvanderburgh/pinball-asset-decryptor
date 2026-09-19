@@ -250,6 +250,10 @@ class App:
         # text (default on).  Mirrored to PAD_STERN_TEXT_GROW before any
         # Write / Build / emulator-override run can read it.
         self._apply_text_grow_env(self._text_grow_setting())
+        # PREVIEW FEATURES (the mode maker ships dark): the codes in settings.json
+        # are checked ONCE, here, and the answer is cached for the whole run
+        # (core/preview.py).  Before MainWindow, whose Modes tab asks it.
+        self._load_preview_codes()
 
         # First-launch disclaimer.  Boolean flag, unversioned: once the
         # user accepts, they never see it again — including across app
@@ -334,6 +338,8 @@ class App:
             initial_compare_row_limit=self._settings.get("compare_row_limit"),
             on_compare_row_limit_change=self._on_compare_row_limit_change,
             on_stage_pending=self.stage_pending_replacements,
+            preview_codes_provider=self._preview_codes,
+            on_preview_codes_change=self._on_preview_codes_change,
             on_recheck_prereqs=self._recheck_prereqs,
             on_install_prereqs=self._launch_install_prereqs,
             on_back=self._on_back_to_picker,
@@ -433,6 +439,7 @@ class App:
         # re-detection (caught in the v0.79.0 screenshot pass).
         self._refresh_title()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._log_preview_startup()
 
         self.root.after(1500, self._check_for_update)
 
@@ -4611,6 +4618,47 @@ class App:
     # Settings
     # ------------------------------------------------------------------
 
+    def _preview_codes(self):
+        """The preview codes settings.json holds (core/preview.py)."""
+        from .core import preview
+        got = self._settings.get(preview.SETTINGS_KEY)
+        return [c for c in got if isinstance(c, str)] if isinstance(got, list) else []
+
+    def _load_preview_codes(self):
+        """Check the stored preview codes ONCE for this run and cache the answer
+        (core/preview.py): every gated place asks ``preview.enabled``.  The
+        check is pure-Python Ed25519, a few milliseconds a code; the time it
+        took goes in the log with what it turned on."""
+        from .core import preview
+        rows = preview.load(self._preview_codes())
+        self._preview_startup = (rows, preview.load_ms())
+
+    def _log_preview_startup(self):
+        """One log line per stored preview code, and what the start-up check
+        cost; nothing at all for a copy with no codes (nearly everyone)."""
+        rows, ms = getattr(self, "_preview_startup", ([], 0.0))
+        for st in rows:
+            for line in st.lines:
+                self.window.append_log(
+                    "Preview features: %s." % line,
+                    "info" if st.active else "warning")
+        if rows:
+            self.window.append_log(
+                "Preview features: %d code(s) checked in %.0f ms."
+                % (len(rows), ms), "info")
+
+    def _on_preview_codes_change(self, codes):
+        """The Preview features dialog changed the stored codes: save them."""
+        from .core import preview
+        if codes:
+            self._settings[preview.SETTINGS_KEY] = list(codes)
+        else:
+            self._settings.pop(preview.SETTINGS_KEY, None)
+        try:
+            self._save_settings()
+        except Exception:
+            pass
+
     def _load_settings_file(self):
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
@@ -5396,6 +5444,22 @@ class App:
                     if name in table.by_name:
                         e = table.get(name)
                         overrides[name] = max(e["min"], min(e["max"], int(v)))
+                # Item 145: a timer the Modes tab staged is in the build already
+                # (the Write puts it in the game program on every path).
+                # Writing it again would only change the file, so the next
+                # Write could not update this build in place.
+                # (Only with the preview switch on: off, the Write put nothing of
+                # the Modes tab's in the program, and every staged setting goes
+                # through here as it always has.)
+                try:
+                    from .plugins.stern import mode_write as _mode_write
+                    from .plugins.stern import stock_modes as _stock_modes
+                    if _mode_write.preview_on():
+                        for name in _stock_modes.settings_already_built(
+                                assets_dir, table, overrides):
+                            overrides.pop(name, None)
+                except Exception:
+                    pass
                 # Staged high-score initials / player names (batch 22) ride
                 # into the SAME ELF write as the numeric defaults.  A slot the
                 # built image doesn't have (a version change since staging) is

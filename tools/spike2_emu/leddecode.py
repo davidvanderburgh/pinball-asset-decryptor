@@ -130,6 +130,27 @@ def decode_frame(b, valid):
 # or it is refused. A mis-parse fails that test by itself, which is why this
 # needs no node gate where decode_frame above cannot live without one.
 
+def wide_long(cmd, body):
+    """Is this the LONG index-bitmap body? The twin of hwshim.c's led_wide_long.
+
+    Read off Godzilla Premium 1.16's builder (the planner at 0x5ae3d8, the frame
+    at 0x5b06ac; item mode-leds). A bitmap window of MORE than 8 groups cannot say
+    which of its middle groups it sends in six flag bits, so the planner switches
+    form: the command gets M (0x20) and a THIRD header byte follows the group
+    nibbles. body[0]'s bits 0-3 say whether groups 0-3 of the window are sent and
+    body[2]'s bits 0-7 groups 4-11; a group not sent is the fill byte (body[0]
+    bit 6), and the first and last are NOT always sent. When every group from 4
+    on is sent, the planner drops the third byte and M (0x5ae5ec: body[2] would
+    have read 0xff), which is the only way a window over 8 groups comes without
+    M. The short-form walk refused both; in a Premium 1.16 game 838 of node 9's
+    frames were this form and every one closed exactly."""
+    if not body or not body[0] & 0x80:
+        return False
+    if cmd & 0x20:
+        return True
+    return len(body) >= 2 and (body[1] & 0x0F) - (body[1] >> 4) + 1 > 8
+
+
 def wide_decode(b):
     """Decode one swelf-generation lamp frame.
 
@@ -170,10 +191,33 @@ def wide_decode(b):
         return None
     idxs, p, sel = [], 0, None
 
-    if body[0] & 0x80:                      # the index-BITMAP body (0x518bb0)
+    if wide_long(cmd, body):                # the LONG index-bitmap body (wide_long)
+        if len(body) < (3 if M else 2) or body[0] & 0x30:
+            return None
+        first_g, last_g = body[1] >> 4, body[1] & 0x0F
+        if last_g < first_g or last_g > 11:
+            return None
+        span = last_g - first_g + 1
+        fill = 0xFF if body[0] & 0x40 else 0x00
+        hdr2, p = (body[2], 3) if M else (0xFF, 2)
+        win = []
+        for j in range(span):
+            if (body[0] >> j & 1) if j < 4 else (hdr2 >> (j - 4) & 1):
+                if p >= len(body):
+                    return None
+                win.append(body[p])
+                p += 1
+            else:
+                win.append(fill)
+        for j in range(span):
+            for k in range(8):
+                if win[j] >> k & 1:
+                    idxs.append((first_g + j) * 8 + k)
+        if not idxs or len(idxs) > 96 or idxs[0] >> 3 != first_g or idxs[-1] >> 3 != last_g:
+            return None
+    elif body[0] & 0x80:                    # the index-BITMAP body (0x518bb0)
         if len(body) < 2 or M:
-            #: M here means a further flags byte at body[2] whose bit base is
-            #: not established. Refused rather than skipped past.
+            #: M with a bitmap is the LONG body, taken above.
             return None
         first_g, last_g = body[1] >> 4, body[1] & 0x0F
         if last_g < first_g or last_g > 11:

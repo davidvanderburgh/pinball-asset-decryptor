@@ -378,7 +378,7 @@ def _grow_card(monkeypatch, tmp_path, params, grown_rows=None, places=None):
 
     repointed = {}
 
-    def repoint(gr, staged, prm, st, log):
+    def repoint(gr, staged, prm, st, log, templates=None):
         repointed["path"] = staged
         repointed["params"] = prm
         repointed["sites"] = st
@@ -419,8 +419,13 @@ def _edits(tmp_path, seconds):
 
 def _run(monkeypatch, assets, params, encode_off, log, dest_is_device=False):
     def _fake_encode(gr, img, prm, ed, np, lg, pr, cx, **k):
-        return {encode_off: b"\xaa" * 64}, []
+        return ({encode_off: b"\xaa" * 64} if ed else {}), []
+
+    # item 150 follow-up: a grown (appended) sound is encoded along the firmware's chain
+    def _fake_chain(gr, img, prm, ed, np, lg, **k):
+        return ({encode_off: b"\xaa" * 64} if ed else {}), prm
     monkeypatch.setattr(engine, "_encode_cat0_sounds", _fake_encode)
+    monkeypatch.setattr(engine, "_chain_encode_appended", _fake_chain)
     monkeypatch.setattr(engine, "_select_changed_idx_wavs",
                         lambda a, b: {0: "audio/idx0000.wav"})
     return engine._compute_patches(

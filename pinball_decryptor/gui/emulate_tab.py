@@ -441,6 +441,29 @@ def overrides_reason(manifest, card_path, assets_dir, fingerprint,
     return ""
 
 
+def preview_modes_reason(manifest, assets_dir, on=None):
+    """Why a set of a project that HOLDS modes cannot be reused since the mode maker's
+    preview switch changed (core/preview.py), or ``""``. The set records the switch it was
+    built under (``modes_preview``, written only for such a project), and its files differ
+    by it: on, the modes' screens and clips; off, none. A project without modes never
+    rebuilds for this. *on* defaults to this run's switch."""
+    if not manifest:
+        return ""
+    try:
+        from ..plugins.stern import mode_write
+        if not mode_write.held_modes(assets_dir):
+            return ""
+        if on is None:
+            on = mode_write.preview_on()
+    except Exception:                                   # noqa: BLE001
+        return ""
+    if bool(manifest.get("modes_preview")) == bool(on):
+        return ""
+    # neutral words: a copy without a code names no preview feature
+    return ("a preview feature was switched %s since it was built (Settings > Preview "
+            "features)" % ("on" if on else "off"))
+
+
 def _title_label(names):
     """``godzilla_le-1_16_0`` out of a card's ``.sidx`` names (see
     ``engine.card_title_index``): the versioned one, else the first."""
@@ -2299,6 +2322,9 @@ class EmulatePanel:
         #: started comes up — _apply fires it when running=1.  And whether
         #: a load is in flight right now (one at a time, like the poll).
         self._launch_slot = None
+        #: Item 127: a caller's one-shot preparation for the next Start
+        #: (launch_with), or None.
+        self._launch_prepare = None
         self._loading = False
         self._proc = None            # the watch.sh child, while we own one
         #: Item 74: the card-copy progress line to show in the state label, or
@@ -5035,12 +5061,14 @@ class EmulatePanel:
 
         out = overrides_dir()
         fp = assets_fingerprint(assets)
-        why = overrides_reason(stern_engine.read_override_manifest(out),
-                               card, assets, fp, run_card=picked)
+        manifest = stern_engine.read_override_manifest(out)
+        why = overrides_reason(manifest, card, assets, fp, run_card=picked)
+        if not why:
+            why = preview_modes_reason(manifest, assets)
         if not why:
             self._log("[emulate] your edits are unchanged since the override "
                       "set in %s was built — reusing it" % out)
-            return ["PAD_OVERRIDE_DIR=%s" % _wsl_path(out)]
+            return self._with_override_modes(out, ["PAD_OVERRIDE_DIR=%s" % _wsl_path(out)])
 
         self._log("[emulate] preparing your edits (%s)" % why)
         self._preparing = "Preparing your edits…"
@@ -5071,7 +5099,53 @@ class EmulatePanel:
         self._log("[emulate] %d card file(s) will be applied on top of the "
                   "card: %s" % (len(files),
                                 ", ".join(p for p, _n in files[:6])))
-        return ["PAD_OVERRIDE_DIR=%s" % _wsl_path(out)]
+        return self._with_override_modes(out, ["PAD_OVERRIDE_DIR=%s" % _wsl_path(out)])
+
+    #: Item 149: where the rig preloads a set's mode runtime from (modes/tryit.sh install).
+    OVERRIDE_MODE_OBJECT = "/lib/pad_mode.so"
+
+    def _with_override_modes(self, out, env):
+        """*env* plus what the set's MODES need, or None when they cannot be put in.
+
+        Item 149. The set carries the project's modes as a card does (write_overrides):
+        their screens in the HUD scene, their clips, and the runtime, port and mode files
+        beside the set in ``<set>-modes``. A screen is authored VISIBLE and the runtime
+        hides it (plugins/stern/scene_write.py), so a set bound without the runtime puts
+        every mode's panel over the HUD all game - what run 9's clean boot of a Written
+        card showed. On a machine the card's game_monitor loads the runtime; here the
+        Start does: ``modes/tryit.sh install`` of the payload, and ``PAD_MODE_SO``. A set
+        without modes is returned as it was. ON THE START WORKER (a wsl.exe)."""
+        from ..plugins.stern import engine as stern_engine
+        try:
+            modes = (stern_engine.read_override_manifest(out) or {}).get("modes") or {}
+        except Exception:                               # noqa: BLE001
+            modes = {}
+        stage = modes.get("dir") if isinstance(modes, dict) else None
+        if not stage:
+            return env
+        names = ", ".join(modes.get("names") or ()) or "the project's modes"
+        if not os.path.isdir(stage):
+            self._overrides_refuse(
+                "Your edits carry modes (%s), but their runtime folder %s is missing. "
+                "Start again to rebuild the set." % (names, stage))
+            return None
+        cmd = rig_cmd("modes/tryit.sh", "install",
+                      _wsl_path(stage) if sys.platform == "win32" else stage)
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=120,
+                               creationflags=_CREATE_FLAGS)
+            ok = r.returncode == 0
+            said = ((r.stdout or b"") + (r.stderr or b"")).decode("utf8", "replace").strip()
+        except (OSError, subprocess.SubprocessError) as exc:
+            ok, said = False, str(exc)
+        if not ok:
+            self._overrides_refuse(
+                "Your edits carry modes (%s), and they could not be put in the emulator: %s"
+                % (names, said[-400:]))
+            return None
+        self._log("[emulate] your edits carry modes (%s): their runtime runs in this game, as "
+                  "on a card Written from the project" % names)
+        return list(env) + ["PAD_MODE_SO=%s" % self.OVERRIDE_MODE_OBJECT]
 
     def _stage_pending(self, assets):
         """Apply the Replace tabs' assigned replacements to *assets*.
@@ -5280,7 +5354,43 @@ class EmulatePanel:
         self._select_touched = True
         self.start()
 
+    def launch_with(self, prepare):
+        """Start the emulator with a caller's own preparation - the Modes tab's
+        Try it (item 127).  ONE launcher: this is the ordinary Start (same card
+        box, same validation, same launch, same status), with *prepare* run on
+        the start WORKER after this tab's own edits set, because it is slow (it
+        builds scenes and encodes clips, and copies files into the rig).
+
+        *prepare(card_path)* returns the env entries to add to the launch, or
+        None to refuse - it says why in the log itself - and the run then does
+        not start ("Not running").  One-shot: start() takes it before any early
+        return, so it can never ride along on a later ordinary Start.
+
+        Returns False, launching nothing, when the rig is already up or busy,
+        or when this tab's own "apply my edits" set is also ticked: both are
+        PAD_OVERRIDE_DIR, and one run binds one set (a named loose end).
+        """
+        if self._last_up or self._starting or self._stopping:
+            self._log("[emulate] the emulator is already running: stop it first, "
+                      "then try again.")
+            return False
+        if self._overrides_wanted() is not None:
+            self._overrides_refuse(
+                "Try it runs your modes as an override set, and \"apply my "
+                "edits\" is ticked, which is another one. A run takes one set "
+                "for now: untick it to try the modes.")
+            return False
+        self._launch_prepare = prepare
+        self._launch_accepted = False
+        self.start()
+        # False when start() returned early (no rig, no card picked...): the
+        # preparation will never run, and the caller should not wait for it.
+        return bool(self._launch_accepted)
+
     def start(self):
+        # Item 127: launch_with's preparation, taken FIRST so an early return
+        # below cannot leave it waiting for somebody else's Start.
+        prepare, self._launch_prepare = getattr(self, "_launch_prepare", None), None
         if self._starting or self._stopping or not rig_available():
             return
         self._starting = True
@@ -5315,6 +5425,9 @@ class EmulatePanel:
         # the edits go on top of ONE of the images, and which one that is has
         # to be said before the run rather than after it.
         ovr_selector = bool(self._select_var.get())
+        # Item 127: the card launch_with's preparation builds against, read
+        # here on the main loop for the same reason.
+        prepare_card = self._src_path.get().strip().strip('"')
         # Item 90: ask the card again, off-thread, for the box's own sake.
         # The Multi-boot tab may have REBUILT the file this path names since
         # the last probe, and the verdict on screen would otherwise describe
@@ -5328,6 +5441,11 @@ class EmulatePanel:
         # loading a save NEEDS this shape; with no toggle there is nothing
         # left to ask.
         states = True
+        # Item 127: this launch's number, counted BEFORE the worker so launch_with's
+        # preparation (on it) reads its own launch's number, and any later Start - which
+        # carries no preparation - has another. The Modes tab ties what Try it put in the
+        # rig to that number, so its Start mode now cannot reach a run without the modes.
+        self._launch_serial = getattr(self, "_launch_serial", 0) + 1
 
         def run():
             self._note_the_runtime_is_a_different_machine()
@@ -5379,6 +5497,29 @@ class EmulatePanel:
                         self._starting = False
                     return
                 env.extend(extra)
+            # Item 127: a caller's preparation (launch_with), after the edits
+            # set and on this thread for the same reason.  None, or anything
+            # it raises, is a refusal: the run does not start.
+            if prepare is not None:
+                self._preparing = "Preparing your modes…"
+                try:
+                    more = prepare(prepare_card)
+                except Exception as exc:                # noqa: BLE001
+                    self._log("[emulate] the run could not be prepared: %s" % exc)
+                    more = None
+                finally:
+                    self._preparing = None
+                if more is None:
+                    try:
+                        self._timer().after(
+                            0, lambda: (self._set("state", "Not running"),
+                                        self._run_label(False, False)))
+                    except (tk.TclError, RuntimeError):
+                        pass
+                    finally:
+                        self._starting = False
+                    return
+                env.extend(more)
             # THE COMMAND IS BUILT IN HERE, not before the thread.  On
             # Windows watch_cmd() asks WSL for the desktop user's home
             # (wsl_home: two wsl.exe probes, 30 s timeout each), and the
@@ -5444,6 +5585,8 @@ class EmulatePanel:
                 self._proc = None
                 self._copying = None
 
+        # Item 127: launch_with's answer - the preparation is on its way.
+        self._launch_accepted = prepare is not None
         threading.Thread(target=run, daemon=True).start()
 
     def _open_playfield(self, fields):

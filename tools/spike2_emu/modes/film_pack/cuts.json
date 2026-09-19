@@ -1,0 +1,134 @@
+{
+ "atomic_breath": {
+  "name": "ATOMIC BREATH",
+  "film": "Godzilla.1954.REMASTERED.JAPANESE.1080p.BluRay.H264.AC3.DD1.0.mp4",
+  "clip_in": 3580.1,
+  "clip_out": 3588.0,
+  "art_at": 3581.5,
+  "sound_in": 3376.2,
+  "sound_out": 3382.2,
+  "end_request": 1020,
+  "stock_record": 1263,
+  "what": "Godzilla (1954): the head close-up, the heat ray, the street in flames; sound = the heat ray at the towers",
+  "level": {
+   "reference": "idx1263 - SE GZ VO GAME HEAT RAY LIT JAPANESE.wav",
+   "ref_peak": 11147,
+   "ref_active_rms": 4784.9,
+   "wav_peak": 29195,
+   "wav_active_rms": 5526.5,
+   "encode_peak": 10812,
+   "encode_active_rms": 4438.1,
+   "encode_range": 11147
+  }
+ },
+ "mothra_s_song": {
+  "name": "MOTHRA'S SONG",
+  "film": "Godzilla.vs.Mothra.1964.JAPANESE.1080p.BluRay.H264.AC3.DD2.0.mp4",
+  "clip_in": 3670.0,
+  "clip_out": 3678.0,
+  "art_at": 2819.0,
+  "sound_in": 2745.0,
+  "sound_out": 2751.0,
+  "end_request": 1133,
+  "stock_record": 1042,
+  "what": "Godzilla vs. Mothra (1964): Mothra flies in over Godzilla; art = the twin fairies; sound = their song",
+  "level": {
+   "reference": "idx1042 - SE GZ VO GAME SUPER SKILL SHOT JAPANESE.wav",
+   "ref_peak": 11147,
+   "ref_active_rms": 4578.5,
+   "wav_peak": 29195,
+   "wav_active_rms": 5918.2,
+   "encode_peak": 10812,
+   "encode_active_rms": 4233.4,
+   "encode_range": 11147
+  }
+ },
+ "mechagodzilla": {
+  "name": "MECHAGODZILLA",
+  "film": "Godzilla.vs.Mechagodzilla.1974.H264.AC3.DD2.0.mp4",
+  "clip_in": 4529.5,
+  "clip_out": 4537.5,
+  "art_at": 4530.0,
+  "sound_in": 4529.5,
+  "sound_out": 4535.5,
+  "end_request": 972,
+  "stock_record": 1833,
+  "what": "Godzilla vs. Mechagodzilla (1974): eye beams, finger missiles, chest beam; sound = the same barrage",
+  "level": {
+   "reference": "idx1833 - SE GZ VO GAME MECHAGODZILLA MB DEPLOYED JAPANESE.wav",
+   "ref_peak": 11147,
+   "ref_active_rms": 4318.5,
+   "wav_peak": 29195,
+   "wav_active_rms": 6594.5,
+   "encode_peak": 10808,
+   "encode_active_rms": 4151.3,
+   "encode_range": 11147
+  }
+ },
+ "king_ghidorah": {
+  "name": "KING GHIDORAH",
+  "film": "Ghidorah.The.Three.Headed.Monster1964.JAPANESE.1080p.BluRay.H264.AC3.DD2.0.mp4",
+  "clip_in": 3239.0,
+  "clip_out": 3247.0,
+  "art_at": 3246.5,
+  "sound_in": 3243.5,
+  "sound_out": 3249.5,
+  "end_request": 1249,
+  "stock_record": 67,
+  "what": "Ghidorah, the Three-Headed Monster (1964): born from the meteor's fireball; sound = its first cries",
+  "level": {
+   "reference": "idx0067 - SE GZ VO GAME TESLA STRIKE COMPLETED JAPANESE.wav",
+   "ref_peak": 11147,
+   "ref_active_rms": 4468.7,
+   "wav_peak": 29195,
+   "wav_active_rms": 7937.1,
+   "encode_peak": 10796,
+   "encode_active_rms": 3881.8,
+   "encode_range": 11147
+  }
+ },
+ "destoroyah": {
+  "name": "DESTOROYAH",
+  "film": "Godzilla.Vs.Destoroyah.1995.JAPANESE.1080p.BluRay.H264.AC3.DD2.0.mp4",
+  "clip_in": 5222.5,
+  "clip_out": 5230.5,
+  "art_at": 5223.0,
+  "sound_in": 5238.0,
+  "sound_out": 5244.0,
+  "end_request": 1197,
+  "stock_record": 561,
+  "what": "Godzilla vs. Destoroyah (1995): Burning Godzilla's breath knocks Destoroyah down; sound = his roar",
+  "level": {
+   "reference": "idx0561 - SE GZ VO GAME BATTLE FINAL AWARD JAPANESE.wav",
+   "ref_peak": 11147,
+   "ref_active_rms": 4610.4,
+   "wav_peak": 29195,
+   "wav_active_rms": 5817.1,
+   "encode_peak": 10812,
+   "encode_active_rms": 4008.0,
+   "encode_range": 11147
+  }
+ },
+ "shin_godzilla": {
+  "name": "SHIN GODZILLA",
+  "film": "Shin.Godzilla.2016.JAPANESE.1080p.BluRay.H264.AC3.DD2.0.mp4",
+  "clip_in": 3964.0,
+  "clip_out": 3972.0,
+  "art_at": 4014.0,
+  "sound_in": 3964.0,
+  "sound_out": 3970.0,
+  "end_request": 1174,
+  "stock_record": 633,
+  "what": "Shin Godzilla (2016): the purple beam from the mouth and the tail across Tokyo; art = the silhouette in flames",
+  "level": {
+   "reference": "idx0633 - SE GZ VO GAME VS BATTLE INSTRUCTIONS JAPANESE.wav",
+   "ref_peak": 11147,
+   "ref_active_rms": 5499.1,
+   "wav_peak": 29195,
+   "wav_active_rms": 5369.8,
+   "encode_peak": 10813,
+   "encode_active_rms": 4917.1,
+   "encode_range": 11147
+  }
+ }
+}

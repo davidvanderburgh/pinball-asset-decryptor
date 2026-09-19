@@ -83,6 +83,27 @@ def _isolate_rig_dirs(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("PAD_JJP_EMU_DIR", str(d))
 
 
+@pytest.fixture(autouse=True)
+def _preview_features_off(monkeypatch):
+    """Every test starts with every PREVIEW FEATURE switched off (core/preview.py), as a
+    copy of the app with no code does - whatever an earlier test in the same worker
+    loaded. A test of the mode maker turns it on with ``preview_modes_on``."""
+    from pinball_decryptor.core import preview
+    monkeypatch.setattr(preview, "_active", frozenset())
+    monkeypatch.setattr(preview, "_statuses", [])
+
+
+@pytest.fixture
+def preview_modes_on(monkeypatch):
+    """The mode maker's preview switch ON for one test: what a signed code turns on at
+    start-up, with no code and no key (the shipped public key is never touched). It holds
+    through an App() start-up, which judges the stored codes again."""
+    from pinball_decryptor.core import preview
+    real = preview.enabled
+    monkeypatch.setattr(preview, "enabled",
+                        lambda feature: feature == "modes" or real(feature))
+
+
 def _tk_works():
     """Return True if we can instantiate a hidden Tk root.
 

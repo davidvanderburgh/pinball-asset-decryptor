@@ -102,11 +102,130 @@ def _write_summary(counts):
     changes" when nothing changed."""
     parts = ["%d %s" % (n, noun) for n, noun in zip(counts, (
         "sound(s)", "video(s)", "image(s)", "display string(s)")) if n]
+    # The game's own modes (item 145): the engine's counts carry how many of
+    # their timers and awards the Write changed, and whether a Write with
+    # nothing staged put this project's build back to the original.
+    n_stock = getattr(counts, "stock_modes", 0)
+    if n_stock:
+        parts.append("%d number(s) of the game's own modes" % n_stock)
+    if not parts and getattr(counts, "restored", False):
+        return "the original card (nothing is staged any more)"
     if not parts:
         return "no changes"
     if len(parts) == 1:
         return parts[0]
     return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _write_summary_with_modes(counts, modes):
+    """:func:`_write_summary` plus the modes a card build carried (item 149).
+
+    *modes* is the build record's ``modes`` entry (``engine.read_build_manifest``),
+    present only when the mode runtime reached the card.  A mode's own end sound is
+    one of the re-encoded sounds in *counts*; it is named with its mode instead of
+    being counted as a replaced sound, so a modes-only project never reads "Wrote no
+    changes" or "1 sound(s)"."""
+    names = list((modes or {}).get("names") or ())
+    if not names:
+        return _write_summary(counts)
+    counts = list(counts)
+    snd = (modes or {}).get("end_sound") or None
+    if snd and counts and counts[0] > 0:
+        counts[0] -= 1
+    own = list((modes or {}).get("own_sounds") or ())
+    if own and counts:
+        counts[0] = max(0, counts[0] - len(own))
+    parts = ["%d %s" % (n, noun) for n, noun in zip(counts, (
+        "sound(s)", "video(s)", "image(s)", "display string(s)")) if n]
+    extra = ["%s with its own end sound" % snd.get("name")] if snd else []
+    words = {"sound_start": "start sound", "sound_shot": "shot sound", "music": "music"}
+    calls = {}                                # a code mode's calls, counted once per mode
+    for o in own:
+        if str(o.get("key", "")).startswith("call:"):
+            calls[o.get("name")] = calls.get(o.get("name"), 0) + 1
+            continue
+        extra.append("%s with its own %s" % (o.get("name"), words.get(o.get("key"), "sound")))
+    for name, n in calls.items():
+        extra.append("%s with %d call(s) of its own" % (name, n))
+    parts.append("%d mode(s) (%s%s)" % (
+        len(names), ", ".join(names), "; " + ", ".join(extra) if extra else ""))
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _only_mode_sounds(counts, modes):
+    """True when every re-encoded sound of a build is a mode's own (its end sound, start / shot
+    sounds, music, a code mode's calls): those are APPENDED records, encoded along the firmware's
+    chain with no window restored, so the blip-free note about replaced sounds does not apply."""
+    m = modes or {}
+    own = len(m.get("own_sounds") or ()) + (1 if m.get("end_sound") else 0)
+    return bool(own) and bool(counts) and counts[0] <= own
+
+
+def _direct_sd_modes_note(assets_dir):
+    """Item 149: the completion-dialog sentence for a Direct-SD write of a project that
+    HAS modes. A direct-SD write cannot add files to the card, so the engine leaves the
+    modes out (and logs why); the dialog says so too, or "Wrote 1 sound(s) directly to
+    the SD card." reads as if the modes went with it. ``""`` for a project without modes
+    (or one whose modes do not load: the build log already named those)."""
+    names = _held_mode_names(assets_dir)
+    if not names:
+        return ""
+    from . import mode_write
+    if not mode_write.preview_on():
+        return _preview_off_note(assets_dir)
+    _ok, why = mode_write.gate(True)
+    return ("\n\nModes: the project's %d mode(s) (%s) were left out: %s."
+            % (len(names), ", ".join(names), why))
+
+
+def _preview_off_note(assets_dir):
+    """The completion-dialog sentence for a project holding a tester's preview content
+    written by a copy with the preview switch OFF, in neutral words (no feature is named
+    without a code), or ``""``."""
+    try:
+        from . import mode_write
+        what = mode_write.preview_held(assets_dir)
+    except Exception:
+        return ""
+    if not what:
+        return ""
+    return "\n\n%s this project's %s: %s." % (mode_write.PREVIEW_LEFT_OUT, what,
+                                              mode_write.PREVIEW_REFUSAL)
+
+
+def _held_mode_names(assets_dir):
+    """The names of the project's modes for a completion note: parsed with the preview
+    switch on (a mode that does not load gives none: the log named it), and by folder
+    name only with it off (the Write never read them)."""
+    try:
+        from . import mode_write
+        if not mode_write.preview_on():
+            return mode_write.held_modes(assets_dir)
+        return [spec.name for _slug, spec in mode_write.project_modes(assets_dir)]
+    except Exception:
+        return []
+
+
+def _image_modes_left_out_note(assets_dir, carried):
+    """Item 149: the completion-dialog sentence for an IMAGE Write of a project that HAS
+    modes when the build carried none because a gate refused them (a Mac, where the tools
+    that put a mode's files on the card do not run; ``PAD_STERN_MODES=0``; no ext4 driver).
+    ``""`` when the build carried the modes, the project has none, or no gate refused."""
+    if carried:
+        return ""
+    names = _held_mode_names(assets_dir)
+    if not names:
+        return ""
+    from . import mode_write
+    if not mode_write.preview_on():
+        return _preview_off_note(assets_dir)
+    ok, why = mode_write.gate(False)
+    if ok:
+        return ""
+    return ("\n\nModes: the project's %d mode(s) (%s) were left out: %s."
+            % (len(names), ", ".join(names), why))
 
 
 def _audio_mode_note(mode):
@@ -256,15 +375,38 @@ class SternWritePipeline(BasePipeline):
         self._set_phase(1)  # Stage
         _require_engine()
         self._set_phase(2)  # Re-encode audio (+ patch, inside the engine)
+        # Item 149: the modes the build already at the output carried, if any.
+        try:
+            before = engine.read_build_manifest(self.output_path)
+            had_modes = (before.get("modes") or {}).get("names") or []
+        except Exception:
+            had_modes = []
         counts, audio_mode, valpatch_mode = engine.write_image(
             self.original_path, self.assets_dir, self.output_path,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
             label=display_for_key(key, self.original_path),
             update=self.update)
         self._set_phase(3)  # Patch image
-        self._done(True, "Wrote %s to %s%s%s"
-                   % (_write_summary(counts), self.output_path,
-                      _audio_mode_note(audio_mode),
+        # Item 149: the modes this build put on the card, from its record.
+        try:
+            after = engine.read_build_manifest(self.output_path)
+            modes = after.get("modes")
+        except Exception:
+            after, modes = {}, None
+        summary = _write_summary_with_modes(counts, modes)
+        if (had_modes and not modes and not any(counts) and not self._cancelled
+                and after.get("complete")):
+            # every mode taken out: the engine wrote the original card (in neutral
+            # words with the preview switch off: no feature is named without a code)
+            from . import mode_write as _mw
+            summary = (("the original card with the last build's modes taken out (%s)"
+                        if _mw.preview_on() else
+                        "the original card with the last build's preview content taken "
+                        "out (%s)") % ", ".join(had_modes))
+        self._done(True, "Wrote %s to %s%s%s%s"
+                   % (summary, self.output_path,
+                      _image_modes_left_out_note(self.assets_dir, modes),
+                      "" if _only_mode_sounds(counts, modes) else _audio_mode_note(audio_mode),
                       _valpatch_note(valpatch_mode)))
 
 
@@ -363,8 +505,9 @@ class SternDirectSsdWritePipeline(BasePipeline):
             log=self._log, progress=self._progress,
             cancel=lambda: self._cancelled, phase=self._set_phase,
             partition_override=self.partition_override)
-        self._done(True, "Wrote %s directly to the SD card.%s%s"
-                   % (_write_summary(counts), _audio_mode_note(audio_mode),
+        self._done(True, "Wrote %s directly to the SD card.%s%s%s"
+                   % (_write_summary(counts), _direct_sd_modes_note(self.assets_dir),
+                      _audio_mode_note(audio_mode),
                       _valpatch_note(valpatch_mode)))
 
 

@@ -1,0 +1,311 @@
+{
+ "about": "The Modes tab's code-mode Examples (pinball_decryptor/plugins/stern/code_modes.py): each mode's code in this folder and the recipe its own clip, picture, music loop and calls are cut from. Times are seconds into the film (the collection's file names are in 'films'). Nothing of a film is in the app: the tab cuts these from the person's own copy with the film cutter. Measured for the showcase card, 2026-09-18; see the README beside this file.",
+ "films": {
+  "ghi64": "Ghidorah.The.Three.Headed.Monster1964.JAPANESE.1080p.BluRay.H264.AC3.DD2.0.mp4",
+  "am65": "Invasion.of.Astro.Monster.1965.H264.AC3.DD2.0.mp4",
+  "g54": "Godzilla.1954.REMASTERED.JAPANESE.1080p.BluRay.H264.AC3.DD1.0.mp4",
+  "des95": "Godzilla.Vs.Destoroyah.1995.JAPANESE.1080p.BluRay.H264.AC3.DD2.0.mp4",
+  "meg73": "Godzilla.Vs.Megalon.1973.JAPANESE.1080p.BluRay.H264.AC3.DD5.1.mp4",
+  "fw04": "Godzilla.Final.Wars.2004.JAPANESE.1080p.BluRay.H264.AC3.DD5.1.mp4",
+  "ra55": "Godzilla.Raids.Again.1955.JAPANESE.1080p.BluRay.H264.AC3.DD1.0.mp4"
+ },
+ "titles": {
+  "ghi64": "Ghidorah, the Three-Headed Monster (1964)",
+  "am65": "Invasion of Astro-Monster (1965)",
+  "g54": "Godzilla (1954)",
+  "des95": "Godzilla vs. Destoroyah (1995)",
+  "meg73": "Godzilla vs. Megalon (1973)",
+  "fw04": "Godzilla: Final Wars (2004)",
+  "ra55": "Godzilla Raids Again (1955)"
+ },
+ "examples": [
+  {
+   "name": "KING GHIDORAH",
+   "slug": "ghidorah_heads",
+   "source": "ghidorah_heads.c",
+   "headers": [
+    "intricate_kit.h"
+   ],
+   "seconds": 90,
+   "panel_color": "#5a3d00",
+   "title_color": "#ffd24a",
+   "recipe": {
+    "clip": {
+     "film": "am65",
+     "from": 5549.0,
+     "length": 8.0,
+     "crop": "fill",
+     "what": "Godzilla and Rodan against King Ghidorah, its three heads and wings spread"
+    },
+    "art": {
+     "film": "am65",
+     "at": 5553.0,
+     "crop": "fill",
+     "what": "King Ghidorah, three heads, wings spread"
+    },
+    "music": {
+     "film": "am65",
+     "from": 1607.37,
+     "length": 14.48,
+     "what": "Akira Ifukube's score, Planet X (bed finder: final 0.833, loop chroma 0.82, 0 untuned blocks)"
+    },
+    "calls": {
+     "sever": {
+      "film": "ghi64",
+      "from": 5379.4,
+      "length": 1.4,
+      "what": "Ghidorah's shriek in the final battle at Mt. Fuji (the game's own Ghidorah screech matches 0.74; a pulsed trill clear of music)"
+     },
+     "regrow": {
+      "film": "ghi64",
+      "from": 4787.1,
+      "length": 1.3,
+      "what": "Ghidorah's trilling cackle in the final battle (the game's own Ghidorah screech matches 0.84; the clearest trill, a 6 dB step at its start)"
+     },
+     "won": {
+      "film": "am65",
+      "from": 5484.5,
+      "length": 2.2,
+      "what": "Godzilla's roar in the final fight (harmonic roar cpp 0.38)"
+     },
+     "lost": {
+      "film": "am65",
+      "from": 5601.3,
+      "length": 3.0,
+      "what": "Ghidorah flying off at the end (the game's own Ghidorah flying matches 0.97)"
+     }
+    }
+   }
+  },
+  {
+   "name": "OXYGEN DESTROYER",
+   "slug": "oxygen_destroyer",
+   "source": "oxygen_destroyer.c",
+   "headers": [
+    "intricate_kit.h"
+   ],
+   "seconds": 45,
+   "panel_color": "#0b3d5c",
+   "title_color": "#9ff3ff",
+   "recipe": {
+    "clip": {
+     "film": "g54",
+     "from": 5498.0,
+     "length": 8.0,
+     "crop": "fill",
+     "what": "the Oxygen Destroyer glowing on the sea bed, then its bubbles erupting"
+    },
+    "art": {
+     "film": "g54",
+     "at": 5215.0,
+     "crop": "fill",
+     "what": "the Oxygen Destroyer in its case"
+    },
+    "music": {
+     "film": "des95",
+     "from": 5852.394,
+     "length": 14.4,
+     "what": "Destoroyah's score near the end (bed finder: final 0.820, 1 of 30 blocks untuned)"
+    },
+    "calls": {
+     "collect": {
+      "film": "g54",
+      "from": 5502.0,
+      "length": 2.5,
+      "what": "the Oxygen Destroyer starting on the sea bed (the frames: it glows at 1:31:42, its bubbles erupt at 1:31:44)"
+     },
+     "won": {
+      "film": "g54",
+      "from": 5616.8,
+      "length": 3.0,
+      "what": "Godzilla's last roar as it surfaces (harmonic roar, -15 dB, the loudest in the scene)"
+     },
+     "lost": {
+      "film": "g54",
+      "from": 3391.9,
+      "length": 3.0,
+      "what": "Godzilla's roar in the Tokyo rampage (the game's own 1954 roar matches 0.86)"
+     }
+    }
+   }
+  },
+  {
+   "name": "MASER BARRAGE",
+   "slug": "maser_barrage",
+   "source": "maser_barrage.c",
+   "headers": [
+    "intricate_kit.h"
+   ],
+   "seconds": 90,
+   "panel_color": "#3a3a3a",
+   "title_color": "#7fe7ff",
+   "recipe": {
+    "clip": {
+     "film": "meg73",
+     "from": 2568.0,
+     "length": 8.0,
+     "crop": "fill",
+     "what": "the Maser cannons firing their beams at Megalon"
+    },
+    "art": {
+     "film": "meg73",
+     "at": 2570.0,
+     "crop": "fill",
+     "what": "a Maser cannon, dish raised"
+    },
+    "music": {
+     "film": "meg73",
+     "from": 4301.985,
+     "length": 21.57,
+     "what": "Riichiro Manabe's score, the final battle (bed finder: final 0.806, loop chroma 0.865)"
+    },
+    "calls": {
+     "barrage": {
+      "film": "meg73",
+      "from": 2589.6,
+      "length": 2.2,
+      "what": "a Maser volley hitting Megalon and the blast (broadband onset at 0:43:09.8)"
+     },
+     "broken": {
+      "film": "meg73",
+      "from": 2607.4,
+      "length": 1.8,
+      "what": "Megalon's cry as it shrugs the attack off (harmonic roar cpp 0.34)"
+     },
+     "won": {
+      "film": "meg73",
+      "from": 2595.7,
+      "length": 2.5,
+      "what": "the big fireball (the strongest broadband onset in the scene, 0:43:15.8)"
+     },
+     "lost": {
+      "film": "meg73",
+      "from": 2426.7,
+      "length": 2.2,
+      "what": "Megalon's roar (the game's own long Megalon roar matches 0.83; a clear onset)"
+     }
+    }
+   }
+  },
+  {
+   "name": "FINAL WARS",
+   "slug": "final_wars",
+   "source": "final_wars.c",
+   "headers": [
+    "intricate_kit.h"
+   ],
+   "seconds": 110,
+   "panel_color": "#5c0b0b",
+   "title_color": "#ffb000",
+   "recipe": {
+    "clip": {
+     "film": "fw04",
+     "from": 6625.0,
+     "length": 8.0,
+     "crop": "fill",
+     "what": "Godzilla's atomic breath against Keizer Ghidorah's gravity beams"
+    },
+    "art": {
+     "film": "fw04",
+     "at": 261.0,
+     "crop": "letterbox",
+     "what": "the GODZILLA FINAL WARS title (the whole frame, letterboxed)",
+     "band": 60,
+     "band_below": true
+    },
+    "music": {
+     "film": "fw04",
+     "from": 7249.602,
+     "length": 18.3,
+     "what": "the end-title score (bed finder: final 0.895, the best of the eight films)"
+    },
+    "calls": {
+     "phase1": {
+      "film": "fw04",
+      "from": 5437.7,
+      "length": 2.4,
+      "what": "Godzilla roaring through the smoke in the city (the game's own 1954 roar matches 0.77; a harmonic roar)"
+     },
+     "phase2": {
+      "film": "fw04",
+      "from": 6604.0,
+      "length": 2.0,
+      "what": "Keizer Ghidorah's three heads rising and roaring as Monster X becomes it"
+     },
+     "won": {
+      "film": "fw04",
+      "from": 6896.9,
+      "length": 2.4,
+      "what": "Godzilla's roar after the battle (harmonic roar cpp 0.43, the strongest)"
+     },
+     "lost": {
+      "film": "fw04",
+      "from": 6698.9,
+      "length": 2.2,
+      "what": "Keizer Ghidorah's gravity beams striking (broadband onset at 1:51:39.0)"
+     }
+    }
+   }
+  },
+  {
+   "name": "ANGUIRUS",
+   "slug": "anguirus_assist",
+   "source": "anguirus_assist.c",
+   "headers": [
+    "intricate_kit.h"
+   ],
+   "seconds": 120,
+   "panel_color": "#2f3a1f",
+   "title_color": "#ff8c1a",
+   "recipe": {
+    "clip": {
+     "film": "ra55",
+     "from": 2685.0,
+     "length": 8.0,
+     "crop": "fill",
+     "what": "Anguirus and Godzilla fighting on Osaka Castle"
+    },
+    "art": {
+     "film": "ra55",
+     "at": 2766.0,
+     "crop": "fill",
+     "what": "Anguirus's spiked shell"
+    },
+    "music": {
+     "film": "ra55",
+     "from": 4888.482,
+     "length": 15.53,
+     "what": "Masaru Sato's score at the end (loop chroma 0.62, in tune 0.68)"
+    },
+    "calls": {
+     "spike": {
+      "film": "ra55",
+      "from": 2732.0,
+      "length": 1.8,
+      "priority": 3,
+      "what": "Anguirus's short roar (the game's own short Anguirus roar matches 0.87)"
+     },
+     "roll": {
+      "film": "ra55",
+      "from": 2680.6,
+      "length": 1.8,
+      "priority": 3,
+      "what": "Anguirus's roar as it charges (the game's own Anguirus roar matches 0.95)"
+     },
+     "won": {
+      "film": "ra55",
+      "from": 2751.0,
+      "length": 1.8,
+      "what": "Anguirus's roar in the castle fight (the game's own Anguirus roar matches 0.88)"
+     },
+     "lost": {
+      "film": "ra55",
+      "from": 2741.9,
+      "length": 3.0,
+      "what": "Godzilla's roar over Anguirus (the game's own Raids Again roar matches 0.84)"
+     }
+    }
+   }
+  }
+ ]
+}

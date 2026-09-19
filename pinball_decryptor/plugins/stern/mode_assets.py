@@ -1,0 +1,401 @@
+"""BUILD a project's modes into the files a card or the emulator needs (item 127).
+
+A project's modes (:mod:`.mode_project`) become, in the game tree's own layout:
+
+* the in-game HUD scene with every mode's screen added (:func:`scene_write.add_screens`),
+* the in-game video bank with every mode's clip added (:func:`video_bank.add_clip`), and
+  each clip file at the path the bank names,
+* one runtime mode file per mode, in slot order - ``mode.cfg``, ``mode1.cfg`` .. - the
+  slots ``mode.so`` reads (item 133).
+
+Everything comes from the STOCK scenes handed in, every time, so a build never stacks on a
+previous build. A mode's own END SOUND is not built here: it is a record appended to
+``image.bin`` (item 130), which joins at the Write step.
+
+Clips are rendered without ffmpeg's drawtext (not every ffmpeg has it): a title card is
+drawn with PIL and its frames piped to ffmpeg as raw video, then encoded the way most
+stock Godzilla clips are - H.264 Constrained Baseline 3.0, 8-bit 4:2:0, 30 fps, silent.
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from dataclasses import dataclass, field
+
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
+from . import mode_project as MP
+from . import scene_write as SW
+from . import video_bank as VB
+
+FONTS = (r"C:\Windows\Fonts\arialbd.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+         "/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/Library/Fonts/Arial Bold.ttf")
+FPS = 30
+_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+
+
+class ModeAssetError(ValueError):
+    """A mode's asset that cannot be built as asked."""
+
+
+def _rgb(hexcolor):
+    return tuple(int(hexcolor[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _font(size):
+    for path in FONTS:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+def _fit_font(draw, text, max_w, start):
+    size = start
+    while size > 12:
+        f = _font(size)
+        if draw.textlength(text, font=f) <= max_w:
+            return f
+        size -= 4
+    return _font(12)
+
+
+# ---- the screen's art ------------------------------------------------------------------
+def panel_art(title, panel_color="#146e28", title_color="#ffe600", w=640, h=160):
+    """The generated screen panel: a rounded panel with the title on it, as RGBA."""
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((4, 4, w - 5, h - 5), radius=28, fill=_rgb(panel_color) + (235,),
+                        outline=_rgb(title_color) + (255,), width=8)
+    font = _fit_font(d, title, w - 60, 92)
+    tw = d.textlength(title, font=font)
+    top = (h - (font.size if hasattr(font, "size") else 12)) / 2 - 10
+    d.text(((w - tw) / 2, top), title, font=font, fill=_rgb(title_color) + (255,))
+    return np.asarray(img)
+
+
+def load_art(path, max_w=1360, max_h=768):
+    """A user's PNG as RGBA, padded to the multiple of 4 BC3 needs."""
+    img = Image.open(path).convert("RGBA")
+    if img.width > max_w or img.height > max_h:
+        img.thumbnail((max_w, max_h))
+    w, h = (img.width + 3) // 4 * 4, (img.height + 3) // 4 * 4
+    if (w, h) != img.size:
+        pad = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        pad.paste(img, (0, 0))
+        img = pad
+    return np.asarray(img)
+
+
+# ---- the clip -----------------------------------------------------------------------------
+def _encode_args(ffmpeg, out):
+    return [ffmpeg, "-v", "error", "-y"], ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.0",
+                                           "-pix_fmt", "yuv420p", "-b:v", "2500k", "-g", str(FPS), "-an",
+                                           "-movflags", "+faststart", "-f", "mp4", out]
+
+
+def title_frames(title, w, h, seconds, panel_color, title_color):
+    """The title card's frames as RGB arrays: the title over the panel colour, with a
+    bar in the title colour sweeping across so it reads as video, not a still."""
+    base = Image.new("RGB", (w, h), _rgb(panel_color))
+    d = ImageDraw.Draw(base)
+    font = _fit_font(d, title, int(w * 0.9), max(24, int(h * 0.22)))
+    tw = d.textlength(title, font=font)
+    bbox = d.textbbox((0, 0), title, font=font)
+    th = bbox[3] - bbox[1]
+    text_xy = ((w - tw) / 2, (h - th) / 2 - bbox[1])
+    bar_w = max(4, w // 22)
+    n = max(1, int(round(seconds * FPS)))
+    bar = np.array(_rgb(title_color), dtype=np.uint8)
+    text_layer = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(text_layer).text(text_xy, title, font=font, fill=255,
+                                    stroke_width=max(2, h // 96))
+    stroke = np.asarray(text_layer) > 0
+    fill_layer = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(fill_layer).text(text_xy, title, font=font, fill=255)
+    fill = np.asarray(fill_layer) > 0
+    background = np.asarray(base).copy()
+    for i in range(n):
+        frame = background.copy()
+        x = int(-bar_w + (w + bar_w) * i / max(1, n - 1))
+        frame[:, max(0, x):max(0, min(w, x + bar_w))] = bar
+        frame[stroke] = 0
+        frame[fill] = bar
+        yield frame
+
+
+def render_title_clip(out, title, w, h, seconds, panel_color, title_color, ffmpeg):
+    head, tail = _encode_args(ffmpeg, out)
+    cmd = head + ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "%dx%d" % (w, h), "-r", str(FPS),
+                  "-i", "-"] + tail
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE,
+                            creationflags=_NO_WINDOW)
+    try:
+        for frame in title_frames(title, w, h, seconds, panel_color, title_color):
+            proc.stdin.write(frame.tobytes())
+        proc.stdin.close()
+    except BrokenPipeError:
+        pass
+    err = proc.stderr.read().decode("utf-8", "replace")
+    if proc.wait() != 0 or not os.path.isfile(out):
+        raise ModeAssetError("ffmpeg could not encode the title clip: %s" % err.strip()[-300:])
+
+
+def convert_clip(src, out, w, h, ffmpeg, max_seconds=30):
+    """A user's own video, made into what the bank plays: the bank's size (letterboxed,
+    never stretched), 30 fps, silent, and no longer than ``max_seconds``."""
+    head, tail = _encode_args(ffmpeg, out)
+    vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%d"
+          % (w, h, w, h, FPS))
+    cmd = head + ["-i", src, "-t", str(max_seconds), "-vf", vf] + tail
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+    if r.returncode != 0 or not os.path.isfile(out):
+        raise ModeAssetError("ffmpeg could not convert %s: %s"
+                             % (os.path.basename(src), (r.stderr or "").strip()[-300:]))
+
+
+# ---- the whole build -----------------------------------------------------------------------
+LCD = "assets/lcd/auto_loaded"
+
+
+@dataclass
+class ModeBuild:
+    """What a build wrote, as game-tree relative paths under ``out_dir``."""
+    out_dir: str
+    slots: list = field(default_factory=list)       # [(slot, slug, name)]
+    files: list = field(default_factory=list)       # game-tree relative paths written
+    mode_files: list = field(default_factory=list)  # runtime mode file names, slot order
+    new_files: list = field(default_factory=list)   # of `files`, the ones a stock card lacks
+    port: str = ""                                  # "game.port" in padmode/ when the title's port shipped (item 148)
+
+
+def mode_file_name(slot):
+    return "mode.cfg" if slot == 0 else "mode%d.cfg" % slot
+
+
+def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=None, prof=None):
+    """Build every mode in ``project`` (or the slugs in ``only``) from the stock scenes.
+
+    ``stock_hud`` / ``stock_bank`` are the stock bytes of the title's HUD scene and video
+    bank. Writes ``out_dir/<game tree path>`` and ``out_dir/padmode/<mode files>``, and
+    returns a :class:`ModeBuild`. Refuses - naming every reason - if any mode is invalid.
+
+    ``code`` is the project's CODE modes with their own assets (``[(slug, CodeAssets)]``,
+    :mod:`.code_modes`): their screens and clips go into the same HUD scene and bank, in the same
+    pass, after the form modes'. A project of code modes only builds for ``prof`` (its card's
+    title, :func:`.code_modes.profile_for`)."""
+    found, broken = MP.list_modes(project)
+    if broken:
+        raise ModeAssetError("these modes could not be read: %s"
+                             % ", ".join("%s (%s)" % b for b in broken))
+    if only is not None:
+        found = [(s, m) for s, m in found if s in only]
+    code = list(code or ())
+    if not found and not code:
+        raise ModeAssetError("there are no modes to build")
+    if len(found) > MP.MAX_MODES:
+        raise ModeAssetError("a card holds at most %d modes" % MP.MAX_MODES)
+    found = _modes_for_the_card(project, found)
+    problems = []
+    for slug, spec in found:
+        for p in MP.validate(spec, MP.mode_folder(project, slug)):
+            problems.append("%s: %s" % (spec.name, p))
+    if code:
+        from . import code_modes as CM
+        for slug, cspec in code:
+            problems += CM.validate(cspec, MP.mode_folder(project, slug))
+    if problems:
+        raise ModeAssetError(" ".join(problems))
+    titles = {spec.title for _, spec in found}
+    if len(titles) > 1:
+        raise ModeAssetError("every mode on a card must be for the same game")
+    if titles:
+        prof = MP.profile(titles.pop())
+    elif prof is None:
+        from . import code_modes as CM
+        prof = CM.profile_for(project, code)
+    result = ModeBuild(out_dir=out_dir)
+
+    def write(rel, data):
+        path = os.path.join(out_dir, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        result.files.append(rel)
+        return path
+
+    # the screens, all in one pass over the stock HUD scene
+    screens = []
+    for slug, spec in found:
+        if not spec.screen or not prof.can("screen"):
+            continue
+        names = MP.asset_names(slug)
+        folder = MP.mode_folder(project, slug)
+        art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
+               else panel_art(spec.screen_title or spec.name, spec.panel_color, spec.title_color))
+        screens.append(dict(name=names["screen_node"], art_rgba=art,
+                            words="%s A SHOT" % "{:,}".format(int(spec.award)),
+                            words_name=names["screen_text"].split(".", 1)[1]))
+    screens += _code_screens(project, code, prof)
+    if screens:
+        hud, _infos = SW.add_screens(stock_hud, screens)
+        write("%s/%s/scene.radium" % (LCD, prof.hud_scene), hud)
+
+    # the clips, one after another into the stock bank
+    clips = [(slug, spec) for slug, spec in found if spec.clip != "none" and prof.can("clip")]
+    code_clips = [(slug, c) for slug, c in code if c.clip and prof.can("clip")]
+    if code_clips and not clips:
+        if not ffmpeg:
+            raise ModeAssetError("building a clip needs ffmpeg, and none was found")
+        bank, _parsed = _add_code_clips(project, code_clips, stock_bank, VB.parse(stock_bank), prof,
+                                        out_dir, ffmpeg, result)
+        write("%s/%s/scene.radium" % (LCD, prof.bank_scene), bank)
+        code_clips = []
+    if clips:
+        if not ffmpeg:
+            raise ModeAssetError("building a clip needs ffmpeg, and none was found")
+        bank = stock_bank
+        parsed = VB.parse(bank)
+        for slug, spec in clips:
+            names = MP.asset_names(slug)
+            path = VB.next_path(parsed)
+            rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
+            local = os.path.join(out_dir, *rel.split("/"))
+            os.makedirs(os.path.dirname(local), exist_ok=True)
+            if spec.clip == "title":
+                render_title_clip(local, spec.clip_title or spec.name, parsed.width, parsed.height,
+                                  float(spec.clip_seconds), spec.panel_color, spec.title_color, ffmpeg)
+            else:
+                convert_clip(os.path.join(MP.mode_folder(project, slug), spec.clip_file), local,
+                             parsed.width, parsed.height, ffmpeg)
+            result.files.append(rel)
+            result.new_files.append(rel)
+            bank, _info = VB.add_clip(bank, names["clip"], os.path.getsize(local), path)
+            parsed = VB.parse(bank)
+            bank, parsed = _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, result)
+        if code_clips:
+            bank, parsed = _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result)
+        write("%s/%s/scene.radium" % (LCD, prof.bank_scene), bank)
+
+    # the runtime mode files, in slot order, beside the tree rather than in it: on a card
+    # they go to p2 (/usr/local/padmode), in the rig to /dump
+    for slot, (slug, spec) in enumerate(found):
+        name = mode_file_name(slot)
+        path = os.path.join(out_dir, "padmode", name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(MP.runtime_cfg(spec, slug))
+        result.mode_files.append(name)
+        result.slots.append((slot, slug, spec.name))
+    os.makedirs(os.path.join(out_dir, "padmode"), exist_ok=True)   # a project of code modes only
+    _ship_port(prof, out_dir, result)
+    return result
+
+
+def _ship_port(prof, out_dir, result):
+    """Item 148: the title's port beside the mode files, as ``padmode/game.port`` - the
+    runtime arms on no other (MODE_SDK.md "Ports"), so a build for TMNT ships TMNT's."""
+    src = MP.port_path(prof)
+    if not src or not os.path.isfile(src):
+        raise ModeAssetError("the port for %s (%s) is missing, and the runtime arms on no other"
+                             % (prof.label, prof.port or "none named"))
+    with open(src, "rb") as f:
+        data = f.read()
+    with open(os.path.join(out_dir, "padmode", "game.port"), "wb") as f:
+        f.write(data)
+    result.port = "game.port"
+
+
+def _modes_for_the_card(project, found):
+    """Item 148: the modes as the PROJECT'S CARD runs them. A mode keeps the title it was
+    made for in ``mode.json`` (every mode made before item 148 says Godzilla Pro 1.15), but
+    the card decides the port, the shot masks and the scenes, so each mode is matched to
+    the card's port by shot name. Refuses a card whose build has no port, and a mode that
+    names a shot the card's game does not have (the Modes tab shows it for that game, so
+    the person picks again) - never a build with shots quietly left out. A project that
+    names no card, or whose card cannot be read, builds each mode for its own title."""
+    card, prof = MP.project_profile(project, probe=True)
+    if card is None or not card.game_dir:
+        return found
+    if prof is None:
+        raise ModeAssetError(MP.NO_PORT_HELP % MP.title_label(card.game_dir, card.version))
+    out, problems = [], []
+    for slug, spec in found:
+        new, dropped = MP.retarget(spec, prof)
+        if dropped:
+            problems.append(MP.retarget_refusal(spec, dropped, prof))
+        out.append((slug, new))
+    if problems:
+        raise ModeAssetError(" ".join(problems))
+    return out
+
+
+def _add_second_clip(project, slug, spec, bank, parsed, prof, out_dir, ffmpeg, result):
+    """Item 141: a mode's SECOND clip (``clip_both`` a title card or a video file), added to
+    the bank as :func:`MP.second_clip_name`. "same" plays the first clip again and adds
+    nothing. Returns the bank and its parse."""
+    kind = (spec.clip_both or {}).get("clip") if isinstance(spec.clip_both, dict) else None
+    if spec.clip == "none" or kind not in ("title", "file"):
+        return bank, parsed
+    path = VB.next_path(parsed)
+    rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
+    local = os.path.join(out_dir, *rel.split("/"))
+    os.makedirs(os.path.dirname(local), exist_ok=True)
+    if kind == "title":
+        render_title_clip(local, spec.clip_both.get("title") or spec.name, parsed.width, parsed.height,
+                          float(spec.clip_both.get("seconds", 4.0)), spec.panel_color, spec.title_color,
+                          ffmpeg)
+    else:
+        convert_clip(os.path.join(MP.mode_folder(project, slug), spec.clip_both["file"]), local,
+                     parsed.width, parsed.height, ffmpeg)
+    result.files.append(rel)
+    result.new_files.append(rel)
+    bank, _info = VB.add_clip(bank, MP.second_clip_name(slug), os.path.getsize(local), path)
+    return bank, VB.parse(bank)
+
+
+# ---- a CODE mode's own screen and clip (the intricate modes' own audio and video) --------------
+def code_words_at(art):
+    """Where a code mode's words go when its picture carries a band for them (``words_on_art``):
+    14 px above the picture's bottom edge, so the text box (40 px above its line, 8 below) sits on
+    the darkened band :func:`.code_modes.compose_art` gives the picture."""
+    h = int(np.asarray(art).shape[0])
+    return (20.0, float(h - 14))
+
+
+def _code_screens(project, code, prof):
+    """The screens of the project's code modes, for :func:`build`'s one pass over the HUD scene:
+    each named after its folder (``PadMode_<slug>_Screen``, the names a code mode looks for), its
+    picture or a generated panel, and its words on the picture's band or under it. The words start
+    as the mode's name; the mode writes its own from then on."""
+    out = []
+    for slug, spec in code or ():
+        if not spec.screen or not prof.can("screen"):
+            continue
+        names = MP.asset_names(slug)
+        folder = MP.mode_folder(project, slug)
+        art = (load_art(os.path.join(folder, spec.screen_art)) if spec.screen_art
+               else panel_art(spec.name, spec.panel_color, spec.title_color))
+        out.append(dict(name=names["screen_node"], art_rgba=art, words=spec.name,
+                        words_name=names["screen_text"].split(".", 1)[1],
+                        words_at=code_words_at(art) if (spec.screen_art and spec.words_on_art) else None))
+    return out
+
+
+def _add_code_clips(project, code_clips, bank, parsed, prof, out_dir, ffmpeg, result):
+    """The code modes' start clips into the bank, after the form modes' (``PadMode_<slug>_Clip``),
+    each made into the bank's format like a form mode's own video. Returns the bank and its parse."""
+    for slug, spec in code_clips:
+        names = MP.asset_names(slug)
+        path = VB.next_path(parsed)
+        rel = "%s/%s/scene.assets/%s" % (LCD, prof.bank_scene, path)
+        local = os.path.join(out_dir, *rel.split("/"))
+        os.makedirs(os.path.dirname(local), exist_ok=True)
+        convert_clip(os.path.join(MP.mode_folder(project, slug), spec.clip), local, parsed.width, parsed.height,
+                     ffmpeg)
+        result.files.append(rel)
+        result.new_files.append(rel)
+        bank, _info = VB.add_clip(bank, names["clip"], os.path.getsize(local), path)
+        parsed = VB.parse(bank)
+    return bank, parsed

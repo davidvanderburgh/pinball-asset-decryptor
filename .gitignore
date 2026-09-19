@@ -26,3 +26,8 @@ plans/*
 
 # Claude Code runtime state
 .claude/
+
+# The preview-code SIGNING KEY (tools/preview_code.py) lives outside every checkout;
+# these patterns are the second line of defence if a copy is ever dropped in one.
+*preview_signing_key*
+pinball_decryptor_signing/

@@ -160,6 +160,31 @@ def test_a_real_mount_reads_as_attached():
     assert rigdata.attached("PAD-Runtime", runner=runner) is True
 
 
+def test_a_mountpoint_that_does_not_exist_is_not_an_attached_disk(tmp_path):
+    """After a full WSL restart ``/mnt/wsl`` is a fresh tmpfs and the mountpoint is not
+    there at all.  Its ``stat`` then prints nothing, nothing differs from the parent's
+    device number, and the device comparison alone answered "mounted": Start skipped
+    the re-attach and the rig was handed a path that did not exist (measured on David's
+    PC, 2026-09-18).  The script itself is run here, against a path that is absent and
+    then against one that is an ordinary directory; both must print nothing."""
+    import shutil
+    import subprocess
+    import sys
+
+    script = rigdata._IS_MOUNTED
+    assert '[ -d "%s" ] &&' % rigdata.MOUNT in script
+    bash = shutil.which("bash") if sys.platform != "win32" else None
+    if not bash:
+        return                          # the text check above is the whole test on Windows
+    for there in (False, True):
+        target = tmp_path / ("there" if there else "absent")
+        if there:
+            target.mkdir()
+        out = subprocess.run([bash, "-c", script.replace(rigdata.MOUNT, str(target))],
+                             capture_output=True, text=True, timeout=60)
+        assert out.stdout.strip() == "", (there, out.stdout)
+
+
 def test_a_distro_that_cannot_answer_is_treated_as_not_attached():
     """Any doubt has to mean "attach it": attaching an already-attached disk
     is a no-op error we can recover from, writing gigabytes into RAM is not."""

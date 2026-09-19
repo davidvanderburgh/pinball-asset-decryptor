@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "name": "DESTOROYAH",
+  "title": "godzilla_pro_1_15",
+  "start_shot": "Right ramp",
+  "start_count": 2,
+  "seconds": 15,
+  "scoring_shots": [
+    "Left ramp",
+    "Right ramp",
+    "Godzilla target",
+    "Maser target"
+  ],
+  "award": 3000000,
+  "screen": true,
+  "screen_title": "",
+  "screen_art": "screen.png",
+  "panel_color": "#4a0010",
+  "title_color": "#ff5a3c",
+  "clip": "file",
+  "clip_title": "",
+  "clip_file": "clip.mp4",
+  "clip_seconds": 4.0,
+  "clip_when": "start",
+  "countdown": true,
+  "end_sound": "end.wav",
+  "lights": true,
+  "light_color": "#ff2000",
+  "light_on_raw": "",
+  "light_off_raw": ""
+}

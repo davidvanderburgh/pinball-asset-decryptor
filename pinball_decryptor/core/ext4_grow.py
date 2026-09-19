@@ -179,7 +179,10 @@ def _bash_script(loop_off, jobs_exec, image_exec):
         # writable (and does not even exist on some hosts).
         "MP=$(mktemp -d /var/tmp/pad_grow_XXXXXX)",
         # Clean up loop + mount no matter how we exit.
-        'cleanup() { sync; umount "$MP" 2>/dev/null || true; '
+        # syncfs on THIS filesystem, never a bare `sync`: under WSL2 a global sync also
+        # flushes the virtiofs mounts of the Windows drives and can park in D state for
+        # good (2026-09-16: a card build hung 15 minutes after its copies had landed).
+        'cleanup() { sync -f "$MP" 2>/dev/null; umount "$MP" 2>/dev/null || true; '
         '[ -n "$LOOP" ] && losetup -d "$LOOP" 2>/dev/null || true; '
         'rmdir "$MP" 2>/dev/null || true; }',
         "trap cleanup EXIT",
@@ -210,7 +213,7 @@ def _bash_script(loop_off, jobs_exec, image_exec):
             'echo "PAD_GROW_NODIR %s" >&2; exit 4; fi' % (tgt, shlex.quote(card_rel)))
         lines.append("cp %s %s" % (shlex.quote(src), tgt))
         lines.append('echo "PAD_GROW_OK %d %s"' % (i, shlex.quote(card_rel)))
-    lines += ["sync", 'echo "PAD_GROW_DONE"']
+    lines += ['sync -f "$MP"', 'echo "PAD_GROW_DONE"']
     return "\n".join(lines)
 
 
@@ -420,8 +423,31 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
                 break
             tgt = '"/%s"' % card_rel
             touched = True
-            _debugfs(tools, dev, "kill_file %s" % tgt, 120)
-            _debugfs(tools, dev, "rm %s" % tgt, 120)
+            # A file the card NEVER HAD is a legitimate job: a mode's own asset,
+            # indexed by a freshly appended .sidx record (item 129).  kill_file and
+            # rm both fail on a path that does not exist yet and _debugfs raises on
+            # "not found", so creating one used to die on the very first command --
+            # while the Linux path created it happily with a plain `cp`.  Free the
+            # old blocks only when there ARE old blocks; `write` makes the inode
+            # either way.
+            exists = _debugfs_file_size(tools, dev, card_rel, 60) is not None
+            if exists:
+                _debugfs(tools, dev, "kill_file %s" % tgt, 120)
+                _debugfs(tools, dev, "rm %s" % tgt, 120)
+            else:
+                # Match the Linux script's PAD_GROW_NODIR guard and name the
+                # directory: debugfs would otherwise fail deep inside `write`
+                # with nothing saying which parent was missing.
+                parent = card_rel.rsplit("/", 1)[0] if "/" in card_rel else ""
+                if parent:
+                    prc, pout = _run_tool(
+                        [tools["debugfs"], "-R", 'stat "/%s"' % parent, dev],
+                        60, "debugfs stat")
+                    if prc != 0 or "Inode:" not in pout:
+                        raise Ext4GrowError(
+                            "Can't create /%s on the card: its directory /%s "
+                            "does not exist." % (card_rel, parent))
+                log("  creating %s (new file)" % card_rel, "info")
             _debugfs(tools, dev, 'write "%s" %s' % (src, tgt), timeout)
             want = os.path.getsize(src)
             got = _debugfs_file_size(tools, dev, card_rel, 60)
@@ -458,4 +484,192 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
                     "growth (exit %d):\n%s" % (rc, out.strip()[-2000:]))
     log("Grew %d file(s) to full size (filesystem left valid)." % grown,
         "success")
+    return grown
+
+
+# --------------------------------------------------------------------------
+# Item 149: a delivery that is BYTE-IDENTICAL from one build to the next.
+# --------------------------------------------------------------------------
+# A second Write of the same project must give the same card.  The kernel path
+# above cannot: two runs of grow_files with the same jobs into two copies of
+# one image differ in 217 bytes (measured 2026-09-16 in PAD-Runtime, 150 MB +
+# 1.2 MB + a new 3 MB file + 301 KB into a 600 MB ext4): the journal's commit
+# blocks (119), s_last_mounted (the random mktemp mountpoint), s_mtime/s_wtime,
+# every touched inode's ctime/mtime (and a new inode's atime/crtime), the
+# random i_generation of a new inode, i_version, and their checksums.  No data
+# block moved.  The same jobs through debugfs with libext2fs's clock pinned
+# (E2FSPROGS_FAKE_TIME) and e2fsck's (E2FSCK_TIME) differ in ZERO bytes and
+# e2fsck is clean - so a build that must be reproducible delivers this way.
+#
+# Beyond the macOS sequence it keeps each replaced file's mode, owner and group
+# (debugfs `write` takes them from the HOST file, which on a Windows drive is
+# 0777), and gives a new file the stock asset mode 0100664 and its directory's
+# owner.
+
+#: The mode a new file gets: what every stock asset on a Spike 2 card carries.
+PINNED_NEW_MODE = 0o100664
+
+_PINNED_HEAD = r'''set -e
+export E2FSPROGS_FAKE_TIME=@EPOCH@ E2FSCK_TIME=@EPOCH@
+DEV=@DEV@
+command -v debugfs >/dev/null && command -v e2fsck >/dev/null || { echo "PAD_GROW_NOTOOLS debugfs/e2fsck" >&2; exit 5; }
+# stat of a path -> "<size> <mode> <uid> <gid>", or nothing when it is not there
+fst() {
+    debugfs -R "stat \"$1\"" "$DEV" 2>/dev/null | awk '
+        /^Inode:/ { for (i = 1; i < NF; i++) if ($i == "Mode:") m = $(i + 1) }
+        /^User:/  { u = $2; g = $4; for (i = 1; i < NF; i++) if ($i == "Size:") s = $(i + 1) }
+        END { if (m != "") print s, m, u, g }'
+}
+stats=$(debugfs -R stats "$DEV" 2>/dev/null)
+fb=$(echo "$stats" | awk -F: '/^Free blocks:/ { gsub(/ /, "", $2); print $2 }')
+bs=$(echo "$stats" | awk -F: '/^Block size:/ { gsub(/ /, "", $2); print $2 }')
+[ -n "$fb" ] && [ -n "$bs" ] || { echo "PAD_GROW_NOFS" >&2; exit 7; }
+LOG=$(mktemp /var/tmp/pad_pinned_XXXXXX)
+trap 'rm -f "$LOG" "$LOG.cmd"' EXIT
+need=0
+'''
+
+_PINNED_NEED = r'''cur=$(fst @TGT@ | cut -d" " -f1); new=$(stat -c%s @SRC@)
+d=$((new - ${cur:-0})); [ "$d" -gt 0 ] && need=$((need + d)) || true
+'''
+
+_PINNED_SPACE = r'''avail=$((fb * bs))
+if [ "$need" -gt "$avail" ]; then echo "PAD_GROW_ENOSPC need=$need avail=$avail" >&2; exit 3; fi
+echo "PAD_GROW_SPACE need=$need avail=$avail"
+'''
+
+_PINNED_JOB = r'''old=$(fst @TGT@)
+if [ -n "$old" ]; then
+    set -- $old; mode=$2; uid=$3; gid=$4
+    printf 'kill_file "%s"\nrm "%s"\n' @TGT@ @TGT@ > "$LOG.cmd"
+else
+    par=$(fst @PARENT@)
+    [ -n "$par" ] || { echo "PAD_GROW_NODIR "@REL@ >&2; exit 4; }
+    set -- $par; mode=@NEWMODE@; uid=$3; gid=$4
+    : > "$LOG.cmd"
+fi
+# debugfs prints a mode's permission bits only (0664); a FILE needs S_IFREG too
+case "$mode" in 10????) ;; *) mode=$(printf "%o" $((8#100000 | 8#$mode))) ;; esac
+printf 'write "%s" "%s"\nset_inode_field "%s" mode 0%s\nset_inode_field "%s" uid %s\nset_inode_field "%s" gid %s\n' \
+    @SRC@ @TGT@ @TGT@ "$mode" @TGT@ "$uid" @TGT@ "$gid" >> "$LOG.cmd"
+debugfs -w -f "$LOG.cmd" "$DEV" > "$LOG" 2>&1
+bad=$(grep -v '^debugfs\|^Allocated inode:\|^$' "$LOG" || true)
+if [ -n "$bad" ]; then echo "PAD_GROW_DEBUGFS "@REL@": $bad" >&2; exit 6; fi
+got=$(fst @TGT@ | cut -d" " -f1); want=$(stat -c%s @SRC@)
+if [ "$got" != "$want" ]; then echo "PAD_GROW_SHORT "@REL@" $got/$want" >&2; exit 6; fi
+echo "PAD_GROW_OK @I@ "@REL@
+'''
+
+_PINNED_TAIL = r'''rc=0; e2fsck -fy "$DEV" > "$LOG" 2>&1 || rc=$?
+if [ "$rc" -gt 2 ]; then echo "PAD_GROW_FSCK rc=$rc" >&2; tail -n 20 "$LOG" >&2; exit 8; fi
+echo "PAD_GROW_DONE fsck=$rc"
+'''
+
+
+def _pinned_script(part_offset, jobs_exec, image_exec, epoch):
+    """The bash script :func:`grow_files_pinned` runs: a free-space check, then
+    per job one ``debugfs -w`` (kill_file/rm when the file exists, write, the
+    old or stock mode/uid/gid), a size check and a ``PAD_GROW_OK`` marker, then
+    one ``e2fsck -fy`` to reconcile the free counts debugfs leaves stale.  Every
+    tool runs with the clock pinned to *epoch*."""
+    q = shlex.quote
+    for rel, src in jobs_exec:
+        if '"' in src or '"' in rel:
+            raise Ext4GrowError("a path contains a double quote, which debugfs "
+                                "cannot take: %s" % (src if '"' in src else rel))
+    out = [_PINNED_HEAD.replace("@EPOCH@", str(int(epoch))).replace(
+        "@DEV@", q("%s?offset=%d" % (image_exec, int(part_offset))))]
+    for rel, src in jobs_exec:
+        out.append(_PINNED_NEED.replace("@TGT@", q("/" + rel))
+                   .replace("@SRC@", q(src)))
+    out.append(_PINNED_SPACE)
+    for i, (rel, src) in enumerate(jobs_exec):
+        tgt = "/" + rel
+        out.append(_PINNED_JOB.replace("@TGT@", q(tgt))
+                   .replace("@PARENT@", q(tgt.rsplit("/", 1)[0] or "/"))
+                   .replace("@SRC@", q(src))
+                   .replace("@REL@", q(rel))
+                   .replace("@NEWMODE@", "%o" % PINNED_NEW_MODE)
+                   .replace("@I@", str(i)))
+    out.append(_PINNED_TAIL)
+    return "".join(out)
+
+
+def partition_epoch(image_path, part_offset):
+    """A fixed clock for a pinned delivery, taken from the stock card itself:
+    the latest of the partition superblock's mount, write and check times.  The
+    same original gives the same clock on every build, and no time e2fsck sees
+    is later than it, so nothing reads as being in the future."""
+    import struct
+    with open(image_path, "rb") as f:
+        f.seek(int(part_offset) + 1024)
+        sb = f.read(1024)
+    if len(sb) < 1024 or sb[0x38:0x3A] != b"\x53\xef":
+        raise Ext4GrowError("no ext4 superblock at offset %d of %s"
+                            % (part_offset, image_path))
+    mtime, wtime = struct.unpack_from("<II", sb, 0x2C)
+    lastcheck = struct.unpack_from("<I", sb, 0x40)[0]
+    return max(mtime, wtime, lastcheck)
+
+
+def grow_files_pinned(image_path, part_offset, jobs, epoch, log=None,
+                      timeout=3600):
+    """:func:`grow_files` with every clock pinned to *epoch*, so the same jobs
+    into the same original give the same bytes (item 149).  Same contract:
+    returns how many files landed, in order; raises :class:`Ext4GrowError`
+    (with ``grown``) or :class:`Ext4GrowNoSpace`.  Runs through e2fsprogs in the
+    executor's Linux (PAD-Runtime on Windows) - no mount, no loop device."""
+    log = log or (lambda *a, **k: None)
+    missing = [rel for rel, src in jobs if not (src and os.path.isfile(src))]
+    for rel in missing:
+        log("Can't write %s onto the card: the prepared file is missing from "
+            "the build's scratch space. This is a bug - please report it."
+            % rel, "error")
+    if missing:
+        raise Ext4GrowError("%d prepared file(s) could not be found on disk "
+                            "when it was time to copy them onto the card."
+                            % len(missing))
+    jobs = [(rel.lstrip("/"), src) for rel, src in jobs]
+    if not jobs:
+        return 0
+    ex = create_executor()
+    ok, msg = ex.check_available()
+    if not ok:
+        raise Ext4GrowUnavailable(
+            "Can't write files on this system: %s. The affected file(s) keep "
+            "their stock content on the card." % msg)
+    image_exec = ex.to_exec_path(os.path.abspath(image_path))
+    jobs_exec = [(rel, ex.to_exec_path(os.path.abspath(src))) for rel, src in jobs]
+    log("Writing %d file(s) onto the card with a fixed clock, so the next "
+        "build of the same project is byte-identical..." % len(jobs), "info")
+    script = _pinned_script(part_offset, jobs_exec, image_exec, epoch)
+    import tempfile
+    b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    fd, tmp = tempfile.mkstemp(suffix=".b64", prefix="pad_pinned_")
+    try:
+        os.write(fd, b64.encode("ascii"))
+        os.close(fd)
+        out = ex.run("base64 -d < %s | bash" % shlex.quote(ex.to_exec_path(tmp)),
+                     timeout=timeout)
+    except Exception as e:  # noqa: BLE001 - executor raises CommandError
+        text = str(e)
+        n_ok = text.count("PAD_GROW_OK ")
+        if "PAD_GROW_ENOSPC" in text:
+            raise Ext4GrowNoSpace(
+                "Not enough free space on the card's data partition to write "
+                "the larger file(s). They keep their stock content on the "
+                "card.", grown=n_ok) from e
+        raise Ext4GrowError("Couldn't write files:\n%s" % text,
+                            grown=n_ok) from e
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    grown = out.count("PAD_GROW_OK ")
+    for line in out.splitlines():
+        if line.startswith("PAD_GROW_OK "):
+            log("  wrote %s" % line.split(" ", 2)[-1], "info")
+    log("Wrote %d file(s) with the clock fixed at %d (filesystem checked)."
+        % (grown, int(epoch)), "success")
     return grown

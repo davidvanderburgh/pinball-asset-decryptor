@@ -1,0 +1,19 @@
+# bleletest.sh cases: "<owner> [p<prio>] [ev] <command>", one per line, run in order.
+#
+# What the earlier runs learned, so they are not repeated:
+#   run 6, priority 0:   tesla's own orange "--lts 224" sweep, twice: returned 1, nothing.
+#   run 7, p255:         the same, nothing.
+#   run 9, ev, ATTRACT:  unusable - attract's own sweep moved 24 fade shapes between two
+#                        idle windows, and a --remove scored higher than a sweep.
+#
+# AND THE LIKELY REASON ALL OF THEM READ AS NOTHING: light set 224 is ONE LAMP (177) in
+# the set table 0x7257a8. ledact averages the whole playfield, so a single insert is
+# invisible in it. These cases ask for the biggest sets instead - 548 is 120 lamps and
+# 207 is 104 - in white at full alpha. If THAT does not move, --lts does not index this
+# table and the parser's own resolution has to be read.
+538 ev blele --sweep 0 --lts 548 --red 255 --green 255 --blue 255 --freq 10 --use_alpha 1 --alpha 255
+538 ev blele --remove --lts 548
+538 ev blele --sweep 0 --lts 548 --red 255 --green 255 --blue 255 --freq 10 --use_alpha 1 --alpha 255
+538 ev blele --remove --lts 548
+538 ev blele --sweep 0 --lts 207 --red 255 --green 255 --blue 255 --freq 10 --use_alpha 1 --alpha 255
+538 ev blele --remove --lts 207

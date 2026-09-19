@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "name": "MOTHRA'S SONG",
+  "title": "godzilla_pro_1_15",
+  "start_shot": "Shield target left",
+  "start_count": 3,
+  "seconds": 40,
+  "scoring_shots": [
+    "Shield target left",
+    "Shield target right",
+    "Big loop"
+  ],
+  "award": 500000,
+  "screen": true,
+  "screen_title": "",
+  "screen_art": "screen.png",
+  "panel_color": "#6b4e00",
+  "title_color": "#fff1a8",
+  "clip": "file",
+  "clip_title": "",
+  "clip_file": "clip.mp4",
+  "clip_seconds": 4.0,
+  "clip_when": "start",
+  "countdown": true,
+  "end_sound": "end.wav",
+  "lights": true,
+  "light_color": "#ffd200",
+  "light_on_raw": "",
+  "light_off_raw": ""
+}

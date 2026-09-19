@@ -1,0 +1,105 @@
+# turtles_pro 1.58 - drafted by port_tool.py from turtles_pro-1.59.port (item 137): every
+# function and global placed, shots copied (the same title). tick matched loosely: 1.58's tick
+# checks event 0x33 where 1.59's checks 0x37 - the only function of that shape in the program.
+# Like 1.59, no lights, screens or clips.
+game           turtles_pro
+version        1.58
+
+# ---- functions: site <name> <address> <first two instruction words> --------------------
+#   tick: located (loose)
+site tick             0x003cf2ec 0xe92d4038 0xe3a00033
+#   shot_dispatch: located (loose)
+site shot_dispatch    0x0012945c 0xe92d43f8 0xe1a09001
+#   ball_end: located (strict)
+site ball_end         0x001291f0 0xe92d4038 0xe59f401c
+#   sound_lookup: located (strict)
+site sound_lookup     0x00348550 0xe92d4038 0xe1a05000
+#   score_add: located (strict)
+site score_add        0x00353504 0xe30615c2 0xe3401061
+#   callout: located (strict)
+site callout          0x002ae830 0xe92d4010 0xe303e3f8
+#   callout_nth: located (strict)
+site callout_nth      0x002ae9e4 0xe92d4010 0xe303e3f8
+#   lamp_group: located (strict)
+site lamp_group       0x001736b0 0xe92d4038 0xe1a04000
+#   show_priority: located (strict)
+site show_priority    0x003aaaec 0xe30c36dc 0xe3403067
+#   award_screen: located (strict)
+site award_screen     0x001de7a8 0xe92d4070 0xe24dd008
+#   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE
+site string_new       0x00016698 0xe28fc605 0xe28cca9c
+#   dynamic_cast: PLT stub for __dynamic_cast
+site dynamic_cast     0x000160b0 0xe28fc605 0xe28cca9c
+#   resource_get: placed through 3 callers, e.g. the bl at 0x2012f0
+site resource_get     0x0029662c 0xe92d43f0 0xe1a04000
+#   set_text: located (strict)
+site set_text         0x0045b49c 0xe92d47f0 0xe1a06000
+#   surface_state: placed through 3 callers, e.g. the bl at 0x1e098
+site surface_state    0x0046a9b8 0xe5900230 0xea004903
+#   player_advance: located (strict)
+site player_advance   0x001deb84 0xe2501000 0x012fff1e
+#   display_draw: located (strict)
+site display_draw     0x003dc02c 0xe3520001 0x812fff1e
+
+# ---- globals: data <name> <address> ---------------------------------------------------------
+#   cur_player: derived from 2 places, e.g. 0x286d20+0x54
+data cur_player             0x005c1288
+#   scores: derived from 2 places, e.g. 0x1e0404+0x8
+data scores                 0x006c40d0
+#   mode_mask: derived from 2 places, e.g. 0x35770+0x1c
+data mode_mask              0x006165c2
+#   event_head: derived from 2 places, e.g. 0x5fbec+0x6c
+data event_head             0x0067c6d8
+#   event_current: derived from 2 places, e.g. 0x1c9c0+0x6c
+data event_current          0x0067c6dc
+#   resource_manager: a base 0x671b48 + field 0x80; the base derived from 2 places, e.g. 0x201278+0x54
+data resource_manager       0x006349c0
+#   typeinfo_resource: derived from 2 places, e.g. 0x1d660+0x60
+data typeinfo_resource      0x004f77dc
+#   typeinfo_scene_player: derived from 2 places, e.g. 0x1d660+0x64
+data typeinfo_scene_player  0x00520e5c
+#   display_holder: derived from 2 places, e.g. 0x1ff88c+0x28
+data display_holder         0x00634940
+#   message_count: derived from 2 places, e.g. 0x26c1c0+0x4
+data message_count          0x004df8e4
+#   message_remap: derived from 2 places, e.g. 0x26c15c+0x10
+data message_remap          0x00614b3c
+#   message_table: derived from 2 places, e.g. 0x26c1c0+0x24
+data message_table          0x005d0c0c
+#   award_screen_arg: derived from 2 places, e.g. 0x1e180+0x1a4
+data award_screen_arg       0x005b4c94
+
+# ---- offsets, flags and ids: value <name> <number> -----------------------------------------
+value shot_mask_at          1
+value shot_mask_bits        32
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+
+# ---- shots: from the item 137 probe (one switch at a time, 17 of 25 switches made a bit) ----
+shot 0x1         Left bank target
+shot 0x8         Left orbit
+shot 0x10        Left ramp
+shot 0x80        Center loop
+shot 0x100       Center ramp
+shot 0x200       Right ramp
+shot 0x800       Right bank target
+shot 0x1000      Left return lane right
+shot 0x2000      Center ramp target
+shot 0x4000      Upper pop target
+shot 0x8000      Left ramp left target
+shot 0x10000     Left ramp right target
+shot 0x20000     Lower pop target
+shot 0x40000     Left return lane left
+shot 0x80000     Right return lane
+shot 0x100000    Left top lane
+shot 0x200000    Right top lane
+
+# ---- callouts by role, scenes by role -------------------------------------------------------------
+#   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x60b04+0x4)
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- examples a template mode can use on this game ------------------------------------------------
+text example_start_shot     Center loop

@@ -40,6 +40,13 @@ _EXTRA_MAPS = ("settings", "high_scores", "image_group_tags",
                # at a different balance than the author's own card.
                "audio_levels")
 _EXTRA_SCALARS = ("menu_expose_through",)
+# The game's own modes (item 145): the Modes tab's record of a stock mode's staged timers and
+# awards, ``{"build", "values": {row key: value}, "touched": [row key]}``.  Not a flat map: its
+# row keys only mean something for the build they were staged against, so it is merged by
+# build (:func:`_merge_stock_modes`), not key by key.  Its timers ride in ``settings`` like any
+# default; without the record an imported project would treat them as Defaults-only settings
+# and drop every award.
+_EXTRA_STOCK_MODES = "stock_modes"
 
 # Reserved zip folder for the BYTES of the Partitions-tab replaces the manifest
 # already lists.  They are not assets of this extract, so they are kept out of
@@ -131,7 +138,59 @@ def project_extras(assets_folder):
         val = data.get(key)
         if isinstance(val, str) and val.strip():
             extras[key] = val
+    rec = data.get(_EXTRA_STOCK_MODES)
+    if isinstance(rec, dict) and rec.get("build") and (rec.get("values") or rec.get("touched")):
+        extras[_EXTRA_STOCK_MODES] = {
+            "build": str(rec["build"]),
+            "values": {str(k): v for k, v in (rec.get("values") or {}).items()},
+            "touched": sorted({str(k) for k in (rec.get("touched") or [])})}
     return extras
+
+
+def _stock_modes_words():
+    """How a pack names the game's-own-modes record's changes: plainly with the preview
+    switch on, and in neutral words without a code (a copy without one names no preview
+    feature; only a tester's project or pack has the record at all)."""
+    try:
+        from . import preview
+        if preview.enabled("modes"):
+            return "change(s) to the game's own modes"
+    except Exception:                                   # noqa: BLE001
+        pass
+    return "preview change(s)"
+
+
+def _merge_stock_modes(data, rec, log_cb=None):
+    """Merge a pack's game's-own-modes record *rec* into *data* (a project's staged changes).
+
+    Same build (or none here yet): the pack's values win row by row, the rows ever changed
+    are joined.  A record staged here for ANOTHER build that still has values is kept, and
+    the pack's is not imported (its row keys would be written against the wrong program);
+    the log says so.  Returns how many values were imported."""
+    if not isinstance(rec, dict) or not rec.get("build"):
+        return 0
+    vals = {str(k): v for k, v in (rec.get("values") or {}).items()}
+    touched = {str(k) for k in (rec.get("touched") or [])}
+    here = data.get(_EXTRA_STOCK_MODES)
+    if isinstance(here, dict) and here.get("build") and here.get("build") != rec["build"]:
+        if here.get("values"):
+            if log_cb:
+                log_cb("The pack's %d %s were made for %s, and "
+                       "this project already has changes staged for %s; they were not "
+                       "imported." % (len(vals), _stock_modes_words(), rec["build"],
+                                      here["build"]), "warning")
+            return 0
+        here = None
+    if not isinstance(here, dict):
+        here = {}
+    merged = dict(here.get("values") or {})
+    merged.update(vals)
+    out = {"build": str(rec["build"]), "values": merged}
+    touched |= {str(k) for k in (here.get("touched") or [])} | set(vals)
+    if touched:
+        out["touched"] = sorted(touched)
+    data[_EXTRA_STOCK_MODES] = out
+    return len(vals)
 
 
 def card_replacements(assets_folder):
@@ -304,6 +363,9 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
             rode.append("%d high-score default(s)" % n_hs)
         if n_tags:
             rode.append("%d image/scene name(s)" % n_tags)
+        n_sm = len((extras.get(_EXTRA_STOCK_MODES) or {}).get("values") or {})
+        if n_sm:
+            rode.append("%d %s" % (n_sm, _stock_modes_words()))
         if rode:
             log_cb("Also packing " + ", ".join(rode)
                    + " — they are project settings, not files.", "info")
@@ -510,6 +572,11 @@ def apply_extras(assets_folder, extras, log_cb=None):
         if isinstance(val, str) and val.strip():
             data[key] = val
             applied[key] = 1
+    if isinstance(extras.get(_EXTRA_STOCK_MODES), dict):
+        before = json.dumps(data.get(_EXTRA_STOCK_MODES), sort_keys=True)
+        n_sm = _merge_stock_modes(data, extras[_EXTRA_STOCK_MODES], log_cb=log_cb)
+        if n_sm or json.dumps(data.get(_EXTRA_STOCK_MODES), sort_keys=True) != before:
+            applied[_EXTRA_STOCK_MODES] = n_sm
     if not applied:
         return {}
     staged_changes.save(assets_folder, data)
@@ -528,13 +595,17 @@ def apply_extras(assets_folder, extras, log_cb=None):
                  "high_scores": "%d high-score default(s)",
                  "image_group_tags": "%d image/scene name(s)",
                  "replacement_names": "the name(s) of %d replacement file(s)",
-                 "menu_expose_through": "the Adjustments-menu reveal"}
+                 "menu_expose_through": "the Adjustments-menu reveal",
+                 _EXTRA_STOCK_MODES: "%d " + _stock_modes_words()}
         parts = []
         for key, n in applied.items():
+            if key == _EXTRA_STOCK_MODES and not n:
+                continue                  # the record only (nothing staged in it)
             w = words.get(key, "%d " + key)
             parts.append(w % n if "%d" in w else w)
-        log_cb("Restored from the pack: " + ", ".join(parts)
-               + " — staged for the next Build.", "success")
+        if parts:
+            log_cb("Restored from the pack: " + ", ".join(parts)
+                   + " — staged for the next Build.", "success")
     return applied
 
 

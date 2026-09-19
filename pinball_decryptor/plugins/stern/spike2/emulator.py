@@ -1000,11 +1000,21 @@ class Spike2Emu:
         return _u16(bytes(self.mu.mem_read(self.QMUL_TABLE + 2 * v, 2)))
 
     # ---- params derivation (chain) -----------------------------------------
-    def derive_params(self, progress=None):
+    def derive_params(self, progress=None, after_step=None):
         """Cold-derive the decode-params table for every cat-0 sound, straight
         from ``game_real`` + ``image.bin``.  Returns a list of dicts:
         ``{idx, body_off, length, pred16, seed_a, band0_keyoff_rel, stride,
         chan, scale}``.
+
+        *after_step* ``(idx, row, redo)`` is called after each record's step
+        (item 150's chain-aware encode of appended records).  It may change the
+        card bytes in this emulator's memory and call ``redo()``, which runs the
+        same record's step again from the same chain state and returns the new
+        ``(obj, next_state)``; returning that pair makes the chain carry on from
+        the new state, so every later record sees the changed bytes.  The redo
+        must build the SAME codec object (a record's own windows set only the
+        records after it); a different one raises.  Returning None keeps the
+        chain as it was.
 
         ``progress(done, total, message)`` is called as the record chain runs
         (throttled to ~200 updates).  Cost scales with the catalog: measured
@@ -1182,6 +1192,24 @@ class Spike2Emu:
                     row["length"] = _u32(obj, 0x10)
                     row["scale"] = obj[0x1d]
                     row["chan"] = obj[0x1b]
+                if after_step is not None:
+                    def redo(_cur=cur, _rec=rec, _idx=idx):
+                        return self._drive_step(_cur, _rec, rec_idx=_idx)
+                    got = after_step(idx, row, redo)
+                    if got is not None:
+                        obj2, nxt2 = got
+                        if obj2 is None or obj2[:0x20] != obj[:0x20]:
+                            raise RuntimeError(
+                                "record %d built a different codec object when "
+                                "its own body changed; the chain-aware encode "
+                                "assumes a record's windows set only the "
+                                "records after it" % idx)
+                        nxt = nxt2
+                        # the container key is the one the redo registered
+                        fk2 = getattr(self, "_last_find_key", None)
+                        if fk2 and len(fk2) >= 8:
+                            row["key0"] = _u32(fk2, 0)
+                            row["findkey"] = bytes(fk2)
                 rows.append(row)
                 if nxt is None:
                     break

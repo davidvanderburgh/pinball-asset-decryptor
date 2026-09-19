@@ -123,6 +123,19 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.fontrender" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_render" \
+    --hidden-import "pinball_decryptor.plugins.stern.scene_write" \
+    --hidden-import "pinball_decryptor.plugins.stern.sidx_append" \
+    --hidden-import "pinball_decryptor.plugins.stern.sidx_deliver" \
+    --hidden-import "pinball_decryptor.plugins.stern.film_cut" \
+    --hidden-import "pinball_decryptor.plugins.stern.mode_assets" \
+    --hidden-import "pinball_decryptor.plugins.stern.mode_project" \
+    --hidden-import "pinball_decryptor.plugins.stern.mode_runtime" \
+    --hidden-import "pinball_decryptor.plugins.stern.mode_sounds" \
+    --hidden-import "pinball_decryptor.plugins.stern.mode_tryit" \
+    --hidden-import "pinball_decryptor.plugins.stern.mode_write" \
+    --hidden-import "pinball_decryptor.plugins.stern.video_bank" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_modes" \
+    --hidden-import "pinball_decryptor.plugins.stern.stock_mode_tables" \
     --hidden-import "pinball_decryptor.plugins.stern.text_colors" \
     --hidden-import "pinball_decryptor.plugins.stern.text_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.dds" \

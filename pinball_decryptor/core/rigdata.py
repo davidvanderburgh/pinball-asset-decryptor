@@ -145,11 +145,19 @@ def create(runner=None) -> None:
 #: missing, a directory sitting on a different device from its parent is one.
 #: Prints "mounted" or nothing, so the caller reads the text and not an exit
 #: code that a missing tool would also produce.
+#:
+#: ``[ -d ]`` FIRST IN THE FALLBACK, and it is not decoration.  After a full WSL
+#: restart ``/mnt/wsl`` is a fresh tmpfs and the mountpoint DOES NOT EXIST: its
+#: ``stat`` prints nothing, nothing differs from the parent's device number, and
+#: the comparison alone answered "mounted" for a disk attached nowhere - so Start
+#: skipped the re-attach and handed the rig a path that was not there (measured
+#: on David's PC, 2026-09-18, with every distro stopped beforehand).  A directory
+#: that does not exist is not a mount.
 _IS_MOUNTED = (
     'if findmnt -no FSTYPE "%s" >/dev/null 2>&1; then echo mounted; '
-    'elif [ "$(stat -c %%d "%s" 2>/dev/null)" != '
+    'elif [ -d "%s" ] && [ "$(stat -c %%d "%s" 2>/dev/null)" != '
     '"$(stat -c %%d "$(dirname "%s")" 2>/dev/null)" ]; then echo mounted; fi'
-    % (MOUNT, MOUNT, MOUNT))
+    % (MOUNT, MOUNT, MOUNT, MOUNT))
 
 
 def attached(distro: str, runner=None) -> bool:

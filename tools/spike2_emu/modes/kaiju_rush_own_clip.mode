@@ -1,0 +1,51 @@
+# kaiju_rush_own_clip.mode - KAIJU RUSH with a SCREEN and a CLIP of its own (items 131, 132).
+#
+# kaiju_rush_own_screen.mode plus a clip: when the mode starts, the game's own video
+# surface plays KaijuRush_Clip, a clip the card never shipped. It is one more entry in the
+# in-game video bank scene 60ed7e50 (name -> clip -> file), added by modes/mode_clip.py,
+# with its file beside the stock clips:
+#   modes/mode_clip.py <stock 60ed7e50 scene.radium> <out dir> --name KaijuRush_Clip
+#       --make "KAIJU RUSH"
+# installs as assets/lcd/auto_loaded/60ed7e50.../scene.radium and
+# .../scene.assets/2.asset/598.asset. The screen needs mode_screen.py's HUD scene too
+# (see kaiju_rush_own_screen.mode).
+#
+# EMULATOR-PROVEN on Godzilla Pro 1.15, NOT hardware-proven.
+#
+name           KAIJU RUSH
+
+# What starts it: a shot mask, and how many of them in one ball.
+# 0x08000000 is the Maser Target (the switch -> shot bit map is in MODE_API.md).
+trigger        0x08000000 3
+
+# How long it runs, in seconds, on the 60 Hz tick clock. No game timer is free.
+seconds        30
+
+# The shots that score while it runs: powerlines 28-30 and both ramps, 20-21.
+shots          0x70300000
+
+# The first shot is worth this, the second twice this, and so on.
+award          1000000
+
+# The screen: a node of our own. No message id is touched.
+screen_scene   32e6ae280ddaec08e203a02289bb39a04968e7b0
+screen_node    KaijuRush_Screen
+screen_text    KaijuRush_Screen.KaijuRush_Screen_Words
+# seconds the total stays up after the mode ends
+restore_after  6
+
+# The clip: played by name on the game's video surface when the mode starts.
+# clip_end plays one when it ends; clip_label picks the crop (empty = Normal).
+clip_start     KaijuRush_Clip
+
+# The lights: the game's own light runner, with a live show event made current.
+# Owner 538 and these two commands are tesla strike's own award pair.
+light_owner    538
+light_on       blele --sweep 0 --lts 224 --red 0 --green 255 --blue 0 --freq 10 --use_alpha 1 --alpha 255
+light_off      blele --sweep 1 --lts 224 --fade 20 --rgb 0 --freq 10 --delay_start 15 --end 1
+
+# The countdown, in the game's own voice: one callout at N seconds left, the
+# counting callout whose variant is (seconds - 1) for 5 down to 1, and one at the end.
+callout_at     10 1291
+callout_count  1287
+callout_end    1295

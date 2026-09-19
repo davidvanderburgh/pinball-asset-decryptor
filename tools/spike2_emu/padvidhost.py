@@ -192,7 +192,8 @@ def host_path(p):
         p = p[len(GUEST_ROOT) + 1:]
     elif p.startswith("/"):
         return None
-    # The edited copy first: the guest sees it bound over this same path.
+    # The edited copy first: the guest sees it bound over this same path (PAD-170).
+    # A file the card never had (a mode's own clip, item 127) is only there.
     ovr = override_root()
     if ovr:
         mine = os.path.normpath(os.path.join(ovr, p))

@@ -9,3 +9,9 @@
 # Never touch the run artefacts, on the off-chance one is ever force-added.
 *.png binary
 *.raw binary
+
+# The Mode SDK's PINNED runtime object (item 127, modes/sdk/prebuilt/mode.so) is
+# committed and shipped. Its rule MUST be here: a deeper .gitattributes wins, so the
+# root file's `binary` line lost to `* text eol=lf` above, and a rebuild whose bytes
+# held a CR LF pair would have been committed with the CR taken out.
+*.so binary

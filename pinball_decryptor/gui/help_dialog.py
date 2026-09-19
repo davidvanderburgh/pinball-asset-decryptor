@@ -1017,7 +1017,17 @@ HELP_CONTENT = {
          "same old version, used only as the reference your old extract is "
          "compared against — with it, the factory's own between-version "
          "changes aren't mistaken for your mods, and audio + text mods can "
-         "be carried too."),
+         "be carried too.\n\nIf your old extract came off a card THIS app "
+         "built, the mods already baked into that card are the folder's "
+         "starting point rather than replacements, so on its own the "
+         "transfer carries only the replacements you assigned inside that "
+         "folder - the confirm dialog and the log both say so. Fill field 3 "
+         "with a stock extract of that card's own code and it offers to "
+         "carry BOTH in one run: the baked-in mods first, compared against "
+         "that stock extract, then this folder's own replacements on top, "
+         "which win on any slot the two share by being the newer round. "
+         "Each pass keeps its own confirm, and turning the first one down "
+         "still runs the second."),
     ],
     "Partition Explorer": [
         ("What it's for",

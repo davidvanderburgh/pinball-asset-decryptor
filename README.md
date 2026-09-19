@@ -1122,7 +1122,17 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    stock extract reports its version too, so the reference you picked
    can be checked against field 1 at a glance instead of on trust),
    and wires the build straight to the new version so
-   the result can't accidentally come out on the old code.
+   the result can't accidentally come out on the old code. From
+   v0.222.0 a project folder that was itself extracted from a card this
+   app built says so up front: on its own only the replacements
+   assigned inside that folder transfer, because the mods already baked
+   into the card it came from are the folder's starting point rather
+   than edits. Fill the optional clean old-version extract and the
+   transfer offers to carry BOTH in one run - the baked-in mods
+   compared against that stock extract first, then the folder's own
+   replacements on top, which win on any slot the two share - so a
+   working folder that has been built, re-extracted and edited again
+   keeps everything without fetching the old card back.
 9. **Emulate tab** *(Stern Spike 2 — Windows via WSL2, Linux, or macOS in a container)* — run the
    game itself on this PC and watch what you built. Point it at a card
    image and press Start: the card's game partition is mounted **read

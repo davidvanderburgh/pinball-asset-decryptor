@@ -109,12 +109,15 @@ def scan_image_slots(assets_dir: str, roots=None, exts=None,
 
 
 def stage_replacement(slot: ImageSlot, replacement_path: str,
-                      keep_size: bool = False):
+                      keep_size: bool = False,
+                      original_info: Optional[ImageInfo] = None):
     """Stage a single replacement over *slot*.
 
     The replacement is scaled to the slot's pixel dimensions (unless
     *keep_size*), saved in the slot's format, and written atomically over
-    ``slot.abs_path``.  Returns ``(ok, detail)`` — on success *detail*
+    ``slot.abs_path``.  *original_info* describes the slot's PRISTINE file
+    when the caller has it (the slot's own file may already hold an earlier
+    replacement).  Returns ``(ok, detail)`` — on success *detail*
     summarises the conversions (may be empty); on failure it's an error
     message.
     """
@@ -125,7 +128,8 @@ def stage_replacement(slot: ImageSlot, replacement_path: str,
 
     tmp = slot.abs_path + ".stage" + slot.ext
     try:
-        info = slot.info or detect_image_info(slot.abs_path)
+        info = (original_info or slot.info
+                or detect_image_info(slot.abs_path))
         ok, detail = transcode_image_to(replacement_path, tmp, info,
                                         keep_size=keep_size)
         if ok and keep_size:
@@ -178,9 +182,20 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
             progress_cb(i, total, rel)
         if log_cb:
             log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")
+        original = None
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
-        ok, detail = stage_replacement(slot, rep, keep_size=rel in keep_size)
+            # Fitted to the PRISTINE picture's size, which slot.info is only
+            # while the slot is untouched.  Once an earlier replacement was
+            # kept at its own size (PAD-154), the slot's file is that size,
+            # and every later pick - Keep size off included - was fitted to
+            # it, so unticking the box never took (PAD-179).  Video staging
+            # budgets against the snapshot for the same reason.
+            snap = staged_originals.snapshot_path(assets_dir, rel)
+            if snap:
+                original = detect_image_info(snap)
+        ok, detail = stage_replacement(slot, rep, keep_size=rel in keep_size,
+                                       original_info=original)
         if ok:
             staged += 1
             if log_cb:

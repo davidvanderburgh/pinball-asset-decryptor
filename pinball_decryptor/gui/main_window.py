@@ -10657,7 +10657,9 @@ class MainWindow:
         "which squeezes a longer name. On: it keeps its own width and "
         "height, and the build grows the scene to fit it. The game draws "
         "it from the same top-left corner, so a wider picture reaches "
-        "further right. Needs an image build (not a direct SD write).")
+        "further right. Needs an image build (not a direct SD write). A "
+        "picture nothing in its scene draws by size is fitted instead, and "
+        "the log says so.")
 
     def _image_keep_state(self, rel):
         """``True`` / ``False`` for a pick that may keep its own size (kept or
@@ -10711,9 +10713,15 @@ class MainWindow:
             _show(False)
             return
         slot = self._image_slots_by_rel[rel]
+        # The original is the pristine snapshot once an earlier replacement
+        # is in the folder: that one's size is not the slot's (PAD-179), and
+        # it is the snapshot's size a pick is fitted to.
+        from ..core import staged_originals
+        orig_path = (staged_originals.snapshot_path(self._image_scan_dir, rel)
+                     or slot.abs_path)
         try:
             from PIL import Image
-            with Image.open(slot.abs_path) as im:
+            with Image.open(orig_path) as im:
                 orig = im.size
             with Image.open(rep) as im:
                 new = im.size

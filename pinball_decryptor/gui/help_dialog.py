@@ -498,7 +498,11 @@ HELP_CONTENT = {
          "the scene to fit it and the game draws it at the new size, from "
          "the same top-left corner, so a wider picture "
          "reaches further right. Needs an image build, not a direct SD "
-         "write. Verified in the PC emulator; no machine has run one yet."),
+         "write. Verified in the PC emulator; no machine has run one yet. "
+         "A few pictures cannot take a new size, because nothing in their "
+         "scene draws them by size (full-screen backgrounds, for one). The "
+         "build fits those to the original size instead, exactly as with "
+         "the box unticked, and the log names each one."),
         ("Assets folder + applying",
          "The assets folder is the one Extract produced — the same folder the "
          "Write tab reads. There's no separate \"stage\" step: each "

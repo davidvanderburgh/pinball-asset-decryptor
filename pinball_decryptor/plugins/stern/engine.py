@@ -4418,9 +4418,20 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
     dict and :func:`_image_grow_gate` passes, its encoded block data is
     recorded as ``grown[card_path] = (node, {data_off: (width, height,
     bytes)})`` for :func:`_stage_grown_radiums` to re-serialise the scene
-    around; otherwise it is skipped with the reason.  A font atlas never
-    changes size (its glyph rectangles are measured in its pixels), and
-    neither does an image no sprite in its scene draws by size.
+    around.  A font atlas never changes size (its glyph rectangles are
+    measured in its pixels), and neither does an image no sprite in its scene
+    draws by size.
+
+    A picture that cannot keep its own size is FITTED to its slot, exactly as
+    the Images tab scales a replacement with Keep size off, and the log says
+    why (PAD-179).  It used to be skipped, so ticking Keep size on one of
+    those - the tab offers it on every scene picture that is not a font atlas,
+    and 26 of the 339 on Godzilla LE 1.16 are drawn by nothing that has a size
+    - took the user's picture off the card and out of the emulator entirely.
+    A font atlas is fitted the same way, to the pixel grid its letters are
+    measured in.  Only an atlas rebuilt from edited glyph slices is still
+    skipped at the wrong size: the slices were cut to its stock grid, so
+    there is nothing sound to fit.
 
     Returns ``(writes, n_images, overlays)`` where ``overlays`` is
     ``{i_block: (node, {file_offset: bytes})}`` for every patched ``scene.radium``
@@ -4476,6 +4487,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
     overlays = {}                  # i_block -> (node, {file_off: bytes})
     encoded = {}                   # staged PNG path -> block bytes (one PNG, many occurrences)
     resized = {}                   # (staged, fmt) -> (w, h, block bytes) at the PNG's own size
+    fitted = {}                    # staged PNG path -> block bytes, scaled to the slot
     gate = []                      # _image_grow_gate, asked once and only if needed
     scenes = {}                    # card path -> (atlas offsets, {data_off: refs})
     scene_bytes = {}               # card path -> the stock scene.radium
@@ -4543,6 +4555,8 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
             moved.setdefault(radium_path, []).append(output)
             continue
         payload = encoded.get(staged)
+        fit = False                # scaled to the slot: cached apart, because
+        #                            another occurrence may still grow it
         if payload is None:
             override = glyph_atlases.get(output)
             try:
@@ -4589,9 +4603,20 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                             "size." % (output, w, h, pad_w, pad_h, radium_path),
                             "info")
                         continue
-                log("Radium image %s is %dx%d but must stay %dx%d; skipped (%s)."
-                    % (output, w, h, pad_w, pad_h, why), "warning")
-                continue
+                if override is not None:
+                    log("Radium image %s is %dx%d but must stay %dx%d; skipped "
+                        "(%s)." % (output, w, h, pad_w, pad_h, why), "warning")
+                    continue
+                fit = True
+                payload = fitted.get(staged)
+                if payload is None:
+                    log("Radium image %s is %dx%d, and this picture can't take "
+                        "a new size (%s), so it is fitted to the original "
+                        "%dx%d instead - the same as leaving Keep size off on "
+                        "the Images tab." % (output, w, h, why, pad_w, pad_h),
+                        "warning")
+                    im = im.resize((pad_w, pad_h), Image.LANCZOS)
+        if payload is None:
             arr = np.asarray(im, dtype=np.uint8)
             if override is None:
                 arr = _premultiplied(arr, output, radium_path, node, data_off,
@@ -4614,7 +4639,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
             if payload is None:
                 payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
                            else _dds.encode_bc3(arr))
-            encoded[staged] = payload
+            (fitted if fit else encoded)[staged] = payload
         if len(payload) != length:
             log("Radium image %s: re-encoded to %d bytes but the slot is %d; "
                 "skipped." % (output, len(payload), length), "warning")

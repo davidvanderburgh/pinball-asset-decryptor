@@ -10,9 +10,11 @@ stock picture's pixels ("SpaceGodzilla is replacing Ebirah ... a 3 char name
   is the stock scene shifted;
 * ``engine._radium_image_writes`` routes a replacement of a different size to
   that growth (never a font atlas, never a picture nothing draws by size, never
-  a direct-SD write), pads a texture-size PNG in place, and the Write ships the
-  grown scene whole with its ``.sidx`` size refreshed;
-* the Replace Images staging keeps a picture's own size when asked.
+  a direct-SD write: PAD-179 fits those to their slot instead of dropping
+  them), pads a texture-size PNG in place, and the Write ships the grown scene
+  whole with its ``.sidx`` size refreshed;
+* the Replace Images staging keeps a picture's own size when asked, and
+  otherwise fits it to the ORIGINAL's size, not to an earlier pick's.
 
 Verified in the PC emulator on Godzilla Pro 1.15: the language screen's
 Japanese date picture grown from 404 to 700 pixels loaded and drew at its new
@@ -238,14 +240,24 @@ def test_a_bigger_replacement_goes_to_growth(tmp_path, monkeypatch):
     assert any("re-serialised around its new size" in m for _l, m in msgs)
 
 
-def test_without_growth_it_is_the_old_skip(tmp_path):
+def _assert_fitted(writes, n, grown, off, rgba=(255, 0, 255, 255)):
+    """The picture went in at the slot's 40x20, in place, all of it the
+    replacement's colour: fitted, not dropped."""
+    assert n == 1 and grown == {}
+    assert [w[0] for w in writes] == [off]
+    dec = dds.decode_bc3(writes[0][1], 40, 20)
+    assert (np.abs(dec.astype(int) - rgba) <= 8).all()
+
+
+def test_without_growth_it_is_fitted_to_the_slot(tmp_path):
     data, banner, _icon = _scene()
     png = _project(tmp_path, data, banner, 40, 20)
     Image.new("RGBA", (90, 22), (255, 0, 255, 255)).save(png)
     writes, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data),
                                           grow=False)
-    assert writes == [] and n == 0 and grown == {}
-    assert any(l == "warning" and "must stay 40x20" in m for l, m in msgs)
+    _assert_fitted(writes, n, grown, banner)
+    assert any(l == "warning" and "fitted to the original 40x20" in m
+               for l, m in msgs)
 
 
 @pytest.mark.parametrize("why, gate, patch", [
@@ -253,8 +265,11 @@ def test_without_growth_it_is_the_old_skip(tmp_path):
      None),
     ("nothing in its scene draws it", (True, ""), "unref"),
 ])
-def test_a_resize_that_cannot_land_says_why(tmp_path, monkeypatch, why, gate,
-                                            patch):
+def test_a_resize_that_cannot_land_is_fitted_and_says_why(
+        tmp_path, monkeypatch, why, gate, patch):
+    """PAD-179: Keep size ticked on a picture that cannot take a new size used
+    to take the picture off the card entirely (DragonRR: "PAD does not include
+    it"). It goes in fitted, as with the box unticked, and the log says why."""
     monkeypatch.setattr(engine, "_image_grow_gate", lambda d: gate)
     data, banner, _icon = _scene()
     if patch == "unref":
@@ -265,8 +280,9 @@ def test_a_resize_that_cannot_land_says_why(tmp_path, monkeypatch, why, gate,
     png = _project(tmp_path, data, banner, 40, 20)
     Image.new("RGBA", (90, 22), (255, 0, 255, 255)).save(png)
     writes, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
-    assert writes == [] and n == 0 and grown == {}
-    assert any(l == "warning" and why in m for l, m in msgs)
+    _assert_fitted(writes, n, grown, banner)
+    said = [m for l, m in msgs if l == "warning" and why in m]
+    assert len(said) == 1 and "fitted to the original 40x20" in said[0]
 
 
 def test_a_font_atlas_never_changes_size(tmp_path, monkeypatch):
@@ -277,9 +293,47 @@ def test_a_font_atlas_never_changes_size(tmp_path, monkeypatch):
     monkeypatch.setattr(
         radium, "parse_glyph_tables",
         lambda d, imgs: [{"glyphs": [{"atlas": {"data_off": banner}}]}])
-    _w, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
-    assert n == 0 and grown == {}
+    writes, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
+    _assert_fitted(writes, n, grown, banner)
     assert any("font atlas" in m for _l, m in msgs)
+
+
+def _twin_scene():
+    """Two copies of one 40x20 picture: the first (handle 6) drawn by no
+    sprite, the second (handle 2) by one. Extract lists both under one PNG.
+    Returns ``(bytes, unref_off, ref_off)``."""
+    head = bytearray(b"\x7f" * 8)
+    head += _record(40, 20, 6)
+    unref = 8 + radium_grow.IMAGE_HEADER_LEN
+    head += b"\x7f" * 4
+    ref = len(head) + radium_grow.IMAGE_HEADER_LEN
+    head += _record(40, 20, 2)
+    tail = _sprite_scene([])
+    tail += _s_instance("Banner", 100.0, 50.0, image_ref=_image_ref(40, 20, 2))
+    return bytes(head) + tail, unref, ref
+
+
+def test_one_picture_grows_where_it_can_and_is_fitted_where_it_cannot(
+        tmp_path, monkeypatch):
+    """The fitted bytes are cached apart from the in-place ones, so the copy
+    that cannot grow (listed FIRST) does not hand its fitted payload to the
+    copy that can."""
+    monkeypatch.setattr(engine, "_image_grow_gate", lambda d: (True, ""))
+    data, unref, ref = _twin_scene()
+    png = _project(tmp_path, data, unref, 40, 20)
+    manifest = tmp_path / "images" / "scene_textures" / "radium_images.txt"
+    row = manifest.read_text(encoding="utf-8").splitlines()[1]
+    manifest.write_text(manifest.read_text(encoding="utf-8")
+                        + row.replace("\t%d\t" % unref, "\t%d\t" % ref) + "\n",
+                        encoding="utf-8")
+    generate_checksums(str(tmp_path))
+    Image.new("RGBA", (90, 22), (255, 0, 255, 255)).save(png)
+    writes, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
+    assert n == 1
+    assert [w[0] for w in writes] == [unref]            # fitted in place
+    (_node, imgs), = grown.values()
+    assert list(imgs) == [ref] and imgs[ref][:2] == (90, 22)
+    assert sum("fitted to the original" in m for _l, m in msgs) == 1
 
 
 def _grown_card(data, banner):
@@ -477,19 +531,23 @@ def test_write_ships_the_grown_scene_whole(tmp_path, monkeypatch):
                for _l, m in msgs)
 
 
-def test_direct_sd_write_skips_a_resize_and_says_why(tmp_path, monkeypatch):
+def test_direct_sd_write_fits_a_resize_and_says_why(tmp_path, monkeypatch):
     raw, _offs = _grow_elf()
     data, banner, _icon = _scene()
     blob = _stub_sidx(["gz/game", "gz/assets/a/scene.radium",
                        "spk/index/a.sidx"])
-    _card(monkeypatch, _CardReader(raw, blob, data))
+    reader = _CardReader(raw, blob, data)
+    _card(monkeypatch, reader)
     assets = tmp_path / "assets"
     png = _project(assets, data, banner, 40, 20)
     Image.new("RGBA", (90, 22), (255, 0, 255, 255)).save(png)
     msgs, log = _capture()
-    with pytest.raises(RuntimeError, match="Nothing could be written"):
-        _compute(assets, log, dest_is_device=True)
-    assert any(l == "warning" and "direct-SD" in m for l, m in msgs)
+    writes, counts, grow_plan, _a, _v = _compute(assets, log,
+                                                 dest_is_device=True)
+    assert counts[2] == 1 and not (grow_plan or {}).get("jobs")
+    assert _writes_in(writes, reader.RAD_DISK, len(data))
+    assert any(l == "warning" and "direct-SD" in m and "fitted" in m
+               for l, m in msgs)
 
 
 # ---------------------------------------------------------------------------
@@ -511,3 +569,38 @@ def test_staging_keeps_the_pictures_own_size_only_when_asked(tmp_path):
     assert (staged, failures) == (2, [])
     assert Image.open(assets / "images" / "a.png").size == (90, 22)
     assert Image.open(assets / "images" / "b.png").size == (40, 20)
+
+
+def test_a_later_pick_is_fitted_to_the_original_not_to_an_earlier_pick(
+        tmp_path):
+    """PAD-179: once a pick was kept at its own size, the slot's file IS that
+    size, and a later scan reads it as the slot's.  Every later pick - Keep
+    size off included - was fitted to it, so the untick never took and a
+    picture its scene cannot resize stayed off the card.  The size to fit to
+    is the pristine snapshot's."""
+    assets = tmp_path / "assets"
+    (assets / "images").mkdir(parents=True)
+    Image.new("RGBA", (40, 20), (0, 0, 0, 255)).save(
+        assets / "images" / "a.png")
+    generate_checksums(str(assets))
+    rel = "images/a.png"
+    first, later = tmp_path / "first.png", tmp_path / "later.png"
+    Image.new("RGBA", (90, 22), (255, 255, 255, 255)).save(first)
+    Image.new("RGBA", (120, 30), (0, 0, 255, 255)).save(later)
+
+    def stage(rep, keep):
+        # a fresh scan each time, as after a restart: slot.info is the file's
+        slots = {s.rel_path: s for s in image_slots.scan_image_slots(
+            str(assets))}
+        return image_slots.stage_replacements(
+            slots, {rel: str(rep)}, assets_dir=str(assets),
+            keep_size=frozenset({rel}) if keep else frozenset())
+
+    assert stage(first, keep=True) == (1, [])
+    assert Image.open(assets / rel).size == (90, 22)
+    assert stage(first, keep=False) == (1, [])
+    assert Image.open(assets / rel).size == (40, 20)      # the untick takes
+    assert stage(later, keep=False) == (1, [])
+    assert Image.open(assets / rel).size == (40, 20)
+    assert stage(later, keep=True) == (1, [])
+    assert Image.open(assets / rel).size == (120, 30)

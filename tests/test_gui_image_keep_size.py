@@ -205,3 +205,20 @@ def test_a_cleared_pick_takes_its_flag_out_of_the_sidecar(window):
     assert staged_changes.load(assets)["image_keep_size"] == []
     assert w.pending_image_assignments(assets) is None
     assert os.path.isfile(os.path.join(assets, BANNER))
+
+
+def test_the_original_size_is_the_snapshots_once_a_pick_is_applied(window):
+    # PAD-179: after a run applied a pick kept at its own size, the slot's
+    # file IS that pick. The note called it the original ("Same size as the
+    # original (90×22)") while the build fits to the real one.
+    from pinball_decryptor.core import staged_originals
+    w, assets, rep = window
+    assert staged_originals.snapshot(assets, BANNER, None)
+    Image.new("RGBA", (90, 22), (255, 255, 255, 255)).save(
+        os.path.join(assets, BANNER))
+    w._image_assignments[BANNER] = rep
+    w._image_current_rel = BANNER
+    w._image_render_preview(BANNER)
+    assert _shown(w)
+    assert "the original 40×20" in w._image_size_lbl["text"]
+    assert "squeezed" in w._image_size_lbl["text"]

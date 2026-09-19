@@ -127,6 +127,15 @@ BLOCK = 200
 # uses the same bound.  Anything above it is a mis-read register, not a card.
 MAX_RECORDS = 1 << 16
 
+# The largest image.bin the game can open, in bytes.  The firmware opens its
+# sound bank with the 32-bit file calls -- ``open``, ``__fxstat``, ``mmap``,
+# never their ``64`` variants -- and a 32-bit kernel refuses a file past 2 GiB
+# to a program that did not ask for large ones.  Run here, the same firmware
+# reads the size back negative and loads no records at all: a bank padded to
+# 2**31 - 1 bytes derives, and one byte more does not (Godzilla LE 1.16,
+# PAD-175, PAD-176).  Only a build that grows the sound bank can get near it.
+MAX_IMAGE_BYTES = (1 << 31) - 1
+
 
 def emitted_length(length):
     """True decoded sample count for a sound of header ``length`` (see BLOCK)."""
@@ -1079,6 +1088,13 @@ class Spike2Emu:
             self.extra.pop(self.MASTERDIR_MALLOC, None)
             self.extra.pop(self.BANDLOOP, None)
         if cap["state"] is None or cap["mddst"] is None or not cap["nrec"]:
+            if self.imgsize > MAX_IMAGE_BYTES:
+                # Not an unmapped build: the firmware read no records because
+                # the file is too big for it to open (see MAX_IMAGE_BYTES).
+                raise RuntimeError(
+                    "Spike 2 params: the sound bank (image.bin) is %d bytes, "
+                    "past the %d the game can open, so the firmware read no "
+                    "sounds from it." % (self.imgsize, MAX_IMAGE_BYTES))
             raise RuntimeError(
                 "Spike 2 params: registration did not reach band-build "
                 "(cap=%r). The engine could not map this firmware build's audio "

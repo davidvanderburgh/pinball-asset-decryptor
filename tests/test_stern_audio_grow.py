@@ -520,6 +520,140 @@ def test_a_closed_gate_trims_and_says_why(monkeypatch, tmp_path, device, flag,
     assert counts[0] == 1
 
 
+def test_a_bank_that_would_pass_the_game_s_file_limit_is_not_staged(
+        monkeypatch, tmp_path, _grow_on):
+    """The game can't open a sound bank of 2 GiB or more.  A build whose
+    longer sounds would take it there used to stage the bank anyway and fail
+    in the derive with "most likely a newer game update" (PAD-176); the clip
+    is now fitted to its slot instead, and the log says why."""
+    from pinball_decryptor.plugins.stern.spike2 import emulator as EM
+    params = _params(4)
+    _reader, staged = _grow_card(monkeypatch, tmp_path, params)
+    # A 2 s mono clip's appended body is ~181 KB; the fake bank is empty.
+    monkeypatch.setattr(EM, "MAX_IMAGE_BYTES", 100000)
+    assets, _w = _edits(tmp_path, 2.0)
+    msgs, log = _capture()
+    writes, counts, plan, _m, _v = _run(
+        monkeypatch, assets, params, params[0]["body_off"], log)
+    assert "path" not in staged, "the bank must not have been staged"
+    trimmed = _said(msgs, "are trimmed to fit")
+    assert len(trimmed) == 1
+    assert "can't open a sound bank bigger than 0 MB" in trimmed[0]
+    assert "idx 0 (2.00 s cut to 1.00 s)" in trimmed[0]
+    img_lo = _CardReader.IMG_DISK
+    assert [d for d, _b in writes if img_lo <= d < img_lo + 0x40000]
+    assert counts[0] == 1
+
+
+@pytest.mark.parametrize("grown_before", [0, 2])
+def test_a_card_an_earlier_build_grew_is_not_grown_again(
+        monkeypatch, tmp_path, _grow_on, grown_before):
+    """Growing assumes a stock bank.  On a card an earlier build had grown it
+    re-pointed from a key the play tables no longer carry and failed with
+    "idx 7: no descriptor in the game's play tables names this sound's
+    record" (PAD-176).  Row 0 is that case, the same sound lengthened again;
+    row 2 is a different sound, whose record would have landed on the
+    earlier appended body.  Either way the clip is fitted and the log says
+    why."""
+    params = _params(4)
+    params[grown_before]["shadows"] = 4        # its live record is appended
+    _reader, staged = _grow_card(monkeypatch, tmp_path, params)
+    assets, _w = _edits(tmp_path, 2.0)
+    msgs, log = _capture()
+    writes, counts, plan, _m, _v = _run(
+        monkeypatch, assets, params, params[0]["body_off"], log)
+    assert "path" not in staged, "the bank must not have been staged"
+    assert "path" not in staged["repointed"]
+    trimmed = _said(msgs, "are trimmed to fit")
+    assert len(trimmed) == 1
+    assert "already grown by an earlier build (1 longer sound(s)" in trimmed[0]
+    assert "stock card" in trimmed[0]
+    assert "idx 0 (2.00 s cut to 1.00 s)" in trimmed[0]
+    img_lo = _CardReader.IMG_DISK
+    assert [d for d, _b in writes if img_lo <= d < img_lo + 0x40000]
+    assert counts[0] == 1
+
+
+def test_a_sound_an_earlier_build_grew_keeps_its_longer_slot(tmp_path):
+    """The source's params carry the grown sound's LIVE length, so a
+    replacement up to it still fits whole: refusing a second grow loses
+    nothing the card already has."""
+    grown = dict(_params(1)[0], length=3 * 44100, shadows=4)
+    wav = _wav(tmp_path / "idx0000.wav", 2.5)
+    fits, grows = engine._classify_audio_edits({0: grown}, {0: wav}, "")
+    assert fits == {0: wav} and grows == {}
+    assert engine._grown_source_gate(_params(4)) == (True, "")
+    ok, why = engine._grown_source_gate([grown] + _params(3)[1:])
+    assert not ok and "(1 longer sound(s), which keep their length)" in why
+
+
+def _bank_header(tmp_path, md_off, count):
+    p = tmp_path / "image.bin"
+    h = bytearray(0x100)
+    struct.pack_into("<I", h, 0x40, md_off)
+    struct.pack_into("<I", h, 0x60, count)
+    p.write_bytes(bytes(h))
+    return str(p)
+
+
+# Stock Godzilla LE/Premium 1.16: image.bin is 1,649,655,138 bytes.
+GZ116_MD_OFF, GZ116_COUNT = 1649594314, 2534
+
+
+def test_longer_sounds_past_the_limit_are_trimmed_in_slot_order(tmp_path):
+    """Slot order is the order they are appended in.  A song that doesn't fit
+    is skipped, not the end of the pass: a shorter one after it still gets
+    the room that is left."""
+    img = _bank_header(tmp_path, GZ116_MD_OFF, GZ116_COUNT)
+    byidx = {i: {"idx": i, "chan": 2, "length": 1692642} for i in (5, 9, 12)}
+    minute = 60 * 44100
+    grows = {5: (1692442, 50 * minute),        # 50 min: ~529 MB, too big
+             9: (1692442, 5078244),            # 115 s:   ~20 MB
+             12: (1692442, 40 * minute)}       # 40 min: ~423 MB, fits after 9
+    msgs, log = _capture()
+    kept = engine._grows_within_bank_limit(grows, byidx, img, log)
+    assert set(kept) == {9, 12}
+    [(lvl, msg)] = msgs
+    assert lvl == "warning"
+    assert "can't open a sound bank bigger than 2147 MB" in msg
+    assert "idx 5 (3000.00 s cut to 38.38 s)" in msg
+    assert "with the 2 other longer sound(s) kept whole" in msg
+    assert "idx 9" not in msg and "idx 12" not in msg
+
+
+def test_longer_sounds_that_fit_are_all_kept_and_nothing_is_said(tmp_path):
+    img = _bank_header(tmp_path, GZ116_MD_OFF, GZ116_COUNT)
+    byidx = {i: {"idx": i, "chan": 2, "length": 1692642} for i in (5, 9)}
+    grows = {5: (1692442, 5078244), 9: (1692442, 5078244)}
+    msgs, log = _capture()
+    assert engine._grows_within_bank_limit(grows, byidx, img, log) == grows
+    assert msgs == []
+
+
+def test_the_limit_is_the_largest_file_the_game_can_open():
+    from pinball_decryptor.plugins.stern.spike2 import emulator as EM
+    assert EM.MAX_IMAGE_BYTES == 2 ** 31 - 1
+
+
+@pytest.mark.parametrize("count", [2534, 2535])
+def test_the_bank_size_is_where_staging_ends_the_file(count):
+    """The budget is only right if it is the size the staged file really
+    comes to, for both parities of the record count (align16 pads an odd
+    array by 8 and an even one by nothing)."""
+    from pinball_decryptor.plugins.stern.spike2 import masterdir as MD
+    d = MD.Directory(b"\x00" * MD.RECORD_SIZE * count, count, GZ116_MD_OFF, 0)
+    sizes = [engine._grown_body_bytes({"chan": 2}, 5078244),
+             engine._grown_body_bytes({"chan": 1}, 99999)]
+    _grown, places = MD.plan_grow_records(
+        d, [MD.GrowEdit(3, 100, 5078444, sizes[0]),
+            MD.GrowEdit(7, 100, 100199, sizes[1])])
+    end = places[-1].body_off + places[-1].body_bytes
+    assert engine._grown_bank_bytes(GZ116_MD_OFF, count, sizes) == end
+    # and with nothing appended it is the stock file: the directory is its tail
+    assert (engine._grown_bank_bytes(GZ116_MD_OFF, count, [])
+            == GZ116_MD_OFF + MD.tail_len(count))
+
+
 def _sidx_size(reader, writes, path):
     blob = reader.sidx_node["_data"]
     base = reader.SIDX_DISK

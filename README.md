@@ -35,14 +35,22 @@ a longer clip is trimmed: the card's sound bank records where every sound
 starts, and lengthening one in place would strand all the rest. An
 Advanced Audio option instead appends your audio past the end of the bank
 and points a copy of that sound's record at it, so every other sound on
-the card is untouched. It is off by default — proven in the PC emulator,
-but no machine has booted a card built that way yet. Before v0.219.5 the
-option never reached a clip assigned on the Replace Audio tab (the tab cut
-it to its slot first); it now does, and a build that can't grow the bank
-logs each trimmed sound with its length before and after. The game can't
-open a sound bank of 2 GB or more, so from v0.219.6 the longer sounds are
-fitted into the room left, in slot order, and the rest are trimmed with a
-warning. A card an earlier build already grew is not grown again: its
+the card is untouched. It is opt-in because it needs an image build rather
+than a direct-SD write, and longer cues have been confirmed playing on a
+real machine. Before v0.219.5 the option never reached a clip assigned on
+the Replace Audio tab (the tab cut it to its slot first); it now does, and
+a build that can't grow the bank logs each trimmed sound with its length
+before and after. The game itself sets the ceiling: it can open a sound
+bank only up to about 2 GB, which is roughly 45 minutes of lengthened
+stereo sound in one build, so from v0.219.6 the longer sounds are fitted
+into the room left and the rest are trimmed with a warning. From v0.221.0
+every grow build says in the log how much of that bank it used and about
+how many minutes of stereo are still free, whether or not anything had to
+be trimmed, and you choose which songs win the room: right-click a sound
+on the Replace Audio tab and pick **Keep this song whole if the bank fills
+up**, and the ones you marked are fitted first, in the order you marked
+them, instead of whichever happen to have the lowest slot numbers. A card
+an earlier build already grew is not grown again: its
 grown sounds keep their longer slot, and anything longer is trimmed with a
 note to build onto a card that was never grown, such as the stock card.
 

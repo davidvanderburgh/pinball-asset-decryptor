@@ -2876,6 +2876,2818 @@ def test_partition_explorer_tab_gated_by_capability(app, manufacturers_by_key):
     assert _state("Partition Explorer") == "hidden"
 
 
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_gated_by_capability(app, manufacturers_by_key):
+    """The Modes tab (item 127) shows for Stern and hides for a plugin without
+    the capability - a mode runtime is Spike 2's, not every manufacturer's."""
+    w = app.window
+
+    def _state(label):
+        for tid in w._notebook.tabs():
+            if w._tab_key(tid) == label:
+                return str(w._notebook.tab(tid, "state"))
+        return None
+
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update(); app.root.update()
+    assert _state("Modes") == "normal"
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update(); app.root.update()
+    assert _state("Modes") == "hidden"
+
+
+def _tab_state(w, label):
+    for tid in w._notebook.tabs():
+        if w._tab_key(tid) == label:
+            return str(w._notebook.tab(tid, "state"))
+    return None
+
+
+def test_the_mode_maker_is_hidden_until_a_preview_code_unlocks_it(app, manufacturers_by_key,
+                                                                  monkeypatch):
+    """The mode maker ships dark (core/preview.py): no Modes tab for Stern without a code.
+    Settings > Preview features takes one; a bad one says why and changes nothing, a good
+    one shows the tab at once and is kept in settings.json, and Remove hides it again."""
+    from pinball_decryptor.core import preview
+    from tests.test_preview_switch import OTHER_SECRET, TEST_PUB, make_code
+    monkeypatch.setattr(preview, "PUBLIC_KEYS", (TEST_PUB,))
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update(); app.root.update()
+    assert _tab_state(w, "Modes") == "hidden"
+    menu = w._build_settings_menu()
+    labels = [menu.entrycget(i, "label") for i in range(menu.index("end") + 1)
+              if menu.type(i) not in ("separator", "tearoff")]
+    assert "Preview features…" in labels
+    dlg = w._open_preview_dialog()
+    try:
+        assert dlg.listbox.get(0) == "No preview features are switched on."
+        for bad, needle in (("hello", "not a preview code"),
+                            (make_code(secret=OTHER_SECRET), "not issued for this app"),
+                            (make_code(days=3, issued=preview.utc_today()
+                                       - dt_days(20)), "ended on")):
+            assert not dlg.unlock(bad)
+            assert needle in dlg.message.get()
+            assert _tab_state(w, "Modes") == "hidden" and not preview.enabled("modes")
+            assert preview.SETTINGS_KEY not in app._settings
+        code = make_code(name="Test Person", days=30, issued=preview.utc_today())
+        dlg.entry.insert("1.0", code[:40] + "\n" + code[40:].lower())    # as pasted
+        assert dlg.unlock()
+        app.root.update()
+        assert preview.enabled("modes") and _tab_state(w, "Modes") == "normal"
+        assert app._settings[preview.SETTINGS_KEY] == [code]
+        until = (preview.utc_today() + dt_days(30)).isoformat()
+        assert dlg.listbox.get(0) == "Mode maker: on for Test Person, until %s" % until
+        assert dlg.message.get().startswith("Unlocked.")
+        assert dlg.remove_selected(0)
+        app.root.update()
+        assert not preview.enabled("modes") and _tab_state(w, "Modes") == "hidden"
+        assert preview.SETTINGS_KEY not in app._settings
+        # another manufacturer never shows it, code or not
+        dlg.unlock(code)
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+        assert _tab_state(w, "Modes") == "hidden"
+    finally:
+        dlg.close()
+
+
+def dt_days(n):
+    import datetime
+    return datetime.timedelta(days=n)
+
+
+def test_an_expired_code_turns_the_mode_maker_off_at_the_next_start(app, manufacturers_by_key,
+                                                                    monkeypatch):
+    """Verification happens at start-up (App._load_preview_codes, cached for the run): a
+    stored code that has ended switches nothing on, and the log says so."""
+    from pinball_decryptor.core import preview
+    from tests.test_preview_switch import TEST_PUB, make_code
+    monkeypatch.setattr(preview, "PUBLIC_KEYS", (TEST_PUB,))
+    ended = make_code(days=5, issued=preview.utc_today() - dt_days(10))
+    app._settings[preview.SETTINGS_KEY] = [ended]
+    said = []
+    monkeypatch.setattr(app.window, "append_log", lambda m, lvl="info", *a, **k: said.append(m))
+    app._load_preview_codes()
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    app._log_preview_startup()
+    assert not preview.enabled("modes") and _tab_state(app.window, "Modes") == "hidden"
+    assert any("Mode maker: expired on" in m for m in said), said
+    assert any("1 code(s) checked in" in m for m in said), said
+    # a good one at the next start
+    app._settings[preview.SETTINGS_KEY] = [make_code(issued=preview.utc_today())]
+    app._load_preview_codes()
+    app.window.apply_preview_features()
+    assert preview.enabled("modes") and _tab_state(app.window, "Modes") == "normal"
+
+
+def test_the_write_scan_lists_no_mode_rows_with_the_switch_off(app, manufacturers_by_key,
+                                                               tmp_path, monkeypatch):
+    """With the switch off a tester's project lists no "Pending (Modes)" or game's-own-modes
+    rows: the Write leaves them out (and its log says so), so the list promises nothing."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import stock_modes as SM
+    w = app.window
+    project = str(tmp_path / "project")
+    for _name, spec in MP.example_specs()[:2]:
+        MP.new_mode(project, spec=spec)
+    monkeypatch.setattr(SM, "staged_edits", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("read with the switch off")))
+    monkeypatch.setattr(w, "_current_mfr", manufacturers_by_key["stern"])
+    sid = w._write_preview_scan_id
+    assert w._add_pending_mode_rows(project, sid) == 0
+    assert w._add_pending_stock_mode_rows(project, sid) == 0
+    assert not [r for r in w._write_preview_rows if "Modes" in r[2] or "modes" in r[2]]
+
+
+# ---- THE APP WITHOUT A CODE NAMES NOTHING OF THE MODE MAKER ------------------------------
+from tkinter import ttk as _ttk_mod                                     # noqa: E402
+
+#: The mode maker's own vocabulary, any of which gives it away (case-insensitive
+#: substrings).  "mode" alone is an ordinary word in this app - service mode, attract
+#: mode, a game's own battle modes on tabs that predate the family - so the list is the
+#: family's words, not the word.
+_REVEALING = ("mode maker", "modes tab", "try it", "code mode", "mode file", "mode.json",
+              "film cutter", "from a film", "film cut", "showcase", "game's own modes",
+              "mode of your own", "modes of your own", "mode of our own", "modes of our own",
+              "own modes", "your own mode", "mode sdk", "mode runtime", "modes folder",
+              "stock mode", "kaiju", "make a mode", "new mode", "a game mode")
+#: ...matched as whole words ("the country it is set to" is not "try it") ...
+_REVEALING_RE = _re_mod.compile(
+    r"\b(?:%s)\b" % "|".join(_re_mod.escape(t) for t in _REVEALING), _re_mod.I)
+#: ...and the tab's and the feature's name, capitalised as a name.
+_REVEALING_NAME = _re_mod.compile(r"\bModes\b")
+
+
+@pytest.fixture
+def tip_log(monkeypatch):
+    """Every hover tooltip made while the test runs (widgets._Tooltip), so the walk below
+    reads tooltips too: they are Python objects, not widget options. Requested BEFORE
+    ``app`` so the window's own tooltips are caught as it builds."""
+    from pinball_decryptor.gui import widgets
+    tips = []
+    real = widgets._Tooltip.__init__
+
+    def init(tip, widget, text, *a, **k):
+        real(tip, widget, text, *a, **k)
+        tips.append(tip)
+    monkeypatch.setattr(widgets._Tooltip, "__init__", init)
+    return tips
+
+
+def _hidden_pages(root):
+    """The path names of every HIDDEN notebook page under *root*: nobody can open one,
+    so what is on it is not something a person can read."""
+    out = set()
+    stack = [root]
+    while stack:
+        w = stack.pop()
+        if isinstance(w, _ttk_mod.Notebook):
+            for tid in w.tabs():
+                try:
+                    if str(w.tab(tid, "state")) == "hidden":
+                        out.add(str(tid))
+                except _tk_mod.TclError:
+                    pass
+        stack.extend(w.winfo_children())
+    return out
+
+
+def _under(path, pages):
+    return any(path == p or path.startswith(p + ".") for p in pages)
+
+
+def _readable_texts(root, tips=(), skip=()):
+    """``[(where, text)]``: every text a person can read in *root*'s widget tree - the
+    text of labels, buttons, frames and menubuttons (and their text variables), notebook
+    tab captions, menu entries, listbox and combobox items, entries, Text contents,
+    treeview headings and rows, canvas text, and the hover tooltips in *tips*. Pages in
+    *skip* (hidden notebook tabs) are left out."""
+    out = []
+
+    def add(w, text):
+        if isinstance(text, (tuple, list)):
+            for t in text:
+                add(w, t)
+        elif text not in (None, ""):
+            out.append(("%s %s" % (w.winfo_class(), w), str(text)))
+
+    stack = [root]
+    while stack:
+        w = stack.pop()
+        if _under(str(w), skip):
+            continue
+        for opt in ("text", "label"):
+            try:
+                add(w, w.cget(opt))
+            except (_tk_mod.TclError, ValueError, AttributeError):
+                pass
+        try:
+            var = str(w.cget("textvariable"))
+            if var:
+                add(w, w.getvar(var))
+        except (_tk_mod.TclError, ValueError, AttributeError):
+            pass
+        try:
+            if isinstance(w, _ttk_mod.Notebook):
+                for tid in w.tabs():
+                    if str(tid) not in skip:
+                        add(w, w.tab(tid, "text"))
+            elif isinstance(w, _tk_mod.Menu):
+                end = w.index("end")
+                for i in range(0 if end is None else end + 1):
+                    if w.type(i) not in ("separator", "tearoff"):
+                        add(w, w.entrycget(i, "label"))
+            elif isinstance(w, _tk_mod.Listbox):
+                add(w, w.get(0, "end"))
+            elif isinstance(w, _ttk_mod.Combobox):
+                add(w, w.cget("values"))
+                add(w, w.get())
+            elif isinstance(w, (_tk_mod.Entry, _ttk_mod.Entry)):
+                add(w, w.get())
+            elif isinstance(w, _tk_mod.Text):
+                add(w, w.get("1.0", "end"))
+            elif isinstance(w, _ttk_mod.Treeview):
+                for col in ("#0",) + tuple(w.cget("columns") or ()):
+                    add(w, w.heading(col, "text"))
+                rows = list(w.get_children(""))
+                while rows:
+                    iid = rows.pop()
+                    add(w, w.item(iid, "text"))
+                    add(w, w.item(iid, "values"))
+                    rows.extend(w.get_children(iid))
+            elif isinstance(w, _tk_mod.Canvas):
+                for item in w.find_all():
+                    if w.type(item) == "text":
+                        add(w, w.itemcget(item, "text"))
+        except _tk_mod.TclError:
+            pass
+        stack.extend(w.winfo_children())
+    for tip in tips:
+        try:
+            wpath = str(tip._widget)
+        except Exception:
+            continue
+        if _under(wpath, skip):
+            continue
+        text = tip.text() if callable(tip.text) else tip.text
+        if text:
+            out.append(("tooltip %s" % wpath, str(text)))
+    return out
+
+
+def _revealing(texts):
+    return [(where, text) for where, text in texts
+            if _REVEALING_RE.search(text) or _REVEALING_NAME.search(text)]
+
+
+def _help_texts(app, tabs):
+    """``[(where, text)]``: what the "?" window shows for each tab in *tabs*."""
+    from pinball_decryptor.gui.help_dialog import TabHelpWindow
+    win = TabHelpWindow(app.root, lambda: app.window._current_theme)
+    out = []
+    try:
+        for tab in tabs:
+            win.show(tab)
+            out.append(("help %s" % tab, win._dlg.title()))
+            out.append(("help %s" % tab, win._text.get("1.0", "end")))
+    finally:
+        win.close()
+    return out
+
+
+def _everything_readable(app, tips):
+    """Every readable text of the window as it stands, with the gear's and the Project
+    menus built (they are made when clicked) and the "?" text of every visible tab."""
+    w = app.window
+    menus = [w._build_settings_menu(), w._build_project_menu()]
+    try:
+        app.root.update_idletasks()
+        skip = _hidden_pages(app.root)
+        texts = _readable_texts(app.root, tips, skip)
+        visible = [w._tab_key(tid) for tid in w._notebook.tabs() if str(tid) not in skip]
+        texts += _help_texts(app, visible)
+        return texts
+    finally:
+        for m in menus:
+            try:
+                m.destroy()
+            except _tk_mod.TclError:
+                pass
+
+
+def test_the_app_without_a_preview_code_names_nothing_of_the_mode_maker(
+        tip_log, app, manufacturers_by_key, monkeypatch):
+    """THE CLEAN SURFACE (David, 2026-09-18): a copy of the app with no preview code shows
+    nothing of the mode maker. Every text a person can read - every widget, tab caption,
+    menu entry, list, tooltip, the log, and the "?" text of every tab - is walked on the
+    picker and for EVERY manufacturer, and none of the family's words is in any of it.
+    The Preview features dialog, before a code, names no feature at all. The control at
+    the end switches the mode maker on and finds its words with the same walk, so the
+    walk can see them."""
+    from pinball_decryptor.core import preview
+    assert not preview.enabled("modes") and tip_log
+    w = app.window
+    hits = _revealing(_everything_readable(app, tip_log))
+    assert not hits, hits[:10]
+    for key in sorted(manufacturers_by_key):
+        app._on_manufacturer_change(manufacturers_by_key[key])
+        app.root.update()
+        hits = _revealing(_everything_readable(app, tip_log))
+        assert not hits, (key, hits[:10])
+    # the "?" text of the hidden tab itself (nobody can reach it: its caption is the
+    # window's title), and of Write, say nothing of it either
+    bodies = [x for x in _help_texts(app, ["Modes", "Write"]) if not x[1].startswith("Tips")]
+    assert len(bodies) == 2 and not _revealing(bodies), _revealing(bodies)
+    # the Settings gear keeps "Preview features..." exactly as it is ...
+    menu = w._build_settings_menu()
+    try:
+        labels = [menu.entrycget(i, "label") for i in range(menu.index("end") + 1)
+                  if menu.type(i) not in ("separator", "tearoff")]
+    finally:
+        menu.destroy()
+    assert "Preview features…" in labels
+    # ... and its window, before a code, names no feature
+    dlg = w._open_preview_dialog()
+    try:
+        app.root.update_idletasks()
+        said = _readable_texts(dlg.win)
+        assert dlg.listbox.get(0, "end") == ("No preview features are switched on.",)
+        for label in preview.FEATURES.values():
+            assert not [t for _w, t in said if label.lower() in t.lower()], label
+        assert not _revealing(said), _revealing(said)
+    finally:
+        dlg.close()
+
+    # THE CONTROL: the switch on, the same walk finds the tab and its words
+    real = preview.enabled
+    monkeypatch.setattr(preview, "enabled", lambda f: f == "modes" or real(f))
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    w.apply_preview_features()
+    app.root.update()
+    found = {t.strip() for _w, t in _revealing(_everything_readable(app, tip_log))}
+    assert "Modes" in found and any("Try it" in t for t in found), sorted(found)[:10]
+    assert _revealing(_help_texts(app, ["Modes", "Write"]))
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_is_built_and_sits_between_defaults_and_write(app):
+    """The WINDOW builds the Modes tab, and it sits after Defaults, before Write.
+
+    Item 127 shipped this tab EMPTY: ``_build_modes_tab`` existed and nothing
+    called it, and every earlier test constructed ``ModesPanel`` by hand, so
+    none of them could see it. This one looks at the real window's frame.
+    Placement is David's (2026-09-16): a mode is one more change a card build
+    applies, so it is authored before Write like the tabs to its left.
+    """
+    w = app.window
+    keys = [w._tab_key(tid) for tid in w._notebook.tabs()]
+    assert keys.index("Default Settings") + 1 == keys.index("Modes")
+    assert keys.index("Modes") + 1 == keys.index("Write")
+    assert w._tab_modes.winfo_children(), "the Modes tab frame is empty"
+    assert getattr(w, "_modes_panel", None) is not None
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_makes_and_edits_a_mode_in_the_project(app, tmp_path):
+    """New makes a mode IN THE PROJECT, and an edit on the form lands in its mode.json.
+
+    David, 2026-09-16: a mode belongs to the card project and reaches a card through
+    Write. The starter is buildable as it stands (the runtime refuses a mode without a
+    clock or a trigger count), shots are picked BY NAME, and the list follows a rename.
+    """
+    import json
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    slug = panel.new_mode()
+    assert slug == "new_mode" and panel._list.get(0) == "NEW MODE"
+    assert "Ready to build" in panel._status.cget("text")
+    assert panel._preview_img is not None                      # the screen preview drew
+
+    panel.v["name"].set("KAIJU RUSH")
+    panel.v["start_shot"].set("Maser target")
+    panel.v["award"].set("2,000,000")
+    for name, var in panel._shot_vars.items():
+        var.set(name in ("Left ramp", "Powerline center"))
+    panel.v["clip"].set("title")
+    panel.save_now()
+    data = json.load(open(project / "modes" / slug / "mode.json", encoding="utf-8"))
+    assert data["name"] == "KAIJU RUSH" and data["award"] == 2000000
+    assert data["scoring_shots"] == ["Left ramp", "Powerline center"] and data["clip"] == "title"
+    assert panel._list.get(0) == "KAIJU RUSH"
+    spec = MP.load(str(project / "modes" / slug / "mode.json"))
+    assert "0x20100000" in MP.runtime_cfg(spec, slug)          # the named shots, as a mask
+
+    panel.v["seconds"].set("0")
+    panel.save_now()
+    assert "at least a second" in panel._status.cget("text")
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_examples_add_kaiju_rush_and_an_empty_editor_keeps_its_labels(app, tmp_path):
+    """Two things David saw on 2026-09-16 with a project that had no modes: the form was
+    "barely legible" in the dark theme, and KAIJU RUSH was nowhere to be found.
+
+    The first was every widget under the editor being DISABLED with no mode open - a
+    disabled ttk.Label draws in the disabled grey against the dark panel. Now only the
+    widgets a person types in or clicks are greyed; labels keep their colour. The second
+    is the Examples menu: KAIJU RUSH, as it ran on the machine, one click away.
+    """
+    from tkinter import ttk
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    assert "Examples" in panel._status.cget("text")
+
+    labels, fields = [], []
+
+    def walk(widget):
+        for child in widget.winfo_children():
+            (labels if isinstance(child, ttk.Label) else fields if isinstance(child, ttk.Entry) else []).append(child)
+            walk(child)
+    walk(panel._editor)
+    assert labels and fields
+    assert not any(lb.instate(["disabled"]) for lb in labels), "a label was greyed out"
+    assert all(f.instate(["disabled"]) for f in fields), "a field was left live with no mode open"
+    assert str(panel._ex_btn.cget("state")) == "normal"
+
+    panel._on_example("KAIJU RUSH")
+    app.root.update()
+    assert panel._list.get(0) == "KAIJU RUSH"
+    assert not any(f.instate(["disabled"]) for f in fields)
+    spec = MP.load(str(project / "modes" / "kaiju_rush" / "mode.json"))
+    assert spec.start_shot == "Maser target" and spec.start_count == 3 and spec.seconds == 30
+    assert "0x08000000 3" in MP.runtime_cfg(spec, "kaiju_rush")   # the machine-proven trigger
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_follows_the_project_and_never_leaks_an_edit(app, tmp_path):
+    """Switching project shows THAT project's modes, and an edit in flight is saved to
+    the project it was made in - never into the one switched to."""
+    w = app.window
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    w.write_assets_var.set(str(a))
+    app.root.update()
+    panel = w._modes_panel
+    slug = panel.new_mode()
+    panel.v["name"].set("ONLY IN A")                 # debounced, not yet saved
+    w.write_assets_var.set(str(b))
+    app.root.update()
+    assert panel._list.size() == 0 and not (b / "modes").exists()
+    assert '"name": "ONLY IN A"' in (a / "modes" / slug / "mode.json").read_text(encoding="utf-8")
+    w.write_assets_var.set(str(a))
+    app.root.update()
+    assert panel._list.get(0) == "ONLY IN A"
+    panel.delete_mode(slug)
+    assert panel._list.size() == 0 and not (a / "modes" / slug).exists()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_without_a_project_says_where_modes_go(app, tmp_path):
+    w = app.window
+    w.write_assets_var.set("")
+    app.root.update()
+    panel = w._modes_panel
+    assert panel.new_mode() is None
+    assert "Extract tab" in panel._project_label.cget("text")
+
+
+# ---- item 127: Try it, on the Mode SDK ---------------------------------------------------
+def _no_wsl(monkeypatch):
+    """Any process start at all fails the test: these reach no WSL and launch nothing."""
+    import subprocess
+    from pinball_decryptor.gui import emulate_tab, modes_tab
+
+    def refuse(*a, **kw):
+        raise AssertionError("a GUI test started a process: %r" % (a[:1],))
+    for mod in (subprocess, modes_tab.subprocess, emulate_tab.subprocess):
+        monkeypatch.setattr(mod, "run", refuse)
+        monkeypatch.setattr(mod, "Popen", refuse)
+
+
+def _fake_rig(panel, ran=None):
+    panel._rig_cmd_fn = lambda script, *args: ["RIG", script] + [str(a) for a in args]
+    if ran is not None:
+        panel._run_fn = lambda cmd, **kw: ran.append(cmd) or type(
+            "R", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+
+def _wait_for(pred, root, secs=5):
+    import time
+    deadline = time.time() + secs
+    while not pred() and time.time() < deadline:
+        root.update()
+        time.sleep(0.02)
+    return pred()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_tryit_section_is_built_and_its_env_is_pure(app, tmp_path, monkeypatch):
+    _no_wsl(monkeypatch)
+    panel = app.window._modes_panel
+    for btn in ("_try_btn", "_start_btn", "_end_btn", "_code_btn", "_sdk_btn"):
+        assert getattr(panel, btn).winfo_exists(), btn
+    panel._tryit_base = str(tmp_path / "try")
+    env = panel.tryit_env()
+    assert env[0].startswith("PAD_OVERRIDE_DIR=") and env[0].endswith("/try/set")
+    assert "\\" not in env[0]
+    assert env[1] == "PAD_MODE_SO=/lib/pad_mode.so"
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_tryit_commands_name_the_right_slot(app, tmp_path, monkeypatch):
+    _no_wsl(monkeypatch)
+    panel = app.window._modes_panel
+    _fake_rig(panel)
+    assert panel.trigger_cmd(0) == ["RIG", "modes/tryit.sh", "start", "0"]
+    assert panel.trigger_cmd(3) == ["RIG", "modes/tryit.sh", "start", "3"]
+    assert panel.stop_cmd() == ["RIG", "modes/tryit.sh", "stop"]
+    stage = str(tmp_path / "rig")
+    cmd = panel.install_cmd(stage)
+    assert cmd[:3] == ["RIG", "modes/tryit.sh", "install"] and "\\" not in cmd[3]
+    push = panel.push_cmd(os.path.join(stage, "push", "mode2.cfg"), 2)
+    assert push[:3] == ["RIG", "modes/tryit.sh", "push"] and push[-1] == "2"
+    build = panel.compile_cmd(os.path.join(stage, "pad_mode.so"), [str(tmp_path / "blitz.c")])
+    assert build[1] == "modes/sdk/build_mode.sh" and build[2] == "-o"
+    assert build[-1].endswith("modes/sdk/mode_file.c") and build[-2].endswith("blitz.c")
+    # ...and the rig script those commands run is there, with every verb
+    rig = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "tools", "spike2_emu", "modes", "tryit.sh")
+    body = open(rig, encoding="utf-8").read()
+    for verb in ("install)", "start)", "stop)", "push)"):
+        assert verb in body
+    assert '"$LIB/pad_mode.so"' in body and '"$DUMP/game.port"' in body
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_hands_the_emulate_tab_a_preparation(app, tmp_path, monkeypatch):
+    """Try it launches NOTHING itself: it hands a preparation to the Emulate tab's own
+    launch. The preparation builds the set, installs through the rig script, and returns
+    the env; while the run is up an autosave pushes the regenerated mode file."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    MP.new_mode(str(project), "QUIET", MP.ModeSpec(name="QUIET", screen=False, clip="none"))
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran, handed = [], []
+    _fake_rig(panel, ran)
+    panel._tryit_base = str(tmp_path / "try")
+    panel._try_fn = lambda prepare: handed.append(prepare) or True
+    running = [False]
+    panel._running_fn = lambda: running[0]
+    monkeypatch.setattr(MT, "card_title", lambda card: ("godzilla_pro", "1.15.0", 2))
+    from tests.test_stern_mode_tryit import _writes_builder
+    _writes_builder(monkeypatch, [])
+    assert panel._on_try() is True
+    assert handed == [panel.tryit_prepare] and not ran     # nothing launched, nothing run
+
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 32)
+    env = handed[0](str(card))                              # what the start worker does
+    # Write's set for QUIET (no screen, no clip) holds the game program with the validator
+    # bypass, so the run binds the set and preloads the object (item 149)
+    assert env == panel.tryit_env() and env[1] == "PAD_MODE_SO=/lib/pad_mode.so"
+    assert len(ran) == 1 and ran[0][:3] == ["RIG", "modes/tryit.sh", "install"]
+    stage = MT.stage_dir(panel._tryit_base)
+    assert sorted(os.listdir(stage)) == ["game.port", "mode.cfg", "pad_mode.so"]
+    assert handed[0](str(tmp_path / "no_such.raw")) is None  # a missing card refuses
+
+    # Start mode now / End mode, per slot, only while the emulator is up
+    assert panel._on_start_now() is None
+    running[0] = True
+    assert panel._on_start_now() == ["RIG", "modes/tryit.sh", "start", "0"]
+    assert panel._on_end_now() == ["RIG", "modes/tryit.sh", "stop"]
+    assert _wait_for(lambda: len(ran) >= 3, app.root)
+
+    # an edit while the game runs: the regenerated file is pushed into slot 0
+    panel.v["seconds"].set("9")
+    panel.save_now()
+    assert _wait_for(lambda: any(c[2] == "push" for c in ran), app.root)
+    push = [c for c in ran if c[2] == "push"][-1]
+    assert push[-1] == "0"
+    pushed = open(os.path.join(stage, "push", "mode.cfg"), encoding="utf-8").read()
+    assert "seconds        9" in pushed
+    # a screen change cannot reload live, and says so
+    n = len(ran)
+    panel.v["screen"].set(True)
+    panel.save_now()
+    assert _wait_for(lambda: len(ran) > n, app.root)
+    assert _wait_for(lambda: "next Try it" in panel._tryit_status.cget("text"), app.root)
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_new_code_mode_copies_the_template_and_opens_the_sdk(app, tmp_path, monkeypatch):
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    opened = []
+    panel._opener = opened.append
+    panel._ask_fn = lambda: "Blitz Rush"
+    path = panel._on_new_code_mode()
+    assert path == str(project / "modes" / "blitz_rush" / "blitz_rush.c")
+    text = open(path, encoding="utf-8").read()
+    assert '#define MODE_NAME        "Blitz Rush"' in text
+    assert '"blitz_rush.start"' in text and "PadMode_blitz_rush_Screen" in text
+    assert "target_rush" not in text and "PM_REGISTER(blitz_rush_mode);" in text
+    assert opened == [path]
+    panel.open_sdk_doc()
+    assert opened[-1].endswith("MODE_SDK.md") and os.path.isfile(opened[-1])
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_compiles_a_code_mode_first_and_names_it(app, tmp_path, monkeypatch):
+    """A project with a CODE mode (New code mode): Try it compiles it with build_mode.sh,
+    beside the mode-file interpreter, BEFORE the install, and the ready line names it -
+    it has no mode.json, so it is not in the list and Start mode now cannot reach it."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    MP.new_mode(str(project), "QUIET", MP.ModeSpec(name="QUIET", screen=False, clip="none"))
+    MT.new_code_mode(str(project), "Blitz")
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran, handed = [], []
+    _fake_rig(panel, ran)
+    panel._tryit_base = str(tmp_path / "try")
+    panel._try_fn = lambda prepare: handed.append(prepare) or True
+    monkeypatch.setattr(MT, "card_title", lambda card: ("godzilla_pro", "1.15.0", 2))
+    from tests.test_stern_mode_tryit import _writes_builder
+    _writes_builder(monkeypatch, [])
+    assert panel._on_try() is True and not ran
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 32)
+    assert handed[0](str(card)) == panel.tryit_env()      # Write's set: the game program
+    assert [c[1] for c in ran] == ["modes/sdk/build_mode.sh", "modes/tryit.sh"]
+    assert ran[0][-2].endswith("blitz/blitz.c") and ran[0][-1].endswith("mode_file.c")
+    assert ran[0][3].endswith("/pad_mode.so") and ran[1][2] == "install"
+    status = panel._tryit_status.cget("text")
+    assert "1 mode(s) ready (QUIET)" in status and "Code mode(s) built in: blitz" in status
+    # a card Written from the project carries the code modes too (their own assets with them)
+    assert "A card Written from this project carries them the same way" in status
+    # End mode ends both: the form modes' mode.stop and the code mode's own blitz.stop
+    panel._running_fn = lambda: True
+    assert panel._on_end_now() == ["RIG", "modes/tryit.sh", "stop", "blitz"]
+    assert _wait_for(lambda: "end the running mode, and the code mode(s) blitz."
+                     in panel._tryit_status.cget("text"), app.root)
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_says_it_does_not_run_on_a_mac_yet(app, tmp_path, monkeypatch):
+    """On macOS the rig runs in padbox.sh's container, which neither mounts the Try it
+    folder nor forwards PAD_MODE_SO: Try it there would start a run with no mode in it, or
+    fail with a rig error. It says so in a sentence and hands nothing to the Emulate tab."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    MP.new_mode(str(project), "QUIET", MP.ModeSpec(name="QUIET", screen=False, clip="none"))
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran, handed = [], []
+    _fake_rig(panel, ran)
+    panel._try_fn = lambda prepare: handed.append(prepare) or True
+    monkeypatch.setattr(panel, "_platform", "darwin")
+    assert panel._on_try() is False and handed == [] and ran == []
+    assert "runs on Windows and Linux for now" in panel._tryit_status.cget("text")
+    monkeypatch.setattr(panel, "_platform", "linux")
+    assert panel._on_try() is True and handed == [panel.tryit_prepare]
+    panel._tryit_working = False              # ends the status watch the hand-off started
+    app.root.update()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_in_the_window_reaches_the_emulate_tabs_own_launch(
+        app, tmp_path, monkeypatch, manufacturers_by_key):
+    """The WINDOW's wiring of Try it (item 127): the button reaches the Emulate panel's own
+    launch_with with the tab's preparation, the Emulate tab comes forward, and "is the
+    emulator up?" is that panel's own poll answer. The emulator runs drove the two panels
+    by hand, and the tab once shipped unbuilt because every test did the same - so this
+    one presses the button in the real window and patches only the launch."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update(); app.root.update()
+    project = tmp_path / "proj"
+    project.mkdir()
+    MP.new_mode(str(project), "QUIET", MP.ModeSpec(name="QUIET", screen=False, clip="none"))
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel, emul = w._modes_panel, w._emulate_panel
+    handed = []
+    monkeypatch.setattr(emul, "launch_with", lambda prepare: handed.append(prepare) or True)
+    try:
+        panel._try_btn.invoke()
+        app.root.update()
+        assert handed == [panel.tryit_prepare]
+        assert w._tab_key(w._notebook.select()) == "Emulate"
+        monkeypatch.setattr(emul, "_last_up", False)
+        assert panel._running_fn() is False
+        emul._last_up = True
+        assert panel._running_fn() is True
+    finally:
+        panel._tryit_working = False          # ends the status watch the hand-off started
+        app.root.update()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_a_save_that_changes_nothing_pushes_nothing(app, tmp_path, monkeypatch):
+    """Item 127 run 2 (2026-09-17): picking another mode in the list saves the open one
+    first, and every such click pushed an IDENTICAL mode file into the running game and
+    said "updated in the running game". Only a file the game does not have is pushed."""
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    for name in ("ALPHA", "BRAVO"):
+        MP.new_mode(str(project), name, MP.ModeSpec(name=name, screen=False, clip="none"))
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran = []
+    _fake_rig(panel, ran)
+    panel._running_fn = lambda: True
+    # what a Try it install leaves: the stage's mode files, one per slot
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    found = MP.list_modes(str(project))[0]
+    for slot, (slug, spec) in enumerate(found):
+        with open(stage / MA.mode_file_name(slot), "w", encoding="utf-8", newline="\n") as f:
+            f.write(MP.runtime_cfg(spec, slug))
+    panel._tryit_live = {"project": str(project),
+                         "slots": {slug: i for i, (slug, _s) in enumerate(found)},
+                         "signatures": {slug: MT.asset_signature(s) for slug, s in found},
+                         "stage": str(stage)}
+
+    def select(slug):
+        i = panel._slugs.index(slug)
+        panel._list.selection_clear(0, "end")
+        panel._list.selection_set(i)
+        panel._on_select()
+        app.root.update()
+
+    select(found[0][0])
+    select(found[1][0])                       # saves the first, unchanged
+    select(found[0][0])                       # and the second
+    assert ran == [] and "updated in the running game" not in panel._tryit_status.cget("text")
+
+    panel.v["seconds"].set("9")               # a real edit is pushed, once
+    panel.save_now()
+    assert _wait_for(lambda: "updated in the running game" in panel._tryit_status.cget("text"),
+                     app.root)
+    assert len(ran) == 1 and ran[0][2] == "push" and ran[0][-1] == "0"
+    panel.save_now()
+    select(found[1][0])
+    assert len(ran) == 1
+
+
+def _modes_select(panel, root, slug):
+    i = panel._slugs.index(slug)
+    panel._list.selection_clear(0, "end")
+    panel._list.selection_set(i)
+    panel._on_select()
+    root.update()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_start_mode_now_reaches_only_a_mode_the_running_game_has(
+        app, tmp_path, monkeypatch):
+    """Start mode now names a SLOT, and the game's slot K is whatever Try it installed
+    there. A mode added after Try it (BRAVO, between ALPHA and CHARLIE) would take
+    CHARLIE's slot by the project's order: it is refused in a sentence, never guessed. The
+    record belongs to Try it's own launch: after another Start there are no modes to reach,
+    and an edit pushes nothing."""
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    for name in ("ALPHA", "CHARLIE"):
+        MP.new_mode(str(project), name, MP.ModeSpec(name=name, screen=False, clip="none"))
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran = []
+    _fake_rig(panel, ran)
+    launch = [7]
+    panel._running_fn = lambda: True
+    panel._run_id_fn = lambda: launch[0]
+    found = MP.list_modes(str(project))[0]
+    stage = tmp_path / "stage"                    # what Try it installed: ALPHA 0, CHARLIE 1
+    stage.mkdir()
+    for slot, (slug, spec) in enumerate(found):
+        with open(stage / MA.mode_file_name(slot), "w", encoding="utf-8", newline="\n") as f:
+            f.write(MP.runtime_cfg(spec, slug))
+    panel._tryit_live = {"project": str(project), "slots": {"alpha": 0, "charlie": 1},
+                         "signatures": {slug: MT.asset_signature(s) for slug, s in found},
+                         "stage": str(stage), "run": 7}
+
+    MP.new_mode(str(project), "BRAVO", MP.ModeSpec(name="BRAVO", screen=False, clip="none"))
+    panel.refresh()
+    app.root.update()
+    assert MT.slot_of(str(project), "bravo") == 1          # CHARLIE's slot in the game
+    _modes_select(panel, app.root, "bravo")
+    assert panel._on_start_now() is None and ran == []
+    assert "BRAVO is not in the running game yet" in panel._tryit_status.cget("text")
+
+    _modes_select(panel, app.root, "charlie")
+    assert panel._on_start_now() == ["RIG", "modes/tryit.sh", "start", "1"]
+    assert _wait_for(lambda: "start CHARLIE (slot 1)" in panel._tryit_status.cget("text"),
+                     app.root)
+    # an edit while Try it's OWN launch is up (the window's wiring: a matching run id) is
+    # pushed into the slot the game has
+    panel.v["seconds"].set("9")
+    panel.save_now()
+    assert _wait_for(lambda: any(c[2] == "push" for c in ran), app.root)
+    assert [c[-1] for c in ran if c[2] == "push"] == ["1"]
+    assert _wait_for(lambda: "CHARLIE updated in the running game"
+                     in panel._tryit_status.cget("text"), app.root)
+
+    # a mode opened from ANOTHER project is not in the game either
+    other = tmp_path / "other"
+    other.mkdir()
+    MP.new_mode(str(other), "ALPHA", MP.ModeSpec(name="ALPHA", screen=False, clip="none"))
+    w.write_assets_var.set(str(other))
+    app.root.update()
+    _modes_select(panel, app.root, "alpha")
+    n = len(ran)
+    assert panel._on_start_now() is None and len(ran) == n
+    assert "another project's modes" in panel._tryit_status.cget("text")
+    w.write_assets_var.set(str(project))
+    app.root.update()
+
+    # the Emulate tab launched again (its own Start, no modes): the record is forgotten
+    launch[0] = 8
+    _modes_select(panel, app.root, "alpha")
+    assert panel._on_start_now() is None and len(ran) == n
+    assert "not started by Try it" in panel._tryit_status.cget("text")
+    assert panel._tryit_live is None
+    assert panel._on_end_now() is None and len(ran) == n
+    panel.v["seconds"].set("9")
+    panel.save_now()
+    app.root.update()
+    assert len(ran) == n                                     # nothing pushed
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_logs_from_the_start_worker_on_the_main_loop(app, tmp_path, monkeypatch):
+    """Try it's preparation runs on the Emulate tab's start WORKER, and the app's log is a
+    Tk Text widget (Tk may only be touched from the main loop): every line the preparation
+    and the rig commands log reaches the log ON THE MAIN THREAD, in order, while the tab's
+    own watch runs - never from the worker."""
+    import threading
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    MP.new_mode(str(project), "QUIET", MP.ModeSpec(name="QUIET", screen=False, clip="none"))
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran, logged, result = [], [], []
+    _fake_rig(panel, ran)
+    panel._tryit_base = str(tmp_path / "try")
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 32)
+    # the Emulate tab's launch_with, as it behaves: the preparation on a worker thread
+    panel._try_fn = lambda prepare: threading.Thread(
+        target=lambda: result.append(prepare(str(card))), daemon=True).start() or True
+    panel._running_fn = lambda: True
+    monkeypatch.setattr(panel, "_log", lambda msg: logged.append(
+        (msg, threading.current_thread() is threading.main_thread())))
+    monkeypatch.setattr(MT, "card_title", lambda card: ("godzilla_pro", "1.15.0", 2))
+    from tests.test_stern_mode_tryit import _writes_builder
+    _writes_builder(monkeypatch, [])
+    assert panel._on_try() is True
+    assert _wait_for(lambda: result and any("ready" in m for m, _t in logged), app.root, 20)
+    assert result == [panel.tryit_env()] and ran and ran[-1][2] == "install"
+    said = [m for m, _t in logged]
+    built = [m for m in said                                # build_set's own log, on the worker
+             if "Try it: building the" in m and "Emulate tab" not in m]
+    assert built, said
+    assert said.index([m for m in said if "ready" in m][0]) > said.index(built[0])
+    # ...and a rig command's answer, from the tab's own thread
+    assert panel._on_end_now() == ["RIG", "modes/tryit.sh", "stop"]
+    assert _wait_for(lambda: any("asked the game to end" in m for m, _t in logged), app.root)
+    assert all(on_main for _m, on_main in logged), [m for m, t in logged if not t]
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_runs_a_project_of_code_modes_only(app, tmp_path, monkeypatch):
+    """A project whose only mode is a CODE mode (New code mode, nothing in the form) can
+    Try it: no set (no screens or clips to build), only the object compiled from it, the
+    card's port, and PAD_MODE_SO. A card the SDK has no port for is refused."""
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    MT.new_code_mode(str(project), "Blitz")
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran, handed = [], []
+    _fake_rig(panel, ran)
+    panel._tryit_base = str(tmp_path / "try")
+    panel._try_fn = lambda prepare: handed.append(prepare) or True
+    running = [False]
+    panel._running_fn = lambda: running[0]
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 32)
+    monkeypatch.setattr(MT, "card_title", lambda c: ("nosuch_pro", "9.9.0", 0))
+    assert panel._on_try() is True and not ran
+    assert handed[0](str(card)) is None and not ran
+    assert "no port for nosuch_pro 9.9.0" in panel._tryit_status.cget("text")
+
+    monkeypatch.setattr(MT, "card_title", lambda c: ("godzilla_pro", "1.15.0", 0))
+    assert panel._on_try() is True
+    assert handed[-1](str(card)) == ["PAD_MODE_SO=/lib/pad_mode.so"]
+    assert [c[1] for c in ran] == ["modes/sdk/build_mode.sh", "modes/tryit.sh"]
+    assert ran[0][-2].endswith("blitz/blitz.c") and ran[1][2] == "install"
+    stage = MT.stage_dir(panel._tryit_base)
+    assert os.listdir(stage) == ["game.port"]          # the object is the compiler's to make
+    assert not os.path.isdir(MT.set_dir(panel._tryit_base))
+    assert "Code mode(s) built in: blitz" in panel._tryit_status.cget("text")
+    assert "carries them the same way" in panel._tryit_status.cget("text")
+    running[0] = True
+    # End mode reaches the code mode by ITS trigger (a code mode never reads mode.stop)
+    assert panel._on_end_now() == ["RIG", "modes/tryit.sh", "stop", "blitz"]
+    assert _wait_for(lambda: len(ran) >= 3, app.root)
+    assert _wait_for(lambda: "end the code mode(s) blitz." in panel._tryit_status.cget("text"),
+                     app.root)
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_without_screens_or_clips_takes_no_override_set(
+        app, tmp_path, monkeypatch):
+    """Item 127 (2026-09-17): a set that holds no file of the TITLE - with Write's code
+    (item 149), one whose only file is the manifest beside the title, as Jaws' is -
+    is refused by run_game.sh ("nothing in this set belongs to the title being booted",
+    exit 1), and the game never started. Such a project, alone or beside a code mode,
+    hands the launch PAD_MODE_SO and no PAD_OVERRIDE_DIR, and its mode files still reach
+    the rig."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    from tests.test_stern_mode_tryit import _writes_builder
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    monkeypatch.setattr(MT, "card_title", lambda card: ("godzilla_pro", "1.15.0", 2))
+    _writes_builder(monkeypatch, [], files=["spk/index/godzilla_pro-1_15_0.sidx"])
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 32)
+    for with_code in (False, True):
+        kind = "code" if with_code else "form"
+        project = tmp_path / ("proj_" + kind)
+        project.mkdir()
+        for name in ("QUIET", "HUSH"):
+            MP.new_mode(str(project), name, MP.ModeSpec(name=name, screen=False, clip="none"))
+        if with_code:
+            MT.new_code_mode(str(project), "Blitz")
+        w.write_assets_var.set(str(project))
+        app.root.update()
+        panel = w._modes_panel
+        ran, handed = [], []
+        _fake_rig(panel, ran)
+        panel._tryit_base = str(tmp_path / ("try_" + kind))
+        panel._try_fn = lambda prepare, handed=handed: handed.append(prepare) or True
+        try:
+            assert panel._on_try() is True and not ran
+            env = handed[0](str(card))                      # what the start worker does
+            assert env == ["PAD_MODE_SO=/lib/pad_mode.so"], (kind, env)
+            # the set on disk really holds no file of the title...
+            sdir = MT.set_dir(panel._tryit_base)
+            held = sorted(os.path.relpath(os.path.join(d, n), sdir).replace(os.sep, "/")
+                          for d, _dirs, names in os.walk(sdir) for n in names)
+            assert held == ["spk/index/godzilla_pro-1_15_0.sidx"], (kind, held)
+            # ...and the modes still reach the rig: compiled (a code mode), then installed
+            assert [c[1] for c in ran] == (["modes/sdk/build_mode.sh"] if with_code else []) \
+                + ["modes/tryit.sh"], (kind, ran)
+            assert ran[-1][2] == "install"
+            assert {"mode.cfg", "mode1.cfg", "game.port"} <= set(
+                os.listdir(MT.stage_dir(panel._tryit_base)))
+            assert panel._tryit_live["slots"] == {"hush": 0, "quiet": 1}
+            assert panel._tryit_live["codes"] == (["blitz"] if with_code else [])
+            assert "2 mode(s) ready" in panel._tryit_status.cget("text")
+        finally:
+            panel._tryit_working = False      # ends the status watch the hand-off started
+            app.root.update()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_with_game_files_in_the_set_still_binds_it(app, tmp_path, monkeypatch):
+    """The other side of the fix above: when the build DOES make a file of the title (a
+    mode's screen puts the HUD scene in the set), the launch binds the set with
+    PAD_OVERRIDE_DIR as before. Write's builder is stood in for with that scene file in its
+    set, so this needs neither the stock HUD scene nor ffmpeg."""
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    from tests.test_stern_mode_tryit import _writes_builder
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    MP.new_mode(str(project), "LOUD", MP.ModeSpec(name="LOUD", screen=False, clip="none"))
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran, handed = [], []
+    _fake_rig(panel, ran)
+    panel._tryit_base = str(tmp_path / "try")
+    panel._try_fn = lambda prepare: handed.append(prepare) or True
+    monkeypatch.setattr(MT, "card_title", lambda card: ("godzilla_pro", "1.15.0", 2))
+    hud_rel = "%s/%s/scene.radium" % (MA.LCD, MP.GODZILLA_PRO_1_15.hud_scene)
+    _writes_builder(monkeypatch, [], files=["godzilla_pro/" + hud_rel,
+                                            "spk/index/godzilla_pro-1_15_0.sidx"])
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 32)
+    try:
+        assert panel._on_try() is True
+        env = handed[0](str(card))
+        assert env == panel.tryit_env()
+        assert env[0].startswith("PAD_OVERRIDE_DIR=") and env[0].endswith("/try/set")
+        assert os.path.isfile(os.path.join(MT.set_dir(panel._tryit_base), "godzilla_pro",
+                                           *hud_rel.split("/")))
+        assert ran and ran[-1][2] == "install"
+    finally:
+        panel._tryit_working = False
+        app.root.update()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_open_sdk_doc_falls_back_to_plain_text(app, tmp_path, monkeypatch):
+    """Open MODE_SDK.md on a Windows PC with no .md association: os.startfile raises "No
+    application is associated", and the tab only said "could not open". MODE_SDK.md and a
+    code mode's .c are plain text: Notepad opens them on Windows, the web browser elsewhere,
+    and only when that fails too does the tab say it could not open the file."""
+    import webbrowser
+    from pinball_decryptor.gui import modes_tab
+
+    _no_wsl(monkeypatch)
+    panel = app.window._modes_panel
+    doc = panel.sdk_doc()
+    tries = []
+
+    def no_association(path):
+        tries.append(path)
+        raise OSError(1155, "No application is associated with the specified file")
+    panel._opener = no_association
+    started = []
+    monkeypatch.setattr(modes_tab.subprocess, "Popen", lambda argv, **kw: started.append(argv))
+    monkeypatch.setattr(panel, "_platform", "win32")
+    panel.open_sdk_doc()
+    assert tries == [doc] and started == [["notepad.exe", doc]]
+    assert "opened MODE_SDK.md in Notepad" in panel._tryit_status.cget("text")
+
+    # elsewhere, the web browser, by a file URI
+    browsed = []
+    monkeypatch.setattr(webbrowser, "open", lambda url, *a, **kw: browsed.append(url) or True)
+    monkeypatch.setattr(panel, "_platform", "linux")
+    panel.open_sdk_doc()
+    assert len(browsed) == 1 and browsed[0].startswith("file:")
+    assert browsed[0].endswith("/MODE_SDK.md") and len(started) == 1
+    assert "MODE_SDK.md in the web browser" in panel._tryit_status.cget("text")
+
+    # when the fallback fails too, it says it could not open the file
+    def no_notepad(argv, **kw):
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+    monkeypatch.setattr(modes_tab.subprocess, "Popen", no_notepad)
+    monkeypatch.setattr(panel, "_platform", "win32")
+    panel.open_sdk_doc()
+    assert "could not open %s" % doc in panel._tryit_status.cget("text")
+
+    # an opener that works needs no fallback
+    opened = []
+    panel._opener = opened.append
+    monkeypatch.setattr(modes_tab.subprocess, "Popen", lambda argv, **kw: started.append(argv))
+    panel.open_sdk_doc()
+    assert opened == [doc] and len(started) == 1
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_runs_on_the_projects_own_card(app, tmp_path, monkeypatch):
+    """Item 127 with item 148: a project made from a Premium/LE 1.16 card whose modes were
+    saved as Pro 1.15 (David's own project is exactly this). Try it used to refuse that card
+    and, on a Pro 1.15 card, staged Pro's port while the build inside went to LE. Now the
+    run takes the project's card: LE 1.16's port and masks in the stage, pressing Try it on
+    an unedited mode leaves its mode.json as it was (only an edit is saved), and an edit
+    while the game runs pushes LE's masks without claiming its screen waits for the next
+    Try it."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw",
+                                  "1.16.0")
+    shots = ["Shield target right"]
+    slug, _spec = MP.new_mode(str(project), "QUIET", MP.ModeSpec(
+        name="QUIET", screen=False, clip="none", scoring_shots=shots))
+    mode_json = project / "modes" / slug / "mode.json"
+    saved = mode_json.read_bytes()
+    le = MP.profile_for_card("godzilla_le", "1.16.0")
+    assert le.mask(shots) != MP.GODZILLA_PRO_1_15.mask(shots)
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    assert panel._spec.title == le.key                      # the form shows the card's title
+    ran, handed = [], []
+    _fake_rig(panel, ran)
+    panel._tryit_base = str(tmp_path / "try")
+    panel._try_fn = lambda prepare: handed.append(prepare) or True
+    running = [False]
+    panel._running_fn = lambda: running[0]
+    monkeypatch.setattr(MT, "card_title", lambda card: ("godzilla_le", "1.16.0", 2))
+    from tests.test_stern_mode_tryit import _writes_builder
+    _writes_builder(monkeypatch, [])
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 32)
+    try:
+        assert panel._on_try() is True
+        assert mode_json.read_bytes() == saved              # no edit, nothing saved
+        env = handed[0](str(card))
+        assert env == panel.tryit_env(), panel._tryit_status.cget("text")
+        stage = MT.stage_dir(panel._tryit_base)
+        with open(os.path.join(stage, "game.port"), "rb") as a, open(MP.port_path(le), "rb") as b:
+            assert a.read() == b.read()
+        cfg = open(os.path.join(stage, "mode.cfg"), encoding="utf-8").read()
+        assert "shots          0x%08x" % le.mask(shots) in cfg
+        assert "1 mode(s) ready" in panel._tryit_status.cget("text")
+        assert mode_json.read_bytes() == saved
+        # while the game runs, an edit pushes LE's masks, and nothing waits for the next Try it
+        running[0] = True
+        panel.v["seconds"].set("9")
+        panel.save_now()
+        assert _wait_for(lambda: any(c[2] == "push" for c in ran), app.root)
+        pushed = open(os.path.join(stage, "push", "mode.cfg"), encoding="utf-8").read()
+        assert "seconds        9" in pushed and "shots          0x%08x" % le.mask(shots) in pushed
+        assert _wait_for(lambda: "updated in the running game" in panel._tryit_status.cget("text"),
+                         app.root)
+        assert "next Try it" not in panel._tryit_status.cget("text")
+        # a sound of its own is built into the set's sound bank: a change to one waits for
+        # the next Try it, and the tab says so
+        spec = panel.collect()
+        spec.music = "theme.wav"
+        panel._tryit_saved(str(project), slug, spec)
+        assert _wait_for(lambda: "own sounds reaches the game at the next Try it"
+                         in panel._tryit_status.cget("text"), app.root)
+    finally:
+        running[0] = False
+        panel._tryit_working = False
+        app.root.update()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_pushes_keep_the_carriers_writes_set_named(app, tmp_path, monkeypatch):
+    """Item 149 with item 150: Try it's set is Write's, so a mode's own start sound is in its
+    sound bank on a carrier request, and the stage's mode file names it. The ready line does
+    not call that sound left out, and an edit pushed while the game runs keeps naming the
+    carrier (a push without it would silence the sound the set carries)."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    from tests.test_stern_mode_tryit import _writes_builder
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    slug, spec = MP.new_mode(str(project), "QUIET", MP.ModeSpec(name="QUIET", screen=False,
+                                                                 clip="none"))
+    folder = MP.mode_folder(str(project), slug)
+    with open(os.path.join(folder, "go.wav"), "wb") as f:
+        f.write(b"RIFF")
+    spec.sound_start = "go.wav"
+    MP.save(str(project), slug, spec)
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran, handed = [], []
+    _fake_rig(panel, ran)
+    panel._tryit_base = str(tmp_path / "try")
+    panel._try_fn = lambda prepare: handed.append(prepare) or True
+    running = [False]
+    panel._running_fn = lambda: running[0]
+    monkeypatch.setattr(MT, "card_title", lambda card: ("godzilla_pro", "1.15.0", 2))
+    carried = {slug: {"requests": {"sound_start": 1251}, "ms": {"sound_start": 480}}}
+    _writes_builder(monkeypatch, [], own_sounds=carried)
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 32)
+    try:
+        assert panel._on_try() is True
+        assert handed[0](str(card)) == panel.tryit_env()
+        status = panel._tryit_status.cget("text")
+        assert "1 mode(s) ready (QUIET)" in status and "not in this run" not in status, status
+        stage = MT.stage_dir(panel._tryit_base)
+        assert "sound_start    1251 480" in open(os.path.join(stage, "mode.cfg"),
+                                                 encoding="utf-8").read()
+        running[0] = True
+        panel.v["seconds"].set("9")
+        panel.save_now()
+        assert _wait_for(lambda: any(c[2] == "push" for c in ran), app.root)
+        pushed = open(os.path.join(stage, "push", "mode.cfg"), encoding="utf-8").read()
+        assert "seconds        9" in pushed and "sound_start    1251 480" in pushed
+    finally:
+        running[0] = False
+        panel._tryit_working = False
+        app.root.update()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_runs_a_tmnt_pro_project(app, tmp_path, monkeypatch):
+    """Item 127 with item 148: TMNT Pro 1.59's port names no HUD scene, and Try it read one
+    anyway (``/turtles_pro/assets/lcd/auto_loaded//scene.radium``), so every form mode on
+    TMNT Pro and Deadpool was refused while a Write build of it succeeded. Try it's own
+    check runs here against a stand-in card and reads no scene; Write's builder (stood in
+    for; tests/test_stern_mode_tryit runs the real one on the real TMNT card) gives the run
+    TMNT's port and TMNT's masks, and the set with its patched game program."""
+    from pinball_decryptor.plugins.stern import explorer
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    tmnt = MP.profile("turtles_pro_1_59")
+    project = _modes_card_project(tmp_path, "turtles_pro-1_59_0.Release.8G.sdcard.raw", "1.59.0")
+    shots = ["Left ramp", "Right ramp"]
+    slug, _spec = MP.new_mode(str(project), "SHELL SHOCK", MP.ModeSpec(
+        name="SHELL SHOCK", title=tmnt.key, start_shot="Center loop", scoring_shots=shots,
+        screen=False, clip="none"))
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    ran, handed, reads = [], [], []
+    _fake_rig(panel, ran)
+    panel._tryit_base = str(tmp_path / "try")
+    panel._try_fn = lambda prepare: handed.append(prepare) or True
+
+    class Card:
+        def __init__(self, path):
+            reads.append(path)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def preview(self, part, path, cap=None):
+            reads.append(path)
+            return None
+    monkeypatch.setattr(explorer, "CardImage", Card)
+    monkeypatch.setattr(MT, "card_title", lambda card: ("turtles_pro", "1.59.0", 3))
+    from tests.test_stern_mode_tryit import _writes_builder
+    _writes_builder(monkeypatch, [])
+    card = tmp_path / "turtles.raw"
+    card.write_bytes(b"\0" * 32)
+    try:
+        assert panel._on_try() is True and not ran
+        env = handed[0](str(card))
+        status = panel._tryit_status.cget("text")
+        assert env == panel.tryit_env(), status
+        assert reads == [] and "scene.radium" not in status
+        assert "1 mode(s) ready (SHELL SHOCK)" in status
+        assert len(ran) == 1 and ran[0][:3] == ["RIG", "modes/tryit.sh", "install"]
+        stage = MT.stage_dir(panel._tryit_base)
+        with open(os.path.join(stage, "game.port"), "rb") as a, open(MP.port_path(tmnt), "rb") as b:
+            assert a.read() == b.read()
+        cfg = open(os.path.join(stage, "mode.cfg"), encoding="utf-8").read()
+        assert "shots          0x%08x" % tmnt.mask(shots) in cfg
+        assert panel._tryit_live["slots"] == {slug: 0}
+    finally:
+        panel._tryit_working = False
+        app.root.update()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_try_it_without_a_card_names_the_projects_own_card(app, tmp_path, monkeypatch):
+    """With no card picked in the Emulate tab, Try it says which card to pick: the
+    PROJECT'S card (item 148), not the title its modes were first saved for."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    _no_wsl(monkeypatch)
+    w = app.window
+    cases = (("godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0", MP.GODZILLA_PRO_1_15.key,
+              "Godzilla Premium/LE 1.16"),
+             ("turtles_pro-1_59_0.Release.8G.sdcard.raw", "1.59.0", "turtles_pro_1_59",
+              "TMNT Pro 1.59"))
+    for n, (card_name, version, saved_as, label) in enumerate(cases):
+        project = _modes_card_project(tmp_path, card_name, version, folder="proj%d" % n)
+        MP.new_mode(str(project), "QUIET", MP.ModeSpec(
+            name="QUIET", title=saved_as, start_shot="Left ramp", scoring_shots=["Left ramp"],
+            screen=False, clip="none"))
+        w.write_assets_var.set(str(project))
+        app.root.update()
+        panel = w._modes_panel
+        ran, handed = [], []
+        _fake_rig(panel, ran)
+        panel._tryit_base = str(tmp_path / ("try%d" % n))
+        panel._try_fn = lambda prepare, handed=handed: handed.append(prepare) or True
+        try:
+            assert panel._on_try() is True
+            assert handed[0](str(tmp_path / "no_card_picked.raw")) is None
+            status = panel._tryit_status.cget("text")
+            assert "pick a card image in the Emulate tab first (a %s card)" % label in status, status
+            assert not ran
+        finally:
+            panel._tryit_working = False
+            app.root.update()
+
+
+def _modes_card_project(tmp_path, card_name, card_version=None, folder="proj"):
+    """A project folder whose extract record names ``card_name`` (item 148)."""
+    import json
+    project = tmp_path / folder
+    project.mkdir()
+    rec = {"input_path": "D:\\cards\\" + card_name, "input_name": card_name, "size": 1, "mtime": 1}
+    if card_version:
+        rec["card_version"] = card_version
+    (project / ".extract_source.json").write_text(json.dumps(rec), encoding="utf-8")
+    return project
+
+
+def _modes_widgets(widget, kinds):
+    out = []
+    for child in widget.winfo_children():
+        if isinstance(child, kinds):
+            out.append(child)
+        out.extend(_modes_widgets(child, kinds))
+    return out
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_cannot(app, tmp_path):
+    """Item 148: a project on a TMNT Pro 1.59 card offers TMNT's 17 shots from its port,
+    greys Lights, Screen and Clip and the countdown WITH the reason in words, and New
+    makes a mode whose runtime file carries TMNT's own masks and no line TMNT cannot do."""
+    from tkinter import ttk
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    tmnt = MP.profile("turtles_pro_1_59")
+    project = _modes_card_project(tmp_path, "turtles_pro-1_59_0.Release.8G.sdcard.raw", "1.59.0")
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    names = [n for n, _m in tmnt.shots]
+    assert len(names) == 17
+    assert list(panel._shot_vars) == names
+    assert len(_modes_widgets(panel._shots_box, ttk.Checkbutton)) == 17
+    assert list(panel._start_combo.cget("values")) == names
+    title = panel._title_label.cget("text")
+    assert "TMNT Pro 1.59" in title and "turtles_pro-1.59.port" in title and "17 shots" in title
+    assert panel._ex_menu.index("end") == 0 and panel._ex_menu.entrycget(0, "label") == "TARGET RUSH"
+    assert str(panel._new_btn.cget("state")) == "normal"
+
+    slug = panel.new_mode()
+    app.root.update()
+    assert "Ready to build" in panel._status.cget("text")
+    for part, box in (("lights", panel._lights_box), ("screen", panel._screen_box),
+                      ("clip", panel._clip_box)):
+        reason = panel._reason_labels[part]
+        assert reason.grid_info() and "Not on this game" in reason.cget("text")
+        assert tmnt.why_not(part) in reason.cget("text")
+        live = [f for f in _modes_widgets(box, panel._INTERACTIVE) if str(f.cget("state")) != "disabled"]
+        assert not live, "%s left live on TMNT" % part
+        assert str(reason.cget("state")) != "disabled"          # the reason itself is legible
+    assert panel._countdown_chk.instate(["disabled"]) and panel._own_sound_radio.instate(["disabled"])
+    assert "countdown" in panel._reason_labels["sound"].cget("text")
+    assert not any(f.instate(["disabled"]) for f in _modes_widgets(panel._shots_box, ttk.Checkbutton))
+
+    spec = MP.load(str(project / "modes" / slug / "mode.json"))
+    assert spec.title == "turtles_pro_1_59" and spec.start_shot == "Center loop"
+    cfg = MP.runtime_cfg(spec, slug)
+    assert "trigger        0x00000080 3" in cfg                  # Center loop x3, TMNT's bit
+    assert "shots          0x00000210" in cfg                    # Left ramp + Right ramp on TMNT
+    for gone in ("screen_scene", "clip_start", "light_on", "callout_count", "callout_end"):
+        assert gone not in cfg
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_premium_1_16_project_offers_godzillas_names(app, tmp_path):
+    """The machine's card, Godzilla Premium 1.16 (a godzilla_le card): Godzilla's names
+    including its third shield target, KAIJU RUSH under Examples, nothing greyed."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    project = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    names = list(panel._shot_vars)
+    assert len(names) == 18 and "Shield target center" in names and "Maser target" in names
+    assert "Godzilla Premium/LE 1.16" in panel._title_label.cget("text")
+    assert panel._ex_menu.entrycget(0, "label") == "KAIJU RUSH"
+    panel._on_title_example("KAIJU RUSH")
+    app.root.update()
+    assert "Ready to build" in panel._status.cget("text")
+    assert not any(lb.grid_info() for lb in panel._reason_labels.values())
+    assert not panel._lights_box.winfo_children()[0].instate(["disabled"])
+    spec = MP.load(str(project / "modes" / "kaiju_rush" / "mode.json"))
+    assert spec.title == "godzilla_le_1_16"
+    assert "0x08000000 3" in MP.runtime_cfg(spec, "kaiju_rush")
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_card_with_no_port_points_at_making_a_port(app, tmp_path):
+    """Godzilla Pro 1.16 has no port: the tab says so, names MODE_SDK.md's "Making a
+    port", and New and Examples are off."""
+    project = _modes_card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    note = panel._title_note.cget("text")
+    assert "MODE_SDK.md" in note and "Making a port for another game or version" in note
+    assert "Godzilla Pro 1.16.0" in note
+    assert str(panel._new_btn.cget("state")) == "disabled"
+    assert str(panel._ex_btn.cget("state")) == "disabled"
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_jaws_greys_lights_and_screen_and_a_godzilla_mode_is_retargeted(app, tmp_path):
+    """Jaws LE 1.02 can count down and add a clip (an added clip played in item 148's run2)
+    but has no lights and no measured HUD; its 27 shots go in three columns. A Godzilla mode already in the project is matched
+    by name: the shots Jaws lacks are dropped and the log says which."""
+    from tkinter import ttk
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    project = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0")
+    MP.new_mode(str(project), spec=MP.example("KAIJU RUSH"))
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    assert len(_modes_widgets(panel._shots_box, ttk.Checkbutton)) == 27
+    assert max(int(c.grid_info()["column"]) for c in panel._shots_box.winfo_children()) == 2
+    for part in ("lights", "screen"):
+        assert panel._reason_labels[part].grid_info()
+    assert "clip" not in panel._reason_labels or not panel._reason_labels["clip"].grid_info()
+    assert not panel._countdown_chk.instate(["disabled"])
+    assert panel.v["start_shot"].get() == "Chum bucket target"
+    assert [n for n, var in panel._shot_vars.items() if var.get()] == ["Left ramp", "Right ramp"]
+    status = panel._status.cget("text")
+    assert "Maser target is not a shot on Jaws LE 1.02, so it starts on Chum bucket target until you pick one" in status
+    assert "Powerline left, Powerline center, Powerline right are not on Jaws LE 1.02" in status
+    assert status.startswith("Ready to build once saved") and "its file is unchanged" in status
+    # the countdown stays live on Jaws, and says its callouts have not been heard
+    unheard = panel._reason_labels["sound_unheard"]
+    assert unheard.grid_info() and "not been heard yet" in unheard.cget("text")
+    panel.v["award"].set("1,500,000")                  # an edit: now the card's shots are saved
+    panel.save_now()
+    spec = MP.load(str(project / "modes" / "kaiju_rush" / "mode.json"))
+    assert spec.title == "jaws_le_1_02" and spec.scoring_shots == ["Left ramp", "Right ramp"]
+    assert spec.start_shot == "Chum bucket target" and spec.award == 1500000
+    assert panel._status.cget("text").startswith("Ready to build.")
+    assert "Its file now has this card's shots" in panel._status.cget("text")
+    log = w._log_text.get("1.0", "end") if getattr(w, "_log_text", None) is not None else ""
+    if log.strip():
+        assert "Powerline left" in log and "Jaws LE 1.02" in log
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_bare_project_keeps_godzilla_pro_1_15(app, tmp_path):
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    project = tmp_path / "bare"
+    project.mkdir()
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    assert list(panel._shot_vars) == [n for n, _m in MP.GODZILLA_PRO_1_15.shots]
+    assert "names no card" in panel._title_label.cget("text")
+    assert panel._title_note.cget("text") == ""
+    assert str(panel._new_btn.cget("state")) == "normal"
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_greys_stacking_and_film_cuts_a_title_cannot_use(app, tmp_path):
+    """Item 148 with items 140 and 142: TMNT Pro 1.59's port names none of the game's own
+    mode queries and cannot use a clip, a screen picture or a sound of the mode's own, so
+    "The game's own modes" and the three film buttons are greyed, each with the reason;
+    Jaws LE 1.02 greys only the picture cut. On the machine's Premium 1.16 card
+    everything stays live."""
+    from tkinter import ttk
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    tmnt = MP.profile("turtles_pro_1_59")
+    project = _modes_card_project(tmp_path, "turtles_pro-1_59_0.Release.8G.sdcard.raw", "1.59.0")
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    assert panel.new_mode()
+    app.root.update()
+    box = panel._stacking_box()
+    assert box is not None and "game's own modes" in str(box.cget("text"))
+    assert all(c.instate(["disabled"]) for c in _modes_widgets(box, ttk.Checkbutton))
+    assert panel._reason_labels["stack"].grid_info()
+    assert tmnt.why_not("stack") in panel._reason_labels["stack"].cget("text")
+    assert all(str(b.cget("state")) == "disabled" for b in panel._film_btns.values())
+    film = panel._reason_labels["film"].cget("text")
+    assert "a clip, a picture for the screen or a sound" in film and "TMNT Pro 1.59" in film
+    # item 147's events: TMNT's port names none, so "An event" is greyed with the reason
+    ev = panel._reason_labels["events"]
+    assert ev.grid_info() and tmnt.why_not("events") in ev.cget("text")
+    assert all(c.instate(["disabled"]) for c in _modes_widgets(ev.master, ttk.Combobox))
+    assert sorted(str(r.cget("value")) for r in _modes_widgets(ev.master, ttk.Radiobutton)
+                  if not r.instate(["disabled"])) == ["clock", "drain", "shot"]
+
+    jaws = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0", folder="jaws")
+    w.write_assets_var.set(str(jaws))
+    app.root.update()
+    assert panel.new_mode()
+    app.root.update()
+    assert {t: str(b.cget("state")) for t, b in panel._film_btns.items()} == {
+        "clip": "normal", "still": "disabled", "sound": "normal"}
+    assert "cutting a picture for the screen from a film" in panel._reason_labels["film"].cget("text")
+
+    premium = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0",
+                                  folder="prem")
+    w.write_assets_var.set(str(premium))
+    app.root.update()
+    assert panel.new_mode()
+    app.root.update()
+    assert not any(c.instate(["disabled"]) for c in _modes_widgets(panel._stacking_box(), ttk.Checkbutton))
+    assert not panel._reason_labels["stack"].grid_info()
+    assert all(str(b.cget("state")) == "normal" for b in panel._film_btns.values())
+    assert not panel._reason_labels["film"].grid_info()
+    assert not panel._reason_labels["events"].grid_info()
+    assert not any(r.instate(["disabled"]) for r in _modes_widgets(panel._reason_labels["events"].master,
+                                                                   ttk.Radiobutton))
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_no_port_card_after_another_title_never_rewrites_a_modes_shots(app, tmp_path):
+    """Item 148: after a TMNT project, a project on a card with no port (Godzilla Pro 1.16)
+    that already holds Godzilla modes shows each mode with the shots of the title it was
+    made for - never TMNT's - read-only, and nothing it does rewrites mode.json. A no-port
+    project with no modes shows no shot names at all."""
+    from tkinter import ttk
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    tmnt = _modes_card_project(tmp_path, "turtles_pro-1_59_0.Release.8G.sdcard.raw", "1.59.0")
+    gz116 = _modes_card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0",
+                                folder="gz116")
+    for name, spec in MP.example_specs()[:2]:
+        MP.new_mode(str(gz116), name, spec)
+    files = {slug: (gz116 / "modes" / slug / "mode.json").read_bytes()
+             for slug, _s in MP.list_modes(str(gz116))[0]}
+    w = app.window
+    w.write_assets_var.set(str(tmnt))
+    app.root.update()
+    panel = w._modes_panel
+    assert panel.new_mode()
+    app.root.update()
+    assert "Center loop" in panel._shot_vars
+
+    w.write_assets_var.set(str(gz116))
+    app.root.update()
+    pro = [n for n, _m in MP.GODZILLA_PRO_1_15.shots]
+    assert list(panel._shot_vars) == pro and "Center loop" not in panel._shot_vars
+    assert list(panel._start_combo.cget("values")) == pro
+    assert panel._spec.name == "ATOMIC BREATH"                  # slug order: atomic_breath first
+    assert sorted(n for n, var in panel._shot_vars.items() if var.get()) == sorted(MP.example("ATOMIC BREATH").scoring_shots)
+    live =[c for c in _modes_widgets(panel._editor, panel._INTERACTIVE) if str(c.cget("state")) != "disabled"]
+    assert not live, "a mode on a card with no port is shown read-only"
+    assert str(panel._del_btn.cget("state")) == "normal"
+    assert "read-only" in panel._status.cget("text")
+    panel.v["award"].set("2,000,000")                       # even a change made in code
+    panel.save_now()
+    panel._list.selection_clear(0, "end")                  # and moving between modes
+    panel._list.selection_set(1)
+    panel._on_select()
+    app.root.update()
+    assert panel._spec.name == "KAIJU RUSH"
+    assert sorted(n for n, var in panel._shot_vars.items() if var.get()) == sorted(MP.example("KAIJU RUSH").scoring_shots)
+    panel.save_now()
+    assert {slug: (gz116 / "modes" / slug / "mode.json").read_bytes() for slug in files} == files
+
+    jaws = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0", folder="jaws")
+    w.write_assets_var.set(str(jaws))
+    app.root.update()
+    assert len(panel._shot_vars) == 27
+    empty = _modes_card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0",
+                                folder="empty")
+    w.write_assets_var.set(str(empty))
+    app.root.update()
+    assert panel._shot_vars == {} and not _modes_widgets(panel._shots_box, ttk.Checkbutton)
+    assert list(panel._start_combo.cget("values")) == [] and panel.v["start_shot"].get() == ""
+    assert str(panel._new_btn.cget("state")) == "disabled"
+    # and a disabled button LOOKS disabled, in both themes (it drew like a live one in dark)
+    from pinball_decryptor.gui.theme import THEMES
+    style = ttk.Style()
+    before = w._current_theme
+    try:
+        for theme in ("dark", "light"):
+            w._apply_theme(theme)
+            assert style.lookup("TButton", "foreground", ["disabled"]) == THEMES[theme]["gray"]
+            assert style.lookup("TButton", "foreground") == THEMES[theme]["fg"]
+    finally:
+        w._apply_theme(before)
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_renamed_card_is_read_only_until_its_game_is_read(app, tmp_path, monkeypatch):
+    """Item 148: while a renamed card's game is read off the UI thread, its project's mode is
+    shown on its own title, read-only, and nothing is saved; once the card answers, the mode
+    is on the card's port and editable. A card file that goes away mid-read stops the wait."""
+    import json
+    import threading
+    import time
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    def project(folder, image):
+        p = tmp_path / folder
+        p.mkdir()
+        rec = {"input_path": str(image), "input_name": image.name, "size": 1, "mtime": 1,
+               "card_version": "1.16.0"}
+        (p / ".extract_source.json").write_text(json.dumps(rec), encoding="utf-8")
+        return p
+
+    def pump(until, seconds=8):
+        end = time.time() + seconds
+        while time.time() < end and not until():
+            app.root.update()
+            time.sleep(0.05)
+        return until()
+
+    go = threading.Event()
+
+    def probe(path):
+        go.wait(15)
+        try:
+            MP._PROBED[MP._probe_key(path)] = ("godzilla_le", "1.16.0")
+        except OSError:
+            return None, None
+        return "godzilla_le", "1.16.0"
+
+    monkeypatch.setattr(MP, "_PROBED", {})
+    monkeypatch.setattr(MP, "probe_card_title", probe)
+    image = tmp_path / "my card.raw"
+    image.write_bytes(b"\0" * 1024)
+    proj = project("proj", image)
+    MP.new_mode(str(proj), spec=MP.example("KAIJU RUSH"))
+    saved = (proj / "modes" / "kaiju_rush" / "mode.json").read_bytes()
+    w = app.window
+    panel = w._modes_panel
+    try:
+        w.write_assets_var.set(str(proj))
+        app.root.update()
+        assert "Reading which game" in panel._title_label.cget("text")
+        assert list(panel._shot_vars) == [n for n, _m in MP.GODZILLA_PRO_1_15.shots]
+        live = [c for c in _modes_widgets(panel._editor, panel._INTERACTIVE) if str(c.cget("state")) != "disabled"]
+        assert not live
+        panel.v["award"].set("5")
+        panel.save_now()
+        assert (proj / "modes" / "kaiju_rush" / "mode.json").read_bytes() == saved
+        go.set()
+        assert pump(lambda: "Premium/LE 1.16" in panel._title_label.cget("text"))
+        assert len(panel._shot_vars) == 18 and panel._spec.title == "godzilla_le_1_16"
+        assert str(panel._dup_btn.cget("state")) == "normal"
+        assert "read-only" not in panel._status.cget("text")
+    finally:
+        go.set()
+
+    go.clear()
+    gone = tmp_path / "gone card.raw"
+    gone.write_bytes(b"\0" * 1024)
+    w.write_assets_var.set(str(project("gone", gone)))
+    app.root.update()
+    try:
+        assert "Reading which game" in panel._title_label.cget("text")
+        gone.unlink()
+        assert pump(lambda: "could not be read" in panel._title_label.cget("text"))
+        assert str(panel._new_btn.cget("state")) == "normal"
+    finally:
+        go.set()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_bare_project_keeps_a_modes_own_title(app, tmp_path):
+    """Item 148: a project that names no card retargets nothing. A TMNT mode in it is shown
+    with TMNT's shots and saved back as TMNT, while New still makes Godzilla Pro 1.15."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    tmnt = MP.profile("turtles_pro_1_59")
+    project = tmp_path / "bare"
+    project.mkdir()
+    spec = MP.blank_spec(tmnt, "TURTLE RUSH")
+    spec.scoring_shots = ["Left orbit", "Left ramp", "Right top lane"]
+    slug, _s = MP.new_mode(str(project), spec=spec)
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    assert list(panel._shot_vars) == [n for n, _m in tmnt.shots]
+    panel.v["award"].set("123456")
+    panel.save_now()
+    saved = MP.load(str(project / "modes" / slug / "mode.json"))
+    assert saved.title == tmnt.key and saved.scoring_shots == spec.scoring_shots and saved.award == 123456
+    assert panel._ex_menu.entrycget(0, "label") == "KAIJU RUSH"
+    new = panel.new_mode()
+    app.root.update()
+    assert MP.load(str(project / "modes" / new / "mode.json")).title == MP.GODZILLA_PRO_1_15.key
+    assert list(panel._shot_vars) == [n for n, _m in MP.GODZILLA_PRO_1_15.shots]
+
+
+def _modes_pump(app, seconds):
+    """Run the Tk loop long enough for a debounced save (500 ms) to have fired."""
+    import time
+    end = time.time() + seconds
+    while time.time() < end:
+        app.root.update()
+        time.sleep(0.02)
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_opening_a_mode_on_another_titles_card_writes_nothing_until_an_edit(app, tmp_path):
+    """Item 148: opening a mode made for Godzilla Pro 1.15 on a Jaws LE 1.02 card matches
+    its shots by name IN THE FORM only. Moving between modes, pressing New and switching
+    project, with no edit, leave its mode.json byte for byte as it was, so a build still
+    refuses it (MODE_SDK.md: a mode naming a shot the card's game lacks is refused, never
+    built with shots left out). On the machine's Premium 1.16 card a mode saved as Pro 1.15
+    keeps its file too."""
+    import pytest
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    def files(project):
+        return {p.parent.name: p.read_bytes() for p in project.glob("modes/*/mode.json")}
+
+    jaws = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0", folder="jaws")
+    MP.new_mode(str(jaws), spec=MP.example("KAIJU RUSH"))
+    MP.new_mode(str(jaws), spec=MP.example("ATOMIC BREATH"))
+    before = files(jaws)
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    w = app.window
+    panel = w._modes_panel
+    w.write_assets_var.set(str(jaws))
+    app.root.update()
+    assert panel._spec.name == "ATOMIC BREATH" and panel._spec.title == "jaws_le_1_02"   # in the form
+    for i in (1, 0, 1):                                  # between the two modes, no edit
+        panel._list.selection_clear(0, "end")
+        panel._list.selection_set(i)
+        panel._on_select()
+        _modes_pump(app, 0.2)
+    assert panel._spec.name == "KAIJU RUSH" and panel.v["start_shot"].get() == "Chum bucket target"
+    assert "until you pick one" in panel._status.cget("text")
+    w.write_assets_var.set(str(bare))                    # and away, no edit
+    _modes_pump(app, 0.7)
+    assert files(jaws) == before
+    w.write_assets_var.set(str(jaws))
+    app.root.update()
+    new = panel.new_mode()                               # New flushes only an edit
+    _modes_pump(app, 0.7)
+    after = files(jaws)
+    assert set(after) == set(before) | {new} and {k: after[k] for k in before} == before
+    with pytest.raises(MA.ModeAssetError) as e:
+        MA.build(str(jaws), None, None, str(tmp_path / "out"))
+    assert "KAIJU RUSH" in str(e.value) and "Maser target" in str(e.value)
+
+    prem = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0",
+                               folder="prem")
+    MP.new_mode(str(prem), spec=MP.example("KAIJU RUSH"))
+    saved = files(prem)
+    assert MP.load(str(prem / "modes" / "kaiju_rush" / "mode.json")).title == "godzilla_pro_1_15"
+    w.write_assets_var.set(str(prem))
+    app.root.update()
+    assert panel._spec.title == "godzilla_le_1_16"
+    assert "until you pick one" not in panel._status.cget("text")    # every shot is on Premium
+    w.write_assets_var.set(str(bare))
+    _modes_pump(app, 0.7)
+    assert files(prem) == saved
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_advanced_and_the_games_call_follow_the_title(app, tmp_path):
+    """Item 148 with item 141: on TMNT Pro 1.59 the Advanced section's points per shot and
+    its early-ending shot offer TMNT's own 17 shots (they listed Godzilla Pro 1.15's on
+    every game), its callout picks name none (TMNT's port names no countdown or time-up
+    callout), and "The game's own call" is greyed with the reason, since nothing plays when
+    time is up. A TMNT shot's own points are saved as TMNT's mask and shown again when the
+    mode is opened again. A project with no modes shows none of the last mode's values."""
+    from tkinter import ttk
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    tmnt = MP.profile("turtles_pro_1_59")
+    names = [n for n, _m in tmnt.shots]
+    project = _modes_card_project(tmp_path, "turtles_pro-1_59_0.Release.8G.sdcard.raw", "1.59.0")
+    w = app.window
+    panel = w._modes_panel
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    slug = panel.new_mode()
+    app.root.update()
+    assert list(panel._shot_award_vars) == names
+    ends = [c for c in _modes_widgets(panel._params_frame, ttk.Combobox)
+            if str(c.cget("textvariable")) == str(panel.v["end_shot"])]
+    assert len(ends) == 1 and list(ends[0].cget("values")) == [panel.PARAM_NEVER] + names
+    picks = [m for m in _modes_widgets(panel._params_frame, ttk.Menubutton) if str(m.cget("text")) == "Pick"]
+    assert len(picks) == panel.PARAM_CALLOUT_ROWS
+    for pick in picks:
+        menu = pick.nametowidget(pick.cget("menu"))
+        assert menu.index("end") == 0 and "TMNT Pro 1.59" in menu.entrycget(0, "label")
+        assert menu.entrycget(0, "state") == "disabled"
+    game = [r for r in _modes_widgets(panel._sound_box, ttk.Radiobutton) if str(r.cget("value")) == "game"]
+    assert len(game) == 1 and game[0].instate(["disabled"])
+    assert "nothing plays when time is up" in panel._reason_labels["sound"].cget("text")
+    assert not any(e.instate(["disabled"]) for e in _modes_widgets(panel._params_frame, ttk.Entry)
+                   if str(e.cget("textvariable")) == str(panel._shot_award_vars["Left orbit"]))
+    second = [r for r in _modes_widgets(panel._params_frame, ttk.Radiobutton)
+              if str(r.cget("variable")) == str(panel.v["clip_both"])]
+    assert len(second) == 4 and all(r.instate(["disabled"]) for r in second)
+    assert "a second clip" in panel._reason_labels["clip_both"].cget("text")
+
+    panel._shot_award_vars["Left orbit"].set("750000")
+    panel.v["end_shot"].set("Center loop")
+    panel.save_now()
+    spec = MP.load(str(project / "modes" / slug / "mode.json"))
+    assert spec.shot_award == [["Left orbit", 750000]] and spec.end_shot == "Center loop"
+    assert MP.validate(spec) == []
+    cfg = MP.runtime_cfg(spec, slug)
+    assert "shot_award     0x%08x 750000" % tmnt.mask(["Left orbit"]) in cfg
+    assert "end_shot       0x%08x" % tmnt.mask(["Center loop"]) in cfg
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    w.write_assets_var.set(str(empty))
+    app.root.update()
+    assert list(panel._shot_award_vars) == [n for n, _m in MP.GODZILLA_PRO_1_15.shots]
+    for key in ("name", "seconds", "award", "start_shot", "clip_title"):
+        assert panel.v[key].get() == "", key
+    assert not any(var.get() for var in panel._shot_vars.values())
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    assert panel._shot_award_vars["Left orbit"].get() == "750000"      # shown, not kept aside
+    assert panel.v["end_shot"].get() == "Center loop"
+    no_port = _modes_card_project(tmp_path, "godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0",
+                                  folder="noport")
+    w.write_assets_var.set(str(no_port))                # no port, no modes: no shot names anywhere
+    app.root.update()
+    assert panel._shot_award_vars == {} and list(ends[0].cget("values")) == [panel.PARAM_NEVER]
+    assert panel.v["name"].get() == ""
+
+    prem = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0",
+                               folder="prem")
+    w.write_assets_var.set(str(prem))
+    app.root.update()
+    assert panel.new_mode()
+    app.root.update()
+    le = MP.profile("godzilla_le_1_16")
+    assert list(panel._shot_award_vars) == [n for n, _m in le.shots]
+    menu = picks[0].nametowidget(picks[0].cget("menu"))
+    assert menu.index("end") == 1 and "Ten seconds left (%d)" % le.callout_ten_seconds == menu.entrycget(0, "label")
+    game = [r for r in _modes_widgets(panel._sound_box, ttk.Radiobutton) if str(r.cget("value")) == "game"]
+    assert not game[0].instate(["disabled"])
+    assert "sound_unheard" not in panel._reason_labels or not panel._reason_labels["sound_unheard"].grid_info()
+    assert not any(r.instate(["disabled"]) for r in _modes_widgets(panel._params_frame, ttk.Radiobutton)
+                   if str(r.cget("variable")) == str(panel.v["clip_both"]))
+    assert not panel._reason_labels["clip_both"].grid_info()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_a_godzilla_modes_advanced_fields_follow_a_jaws_card(app, tmp_path):
+    """Family sweep (item 148's open gap with item 141): a Godzilla Pro 1.15 mode with points
+    on a Powerline, a Powerline that ends it early and a hand-typed callout, opened on a Jaws
+    LE 1.02 card. Before, the Powerline's points were kept aside where no control showed them
+    and every build refused the mode for good. Now the form drops what Jaws lacks and says so,
+    moves the ten-seconds call to Jaws's own id, and after one edit the file builds."""
+    import pytest
+    from pinball_decryptor.plugins.stern import mode_assets as MA
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    project = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0")
+    spec = MP.example("KAIJU RUSH")
+    spec.clip = "none"                                   # no stock bank is read here
+    spec.shot_award = [["Powerline left", 750000], ["Left ramp", 500000]]
+    spec.end_shot = "Powerline right"
+    spec.callout_at = [[10, 1291], [3, 1111]]
+    slug, _spec = MP.new_mode(str(project), spec=spec)
+    path = project / "modes" / slug / "mode.json"
+    before = path.read_bytes()
+    w = app.window
+    panel = w._modes_panel
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    assert panel._shot_award_vars["Left ramp"].get() == "500000"
+    assert "Powerline left" not in panel._shot_award_vars and panel._params_kept_awards == []
+    assert panel.v["end_shot"].get() == panel.PARAM_NEVER and "end_shot" not in panel._params_raw
+    assert [(s.get(), c.get()) for s, c in panel._callout_rows][:2] == [("10", "1387"), ("", "")]
+    assert panel._params_kept_callouts == []
+    status = panel._status.cget("text")
+    for words in ("Powerline left is not on Jaws LE 1.02, so its own points are left out",
+                  "Powerline right is not on Jaws LE 1.02, so no shot ends the mode early",
+                  "callout 1111 is a sound number of another game and no callout measured on Jaws LE 1.02",
+                  "callout 1291 is 1387 on Jaws LE 1.02", "a build refuses it"):
+        assert words in status, words
+    assert path.read_bytes() == before                   # opening it wrote nothing
+    with pytest.raises(MA.ModeAssetError, match="callout 1111"):
+        MA.build(str(project), None, None, str(tmp_path / "out"))
+
+    panel.v["award"].set("1,500,000")                    # one edit saves the card's version
+    panel.save_now()
+    saved = MP.load(str(path))
+    assert saved.shot_award == [["Left ramp", 500000]] and saved.end_shot == ""
+    assert saved.callout_at == [[10, 1387]] and MP.validate(saved) == []
+    assert panel._status.cget("text").startswith("Ready to build.")
+    out = tmp_path / "out2"
+    MA.build(str(project), None, None, str(out))
+    cfg = (out / "padmode" / "mode.cfg").read_text(encoding="utf-8")
+    assert "shot_award     0x%08x 500000" % MP.profile("jaws_le_1_02").mask(["Left ramp"]) in cfg
+    assert "callout_at     10 1291" not in cfg and "1111" not in cfg and "end_shot" not in cfg
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_offers_sounds_of_its_own(app, tmp_path):
+    """Item 150: a start sound, a shot sound (every Nth shot) and music, each a WAV in the
+    mode folder, saved with the mode and turned into the mode-file keys once carried."""
+    import json
+    import wave
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_sounds as MS
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    slug = panel.new_mode()
+    folder = project / "modes" / slug
+    assert set(panel._own_sound_labels) == {"sound_start", "sound_shot", "music"}
+    for name in ("start.wav", "shot.wav", "music.wav", "end.wav"):
+        with wave.open(str(folder / name), "wb") as f:
+            f.setnchannels(1)
+            f.setsampwidth(2)
+            f.setframerate(44100)
+            f.writeframes(b"\x00\x00" * 4410)
+    # what "My sound…" does after the file dialog: the file named, the radio on file
+    panel._spec.sound_start, panel._spec.sound_shot, panel._spec.music = "start.wav", "shot.wav", "music.wav"
+    panel._spec.end_sound = "end.wav"
+    for var in ("start_sound_mode", "shot_sound_mode", "music_mode", "end_mode"):
+        panel.v[var].set("file")
+    panel.v["sound_shot_every"].set("3")
+    panel.save_now()
+    data = json.load(open(folder / "mode.json", encoding="utf-8"))
+    assert (data["sound_start"], data["sound_shot"], data["music"], data["sound_shot_every"]) == \
+        ("start.wav", "shot.wav", "music.wav", 3)
+    assert "Ready to build" in panel._status.cget("text")
+    assert panel._own_sound_labels["music"].cget("text") == "Sound: music.wav"
+
+    spec = MP.load(str(folder / "mode.json"))
+    carried = MS.assign_specs(spec.title, [spec])[0]
+    assert set(carried) == set(MS.SOUND_KEYS) | {"music_sid"}      # item 150 follow-up: its own bed
+    text = MP.runtime_cfg(spec, slug, own_sounds=carried)
+    assert "sound_shot     %d 3" % carried["sound_shot"] in text
+    assert "music          %d %d" % (carried["music"], carried["music_sid"]) in text
+    assert "callout_end" in text                     # an older mode.so still has its call
+    assert "sound_start" not in MP.runtime_cfg(spec, slug)
+
+    panel.v["music_mode"].set("none")
+    panel.save_now()
+    assert json.load(open(folder / "mode.json", encoding="utf-8"))["music"] == ""
+    panel.v["sound_shot_every"].set("0")
+    panel.save_now()
+    assert "every 2nd" in panel._status.cget("text")
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_own_sounds_note_never_says_write_leaves_them_out(app):
+    """Item 149 (`b15b0ebd`) made Write carry item 150's start sound, shot sound and music,
+    so the "Sounds of its own" note may not go back to saying Write leaves them off the
+    card. A stale note here is the tab telling a person their sounds will not be written."""
+    note = app.window._modes_panel._own_sounds_note.cget("text")
+    assert "does not add" not in note and "not yet" not in note and "yet." not in note, note
+    assert "Write puts them on the card" in note, note
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_how_often_a_mode_can_start(app, tmp_path):
+    """Item 139: the tab's "How often it can start" choices land in mode.json and in the
+    generated mode file, the tab says it in words - the same words the generator gives
+    for the saved spec, so the tab and the file agree - and reopening restores the form.
+    A mode left at the default writes neither key, as before."""
+    import json
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    slug = panel.new_mode()
+    path = project / "modes" / slug / "mode.json"
+    panel.save_now()
+    data = json.load(open(path, encoding="utf-8"))
+    assert (data["starts"], data["cooldown"]) == ("unlimited", 0)
+    text = MP.runtime_cfg(MP.load(str(path)), slug)
+    assert "\nstarts " not in text and "\ncooldown " not in text
+    assert panel._starts_words.cget("text") == "Can start: any number of times"
+
+    cases = [
+        ("once_per_game", None, "0", "once_per_game", 0, "starts         once_per_game"),
+        ("once_per_ball", None, "15", "once_per_ball", 15, "starts         once_per_ball"),
+        ("count", "3", "0", 3, 0, "starts         3"),
+        ("unlimited", None, "20", "unlimited", 20, "cooldown       20"),
+    ]
+    for policy, count, cooldown, want_starts, want_cooldown, want_line in cases:
+        panel.v["starts_policy"].set(policy)
+        if count is not None:
+            panel.v["starts_count"].set(count)
+        panel.v["cooldown"].set(cooldown)
+        panel.save_now()
+        data = json.load(open(path, encoding="utf-8"))
+        assert (data["starts"], data["cooldown"]) == (want_starts, want_cooldown), policy
+        spec = MP.load(str(path))
+        assert want_line in MP.runtime_cfg(spec, slug).splitlines(), policy
+        assert panel._starts_words.cget("text") == MP.starts_words(spec), policy
+        assert "Ready to build" in panel._status.cget("text"), policy
+
+    # reopening the mode puts the form back as it was saved
+    panel.v["starts_policy"].set("count")
+    panel.v["starts_count"].set("7")
+    panel.v["cooldown"].set("45")
+    panel.save_now()
+    panel._slug = None
+    panel.refresh(select=slug)
+    assert panel.v["starts_policy"].get() == "count" and panel.v["starts_count"].get() == "7"
+    assert panel.v["cooldown"].get() == "45"
+    assert panel._starts_words.cget("text") == \
+        "Can start: up to 7 times a game, for each player; not again until 45 s after it ends"
+
+    # a count that is not one is named, not silently changed
+    panel.v["starts_count"].set("0")
+    panel.save_now()
+    assert "How often it can start" in panel._status.cget("text")
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_from_a_film_makes_the_cut_the_modes_clip_sound_and_picture(app, tmp_path):
+    """Item 142: "From a film" on the Modes tab. The dialog's logic (FilmCutForm, never a
+    window) cuts a span of a synthetic lavfi film into the open mode's folder, and the tab
+    makes the cut the mode's clip, end sound and screen picture, saves where each came
+    from, and still says Ready to build. The mode keeps only the cut: nothing of the film
+    is copied in."""
+    import json
+    import os
+    import pytest
+    from pinball_decryptor.core import audio
+    from pinball_decryptor.gui.film_cut_dialog import FilmCutForm
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from tests.test_stern_film_cut import make_film
+
+    ff = audio.find_ffmpeg()
+    if not ff:
+        pytest.skip("no ffmpeg")
+    film = make_film(str(tmp_path / "films"), ff)
+    if not film:
+        pytest.skip("this ffmpeg cannot make the synthetic film")
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    slug = panel.new_mode("FILM RUSH")
+    assert "Nothing cut from a film yet" in panel._film_label.cget("text")
+    assert all(str(b.cget("state")) == "normal" for b in panel._film_btns.values())
+    folder = MP.mode_folder(str(project), slug)
+
+    form = FilmCutForm.from_spec(panel._spec, "clip")
+    form.film, form.start, form.length, form.crop = film, "0:02", "6", "fill"
+    form.take_sound = form.take_still = True
+    panel.apply_film_cut(form.apply(folder, ff))
+    app.root.update()
+
+    data = json.load(open(os.path.join(folder, "mode.json"), encoding="utf-8"))
+    assert (data["clip"], data["clip_file"], data["end_sound"], data["screen_art"]) == (
+        "file", "clip.mp4", "end.wav", "art.png")
+    assert (data["clip_from"], data["clip_length"], data["sound_from"], data["art_from"]) == (2.0, 6.0, 2.0, 2.0)
+    assert data["clip_source"] == data["sound_source"] == data["art_source"] == os.path.abspath(film)
+    assert sorted(os.listdir(folder)) == ["art.png", "clip.mp4", "end.wav", "mode.json"]
+    film_bytes = open(film, "rb").read()
+    assert all(open(os.path.join(folder, n), "rb").read() != film_bytes for n in os.listdir(folder))
+    assert "Ready to build" in panel._status.cget("text")
+    assert (panel.v["clip"].get(), panel.v["end_mode"].get(), panel.v["art_mode"].get()) == ("file", "file", "file")
+    assert panel._film_label.cget("text") == ("Clip: 6 s from 0:02. Sound: 6 s from 0:02. Picture: the "
+                                              "frame at 0:02. Cut from synthetic_film.mp4.")
+    assert "Video: clip.mp4" in panel._clip_label.cget("text")
+    spec = MP.load(os.path.join(folder, "mode.json"))
+    assert "synthetic_film" not in MP.runtime_cfg(spec, slug)
+
+
+def _film_dialog_setup(app, tmp_path, monkeypatch):
+    """Item 142 dialog tests: the synthetic film, a project with one mode open, and the
+    dialog's staging folders kept under tmp_path so a leaked one is seen."""
+    import tempfile
+    import pytest
+    from pinball_decryptor.core import audio
+    from tests.test_stern_film_cut import make_film
+
+    ff = audio.find_ffmpeg()
+    if not ff:
+        pytest.skip("no ffmpeg")
+    film = make_film(str(tmp_path / "films"), ff)
+    if not film:
+        pytest.skip("this ffmpeg cannot make the synthetic film")
+    stages = tmp_path / "stages"
+    stages.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(stages))
+    project = tmp_path / "proj"
+    project.mkdir()
+    app.window.write_assets_var.set(str(project))
+    app.root.update()
+    panel = app.window._modes_panel
+    slug = panel.new_mode("FILM RUSH")
+    return ff, film, stages, panel, slug
+
+
+def _pump(app, cond, secs=60.0):
+    import time
+    end = time.time() + secs
+    while time.time() < end:
+        app.root.update()
+        if cond():
+            return True
+        time.sleep(0.02)
+    app.root.update()
+    return bool(cond())
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_film_cut_dialog_probes_previews_and_cuts_on_workers(app, tmp_path, monkeypatch):
+    """Item 142: the "From a film" DIALOG itself (an invisible window), driven like a
+    person: a Preview pressed before the film's probe has answered does not strand the
+    film line, the preview draws, Cut runs on a worker and makes the cut the mode's, the
+    dialog closes, its timer stops and no staging folder is left behind."""
+    import json
+    import os
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    ff, film, stages, panel, slug = _film_dialog_setup(app, tmp_path, monkeypatch)
+    dlg = panel._open_film_cut("clip")
+    assert dlg.form.film == "" and dlg.form.take_clip
+    dlg.v["film"].set(film)
+    dlg.v["start"].set("0:02")
+    dlg.v["length"].set("6")
+    dlg.v["crop"].set("fill")
+    dlg.v["take_sound"].set(True)
+    dlg.v["take_still"].set(True)
+    dlg._probe()
+    dlg._preview()                                   # before the probe answers
+    assert _pump(app, lambda: dlg._preview_img is not None
+                 and dlg._info.cget("text") not in ("", "Reading the film…"))
+    assert dlg._info.cget("text").startswith("720x300, 23.976 fps, 0:10, sound 6 ch")
+    assert dlg._status.cget("text") == "The frame at 0:02, as the clip will show it."
+
+    dlg._cut()
+    dlg.v["start"].set("0:09")                       # an edit during the cut changes nothing
+    assert _pump(app, lambda: not dlg.win.winfo_exists())
+    folder = MP.mode_folder(panel._open_project, slug)
+    data = json.load(open(os.path.join(folder, "mode.json"), encoding="utf-8"))
+    assert (data["clip_file"], data["end_sound"], data["screen_art"]) == ("clip.mp4", "end.wav", "art.png")
+    assert (data["clip_from"], data["clip_length"], data["clip_crop"], data["art_crop"]) == (2.0, 6.0, "fill", "fill")
+    assert sorted(os.listdir(folder)) == ["art.png", "clip.mp4", "end.wav", "mode.json"]
+    assert "Ready to build" in panel._status.cget("text")
+    assert _pump(app, lambda: False, 0.4) is False
+    assert dlg._poll_job is None                     # the timer stopped with the window
+    assert os.listdir(str(stages)) == []
+
+    again = panel._open_film_cut("clip")             # reopens on the cut, its crop included
+    assert (again.v["film"].get(), again.v["start"].get(), again.v["crop"].get()) == (
+        os.path.abspath(film), "0:02", "fill")
+    again.close()
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_film_cut_dialog_closed_during_a_cut_leaves_the_mode_as_it_was(app, tmp_path, monkeypatch):
+    """Item 142: Cancel (or Escape, or the window's X) while a cut runs abandons it: the
+    mode's files and mode.json are untouched and the staging folder goes. A cut already
+    being moved into the mode when the dialog closes still lands, and the mode's file
+    follows it."""
+    import json
+    import os
+    import threading
+    from pinball_decryptor.gui import film_cut_dialog as D
+    from pinball_decryptor.gui.film_cut_dialog import FilmCutForm
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    ff, film, stages, panel, slug = _film_dialog_setup(app, tmp_path, monkeypatch)
+    folder = MP.mode_folder(panel._open_project, slug)
+    first = FilmCutForm(film=film, start="0:02", length="6", take_sound=True)
+    panel.apply_film_cut(first.apply(folder, ff))
+    app.root.update()
+    mode_json = os.path.join(folder, "mode.json")
+    before = {n: open(os.path.join(folder, n), "rb").read() for n in ("clip.mp4", "end.wav", "mode.json")}
+
+    gate = threading.Event()
+    real_apply = FilmCutForm.apply
+
+    def held_apply(self, mode_folder, ffmpeg=None):
+        gate.wait(60)
+        return real_apply(self, mode_folder, ffmpeg)
+    monkeypatch.setattr(FilmCutForm, "apply", held_apply)
+    dlg = panel._open_film_cut("clip")
+    dlg.v["film"].set(film)
+    dlg.v["start"].set("0:06")
+    dlg.v["length"].set("3")
+    worker = dlg._cut()
+    _pump(app, lambda: False, 0.2)
+    dlg.close()                                      # Cancel, mid-cut
+    gate.set()
+    worker.join(120)
+    assert not worker.is_alive()
+    _pump(app, lambda: False, 0.4)
+    after = {n: open(os.path.join(folder, n), "rb").read() for n in ("clip.mp4", "end.wav", "mode.json")}
+    assert after == before
+    assert sorted(os.listdir(folder)) == ["clip.mp4", "end.wav", "mode.json"]
+    assert os.listdir(str(stages)) == []
+    assert dlg._poll_job is None
+
+    # closed while the cut is already being moved in: it lands, and mode.json follows it
+    monkeypatch.setattr(FilmCutForm, "apply", real_apply)
+    moving, go = threading.Event(), threading.Event()
+    real_commit = D.commit_cut
+
+    def held_commit(result, mode_folder):
+        moving.set()
+        go.wait(60)
+        return real_commit(result, mode_folder)
+    monkeypatch.setattr(D, "commit_cut", held_commit)
+    dlg2 = panel._open_film_cut("clip")
+    dlg2.v["start"].set("0:06")
+    dlg2.v["length"].set("3")
+    worker = dlg2._cut()
+    assert moving.wait(120)
+    dlg2.close()
+    go.set()
+    worker.join(120)
+    assert _pump(app, lambda: json.load(open(mode_json, encoding="utf-8"))["clip_from"] == 6.0)
+    data = json.load(open(mode_json, encoding="utf-8"))
+    assert (data["clip_from"], data["clip_length"]) == (6.0, 3.0)
+    assert open(os.path.join(folder, "clip.mp4"), "rb").read() != before["clip.mp4"]
+    assert os.listdir(str(stages)) == []
+    _pump(app, lambda: False, 0.3)
+    assert dlg2._poll_job is None
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_can_run_during_the_game_s_own_modes(app, tmp_path):
+    """Item 140: "Can run during the game's own modes" is on for a new mode; unticking it
+    saves stack false, the generated file says `stack no`, and reopening the mode shows
+    it unticked while another mode keeps its own tick."""
+    import json
+    from tkinter import ttk
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    boxes = []
+
+    def walk(widget):
+        for child in widget.winfo_children():
+            if isinstance(child, ttk.Checkbutton) and child.cget("text") == "Can run during the game's own modes":
+                boxes.append(child)
+            walk(child)
+    walk(panel._editor)
+    assert len(boxes) == 1
+
+    slug = panel.new_mode("WAITS")
+    assert panel.v["stack"].get() is True
+    panel.v["stack"].set(False)
+    panel.save_now()
+    path = project / "modes" / slug / "mode.json"
+    assert json.load(open(path, encoding="utf-8"))["stack"] is False
+    assert "stack          no" in MP.runtime_cfg(MP.load(str(path)), slug)
+
+    other = panel.new_mode("STACKS")
+    assert other != slug and panel.v["stack"].get() is True
+    panel._list.selection_clear(0, "end")
+    panel._list.selection_set(panel._slugs.index(slug))
+    panel._on_select()
+    assert panel._slug == slug and panel.v["stack"].get() is False
+    assert json.load(open(project / "modes" / other / "mode.json", encoding="utf-8"))["stack"] is True
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_lights_the_shots_and_sets_a_display_priority(app, tmp_path):
+    """Item 157: the form's "Light the shots that score" (a colour and a pattern) and its "Display
+    priority" land in mode.json and in the generated file as `light_shots` and `priority`; a new mode
+    writes neither (the bytes of every mode before them), a reopened mode shows them, a bad priority is
+    named, and the section's words are plain labels (legible in the dark theme)."""
+    import json
+    from tkinter import ttk
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    box = panel._display_lights_box
+    texts = []
+
+    def walk(widget):
+        for child in widget.winfo_children():
+            if isinstance(child, (ttk.Label, ttk.Checkbutton)):
+                texts.append(child.cget("text"))
+            walk(child)
+    walk(box)
+    assert "Light the shots that score" in texts and "Display priority" in texts
+
+    slug = panel.new_mode("LIT")
+    path = project / "modes" / slug / "mode.json"
+    cfg = MP.runtime_cfg(MP.load(str(path)), slug)
+    assert "light_shots" not in cfg and "priority" not in cfg
+    assert panel.v["light_shots_on"].get() is False and panel.v["priority"].get() == "0"
+    assert str(box.winfo_children()[0].cget("state")) != "disabled"          # the open mode's form is live
+
+    panel.v["light_shots_on"].set(True)
+    panel.v["light_shots_color"].set("#FF6000")
+    panel.v["light_shots_pattern"].set("Pulse")
+    panel.v["priority"].set("180")
+    panel.save_now()
+    data = json.load(open(path, encoding="utf-8"))
+    assert data["light_shots"] == "#FF6000" and data["light_shots_pattern"] == "pulse" and data["priority"] == 180
+    cfg = MP.runtime_cfg(MP.load(str(path)), slug)
+    assert "light_shots    ff6000 pulse\n" in cfg and "priority       180\n" in cfg
+
+    other = panel.new_mode("PLAIN")
+    assert other != slug and panel.v["light_shots_on"].get() is False and panel.v["priority"].get() == "0"
+    panel._list.selection_clear(0, "end")
+    panel._list.selection_set(panel._slugs.index(slug))
+    panel._on_select()
+    assert panel._slug == slug and panel.v["light_shots_on"].get() is True
+    assert panel.v["light_shots_pattern"].get() == "Pulse" and panel.v["priority"].get() == "180"
+
+    panel.v["priority"].set("300")
+    panel.save_now()
+    assert "display priority is 0 (none) to 255" in panel._status.cget("text")
+    panel.v["priority"].set("0")
+    panel.v["light_shots_on"].set(False)
+    panel.save_now()
+    cfg = MP.runtime_cfg(MP.load(str(path)), slug)
+    assert "light_shots" not in cfg and "priority" not in cfg
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_advanced_section_writes_every_parameter(app, tmp_path):
+    """Item 141: the Advanced section edits every parameter the tab hid - the award ladder,
+    points per shot, an ending shot, a second clip, callouts at chosen seconds and how long
+    the screen stays up - and each lands in mode.json and in the runtime file. It is
+    collapsed until Show, and a mode that sets any of them opens with it shown."""
+    import json
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    slug = panel.new_mode("PARAM TEST")
+    assert panel._params_frame.grid_info() == {}                 # collapsed
+    path = project / "modes" / slug / "mode.json"
+    panel.save_now()
+    data = json.load(open(path, encoding="utf-8"))
+    assert (data["award_ladder"], data["shot_award"], data["end_shot"], data["clip_both"],
+            data["callout_at"], data["restore_after"]) == ("rising", [], "", {}, [], 6)
+
+    panel._params_show.set(True)
+    panel._show_parameters()
+    assert panel._params_frame.grid_info() != {}
+    panel.v["seconds"].set("45")
+    panel.v["award_ladder"].set("fixed")
+    panel._shot_award_vars["Building"].set("5,000,000")
+    panel._shot_award_vars["Godzilla target"].set("3000000")
+    panel.v["end_shot"].set("Shield target left")
+    panel.v["clip"].set("title")
+    panel.v["clip_both"].set("title")
+    panel.v["clip_both_title"].set("PARAM END")
+    panel.v["clip_both_seconds"].set("3")
+    (s0, c0), (s1, c1) = panel._callout_rows[:2]
+    s0.set("30")
+    c0.set("1291")
+    s1.set("20")
+    panel._pick_callout(c1, MP.callout_choices(MP.GODZILLA_PRO_1_15)[1][1])
+    panel.v["restore_after"].set("8")
+    panel.save_now()
+    assert "Ready to build" in panel._status.cget("text")
+
+    data = json.load(open(path, encoding="utf-8"))
+    assert data["award_ladder"] == "fixed"
+    assert data["shot_award"] == [["Building", 5000000], ["Godzilla target", 3000000]]
+    assert data["end_shot"] == "Shield target left"
+    assert data["clip_both"] == {"clip": "title", "title": "PARAM END", "seconds": 3.0}
+    assert data["callout_at"] == [[30, 1291], [20, 1295]] and data["restore_after"] == 8
+    cfg = MP.runtime_cfg(MP.load(str(path)), slug)
+    for line in ("award_ladder   fixed", "shot_award     0x00400000 5000000",
+                 "shot_award     0x00080000 3000000", "end_shot       0x80000000",
+                 "clip_start     PadMode_param_test_Clip", "clip_end       PadMode_param_test_Clip2",
+                 "callout_at     30 1291", "callout_at     20 1295", "restore_after  8"):
+        assert line + "\n" in cfg, line
+
+    # reopen: every control comes back, and the section opens shown
+    panel._params_show.set(False)
+    panel._show_parameters()
+    panel._open(slug, MP.load(str(path)))
+    assert panel._params_frame.grid_info() != {}
+    assert panel.v["award_ladder"].get() == "fixed" and panel.v["end_shot"].get() == "Shield target left"
+    assert panel._shot_award_vars["Building"].get() == "5000000" and panel._shot_award_vars["Big loop"].get() == ""
+    assert (panel.v["clip_both"].get(), panel.v["clip_both_title"].get(), panel.v["clip_both_seconds"].get()) == (
+        "title", "PARAM END", "3")
+    assert [(s.get(), c.get()) for s, c in panel._callout_rows] == [("30", "1291"), ("20", "1295"), ("", ""), ("", "")]
+    assert panel.v["restore_after"].get() == "8"
+
+    # the same clip at both ends, and back to none
+    panel.v["clip_both"].set("same")
+    panel.v["end_shot"].set(panel.PARAM_NEVER)
+    panel.save_now()
+    data = json.load(open(path, encoding="utf-8"))
+    assert data["clip_both"] == {"clip": "same"} and data["end_shot"] == ""
+    panel.v["clip_both"].set("none")
+    panel.save_now()
+    assert json.load(open(path, encoding="utf-8"))["clip_both"] == {}
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_advanced_section_names_bad_values_and_keeps_what_it_cannot_show(app, tmp_path):
+    """A bad value in the Advanced section is named in the status, not dropped; rows the form
+    has no place for (callouts past its four rows, a shot this title does not name) are
+    written back as they were; and with no mode open every Advanced field is greyed."""
+    import json
+    from tkinter import ttk
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+
+    def fields():
+        out = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, (ttk.Entry, ttk.Radiobutton)):
+                    out.append(child)
+                walk(child)
+        walk(panel._params_frame)
+        return out
+
+    assert fields() and all(f.instate(["disabled"]) for f in fields())
+
+    slug = panel.new_mode("BAD")
+    assert not any(f.instate(["disabled"]) for f in fields())
+    panel._shot_award_vars["Building"].set("lots")
+    panel.v["seconds"].set("30")
+    s0, c0 = panel._callout_rows[0]
+    s0.set("45")
+    c0.set("1291")
+    panel.v["restore_after"].set("0")
+    panel.v["clip"].set("none")
+    panel.v["clip_both"].set("same")
+    panel.save_now()
+    status = panel._status.cget("text")
+    for words in ("Building's own points", "45 seconds left", "1 to 60 seconds", "choose the first clip"):
+        assert words in status, words
+    assert json.load(open(project / "modes" / slug / "mode.json", encoding="utf-8"))["shot_award"] == [
+        ["Building", "lots"]]
+
+    path = project / "modes" / slug / "mode.json"
+    data = json.load(open(path, encoding="utf-8"))
+    data.update(callout_at=[[25, 1], [24, 2], [23, 3], [22, 4], [21, 5]], shot_award=[["Spinner", 7]],
+                restore_after=6, clip_both={})
+    json.dump(data, open(path, "w", encoding="utf-8"))
+    panel._open(slug, MP.load(str(path)))
+    panel._shot_award_vars["Building"].set("")
+    panel.save_now()
+    data = json.load(open(path, encoding="utf-8"))
+    assert data["callout_at"] == [[25, 1], [24, 2], [23, 3], [22, 4], [21, 5]]
+    assert data["shot_award"] == [["Spinner", 7]]
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_advanced_section_keeps_hand_edited_values_until_changed(app, tmp_path):
+    """Item 141: a hand-edited mode.json the Advanced section cannot show (an unknown ladder,
+    end shot or second clip, a shot name that is not text, a second award for one shot, a
+    callout row that is not [seconds, id]) opens without an error, is written back as it was,
+    and is named in the status; setting that control replaces it. The form shows a shot's
+    FIRST award, the one the runtime pays. restore_after is checked only with the mode's own
+    screen, the only time it is written."""
+    import json
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    slug = panel.new_mode("RAW")
+    panel.save_now()
+    path = project / "modes" / slug / "mode.json"
+    data = json.load(open(path, encoding="utf-8"))
+    data.update(award_ladder="steep", end_shot=["Shield target left"], clip_both={"clip": "loop"},
+                shot_award=[["Building", 5], ["Building", 7], [["x"], 3]],
+                callout_at=[[25, 1], "bad", [24, 2]])
+    json.dump(data, open(path, "w", encoding="utf-8"))
+    panel._open(slug, MP.load(str(path)))
+    assert (panel.v["award_ladder"].get(), panel.v["end_shot"].get(), panel.v["clip_both"].get()) == (
+        "rising", panel.PARAM_NEVER, "none")
+    assert panel._shot_award_vars["Building"].get() == "5"
+    assert [(s.get(), c.get()) for s, c in panel._callout_rows] == [("25", "1"), ("24", "2"), ("", ""), ("", "")]
+    panel.save_now()
+    data = json.load(open(path, encoding="utf-8"))
+    assert (data["award_ladder"], data["end_shot"], data["clip_both"]) == (
+        "steep", ["Shield target left"], {"clip": "loop"})
+    assert data["shot_award"] == [["Building", 5], ["Building", 7], [["x"], 3]]
+    assert data["callout_at"] == [[25, 1], [24, 2], "bad"]
+    status = panel._status.cget("text")
+    for words in ("rising or fixed", "to end the mode", "same clip, a title card", "[shot, points]",
+                  "Building has its own points twice", "[seconds left, id]"):
+        assert words in status, words
+
+    panel.v["award_ladder"].set("fixed")
+    panel.v["end_shot"].set(panel.PARAM_NEVER)
+    panel.v["clip_both"].set("none")
+    panel.save_now()
+    data = json.load(open(path, encoding="utf-8"))
+    assert (data["award_ladder"], data["end_shot"], data["clip_both"]) == ("fixed", "", {})
+
+    # restore_after does nothing without the mode's own screen, so it does not block a build
+    data.update(shot_award=[], callout_at=[])
+    json.dump(data, open(path, "w", encoding="utf-8"))
+    panel._open(slug, MP.load(str(path)))
+    panel.v["restore_after"].set("0")
+    panel.save_now()
+    assert "1 to 60 seconds" in panel._status.cget("text")
+    panel.v["screen"].set(False)
+    panel.save_now()
+    assert "1 to 60 seconds" not in panel._status.cget("text")
+
+
+def _stock_modes_project(tmp_path, name="godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw"):
+    import json
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / ".extract_source.json").write_text(json.dumps(
+        {"input_path": "D:\\cards\\" + name, "input_name": name, "size": 1, "mtime": 1}),
+        encoding="utf-8")
+    return project
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_lists_the_games_own_modes_and_stages_like_defaults(app, tmp_path):
+    """Item 145: the Modes tab lists the timers and awards of the modes the game shipped
+    with (from item 144's table for the project's build), and Set / Stock / All to stock
+    stage them in the project's .staged_changes.json: a word under "stock_modes", an
+    operator setting under Defaults' own "settings". A number the game computes in code
+    stays read-only and says why."""
+    from pinball_decryptor.core import staged_changes
+    w = app.window
+    project = _stock_modes_project(tmp_path)
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    tree = panel._stock_tree
+    assert "godzilla_pro 1.15" in panel._stock_msg.cget("text")
+    rows = tree.get_children()
+    assert "12.start.caward_add" in rows and "12.timer.seconds" in rows
+    assert "12.timer.v57" not in rows                      # one row per operator setting
+    assert tree.item("12.start.caward_add", "text") == "Battle vs Ebirah"
+    assert tree.set("12.start.caward_add", "value") == "250,000"
+
+    # an award: select, type, Set
+    tree.selection_set("12.start.caward_add")
+    app.root.update()
+    panel._stock_value.set("777,777")
+    panel._stock_set_btn.invoke()
+    data = staged_changes.load(str(project))
+    assert data["stock_modes"] == {"build": "godzilla_pro 1.15",
+                                   "values": {"12.start.caward_add": 777777},
+                                   "touched": ["12.start.caward_add"]}
+    assert tree.set("12.start.caward_add", "value").startswith("777,777")
+    # a timer that is an operator setting: Defaults' settings key
+    tree.selection_set("12.timer.seconds")
+    app.root.update()
+    assert "Defaults tab" in panel._stock_note.cget("text")
+    # what the emulator measured (item 145 runs 2-3): a machine at the default follows it
+    assert "still on the game's default takes the new one" in panel._stock_note.cget("text")
+    assert "still on the game's default takes the new one" in panel.STOCK_TIP
+    panel._stock_value.set("30")
+    panel._stock_set_btn.invoke()
+    assert staged_changes.load(str(project))["settings"] == {"AD_BATTLE_VS_EBIRAH_TIMER": 30}
+    panel._stock_value.set("99")                           # outside the game's own range
+    panel._stock_set_btn.invoke()
+    assert "between 30 and 70" in panel._stock_note.cget("text")
+    assert staged_changes.load(str(project))["settings"] == {"AD_BATTLE_VS_EBIRAH_TIMER": 30}
+
+    # code stays read-only, with the reason
+    tree.selection_set("12.shot.caward_add")
+    app.root.update()
+    assert str(panel._stock_set_btn.cget("state")) == "disabled"
+    assert "Read-only" in panel._stock_note.cget("text") and "code" in panel._stock_note.cget("text")
+
+    # Stock on one row, then All to stock
+    tree.selection_set("12.start.caward_add")
+    app.root.update()
+    panel._stock_reset_btn.invoke()
+    assert staged_changes.load(str(project))["stock_modes"]["values"] == {}
+    panel._stock_all_btn.invoke()
+    data = staged_changes.load(str(project))
+    assert "settings" not in data and data["stock_modes"]["values"] == {}
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_says_when_the_build_has_no_table(app, tmp_path):
+    w = app.window
+    project = _stock_modes_project(tmp_path, "turtles_pro-1_59_0.Release.8G.sdcard.raw")
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    assert "doesn't know" in panel._stock_msg.cget("text")
+    assert "turtles_pro 1.59.0" in panel._stock_msg.cget("text")
+    assert not panel._stock_tree.get_children()
+    assert str(panel._stock_set_btn.cget("state")) == "disabled"
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_write_scan_lists_the_games_own_mode_changes(app, tmp_path, manufacturers_by_key):
+    """Item 145: a staged stock-mode number is a pending Write row (the Write computes it
+    from the sidecar, the MD5 scan can't see it), the operator setting too, and staging
+    moves the Write fingerprint."""
+    from pinball_decryptor.plugins.stern import stock_modes as SM
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    project = _stock_modes_project(tmp_path)
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    fp0 = w._current_write_fingerprint()
+    build = SM.table_for_project(str(project))
+    SM.stage(str(project), build, build.number("23.start.caward_add"), 555555)
+    SM.stage(str(project), build, build.number("12.timer.seconds"), 30)
+    assert w._current_write_fingerprint() != fp0
+    sid = w._write_preview_scan_id
+    n = w._add_pending_preview_rows(str(project), sid)
+    assert n >= 2
+    rows = [r[0] for r in w._write_preview_rows if r[2] == "Pending (game's own modes)"]
+    assert "Tesla Strike start award: 250,000 -> 555,555" in rows
+    assert "Battle vs Ebirah timer: 60 -> 30" in rows
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_defaults_form_adopts_a_timer_the_modes_tab_staged(app, tmp_path):
+    """The Defaults form's autostage REPLACES the staged settings from its own fields, so
+    a timer staged on the Modes tab is put into the form's field (item 145) - else the next
+    Defaults edit would drop it."""
+    import tkinter as tk
+    from pinball_decryptor.plugins.stern import stock_modes as SM
+    w = app.window
+    project = _stock_modes_project(tmp_path)
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    var = tk.IntVar(value=60)
+    w._settings_rows = [{"name": "AD_BATTLE_VS_EBIRAH_TIMER", "label": "Ebirah timer",
+                         "kind": "int", "var": var, "default": 60, "min": 30, "max": 70}]
+    w._settings_fill_all_tree = lambda: None
+    build = SM.table_for_project(str(project))
+    w._modes_panel.refresh_stock_modes()
+    w._modes_panel.stage_stock_value("12.timer.seconds", 45)
+    assert var.get() == 45
+    assert w._settings_changes() == {"AD_BATTLE_VS_EBIRAH_TIMER": 45}
+    w._modes_panel.stage_stock_value("12.timer.seconds", 60)
+    assert var.get() == 60 and w._settings_changes() == {}
+    assert build is not None
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_revert_all_and_defaults_only_settings_with_the_games_own_modes(
+        app, tmp_path, manufacturers_by_key):
+    """Item 145 fix round 2. A setting staged only on the Defaults tab is not a Write row of
+    the game's own modes (Defaults applies it after the next build, as before). Revert all
+    changes drops every staged number but keeps the project managing the game's own modes,
+    so the next Write can put its card back to stock."""
+    from pinball_decryptor.core import staged_changes
+    from pinball_decryptor.plugins.stern import stock_modes as SM
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    project = _stock_modes_project(tmp_path)
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    staged_changes.save(str(project), {"settings": {"AD_BATTLE_VS_EBIRAH_TIMER": 30}})
+    w._add_pending_preview_rows(str(project), w._write_preview_scan_id)
+    assert not [r for r in w._write_preview_rows if r[2] == "Pending (game's own modes)"]
+
+    build = SM.table_for_project(str(project))
+    SM.stage(str(project), build, build.number("12.start.caward_add"), 777777)
+    w.clear_replace_assignments(str(project))
+    data = staged_changes.load(str(project))
+    assert data == {"stock_modes": {"build": "godzilla_pro 1.15", "values": {},
+                                    "touched": ["12.start.caward_add"]}}
+    assert SM.manages(str(project)) and SM.pending_count(str(project)) == 0
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_starts_and_ends_on_an_event(app, tmp_path):
+    """Item 147: "Starts on: its shot / an event" and "Ends on: the drain / the clock only /
+    an event". The form shows events in words, the file keeps their names, and the runtime
+    file an event start generates has no trigger line."""
+    import json
+    from pinball_decryptor.plugins.stern import mode_project as MP
+
+    w = app.window
+    project = tmp_path / "proj"
+    project.mkdir()
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    slug = panel.new_mode("EVENT RUSH")
+    assert panel.v["starts_kind"].get() == "shot" and panel.v["ends_kind"].get() == "drain"
+    panel.v["starts_kind"].set("event")
+    panel.v["start_event"].set(MP.EVENT_LABELS["ball_start"])
+    panel.v["ends_kind"].set("event")
+    panel.v["end_event"].set(MP.EVENT_LABELS["multiball_end"])
+    panel.save_now()
+    data = json.load(open(project / "modes" / slug / "mode.json", encoding="utf-8"))
+    assert data["starts_on"] == "event ball_start" and data["ends_on"] == "event multiball_end"
+    assert "Ready to build" in panel._status.cget("text")
+    cfg = MP.runtime_cfg(MP.load(str(project / "modes" / slug / "mode.json")), slug)
+    assert "starts_on      event ball_start" in cfg
+    assert not [line for line in cfg.splitlines() if line.startswith("trigger ")]
+
+    panel.v["ends_kind"].set("clock")
+    panel.save_now()
+    assert json.load(open(project / "modes" / slug / "mode.json", encoding="utf-8"))["ends_on"] == "clock"
+    # reopening the mode shows what was saved
+    panel._slug = None
+    panel.refresh(select=slug)
+    assert panel.v["starts_kind"].get() == "event"
+    assert panel.v["start_event"].get() == MP.EVENT_LABELS["ball_start"]
+    assert panel.v["ends_kind"].get() == "clock"
+    panel.v["start_event"].set("")
+    panel.save_now()
+    assert "Pick the event that starts" in panel._status.cget("text")
+
+
 def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
     """The Settings tab shows only for Stern, its form builds from decoded
     adjustment rows, and change-detection reports only edited-and-differing
@@ -5479,3 +8291,296 @@ def test_one_row_still_clears_without_a_confirm(
     assert sorted(w._image_assignments) == sorted(rels[1:])
     log = w._log_text.get("1.0", "end-1c")
     assert "cleared replacement for %s" % rels[0] in log
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_the_write_scan_lists_each_mode_and_what_it_adds(app, manufacturers_by_key,
+                                                         tmp_path, monkeypatch):
+    """Item 149: a project's modes are a change Build applies, so the Write change scan
+    lists one "Pending (Modes)" row per mode saying what it adds - its screen, its clip,
+    its own end sound, its mode file - and none for a project without modes or a
+    manufacturer without the modes capability."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    # a host that carries modes (a Mac's rows say they are left out: the test below pins that)
+    monkeypatch.setattr(MW, "host_refusal", lambda platform=None: "")
+    w = app.window
+    project = str(tmp_path / "project")
+    for name, spec in MP.example_specs()[:2]:
+        slug, spec = MP.new_mode(project, spec=spec)
+        if name == "KAIJU RUSH":
+            spec.end_sound = "end.wav"
+            MP.save(project, slug, spec)
+    sid = w._write_preview_scan_id
+    monkeypatch.setattr(w, "_current_mfr", manufacturers_by_key["stern"])
+    assert w._add_pending_mode_rows(project, sid) == 2
+    rows = [r for r in w._write_preview_rows if r[2] == "Pending (Modes)"]
+    assert [r[1] for r in rows] == ["mode", "mode"]
+    kaiju = next(r[0] for r in rows if r[0].startswith("KAIJU RUSH"))
+    for needle in ("its own screen", "title-card clip", "its own end sound end.wav",
+                   "mode file mode1.cfg"):
+        assert needle in kaiju, needle
+    # the other mode ends on the same (re-pointed) time-up call, and the row says whose sound
+    atomic = next(r[0] for r in rows if r[0].startswith("ATOMIC BREATH"))
+    assert "KAIJU RUSH's end sound when it ends" in atomic
+    assert w._write_preview_count_lbl.cget("text") == "Total changes: 2"
+    # nothing for a folder with no modes, or a manufacturer without the capability
+    assert w._add_pending_mode_rows(str(tmp_path / "empty"), sid) == 0
+    monkeypatch.setattr(w, "_current_mfr", manufacturers_by_key["spooky"])
+    assert w._add_pending_mode_rows(project, sid) == 0
+    # a CODE mode (modes/<slug>/<slug>.c, no mode file) reaches the card too, and the scan says what
+    monkeypatch.setattr(w, "_current_mfr", manufacturers_by_key["stern"])
+    os.makedirs(os.path.join(project, "modes", "blitz"))
+    with open(os.path.join(project, "modes", "blitz", "blitz.c"), "w") as f:
+        f.write("/* a mode */\n")
+    assert w._add_pending_mode_rows(project, sid) == 3
+    assert w._write_preview_rows[-1][0].startswith("BLITZ (code mode): its code (blitz.c)")
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_the_write_scan_says_a_direct_sd_write_leaves_the_modes_out(app, manufacturers_by_key,
+                                                                    tmp_path, monkeypatch):
+    """Item 149: a direct-SD write cannot add files, so the engine leaves a project's modes out.
+    With the Write tab set to write to the SD card, the scan's Modes rows say so instead of
+    promising the screens, clips and mode files an image build would add."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    w = app.window
+    project = str(tmp_path / "project")
+    for _name, spec in MP.example_specs()[:2]:
+        MP.new_mode(project, spec=spec)
+    sid = w._write_preview_scan_id
+    monkeypatch.setattr(w, "_current_mfr", manufacturers_by_key["stern"])
+    old = w.write_input_source_var.get()
+    try:
+        w.write_input_source_var.set("ssd")
+        n = len(w._write_preview_rows)
+        assert w._add_pending_mode_rows(project, sid) == 2
+        rows = [r[0] for r in w._write_preview_rows[n:]]
+        assert all("left out of a Direct-SD write" in r for r in rows), rows
+        assert not any("its own screen" in r or "mode file" in r for r in rows), rows
+        # an image build lists what it adds, as before
+        w.write_input_source_var.set("iso")
+        n = len(w._write_preview_rows)
+        assert w._add_pending_mode_rows(project, sid) == 2
+        assert not any("Direct-SD" in r[0] for r in w._write_preview_rows[n:])
+    finally:
+        w.write_input_source_var.set(old)
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_the_write_scan_says_a_mac_leaves_the_modes_out(app, manufacturers_by_key, tmp_path,
+                                                        monkeypatch):
+    """Item 149: on a Mac the tools that put a mode's files on the card do not run, so the engine
+    leaves every mode out; the scan's Modes rows say so instead of promising them."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    w = app.window
+    project = str(tmp_path / "project")
+    for _name, spec in MP.example_specs()[:2]:
+        MP.new_mode(project, spec=spec)
+    sid = w._write_preview_scan_id
+    monkeypatch.setattr(w, "_current_mfr", manufacturers_by_key["stern"])
+    old = w.write_input_source_var.get()
+    try:
+        w.write_input_source_var.set("iso")
+        monkeypatch.setattr(MW, "host_refusal", lambda platform=None: MW.MAC_REFUSAL)
+        n = len(w._write_preview_rows)
+        assert w._add_pending_mode_rows(project, sid) == 2
+        rows = [r[0] for r in w._write_preview_rows[n:]]
+        assert all("left out of this Write: a Mac cannot put" in r for r in rows), rows
+        assert not any("its own screen" in r or "mode file" in r for r in rows), rows
+        monkeypatch.setattr(MW, "host_refusal", lambda platform=None: "")
+        n = len(w._write_preview_rows)
+        assert w._add_pending_mode_rows(project, sid) == 2
+        assert not any("left out" in r[0] for r in w._write_preview_rows[n:])
+    finally:
+        w.write_input_source_var.set(old)
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_a_mode_edit_makes_the_write_tab_rescan(app, manufacturers_by_key, tmp_path, monkeypatch):
+    """Item 149: the Write scan's fingerprint covers the project's modes, so adding a mode,
+    editing its mode.json, giving it a sound, removing it or closing a modes gate rescans when
+    the Write tab is shown again, instead of keeping stale Modes rows (or none, and a Build
+    that warns "no modified files" while it writes the modes)."""
+    import shutil
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    w = app.window
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(w, "_current_mfr", manufacturers_by_key["stern"])
+    monkeypatch.setattr(w, "_current_tab_key", lambda: "Write")
+    monkeypatch.delenv("PAD_STERN_MODES", raising=False)
+    monkeypatch.delenv("PAD_STERN_MODE_SOUND", raising=False)
+    old = w.write_assets_var.get()
+    scans = []
+    monkeypatch.setattr(w, "_scan_write_preview", lambda: scans.append(1))
+    try:
+        w.write_assets_var.set(str(project))
+
+        def shown_again():
+            """what the tab does when shown: rescan only if the fingerprint moved;
+            then record the fingerprint the way a finished scan does."""
+            n = len(scans)
+            w._maybe_rescan_write_preview()
+            w._write_scan_fingerprint = w._current_write_fingerprint()
+            return len(scans) > n
+
+        w._write_scan_fingerprint = w._current_write_fingerprint()
+        assert not shown_again()                      # nothing changed: no rescan
+        name, spec = MP.example_specs()[0]
+        slug, spec = MP.new_mode(str(project), spec=spec)
+        assert shown_again(), "a mode added"
+        assert not shown_again()
+        spec.name = spec.name + " TWO"
+        MP.save(str(project), slug, spec)
+        assert shown_again(), "a mode.json edited"
+        (project / "modes" / slug / "end.wav").write_bytes(b"RIFF")
+        assert shown_again(), "a sound added to a mode"
+        monkeypatch.setenv("PAD_STERN_MODE_SOUND", "0")
+        assert shown_again(), "the own-sound gate closed"
+        monkeypatch.setenv("PAD_STERN_MODES", "0")
+        assert shown_again(), "the modes gate closed"
+        shutil.rmtree(str(project / "modes" / slug))
+        assert shown_again(), "a mode removed"
+        assert not shown_again()
+    finally:
+        w.write_assets_var.set(old)
+
+
+# ---- the intricate modes' own audio and video: code modes with assets, the code-mode Examples ------------
+def _code_menu_labels(panel):
+    m = panel._ex_menu
+    out = []
+    for i in range((m.index("end") or 0) + 1):
+        if m.type(i) == "command":
+            out.append(m.entrycget(i, "label"))
+    return out
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_modes_tab_offers_the_five_intricate_modes_as_code_examples(app, tmp_path):
+    """Examples lists the form modes, then the SDK's five intricate modes as CODE modes (a Godzilla
+    title only: their shots are Godzilla's)."""
+    project = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    labels = _code_menu_labels(panel)
+    assert labels[0] == "KAIJU RUSH"
+    assert labels[-5:] == ["KING GHIDORAH (code mode)", "OXYGEN DESTROYER (code mode)",
+                           "MASER BARRAGE (code mode)", "FINAL WARS (code mode)", "ANGUIRUS (code mode)"]
+    assert "No code modes in this project" in panel._code_label.cget("text")
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_a_code_example_without_its_films_is_added_and_the_tab_says_which(app, tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    monkeypatch.delenv("PAD_FILMS_DIR", raising=False)
+    project = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    t = panel.add_code_example("ANGUIRUS", dirs=[str(tmp_path)], wait=True)
+    assert t is not None and not t.is_alive()
+    folder = MP.mode_folder(str(project), "anguirus_assist")
+    assert sorted(os.listdir(folder)) == ["anguirus_assist.c", "assets.json", "intricate_kit.h"]
+    status = panel._tryit_status.cget("text")
+    assert "added the example ANGUIRUS as modes/anguirus_assist with its code" in status
+    assert "Godzilla Raids Again (1955)" in status and "Cut film assets" in status
+    assert "ANGUIRUS (its film assets are not cut yet)" in panel._code_label.cget("text")
+    # not in the form's list: a code mode has no mode.json
+    assert panel._list.size() == 0
+    assert panel.add_code_example("ANGUIRUS") is None
+    assert "already in this project" in panel._tryit_status.cget("text")
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_a_code_example_is_cut_from_the_films_folder_the_person_picks(app, tmp_path, monkeypatch):
+    """The recipe's clip, picture, music loop and calls are cut with the film cutter from the folder
+    asked for (a synthetic film under a collection file name: nothing of a film is in the repo)."""
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    from tests.test_stern_code_modes import _ffmpeg, _synthetic_film
+    ff = _ffmpeg()
+    monkeypatch.delenv("PAD_FILMS_DIR", raising=False)
+    films = str(tmp_path / "films")
+    _synthetic_film(films, CM.FILMS["fw04"], ff)
+    ex = {"name": "TEST WARS", "slug": "test_wars", "source": "final_wars.c", "headers": ["intricate_kit.h"],
+          "seconds": 40,
+          "recipe": {"clip": {"film": "fw04", "from": 1.0, "length": 3.0, "crop": "fill"},
+                     "art": {"film": "fw04", "at": 2.0, "crop": "fill"},
+                     "music": {"film": "fw04", "from": 2.0, "length": 10.0},
+                     "calls": {"won": {"film": "fw04", "from": 3.0, "length": 1.5}}}}
+    monkeypatch.setattr(CM, "EXAMPLES", [ex])
+    project = _modes_card_project(tmp_path, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw", "1.16.0")
+    w = app.window
+    w.write_assets_var.set(str(project))
+    app.root.update()
+    panel = w._modes_panel
+    panel._ffmpeg_fn = lambda: ff
+    asked = []
+    panel._ask_dir_fn = lambda why: asked.append(why) or films
+    t = panel._on_code_example("TEST WARS")
+    t.join(60)
+    assert _wait_for(lambda: "TEST WARS (clip, picture, music, 1 call(s))" in panel._code_label.cget("text"),
+                     app.root, secs=10)
+    assert asked and "Godzilla: Final Wars (2004)" in asked[0]
+    assert "its own clip, picture, music and calls cut from the films" in panel._tryit_status.cget("text")
+    spec = CM.load(str(project), "test_wars")
+    assert spec.film["dir"] == films and spec.calls == {"won": "won.wav"}
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_try_it_carries_code_modes_with_assets_through_writes_set(app, tmp_path, monkeypatch):
+    """A project of code modes WITH assets is not the code-only fast path: Try it builds Write's own
+    set (their screens, clips and sounds), whose stage already holds the object Write compiled, so
+    the tab installs it without compiling again."""
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_runtime as MR
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    from tests.test_stern_code_modes import _code_project
+
+    _no_wsl(monkeypatch)
+    project = _code_project(tmp_path)
+    w = app.window
+    w.write_assets_var.set(project)
+    app.root.update()
+    panel = w._modes_panel
+    ran, handed, calls = [], [], []
+    _fake_rig(panel, ran)
+    panel._tryit_base = str(tmp_path / "try")
+    panel._try_fn = lambda prepare: handed.append(prepare) or True
+    monkeypatch.setattr(MT, "card_title", lambda card: ("godzilla_pro", "1.15.0", 2))
+    monkeypatch.setattr(CM, "profile_for", lambda project, code=(): MP.GODZILLA_PRO_1_15)
+
+    def build(project_, card, base, log=None, **kw):
+        calls.append(project_)
+        s = os.path.join(base, MW.TRYIT_SET)
+        stage = s + "-modes"
+        os.makedirs(os.path.join(s, "godzilla_pro"), exist_ok=True)
+        with open(os.path.join(s, "godzilla_pro", "game"), "wb") as f:
+            f.write(b"set file")
+        os.makedirs(stage, exist_ok=True)
+        for name, data in (("pad_mode.so", b"\x7fELF compiled by Write"), ("game.port", b"game godzilla_pro\n"),
+                           ("ghidorah_heads.assets", b"name KING GHIDORAH\n")):
+            with open(os.path.join(stage, name), "wb") as f:
+                f.write(data)
+        return MW.TryItSet(set_dir=s, stage_dir=stage, game_dir="godzilla_pro", version="1.15",
+                           files=["godzilla_pro/game"], port=os.path.join(stage, "game.port"),
+                           codes=["ghidorah_heads"], code_object=True)
+    monkeypatch.setattr(MW, "build_tryit_set", build)
+    assert panel._on_try() is True
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 32)
+    env = handed[0](str(card))
+    assert calls == [project]                               # Write's set, not the fast path
+    assert env == panel.tryit_env()
+    assert [c[1] for c in ran] == ["modes/tryit.sh"] and ran[0][2] == "install"   # no second compile
+    status = panel._tryit_status.cget("text")
+    assert "Code mode(s) built in: ghidorah_heads" in status and "carries them the same way" in status
+    assert status.startswith("Ready. Start a game") and "0 mode(s)" not in status   # no form mode to name
+    assert MR.sdk_dir()                                      # the SDK is where the tab looks

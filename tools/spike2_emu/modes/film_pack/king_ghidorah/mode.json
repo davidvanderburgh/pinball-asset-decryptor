@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "name": "KING GHIDORAH",
+  "title": "godzilla_pro_1_15",
+  "start_shot": "Left ramp",
+  "start_count": 3,
+  "seconds": 30,
+  "scoring_shots": [
+    "Powerline left",
+    "Powerline center",
+    "Powerline right"
+  ],
+  "award": 1250000,
+  "screen": true,
+  "screen_title": "",
+  "screen_art": "screen.png",
+  "panel_color": "#4a3300",
+  "title_color": "#ffd24a",
+  "clip": "file",
+  "clip_title": "",
+  "clip_file": "clip.mp4",
+  "clip_seconds": 4.0,
+  "clip_when": "start",
+  "countdown": true,
+  "end_sound": "end.wav",
+  "lights": true,
+  "light_color": "#ffb000",
+  "light_on_raw": "",
+  "light_off_raw": ""
+}

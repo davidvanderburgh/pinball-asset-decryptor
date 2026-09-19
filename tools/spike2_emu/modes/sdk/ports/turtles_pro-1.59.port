@@ -1,0 +1,103 @@
+# turtles_pro 1.59 - drafted by port_tool.py (from jaws_le-1.02.port and godzilla_pro-1.15.port, which
+# agree on every entry both placed), finished from an emulator probe (item 137).
+# TMNT Pro is an older framework: its rules are run by crule_manager, not cmode_manager, and
+# the shot mask is a 32-bit value in r1. Nine functions have no counterpart the tools found:
+# light_run, find_node, find_text, clip_play, clip_stop, video_player and video_surface are
+# left out, so lights, screens and clips are off on this port.
+game           turtles_pro
+version        1.59
+
+# ---- functions: site <name> <address> <first two instruction words> --------------------
+# hooked by the runtime
+#   tick: located (strict), both references
+site tick             0x0018b8b8 0xe92d4038 0xe3a00037
+#   shot_dispatch: crule_manager virtual 33 (0x129918). The probe saw it once per press with the
+#   shot's bit in r1 and 1 in r2 (see shot_mask_at / shot_mask_bits below)
+site shot_dispatch    0x00129918 0xe92d43f8 0xe1a09001
+#   ball_end: crule_manager virtual 9 (0x1296fc), a broadcast to all 54 rules 0.6 s after the drain
+#   (virtual 10 follows at the end of bonus, virtual 7 at each ball start). Its second instruction
+#   loads a literal, which the runtime relocates
+site ball_end         0x001296fc 0xe92d4038 0xe59f401c
+#   sound_lookup: located (strict)
+site sound_lookup     0x003e4a78 0xe92d4038 0xe1a05000
+# called
+#   score_add: located (strict)
+site score_add        0x001e047c 0xe30717da 0xe340106c
+#   callout / callout_nth: the framework sound requests (placed from the Jaws port)
+site callout          0x0034be40 0xe92d4010 0xe305e3f0
+site callout_nth      0x0034bff4 0xe92d4010 0xe305e3f0
+#   lamp_group: located (strict)
+site lamp_group       0x003e7aac 0xe92d4038 0xe1a04000
+#   show_priority: located (strict)
+site show_priority    0x0026bca0 0xe30439bc 0xe340306c
+#   award_screen: located (strict)
+site award_screen     0x00200b74 0xe92d4070 0xe24dd008
+#   string_new: PLT stub
+site string_new       0x000167f4 0xe28fc605 0xe28ccad4
+#   dynamic_cast: PLT stub
+site dynamic_cast     0x000161f4 0xe28fc605 0xe28ccad5
+#   resource_get: located
+site resource_get     0x00307440 0xe92d43f0 0xe1a04000
+#   set_text: located (strict)
+site set_text         0x00487a5c 0xe92d47f0 0xe1a06000
+#   surface_state: located (strict)
+site surface_state    0x00496fc0 0xe5900550 0xe2800008
+#   player_advance: located (strict)
+site player_advance   0x00200f6c 0xe2501000 0x012fff1e
+#   display_draw: located (strict)
+site display_draw     0x002de8a0 0xe3520001 0x812fff1e
+
+# ---- globals: data <name> <address> ---------------------------------------------------------
+# all derived by port_tool.py, both references agreeing; crule_manager's own code reads mode_mask
+data cur_player             0x005f4178
+data scores                 0x00652a60
+data mode_mask              0x006c77da
+data event_head             0x006c49b8
+data event_current          0x006c49bc
+data resource_manager       0x00671bc8
+data typeinfo_resource      0x0052a264
+data typeinfo_scene_player  0x005612a4
+data display_holder         0x00671b48
+data message_count          0x00510c94
+data message_remap          0x00677684
+data message_table          0x0060b134
+data award_screen_arg       0x005edc38
+
+# ---- offsets, flags and ids: value <name> <number> -----------------------------------------
+# where the shot dispatch carries the mask: register r1, 32 bits
+value shot_mask_at          1
+value shot_mask_bits        32
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+
+# ---- shots: from the item 137 probe (one switch at a time, 17 of 25 switches made a bit) ----
+# no bit from: right ramp enter, left ramp enter, spinner, the slingshots, right orbit; the pop
+# bumpers go through another crule_manager virtual (52)
+shot 0x1         Left bank target
+shot 0x8         Left orbit
+shot 0x10        Left ramp
+shot 0x80        Center loop
+shot 0x100       Center ramp
+shot 0x200       Right ramp
+shot 0x800       Right bank target
+shot 0x1000      Left return lane right
+shot 0x2000      Center ramp target
+shot 0x4000      Upper pop target
+shot 0x8000      Left ramp left target
+shot 0x10000     Left ramp right target
+shot 0x20000     Lower pop target
+shot 0x40000     Left return lane left
+shot 0x80000     Right return lane
+shot 0x100000    Left top lane
+shot 0x200000    Right top lane
+
+# ---- callouts by role, scenes by role -------------------------------------------------------------
+# no countdown callout ids: TMNT's timed modes keep none the way Godzilla's and Jaws's do
+# the same scene id as Godzilla's and Jaws's (the target program names it)
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- examples a template mode can use on this game ------------------------------------------------
+text example_start_shot     Center loop

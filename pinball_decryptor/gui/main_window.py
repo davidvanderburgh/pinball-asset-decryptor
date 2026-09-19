@@ -1555,8 +1555,14 @@ class MainWindow:
                  on_show_log_history_change=None,
                  initial_compare_row_limit=None,
                  on_compare_row_limit_change=None,
-                 on_stage_pending=None):
+                 on_stage_pending=None,
+                 preview_codes_provider=None,
+                 on_preview_codes_change=None):
         self.root = root
+        # Preview features (core/preview.py): the stored codes, read and saved
+        # by the App (settings.json); the dialog is Settings > Preview features.
+        self._preview_codes_provider = preview_codes_provider
+        self._on_preview_codes_change = on_preview_codes_change
         self._install_callback_error_logger(root)
         # Default Settings presets: {"presets": {name: {AD_name: value}},
         # "active": name}.  Persisted via on_default_presets_change.
@@ -2592,6 +2598,7 @@ class MainWindow:
         self._tab_jjp_emulate = ttk.Frame(self._notebook)
         self._tab_spike1_emulate = ttk.Frame(self._notebook)
         self._tab_multiboot = ttk.Frame(self._notebook)
+        self._tab_modes = ttk.Frame(self._notebook)
 
         # Order: Extract → the Replace tabs → Default Settings (set defaults
         # before building) → Write → Mod Pack → Partitions.  Display labels are
@@ -2605,6 +2612,11 @@ class MainWindow:
             (self._tab_image, "Images", "Replace Images"),
             (self._tab_text, "Text", "Replace Text"),
             (self._tab_settings, "Defaults", "Default Settings"),
+            # Item 127: the Modes tab - a game mode of our own.  AFTER Defaults
+            # and BEFORE Write (David, 2026-09-16): a mode is one more change a
+            # card build applies, like the tabs to its left.  Gated by
+            # ``modes`` (Stern Spike 2).
+            (self._tab_modes, "Modes", "Modes"),
             (self._tab_write, "Write", "Write"),
             (self._tab_modpack, "Mod Pack", "Mod Pack"),
             (self._tab_partition, "Partitions", "Partition Explorer"),
@@ -2643,6 +2655,17 @@ class MainWindow:
         self._build_compare_tab()
         self._build_emulate_tab()
         self._build_multiboot_tab()
+        # Item 127 defined this and never called it, so the tab shipped EMPTY:
+        # every test drove ModesPanel by hand and none built the window.  After
+        # the Emulate tab, because 'Play it' hands off to that panel.
+        self._build_modes_tab()
+        # The mode maker ships dark (core/preview.py): its tab starts HIDDEN, not
+        # only once a manufacturer is picked, so a copy without a code never has
+        # it in the window at all; _configure_tab (per manufacturer) and
+        # apply_preview_features (a code unlocked) are what show it.
+        from ..core import preview as _preview
+        if not _preview.enabled("modes"):
+            self._configure_tab("Modes", False)
         self._build_jjp_emulate_tab()
         self._build_spike1_emulate_tab()
 
@@ -7978,7 +8001,16 @@ class MainWindow:
         self._audio_assignments = {}
         self._video_assignments = {}
         self._image_assignments = {}
-        staged_changes.save(assets_dir, {})
+        # The game's own modes (item 145): every staged number goes, but the
+        # project still manages them, so the next Write puts a build of this
+        # project back to stock instead of stopping at "Nothing to write".
+        kept = {}
+        try:
+            from ..plugins.stern import stock_modes
+            kept = stock_modes.kept_by_revert_all(staged_changes.load(assets_dir))
+        except Exception:
+            kept = {}
+        staged_changes.save(assets_dir, kept)
 
     # ---- Clearing replacement picks in bulk (Audio / Video / Images) ----
     #
@@ -15145,6 +15177,114 @@ class MainWindow:
                 k, p, t, tab="Emulate"))
         self._emulate_panel.build(self._tab_emulate)
 
+    def _build_modes_tab(self):
+        """Build the 'Modes' tab: make game modes of our own, saved in the
+        project and put on the card by Write (item 127).
+
+        The seam only - the substance is in :mod:`..gui.modes_tab`.  The
+        project folder is ASKED each time (``write_assets_var``, what every
+        tab reads), and the list follows it when it changes: a mode belongs
+        to the project the rest of the tabs are editing."""
+        from .modes_tab import ModesPanel
+        self._modes_panel = ModesPanel(
+            self._tab_modes,
+            log=self.append_log,
+            theme_fn=lambda: self._current_theme,
+            badge_fn=self._make_round_icon,
+            resize_fn=self._resize_notebook_to_current_tab,
+            project_fn=lambda: self.write_assets_var.get(),
+            emulate_fn=self._modes_play,
+            # item 127, Try it: the Emulate tab's own launch, and its answer to
+            # "is the emulator up?"
+            try_fn=self._modes_try,
+            running_fn=lambda: bool(getattr(getattr(self, "_emulate_panel", None),
+                                            "_last_up", False)),
+            # ...and which launch is the latest: a Try it record belongs to ONE run
+            run_id_fn=lambda: getattr(getattr(self, "_emulate_panel", None),
+                                      "_launch_serial", None),
+            settings_staged_fn=self._modes_settings_staged)
+        self._modes_panel.build(self._tab_modes)
+        # The list follows the project only while the mode maker is switched
+        # on (the preview switch, core/preview.py): with it off the tab is
+        # hidden and reads and says nothing; apply_preview_features refreshes
+        # it when it appears.
+        from ..core import preview as _preview
+        self.write_assets_var.trace_add(
+            "write", lambda *_a: self._modes_panel.refresh()
+            if _preview.enabled("modes") else None)
+        # item 145: the game's own modes follow the project too
+        self.write_assets_var.trace_add(
+            "write", lambda *_a: self._modes_panel.refresh_stock_modes()
+            if _preview.enabled("modes") else None)
+
+    def _modes_settings_staged(self, name):
+        """The Modes tab staged (or put back) the operator setting *name* in the
+        project's Defaults settings (a stock mode's timer, item 145).  The
+        Defaults form's autostage REPLACES those settings from its own fields,
+        so the field is put in step here - otherwise the next edit on the
+        Defaults tab would quietly drop the Modes tab's value."""
+        rows = getattr(self, "_settings_rows", None) or []
+        if not rows:
+            return                    # no card read yet: the form overlays staged values when built
+        staged = self.staged_default_settings(self._settings_staged_dir())
+        self._settings_loading = True
+        try:
+            have = False
+            for r in rows:
+                if r["name"] != name:
+                    continue
+                have = True
+                if name in staged:
+                    self._settings_set_row(r, int(staged[name]) // r.get("scale", 1))
+                else:
+                    self._settings_set_row(r, r["default"])
+            if not have and name in staged:
+                by_name = {a["name"]: a for a in
+                           (getattr(self, "_settings_all_rows", None) or [])}
+                if name in by_name:
+                    self._settings_set_row(
+                        self._settings_add_extra_row(by_name[name]), int(staged[name]))
+        finally:
+            self._settings_loading = False
+        try:
+            self._settings_fill_all_tree()
+        except Exception:
+            pass
+
+    def _modes_play(self):
+        """'Play it' = the Emulate tab's own launch, with the tab brought
+        forward so the user watches the run they asked for.
+
+        It CALLS that panel's start rather than spelling a launch of its own: a
+        second launcher would be a second definition of how a run starts, and
+        the rig's own rule about two scripts defining one fact applies just as
+        well one level up.  ``start()`` guards itself (already starting, already
+        stopping, no rig), so an impatient second click cannot launch twice."""
+        self._step_aside_for_jump()
+        for tid in self._notebook.tabs():
+            if self._tab_key(tid) == "Emulate":
+                self._notebook.select(tid)
+                break
+        panel = getattr(self, "_emulate_panel", None)
+        start = getattr(panel, "start", None) if panel is not None else None
+        if callable(start):
+            start()
+
+    def _modes_try(self, prepare):
+        """Try it (item 127) = the Emulate tab's own Start with the Modes tab's
+        preparation (``EmulatePanel.launch_with``), the tab brought forward so
+        the user watches the run they asked for.  Never a second launcher."""
+        self._step_aside_for_jump()
+        for tid in self._notebook.tabs():
+            if self._tab_key(tid) == "Emulate":
+                self._notebook.select(tid)
+                break
+        panel = getattr(self, "_emulate_panel", None)
+        launch = getattr(panel, "launch_with", None) if panel is not None else None
+        if not callable(launch):
+            return False
+        return launch(prepare)
+
     def _build_multiboot_tab(self):
         """Build the 'Multi-boot' tab: one SD card carrying several game
         images and a menu at power-up (item 90).
@@ -17876,6 +18016,9 @@ class MainWindow:
         self._configure_tab("Emulate Spike1",
                             getattr(caps, "emulate_spike1", False))
         self._configure_tab("Multi-boot", getattr(caps, "multiboot", False))
+        # The mode maker ships dark: its tab shows only with the preview
+        # switch on (Settings > Preview features, core/preview.py).
+        self._configure_tab("Modes", self._modes_preview_on(mfr))
         # ...and the tab BUILDS FOR THIS MANUFACTURER (item 118): Stern's SD
         # card or a JJP install ISO, the same panel with the other backend
         # behind it.  Only a manufacturer that has the tab gets to switch it,
@@ -20334,7 +20477,137 @@ class MainWindow:
                         "text", "Pending (text layout)", scan_id,
                         tag="pending")
                     n += 1
+        n += self._add_pending_mode_rows(assets_path, scan_id)
+        n += self._add_pending_stock_mode_rows(assets_path, scan_id)
         return n
+
+    #: Write-list status of a staged change to one of the game's own modes (item 145)
+    _PENDING_STOCK_MODES = "Pending (game's own modes)"
+
+    def _add_pending_stock_mode_rows(self, assets_path, scan_id):
+        """One pending row per staged number of the game's OWN modes (item
+        145): a timer or award word in the game program, or the operator
+        setting the table names (staged in Defaults' settings, so it is listed
+        here with its mode as well).  Returns the count added."""
+        mfr = self._current_mfr
+        if not assets_path or not self._modes_preview_on(mfr):
+            return 0
+        try:
+            from ..plugins.stern import stock_modes
+            build = stock_modes.table_for_project(assets_path)
+            edits = stock_modes.staged_edits(assets_path, build)
+        except Exception:
+            return 0
+        n = 0
+        for e in edits:
+            num = e["number"]
+            label = (build.row_label(num) if build is not None else num.label)
+            other = e["staged_for"] not in (None, build.id if build else None)
+            self._add_write_preview_row(
+                "%s %s: %s -> %s%s" % (
+                    e["mode"], label.lower(), format(e["stock"], ","),
+                    format(e["new"], ","),
+                    "  (staged for %s, not written)" % e["staged_for"]
+                    if other else ""),
+                "setting" if num.is_adjustment else "program",
+                self._PENDING_STOCK_MODES, scan_id, tag="pending")
+            n += 1
+        return n
+
+    #: Write-tab status for a project's mode (item 149).
+    _PENDING_MODE = "Pending (Modes)"
+
+    def _add_pending_mode_rows(self, assets_path, scan_id):
+        """Item 149: one "Pending (Modes)" row per mode in the project's
+        modes folder, saying what a build adds for it (its screen, its clip,
+        its own end sound, its mode file on the system partition) - the same
+        wording the build log uses.  A mode lives in the project, not in the
+        Extract baseline, so the MD5 scan never sees it and Revert never
+        touches it.  Returns the count added.  None with the preview switch
+        off (Settings > Preview features): the Write leaves the modes out,
+        and its log says so."""
+        mfr = self._current_mfr
+        if not assets_path or not self._modes_preview_on(mfr):
+            return 0
+        try:
+            from ..plugins.stern import mode_write
+            modes = mode_write.project_modes(assets_path)
+            lines = mode_write.pending_lines(assets_path, modes)
+        except Exception as e:
+            self._add_write_preview_row(
+                "Modes — %s" % e, "mode", self._PENDING_MODE, scan_id,
+                tag="pending")
+            return 1
+        if modes and not mode_write.enabled():
+            lines = ["%s — left out of the build (%s=0)"
+                     % (spec.name, mode_write.GATE_ENV) for _s, spec in modes]
+        elif modes and self._write_dest_is_device_for_modes(mfr):
+            # a direct-SD write cannot add files, so the engine leaves every mode out:
+            # the row must not promise screens, clips and mode files it will not write
+            lines = ["%s — left out of a Direct-SD write: it cannot add files to the "
+                     "card (build an image file to carry the modes)"
+                     % spec.name for _s, spec in modes]
+        elif modes and mode_write.host_refusal():
+            # a Mac: the tools that put a mode's files on the card do not run there, so the
+            # engine leaves every mode out, and the row says so rather than promising them
+            lines = ["%s — left out of this Write: %s" % (spec.name, mode_write.host_refusal())
+                     for _s, spec in modes]
+        code = mode_write.code_modes(assets_path)
+        if code and (not mode_write.enabled() or self._write_dest_is_device_for_modes(mfr)
+                     or mode_write.host_refusal()):
+            # the code modes are carried like the form modes (pending_lines names each); only a
+            # build that leaves the modes out says they are not put on the card
+            lines = [ln for ln in lines if "(code mode)" not in ln]
+            lines = list(lines) + ["Modes — %s" % mode_write.code_modes_note(code)]
+        for line in lines:
+            self._add_write_preview_row(line, "mode", self._PENDING_MODE,
+                                        scan_id, tag="pending")
+        return len(lines)
+
+    def _modes_write_fingerprint(self, assets_path):
+        """Item 149: the part of the Write scan's fingerprint a project's modes
+        make - every file under ``modes/`` as (path, mtime, size), plus the
+        modes gates - so adding, editing or removing a mode rescans when the
+        Write tab is shown again. A folder walk of a few small files; no
+        hashing."""
+        files = []
+        try:
+            from ..plugins.stern import mode_project, mode_write
+            root = mode_project.modes_dir(assets_path) if assets_path else ""
+            if root and os.path.isdir(root):
+                for dirpath, dirnames, filenames in os.walk(root):
+                    dirnames.sort()
+                    for name in sorted(filenames):
+                        p = os.path.join(dirpath, name)
+                        try:
+                            st = os.stat(p)
+                        except OSError:
+                            continue
+                        files.append((os.path.relpath(p, root), st.st_mtime_ns,
+                                      st.st_size))
+            gates = (mode_write.enabled(), mode_write.sound_enabled(),
+                     mode_write.preview_on())
+        except Exception:
+            return None
+        return (tuple(files), gates)
+
+    def _modes_preview_on(self, mfr=None):
+        """Does this window show the mode maker: a manufacturer with the Modes
+        tab, AND the preview switch on (core/preview.py, a signed code under
+        Settings > Preview features)?  Everything of the family's in this
+        window asks this."""
+        mfr = mfr if mfr is not None else self._current_mfr
+        if mfr is None or not getattr(mfr.capabilities, "modes", False):
+            return False
+        from ..core import preview
+        return preview.enabled("modes")
+
+    def _write_dest_is_device_for_modes(self, mfr):
+        """Item 149: is the Write tab set to write straight to a physical card (the
+        Direct-SD source), where a project's modes are left out?"""
+        var = getattr(self, "write_input_source_var", None)
+        return bool(getattr(mfr.capabilities, "direct_ssd", False)
+                    and var is not None and var.get() == "ssd")
 
     def _add_write_preview_row(self, rel, ext, status, scan_id, tag="modified"):
         """Insert one row into the preview tree (main-thread only)."""
@@ -21085,6 +21358,14 @@ class MainWindow:
                 for p, per in text_layout.load(assets_path).items()))
         except Exception:
             parts.append(None)
+        # Item 149: a mode added, edited or removed changes the Modes rows.
+        parts.append(self._modes_write_fingerprint(assets_path))
+        # The game's own modes (item 145): staged words and their settings.
+        try:
+            from ..plugins.stern import stock_modes
+            parts.append(stock_modes.fingerprint(assets_path))
+        except Exception:
+            parts.append(None)
         return parts
 
     def _browse_extract_output(self):
@@ -21709,11 +21990,61 @@ class MainWindow:
                          menu=prereq_menu)
 
         # The first-launch disclaimer, re-readable on demand (David) —
-        # About-style reference material, so it sits last.
+        # About-style reference material, so it sits last.  Preview features
+        # beside it: a code from the app's author switches one on (the mode
+        # maker ships dark, core/preview.py).
         menu.add_separator()
+        menu.add_command(label="Preview features…",
+                         command=self._open_preview_dialog)
         menu.add_command(label="View disclaimer…",
                          command=self._show_disclaimer)
         return menu
+
+    def _open_preview_dialog(self):
+        """Settings > "Preview features…": paste a code, Unlock, see what is
+        on and until when, Remove one (gui/preview_dialog.py)."""
+        from .preview_dialog import PreviewFeaturesDialog
+        dlg = getattr(self, "_preview_dialog", None)
+        if dlg is not None and dlg.alive():
+            dlg.lift()
+            return dlg
+        self._preview_dialog = PreviewFeaturesDialog(
+            self.root, theme_name=self._current_theme,
+            get_codes=self._preview_codes, set_codes=self._set_preview_codes)
+        return self._preview_dialog
+
+    def _preview_codes(self):
+        try:
+            got = self._preview_codes_provider() if self._preview_codes_provider else []
+        except Exception:
+            got = []
+        return [c for c in (got or []) if isinstance(c, str)]
+
+    def _set_preview_codes(self, codes):
+        """The dialog changed the stored codes: save them (the App), judge them
+        again for this run, and show or hide what they gate right away."""
+        from ..core import preview
+        if self._on_preview_codes_change:
+            self._on_preview_codes_change(list(codes))
+        preview.load(codes)
+        self.apply_preview_features()
+
+    def apply_preview_features(self):
+        """Show or hide what the preview switch gates in this window (the Modes
+        tab), for the manufacturer on screen."""
+        mfr = self._current_mfr
+        if mfr is None:
+            return
+        on = self._modes_preview_on(mfr)
+        self._configure_tab("Modes", on)
+        self._ensure_visible_selection()
+        panel = getattr(self, "_modes_panel", None)
+        if on and panel is not None:
+            try:
+                panel.refresh()
+                panel.refresh_stock_modes()
+            except Exception:                           # noqa: BLE001
+                pass
 
     def _show_disclaimer(self):
         """Gear "View disclaimer…" — re-open the first-launch terms in
@@ -23870,7 +24201,8 @@ class MainWindow:
         style.configure("TButton", background=c["button"], foreground=c["fg"])
         style.map("TButton",
                   background=[("active", c["accent"]), ("pressed", c["accent"])],
-                  foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
+                  foreground=[("disabled", c["gray"]),
+                              ("active", "#ffffff"), ("pressed", "#ffffff")])
         # Color-coded action buttons (David): "Go.TButton" = green
         # go/confirm actions (Extract, Build, Build / flash, dialog Start);
         # "Danger.TButton" = red destructive ones (live run Cancels, Revert

@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "name": "SHIN GODZILLA",
+  "title": "godzilla_pro_1_15",
+  "start_shot": "Powerline center",
+  "start_count": 3,
+  "seconds": 25,
+  "scoring_shots": [
+    "Left ramp",
+    "Right ramp",
+    "Building",
+    "Big loop"
+  ],
+  "award": 2000000,
+  "screen": true,
+  "screen_title": "",
+  "screen_art": "screen.png",
+  "panel_color": "#1e0b33",
+  "title_color": "#c77dff",
+  "clip": "file",
+  "clip_title": "",
+  "clip_file": "clip.mp4",
+  "clip_seconds": 4.0,
+  "clip_when": "start",
+  "countdown": true,
+  "end_sound": "end.wav",
+  "lights": true,
+  "light_color": "#a020ff",
+  "light_on_raw": "",
+  "light_off_raw": ""
+}

@@ -1,0 +1,88 @@
+# deadpool_pro 1.16 - drafted by port_tool.py from jaws_le-1.02.port, finished with call_probe.c and the
+# end-of-ball hook (item 138). Lights, screens and clips are off: their functions were not found.
+game           deadpool_pro
+version        1.16
+
+# ---- functions: site <name> <address> <first two instruction words> --------------------
+site tick             0x0021c3ec 0xe92d4038 0xe3a00037
+#   shot_dispatch: cmode_manager virtual 11 (0xff9c4), found with call_probe.c: once per press, the mask
+#   64-bit in r2:r3 as on Godzilla (it walks 26 modes calling their +0x6c)
+site shot_dispatch    0x000ff9c4 0xe92d4ff0 0xe1a07003
+#   ball_end: 0xfe798, which the handler of hook 0x34 calls (registered 0x101180); it walks the 26 modes
+#   calling their +0x40. Godzilla's handlers of hooks 0x34 and 0xc6 both call its ball_end
+site ball_end         0x000fe798 0xe92d4038 0xe1a05000
+site sound_lookup     0x002dc4e0 0xe92d4038 0xe1a05000
+site score_add        0x00355d20 0xe3071e96 0xe340106e
+site callout          0x00243900 0xe92d4010 0xe308e110
+site callout_nth      0x00243ab4 0xe92d4010 0xe308e110
+site lamp_group       0x0038d660 0xe92d4038 0xe1a04000
+site show_priority    0x003ad84c 0xe30e3a64 0xe340306e
+site award_screen     0x00151cdc 0xe92d4070 0xe24dd008
+site string_new       0x00016938 0xe28fc606 0xe28cca1f
+site dynamic_cast     0x0001632c 0xe28fc606 0xe28cca1f
+site resource_get     0x003aad34 0xe92d43f0 0xe1a04000
+site set_text         0x004d75d4 0xe92d47f0 0xe1a06000
+site surface_state    0x004e6b38 0xe5900550 0xe2800008
+site player_advance   0x001520d4 0xe2501000 0x012fff1e
+site display_draw     0x003879f4 0xe3520001 0x812fff1e
+
+# ---- globals: data <name> <address> ---------------------------------------------------------
+# derived by port_tool.py; Godzilla and Jaws agree wherever both placed one
+data cur_player             0x0063e3fc
+data scores                 0x006ee2b8
+data mode_mask              0x006e7e96
+data event_head             0x006eea60
+data event_current          0x006eea64
+data resource_manager       0x006da028
+data typeinfo_resource      0x005868c0
+data typeinfo_scene_player  0x005b13cc
+data display_holder         0x006d9fa8
+data message_count          0x00566068
+data message_remap          0x006f8494
+data message_table          0x00660c8c
+data award_screen_arg       0x00637dd8
+
+# ---- offsets, flags and ids: value <name> <number> -----------------------------------------
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value display_at            0x7c
+value surface_playing       2
+value clip_layer            0
+
+# ---- shots: from the item 138 probe, one switch at a time (census_mode.c confirms) ----------
+shot 0x2               Left orbit
+shot 0x20              Inner loop
+shot 0x40              Colossal jackpot target
+shot 0x400             Left Lil Deadpool drop
+shot 0x800             Middle Lil Deadpool drop
+shot 0x1000            Right Lil Deadpool drop
+shot 0x4000            Lil Deadpool target
+shot 0x8000            Left ramp
+shot 0x40000           Right orbit
+shot 0x1000000         DEAD target D
+shot 0x2000000         DEAD target E
+shot 0x4000000         DEAD target A
+shot 0x8000000         DEAD target last D
+shot 0x10000000        POOL target P
+shot 0x20000000        POOL target O
+shot 0x40000000        POOL target second O
+shot 0x80000000        POOL target L
+shot 0x100000000       BAM target B
+shot 0x200000000       BAM target A
+shot 0x400000000       BAM target M
+shot 0x800000000       BAM target !
+shot 0x10000000000     BOOM target B
+shot 0x20000000000     BOOM target M
+shot 0x40000000000     BOOM target O
+shot 0x80000000000     BOOM target second O
+
+# ---- callouts by role, scenes by role -------------------------------------------------------------
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- examples a template mode can use on this game ------------------------------------------------
+text example_start_shot     Lil Deadpool target

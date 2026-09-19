@@ -368,6 +368,31 @@ if [ -n "${PAD_OVERRIDE_DIR:-}" ]; then
         exit 1; }
 fi
 
+# THE CARD'S OWN MODES (the item 149 family follow-up): EMULATING A CARD MEANS WHAT
+# BOOTING IT MEANS.
+#
+# A card that carries modes of our own (/usr/local/padmode on its rootfs partition,
+# mode_install.py) loads them itself on a machine: its game_monitor hook preloads the
+# object. This rig execs ./game directly and never runs a card's boot chain, so until
+# this block such a card booted here with no runtime at all - and with every mode's
+# panel over the HUD all game, because a mode's screen is authored visible and hidden
+# BY the runtime. modes/cardmodes.sh asks the card the way the boot selector above asks
+# it for its menu and media (parts.py, debugfs, no mount, no root; ~0.15 s on a stock
+# card over /mnt/c, measured), puts the card's own object, port and mode files in the
+# guest through modes/tryit.sh install, and answers with the path to preload.
+#
+# OUT HERE, NOT IN THE APP, so a card run means the same thing from the Emulate tab,
+# from a terminal and inside the macOS container, with no project open and nothing
+# ticked. A PAD_MODE_SO that arrived with the launch WINS (the project's override set,
+# the Modes tab's Try it, a scripted run): the script then touches nothing and says the
+# card's modes are left out. PAD_CARD_MODES=0 opts out. A card without modes is the run
+# it has always been: no line, no file, no variable. And it never stops a run - see the
+# script's header for every rule. Called with an empty card too (an extracted title, a
+# folder): it then only takes out what an earlier card's install of ours left behind.
+_cardmode_so=$(bash "$S/modes/cardmodes.sh" "${PAD_CARD:-}" | tail -1)
+[ -n "$_cardmode_so" ] && export PAD_MODE_SO="$_cardmode_so"
+unset _cardmode_so
+
 # THE SHIM NEEDS THE TITLE BY NAME, not just the directory it is told to run
 # from, and until 2026-08-23 a CARD run never gave it one.
 #
@@ -883,6 +908,50 @@ if [ "${PAD_DISPLAY_INVERT:-0}" != "1" ] && [ -s "$BDC" ] && grep -qa -- '-inver
     fi
 fi
 
+# ★ ITEM 127 - A FILE THE CARD NEVER HAD (a mode's own clip), THROUGH THE SET.
+#
+# A bind needs a target, so the loop below can only lay a set file over a file the card
+# already has. A mode's clip is a NEW file inside the title (the video bank names
+# scene.assets/<dir>/<n>.asset past the last stock one), and the Modes tab's Try it
+# lists such files in `overrides.new`. Each one's deepest directory the card DOES have
+# gets a READ-ONLY OVERLAY here - the set's copy of that directory over the card's - so
+# the new file appears beside the stock ones and nothing else changes. Measured under
+# WSL before it went in: `unshare -rm` overlays a directory of a fuse2fs mount (the
+# card), the new file reads back, the stock files still read, and a write is refused.
+#
+# AN OVERLAY THAT FAILS IS LOGGED, NOT FATAL: the game still boots with every edit the
+# binds apply, and a clip that is not there is one pm_clip reports as NOT played. The
+# video host (padvidhost.py) runs OUTSIDE this namespace and cannot see the overlay or
+# the binds; the PAD-103 block below clears dump/vidoverride on every run and publishes
+# the set's title directory once the binds are on (PAD-170), and a new clip is served
+# from there like a replaced one.
+ovl_tried="|"
+ovl_miss=""
+if [ -n "$OVERRIDE_SRC" ] && [ -f "$OVERRIDE_SRC/overrides.new" ]; then
+    for rel in $(tr -d '\r' < "$OVERRIDE_SRC/overrides.new" | grep -v '^#' | LC_ALL=C sort -u); do
+        [ -f "$OVERRIDE_SRC/$rel" ] || continue
+        [ -e "$R/games/$rel" ] && continue
+        ovl_dir=$(dirname "$rel")
+        while [ "$ovl_dir" != . ] && [ ! -d "$R/games/$ovl_dir" ]; do
+            ovl_dir=$(dirname "$ovl_dir")
+        done
+        [ "$ovl_dir" != . ] || continue
+        case "$ovl_tried" in *"|$ovl_dir|"*) continue ;; esac
+        ovl_tried="$ovl_tried$ovl_dir|"
+        if mount -t overlay overlay -o "lowerdir=$OVERRIDE_SRC/$ovl_dir:$R/games/$ovl_dir" \
+                "$R/games/$ovl_dir"; then
+            echo "[run] new files: overlaid /games/$ovl_dir (read-only, the set's files over the card's)"
+        else
+            echo "[run] new files: could not overlay /games/$ovl_dir - the new files in it are" >&2
+            echo "[run]   missing from this run (the rest of the set still applies)" >&2
+        fi
+    done
+    for rel in $(tr -d '\r' < "$OVERRIDE_SRC/overrides.new" | grep -v '^#'); do
+        [ -e "$R/games/$rel" ] || ovl_miss="$ovl_miss $rel"
+    done
+    [ -z "$ovl_miss" ] || echo "[run] new files NOT in this run:$ovl_miss" >&2
+fi
+
 # ★ PAD-103 - YOUR EDITS, ON TOP OF THE CARD, WITHOUT A REBUILD.
 #
 # One bind per file, over the card's own copy. It goes HERE, last of the
@@ -937,8 +1006,11 @@ if [ -n "$OVERRIDE_SRC" ]; then
     OLDIFS=$IFS; IFS=$'\n'
     for rel in $(cd "$OVERRIDE_SRC" && find . -type f ! -name overrides.json \
                                             ! -name overrides.delta \
+                                            ! -name overrides.new \
                                             -printf '%P\n' | LC_ALL=C sort); do
         if [ ! -f "$R/games/$rel" ]; then
+            # Item 127: a NEW file whose overlay failed is reported above, not fatal.
+            case " $ovl_miss " in *" $rel "*) continue ;; esac
             # Is this a file of a TITLE, or one that lives beside one? A title
             # directory is the one carrying that title's own `game` ELF or its
             # `image.bin` sound bank, and a set names exactly one title; any
@@ -1011,7 +1083,7 @@ if [ -n "$PIVOT" ]; then
         cd /
         /busybox umount -l /oldroot
         cd "/games/$GAME" || exit 1
-        export LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1}
+        export LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1}
         # stdio has to point INSIDE the container. The caller's stdout is a file
         # on a host mount ($HOME/gzwatch.log for watch.sh), and that mount leaves
         # the namespace with the pivot - criu then refuses fd 1 ("Can't lookup
@@ -1039,5 +1111,5 @@ fi
 # LD_PRELOAD is applied to the game alone: the busybox tools in this rootfs do
 # not link libdl and fail to start with the shim forced on them.
 exec chroot "$R" /bin/sh -c \
-  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} exec ./game"
+  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} exec ./game"
 INNER

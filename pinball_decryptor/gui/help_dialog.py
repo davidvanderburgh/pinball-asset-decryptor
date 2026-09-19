@@ -814,6 +814,10 @@ HELP_CONTENT = {
          "it's the same name the Replace Images tab shows for that scene, "
          "from either direction."),
     ],
+    # The Modes tab's own tips are in PREVIEW_HELP: a copy of the app without a
+    # preview code shows none of them (sections_for).  The key stays so every
+    # notebook tab has an entry.
+    "Modes": [],
     "Write": [
         ("What a build does",
          "Build copies the pristine original and repacks every file in the "
@@ -2155,6 +2159,70 @@ _CONTENT_EXTRAS = {
 for _tab, _extra in _CONTENT_EXTRAS.items():
     HELP_CONTENT[_tab] = list(HELP_CONTENT[_tab]) + list(_extra)
 
+# Tips only a copy of the app with a PREVIEW FEATURE switched on shows
+# (core/preview.py): {feature id: {tab: [(title, body), ...]}}.  Without a
+# code none of this is rendered, so the "?" window of a copy without one
+# describes the app that copy is (sections_for).
+PREVIEW_HELP = {
+    "modes": {
+        "Modes": [
+            ("What it's for",
+             "Make a game mode of your own: what starts it, how long it runs, "
+             "which shots score and what they pay, and what the display, lights "
+             "and speakers do while it runs. A mode is a small text file that the "
+             "running game reads, so it behaves like a mode the game shipped with: "
+             "it scores through the game's own scoring and plays through its own "
+             "light and sound calls."),
+            ("Which games",
+             "Godzilla Pro 1.15 for now. A mode hooks the game's own program, and "
+             "those hooks are measured on that one build."),
+            ("Making a mode",
+             "Press New, name it, then pick the shot that starts it and how many "
+             "times, how long it runs, which shots score and what the first one "
+             "pays. The Screen, Clip, Sound and Lights sections are optional. A "
+             "screen is a panel in your colours or a picture of your own, and it "
+             "shows what each shot paid and the total. A clip is a title card or "
+             "a video of your own, played full screen when the mode starts or "
+             "ends. Every change saves itself in the project's modes folder."),
+            ("Several modes",
+             "A card holds up to 8 modes. Each starts from its own shot, and one "
+             "runs at a time: a mode whose shots come up while another is "
+             "running does not start then, but its next starting shot after that "
+             "one ends starts it."),
+            ("A preview feature",
+             "The mode maker is a preview: it is in every copy of the app, switched "
+             "off, and a personal code from the app's author switches it on "
+             "(Settings, the gear, > Preview features: paste the code and press "
+             "Unlock). The window says whose code it is and the last day it works; "
+             "after that day the Modes tab is gone again at the next start. Your "
+             "modes stay in the project's modes folder either way."),
+        ],
+        "Write": [
+            ("Preview features",
+             "A project can hold modes made with the mode maker, a preview feature "
+             "(Settings > Preview features). A copy of the app where it is not "
+             "switched on builds everything else in the project exactly as usual, "
+             "leaves the modes and any changes to the game's own modes off the "
+             "card, and says so in the log."),
+        ],
+    },
+}
+
+
+def sections_for(tab_name):
+    """The (title, body) sections the "?" window shows for *tab_name*: the
+    tab's own, plus those of every preview feature switched on in this run
+    (:data:`PREVIEW_HELP`).  Never raises."""
+    out = list(HELP_CONTENT.get(tab_name) or [])
+    try:
+        from ..core import preview
+        for feature, tabs in PREVIEW_HELP.items():
+            if preview.enabled(feature):
+                out += list(tabs.get(tab_name) or [])
+    except Exception:                                   # noqa: BLE001
+        pass
+    return out
+
 # Appended to every tab's sections — app-wide behaviours users ask about.
 GENERAL_CONTENT = [
     ("The ⚙ settings menu",
@@ -2297,11 +2365,10 @@ class TabHelpWindow:
 
     def _render(self, tab_name):
         self._tab_name = tab_name
-        sections = HELP_CONTENT.get(tab_name)
-        if sections is None:
-            # Unknown/renamed tab — show just the general tips rather than
-            # nothing so the button never feels broken.
-            sections = []
+        # An unknown/renamed tab gets just the general tips rather than
+        # nothing, so the button never feels broken; a preview feature's tips
+        # only with that feature switched on (sections_for).
+        sections = sections_for(tab_name)
         th = THEMES.get(self._theme_fn()) or THEMES["light"]
         sans, _ = platform_font()
 

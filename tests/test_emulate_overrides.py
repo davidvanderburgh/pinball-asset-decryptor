@@ -20,6 +20,9 @@ a real mount namespace under WSL, which no test on a Windows CI runner can do.
 
 import os
 import pathlib
+import shutil
+import subprocess
+import sys
 
 import pytest
 
@@ -999,6 +1002,56 @@ def test_an_assigned_replacement_is_applied_before_the_set_is_built(
         root.destroy()
 
 
+def test_an_ordinary_start_runs_the_sets_modes_as_a_card_does(tmp_path, monkeypatch):
+    """Item 149: the set carries the project's modes (write_overrides), whose screens are
+    authored VISIBLE for the runtime to hide - run 9's clean boot of a Written card showed every
+    panel over the HUD all game without it. So when the set names its modes payload, the
+    ordinary Start puts it in the rig (modes/tryit.sh install, as the card's game_monitor does
+    on a machine) and preloads it; a set without modes starts as it always did; a payload that
+    will not go in refuses the run with the reason."""
+    import subprocess as sp
+    stage = tmp_path / "ovr-modes"
+    stage.mkdir()
+    ran, lines = [], []
+    root, panel, img, assets = _ready_panel(tmp_path, monkeypatch,
+                                            stage=lambda a, cancel_cb=None: (0, 0, []),
+                                            log=lines.append)
+    monkeypatch.setattr(emulate_tab, "rig_cmd", lambda script, *a, **k: ["RIG", script] + list(a))
+    result = {"rc": 0}
+
+    def run(cmd, **kw):
+        ran.append(cmd)
+        return sp.CompletedProcess(cmd, result["rc"], b"", b"boom" if result["rc"] else b"")
+    monkeypatch.setattr(emulate_tab.subprocess, "run", run)
+    try:
+        # no modes in the set: the env it always was, and no rig command
+        extra = panel._prepare_overrides(img, assets)
+        assert extra == ["PAD_OVERRIDE_DIR=%s" % emulate_tab._wsl_path(str(tmp_path / "ovr"))]
+        assert ran == []
+        # the set's record names its modes: installed, then preloaded
+        monkeypatch.setattr(engine, "read_override_manifest", lambda d: {
+            "reuse": True, "modes": {"dir": str(stage), "names": ["ATOMIC BREATH", "KAIJU RUSH"]}})
+        extra = panel._prepare_overrides(img, assets)
+        assert extra[0].startswith("PAD_OVERRIDE_DIR=") and extra[1] == "PAD_MODE_SO=/lib/pad_mode.so"
+        want = emulate_tab._wsl_path(str(stage)) if sys.platform == "win32" else str(stage)
+        assert ran == [["RIG", "modes/tryit.sh", "install", want]]
+        root.update()
+        assert any("carry modes (ATOMIC BREATH, KAIJU RUSH)" in ln for ln in lines), lines
+        # the install fails: no run, and the hint says why
+        result["rc"] = 1
+        assert panel._prepare_overrides(img, assets) is None
+        root.update()
+        assert "could not be put in the emulator" in panel._ovr_hint.cget("text")
+        assert "boom" in panel._ovr_hint.cget("text")
+        # the payload folder is gone: refused, never a run with the panels on the glass
+        result["rc"] = 0
+        monkeypatch.setattr(engine, "read_override_manifest", lambda d: {
+            "reuse": True, "modes": {"dir": str(tmp_path / "gone"), "names": ["KAIJU RUSH"]}})
+        assert panel._prepare_overrides(img, assets) is None
+    finally:
+        root.destroy()
+
+
 def test_a_folder_with_nothing_assigned_is_taken_as_it_stands(tmp_path,
                                                               monkeypatch):
     """The ordinary run: staging finds nothing, and says nothing about it."""
@@ -1223,7 +1276,189 @@ def test_run_game_skips_a_set_file_a_card_run_does_not_mount():
 
 
 # --------------------------------------------------------------------------
+# Item 127: a file the card never had (a mode's own clip), through the set
+# --------------------------------------------------------------------------
+
+def _run_game_text():
+    return (RIG / "run_game.sh").read_text(encoding="utf-8", errors="replace")
+
+
+def test_run_game_overlays_the_new_files_before_it_binds():
+    """A bind needs a target, so a NEW file (overrides.new) gets a read-only overlay
+    of its directory first; the list itself is never bound."""
+    body = _run_game_text()
+    block = body[body.index("ITEM 127 - A FILE THE CARD NEVER HAD"):]
+    assert 'mount -t overlay overlay -o "lowerdir=$OVERRIDE_SRC/$ovl_dir:$R/games/$ovl_dir"' in block
+    assert body.index("mount -t overlay overlay") < body.index('mount --bind "$OVERRIDE_SRC/$rel"')
+    assert "! -name overrides.new" in body
+    # a failed overlay is logged and skipped, never the run-ending "different card" error
+    assert 'case " $ovl_miss " in *" $rel "*) continue ;; esac' in body
+    assert "new files NOT in this run:$ovl_miss" in body
+
+
+def test_run_game_publishes_the_sets_title_dir_for_the_video_host():
+    body = _run_game_text()
+    clear = body.index('rm -f "$R/dump/vidoverride"')
+    publish = body.index('> "$R/dump/vidoverride"')
+    # cleared on EVERY run (at the top level of the block, not inside an if) before
+    # anything can publish it
+    assert clear < publish
+    assert body[clear - 1] == "\n"
+
+
+def _unshare_ok():
+    if sys.platform == "win32" or not shutil.which("unshare"):
+        return False
+    try:
+        r = subprocess.run(["unshare", "-rm", "true"], capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+_UNSHARE = _unshare_ok()
+
+
+def _block_run(tmp_path, fail_overlay=False, with_set=True, pivot=None):
+    """Run run_game.sh's OWN override block (item 127's overlay, then the PAD-103 bind
+    loop) in a user + mount namespace, over a plain directory standing in for the card.
+    (A fuse2fs card was measured the same way by hand under WSL, with the same result.)
+    ``pivot`` = the pivot_root command: then the run is PAD_PIVOT's shape - $R bound onto
+    itself FIRST, the block, then pivot_root and `/busybox umount -l /oldroot` as
+    run_game.sh does it, and the tree read again from inside the new root."""
+    g = "godzilla_pro"
+    a = "assets/lcd/auto_loaded/60ed/scene.assets/2.asset"
+    card, sset, r = tmp_path / "card", tmp_path / "set", tmp_path / "R"
+    (card / g / a).mkdir(parents=True)
+    (sset / g / a).mkdir(parents=True)
+    (r / "games" / g).mkdir(parents=True)
+    (r / "dump").mkdir(parents=True)
+    (card / g / a / "0.asset").write_text("stock0\n")
+    (card / g / "assets/lcd/auto_loaded/60ed/scene.radium").write_text("stockbank\n")
+    (card / g / "game").write_text("elf\n")
+    (sset / g / "assets/lcd/auto_loaded/60ed/scene.radium").write_text("newbank\n")
+    (sset / g / a / "598.asset").write_text("newclip\n")
+    (sset / "overrides.json").write_text("{}\n")
+    (sset / "overrides.new").write_text("%s/%s/598.asset\n" % (g, a))
+    (r / "dump" / "vidoverride").write_text("stale\n")
+    body = _run_game_text()
+    block = body[body.index("# ★ ITEM 127 - A FILE THE CARD NEVER HAD"):
+                 body.index('\ncd "$R"\n')]
+    (tmp_path / "block.sh").write_text(block, encoding="utf-8", newline="\n")
+    shim = ('mount() { [ "$2" = overlay ] && return 32; command mount "$@"; }\n'
+            if fail_overlay else "")
+    inner = (
+        'R=%s; GAME=%s; OVERRIDE_SRC=%s\n' % (r, g, sset if with_set else "")
+        + ('mount --bind "$R" "$R" || exit 7\n' if pivot else "")
+        + 'mount --bind %s/%s "$R/games/$GAME" || exit 9\n' % (card, g)
+        + shim
+        + '. %s/block.sh\n' % tmp_path
+        + 'echo "LS=$(ls "$R/games/%s/%s" | tr "\\n" " ")"\n' % (g, a)
+        + 'echo "BANK=$(cat "$R/games/%s/assets/lcd/auto_loaded/60ed/scene.radium")"\n' % g
+        + 'echo "VIDOVERRIDE=$(cat "$R/dump/vidoverride" 2>/dev/null)"\n')
+    if pivot:
+        shutil.copy2(pivot[1], str(r / "busybox"))
+        inner += (
+            'cd "$R" && mkdir -p oldroot || exit 6\n'
+            + '%s . oldroot || exit 6\n' % pivot[0]
+            + 'cd / && /busybox umount -l /oldroot || exit 5\n'
+            + 'echo "PLS=$(/busybox ls /games/%s/%s | /busybox tr "\\n" " ")"\n' % (g, a)
+            + 'echo "PCLIP=$(/busybox cat /games/%s/%s/598.asset)"\n' % (g, a)
+            + 'echo "PBANK=$(/busybox cat /games/%s/assets/lcd/auto_loaded/60ed/scene.radium)"\n' % g
+            + 'echo "POLD=$(/busybox ls -A /oldroot | /busybox wc -l)"\n')
+    (tmp_path / "inner.sh").write_text(inner, encoding="utf-8", newline="\n")
+    p = subprocess.run(["unshare", "-rm", "bash", str(tmp_path / "inner.sh")],
+                       capture_output=True, text=True, timeout=60)
+    return p, g, sset
+
+
+@pytest.mark.skipif(not _UNSHARE, reason="needs Linux with unprivileged unshare -rm")
+def test_a_new_file_reaches_the_guest_tree_and_the_video_host(tmp_path):
+    p, g, sset = _block_run(tmp_path)
+    if "could not overlay" in p.stderr:
+        pytest.skip("this kernel refuses overlayfs in a user namespace: %s" % p.stderr[-200:])
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "overlaid /games/%s/assets/lcd/auto_loaded/60ed/scene.assets/2.asset" % g in p.stdout
+    assert "LS=0.asset 598.asset" in p.stdout
+    assert "BANK=newbank" in p.stdout
+    assert "VIDOVERRIDE=%s/%s" % (sset, g) in p.stdout
+    assert "your edits: 2 file(s) applied" in p.stdout
+
+
+@pytest.mark.skipif(not _UNSHARE, reason="needs Linux with unprivileged unshare -rm")
+def test_a_failed_overlay_is_logged_and_the_run_goes_on(tmp_path):
+    p, _g, _sset = _block_run(tmp_path, fail_overlay=True)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "could not overlay" in p.stderr
+    assert "new files NOT in this run:" in p.stderr
+    assert "could not apply" not in p.stderr
+    assert "BANK=newbank" in p.stdout
+    assert "LS=0.asset \n" in p.stdout
+
+
+@pytest.mark.skipif(not _UNSHARE, reason="needs Linux with unprivileged unshare -rm")
+def test_a_run_without_a_set_clears_a_stale_vidoverride(tmp_path):
+    p, _g, _sset = _block_run(tmp_path, with_set=False)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "VIDOVERRIDE=\n" in p.stdout
+
+
+def _static_busybox():
+    """A STATIC busybox (the one PAD_PIVOT copies into the guest), or None: after the
+    pivot nothing of the host is left to run."""
+    import struct
+    path = shutil.which("busybox")
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as f:
+            head = f.read(64)
+            if head[:4] != b"\x7fELF" or head[4] != 2 or head[5] != 1:
+                return None                          # only 64-bit little-endian checked
+            phoff, = struct.unpack_from("<Q", head, 0x20)
+            phentsize, phnum = struct.unpack_from("<HH", head, 0x36)
+            f.seek(phoff)
+            table = f.read(phentsize * phnum)
+    except OSError:
+        return None
+    for i in range(phnum):
+        if struct.unpack_from("<I", table, i * phentsize)[0] == 3:   # PT_INTERP: dynamic
+            return None
+    return path
+
+
+def _pivot_root_cmd():
+    for p in (shutil.which("pivot_root"), "/usr/sbin/pivot_root", "/sbin/pivot_root"):
+        if p and os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
+
+
+@pytest.mark.skipif(not _UNSHARE or sys.platform == "win32",
+                    reason="needs Linux with unprivileged unshare -rm")
+def test_a_new_file_survives_the_pivot_of_a_checkpointable_run(tmp_path):
+    """The app's Start is ALWAYS the PAD_PIVOT shape (root, pivot_root, then a lazy umount
+    of the whole host tree), and the Try it overlay's upper layer - the staged set - lives
+    OUTSIDE the new root. The new clip must still be there, and still read, from inside
+    the guest's root after the host tree is gone (item 127; the emulator runs proved only
+    the ordinary chroot boot)."""
+    busybox, pivot_root = _static_busybox(), _pivot_root_cmd()
+    if not busybox or not pivot_root:
+        pytest.skip("needs a static busybox and pivot_root (PAD_PIVOT's own prerequisites)")
+    p, g, _sset = _block_run(tmp_path, pivot=(pivot_root, busybox))
+    if "could not overlay" in p.stderr:
+        pytest.skip("this kernel refuses overlayfs in a user namespace: %s" % p.stderr[-200:])
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "LS=0.asset 598.asset" in p.stdout
+    assert "PLS=0.asset 598.asset" in p.stdout            # from inside the new root
+    assert "PCLIP=newclip" in p.stdout
+    assert "PBANK=newbank" in p.stdout                    # the PAD-103 binds ride it too
+    assert "POLD=0" in p.stdout                           # and the host tree is gone
+
+
+# --------------------------------------------------------------------------
 # PAD-170: the video host serves the edited clip
+# (and item 127's new clip, which only the set has: see the last test here)
 # --------------------------------------------------------------------------
 
 def _load_padvidhost(monkeypatch, rootfs):
@@ -1319,3 +1554,26 @@ def test_watch_clears_the_last_runs_edits_before_every_run():
     # Not inside the boot selector's if/else: every run clears it.
     line = body[body.rindex("\n", 0, clear) + 1:clear]
     assert line == ""
+
+
+def test_a_clip_only_the_set_has_is_served_from_it(vidhost):
+    """Item 127: a mode's own clip is a NEW file (the card never had it), laid
+    in by run_game.sh's overlay. PAD-170's lookup serves it like a replaced one;
+    before the set is published it is simply not there."""
+    mod, flag, stage, _card, clip, _other = vidhost
+    new = clip.parent / "598.asset"
+    (stage / new).write_bytes(b"NEWCLIP")
+    assert mod.host_path("./" + new.as_posix()) is None
+    flag.write_text(str(stage) + "\n")
+    got = mod.host_path("./" + new.as_posix())
+    assert got == os.path.normpath(str(stage / new))
+    assert mod.from_edits(got)
+
+
+def test_run_game_clears_and_publishes_the_video_host_flag_once():
+    """Item 127 and PAD-170 each published dump/vidoverride; merged, only
+    PAD-170's clear-then-publish-after-the-binds remains, so a set that fails
+    on a bind never leaves a flag behind."""
+    body = (RIG / "run_game.sh").read_text(encoding="utf-8", errors="replace")
+    assert body.count('rm -f "$R/dump/vidoverride"') == 1
+    assert body.count('> "$R/dump/vidoverride"') == 1

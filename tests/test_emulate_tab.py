@@ -4471,3 +4471,121 @@ def test_more_than_one_tab_can_move_a_user_off_a_stale_runtime():
     assert len(users) >= 2, (
         "only %s can act on a stale runtime; a user who never opens that tab "
         "has no way off one" % (users or "nothing"))
+
+
+# --------------------------------------------------------------------------
+# Item 127: launch_with - the Modes tab's Try it through this tab's own Start
+# --------------------------------------------------------------------------
+
+def _launch_with_panel(tmp_path, monkeypatch):
+    img = tmp_path / "godzilla_pro-1_15_0.Release.8G.sdcard.raw"
+    img.write_bytes(bytes(16))
+    root, panel = _panel(tmp_path)
+    _quiesce(panel)
+    panel._precache_kick = lambda *a, **kw: None
+    panel._select_probe_kick = lambda *a, **kw: None
+    panel._reattach_data_disk = lambda *a, **kw: None
+    panel._note_the_runtime_is_a_different_machine = lambda *a, **kw: None
+    logged = []
+    panel._log = lambda msg: logged.append(msg)
+    built, launched = [], []
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
+    monkeypatch.setattr(emulate_tab, "watch_cmd",
+                        lambda minutes, env, savestates=True: built.append(list(env))
+                        or ["watch.sh-stand-in"])
+    monkeypatch.setattr(
+        emulate_tab.subprocess, "Popen",
+        lambda *a, **kw: launched.append(a[0]) or
+        SimpleNamespace(stdout=iter(()), wait=lambda timeout=None: 0))
+    panel._src_path.set(str(img))
+    return root, panel, str(img), built, launched, logged
+
+
+def _wait_started(panel):
+    deadline = time.time() + 5
+    while panel._starting and time.time() < deadline:
+        time.sleep(0.01)
+
+
+def test_launch_with_appends_the_prepared_env_to_the_ordinary_start(tmp_path, monkeypatch):
+    root, panel, img, built, launched, _logged = _launch_with_panel(tmp_path, monkeypatch)
+    seen = []
+    try:
+        assert panel.launch_with(lambda card: seen.append(card) or
+                                 ["PAD_OVERRIDE_DIR=/x/set", "PAD_MODE_SO=/lib/pad_mode.so"])
+        _wait_started(panel)
+        assert seen == [img]                      # the card in the box, read on the main loop
+        assert launched == [["watch.sh-stand-in"]]
+        env = built[0]
+        assert any(e.startswith("PAD_CARD=") for e in env)
+        assert env[-2:] == ["PAD_OVERRIDE_DIR=/x/set", "PAD_MODE_SO=/lib/pad_mode.so"]
+        assert panel._launch_prepare is None      # one-shot
+    finally:
+        root.destroy()
+
+
+def test_launch_with_a_refusing_preparation_starts_nothing(tmp_path, monkeypatch):
+    root, panel, _img, built, launched, logged = _launch_with_panel(tmp_path, monkeypatch)
+    try:
+        assert panel.launch_with(lambda card: None)
+        _wait_started(panel)
+        assert not built and not launched
+        assert not panel._starting
+        # ...and one that raises is a refusal too, said in the log
+        assert panel.launch_with(lambda card: 1 / 0)
+        _wait_started(panel)
+        assert not launched
+        assert any("could not be prepared" in m for m in logged)
+    finally:
+        root.destroy()
+
+
+def test_launch_with_never_rides_along_on_a_later_start(tmp_path, monkeypatch):
+    root, panel, _img, built, launched, _logged = _launch_with_panel(tmp_path, monkeypatch)
+    try:
+        monkeypatch.setattr(emulate_tab, "rig_available", lambda: False)
+        # no rig: start() returns early, and launch_with says the preparation will not run
+        assert panel.launch_with(lambda card: ["PAD_MODE_SO=/lib/pad_mode.so"]) is False
+        assert not launched
+        monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+        panel.start()                              # an ordinary Start afterwards
+        _wait_started(panel)
+        assert launched and not any("PAD_MODE_SO" in e for e in built[0])
+    finally:
+        root.destroy()
+
+
+def test_launch_with_refuses_beside_the_edits_set_and_a_live_run(tmp_path, monkeypatch):
+    root, panel, _img, built, launched, logged = _launch_with_panel(tmp_path, monkeypatch)
+    called = []
+    try:
+        panel._overrides_wanted = lambda: ("card", "assets")
+        panel._overrides_refuse = lambda msg: logged.append(msg)
+        assert panel.launch_with(lambda card: called.append(card) or []) is False
+        assert any("untick it" in m for m in logged)
+        panel._overrides_wanted = lambda: None
+        panel._last_up = True
+        assert panel.launch_with(lambda card: called.append(card) or []) is False
+        assert any("already running" in m for m in logged)
+        time.sleep(0.05)
+        assert not called and not launched and panel._launch_prepare is None
+    finally:
+        root.destroy()
+
+
+def test_launch_with_the_preparation_reads_its_own_launch_number(tmp_path, monkeypatch):
+    """Item 127: the Modes tab ties what Try it put in the rig to the launch its
+    preparation ran in. Every Start is numbered BEFORE its worker, so the preparation reads
+    its own launch's number, and a later ordinary Start (no modes in it) has another."""
+    root, panel, _img, _built, launched, _logged = _launch_with_panel(tmp_path, monkeypatch)
+    seen = []
+    try:
+        assert panel.launch_with(lambda card: seen.append(panel._launch_serial) or [])
+        _wait_started(panel)
+        assert launched and seen == [panel._launch_serial]
+        panel.start()                              # the Emulate tab's own Start, later
+        _wait_started(panel)
+        assert len(launched) == 2 and panel._launch_serial == seen[0] + 1
+    finally:
+        root.destroy()

@@ -1,0 +1,159 @@
+# jaws_le 1.02 - drafted by port_tool.py from godzilla_pro-1.15.port, finished by hand (item 136).
+# The first port for a title with its own rules code. What was placed by hand, what the
+# emulator proved, and what is still copied is written beside each entry.
+# Proven in the emulator (PAD_CARD jaws_le-1_02_0, muted): all 24 functions match; the
+# shot dispatch, tick and ball end hooks fire (one thread); template_mode.c runs unchanged.
+game           jaws_le
+version        1.02
+
+# ---- functions: site <name> <address> <first two instruction words> --------------------
+# hooked by the runtime
+#   tick: located (strict)
+site tick             0x002b7298 0xe92d4038 0xe3a00037
+#   shot_dispatch: by hand (item 136) - cmode_manager virtual 11, called once from the shot handler with the mask in r2:r3
+site shot_dispatch    0x0014f938 0xe92d4ff0 0xe3045b18
+#   ball_end: 0x1521e8, which the handler of hook 0x34 calls (item 138). Item 136's loose match, 0x1524cc,
+#   was a sibling loop over the same modes calling another virtual: it ran once at game start
+site ball_end         0x001521e8 0xe92d40f8 0xe30e6c04
+#   sound_lookup: located (strict)
+site sound_lookup     0x0055bab8 0xe92d4038 0xe1a05000
+# called
+#   score_add: located (strict)
+site score_add        0x003d3260 0xe3041d0e 0xe3401087
+#   callout: by hand (item 136) - the framework request Godzilla's wrapper ends in; Jaws calls it directly 366 times
+site callout          0x004c2fe0 0xe92d4010 0xe30ceda8
+#   callout_nth: by hand (item 136) - the framework numbered request; cmode_timed's countdown tail-calls it
+site callout_nth      0x004c3194 0xe92d4010 0xe30ceda8
+#   light_run: located (strict)
+site light_run        0x0028f67c 0xeafffd83 0xe92d40f0
+#   lamp_group: located (strict)
+site lamp_group       0x004a1be0 0xe92d4038 0xe1a04000
+#   show_priority: located (strict)
+site show_priority    0x0032e980 0xe30d3afc 0xe340308a
+#   award_screen: located (strict)
+site award_screen     0x003c7714 0xe92d4070 0xe24dd008
+#   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE
+site string_new       0x00015b98 0xe28fc607 0xe28cca9d
+#   dynamic_cast: PLT stub for __dynamic_cast
+site dynamic_cast     0x000167ec 0xe28fc607 0xe28cca9d
+#   resource_get: placed through 3 callers, e.g. the bl at 0x3bacbc
+site resource_get     0x0037f984 0xe92d43f0 0xe1a04000
+#   find_node: placed through 3 callers, e.g. the bl at 0x207b8
+site find_node        0x00638d24 0xe92d4070 0xe24dd008
+#   find_text: placed through 3 callers, e.g. the bl at 0x20f2c
+site find_text        0x006387c0 0xe92d4070 0xe24dd008
+#   set_text: located (strict)
+site set_text         0x0061cc74 0xe92d47f0 0xe1a06000
+#   clip_play: located (strict)
+site clip_play        0x00051fe8 0xe92d43f0 0xe24dd014
+#   clip_stop: located (strict)
+site clip_stop        0x00052248 0xe92d4008 0xebfffeea
+#   video_player: located (strict)
+site video_player     0x00051dd8 0xe92d4010 0xe30443e8
+#   video_surface: located (strict)
+site video_surface    0x00051dfc 0xe92d4070 0xe30453e8
+#   surface_state: located (strict)
+site surface_state    0x0062ba50 0xe5900550 0xe2800008
+#   player_advance: located (strict)
+site player_advance   0x003c7b0c 0xe2501000 0x012fff1e
+#   display_draw: located (strict)
+site display_draw     0x005a6c4c 0xe3520001 0x812fff1e
+
+# ---- globals: data <name> <address> ---------------------------------------------------------
+#   cur_player: derived from 2 places, e.g. 0x460b40+0x60
+data cur_player             0x007c2098
+#   scores: derived from 2 places, e.g. 0x4b8c60+0x8
+data scores                 0x008a3850
+#   mode_mask: derived from 2 places, e.g. 0x1c2d0+0xf8
+data mode_mask              0x00874d0e
+#   event_head: derived from 2 places, e.g. 0x52bb8+0x30
+data event_head             0x008adaf8
+#   event_current: a base 0x7b7e80 + field 0x4; the base derived from 2 places, e.g. 0x255094+0x4
+data event_current          0x008adafc
+#   resource_manager: a base 0x7db1a0 + field 0x80; the base derived from 2 places, e.g. 0x3bac44+0x54
+data resource_manager       0x008a2248
+#   typeinfo_resource: derived from 2 places, e.g. 0x264fc+0x34
+data typeinfo_resource      0x006db088
+#   typeinfo_scene_player: derived from 2 places, e.g. 0x264fc+0x38
+data typeinfo_scene_player  0x007215ec
+#   display_holder: derived from 2 places, e.g. 0x3b9258+0x28
+data display_holder         0x008a21c8
+#   message_count: derived from 2 places, e.g. 0x34a5c8+0xd4
+data message_count          0x006aeac0
+#   message_remap: derived from 2 places, e.g. 0x34a6a4+0x10
+data message_remap          0x0087cf94
+#   message_table: derived from 2 places, e.g. 0x34a708+0x24
+data message_table          0x00812724
+#   award_screen_arg: derived from 2 places, e.g. 0x3d414+0x8
+data award_screen_arg       0x007b6b10
+
+# ---- offsets, flags and ids: value <name> <number> -----------------------------------------
+# COPIED framework offsets. mode_mask_busy, clip_layer and surface_playing were exercised by
+# the run (in_game went true in a game; the example clip drew full screen). The event and
+# node offsets were not exercised. Godzilla's light owner, light set and award screen type are
+# its own rules' ids and are LEFT OUT, so lights are off on Jaws. The award screen offsets are
+# left out too: with no known Jaws award screen type there is nothing to call them with.
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value display_at            0x7c
+value surface_playing       2
+value clip_layer            0
+
+# ---- shots: shot <mask> <name> - from a one-switch-at-a-time census in the emulator ---------
+# Jaws sends 0x1 and the shot bit in ONE dispatch (Godzilla sends two).
+shot 0x2               Left slingshot
+shot 0x4               Right slingshot
+shot 0x8               Left return lane
+shot 0x20              Right return lane
+shot 0x80              Right pop bumper
+# the spinner sends 0x100, 0x400 and 0x800 in one spin
+shot 0x100             Spinner
+# the upper playfield ship wheel sends 0x1000, 0x2000, 0x4000 and 0x8000 as it turns
+shot 0x1000            Ship wheel
+shot 0x400000          Chum bucket target
+shot 0x4000000         Left ramp enter
+# 1.5 s after Left ramp enter when the ramp's made switch did not follow; meaning not measured
+shot 0x10000000        Left ramp enter, late
+shot 0x8000000         Left ramp
+shot 0x20000000        Center ramp
+shot 0x40000000        Right ramp
+shot 0x80000000        Upper playfield ramp
+shot 0x100000000       Target 1
+shot 0x200000000       Target 2
+shot 0x400000000       Target 3
+shot 0x800000000       Bottom right target
+shot 0x2000000000      Upper playfield target
+shot 0x4000000000      3 bank bottom
+shot 0x8000000000      3 bank middle
+shot 0x10000000000     3 bank top
+# sent with 3 bank top after the bottom and middle were down: probably the bank completed
+shot 0x20000000000     3 bank complete
+shot 0x400000000000    Mid flipper lane
+shot 0x8000000000000   Quickshot top
+shot 0x10000000000000  Quickshot middle
+shot 0x20000000000000  Quickshot bottom
+# no shot from: the three boat hit optos, shark hit, shark fin target (their mechs were not
+# moved), and the left loop entrance (0x1 only: a loop needs its exit too)
+
+# ---- callouts by role, scenes by role -------------------------------------------------------------
+# cmode_timed's own defaults (0x1b8da8 stores them at +0x84/+0x86/+0x88; its countdown virtual
+# 0x1b7c40 plays them): the same roles as Godzilla's 1287/1291/1295. The run was muted: the
+# requests ran without a fault, but which sound plays is not heard yet.
+callout countdown           1386
+callout ten_seconds         1387
+callout time_up             1388
+# Jaws has no slide-out scene like Godzilla's 32e6ae28. UIScoreFrame loads the score panel
+# 9d578751 (the same id as Godzilla's score panel). NOT yet proven as a home for a screen.
+scene hud                  9d57875196c613785a1eee010c55223a0f1aa821
+# the same scene id as Godzilla's; 635 clips, and video_bank.parse walks it
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
+
+# ---- examples a template mode can use on this game ------------------------------------------------
+text example_start_shot     Chum bucket target
+text example_clip           Beach_panic_intro

@@ -85,7 +85,8 @@ def test_a_sound_no_play_table_names_is_not_grown_and_says_why():
     assert all("trimmed to fit" in m for _l, m in msgs)
 
 
-def test_the_plan_rewrites_only_the_key_bits_under_the_same_whitening():
+@pytest.mark.parametrize("family", [False, True])
+def test_the_plan_rewrites_only_the_key_bits_under_the_same_whitening(family):
     """The middle sixteen bits of the second word are not the key and are
     kept; the whitening the descriptor already has is re-applied."""
     stock, new = _key(0xd2694790, 0x00000d81), _key(0xd7094794, 0x80000b86)
@@ -97,11 +98,21 @@ def test_the_plan_rewrites_only_the_key_bits_under_the_same_whitening():
     params = [{"idx": 39, "grown": True, "stock_findkey": stock,
                "findkey": new, "length": 230819, "stock_length": 22050},
               {"idx": 40, "grown": False}]
-    writes, expect = engine._plan_descriptor_repoint(params, sites)
+    writes, expect = engine._plan_descriptor_repoint(params, sites, family=family)
     want_plain = _key(0xd7094794, (0x1eef6d81 & ~MASK) | 0x80000b86)
-    # the declared duration moves by the growth, on top of whatever the card
-    # said: 2001 + (ceil(230819 * 4000 / 44100) - 2000) = 2001 + 18937
-    want_dur = 2001 + (engine._duration_units(230819) - 2000)
+    if family:
+        # the mode editor family (the preview switch on): the declared duration
+        # moves by the growth, on top of whatever the card said, and ends where
+        # the record's AUDIO ends (item 150 follow-up: the codec emits length -
+        # BLOCK samples and a duration past that plays a burst):
+        # 2001 + (floor((230819 - 200) * 4000 / 44100) - 2000) = 2001 + 18917
+        want_dur = 2001 + (engine._duration_units_emitted(230819) - 2000)
+        assert want_dur == 2001 + 18917
+    else:
+        # the switch off: the rounding a build without the family has always
+        # made, 2001 + (ceil(230819 * 4000 / 44100) - 2000) = 2001 + 18936
+        want_dur = 2001 + (engine._duration_units(230819) - 2000)
+        assert want_dur == 2001 + 18936
     assert writes == {
         0x2af2bdf2: bytes(a ^ b for a, b in zip(want_plain, ks)),
         0x2af2bdf2 - 7: bytes(a ^ b for a, b in
@@ -109,6 +120,19 @@ def test_the_plan_rewrites_only_the_key_bits_under_the_same_whitening():
     assert expect == {180: ({new}, want_dur)}
     # what the game would derive from the rewritten payload IS the new key
     assert engine._play_key(want_plain, 180) == new
+
+
+def test_the_emitted_duration_ends_on_the_audio_and_is_exact_on_a_10_ms_grid():
+    """Item 150 follow-up: a grown record's declared duration is rounded DOWN from the samples
+    the codec emits (length - BLOCK), so the voice never plays past them - measured in a rig
+    capture as a burst at the end of every appended record and at the music's loop seam. An
+    emitted length on the 441-sample grid (mode_sounds.loop_wav) is exact."""
+    assert engine._duration_units_emitted(200 + 441 * 1000) == 40000      # exact: 10 s
+    assert engine._duration_units_emitted(200 + 441 * 1000) * 44100 // 4000 == 441 * 1000
+    for length in (86169, 99481, 264800, 1762435):
+        units = engine._duration_units_emitted(length)
+        assert units * 44100 / 4000.0 <= length - 200 < (units + 1) * 44100 / 4000.0
+    assert engine._duration_units_emitted(100) == 0
 
 
 def test_a_row_without_a_stock_length_keeps_the_declared_duration():
@@ -154,9 +178,9 @@ def test_the_plan_refuses_a_grown_sound_nothing_names_or_without_a_key():
         engine._plan_descriptor_repoint(params, sites)
 
 
-def test_two_grown_sounds_in_one_descriptor_are_both_expected():
-    """Both keys are re-pointed and the declared duration moves by BOTH
-    growths (the descriptor's figure covers the whole sequence)."""
+def test_two_grown_sounds_in_one_descriptor_are_both_expected_switch_off():
+    """The preview switch off: both keys re-pointed, and the declared duration
+    moves by BOTH growths, rounded as a build without the family rounds."""
     a, b = _key(0x11, 0x0d81), _key(0x22, 0x0d82)
     sites = [_site(1, 0x100, a, dur=4000),
              engine._DescSite(1, 0x120, b"\x00" * 8, b, 0x100 - 7,
@@ -172,6 +196,29 @@ def test_two_grown_sounds_in_one_descriptor_are_both_expected():
     assert expect == {1: ({_key(0x91, 1), _key(0x92, 2)},
                           4000 + 4000 + 4000)}
     assert writes[0x100 - 7] == struct.pack("<I", 12000)
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_two_grown_sounds_in_one_descriptor_are_both_expected():
+    """Both keys are re-pointed and the declared duration moves by BOTH
+    growths (the descriptor's figure covers the whole sequence)."""
+    a, b = _key(0x11, 0x0d81), _key(0x22, 0x0d82)
+    sites = [_site(1, 0x100, a, dur=4000),
+             engine._DescSite(1, 0x120, b"\x00" * 8, b, 0x100 - 7,
+                              b"\x00" * 4, 4000)]
+    params = [{"idx": 0, "grown": True, "stock_findkey": a,
+               "findkey": _key(0x91, 1), "length": 88200,
+               "stock_length": 44100},
+              {"idx": 1, "grown": True, "stock_findkey": b,
+               "findkey": _key(0x92, 2), "length": 66150,
+               "stock_length": 22050}]
+    writes, expect = engine._plan_descriptor_repoint(params, sites)
+    assert set(writes) == {0x100, 0x120, 0x100 - 7}
+    # each growth ends where its record's audio ends: 88000 and 65950 emitted
+    # samples are 7981 and 5981 units, 3981 more than each stock length's
+    assert expect == {1: ({_key(0x91, 1), _key(0x92, 2)},
+                          4000 + 3981 + 3981)}
+    assert writes[0x100 - 7] == struct.pack("<I", 11962)
 
 
 # --------------------------------------------------------------------------
@@ -264,3 +311,98 @@ def test_a_sound_no_play_table_names_trims_instead_of_growing(monkeypatch,
     assert _said(msgs, "idx 0: nothing in the game's play tables names")
     assert not _said(msgs, "the sound bank grows to keep it whole")
     assert plan is None or not plan.get("jobs")
+
+
+# --------------------------------------------------------------------------
+# item 149: the key mask is PER BUILD and is measured, not assumed
+# --------------------------------------------------------------------------
+GZ = 0xFC0003FF
+
+
+def _named_card(mask, n, extra_sites=()):
+    """``n`` stock records and one descriptor site each whose payload carries junk
+    in the bits ``mask`` drops, so only the right mask names the records."""
+    params, sites = [], []
+    for i in range(n):
+        w1, w2 = 0x1000 + i, 0x80000001 + (i & 0x3ff)
+        junk = (0x5a5a5a5a & ~mask) & 0xFFFFFFFF
+        params.append({"idx": i, "grown": False, "findkey": _key(w1, w2 & mask)})
+        sites.append(_site(100 + i, 0x1000 + 0x20 * i, _key(w1, (w2 & mask) | junk)))
+    return params, sites + list(extra_sites)
+
+
+def test_play_key_takes_the_builds_mask():
+    assert engine._play_key(_key(1, 0xffffffff), 0, GZ) == _key(1, GZ)
+
+
+def test_the_mask_that_names_the_most_stock_records_is_chosen():
+    """Godzilla Pro 1.15's layout (item 130: 2534 of 2535 named with 0xFC0003FF,
+    44 with Led Zeppelin's) is picked on a card whose tables carry it, and Led
+    Zeppelin's on one whose tables carry that."""
+    params, sites = _named_card(GZ, 40)
+    msgs, log = _capture()
+    assert engine._desc_key_mask(params, sites, log) == GZ
+    assert _said(msgs, "0xFC0003FF")
+    params, sites = _named_card(MASK, 40)
+    assert engine._desc_key_mask(params, sites) == MASK
+
+
+def test_a_grown_row_counts_by_its_stock_key():
+    params, sites = _named_card(GZ, 10)
+    params[0].update(grown=True, stock_findkey=params[0]["findkey"],
+                     findkey=_key(0x9999, 0x80000002))
+    params, sites = params, sites
+    assert engine._desc_key_mask(params, sites) == GZ
+
+
+def test_no_clear_winner_is_refused():
+    """Half a card named each way is not a measurement."""
+    p1, s1 = _named_card(GZ, 10)
+    p2, s2 = _named_card(MASK, 10)
+    for p in p2:
+        p["findkey"] = _key(struct.unpack("<I", p["findkey"][:4])[0] + 0x100000,
+                            struct.unpack("<I", p["findkey"][4:])[0])
+    s2 = [engine._DescSite(s.sid + 1000, s.off + 0x100000, s.keystream,
+                           _key(struct.unpack("<I", s.payload[:4])[0] + 0x100000,
+                                struct.unpack("<I", s.payload[4:])[0]),
+                           s.dur_off + 0x100000, s.dur_keystream, s.duration) for s in s2]
+    with pytest.raises(RuntimeError, match="do not match one known key layout"):
+        engine._desc_key_mask(p1 + p2, s1 + s2)
+
+
+def test_the_switch_off_plan_keeps_the_one_mask_it_always_had():
+    """The preview switch off (core/preview.py): the plan takes the mask a build
+    without the mode editor family takes, and on a Godzilla Pro 1.15 layout it
+    refuses exactly as that build does."""
+    params, sites = _named_card(GZ, 20)
+    params[3].update(grown=True, stock_findkey=params[3]["findkey"],
+                     findkey=_key(0x7777, 0x80000123), length=176600,
+                     stock_length=83456)
+    with pytest.raises(RuntimeError, match="idx 3: no descriptor"):
+        engine._plan_descriptor_repoint(params, sites)
+    # ...and on Led Zeppelin's layout it re-points as it always did
+    params, sites = _named_card(MASK, 20)
+    new = _key(0x7777, 0x00000123)
+    params[3].update(grown=True, stock_findkey=params[3]["findkey"], findkey=new)
+    _writes, expect = engine._plan_descriptor_repoint(params, sites)
+    assert expect[sites[3].sid][0] == {new}
+
+
+@pytest.mark.usefixtures("preview_modes_on")
+def test_the_plan_repoints_under_the_godzilla_mask():
+    """The product bug item 130 measured: on a Godzilla Pro 1.15 layout the plan
+    used to refuse ("no descriptor ... names this sound's record")."""
+    params, sites = _named_card(GZ, 20)
+    stock = params[3]["findkey"]
+    new = _key(0x7777, 0x80000123)
+    params[3].update(grown=True, stock_findkey=stock, findkey=new,
+                     length=176600, stock_length=83456)
+    writes, expect = engine._plan_descriptor_repoint(params, sites)
+    s = sites[3]
+    assert list(expect) == [s.sid]
+    assert expect[s.sid][0] == {new}
+    plain = bytes(a ^ b for a, b in zip(writes[s.off], s.keystream))
+    assert engine._play_key(plain, s.sid, GZ) == new
+    # the bits the mask drops are the descriptor's own and are kept
+    assert (struct.unpack("<I", plain[4:])[0] & ~GZ & 0xFFFFFFFF) == \
+        (struct.unpack("<I", s.payload[4:])[0] & ~GZ & 0xFFFFFFFF)

@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "name": "KAIJU RUSH",
+  "title": "godzilla_pro_1_15",
+  "start_shot": "Maser target",
+  "start_count": 3,
+  "seconds": 30,
+  "scoring_shots": [
+    "Powerline left",
+    "Powerline center",
+    "Powerline right",
+    "Left ramp",
+    "Right ramp"
+  ],
+  "award": 1000000,
+  "screen": true,
+  "screen_title": "",
+  "screen_art": "",
+  "panel_color": "#146e28",
+  "title_color": "#ffe600",
+  "clip": "title",
+  "clip_title": "",
+  "clip_file": "",
+  "clip_seconds": 4.0,
+  "clip_when": "start",
+  "countdown": true,
+  "end_sound": "",
+  "lights": true,
+  "light_color": "#00ff00",
+  "light_on_raw": "",
+  "light_off_raw": ""
+}

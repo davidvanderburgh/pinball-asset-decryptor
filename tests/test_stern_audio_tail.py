@@ -2027,6 +2027,18 @@ def test_audit_audio_patches_clean_and_anomalies():
     shifted = {0: b"\0" * 200, 198: b"\0" * 100}     # idx2 window shifted -1
     assert _audit_audio_patches(params, shifted, log) == 0
 
+    # An APPENDED record (a grown sound's new copy) is encoded with its silent lead-out too
+    # (engine._APPENDED_TAIL, item 150 follow-up): its window is length + that, and no anomaly.
+    from pinball_decryptor.plugins.stern.engine import _APPENDED_TAIL
+    logs.clear()
+    grown = params + [{"idx": 3, "body_off": 4096, "length": 60, "chan": 1, "grown": True}]
+    tail = {0: b"\0" * 200, 4096: b"\0" * (2 * (60 + _APPENDED_TAIL))}
+    assert _audit_audio_patches(grown, tail, log) == 0
+    # ...but a STOCK record is never allowed the extra
+    logs.clear()
+    stock_tail = {0: b"\0" * (2 * (100 + _APPENDED_TAIL))}
+    assert _audit_audio_patches(params, stock_tail, log) >= 1
+
 
 def test_audio_profile_report(tmp_path):
     """Stock population + a hot bright replacement -> flagged row + CSV."""

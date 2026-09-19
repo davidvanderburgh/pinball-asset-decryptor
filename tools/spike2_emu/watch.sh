@@ -1801,6 +1801,13 @@ sel_flag_stale() {
     if [ -n "$SEL_SEEN" ]; then bound=$SEL_GAP; else bound=$SEL_WAIT; fi
     [ "$bound" != 0 ] && [ "$age" -ge "$bound" ]
 }
+# PAD_MODE_SO AND PAD_CARD_MODES ARE NAMED ON THIS LINE ALTHOUGH `env` WOULD INHERIT THEM.
+# The first is how a launch brings a mode runtime of its own (the Emulate tab's override
+# set, the Modes tab's Try it); the second is the opt-out from the card's own modes
+# (modes/cardmodes.sh, called by run_game.sh). Both decide what gets preloaded into the
+# game, and a launch line that carries them only by accident is one `env -i` away from a
+# card that silently boots without its modes - tests/test_spike2_card_modes.py pins them.
+# Empty means unset to everything that reads them.
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
            PAD_LCD_SHM="$LCD_GUEST" PAD_LCD_NODE="${PAD_LCD_NODE:-$LCD_NODE}" \
@@ -1811,6 +1818,7 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_PIVOT="${PAD_PIVOT:-}" PAD_OVERRIDE_DIR="${PAD_OVERRIDE_DIR:-}" \
            PAD_PIVOT="${PAD_PIVOT:-}" PAD_SELECT="${PAD_SELECT:-0}" \
            PAD_SELECT_AUTO="${PAD_SELECT_AUTO:-0}" \
+           PAD_MODE_SO="${PAD_MODE_SO:-}" PAD_CARD_MODES="${PAD_CARD_MODES:-}" \
            bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
 GAMEPG=$!
 if [ -n "${PAD_PIVOT:-}" ]; then
@@ -2174,6 +2182,15 @@ if ! pad_guest_up; then
     tail -20 "$LOG" >&2
     exit 1
 fi
+
+# THE CARD'S OWN MODES, SAID WHERE THE USER READS. run_game.sh asks the card whether it
+# carries modes of our own and puts them in the guest (modes/cardmodes.sh); what it found
+# is a "[modes] ..." line in $LOG, written in the run's first second - long before the
+# event feed below starts listening (it tails from the END of $LOG, on purpose), so that
+# feed can never carry it. This script's stdout is what the Emulate tab shows, so the
+# lines are repeated here, once, now that the guest exists and they are certainly there.
+# A card without modes wrote none, and this prints nothing.
+grep -a '^\[modes\] ' "$LOG" 2>/dev/null
 
 # DID THE PLAYFIELD WINDOW STAY UP? Asked HERE, and it is the whole of the
 # answer to "starting Bond Pro was missing the keys window and playfield"

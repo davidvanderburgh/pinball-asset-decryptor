@@ -10560,6 +10560,25 @@ static unsigned popcount8(unsigned v)
     return n;
 }
 
+/* ★ THE LONG INDEX-BITMAP BODY (item mode-leds, read off Godzilla Premium 1.16's
+ * builder: the planner at 0x5ae3d8, the frame at 0x5b06ac). A bitmap window of
+ * MORE than 8 groups cannot say which of its middle groups it sends in six flag
+ * bits, so the planner switches form: the command gets M (0x20) and a THIRD header
+ * byte follows the group nibbles. body[0] bits 0-3 say whether groups 0-3 of the
+ * window are sent, body[2] bits 0-7 groups 4-11; a group not sent is the fill
+ * byte (body[0] bit 6), and the first and last are NOT always sent. When every
+ * group from 4 on is sent the planner drops the third byte and M (0x5ae5ec:
+ * body[2] would have read 0xff), the only way a window over 8 groups comes
+ * without M. The short walk refused both; in a Premium 1.16 game 838 of node 9's
+ * frames were this form and every one closed exactly. leddecode.wide_long is the
+ * twin. */
+static int led_wide_long(unsigned cmd, const unsigned char *body, unsigned blen)
+{
+    if (!blen || !(body[0] & 0x80)) return 0;
+    if (cmd & 0x20) return 1;
+    return blen >= 2 && (int)(body[1] & 0x0f) - (int)(body[1] >> 4) + 1 > 8;
+}
+
 static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
                          unsigned char *idx, unsigned char *val, unsigned *nout)
 {
@@ -10573,7 +10592,36 @@ static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
      * being written over a bank-0 one. */
     if (B == 0x10) return 0;
 
-    if (body[0] & 0x80) {                    /* the index-BITMAP body        */
+    if (led_wide_long(cmd, body, blen)) {    /* the LONG bitmap body (above)  */
+        unsigned first_g, last_g, span, hdr2, fill, sent;
+        unsigned char win[12];
+        if (blen < (M ? 3u : 2u) || (body[0] & 0x30)) return 0;
+        first_g = body[1] >> 4;
+        last_g  = body[1] & 0x0f;
+        if (last_g < first_g || last_g > 11) return 0;
+        span = last_g - first_g + 1;
+        fill = (body[0] & 0x40) ? 0xff : 0x00;
+        hdr2 = M ? body[2] : 0xff;
+        p = M ? 3 : 2;
+        for (i = 0; i < span; i++) {
+            sent = i < 4 ? (body[0] >> i & 1) : (hdr2 >> (i - 4) & 1);
+            if (sent) {
+                if (p >= blen) return 0;
+                win[i] = body[p++];
+            } else {
+                win[i] = (unsigned char)fill;
+            }
+        }
+        for (i = 0; i < span; i++)
+            for (k = 0; k < 8; k++)
+                if (win[i] >> k & 1) {
+                    unsigned e = (first_g + i) * 8 + k;
+                    if (e >= 96 || cnt >= 96) return 0;
+                    idx[cnt++] = (unsigned char)e;
+                }
+        if (!cnt) return 0;
+        if ((idx[0] >> 3) != first_g || (idx[cnt - 1] >> 3) != last_g) return 0;
+    } else if (body[0] & 0x80) {             /* the index-BITMAP body        */
         unsigned first_g, last_g, span, blk, t = 0, fill, flags;
         unsigned char win[12];
         /* M would put a further flags byte at body[2] whose bit base is not
@@ -10762,7 +10810,10 @@ static int led_wide_publish(unsigned node, unsigned cmd,
      * counter measuring protocol chatter rather than lamp frames we failed. */
     if ((cmd & 0xc0) != 0x80 || blen < 1) return 0;
 
-    if (!led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
+    /* The long bitmap body is refused on THIS path, as the walk refused it before
+     * item mode-leds: the per-title verdict and what it publishes stay exactly
+     * what they were. The per-node path below (led_node_wide_publish) reads it. */
+    if (led_wide_long(cmd, body, blen) || !led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
         led_wide_dialect(0);
         led_map();
         if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
@@ -10819,6 +10870,77 @@ static int led_wide_publish(unsigned node, unsigned cmd,
         snprintf(l + q, sizeof l - q, "\n");
         logmsg(l);
     }
+    return 1;
+}
+
+/* ★ THE SAME GRAMMAR, PROVEN PER BOARD (item mode-leds, Godzilla Premium 1.16).
+ *
+ * The per-title vote above was drawn over EVERY board, and on godzilla that means
+ * the strip boards (nodes 12, 14) that do not speak this grammar - godzilla_pro's
+ * node 7 accepted 0.5%, and the title said no. That was right for Pro 1.15 and
+ * wrong for Premium 1.16: its INSERT boards take their levels in exactly this
+ * grammar (84 85 88 8a 94 95 96 97 9e a2 a6 aa b4 b5 ba ...), measured over a
+ * whole traced game: node 8 2444 of 2444 frames closed exactly, node 9 7623 of
+ * 7623 with the long bitmap body, node 1 589 of 589; node 12 36%, node 14 0%. So
+ * the title vote refused, the insert levels were never decoded, and the virtual
+ * playfield showed neither the game's in-play inserts nor a mode's.
+ *
+ * And the old godzilla shapes read those boards WRONG on this build: `97 4e d3 03`
+ * is lamp 78 at 0xd3 with the builder's fade byte 03 (a mode's pulse, commanded as
+ * 0xd3 and read back as that), which the indexed shape refuses for its missing
+ * 0x0f gap; `a6 2a d0 a6 78` is lamps 42 AND 80, of which the shape keeps one.
+ *
+ * So each board votes for ITSELF, with its own frames, and only the ones that
+ * cannot be a coincidence count: a frame that addresses two or more lamps and
+ * closes exactly is a yes, a frame that does not close is a no, and a one-lamp
+ * frame does not vote at all (almost any three bytes close as one lamp). 200
+ * votes, and 90% yes. A board that says yes has EVERY command in 0x80..0xbf read
+ * this way, the godzilla shapes included, before anything else sees the frame;
+ * a frame the walk refuses falls through to what read it before. A board that
+ * says no, or has not decided, is read exactly as before, and a title whose own
+ * verdict is yes (batman) never comes here. Premium 1.16: nodes 1, 7, 8, 9 yes
+ * (200 of 200 each, decided 53-76 s into the boot), 12 and 14 no. */
+static signed char led_node_verdict[16];         /* 0 undecided, 1 yes, -1 no   */
+static unsigned short led_node_votes[16], led_node_yes[16];
+
+static int led_node_wide_publish(unsigned node, unsigned cmd,
+                                 const unsigned char *body, unsigned blen)
+{
+    unsigned char idx[96], val[96];
+    unsigned cnt = 0, i, ok;
+    if (node >= 16 || (cmd & 0xc0) != 0x80 || blen < 1 || led_wide_settled()) return 0;
+    if (led_node_verdict[node] < 0) return 0;
+    ok = (unsigned)led_wide_walk(body, blen, cmd, idx, val, &cnt);
+    if (!led_node_verdict[node]) {
+        if (ok && cnt < 2) return 0;             /* one lamp: no vote           */
+        led_node_votes[node]++;
+        led_node_yes[node] += ok ? 1u : 0u;
+        if (led_node_votes[node] < 200) return 0;
+        led_node_verdict[node] = (signed char)(led_node_yes[node] * 100u >= led_node_votes[node] * 90u ? 1 : -1);
+        {
+            char m[200];
+            snprintf(m, sizeof m, "[ledwide] node %u dialect %s: %u of %u multi-lamp frames parsed exactly\n",
+                     node, led_node_verdict[node] > 0 ? "ACCEPTED - its lamps are read this way"
+                                                      : "REFUSED - its lamps stay with the older shapes",
+                     led_node_yes[node], led_node_votes[node]);
+            logmsg(m);
+        }
+        return 0;
+    }
+    /* nothing is taken from the title's own vote while it is still drawing its sample */
+    if (!ok || led_wide_verdict < 0) return 0;
+    if (led_count[node])                         /* a lamp the board never announced */
+        for (i = 0; i < cnt; i++)
+            if (!led_known[node][idx[i]]) return 0;
+    led_map();
+    if (!led_shm) return 0;
+    for (i = 0; i < cnt; i++) {
+        led_wide_owns[node][idx[i]] = 1;
+        led_val(node, idx[i], val[i]);
+    }
+    led_shm->decoded += cnt;
+    led_shm->gen++;
+    if (led_shm_len >= 8192) led_shm->wide_decoded++;
     return 1;
 }
 
@@ -11120,6 +11242,10 @@ static void led_publish(const unsigned char *p, int n)
             const char *e = getenv("PAD_LED_WIDE");
             wide = (e && *e == '0') ? 0 : 1;
         }
+        /* item mode-leds: a board that proved the grammar for itself is read by it
+         * first, whatever the title verdict (led_node_wide_publish's header) */
+        if (wide && n >= 6 && led_node_wide_publish(node, cmd, p + 3, (unsigned)n - 5))
+            return;
         if (wide && n >= 6
             && (!led_insert_node(node)
                 || (!led_gz_cmd(cmd) && led_wide_settled()))

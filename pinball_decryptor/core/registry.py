@@ -103,6 +103,15 @@ class Capabilities:
     # builder needs no emulator, and a plugin with an Emulate tab does not
     # necessarily have a multi-image card layout.  Used by Stern Spike 2.
     multiboot: bool = False
+    # Modes tab (item 127): choreograph a game mode of our own - its trigger,
+    # clock, shots and awards, screens, lights and callouts - and play it in the
+    # emulator.  A mode is a FILE (item 126): mode.so reads it and re-reads it
+    # twice a second, so an edit lands in a RUNNING game inside a second, which
+    # is what makes this an editor rather than a form.  Its own flag rather than
+    # a rider on ``emulate``: the tab edits a mode file whether or not a rig run
+    # is up, and an era could have an emulator without a mode runtime.  Used by
+    # Stern Spike 2.  See gui/modes_tab.py and tools/spike2_emu/modes.
+    modes: bool = False
     # Auto-transcribe path: run faster-whisper across the extracted
     # audio files and emit a ``callouts.csv`` mapping each WAV to its
     # spoken text (non-speech samples are skipped via VAD).  Used by

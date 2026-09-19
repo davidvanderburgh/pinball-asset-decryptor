@@ -1,0 +1,116 @@
+# deadpool_le 1.14 - drafted by port_tool.py from deadpool_pro-1.16.port (item 138): all 17 functions
+# and 13 globals placed by strict signature; its end of ball is also the function its hook 0x34 handler
+# calls. NOT RUN: Deadpool LE refuses to start a game in the emulator (Start reaches the game; the
+# refusal is not understood yet). Shots are copied from Pro: check them with a census once it starts.
+game           deadpool_le
+version        1.14
+
+# ---- functions: site <name> <address> <first two instruction words> --------------------
+#   tick: located (strict)
+site tick             0x003227f4 0xe92d4038 0xe3a00037
+#   shot_dispatch: located (strict)
+site shot_dispatch    0x000fe5b0 0xe92d4ff0 0xe1a07003
+#   ball_end: located (strict)
+site ball_end         0x000fd9a8 0xe92d4038 0xe1a05000
+#   sound_lookup: located (strict)
+site sound_lookup     0x00293ad0 0xe92d4038 0xe1a05000
+#   score_add: located (strict)
+site score_add        0x002df474 0xe30d178a 0xe340106a
+#   callout: located (strict)
+site callout          0x001fb2b8 0xe92d4010 0xe303e4d0
+#   callout_nth: located (strict)
+site callout_nth      0x001fb46c 0xe92d4010 0xe303e4d0
+#   lamp_group: located (strict)
+site lamp_group       0x002df2c8 0xe92d4038 0xe1a04000
+#   show_priority: located (strict)
+site show_priority    0x002dfcbc 0xe3023a94 0xe3403066
+#   award_screen: located (strict)
+site award_screen     0x00160b54 0xe92d4070 0xe24dd008
+#   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE
+site string_new       0x000168f4 0xe28fc605 0xe28cca9c
+#   dynamic_cast: PLT stub for __dynamic_cast
+site dynamic_cast     0x000162f4 0xe28fc605 0xe28cca9c
+#   resource_get: placed through 3 callers, e.g. the bl at 0x152458
+site resource_get     0x001b0ab8 0xe92d43f0 0xe1a04000
+#   set_text: located (strict)
+site set_text         0x0046cb14 0xe92d47f0 0xe1a06000
+#   surface_state: located (strict)
+site surface_state    0x0047c078 0xe5900550 0xe2800008
+#   player_advance: located (strict)
+site player_advance   0x00160f30 0xe2501000 0x012fff1e
+#   display_draw: located (strict)
+site display_draw     0x002ebc00 0xe3520001 0x812fff1e
+
+# ---- globals: data <name> <address> ---------------------------------------------------------
+#   cur_player: derived from 2 places, e.g. 0x18e9b0+0x54
+data cur_player             0x005c0d50
+#   scores: derived from 2 places, e.g. 0x355ca8+0x8
+data scores                 0x006669b0
+#   mode_mask: derived from 2 places, e.g. 0x28c28+0x3c
+data mode_mask              0x006ad78a
+#   event_head: derived from 2 places, e.g. 0xb5540+0x6c
+data event_head             0x00662a90
+#   event_current: derived from 2 places, e.g. 0x1ccc8+0x4
+data event_current          0x00662a94
+#   resource_manager: a base 0x6d9fa8 + field 0x80; the base derived from 2 places, e.g. 0x1523e0+0x54
+data resource_manager       0x00656a78
+#   typeinfo_resource: derived from 2 places, e.g. 0x1cea8+0x34
+data typeinfo_resource      0x0051647c
+#   typeinfo_scene_player: derived from 2 places, e.g. 0x1cea8+0x38
+data typeinfo_scene_player  0x00563ac4
+#   display_holder: derived from 2 places, e.g. 0x1509f0+0x28
+data display_holder         0x006569f8
+#   message_count: derived from 2 places, e.g. 0x3e9368+0xd4
+data message_count          0x004f82a0
+#   message_remap: derived from 2 places, e.g. 0x3e9444+0x10
+data message_remap          0x0066416c
+#   message_table: derived from 2 places, e.g. 0x3e94a8+0x24
+data message_table          0x005dceb8
+#   award_screen_arg: derived from 2 places, e.g. 0x31c20+0x38
+data award_screen_arg       0x005b4d34
+
+# ---- offsets, flags and ids: value <name> <number> -----------------------------------------
+value mode_mask_busy        0x210
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value display_at            0x7c
+value surface_playing       2
+value clip_layer            0
+
+# ---- shots: from the item 138 probe, one switch at a time (census_mode.c confirms) ----------
+shot 0x2               Left orbit
+shot 0x20              Inner loop
+shot 0x40              Colossal jackpot target
+shot 0x400             Left Lil Deadpool drop
+shot 0x800             Middle Lil Deadpool drop
+shot 0x1000            Right Lil Deadpool drop
+shot 0x4000            Lil Deadpool target
+shot 0x8000            Left ramp
+shot 0x40000           Right orbit
+shot 0x1000000         DEAD target D
+shot 0x2000000         DEAD target E
+shot 0x4000000         DEAD target A
+shot 0x8000000         DEAD target last D
+shot 0x10000000        POOL target P
+shot 0x20000000        POOL target O
+shot 0x40000000        POOL target second O
+shot 0x80000000        POOL target L
+shot 0x100000000       BAM target B
+shot 0x200000000       BAM target A
+shot 0x400000000       BAM target M
+shot 0x800000000       BAM target !
+shot 0x10000000000     BOOM target B
+shot 0x20000000000     BOOM target M
+shot 0x40000000000     BOOM target O
+shot 0x80000000000     BOOM target second O
+
+# ---- callouts by role, scenes by role -------------------------------------------------------------
+#   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x144904+0x4)
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- examples a template mode can use on this game ------------------------------------------------
+text example_start_shot     Lil Deadpool target

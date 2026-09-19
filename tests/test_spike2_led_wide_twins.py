@@ -99,7 +99,8 @@ int main(int argc, char **argv)
 def cbin(tmp_path_factory):
     d = tmp_path_factory.mktemp("ledwide")
     src = d / "twin.c"
-    src.write_text(HARNESS % (_extract("popcount8"), _extract("led_wide_walk")),
+    helpers = _extract("popcount8") + chr(10) + _extract("led_wide_long")
+    src.write_text(HARNESS % (helpers, _extract("led_wide_walk")),
                    encoding="utf-8")
     exe = d / ("twin.exe" if os.name == "nt" else "twin")
     r = subprocess.run([CC, "-O1", "-o", str(exe), str(src)],

@@ -553,9 +553,13 @@ def test_cli_multiboot_is_one_line_and_an_exit_status(parts, monkeypatch, capsys
 #: The two exec lines, byte for byte as they were before item 90. Copied from
 #: the file rather than pattern-matched: the whole point is that they are
 #: unchanged, and a looser test could be satisfied by a changed line.
+#: The one change since: item 125 (the Mode SDK) put the mode object in the
+#: game's preload list, ``${PAD_MODE_SO:+$PAD_MODE_SO:}``, empty unless a run
+#: names one - the same entry the pivot path's export carries.
 EXEC_PIVOT = "        exec /.padqemu/game ./game </dev/null >/dump/game.out 2>&1"
 EXEC_CHROOT = ('exec chroot "$R" /bin/sh -c \\\n'
                '  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}'
+               '${PAD_MODE_SO:+$PAD_MODE_SO:}'
                '/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} '
                'exec ./game"')
 

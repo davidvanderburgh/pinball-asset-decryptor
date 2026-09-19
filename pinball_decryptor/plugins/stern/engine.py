@@ -3252,6 +3252,33 @@ def _audio_grow_gate(dest_is_device, gr_path=None):
     return True, ""
 
 
+def _grown_source_gate(params):
+    """``(ok, why)`` — may this write grow a sound bank that an EARLIER build
+    already grew?  Not yet: *params* are the source card's, and any row with
+    ``shadows`` is a sound that build lengthened.
+
+    Growing assumes a stock bank, twice over.  Each appended body starts right
+    after the record array, so one more record overlaps the first body an
+    earlier build appended.  And that build re-pointed the play tables at its
+    appended records' keys, while the grow copies and re-points from the
+    STOCK record, a key no table carries any more.  Growing Godzilla Pro
+    1.16's main-play music on a card a v0.219.5 build had already grown
+    failed with "idx 7: no descriptor in the game's play tables names this
+    sound's record" (PAD-176; PAD-175 reproduced it on LE 1.16).
+
+    Closed, nothing is lost that the card has: a sound grown earlier keeps
+    its longer slot (the collapsed params give its live length), so a
+    replacement up to that length still goes on whole."""
+    n = sum(1 for p in params if p.get("shadows") is not None)
+    if not n:
+        return True, ""
+    return False, ("this card's sound bank was already grown by an earlier "
+                   "build (%d longer sound(s), which keep their length), and "
+                   "a build can't grow it a second time; to lengthen more, "
+                   "build onto a card that was never grown, such as the "
+                   "stock card" % n)
+
+
 #: A trim that cuts at least this much (card samples) off a replacement is a
 #: warning rather than a note: that is part of a song gone, not the tail of a
 #: callout that ran a little long, which is the everyday case the trim is for.
@@ -4958,6 +4985,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     if _grows:
                         _gok, _gwhy = _audio_grow_gate(dest_is_device, gr_path)
                         if _gok:
+                            _gok, _gwhy = _grown_source_gate(params)
+                        if _gok:
                             grows = _grows
                         else:
                             log(*_trimmed_notice(_grows, _gwhy))
@@ -4973,6 +5002,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         desc_sites = _descriptor_sites(gr_path, img_path, log)
                         grows = _grows_named_by_a_descriptor(
                             grows, {p["idx"]: p for p in params}, desc_sites,
+                            log)
+                        grows = _grows_within_bank_limit(
+                            grows, {p["idx"]: p for p in params}, img_path,
                             log)
                         _stage_done(log, "reading the game's play tables", t0)
                     if grows:
@@ -10683,6 +10715,69 @@ def _appended_body_offsets(patches, places, last_only=False):
     return out
 
 
+def _grown_body_bytes(p, want):
+    """Bytes the appended body of sound *p* takes for a replacement *want*
+    card samples long: room for the encoder's whole window, which writes from
+    a word or two BELOW the body offset (the shared-boundary word) up to the
+    last frame of the new length."""
+    from .spike2.emulator import BLOCK
+    step = 4 if p.get("chan") == 2 else 2
+    return step * (int(want) + BLOCK) + 4096
+
+
+def _grown_bank_bytes(md_off, count, bodies):
+    """What ``image.bin`` measures once :func:`_stage_grown_image` has appended
+    one record per entry of *bodies* (appended body sizes in bytes): the record
+    array at *md_off* gains that many records and each body follows it behind
+    its zero pad, as :func:`~.spike2.masterdir.plan_grow_records` lays them
+    out."""
+    from .spike2 import masterdir as MD
+    return (md_off + MD.tail_len(count + len(bodies))
+            + sum(MD.BODY_PAD + b for b in bodies))
+
+
+def _grows_within_bank_limit(grows, byidx, img_path, log):
+    """*grows* less every sound whose longer copy would take the sound bank
+    past :data:`~.spike2.emulator.MAX_IMAGE_BYTES`, the largest file the game
+    can open; those are trimmed to fit and named in one log line.
+
+    Every appended body holds the WHOLE new sound and the stock body it
+    retires stays where it is, so full-length songs over looping music beds
+    add up: stock Godzilla 1.16 has ~498 MB to spare, about 47 minutes of
+    stereo sound across everything one build lengthens.  A build past it
+    failed outright, with the derive blaming an unrecognised game update
+    (PAD-175, PAD-176).  Sounds are taken in slot order, the order they are
+    appended in, and one that doesn't fit is skipped rather than ending the
+    pass, so a shorter one after it can still use what is left."""
+    if not grows:
+        return grows
+    from .spike2 import masterdir as MD
+    from .spike2.emulator import MAX_IMAGE_BYTES
+    with open(_lp(img_path), "rb") as f:
+        md_off, count = MD.header_geometry(f.read(0x100))
+    kept, cut, bodies = {}, {}, []
+    for idx in sorted(grows):
+        b = _grown_body_bytes(byidx[idx], grows[idx][1])
+        if _grown_bank_bytes(md_off, count, bodies + [b]) <= MAX_IMAGE_BYTES:
+            kept[idx] = grows[idx]
+            bodies.append(b)
+        else:
+            cut[idx] = grows[idx]
+    if cut:
+        now = _grown_bank_bytes(md_off, count, bodies)
+        spare = max(0, MAX_IMAGE_BYTES - _grown_bank_bytes(
+            md_off, count, bodies + [_grown_body_bytes({}, 0)]))
+        log(*_trimmed_notice(cut, (
+            "the game can't open a sound bank bigger than %d MB, and keeping "
+            "them whole as well would pass that (the bank comes to %d MB%s, "
+            "which leaves room for about %.1f more minute(s) of stereo sound "
+            "or twice that in mono)"
+            % (MAX_IMAGE_BYTES // 10**6, now // 10**6,
+               " with the %d other longer sound(s) kept whole" % len(kept)
+               if kept else "", spare / (4 * 44100 * 60.0)))))
+    return kept
+
+
 def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
     """Build the sound bank a longer replacement needs, and return
     ``(staged_path, placements)``.
@@ -10712,17 +10807,12 @@ def _stage_grown_image(gr_path, img_path, grow_work, byidx, grows, log):
     try:
         emu.boot()
         d = MD.read_directory(img_path, emu)
-        edits, sizes = [], {}
+        edits = []
         for idx in sorted(grows):
             _room, want = grows[idx]
             p = byidx[idx]
-            new_len = int(want) + BLOCK
-            step = 4 if p.get("chan") == 2 else 2
-            # Room for the encoder's whole window: it writes from a word or
-            # two BELOW the body offset (the shared-boundary word) up to the
-            # last frame of the new length.
-            sizes[idx] = step * new_len + 4096
-            edits.append(MD.GrowEdit(idx, int(p["length"]), new_len, sizes[idx]))
+            edits.append(MD.GrowEdit(idx, int(p["length"]), int(want) + BLOCK,
+                                     _grown_body_bytes(p, want)))
         grown, places = MD.plan_grow_records(d, edits)
         writes = MD.write_directory(grown, emu)
     finally:

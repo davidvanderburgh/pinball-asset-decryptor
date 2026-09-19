@@ -23,6 +23,7 @@ the delivery — with the emulator work stubbed at its own seams:
 
 import io
 import os
+import re
 import struct
 import wave
 
@@ -81,12 +82,12 @@ def _said(msgs, needle):
 # the gate
 # --------------------------------------------------------------------------
 def test_gate_is_off_unless_asked_for(monkeypatch):
-    """No machine has booted a grown bank, so a build must never produce one
-    unless the user asked for it by name."""
+    """Growing changes the build (an image build), so it is opt-in: a build
+    must never produce a grown bank unless the user asked for it by name."""
     monkeypatch.delenv("PAD_STERN_AUDIO_GROW", raising=False)
     ok, why = engine._audio_grow_gate(False)
     assert not ok
-    assert "no machine has booted" in why
+    assert "longer replacements are off" in why
 
 
 def test_the_off_reason_names_the_option_the_dialog_really_has(monkeypatch):
@@ -494,7 +495,7 @@ def test_the_bank_is_queued_before_the_firmware(monkeypatch, tmp_path,
 
 @pytest.mark.parametrize("device,flag,needle", [
     (True, "1", "direct-SD"),
-    (False, None, "no machine has booted"),
+    (False, None, "longer replacements are off"),
 ])
 def test_a_closed_gate_trims_and_says_why(monkeypatch, tmp_path, device, flag,
                                           needle):
@@ -618,21 +619,66 @@ def test_longer_sounds_past_the_limit_are_trimmed_in_slot_order(tmp_path):
     msgs, log = _capture()
     kept = engine._grows_within_bank_limit(grows, byidx, img, log)
     assert set(kept) == {9, 12}
-    [(lvl, msg)] = msgs
-    assert lvl == "warning"
+    # A budget readout is always logged; the trim reason is the warning.
+    [msg] = _said(msgs, "trimmed to fit")
+    assert msgs[-1][0] == "warning"
     assert "can't open a sound bank bigger than 2147 MB" in msg
     assert "idx 5 (3000.00 s cut to 38.38 s)" in msg
     assert "with the 2 other longer sound(s) kept whole" in msg
     assert "idx 9" not in msg and "idx 12" not in msg
+    # The always-on readout names how much room the two kept songs leave.
+    [readout] = _said(msgs, "2 kept whole")
+    assert "of the 2147 MB the game can open" in readout
 
 
-def test_longer_sounds_that_fit_are_all_kept_and_nothing_is_said(tmp_path):
+def test_longer_sounds_that_fit_are_all_kept_with_a_budget_readout(tmp_path):
+    """Item PAD-181: even when nothing is trimmed, one info line reports how
+    much of the bank is used and how many minutes are left."""
     img = _bank_header(tmp_path, GZ116_MD_OFF, GZ116_COUNT)
     byidx = {i: {"idx": i, "chan": 2, "length": 1692642} for i in (5, 9)}
     grows = {5: (1692442, 5078244), 9: (1692442, 5078244)}
     msgs, log = _capture()
     assert engine._grows_within_bank_limit(grows, byidx, img, log) == grows
-    assert msgs == []
+    [(lvl, msg)] = msgs
+    assert lvl == "info"
+    assert "2 kept whole" in msg
+    assert "more minute(s) of stereo sound" in msg
+
+
+def test_grow_priority_keeps_user_chosen_songs_first(tmp_path):
+    """Item PAD-181: when the bank can't hold everything, the songs the user
+    marked win the room, in the order marked, over lower slot numbers."""
+    img = _bank_header(tmp_path, GZ116_MD_OFF, GZ116_COUNT)
+    byidx = {i: {"idx": i, "chan": 2, "length": 1692642} for i in (5, 9, 12)}
+    minute = 60 * 44100
+    # Each song is ~30 min (~317 MB); only one fits in the ~498 MB spare.
+    grows = {i: (1692442, 30 * minute) for i in (5, 9, 12)}
+    # Slot order would keep idx 5; the user asked for idx 12.
+    msgs, log = _capture()
+    kept = engine._grows_within_bank_limit(grows, byidx, img, log,
+                                           priority=[12, 9])
+    assert set(kept) == {12}
+    assert {5, 9} == set(_grows_cut(msgs))
+
+
+def _grows_cut(msgs):
+    """idx numbers named in the trim line of a budget run."""
+    line = "".join(_said(msgs, "trimmed to fit"))
+    return [int(n) for n in re.findall(r"idx (\d+) \(", line)]
+
+
+def test_grow_priority_read_from_the_sidecar_in_order(tmp_path):
+    """The write reads the user's "keep whole" order out of
+    ``.staged_changes.json`` (matched by the idx#### stem, like the Level
+    column), not through the write call.  A folder that never used it reads []
+    so the pick stays slot order."""
+    from pinball_decryptor.core import staged_changes as sc
+    assert engine._grow_priority_idxs(str(tmp_path)) == []
+    sc.save(str(tmp_path), {"grow_keep_whole": [
+        "audio/idx1145 SONG.wav", "audio/idx0220.wav",
+        "video/clip.mov", "audio/idx1145 SONG.wav"]})
+    # idx order preserved, non-audio and duplicate dropped.
+    assert engine._grow_priority_idxs(str(tmp_path)) == [1145, 220]
 
 
 def test_the_limit_is_the_largest_file_the_game_can_open():

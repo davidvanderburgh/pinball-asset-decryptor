@@ -275,7 +275,8 @@ HELP_CONTENT = {
          "menu and either confirm what the extract called that slot or pick "
          "the entry (type its number to find it) yourself."),
         ("Blip-free callouts (Advanced Audio Options)",
-         "Off by default, and experimental. The machine reads two ~512-byte "
+         "Opt-in, and confirmed working on real machines. The machine reads "
+         "two ~512-byte "
          "windows out of "
          "every sound at boot to set up its decoder, and each result feeds "
          "the next, so re-encoding one sound would desync the whole bank. "
@@ -286,15 +287,13 @@ HELP_CONTENT = {
          "read at the copy, so your audio plays for the whole sound. It "
          "needs the Linux filesystem driver (the same one full-size video "
          "replacement uses) because it makes the game binary slightly "
-         "longer, and it is skipped for a direct-SD write. It is off because "
-         "the one machine it has ever reached reboots partway through its "
-         "startup screen and loops there. Two faults in the added code were "
-         "found and fixed in v0.102.5 and that machine still does it, so the "
-         "cause is not yet known and no card built this way has been "
-         "confirmed to boot. Leaving it off costs you only the brief scrap "
+         "longer, and it is skipped for a direct-SD write. It is left as a "
+         "choice, rather than on for every write, only because of that image-"
+         "build requirement. Leaving it off costs you the brief scrap "
          "described above, which a tester listening for it could not hear."),
         ("Longer replacements (Advanced Audio Options)",
-         "Off by default. On Spike 2 a replacement is normally fitted to "
+         "Opt-in, and confirmed on a real machine. On Spike 2 a replacement "
+         "is normally fitted to "
          "the sound it replaces, so a longer clip is trimmed: the card's "
          "sound bank records where every sound starts, and lengthening one "
          "in place would strand all the rest. Ticking this appends your "
@@ -305,10 +304,12 @@ HELP_CONTENT = {
          "with a green line where the original ended, instead of hatching "
          "its tail as trimmed. It needs the Linux filesystem driver (the "
          "file gets bigger) and is skipped for a direct-SD write, which "
-         "trims as before. Proven in the PC emulator, where the grown "
-         "sound plays its full length and every neighbouring sound matches "
-         "a stock card; no real machine has booted a card built this way "
-         "yet, which is why it is off."),
+         "trims as before. Longer cues have been confirmed playing on a real "
+         "machine (no loop, correct cut-off). There is a size limit: the "
+         "game can open a sound bank only up to about 2 GB, so one build "
+         "holds roughly 45 minutes of lengthened stereo sound in total "
+         "(the whole length of each counts); anything over that is trimmed "
+         "and named in the log."),
     ],
     "Replace Video": [
         ("Scan and assign",

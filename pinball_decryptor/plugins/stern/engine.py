@@ -3336,9 +3336,10 @@ def _audio_grow_gate(dest_is_device, gr_path=None):
     """``(ok, why)`` — may this write place a replacement callout LONGER than
     its stock slot in new space at the end of the sound bank?
 
-    Off unless ``PAD_STERN_AUDIO_GROW=1`` asks for it: no machine has booted a
-    grown sound bank yet, so a build that quietly produced one would be a
-    hardware experiment the user never agreed to.  Beyond the flag it needs the
+    Off unless ``PAD_STERN_AUDIO_GROW=1`` asks for it: a grown sound bank is
+    confirmed playing on a real machine, but it is opt-in because it changes
+    the build (an image build only) rather than something to do on every
+    write without asking.  Beyond the flag it needs the
     same things a longer game program needs — an image build, and a host that
     can grow a file inside an ext4 image — plus a firmware whose codec objects
     carry their own length, which is what lets a sound decode past its stock
@@ -3348,8 +3349,7 @@ def _audio_grow_gate(dest_is_device, gr_path=None):
         # Name the switch: the default is off, so this is the reason nearly
         # every trim gives, and a user who handed over a whole song has no
         # other way to learn the option exists (PAD-174).
-        return False, ("longer replacements are off (no machine has booted a "
-                       "grown sound bank yet); to keep them whole, tick "
+        return False, ("longer replacements are off; to keep them whole, tick "
                        "\"Allow replacements longer than the original\" "
                        "under the Audio tab's Advanced... and build an "
                        "image file")
@@ -5286,7 +5286,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             log)
                         grows = _grows_within_bank_limit(
                             grows, {p["idx"]: p for p in params}, img_path,
-                            log)
+                            log, priority=_grow_priority_idxs(assets_dir))
                         _stage_done(log, "reading the game's play tables", t0)
                     if mode_sound:
                         # Item 149: a mode's own end sound is a FORCED grow of
@@ -8537,6 +8537,29 @@ def _slot_gain_maps(assets_dir):
     return by_idx, by_music
 
 
+def _grow_priority_idxs(assets_dir):
+    """Ordered cat-0 idxs the user chose to keep whole when the sound bank
+    can't hold every longer song (item PAD-181).
+
+    Read from ``.staged_changes.json`` (``"grow_keep_whole"``: a list of rel
+    paths, written by the Replace Audio tab's right-click "Keep this song
+    whole..." toggle) the same way :func:`_slot_gain_maps` reads the Level
+    column, so it is not threaded through the write call and survives an
+    Auto-transcribe rename (matched by the ``idxNNNN`` stem).  The list's order
+    is the user's priority.  An empty list restores the old slot-order pick, so
+    a folder that never used the feature builds byte-identically."""
+    from ...core import staged_changes as _sc
+    rels = (_sc.load(assets_dir) or {}).get("grow_keep_whole") or []
+    out, seen = [], set()
+    for rel in rels:
+        stem = os.path.splitext(os.path.basename(str(rel)))[0]
+        idx = _wav_idx(stem)
+        if idx is not None and idx not in seen:
+            out.append(idx)
+            seen.add(idx)
+    return out
+
+
 def _fmt_gain_map(gains, cap=12):
     """``idx 6 +3 dB, idx 21 -2 dB, … and N more`` for the build log."""
     items = sorted(gains.items(), key=lambda kv: str(kv[0]))
@@ -11598,18 +11621,43 @@ def _grown_bank_bytes(md_off, count, bodies):
             + sum(MD.BODY_PAD + b for b in bodies))
 
 
-def _grows_within_bank_limit(grows, byidx, img_path, log):
+#: Bytes one minute of lengthened stereo sound costs in the bank (4 bytes a
+#: card sample at 44.1 kHz).  Mono costs half.  Used for the budget readout and
+#: the trim reason so both speak in minutes, the unit a user thinks in.
+_STEREO_BYTES_PER_MIN = 4 * 44100 * 60
+
+
+def _grow_budget_minutes(md_off, count, bodies):
+    """Stereo minutes of lengthened sound the bank can still hold once the
+    appended *bodies* (byte sizes) are placed, against
+    :data:`~.spike2.emulator.MAX_IMAGE_BYTES`.  Conservative: it leaves room
+    for one more body's own header overhead, so a clip of that length really
+    fits."""
+    from .spike2.emulator import MAX_IMAGE_BYTES
+    spare = max(0, MAX_IMAGE_BYTES - _grown_bank_bytes(
+        md_off, count, list(bodies) + [_grown_body_bytes({}, 0)]))
+    return spare / float(_STEREO_BYTES_PER_MIN)
+
+
+def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None):
     """*grows* less every sound whose longer copy would take the sound bank
     past :data:`~.spike2.emulator.MAX_IMAGE_BYTES`, the largest file the game
-    can open; those are trimmed to fit and named in one log line.
+    can open; those are trimmed to fit and named in one log line.  A budget
+    readout is always logged, so a user sees how much room is left even when
+    nothing was trimmed.
 
     Every appended body holds the WHOLE new sound and the stock body it
     retires stays where it is, so full-length songs over looping music beds
     add up: stock Godzilla 1.16 has ~498 MB to spare, about 47 minutes of
     stereo sound across everything one build lengthens.  A build past it
     failed outright, with the derive blaming an unrecognised game update
-    (PAD-175, PAD-176).  Sounds are taken in slot order, the order they are
-    appended in, and one that doesn't fit is skipped rather than ending the
+    (PAD-175, PAD-176).
+
+    *priority* is an optional sequence of idxs the user chose to keep whole
+    (item PAD-181): they are fitted FIRST, in the given order, so when the
+    bank can't hold everything the songs the user cares about win rather than
+    whichever happen to have the lowest slot numbers.  Everything else follows
+    in slot order.  A sound that doesn't fit is skipped rather than ending the
     pass, so a shorter one after it can still use what is left."""
     if not grows:
         return grows
@@ -11617,18 +11665,30 @@ def _grows_within_bank_limit(grows, byidx, img_path, log):
     from .spike2.emulator import MAX_IMAGE_BYTES
     with open(_lp(img_path), "rb") as f:
         md_off, count = MD.header_geometry(f.read(0x100))
+    # User-chosen idxs first (order preserved, dupes and unknowns dropped),
+    # then every remaining grow in slot order.
+    order, seen = [], set()
+    for idx in (priority or []):
+        if idx in grows and idx not in seen:
+            order.append(idx)
+            seen.add(idx)
+    order += [idx for idx in sorted(grows) if idx not in seen]
     kept, cut, bodies = {}, {}, []
-    for idx in sorted(grows):
+    for idx in order:
         b = _grown_body_bytes(byidx[idx], grows[idx][1])
         if _grown_bank_bytes(md_off, count, bodies + [b]) <= MAX_IMAGE_BYTES:
             kept[idx] = grows[idx]
             bodies.append(b)
         else:
             cut[idx] = grows[idx]
+    now = _grown_bank_bytes(md_off, count, bodies)
+    left_min = _grow_budget_minutes(md_off, count, bodies)
+    log("Longer sounds: %d kept whole, the sound bank comes to %d MB of the "
+        "%d MB the game can open, room for about %.1f more minute(s) of "
+        "stereo sound (or twice that in mono)."
+        % (len(kept), now // 10**6, MAX_IMAGE_BYTES // 10**6, left_min),
+        "info")
     if cut:
-        now = _grown_bank_bytes(md_off, count, bodies)
-        spare = max(0, MAX_IMAGE_BYTES - _grown_bank_bytes(
-            md_off, count, bodies + [_grown_body_bytes({}, 0)]))
         log(*_trimmed_notice(cut, (
             "the game can't open a sound bank bigger than %d MB, and keeping "
             "them whole as well would pass that (the bank comes to %d MB%s, "
@@ -11636,7 +11696,7 @@ def _grows_within_bank_limit(grows, byidx, img_path, log):
             "or twice that in mono)"
             % (MAX_IMAGE_BYTES // 10**6, now // 10**6,
                " with the %d other longer sound(s) kept whole" % len(kept)
-               if kept else "", spare / (4 * 44100 * 60.0)))))
+               if kept else "", left_min))))
     return kept
 
 

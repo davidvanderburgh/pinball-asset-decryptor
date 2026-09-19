@@ -134,6 +134,20 @@ MAX_RECORDS = 1 << 16
 # reads the size back negative and loads no records at all: a bank padded to
 # 2**31 - 1 bytes derives, and one byte more does not (Godzilla LE 1.16,
 # PAD-175, PAD-176).  Only a build that grows the sound bank can get near it.
+#
+# RAISING THIS (the "2.5 GB" ask, PAD-181): this is the ONE place the ceiling
+# lives, so the budget in _grows_within_bank_limit follows it.  But the number
+# cannot move on its own.  It is the game program's own limit, not PAD's: the
+# firmware here (and the real machine) still can't open a bigger file, so a
+# higher value alone just moves the failure from "trimmed to fit" back to the
+# derive reading no records.  Lifting it needs the game program itself to open
+# its bank with the large-file calls -- the same kind of program change the
+# blip-free option already ships and that has been confirmed on real machines
+# -- and then this value re-measured against that changed program, and a real
+# machine booted with a card over 2 GB before anyone relies on it.  Even then
+# a 32-bit program maps the whole file into a ~3 GB address space shared with
+# its code, libraries and buffers, so the practical ceiling is roughly
+# 2.5-2.8 GB (about 1.5-2 h of lengthened stereo), never "no limit".
 MAX_IMAGE_BYTES = (1 << 31) - 1
 
 

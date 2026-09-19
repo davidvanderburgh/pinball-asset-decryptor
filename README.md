@@ -1216,6 +1216,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    program was rebuilt whole (blip-free sounds, longer program text) is
    named in the log and runs with the prepared program as before. A set
    prepared for another card is rebuilt at the next Start.
+   **The log names the validation check** (v0.220.3). GAME VALIDATION
+   ERROR, UPDATE SD CARD is one banner for six different checks; a run
+   now says whether the program it uses has its validator switched off,
+   and when a check goes up it logs a `[validation]` line naming it, by
+   number and with the values Tech Alerts shows (for example `#4 2534:2
+   - the sound bank, 2 record(s) failed`).
    A **virtual playfield** window opens beside the game: the title's own
    artwork with every switch, coil and insert drawn on it, inserts lit
    live off the node bus, and switches you can click or press and hold

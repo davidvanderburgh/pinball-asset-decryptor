@@ -39,7 +39,12 @@ the card is untouched. It is off by default — proven in the PC emulator,
 but no machine has booted a card built that way yet. Before v0.219.5 the
 option never reached a clip assigned on the Replace Audio tab (the tab cut
 it to its slot first); it now does, and a build that can't grow the bank
-logs each trimmed sound with its length before and after.
+logs each trimmed sound with its length before and after. The game can't
+open a sound bank of 2 GB or more, so from v0.219.6 the longer sounds are
+fitted into the room left, in slot order, and the rest are trimmed with a
+warning. A card an earlier build already grew is not grown again: its
+grown sounds keep their longer slot, and anything longer is trimmed with a
+note to build onto a card that was never grown, such as the stock card.
 
 <p>
   <a href="docs/screenshots/replace-audio.png"><img src="docs/screenshots/replace-audio.png" width="49%" alt="The Replace Audio tab: 2,540 sound slots from a Godzilla LE card with a spectrogram preview of the selected sound"></a>

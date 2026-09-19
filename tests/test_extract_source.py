@@ -5,9 +5,9 @@ import json
 import os
 
 from pinball_decryptor.core.extract_source import (
-    SIDE_CAR, amend_extract_source, find_extract_for, read_extract_source,
-    stale_source_message, version_for_dir, version_hint_for_dir,
-    version_hint_from_name, write_extract_source)
+    SIDE_CAR, amend_extract_source, find_extract_for, other_card_recorded,
+    read_extract_source, stale_source_message, version_for_dir,
+    version_hint_for_dir, version_hint_from_name, write_extract_source)
 
 
 def _make_image(path, data=b"\x00" * 4096):
@@ -234,3 +234,73 @@ def test_amend_without_a_sidecar_is_a_noop(tmp_path):
     amend_extract_source(str(tmp_path), card_version="9.9.9")
     assert read_extract_source(str(tmp_path)) is None
     assert version_for_dir(str(tmp_path)) == (None, False)
+
+
+# --------------------------------------------------------------------------
+# building onto a card the folder did not come from (PAD-176)
+# --------------------------------------------------------------------------
+def test_building_onto_the_folder_s_own_card_is_quiet(tmp_path):
+    img = tmp_path / "godzilla_pro-1_16_0.raw"
+    _make_image(str(img))
+    out = tmp_path / "extract"
+    out.mkdir()
+    write_extract_source(str(out), str(img))
+    assert other_card_recorded(str(out), str(img)) is None
+
+    # ...and so is a copy of that same card somewhere else: a card is moved
+    # far more often than it is rebuilt (same rule find_extract_for uses).
+    moved = tmp_path / "copy" / "godzilla_pro-1_16_0.raw"
+    moved.parent.mkdir()
+    _make_image(str(moved))
+    assert other_card_recorded(str(out), str(moved)) is None
+
+
+def test_building_onto_another_card_names_the_one_the_folder_came_from(
+        tmp_path):
+    """A build carries the folder's replacements, not its contents, so this
+    is the case where mods baked into the recorded card vanish (PAD-176)."""
+    built = tmp_path / "Godzilla Pro 1.16 Custom V1.91.raw"
+    _make_image(str(built))
+    out = tmp_path / "V1.92"
+    out.mkdir()
+    write_extract_source(str(out), str(built))
+
+    stock = tmp_path / "godzilla_pro-1_16_0.raw"
+    _make_image(str(stock), b"\x01" * 4096)
+    assert (other_card_recorded(str(out), str(stock))
+            == "Godzilla Pro 1.16 Custom V1.91.raw")
+
+
+def test_a_folder_with_no_sidecar_or_no_card_is_quiet(tmp_path):
+    img = tmp_path / "game.raw"
+    _make_image(str(img))
+    # older extract: no sidecar at all
+    assert other_card_recorded(str(tmp_path), str(img)) is None
+    out = tmp_path / "extract"
+    out.mkdir()
+    write_extract_source(str(out), str(img))
+    assert other_card_recorded(str(out), "") is None
+    assert other_card_recorded("", str(img)) is None
+
+
+def test_the_build_asks_before_dropping_the_baked_mods(tmp_path):
+    """The message names both cards, says what a build actually carries, and
+    points at the route that does carry baked mods; _start_write asks it."""
+    import inspect
+
+    from pinball_decryptor import app as app_mod
+
+    msg = app_mod.other_card_message(
+        str(tmp_path), "Godzilla Pro 1.16 Custom V1.91.raw",
+        r"D:\cards\godzilla_pro-1_16_0.raw")
+    assert "Godzilla Pro 1.16 Custom V1.91.raw" in msg
+    assert "godzilla_pro-1_16_0.raw" in msg
+    assert "will NOT be on this card" in msg
+    assert "Transfer mods" in msg
+    assert msg.rstrip().endswith("Build anyway?")
+
+    src = inspect.getsource(app_mod.App._start_write)
+    assert "other_card_recorded(assets_dir, original)" in src
+    assert "other_card_message(assets_dir, other, original)" in src
+    # and the same thing lands in the log, for a log posted days later
+    assert src.index("other_card_recorded") < src.index("log_cb(")

@@ -115,6 +115,18 @@ def other_card_message(assets_dir, recorded_name, card_path):
             f"Build anyway?")
 
 
+def _next_transfer_pass(then):
+    """Run the second pass of a two-pass transfer, if there is one.
+
+    Called from every way a pass can end except a failed apply (see
+    ``App._transfer_plan_ready``), so the chain lives in one place rather
+    than in six ``if then:`` tails.  Module level, not a method: it needs
+    nothing from the app.
+    """
+    if then is not None:
+        then()
+
+
 def recorded_replacement_counts(assets_dir, kinds):
     """``{kind: n}`` of replacements *assets_dir* has recorded in its own
     ``.staged_changes.json``, for each of *kinds* that has any.
@@ -2913,15 +2925,38 @@ class App:
                 self._transfer_baked_mods(source_dir, target_dir)
             return
 
-        # This route carries the folder's PENDING replacements only.  When
-        # the folder is an extract of a card this app built, that card's own
-        # mods are the folder's baseline and stay behind — the same trap the
-        # Build warning covers, one step further along the road out of it
-        # (PAD-176).  The baked route is the way to carry those, and it needs
-        # a folder with no pending edits of its own.
+        # A working folder usually holds BOTH: the mods baked into the card it
+        # was extracted from, and the round of replacements assigned since.
+        # This route carries only the second, because the first are the
+        # folder's own baseline rather than edits.  That cost a modder a
+        # fortnight of editions, and the way out used to be "go and make a
+        # pristine extract of the old card", which needs the card (PAD-176).
+        # So offer both passes here instead: the baked mods first, then this
+        # plan on top, which wins on any slot they share.
         from .core.extract_source import built_card_source
         intro = None
         built = built_card_source(source_dir)
+        stock_dir = getattr(self, "_transfer_old_stock", None)
+        if built and stock_dir and messagebox.askyesno(
+                "Carry the baked-in mods too?",
+                "This folder was extracted from \"%s\", a card this app "
+                "built, so it carries that card's mods as its starting point "
+                "as well as the %d replacement(s) assigned since.\n\n"
+                "Yes: carry both. The baked-in mods are compared against the "
+                "stock extract first (that takes a while), then this folder's "
+                "own replacements go on top of them.\n\n"
+                "No: carry only this folder's %d replacement(s), as before."
+                % (built, totals["transfer"], totals["transfer"])):
+            self.window.append_log(
+                "Carrying both: the mods baked into %s first, then this "
+                "folder's own replacements on top." % built, "info")
+            self._transfer_baked_mods(
+                source_dir, target_dir,
+                then=lambda: self._confirm_apply_transfer(
+                    source_dir, target_dir, plan,
+                    intro=("Now this folder's own replacements, on top of the "
+                           "baked-in mods just carried.")))
+            return
         if built:
             intro = (
                 "Only this folder's own replacements transfer.\n\n"
@@ -2929,16 +2964,18 @@ class App:
                 "mods already baked into that card are its starting point "
                 "rather than replacements, and they are NOT included "
                 "below.\n\n"
-                "To carry those as well, run this from a fresh extract of "
-                "that card (a folder with no replacements of its own) and "
-                "fill \"Stock extract of the OLD version\"." % built)
+                "To carry those as well, fill \"Stock extract of the OLD "
+                "version\" with a stock extract of this card's code and run "
+                "this again." % built)
             self.window.append_log(intro.replace("\n\n", "  "), "warning")
         self._confirm_apply_transfer(source_dir, target_dir, plan, intro=intro)
 
-    def _transfer_baked_mods(self, modded_dir, target_dir):
+    def _transfer_baked_mods(self, modded_dir, target_dir, then=None):
         """Route the baked-in-mods case (old extract has no pending Replace
-        edits — modded with another tool before it was extracted) using the
-        optional 3rd field instead of a modal:
+        edits — modded with another tool before it was extracted, or built by
+        this app) using the optional 3rd field instead of a modal.  *then* is
+        the pending-edits pass that follows when the folder has both
+        (:meth:`_transfer_plan_ready`):
 
         * Stock extract of the OLD version provided → diff modded-vs-stock,
           then run the normal content-matched transfer with the STOCK extract
@@ -2953,7 +2990,7 @@ class App:
                 "No stock old-version extract given — comparing the modded "
                 "extract directly against the new one (images + video only).",
                 "info")
-            self._transfer_direct_diff(modded_dir, target_dir)
+            self._transfer_direct_diff(modded_dir, target_dir, then=then)
             return
         self.window.append_log(
             "Using the stock old-version extract as a baseline — this is the "
@@ -2985,10 +3022,12 @@ class App:
         self._transfer_worker(
             _work,
             lambda res: self._baked_diff_ready(modded_dir, stock_dir,
-                                               target_dir, res[0], res[1]),
+                                               target_dir, res[0], res[1],
+                                               then=then),
             "Compare failed")
 
-    def _baked_diff_ready(self, modded_dir, stock_dir, target_dir, diff, plan):
+    def _baked_diff_ready(self, modded_dir, stock_dir, target_dir, diff, plan,
+                          then=None):
         """Main-thread continuation of the stock-baseline compare."""
         saved = diff["saved"]
         n_found = (len(saved["audio"]) + len(saved["video"])
@@ -2999,7 +3038,7 @@ class App:
                 "The two extracts have identical content — no baked-in mods "
                 "were detected. Make sure the stock extract is the same code "
                 "version, extracted with this same app version.")
-            return
+            return _next_transfer_pass(then)
 
         paired = diff["notes"]["paired_audio"]
         if paired >= 20 and len(saved["audio"]) * 2 > paired:
@@ -3010,7 +3049,7 @@ class App:
                     "DIFFERENT code version, not a real set of mods.\n\n"
                     "Continue anyway?"
                     % (len(saved["audio"]), paired)):
-                return
+                return _next_transfer_pass(then)
 
         intro = ("Found %d baked-in mod(s): %d audio, %d video, %d image, "
                  "%d text."
@@ -3033,9 +3072,9 @@ class App:
                       "same app version lines them up." % unpaired)
         self._confirm_apply_transfer(stock_dir, target_dir, plan,
                                      src_saved=saved, intro=intro,
-                                     source_label=modded_dir)
+                                     source_label=modded_dir, then=then)
 
-    def _transfer_direct_diff(self, modded_dir, target_dir):
+    def _transfer_direct_diff(self, modded_dir, target_dir, then=None):
         """No-baseline route: diff the modded old extract directly against the
         new one.  Videos pair by on-card path, images by rel; audio/text can't
         be attributed without a baseline — heads-up notes surface what this
@@ -3050,10 +3089,11 @@ class App:
         self._transfer_worker(
             lambda: mod_transfer.plan_direct_diff(modded_dir, target_dir,
                                                   log_cb=log_cb),
-            lambda plan: self._direct_diff_ready(modded_dir, target_dir, plan),
+            lambda plan: self._direct_diff_ready(modded_dir, target_dir,
+                                                 plan, then=then),
             "Compare failed")
 
-    def _direct_diff_ready(self, modded_dir, target_dir, plan):
+    def _direct_diff_ready(self, modded_dir, target_dir, plan, then=None):
         """Main-thread continuation of the no-baseline compare."""
         notes = plan["notes"]
         caveats = []
@@ -3094,7 +3134,7 @@ class App:
                 "No image or video differences",
                 "No same-named image or video differs between the two "
                 "extracts." + ("\n\n" + "\n".join(caveats) if caveats else ""))
-            return
+            return _next_transfer_pass(then)
 
         n_vid = len(plan["video"]["matched"])
         n_img = len(plan["image"]["matched"])
@@ -3120,12 +3160,20 @@ class App:
         if caveats:
             intro += "\n\n" + "\n".join(caveats)
         self._confirm_apply_transfer(modded_dir, target_dir, plan,
-                                     src_saved={}, intro=intro)
+                                     src_saved={}, intro=intro, then=then)
 
     def _confirm_apply_transfer(self, source_dir, target_dir, plan,
-                                src_saved=None, intro=None, source_label=None):
+                                src_saved=None, intro=None, source_label=None,
+                                then=None):
         """Shared tail of both transfer flows: summarize the plan, confirm,
-        apply, and refresh the Replace tabs."""
+        apply, and refresh the Replace tabs.
+
+        *then* is the next pass of a two-pass run (:meth:`_transfer_plan_ready`
+        carrying a folder's baked-in mods AND its own replacements).  It runs
+        whether this pass was applied, found nothing or was declined — each
+        pass is a separate decision, and turning the first one down is not a
+        reason to drop the round the user actually asked for.  A failed apply
+        stops the chain: that is an error, not an answer."""
         from .core import mod_transfer
 
         totals = plan["totals"]
@@ -3134,7 +3182,7 @@ class App:
                 "Nothing to transfer",
                 "None of those mods have a matching slot or text in the new "
                 "version, so nothing can transfer.")
-            return
+            return _next_transfer_pass(then)
 
         # Name every mod that can't come across BEFORE the dialog opens, so
         # the list is waiting in the log whichever way the user answers.  The
@@ -3149,7 +3197,7 @@ class App:
         if intro:
             summary = intro + "\n\n" + summary
         if not messagebox.askyesno("Transfer mods?", summary):
-            return
+            return _next_transfer_pass(then)
 
         include_flagged = False
         if totals["flagged"]:
@@ -3242,6 +3290,7 @@ class App:
                ("The Write tab's base image is set to the new version.\n"
                 if wired_img else ""),
                next_step))
+        _next_transfer_pass(then)
 
     @staticmethod
     def _format_transfer_summary(plan, prior_n=0):

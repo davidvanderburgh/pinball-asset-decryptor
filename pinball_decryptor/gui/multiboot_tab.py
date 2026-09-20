@@ -276,6 +276,14 @@ DEF_HEADING = "SELECT GAME CODE"
 #: ...and how much of it the selector's field holds (conf.h's CONF_STR - 1).
 HEADING_MAX = 199
 
+#: HOW BIG THE CARDS' TEXT IS DRAWN - images.conf's ``text_size=`` (PAD-183),
+#: the two words mkmulticard.py's TEXT_SIZES holds and the selector reads.
+#: ``uniform`` is one size for the whole menu, measured over every card;
+#: ``per-card`` lets each card fit its own title, which is what every menu did
+#: before the key existed.
+TEXT_SIZE_UNIFORM = "uniform"
+TEXT_SIZE_PER_CARD = "per-card"
+
 #: David's card library - never an output (mkmulticard.py refuses the same
 #: prefixes after resolving links; the repo's own images/ is a junction into
 #: it).  Both spellings, because the form holds Windows paths and the tool
@@ -775,6 +783,14 @@ class MultibootForm:
     #: own wording is the DEFAULT here rather than a hidden fallback, because a
     #: box that reads empty when the menu says SELECT GAME CODE is a lie.
     heading: str = DEF_HEADING
+    #: SAME TEXT SIZE ON EVERY CARD (BEN, Discord, 2026-09-20: "is there a way
+    #: to make the font size consistent across all images in a multiboot?").
+    #: On - the selector's own default - the menu measures the title and the
+    #: subtitle over every card and draws them all at the smallest any card
+    #: needs; off lets each card fit its own, which is what the menu did before
+    #: this existed.  Written out either way (``text_size=``), so the card says
+    #: what it does rather than leaning on the selector's default.
+    same_text_size: bool = True
     default: int = 0
     # (No bypass field: the validator bypass is ALWAYS ON - build_args and
     # update_args pass it for every image.  David, after the TMNT booted
@@ -931,6 +947,15 @@ def heading_args(form):
     card as ``heading=`` (no line) rather than as "the flag was absent, keep
     whatever is there"."""
     return ["--heading", (form.heading or "").strip()]
+
+
+def text_size_args(form):
+    """``--text-size uniform|per-card`` - always passed, on heading_args'
+    rule: the form is the record of what the menu does, and a tick cleared
+    here has to reach the card as the other word rather than as "the flag was
+    absent, keep whatever is there"."""
+    return ["--text-size", TEXT_SIZE_UNIFORM if form.same_text_size
+            else TEXT_SIZE_PER_CARD]
 
 
 def theme_args(form):
@@ -2046,7 +2071,7 @@ def _jjp_build_args(form):
         "--timeout", str(int(form.timeout)),
         "--default", str(int(form.default)),
         "--volume", str(int(form.volume)),
-    ] + heading_args(form) + theme_args(form)
+    ] + heading_args(form) + text_size_args(form) + theme_args(form)
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     if form.media_dir:
@@ -2091,7 +2116,7 @@ def build_args(form):
         # media.json (prepare) and into images.conf here, so a text-only card
         # with no prepared media still carries it.
         "--volume", str(int(form.volume)),
-    ] + heading_args(form) + theme_args(form)
+    ] + heading_args(form) + text_size_args(form) + theme_args(form)
     # A KEEPING GROUP'S CARD CANNOT BE NAMED BY AN IMAGE: its games all keep
     # cards of their own, so no image index resolves to it.  A random card the
     # countdown cannot land on is useless for an unattended power-up, which is
@@ -2163,7 +2188,9 @@ def inject_args(form, card):
                 "--subtitles", ";".join(subtitles),
                 "--timeout", str(int(form.timeout)),
                 "--default", str(int(form.default)),
-                "--volume", str(int(form.volume))] + heading_args(form) + theme_args(form)
+                "--volume", str(int(form.volume))]
+        args += (heading_args(form) + text_size_args(form)
+                 + theme_args(form))
         if form.media_dir:
             args += ["--media-dir", wsl(form.media_dir)]
         return args
@@ -2174,7 +2201,9 @@ def inject_args(form, card):
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
             "--default", str(int(form.default)),
-            "--volume", str(int(form.volume))] + heading_args(form) + theme_args(form)
+            "--volume", str(int(form.volume))]
+    args += (heading_args(form) + text_size_args(form)
+             + theme_args(form))
     if form.machine_volume:
         args.append("--machine-volume")
     if form.media_dir:
@@ -2199,7 +2228,9 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
             "--default", str(int(form.default)),
-            "--volume", str(int(form.volume))] + heading_args(form) + theme_args(form)
+            "--volume", str(int(form.volume))]
+    args += (heading_args(form) + text_size_args(form)
+             + theme_args(form))
     if form.machine_volume:
         args.append("--machine-volume")
     args.append("--bypass-validation")      # always (see build_args)
@@ -2829,6 +2860,10 @@ def write_preview_conf(form):
     lines += ["default=%d" % row_first_image(form, int(form.default)),
               "timeout=%d" % int(form.timeout),
               "heading=%s" % (form.heading or "").strip(),
+              # the preview draws the card's text the size the CARD will:
+              # the tick is part of what a frame depends on (PAD-183)
+              "text_size=%s" % (TEXT_SIZE_UNIFORM if form.same_text_size
+                                else TEXT_SIZE_PER_CARD),
               "volume=%d" % int(form.volume),
               "font=" + be.conf_font]
     lines += theme_conf_lines(form)
@@ -3572,6 +3607,10 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
         # field shows; "" = the card asked for a bare top (PAD-135).
         heading=(DEF_HEADING if info.get("heading") is None
                  else str(info["heading"])),
+        # ...and its text size.  null = the card never set the key, which the
+        # selector draws as one size for every card, so the tick comes up ON
+        # for it exactly as it does for a card that says so (PAD-183).
+        same_text_size=(info.get("text_size") != TEXT_SIZE_PER_CARD),
         default=_int_of("default", 0),
         theme=theme, colors=colors,
         media_dir=media_dir if (media_dir and os.path.isfile(
@@ -3588,7 +3627,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
 #: MultibootPanel._loaded_diff.)
 MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "move sound", "confirm sound", "volume", "countdown",
-                    "heading", "default", "bypass", "theme")
+                    "heading", "text size", "default", "bypass", "theme")
 
 #: Of those, the ones the media has to be rendered again for.
 MEDIA_FIELDS = ("art", "animation", "music", "move sound", "confirm sound")
@@ -3639,6 +3678,8 @@ def _menu_fields(before, after):
             changed.add(name)
     if (before.heading or "").strip() != (after.heading or "").strip():
         changed.add("heading")
+    if bool(before.same_text_size) != bool(after.same_text_size):
+        changed.add("text size")
     if theme_args(before) != theme_args(after):
         changed.add("theme")
     return changed
@@ -4234,6 +4275,9 @@ def menu_from_state(menu):
             # menu it describes said SELECT GAME CODE - so the absent key is
             # that, not "no heading" (PAD-135).
             "heading": str(menu.get("heading", DEF_HEADING))[:HEADING_MAX],
+            # ...and a state from before the tick describes a menu the
+            # selector drew at one size, which is what the tick means
+            "same_text_size": bool(menu.get("same_text_size", True)),
             "default": max(0, _as_int("default", 0)),
             "theme": theme,
             "colors": clean_colors(menu.get("colors"))}
@@ -5028,8 +5072,11 @@ def menu_summary(form):
         v = (v or "").strip() or "none"
         return v if v.lower() in _WORDS else os.path.basename(v)
     head = (form.heading or "").strip()
+    # THE TEXT SIZE ONLY WHEN IT IS NOT THE USUAL ONE: this line is already
+    # eight clauses long, and "every card the same" is what every menu does
+    # unless somebody turned it off (PAD-183).
     return ("sounds %s / %s  ·  volume %d%s  ·  %s  ·  default %d  ·  "
-            "theme %s  ·  %s" % (
+            "theme %s  ·  %s%s" % (
                 sound(form.sound_move), sound(form.sound_confirm),
                 int(form.volume),
                 " (the machine's own on the card)" if form.machine_volume
@@ -5038,7 +5085,8 @@ def menu_summary(form):
                 else "%d s countdown" % int(form.timeout),
                 int(form.default),
                 (form.theme or "").strip().lower() or DEFAULT_THEME,
-                "no heading" if not head else '"%s"' % _one_line_text(head, 28)))
+                "no heading" if not head else '"%s"' % _one_line_text(head, 28),
+                "" if form.same_text_size else "  ·  each card its own text size"))
 
 
 # ---------------------------------------------------------------------------
@@ -5509,7 +5557,10 @@ class MenuSettingsDialog(_Modal):
         sounds = ttk.LabelFrame(b, text="Sounds")
         sounds.pack(fill=tk.X)
         g = ttk.Frame(sounds)
-        g.pack(fill=tk.X, padx=8, pady=6)
+        # 4, NOT 6, here and in the two sections below (and 8 rather than 10
+        # between them): the text-size tick added a row, and this dialog has
+        # to keep fitting a 768-high desktop with its OK button on it.
+        g.pack(fill=tk.X, padx=8, pady=4)
         # 15, not 13: "Confirm sound:" is fourteen characters and a 13-wide
         # ttk label showed "Confirm sounc" (the first shot of this dialog).
         _media_row(g, 0, 0, "Move sound:", panel._move_var, SOUND_CHOICES,
@@ -5564,9 +5615,9 @@ class MenuSettingsDialog(_Modal):
         g.columnconfigure(1, weight=1)
 
         look = ttk.LabelFrame(b, text="Look")
-        look.pack(fill=tk.X, pady=(10, 0))
+        look.pack(fill=tk.X, pady=(8, 0))
         g1 = ttk.Frame(look)
-        g1.pack(fill=tk.X, padx=8, pady=6)
+        g1.pack(fill=tk.X, padx=8, pady=4)
         # THE HEADING FIRST: it is the one part of the look that is words
         # rather than colour, and it is what somebody notices first (C FB,
         # PAD-135, about SELECT GAME CODE: "Can there be an option to change
@@ -5579,14 +5630,23 @@ class MenuSettingsDialog(_Modal):
         ttk.Label(g1, foreground=th["gray"], wraplength=560, justify=tk.LEFT,
                   text="Across the top of the menu. Leave it empty for no "
                        "heading at all.").grid(row=1, column=0, columnspan=2,
-                                               sticky=tk.W, pady=(0, 4))
-        ttk.Label(g1, text="Theme:", width=15).grid(row=2, column=0,
+                                               sticky=tk.W, pady=(0, 2))
+        # THE TEXT SIZE, under the heading because it is the other part of the
+        # look that is words (BEN, Discord, PAD-183: "is there a way to make
+        # the font size consistent across all images in a multiboot?").  ONE
+        # line, its own sentence in the label: this dialog is 729 px tall on a
+        # 768 px desktop and a note of its own would cost the OK button.
+        ttk.Checkbutton(g1, variable=panel._same_text_var,
+                        text="Same text size on every card (a long name is "
+                             "not shrunk on its own)").grid(
+            row=2, column=0, columnspan=2, sticky=tk.W, pady=(0, 2))
+        ttk.Label(g1, text="Theme:", width=15).grid(row=3, column=0,
                                                     sticky=tk.W, pady=3)
         names = theme_names() + [CUSTOM_THEME]
         panel._theme_combo = ttk.Combobox(
             g1, textvariable=panel._theme_pick, state="readonly",
             values=[theme_title(n) for n in names], width=18)
-        panel._theme_combo.grid(row=2, column=1, sticky=tk.W, pady=3)
+        panel._theme_combo.grid(row=3, column=1, sticky=tk.W, pady=3)
         panel._theme_combo.bind("<<ComboboxSelected>>",
                                 lambda _e: panel._theme_picked())
         panel._theme_tip = _Tooltip(panel._theme_combo, "", panel._theme_fn)
@@ -5597,7 +5657,7 @@ class MenuSettingsDialog(_Modal):
         # dialog than the desktop.
         roles = theme_roles()
         grid = ttk.Frame(g1)
-        grid.grid(row=3, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
+        grid.grid(row=4, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
         rows = max(1, (len(roles) + 2) // 3)
         for i, role in enumerate(roles):
             r, c = i % rows, (i // rows) * 3
@@ -5622,14 +5682,14 @@ class MenuSettingsDialog(_Modal):
                     "keeps its default colours." % THEMES_JSON)
         ttk.Label(g1, foreground=th["gray"], wraplength=560,
                   justify=tk.LEFT, text=note).grid(
-            row=4, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
+            row=5, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
         g1.columnconfigure(1, weight=1)
         panel._sync_theme_states()
 
         boot = ttk.LabelFrame(b, text="At power-up")
-        boot.pack(fill=tk.X, pady=(10, 0))
+        boot.pack(fill=tk.X, pady=(8, 0))
         g2 = ttk.Frame(boot)
-        g2.pack(fill=tk.X, padx=8, pady=6)
+        g2.pack(fill=tk.X, padx=8, pady=4)
         ttk.Label(g2, text="Countdown (s):", width=15).grid(
             row=0, column=0, sticky=tk.W, pady=3)
         cd = ttk.Frame(g2)
@@ -6240,6 +6300,9 @@ class MultibootPanel:
         #: read as what the menu says: emptying it is how somebody asks for
         #: no heading at all.
         self._heading_var = tk.StringVar(value=DEF_HEADING)
+        #: Same text size on every card (PAD-183): ON, which is what the
+        #: selector does when nothing says otherwise.
+        self._same_text_var = tk.BooleanVar(value=True)
         self._default_var = tk.StringVar(value="0")
         #: The compact layout (item 95): OFF by default, and it stays off
         #: until the user ticks it - never set from a card that is merely
@@ -6291,7 +6354,7 @@ class MultibootPanel:
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var,
-                    self._heading_var, self._default_var):
+                    self._heading_var, self._same_text_var, self._default_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
         # Item 100: the compact tick beside the size strip.  Not a menu field
         # (an inject never changes a card's layout: diff_forms puts it in the
@@ -6478,8 +6541,8 @@ class MultibootPanel:
         for var in (self._ed_title, self._ed_sub, self._ed_music,
                     self._ed_confirm, self._ed_roll) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
-                    self._timeout_var, self._heading_var, self._default_var,
-                    self._out_var, self._selector_var,
+                    self._timeout_var, self._heading_var, self._same_text_var,
+                    self._default_var, self._out_var, self._selector_var,
                     self._theme_var) + tuple(self._color_vars.values()):
             var.trace_add("write", lambda *_a: self.schedule_preview())
         # ...and the path box also moves the row's own verb and the sentence
@@ -8932,6 +8995,7 @@ class MultibootPanel:
             self._machine_vol_var.set(True)
             self._timeout_var.set("15")
             self._heading_var.set(DEF_HEADING)
+            self._same_text_var.set(True)
             self._default_var.set("0")
             self._theme_var.set(DEFAULT_THEME)
             self._seed_colors(theme_colors(DEFAULT_THEME) or {})
@@ -9376,6 +9440,7 @@ class MultibootPanel:
                              self._machine_vol_var.get(),
                              self._timeout_var.get(),
                              self._heading_var.get(),
+                             self._same_text_var.get(),
                              self._default_var.get(),
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
@@ -9391,8 +9456,8 @@ class MultibootPanel:
     def _menu_settings_cancel(self):
         self._forget_menu_dialog()
         if self._menu_backup is not None:
-            (move, confirm, vol, machine, timeout, heading, default,
-             selector, theme, colors) = self._menu_backup
+            (move, confirm, vol, machine, timeout, heading, same_text,
+             default, selector, theme, colors) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
             self._confirm_var.set(confirm)
@@ -9400,6 +9465,7 @@ class MultibootPanel:
             self._machine_vol_var.set(machine)
             self._timeout_var.set(timeout)
             self._heading_var.set(heading)
+            self._same_text_var.set(same_text)
             self._default_var.set(default)
             self._selector_var.set(selector)
             # the theme and the grid together, or the theme's trace would
@@ -9606,6 +9672,7 @@ class MultibootPanel:
             # NOT `or DEF_HEADING`: an empty box is a menu with no heading,
             # which is a thing somebody can ask for (PAD-135)
             heading=self._heading_var.get().strip(),
+            same_text_size=bool(self._same_text_var.get()),
             default=_int(self._default_var, 0),
             media_dir=media if (media and os.path.isfile(
                 os.path.join(media, "media.json"))) else "",
@@ -9665,6 +9732,7 @@ class MultibootPanel:
                      "compact": bool(self._compact_var.get()),
                      "timeout": _int(self._timeout_var, 15),
                      "heading": self._heading_var.get().strip(),
+                     "same_text_size": bool(self._same_text_var.get()),
                      "default": _int(self._default_var, 0),
                      "theme": self._theme_var.get().strip().lower()
                      or DEFAULT_THEME,
@@ -9782,6 +9850,9 @@ class MultibootPanel:
             self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
             self._heading_var.set(menu["heading"])
+            # a document written before the tick existed is a menu the
+            # selector drew at one size anyway, so it comes back ticked
+            self._same_text_var.set(bool(menu.get("same_text_size", True)))
             self._default_var.set(str(menu["default"]))
             self._theme_var.set(menu["theme"])
             # a built-in comes back as the file spells it today; a custom
@@ -10347,6 +10418,7 @@ class MultibootPanel:
             self._compact_var.set(bool(form.compact))
             self._timeout_var.set(str(int(form.timeout)))
             self._heading_var.set(form.heading)
+            self._same_text_var.set(bool(form.same_text_size))
             self._default_var.set(str(int(form.default)))
             self._theme_var.set(form.theme)
             self._seed_colors(form.colors if form.theme == CUSTOM_THEME

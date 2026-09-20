@@ -39,7 +39,7 @@ move/confirm sounds and the volume; only the referenced files are staged into
 /usr/local/codeselect/media on p2 (flat, names ^[A-Za-z0-9._-]+$, PNG <= 1360x768, GIF <= 10 MB /
 512x288 / 150 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the whole set <= 96 MB), and images.conf gets
 the image lines (image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>) and the
-sound_move= / sound_confirm= / volume= / mixer_volume= / media= / heading= keys.  The line is written only as
+sound_move= / sound_confirm= / volume= / mixer_volume= / media= / heading= / text_size= keys.  The line is written only as
 wide as it needs to be - 3 fields with no media at all, 6 when no image names a confirm of its own -
 and every narrower form stays valid.  An image's own confirm is the sound that plays when THAT image
 is chosen; an empty field falls back to the menu-wide sound_confirm=.
@@ -57,7 +57,7 @@ images.conf - never inside media/, never in the media budget, never opened by th
                "images": [{"device", "source", "title", "subtitle", "art", "anim", "music",
                            "confirm"}],
                "timeout", "default", "volume", "mixer_volume", "sound_move", "sound_confirm",
-               "heading", "theme", "colors"}
+               "heading", "text_size", "theme", "colors"}
               'source' is the .raw each image came from - the one thing images.conf cannot
               hold and a rebuild needs.  An `inject` given no --primary/--extra reads the
               card's build.json first and carries the old sources through: an inject must
@@ -302,8 +302,16 @@ CONF_LINE_MAX = 1000
 #: so this is about the file, not about how much fits on the LCD).
 CONF_STR_MAX = 199
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
-CONF_KEYS = ("default", "timeout", "heading", "font", "sound_move", "sound_confirm", "volume", "mixer_volume",
-             "media", "theme", "machine_volume")
+CONF_KEYS = ("default", "timeout", "heading", "text_size", "font", "sound_move", "sound_confirm", "volume",
+             "mixer_volume", "media", "theme", "machine_volume")
+
+#: HOW BIG A CARD'S TITLE AND SUBTITLE ARE DRAWN (images.conf text_size=; PAD-183).
+#: `uniform` measures the two sizes over EVERY card and draws them all at the smallest
+#: any of them needs, so a long name does not come up smaller than a short one;
+#: `per-card` lets each card fit its own, which is what the menu did before there was a
+#: choice. The selector's own default is `uniform`, and a card that never says gets it.
+TEXT_SIZES = ("uniform", "per-card")
+TEXT_SIZE_DEFAULT = "uniform"
 
 #: THE MACHINE'S OWN VOLUME (images.conf volume=machine + machine_volume=<store>|<key>|<default>):
 #: the selector plays at the MASTER VOLUME SETTING the owner set on the coin door, read off the
@@ -375,6 +383,18 @@ def check_theme(theme):
         return None
     if t != CUSTOM_THEME and t not in theme_names():
         raise Refused("theme %r is not one of %s, or %s" % (theme, ", ".join(theme_names()), CUSTOM_THEME))
+    return t
+
+
+def check_text_size(text_size):
+    """A ``text_size=`` value for images.conf: 'uniform' or 'per-card', lower case;
+    '' / None -> None (no key written, and the selector's own uniform).  Anything else
+    is refused here rather than warned about on the machine."""
+    t = (text_size or "").strip().lower()
+    if not t:
+        return None
+    if t not in TEXT_SIZES:
+        raise Refused("text_size %r is not one of %s" % (text_size, ", ".join(TEXT_SIZES)))
     return t
 
 
@@ -1717,7 +1737,7 @@ def check_groups(groups, nimages):
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None,
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
-                       groups=None, default_card=None, heading=None):
+                       groups=None, default_card=None, heading=None, text_size=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1725,6 +1745,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     global keys follow.  `theme` (a built-in's name or 'custom') and `colors` ({role: RRGGBB}) are
     the menu's colours (see THEMES_JSON); neither is written when not given.  `heading` is the line
     across the top of the menu (None = the selector's own SELECT GAME CODE, '' = no line at all).
+    `text_size` is 'uniform' or 'per-card' (None = no key, which the selector reads as uniform).
     `debug_log` writes `log=CARD_LOG` (the selector's diagnostics on the card - a development build
     only)."""
     devices = list(devices)
@@ -1827,6 +1848,10 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     # a CHOICE and writes 'heading=', which the selector reads as no line at all.
     if heading is not None:
         out.append("heading=%s" % conf_heading(heading))
+    # THE TEXT SIZE: left out when nobody asked, so a card built before this existed is
+    # byte for byte what it was (and reads as 'uniform' on a selector that knows the key)
+    if text_size is not None:
+        out.append("text_size=%s" % check_text_size(text_size))
     if font:
         out.append("font=%s" % font)
     if sound_move:
@@ -1868,6 +1893,7 @@ def parse_images_conf(text):
     '' = none), 'default': int, 'timeout': int, 'font': str|None, 'sound_move': str|None,
     'sound_confirm': str|None, 'volume': int|None, 'mixer_volume': int|None, 'media_dir': str|None,
     'heading': str|None (None = the key was absent, '' = the card asked for no heading),
+    'text_size': str|None (None = the key was absent, which the selector reads as 'uniform'),
     'theme': str|None, 'colors': {role: rrggbb}, 'debug_log': str|None (the log= path)}.
     3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
     '|' ':' or '/', more than MAX_IMAGES images, more than MAX_CARDS cards or more than MAX_GROUPS
@@ -1879,7 +1905,7 @@ def parse_images_conf(text):
     if isinstance(text, bytes):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "groups": [], "default": 0, "default_card": None,
-            "timeout": 15, "heading": None, "font": None,
+            "timeout": 15, "heading": None, "text_size": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None}
     for raw in text.splitlines():
@@ -1931,6 +1957,12 @@ def parse_images_conf(text):
             # the top, which is a different answer from a card that never said
             # (None, the selector's own default).
             conf["heading"] = val.strip()
+        elif key == "text_size":
+            # a word the selector does not know is a card that will draw at one size
+            # anyway: read back as None so the card is not told it says something else
+            conf["text_size"] = val.strip().lower() or None
+            if conf["text_size"] not in TEXT_SIZES:
+                conf["text_size"] = None
         elif key == "font":
             conf["font"] = val.strip() or None
         elif key in ("sound_move", "sound_confirm"):
@@ -2949,7 +2981,8 @@ def conf_for_plan(plan, args, existing=None, media=None):
         return text
     ex = existing or {"images": [], "media": [], "groups": [], "default": None,
                       "default_card": None, "timeout": None,
-                      "heading": None, "font": None, "sound_move": None, "sound_confirm": None,
+                      "heading": None, "text_size": None,
+                      "font": None, "sound_move": None, "sound_confirm": None,
                       "volume": None, "mixer_volume": None, "theme": None, "colors": {}}
     n = len(plan.trees)
     same_n = len(ex["images"]) == n
@@ -3036,10 +3069,17 @@ def conf_for_plan(plan, args, existing=None, media=None):
     heading = getattr(args, "heading", None)
     if heading is None:
         heading = ex.get("heading")
+    # THE TEXT SIZE, on the same rule: --text-size is the whole answer, and without the
+    # flag the card keeps whatever it already says (a card that never said still says
+    # nothing, and the selector draws at one size either way)
+    text_size = check_text_size(getattr(args, "text_size", None))
+    if text_size is None:
+        text_size = ex.get("text_size")
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
-                              groups=groups, default_card=default_card, heading=heading)
+                              groups=groups, default_card=default_card, heading=heading,
+                              text_size=text_size)
 
 
 # ============================================================================= the JSON sidecars
@@ -3100,6 +3140,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("sound_move", conf["sound_move"]),
         ("sound_confirm", conf["sound_confirm"]),
         ("heading", conf.get("heading")),
+        ("text_size", conf.get("text_size")),
         ("theme", conf.get("theme")),
         ("colors", dict(conf.get("colors") or {})),
         # ONE ENTRY PER GROUP CARD (item 106), with the media *_source keys the tab's
@@ -5084,7 +5125,10 @@ def render_images_conf_text(conf):
         conf["media"], conf["sound_move"], conf["sound_confirm"], volume, conf["mixer_volume"],
         media_dir=conf.get("media_dir"), theme=conf.get("theme"), colors=conf.get("colors"),
         machine_volume=mv, debug_log=bool(conf.get("debug_log")), groups=conf.get("groups"),
-        default_card=conf.get("default_card"))
+        default_card=conf.get("default_card"),
+        # the card's own LOOK keys, or a card that carries one reads back as a card that
+        # changed and every update re-injects its menu for nothing
+        heading=conf.get("heading"), text_size=conf.get("text_size"))
 
 
 # ============================================================================= reading a card back
@@ -6470,6 +6514,9 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
                                                             conf.get("debug_log") or "off"))
         print("    sound_move=%s sound_confirm=%s volume=%s mixer_volume=%s media=%s"
               % (conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"], conf["media_dir"]))
+        print("    heading=%s text_size=%s"
+              % ("(the selector's own)" if conf.get("heading") is None else repr(conf["heading"]),
+                 conf.get("text_size") or "(the selector's own: %s)" % TEXT_SIZE_DEFAULT))
         if selector_dir:
             for name, (cardname, mode, required) in SELECTOR_FILES.items():
                 src = os.path.join(selector_dir, name)
@@ -6747,6 +6794,8 @@ def inspect_card(card, media_out=None):
         # null = the card never set one (the selector's own line is drawn); "" = the
         # card asked for no heading at all
         ("heading", conf.get("heading")),
+        # null = the card never set one, which the selector draws as 'uniform'
+        ("text_size", conf.get("text_size")),
         ("theme", conf.get("theme")), ("colors", dict(conf.get("colors") or {})),
         ("media", media), ("media_out", out),
         ("has_media_json", media_json is not None), ("has_build_json", build is not None),
@@ -6785,6 +6834,10 @@ def print_inspect(rep):
                              else repr(head)))
     colors = "".join(" color_%s=%s" % kv for kv in sorted((rep.get("colors") or {}).items()))
     print("theme      %s%s" % (rep.get("theme") or "(the selector's default)", colors))
+    ts = rep.get("text_size")
+    print("text size  %s" % ("(the selector's default: one size for every card)" if ts is None
+                             else "uniform - one size for every card" if ts == TEXT_SIZE_DEFAULT
+                             else "per-card - each card fits its own title"))
     # WHAT THE PLAYER ACTUALLY SCROLLS THROUGH (item 106), before the per-image detail:
     # a card that shows five images as three cards is not obvious from the image list,
     # and "which of these do I see" is the first question a group raises.
@@ -8215,6 +8268,11 @@ def _add_conf_flags(s):
                    help="images.conf heading=TEXT - the line across the top of the menu (the selector's "
                         "own '%s' when no card ever set one; --heading '' leaves the top bare); an "
                         "existing card's is kept when absent" % DEF_HEADING)
+    s.add_argument("--text-size", choices=list(TEXT_SIZES),
+                   help="images.conf text_size= - how big a card's title and subtitle are drawn: "
+                        "uniform (one size for the whole menu, the largest every card's text fits "
+                        "at) or per-card (each card fits its own); an existing card's is kept when "
+                        "absent, and a card that says neither draws uniform")
     s.add_argument("--default", type=int, help="images.conf default index (default 0)")
     s.add_argument("--volume", type=int, help="images.conf volume 0-100 (software mix gain; overrides media.json)")
     s.add_argument("--mixer-volume", type=int, help="images.conf mixer_volume 0-63 (the game's codec curve on selem PCM; only when set)")

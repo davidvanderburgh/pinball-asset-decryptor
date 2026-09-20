@@ -452,6 +452,8 @@ default=0          # highlight when there is no usable last-choice file
 timeout=10         # 0 = wait for ever
 #heading=THE BEATLES JUKEBOX   # the line across the top (default SELECT GAME CODE)
 #heading=          # ...and an empty one leaves the top of the menu bare
+#text_size=uniform # one text size for every card (the default); per-card lets
+                   # each card fit its own title
 #font=/usr/local/codeselect/font.ttf
 #theme=midnight    # the colours: midnight arcade neon emerald slate daylight, or custom
 #color_frame_hl=ffc42d   # one colour on top of the theme (the roles are in themes.json)
@@ -477,7 +479,13 @@ clamped to 0-100,
 menu with free UTF-8 text, shrunk and then cut to the glass like every other
 line the program does not own; the key being ABSENT is the built-in
 `SELECT GAME CODE`, and the key being PRESENT AND EMPTY is no heading at all.
-Unknown keys are ignored so the file can grow.
+`text_size=` says how big a card's title and subtitle are drawn: `uniform`
+(the default, and what a card that never sets the key gets) measures both
+sizes over EVERY card - the ones a carousel is not showing too - and draws
+them all at the smallest any card needs, so a long name no longer comes up
+smaller than a short one; `per-card` lets each card fit its own, which is
+what the menu did before the key existed. Unknown keys are ignored so the
+file can grow.
 
 **Image groups: one card that boots a different member every power-up.**
 

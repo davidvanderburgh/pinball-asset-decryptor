@@ -36,6 +36,13 @@
  *                            CODE"); free UTF-8 text, shrunk and then cut to
  *                            the glass, and a line of nothing but spaces
  *                            leaves the top of the menu empty
+ *   text_size=<word>         how big a card's title and subtitle are drawn:
+ *                            'uniform' (the default) = ONE size for the whole
+ *                            menu, the largest every card's text fits at, so a
+ *                            long name does not come up smaller than a short
+ *                            one; 'per-card' = each card fits its own, which is
+ *                            what the menu did before there was a choice.  An
+ *                            unknown word is warned about and 'uniform' is used
  *   font=<path>              optional TrueType font
  *   media=<dir>              where the media names resolve (default
  *                            /usr/local/codeselect/media; --media overrides)
@@ -195,6 +202,8 @@ struct conf {
     char heading[CONF_STR];        /* heading= ("" when absent = the built-in line) */
     int heading_set;               /* ...and whether the key was there at all, so an
                                     * empty one can mean "no heading" (C FB, PAD-135) */
+    int text_uniform;              /* text_size=: 1 = one text size for the whole menu
+                                    * (the default), 0 = each card fits its own */
     char font[CONF_STR];
     char media[CONF_STR];          /* media= ("" when absent) */
     char sound_move[CONF_STR];     /* "" when absent */

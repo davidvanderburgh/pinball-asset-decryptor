@@ -732,6 +732,20 @@ never takes one from the trough, because with the feeder on by default the
 game's own eject has already put it there, and serving from a full trough in
 attract left the machine a ball short. `plunge.py serve` still ejects, and the
 TROUGH coil marker on the artwork runs it.
+**PAD-186 (2026-09-20) made "nobody is playing" a question about the ROOM and
+not about one ball.** PAD-134's cancel only covered the balls ALREADY pending
+when somebody clicked; the ball the game served NEXT started a fresh 5 s timer
+from the claim as it then stood, so every quiet moment after a player's last
+click was fair game again. A battle is the worst place for that, because a
+battle is exactly when a player stops clicking and watches: the feeder took
+the ball, the game handed it straight back under the battle's ball save and
+auto-plunged it, the feeder owned that launch too, and the player's own Drain
+click then landed on a trough the feeder had already filled. Anybody who moved
+anything in the last `PAD_BALL_HUMAN_MS` (default 60000 ms) now keeps their
+balls. A WINDOW and not a latch, because the way home still has a job when the
+room really does empty — the balls a ball search is waiting to see — so an
+abandoned window goes back to the old behaviour a minute later instead of
+never. **`PAD_BALL_HUMAN_MS=0` restores the PAD-134 behaviour exactly.**
 **The actual Start-refusal root cause was DATA, not code, and does not ship
 in this repo**: DnD LE's factory ball count is **8** — 6 in the trough plus
 **2 captive in the dragon** — and the game disarms its own Start/Tournament

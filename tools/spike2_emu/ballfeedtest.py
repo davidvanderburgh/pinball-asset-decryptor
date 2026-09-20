@@ -172,7 +172,15 @@ def main():
                PAD_BALL_FILE=os.path.join(SCRATCH, "padball"),
                PAD_TABLES=padpath.tables() or "", PAD_GAME=game,
                PAD_BALL_HZ="50", PAD_BALL_LANE_MS="150",
-               PAD_BALL_MIN_GAP_MS="300", PAD_BALL_HOME_MS="0")
+               PAD_BALL_MIN_GAP_MS="300", PAD_BALL_HOME_MS="0",
+               # PAD_BALL_HUMAN_MS=0 EVERYWHERE EXCEPT ITS OWN SECTION. The
+               # way-home checks below click as a person and then expect
+               # balls home seconds later, which is the PAD-134 shape and is
+               # still the thing they are about. PAD-186's window would hold
+               # those balls for a minute and turn every one of them into a
+               # test of the wrong rule, so it is off here and switched on,
+               # with a short window, where it is what is being measured.
+               PAD_BALL_HUMAN_MS="0")
     p = subprocess.Popen([sys.executable, os.path.join(HERE, "ballfeed.py")],
                          env=env, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -406,6 +414,49 @@ def main():
     p2.terminate()
     p2.wait(timeout=5)
     out.extend(out2)
+
+    # ---- PAD-186: A PAUSE BETWEEN SHOTS IS NOT AN EMPTY ROOM --------------
+    # DragonRR again, in a battle: his Drain click stopped ending the game
+    # whenever the mode clock on the LCD was frozen, and it worked whenever it
+    # was running. A Stern mode timer freezes after a few seconds with no
+    # playfield switch, so "frozen clock" and "this player has not clicked
+    # anything for a few seconds" are one state - and that is the state the
+    # way home used to take his ball in. The click comes BEFORE the launch
+    # here, which is what the section above never does and the only way the
+    # fault shows: PAD-134 cancels for the balls already pending, and the one
+    # the game serves next starts a fresh timer from the claim as it stands.
+    run("reset")
+    time.sleep(0.4)
+    henv2 = dict(henv, PAD_BALL_HUMAN_MS="4000")
+    p3 = subprocess.Popen([sys.executable, os.path.join(HERE, "ballfeed.py")],
+                          env=henv2, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, bufsize=1)
+    out3 = []
+    threading.Thread(target=lambda: [out3.append(l.rstrip()) for l in p3.stdout],
+                     daemon=True).start()
+    time.sleep(0.6)
+
+    window_click(shim, click_sw)        # the shot - or the Drain - they made
+    time.sleep(0.3)
+    launch()                            # the ball the game hands back
+    check("the ball the game served after a click is out of the trough",
+          shim.count(ids), len(ids) - 1)
+    time.sleep(1.8)                     # past PAD_BALL_HOME_MS, inside HUMAN
+    check("...and stays out while the player is only watching",
+          shim.count(ids), len(ids) - 1)
+    # The whole phrase, not "at the controls": the line this is NOT supposed
+    # to see - "nobody at the controls" - contains those words too, and the
+    # control run passed on that substring while the ball was being taken.
+    check("...and the feeder says who it is holding it for",
+          any("somebody was at the controls" in l for l in out3), True)
+    # And the window is a window: a room that really did empty gets its ball
+    # back, because a ball search is waiting to see it.
+    time.sleep(3.0)
+    check("a room that really did empty still gets its ball back",
+          shim.count(ids), len(ids))
+    p3.terminate()
+    p3.wait(timeout=5)
+    out.extend(out3)
 
     shim.stop = True
     print("\n--- ballfeed.py said ---")

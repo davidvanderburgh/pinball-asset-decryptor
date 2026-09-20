@@ -103,11 +103,44 @@ AUTO_PLUNGE = _num("PAD_BALL_AUTOPLUNGE", 1)
 #: nobody at the flippers, drains to the trough a few seconds later. This rig
 #: has no playfield, so that return is an action here: PAD_BALL_HOME_MS
 #: (default 5000) after an answered launch, the ball drains home - UNLESS
-#: somebody is PLAYING it (`_claim` below). Attract/ball-search cycles have
+#: somebody is PLAYING it (`_claim` below) or is still at the machine at all
+#: (`HUMAN_S` below, PAD-186). Attract/ball-search cycles have
 #: nobody at the controls, so their balls always come home - which is exactly
 #: what the game's search is waiting to see, and what clears (and never
 #: re-raises) the malfunction above. 0 disables the way home.
 HOME_S = _num("PAD_BALL_HOME_MS", 5000) / 1000.0
+
+#: HOW LONG SOMEBODY IS STILL AT THE MACHINE AFTER THEIR LAST INPUT.
+#:
+#: ★ PAD-186, DRAGONRR: "in battle mode clicking to drain the ball does not
+#: end the game. This is if the timer isn't actively ticking when you drain
+#: it. It works if it is." Both halves of that sentence are THIS timer, and
+#: the mode clock on the LCD is only how he could see it: Stern pauses a mode
+#: timer after a few seconds with no playfield switch (adjustment 166 ALLOW
+#: INACTIVITY TO PAUSE TIMERS, on by default), so "the timer is frozen" and
+#: "this player has not clicked anything for a few seconds" are the same
+#: state - and that was exactly the state in which the way home took his ball.
+#:
+#: PAD-134 made a human's touch cancel the way home, but only for the balls
+#: ALREADY pending when they touched it: `pending` is cleared and the next
+#: launch starts a fresh timer from the CURRENT claim. So every ball launched
+#: after somebody's last click was fair game again five seconds later, and a
+#: battle is the worst place for that - the battles carry a 16-45 s ball save
+#: (AD_BATTLE_VS_KING_GHIDORAH_BALL_SAVE_TIMER and friends default to 30),
+#: so the game answers each stolen ball by re-serving and auto-plunging it,
+#: this feeder owns that launch too, and five seconds later it takes it back.
+#: Round and round, with the player's own Drain click landing on a trough the
+#: feeder had already filled ("the trough is already full - no ball is in
+#: play") and the game never reaching the end of the ball.
+#:
+#: So "nobody is playing" is now a question about the ROOM and not about one
+#: ball: a person who moved anything in the last PAD_BALL_HUMAN_MS is still
+#: here, and watching a mode intro is not an empty room. A WINDOW rather than
+#: a latch because the way home has a job to do when the room really does
+#: empty - the balls a ball search is waiting for - so an abandoned window
+#: goes back to the old behaviour a minute later instead of never. 0 turns
+#: the window off and restores the PAD-134 behaviour exactly.
+HUMAN_S = _num("PAD_BALL_HUMAN_MS", 60000) / 1000.0
 
 #: WHO COUNTS AS SOMEBODY PLAYING, on the SCRIPT side of the block - the
 #: source letters padsw.h lists, of the writers that are a person moving a
@@ -249,6 +282,16 @@ class Feeder:
         #: moved a switch. A counter and not a flag because it has to survive
         #: our own writes in between - see _claim().
         self.hands = 0
+        #: The claim as the last poll left it, and when it last MOVED - which
+        #: is the only reading this rig has of "somebody is in the room"
+        #: (PAD-186). Seeded on the first look, like `my_gen` and `fired()`:
+        #: coming up beside a session that has been going for a while must not
+        #: read its whole history as one click.
+        self.last_claim = None
+        self.human_at = None
+        #: Whether the way home is currently being held for a person, so the
+        #: line saying so is said once per hold rather than every poll.
+        self.holding = False
 
     @staticmethod
     def _switch(rows, name):
@@ -430,22 +473,41 @@ class Feeder:
         a person has touched the machine the balls are theirs, even if they then
         go quiet - the playfield window's drain click is how they end.
 
+        THE CLAIM IS ALSO READ HERE FOR ITS TIME, before anything else, and
+        that has to happen on every poll rather than only when a ball is
+        pending (PAD-186): the click that matters most is the one made just
+        BEFORE the game re-serves - a Drain, a plunge, a shot - and by the
+        time that ball's timer matures the claim has long stopped moving.
+
         ONE BALL PER POLL, deliberately. `plan_drain` is derived from the
         MERGED array, which the guest republishes after our write, so two
         drains in one pass could both read the same hole and put two balls in
         one trough position. At 50 Hz the next one is 20 ms later and the
         timers they are waiting on are a second apart anyway.
         """
+        if self.last_claim is not None and claim != self.last_claim:
+            self.human_at = now
+        self.last_claim = claim
         if not self.pending or not HOME_S:
             return
         if any(c != claim for _, c in self.pending):
             n = len(self.pending)
             self.pending = []
+            self.holding = False
             say("somebody is playing - %d launched ball(s) stay in play "
                 "until Drain" % n)
             return
         if now - self.pending[0][0] < HOME_S:
             return
+        if HUMAN_S and self.human_at is not None \
+                and now - self.human_at < HUMAN_S:
+            if not self.holding:
+                self.holding = True
+                say("somebody was at the controls %.0f s ago - %d launched "
+                    "ball(s) stay in play" % (now - self.human_at,
+                                              len(self.pending)))
+            return
+        self.holding = False
         t0, _ = self.pending.pop(0)
         mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
         lane_made = (self.lane is not None

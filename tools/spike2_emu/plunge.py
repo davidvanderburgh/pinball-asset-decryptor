@@ -376,6 +376,9 @@ def do_drain(m):
         print(plan.refused)
         return 1
     for step in plan.steps:
+        if step[0] == "wait":              # the roll down the ramp (PAD-186)
+            time.sleep(step[1])
+            continue
         if not _move(m, step[1], step[2], step[3]):
             return 1
     return 0

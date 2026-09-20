@@ -200,6 +200,7 @@ from . import _rig
 from .emulate_tab import rig_dir, wsl_account, wsl_home
 from . import preview_audio
 from .preview_audio import PreviewAudio
+from .placement import monitor_workarea
 from .theme import THEMES, dark_titlebar
 from .widgets import _Tooltip, center_over
 # THE PLATFORMS (item 118): what this module hard-coded for the Stern card,
@@ -5345,6 +5346,263 @@ def _media_row(parent, row, col, label, var, choices, filetypes,
     return cb, btn, play
 
 
+#: What a video shows, STATED rather than offered as controls (David:
+#: "remove the 'start', 'Length' and 'FPS' controls... just state [the
+#: limits]").  It loops the first 5 s AT THE VIDEO'S OWN FRAME RATE (David:
+#: "10fps sucks... make it the original fps", then "run at original fps
+#: (minimum 30fps would be ideal). we can limit them to 5 second clips") -
+#: 30 fps at most, which a 60 fps clip halves to cleanly.  Any common video
+#: works - it is re-encoded - so there is no codec to get right either.
+CLIP_NOTE = ("Shown as a loop of the first 5 seconds, at the video's own "
+             "frame rate (up to 30 fps). Any common video works - it is "
+             "re-encoded.")
+
+#: What each choice does, said under the box that makes it.  ONE LIVE LINE,
+#: not a paragraph per option (BEN, PAD-187: the dialog was tall enough to
+#: push its own OK button off the bottom of the screen).  Each of these used
+#: to be either a note standing under the list for ever or a sentence nobody
+#: could see until they had picked the option it described.
+MEDIA_NOTES = {
+    "logo": "The game's own logo, taken off its card when the menu is built.",
+    "picture": ("Your own picture, fitted to the card's panel: never "
+                "stretched, never cropped."),
+    "attract": ("The game's own attract video plays while the image is "
+                "highlighted, and its own logo is the still. " + CLIP_NOTE),
+    "video": ("A video is the still too: the frame it starts on shows while "
+              "the image is not highlighted. " + CLIP_NOTE),
+    "none": ("Text only: the card shows its title and subtitle on the menu's "
+             "own colours."),
+    "card": ("Kept exactly as the card has it: the files the load read, "
+             "never re-made from what made them."),
+}
+
+#: ...and the one every RANDOM card's style shares, because they are all the
+#: same idea: the games behind this one card, drawn seven ways.
+GROUP_MEDIA_NOTE = ("Every one of these is drawn from the logos of the games "
+                    "this card rolls between, so the card shows what it can "
+                    "boot. The moving ones play while the card is "
+                    "highlighted.")
+
+
+def media_note(kind, group=False):
+    """The grey line under the Picture box for *kind*: what the option that
+    is chosen right now does."""
+    if group:
+        return MEDIA_NOTES.get(kind, "") if kind in ("picture", "none", "card") \
+            else GROUP_MEDIA_NOTE
+    return MEDIA_NOTES.get(kind, "")
+
+
+def manifest_art_source(manifest, name):
+    """What the prepared ``art<N>.png`` / ``gart<G>.png`` called *name* was
+    made from, as the spec the tools were given ('auto', a style, a path),
+    or '' when this media set has no such file.
+
+    BY FILE NAME AND NOT BY INDEX: the art files are numbered by IMAGE and
+    a random card's by GROUP, while the rows on the tab are neither (see
+    :func:`card_media_names`), so the name is the only thing the two sides
+    are sure to agree on."""
+    for key in ("images", "groups"):
+        for row in manifest.get(key) or []:
+            if isinstance(row, dict) and (row.get("art") or "") == name:
+                return str(row.get("art_source") or "")
+    return ""
+
+
+def still_for_row(form, index, media_dir, manifest=None):
+    """Where the picture of row *index* can be drawn from AT THIS MOMENT,
+    as ``(what, value)``:
+
+      ``("file", path)``      a picture the owner chose - the file itself
+      ``("video", (path, seconds))``  the frame that video starts on
+      ``("rendered", path)``  the art the tools made, and only when they
+                              made it from exactly the choice the row
+                              carries now
+      ``("none", "")``        nothing that can be drawn yet
+
+    THE RENDERED FILE IS ONLY OFFERED WHEN IT IS STILL THE ANSWER.  A media
+    directory keeps the last render, so the moment somebody picks another
+    style the file beside it is a picture of the choice they have just left:
+    showing it would be a preview of the wrong thing, which is worse than
+    showing nothing.  The manifest records what each file was made from, so
+    the two can be compared rather than assumed."""
+    rows = list(getattr(form, "images", ()) or ())
+    if not 0 <= index < len(rows):
+        return ("none", "")
+    row = rows[index]
+    group = is_group(row)
+    kind = group_media_kind(row) if group else media_kind(row)
+    path = (group_media_file(row) if group
+            else media_file(row)).strip().strip('"')
+    if kind == "picture" and path and os.path.isfile(path):
+        return ("file", path)
+    if kind == "video" and path and os.path.isfile(path):
+        return ("video", (path, _clip_start(row) or _num(row.art_time, "0")))
+    names = card_media_names(form)
+    name = names[index][0] if index < len(names) else ""
+    spec = group_art_spec(row) if group else art_spec(row)
+    if name and media_dir and spec not in ("", "none") and \
+            manifest_art_source(manifest or {}, name) == spec:
+        full = os.path.join(media_dir, name)
+        if os.path.isfile(full):
+            return ("rendered", full)
+    return ("none", "")
+
+
+#: What the preview draws, in the proportions selectmedia.py builds a card
+#: with: a 16:9 panel, ``CARD_PAD`` (24 of the panel's 522) around it and
+#: ``TEXT_BLOCK`` (118) under it for the title and the subtitle.  The
+#: numbers below are that card at a size that sits beside the dialog's
+#: fields without deciding how tall the dialog is.
+PREVIEW_ART_W = 200
+PREVIEW_ART_H = int(round(PREVIEW_ART_W * 9 / 16.0))
+PREVIEW_CARD_PAD = int(round(PREVIEW_ART_W * 24 / 522.0))
+PREVIEW_TEXT_H = int(round(PREVIEW_ART_W * 118 / 522.0))
+PREVIEW_CARD_W = PREVIEW_ART_W + 2 * PREVIEW_CARD_PAD
+PREVIEW_CARD_H = PREVIEW_ART_H + PREVIEW_TEXT_H + 2 * PREVIEW_CARD_PAD
+#: The menu around the card, so the card is a card and not a rectangle
+#: filling a box.
+PREVIEW_MARGIN = 8
+#: The card's two lines of text.  The machine draws them in its own fonts;
+#: this is a picture of the layout, not of the typeface.
+PREVIEW_FONT = "TkDefaultFont"
+
+#: What the preview says when it has nothing to draw - each of them a state
+#: the tab is really in, never a failure.
+PREVIEW_NOTES = {
+    "file": "Your picture, fitted to the card.",
+    "video": "The frame this clip starts on.",
+    "rendered": "As the menu last drew it.",
+    "none": "The picture appears here once the tab has drawn its preview.",
+    "missing": "That file is not on this machine.",
+    "unreadable": "That file cannot be read as a picture.",
+    "text": "This card shows its text and nothing else.",
+    "noffmpeg": "ffmpeg is not installed, so the frame cannot be shown here.",
+}
+
+
+class CardPreview:
+    """The card as the boot menu draws it - the picture, the title under it,
+    the subtitle under that, in the menu's own colours - inside the Edit
+    image… dialog (BEN, PAD-187: "Add in a preview of what it will look
+    like... Currently you have to select it, and go back to the main page to
+    see what it looks like").
+
+    IT IS ONE CARD AND NOT THE MENU.  The tab's own preview is the real
+    thing: a frame the selector itself rendered, with every card on it, and
+    it costs a build and a render to make.  This costs a file read, it is
+    drawn from the dialog's own fields, and it follows every keystroke -
+    which is what the question "what will this look like?" is asking while
+    the dialog is open.
+
+    IT IS THE HIGHLIGHTED CARD.  A menu draws the one the player is on
+    bigger and brighter than its neighbours, and the picture is what this
+    dialog is about, so the highlighted colours are the ones to show."""
+
+    def __init__(self, parent, theme_fn):
+        self._theme_fn = theme_fn
+        self.frame = ttk.LabelFrame(parent, text="Preview")
+        w = PREVIEW_CARD_W + 2 * PREVIEW_MARGIN
+        h = PREVIEW_CARD_H + 2 * PREVIEW_MARGIN
+        self.canvas = tk.Canvas(self.frame, width=w, height=h,
+                                highlightthickness=0, bd=0, takefocus=0)
+        self.canvas.pack(padx=8, pady=(6, 4))
+        th = THEMES.get(theme_fn()) or THEMES["dark"]
+        self.note = ttk.Label(self.frame, foreground=th["gray"],
+                              wraplength=w, justify=tk.LEFT)
+        self.note.pack(anchor=tk.W, padx=8, pady=(0, 6))
+        #: The decoded picture, kept alive for as long as it is on the
+        #: canvas (Tk keeps no reference of its own), with the key it was
+        #: decoded from so the same file is not read on every keystroke.
+        self._photo = None
+        self._photo_key = None
+        self.drawn = ("none", "")
+
+    # -- the picture -------------------------------------------------------
+    def _photo_for(self, path):
+        """*path* decoded and fitted into the card's panel, or None."""
+        key = None
+        try:
+            st = os.stat(path)
+            key = (os.path.abspath(path), st.st_mtime, st.st_size)
+        except OSError:
+            return None
+        if key == self._photo_key and self._photo is not None:
+            return self._photo
+        if not _HAVE_PIL:                                   # pragma: no cover
+            return None
+        try:
+            with Image.open(path) as img:
+                img.load()
+                size = scaled_size(img.width, img.height,
+                                   PREVIEW_ART_W, PREVIEW_ART_H)
+                shown = img.convert("RGB").resize(size, Image.LANCZOS)
+            photo = ImageTk.PhotoImage(shown)
+        except Exception:                                   # noqa: BLE001
+            return None
+        self._photo, self._photo_key = photo, key
+        return photo
+
+    def show_image(self, image):
+        """A picture already in memory (a frame grabbed out of a video),
+        fitted and kept the same way a file is."""
+        if not _HAVE_PIL:                                   # pragma: no cover
+            return None
+        try:
+            size = scaled_size(image.width, image.height,
+                               PREVIEW_ART_W, PREVIEW_ART_H)
+            photo = ImageTk.PhotoImage(image.convert("RGB").resize(
+                size, Image.LANCZOS))
+        except Exception:                                   # noqa: BLE001
+            return None
+        self._photo, self._photo_key = photo, None
+        return photo
+
+    # -- the card ----------------------------------------------------------
+    def draw(self, photo, title, subtitle, colors, note=""):
+        """One card: *photo* (or None) in the panel, the two lines of text
+        under it, in the menu's *colors* (``{role: rrggbb}``)."""
+        def col(role, fallback):
+            v = (colors or {}).get(role) or fallback
+            return "#" + str(v).lstrip("#")
+
+        c = self.canvas
+        try:
+            c.delete("all")
+            c.configure(bg=col("background", "0b0e13"))
+        except tk.TclError:                                 # pragma: no cover
+            return
+        x0, y0 = PREVIEW_MARGIN, PREVIEW_MARGIN
+        x1, y1 = x0 + PREVIEW_CARD_W, y0 + PREVIEW_CARD_H
+        c.create_rectangle(x0, y0, x1, y1, fill=col("card_hl", "263041"),
+                           outline=col("frame_hl", "ffc42d"), width=2)
+        ax0, ay0 = x0 + PREVIEW_CARD_PAD, y0 + PREVIEW_CARD_PAD
+        ax1, ay1 = ax0 + PREVIEW_ART_W, ay0 + PREVIEW_ART_H
+        if photo is not None:
+            c.create_image((ax0 + ax1) // 2, (ay0 + ay1) // 2, image=photo,
+                           anchor=tk.CENTER)
+        else:
+            # The panel, empty and said to be empty - a card with no picture
+            # is a real card, and the menu leaves the same space for it.
+            # Drawn in the LABEL colour: the frame colour is a shade of the
+            # card itself, and an outline nobody can see is not one.
+            c.create_rectangle(ax0, ay0, ax1, ay1, outline=col("label", "5d6673"),
+                               dash=(3, 3))
+        mid = (ax0 + ax1) // 2
+        ty = ay1 + max(8, PREVIEW_TEXT_H // 3)
+        c.create_text(mid, ty, text=(title or "").strip() or "(no title)",
+                      fill=col("title_hl", "ffffff"),
+                      font=(PREVIEW_FONT, 9, "bold"), anchor=tk.CENTER,
+                      width=PREVIEW_ART_W)
+        c.create_text(mid, ty + 16, text=(subtitle or "").strip(),
+                      fill=col("subtitle_hl", "d6dce4"), font=(PREVIEW_FONT, 8),
+                      anchor=tk.CENTER, width=PREVIEW_ART_W)
+        try:
+            self.note.configure(text=note)
+        except tk.TclError:                                 # pragma: no cover
+            pass
+
+
 class _Modal:
     """The app's modal shape, in one place: a transient, grabbed Toplevel
     centred over the window, OK / Cancel at the bottom right, Escape and the
@@ -5352,7 +5610,28 @@ class _Modal:
 
     The dialogs below edit the panel's OWN variables (the same ones the tab
     has always carried, so every trace, every diff and every test still sees
-    one source of truth) and hand back a snapshot to restore on Cancel."""
+    one source of truth) and hand back a snapshot to restore on Cancel.
+
+    AND OK / CANCEL ARE ALWAYS ON SCREEN (BEN, PAD-187: "The properties
+    window on a multiboot image properties can go off the bottom of the
+    screen hiding critical buttons").  The buttons are not in the body any
+    more: they are packed against the bottom of the window FIRST, so the
+    packer gives them their parcel before anything else asks, and the body
+    above them is in a canvas that is only ever as tall as the monitor's
+    work area has room for.  A body that does not fit scrolls - with a bar,
+    the wheel, and Page/arrow keys - instead of hanging off the desktop.
+
+    Every dialog is centred on the parent's own monitor and the desktop
+    David builds on is 1440 tall, so nothing here ever showed it to him: it
+    takes a 768-high laptop, or Windows display scaling (this app is
+    DPI-unaware, so 150% scaling turns a 1080-high screen into a 720-high
+    one as far as Tk is concerned) for a tall dialog to run off the bottom.
+    That is the desk every one of these reports comes from."""
+
+    #: What the window itself takes around the body, height-wise: a title
+    #: bar and two borders.  Deliberately generous - the cost of guessing
+    #: high is a few pixels of scroll, and of guessing low is the bug above.
+    CHROME_H = 48
 
     def __init__(self, parent, title, theme_fn, on_ok=None, on_cancel=None):
         self._parent = parent
@@ -5379,19 +5658,42 @@ class _Modal:
         top.protocol("WM_DELETE_WINDOW", self.cancel)
         top.bind("<Escape>", lambda _e: self.cancel())
         top.resizable(False, False)
-        self.body = ttk.Frame(top, padding=14)
-        self.body.pack(fill=tk.BOTH, expand=True)
+        # THE BUTTON ROW IS PACKED FIRST, and against the bottom: the packer
+        # hands out parcels in the order the slaves were packed, so whatever
+        # is left over when the window is too small comes off the body - the
+        # last thing to be packed - and never off OK and Cancel.
+        self._button_row = ttk.Frame(top, padding=(14, 0, 14, 14))
+        self._button_row.pack(side=tk.BOTTOM, fill=tk.X)
+        self._shell = ttk.Frame(top)
+        self._shell.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self._canvas = tk.Canvas(self._shell, highlightthickness=0, bd=0,
+                                 takefocus=0)
+        try:
+            self._canvas.configure(bg=th["bg"])
+        except tk.TclError:                                 # pragma: no cover
+            pass
+        self._bar = ttk.Scrollbar(self._shell, orient=tk.VERTICAL,
+                                  command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._bar.set)
+        self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        #: The body is a child of the canvas, not of the window - but it is
+        #: still ``dlg.body``, and a dialog that fits is drawn exactly as it
+        #: always was (the canvas is the body's own size, with no bar).
+        self.body = ttk.Frame(self._canvas, padding=14)
+        self._body_win = self._canvas.create_window(0, 0, window=self.body,
+                                                    anchor=tk.NW)
+        self.scrolls = False
 
     def show(self):
         """Add the OK / Cancel row, place the window and take the grab."""
-        row = ttk.Frame(self.body)
-        row.pack(fill=tk.X, pady=(14, 0))
+        row = self._button_row
         ttk.Button(row, text="Cancel", width=10,
                    command=self.cancel).pack(side=tk.RIGHT)
         self.ok_btn = ttk.Button(row, text="OK", width=10, command=self.ok,
                                  style="Go.TButton")
         self.ok_btn.pack(side=tk.RIGHT, padx=(0, 8))
         self.top.bind("<Return>", lambda _e: self.ok())
+        self.fit()
         center_over(self._parent, self.top)
         try:
             self.top.deiconify()
@@ -5406,6 +5708,74 @@ class _Modal:
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
         dark_titlebar(self.top, th is THEMES.get("dark"))
         return self
+
+    def room(self):
+        """How much height the body may have on the monitor the parent is
+        on: its work area (the screen less the taskbar), less this window's
+        own chrome and the button row that must stay visible."""
+        try:
+            self.top.update_idletasks()
+            parent = self._parent
+            _l, top, _r, bottom = monitor_workarea(
+                parent.winfo_rootx() + parent.winfo_width() // 2,
+                parent.winfo_rooty() + parent.winfo_height() // 2,
+                parent.winfo_screenwidth(), parent.winfo_screenheight())
+            buttons = self._button_row.winfo_reqheight()
+        except tk.TclError:                                 # pragma: no cover
+            return 10 ** 6
+        return max(120, (bottom - top) - self.CHROME_H - buttons)
+
+    def fit(self):
+        """Size the scrolling area to the body, or to the screen when the
+        body is taller than the screen has room for.  Called once as the
+        dialog opens, and again by a dialog whose content changed height."""
+        try:
+            self.body.update_idletasks()
+            w, h = self.body.winfo_reqwidth(), self.body.winfo_reqheight()
+            room = self.room()
+            self._canvas.configure(width=w, height=min(h, room),
+                                   scrollregion=(0, 0, w, h))
+            self._canvas.itemconfigure(self._body_win, width=w)
+            self._scroll(h > room)
+        except tk.TclError:                                 # pragma: no cover
+            pass
+        return self
+
+    def _scroll(self, on):
+        """Show or hide the bar, and take or let go of the wheel."""
+        if on == self.scrolls:
+            return
+        self.scrolls = on
+        if on:
+            self._bar.pack(side=tk.RIGHT, fill=tk.Y)
+            # The wheel is bound on the WINDOW, not the canvas: the pointer
+            # is over an entry or a combobox most of the time it is over this
+            # dialog, and a wheel that only works over the gaps is a wheel
+            # that does not work.
+            self.top.bind("<MouseWheel>", self._wheel)
+            self.top.bind("<Button-4>", self._wheel)        # X11
+            self.top.bind("<Button-5>", self._wheel)
+            self.top.bind("<Prior>", lambda _e: self._page(-1))
+            self.top.bind("<Next>", lambda _e: self._page(1))
+        else:
+            self._bar.pack_forget()
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>",
+                        "<Prior>", "<Next>"):
+                self.top.unbind(seq)
+
+    def _wheel(self, event):
+        delta = getattr(event, "delta", 0)
+        step = -1 if (delta > 0 or getattr(event, "num", 0) == 4) else 1
+        try:
+            self._canvas.yview_scroll(step * 3, "units")
+        except tk.TclError:                                 # pragma: no cover
+            pass
+
+    def _page(self, step):
+        try:
+            self._canvas.yview_scroll(step, "pages")
+        except tk.TclError:                                 # pragma: no cover
+            pass
 
     def ok(self):
         self._close(True)
@@ -5435,13 +5805,33 @@ class ImageEditorDialog(_Modal):
     with the video frame options. it needs to be a 'radio button' type
     choice... why do we have a separate animation section?"): the game's
     own logo, a picture file, the game's own attract clip, a video file, or
-    nothing - every option in view, each one's fields live only while it is
-    the choice, and no box that quietly unlocks a row beneath it.  A video
-    is the animation AND the still (the frame it starts on shows while the
-    image is not highlighted), so the Animation section had nothing left
-    to say and is gone.  A row a load read off a card with no source
-    recorded gets a sixth option, the card's own files, which is where it
-    starts (see MEDIA_KINDS)."""
+    nothing - one list, one answer, and no box that quietly unlocks a row
+    beneath it.  A video is the animation AND the still (the frame it
+    starts on shows while the image is not highlighted), so the Animation
+    section had nothing left to say and is gone.  A row a load read off a
+    card with no source recorded gets one more option, the card's own
+    files, which is where it starts (see MEDIA_KINDS).
+
+    THE LIST IS A LIST BOX AND NOT A COLUMN OF RADIO BUTTONS (BEN, PAD-187:
+    "The properties window on a multiboot image properties can go off the
+    bottom of the screen hiding critical buttons.  Suggestion, change all
+    the radio buttons to a drop down list to save space").  It was a column
+    of them, one line each plus a file row for two of them, which on a
+    random card is NINE options and 250 px of a dialog that had grown to
+    887: taller than a 768-high desktop can show, so OK and Cancel were off
+    the bottom of it.  The choice is unchanged - still flat, still one
+    answer, each option's file row still live only while it is the choice -
+    and what was lost with "every option in view" is more than paid back by
+    the PREVIEW beside it, which shows what the option chosen actually
+    looks like instead of leaving the other eight names to describe
+    themselves.  The two ways a random card PICKS stayed radio buttons:
+    they are a pair, each needs a sentence, and two lines is not a height
+    problem.
+
+    AND IT SHOWS THE CARD IT IS EDITING (BEN, again: "Add in a preview of
+    what it will look like.  Currently you have to select it, and go back
+    to the main page to see what it looks like").  See :class:`CardPreview`
+    for what that picture is and is not."""
 
     #: The choices, in the order they are offered: ``(kind, label)``.  The
     #: two stills, then the two videos - so the clip fields sit under the
@@ -5466,10 +5856,6 @@ class ImageEditorDialog(_Modal):
     #: and this card is several of them.  See GROUP_MEDIA_KINDS.
     GROUP_KINDS = tuple((k, label) for k, label, _a, _n in GROUP_MEDIA_KINDS)
 
-    GROUP_NOTE = ("Every one of these is drawn from the logos of the games "
-                  "this card rolls between, so the card shows what it can "
-                  "boot. The moving ones play while the card is highlighted.")
-
     #: Under the two rules and the tick they share: what the machine keeps
     #: between power-ups, and why a shuffle answers the tick for you.
     ROLL_NOTE = ("The machine remembers across power-ups: a shuffle deals "
@@ -5481,17 +5867,11 @@ class ImageEditorDialog(_Modal):
     FILETYPES = {"picture": [("Pictures", "*.png *.jpg *.jpeg")],
                  "video": [("Videos", "*.mp4 *.mov *.mkv *.avi *.webm *.flv *.gif")]}
 
-    #: What a video shows, STATED rather than offered as controls (David:
-    #: "remove the 'start', 'Length' and 'FPS' controls... just state [the
-    #: limits]").  It loops the first 5 s AT THE VIDEO'S OWN FRAME RATE
-    #: (David: "10fps sucks... make it the original fps", then "run at
-    #: original fps (minimum 30fps would be ideal). we can limit them to 5
-    #: second clips") - 30 fps at most, which a 60 fps clip halves to
-    #: cleanly.  Any common video works - it is re-encoded - so there is no
-    #: codec to get right either.
-    CLIP_NOTE = ("Shown as a loop of the first 5 seconds, at the video's "
-                 "own frame rate (up to 30 fps). Any common video works - "
-                 "it is re-encoded.")
+    #: How long the dialog waits after the last keystroke before it asks
+    #: ffmpeg for a video's first frame.  The same 350 ms the tab's own
+    #: preview waits, and for the same reason: a path is typed a letter at
+    #: a time and every letter is a file that does not exist yet.
+    FRAME_DEBOUNCE_MS = PREVIEW_DEBOUNCE_MS
 
     def __init__(self, panel, index, row):
         _Modal.__init__(
@@ -5503,9 +5883,26 @@ class ImageEditorDialog(_Modal):
             panel._theme_fn, on_ok=panel._image_editor_ok,
             on_cancel=panel._image_editor_cancel)
         self._panel = panel
+        self._index = index
         self._group = is_group(row)
-        b = self.body
         th = THEMES.get(panel._theme_fn()) or THEMES["dark"]
+        # THE FIELDS ON THE LEFT, THE CARD ON THE RIGHT.  The preview is
+        # BESIDE the fields and not under them, so however tall it is it
+        # costs this dialog no height at all - which is the whole point of
+        # a report that was about height (BEN, PAD-187).
+        cols = ttk.Frame(self.body)
+        cols.pack(fill=tk.BOTH, expand=True)
+        b = ttk.Frame(cols)
+        b.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.preview = CardPreview(cols, panel._theme_fn)
+        self.preview.frame.pack(side=tk.LEFT, anchor=tk.N, padx=(14, 0))
+        #: The video frame ffmpeg is fetching, and who asked for it: the
+        #: grab runs off the UI thread and a typed path changes under it.
+        self._frame_q = queue.Queue()
+        self._frame_token = 0
+        self._frame_job = None
+        self._poll_job = None
+        self._frame_hit = None          # (path, seconds) -> the image
         ttk.Label(b, text=_cell_image(row), foreground=th["gray"],
                   wraplength=520, justify=tk.LEFT).pack(anchor=tk.W,
                                                         pady=(0, 10))
@@ -5527,51 +5924,65 @@ class ImageEditorDialog(_Modal):
         g.pack(fill=tk.X, padx=8, pady=6)
         panel._media_entries = {}
         panel._clip_widgets = []
-        r = 0
-        for kind, label in (self.GROUP_KINDS if self._group
-                            else self.kinds_for(panel._backend)):
-            ttk.Radiobutton(g, text=label, value=kind,
-                            variable=panel._ed_media).grid(
-                row=r, column=0, sticky=tk.W, pady=3, padx=(0, 10))
-            if kind in self.FILETYPES and not (self._group and kind == "video"):
-                var = panel._ed_picture if kind == "picture" \
-                    else panel._ed_video
-                entry = ttk.Entry(g, textvariable=var, width=26)
-                entry.grid(row=r, column=1, sticky=tk.EW, pady=3)
-                panel._media_entries[kind] = entry
-                ttk.Button(g, text="Browse…", width=9,
-                           command=lambda k=kind: self._browse(k)).grid(
-                    row=r, column=2, sticky=tk.W, padx=(4, 0), pady=3)
-            r += 1
-            if kind == "video":
-                # NO Start / Length / FPS CONTROLS (David: "remove the
-                # 'start', 'Length' and 'FPS' controls here since they are
-                # misleading. We obviously have limits on what we show here,
-                # so just state them instead").  A boot-menu clip is a short
-                # loop drawn frame by frame, so it is a fixed slice at a
-                # fixed rate - the numbers were a request the renderer then
-                # clamped anyway - and it is STATED, not offered.  The
-                # ``_ed_anim_start`` var stays (a clip loaded off a card
-                # keeps where it starts, and the render reads it), it is
-                # simply not editable here any more; the length and the
-                # rate are not even vars now (see ImageRow).
-                ttk.Label(g, foreground=th["gray"], wraplength=440,
-                          justify=tk.LEFT, text=self.CLIP_NOTE).grid(
-                    row=r, column=1, columnspan=2, sticky=tk.W, pady=(0, 3))
-                r += 1
+        #: ``[(kind, label)]`` as the list offers them, and the label each
+        #: kind wears - the list box carries WORDS, the row carries kinds.
+        self.kinds = list(self.GROUP_KINDS if self._group
+                          else self.kinds_for(panel._backend))
         names = [val for what, val in on_card_fields(row)
                  if what in ("art", "animation")]
         if names:
-            ttk.Radiobutton(g, text="Keep the card's own " + ", ".join(names),
-                            value="card", variable=panel._ed_media).grid(
-                row=r, column=0, columnspan=3, sticky=tk.W, pady=3)
+            # The one a LOAD adds: this row's files are on the card and
+            # nothing here made them (see MEDIA_KINDS).
+            self.kinds.append(("card", "Keep the card's own "
+                               + ", ".join(names)))
+        self._label_of = dict(self.kinds)
+        self._kind_of = {label: kind for kind, label in self.kinds}
+        self.kind_var = tk.StringVar()
+        ttk.Label(g, text="Shows:", width=13).grid(row=0, column=0,
+                                                   sticky=tk.W, pady=3)
+        self.kind_box = ttk.Combobox(
+            g, textvariable=self.kind_var, state="readonly",
+            values=[label for _k, label in self.kinds], width=44)
+        self.kind_box.grid(row=0, column=1, columnspan=3, sticky=tk.EW,
+                           pady=3)
+        self.kind_box.bind("<<ComboboxSelected>>", self._chose_kind)
+        # ONE FILE ROW, in one place, wearing the name of whichever of the
+        # two file options the list is on.  Both entries are built (each
+        # keeps its own path, so switching back and forth loses nothing);
+        # only the one that belongs to the choice is on screen, and the row
+        # is never taken away - a dialog that changes height as you move
+        # down a list is a dialog that moves its own OK button.
+        self._file_label = ttk.Label(g, text="Picture file:", width=13)
+        self._file_label.grid(row=1, column=0, sticky=tk.W, pady=3)
+        self._file_rows = {}
+        for kind in ("picture", "video"):
+            if self._group and kind == "video":
+                continue            # a random card's picture is drawn, not clipped
+            if kind not in self._label_of:
+                continue
+            var = panel._ed_picture if kind == "picture" else panel._ed_video
+            entry = ttk.Entry(g, textvariable=var, width=26)
+            entry.grid(row=1, column=1, sticky=tk.EW, pady=3)
+            btn = ttk.Button(g, text="Browse…", width=9,
+                             command=lambda k=kind: self._browse(k))
+            btn.grid(row=1, column=2, sticky=tk.W, padx=(4, 0), pady=3)
+            panel._media_entries[kind] = entry
+            self._file_rows[kind] = (entry, btn)
         g.columnconfigure(1, weight=1)
-        ttk.Label(box, foreground=th["gray"], wraplength=500,
-                  justify=tk.LEFT,
-                  text=self.GROUP_NOTE if self._group else
-                       "A video is the still too: the frame it starts on "
-                       "shows while the image is not highlighted.").pack(
-            anchor=tk.W, padx=8, pady=(0, 6))
+        # WHAT THE CHOICE MEANS, LIVE, where the choice was made.  This one
+        # line replaces the two notes that used to stand here for ever: the
+        # clip's own terms (NO Start / Length / FPS controls - David:
+        # "remove the 'start', 'Length' and 'FPS' controls here since they
+        # are misleading... just state them instead") and "a video is the
+        # still too".  Both of them described one option while five others
+        # were on screen; this describes the one that is chosen.  The
+        # ``_ed_anim_start`` var stays (a clip loaded off a card keeps where
+        # it starts, and the render reads it), it is simply not editable
+        # here; the length and the rate are not even vars (see ImageRow).
+        self._media_note = ttk.Label(g, foreground=th["gray"], wraplength=460,
+                                     justify=tk.LEFT)
+        self._media_note.grid(row=2, column=0, columnspan=4, sticky=tk.W,
+                              pady=(2, 0))
 
         if self._group:
             # HOW IT PICKS.  Its own box, because it is not what the card
@@ -5659,6 +6070,165 @@ class ImageEditorDialog(_Modal):
                        "already uses. %s hears either one now, here."
                        % PLAY_NAME).grid(
             row=3, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
+        self.sync_kind()
+        self.sync_preview()
+
+    # -- what it shows -----------------------------------------------------
+    def _chose_kind(self, _event=None):
+        """A pick in the list box -> the row's own choice.  The var is what
+        everything else reads (the traces, the row, the tests); the box only
+        ever carries the words."""
+        kind = self._kind_of.get(self.kind_var.get().strip())
+        if kind and kind != self._panel._ed_media.get():
+            self._panel._ed_media.set(kind)
+
+    def sync_kind(self):
+        """The list box, the file row and the live note <- the choice, from
+        wherever it was made (the box, Browse…, a row loaded into the
+        editor).  The panel's own state sync calls this."""
+        panel = self._panel
+        kind = (panel._ed_media.get() or "").strip()
+        # ``or kind``: a choice this dialog does not offer (the editor's vars
+        # are the PANEL's, and something else can load another row into them)
+        # reads as its own word rather than as an empty box.
+        label = self._label_of.get(kind) or kind
+        try:
+            if self.kind_var.get() != label:
+                self.kind_var.set(label)
+            shown = "video" if kind == "video" and "video" in self._file_rows \
+                else "picture"
+            for k, (entry, btn) in self._file_rows.items():
+                for w in (entry, btn):
+                    if k == shown:
+                        w.grid()
+                    else:
+                        w.grid_remove()
+            if shown in self._file_rows:
+                self._file_label.configure(
+                    text="Video file:" if shown == "video" else "Picture file:")
+            self._media_note.configure(text=media_note(kind, self._group))
+        except tk.TclError:                             # pragma: no cover
+            pass
+
+    # -- the preview -------------------------------------------------------
+    def sync_preview(self):
+        """The card on the right <- the dialog, on every keystroke in it.
+
+        Cheap by construction: the only thing it ever reads off disk is the
+        one picture the choice names, and that is kept against the file's
+        own mtime.  A VIDEO is the exception - a frame has to be fetched out
+        of it with ffmpeg - so that one is debounced and fetched off the UI
+        thread (:meth:`_want_frame`)."""
+        panel = self._panel
+        try:
+            form = panel.form()
+            what, value = still_for_row(form, self._index, panel.media_dir(),
+                                        panel._manifest(panel.media_dir()))
+        except (tk.TclError, OSError):                  # pragma: no cover
+            return
+        photo, note = None, PREVIEW_NOTES["none"]
+        kind = (panel._ed_media.get() or "").strip()
+        if what == "video":
+            photo, note = self._video_frame(*value)
+        elif what in ("file", "rendered"):
+            photo = self.preview._photo_for(value)
+            note = PREVIEW_NOTES[what] if photo is not None \
+                else PREVIEW_NOTES["unreadable"]
+        elif kind == "none":
+            note = PREVIEW_NOTES["text"]
+        elif kind in ("picture", "video"):
+            # A file that is named but not there yet (half typed, or on the
+            # other machine): say so rather than leaving the last card up.
+            row = form.images[self._index] \
+                if self._index < len(form.images) else None
+            named = "" if row is None else (
+                group_media_file(row) if self._group else media_file(row))
+            note = PREVIEW_NOTES["missing"] if (named or "").strip() \
+                else PREVIEW_NOTES["none"]
+        self.drawn = (what, value)
+        self.preview.draw(photo, panel._ed_title.get(), panel._ed_sub.get(),
+                          panel.menu_colors(), note)
+
+    def _video_frame(self, path, seconds):
+        """The frame *path* starts on, if it has already been fetched; a
+        fetch is asked for when it has not.  ``(photo or None, note)``."""
+        key = (os.path.abspath(path), str(seconds))
+        if self._frame_hit is not None and self._frame_hit[0] == key:
+            image = self._frame_hit[1]
+            if image is None:
+                return None, self._frame_hit[2]
+            return self.preview.show_image(image), PREVIEW_NOTES["video"]
+        self._want_frame(key)
+        return None, "Reading the frame this clip starts on…"
+
+    def _want_frame(self, key):
+        """Ask ffmpeg for a video's frame once the typing has stopped."""
+        if self._frame_job is not None:
+            try:
+                self.top.after_cancel(self._frame_job)
+            except (tk.TclError, ValueError):           # pragma: no cover
+                pass
+        try:
+            self._frame_job = self.top.after(self.FRAME_DEBOUNCE_MS,
+                                             lambda: self._grab_frame(key))
+        except tk.TclError:                             # pragma: no cover
+            self._frame_job = None
+
+    def _grab_frame(self, key):
+        """Fetch one frame off the UI thread; :meth:`_drain` brings it back."""
+        self._frame_job = None
+        if self._closed:
+            return
+        self._frame_token += 1
+        token, q = self._frame_token, self._frame_q
+        path, seconds = key
+
+        def work():
+            try:
+                from ..core.audio import find_ffmpeg
+                from ..plugins.stern import film_cut
+                ffmpeg = find_ffmpeg()
+                if not ffmpeg:
+                    q.put((token, key, None, PREVIEW_NOTES["noffmpeg"]))
+                    return
+                image = film_cut.preview_frame(
+                    path, float(seconds or 0), ffmpeg,
+                    box=(PREVIEW_ART_W, PREVIEW_ART_H))
+                q.put((token, key, image, PREVIEW_NOTES["video"]))
+            except Exception as e:                      # noqa: BLE001
+                q.put((token, key, None, "No frame here: %s" % e))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._poll()
+
+    def _poll(self):
+        if self._poll_job is not None or self._closed:
+            return
+        try:
+            self._poll_job = self.top.after(120, self._drain)
+        except tk.TclError:                             # pragma: no cover
+            self._poll_job = None
+
+    def _drain(self):
+        """A fetched frame -> the preview, on the UI thread.  A frame that
+        was superseded (the path changed while ffmpeg was reading) is
+        dropped: the newer request has its own."""
+        self._poll_job = None
+        if self._closed:
+            return
+        got = False
+        try:
+            while True:
+                token, key, image, note = self._frame_q.get_nowait()
+                if token == self._frame_token:
+                    self._frame_hit = (key, image, note)
+                    got = True
+        except queue.Empty:
+            pass
+        if got:
+            self.sync_preview()
+        elif not self._closed:
+            self._poll()
 
     def sync_confirm_note(self):
         """The 'Plays …' line under the Confirm sound box <- the box, on
@@ -5684,6 +6254,20 @@ class ImageEditorDialog(_Modal):
         _browse_into(var, self.FILETYPES[kind])
         if var.get().strip():
             panel._ed_media.set(kind)
+
+    def _close(self, accepted):
+        """...and nothing is left ticking behind a closed dialog: the frame
+        fetch's debounce and its poll are this window's, and a callback
+        landing on a destroyed Toplevel is a traceback in the log."""
+        for name in ("_frame_job", "_poll_job"):
+            job = getattr(self, name, None)
+            if job is not None:
+                try:
+                    self.top.after_cancel(job)
+                except (tk.TclError, ValueError):       # pragma: no cover
+                    pass
+                setattr(self, name, None)
+        _Modal._close(self, accepted)
 
 
 class MenuSettingsDialog(_Modal):
@@ -8795,6 +9379,10 @@ class MultibootPanel:
             self._sound_follow()
         if media:
             self._apply_media(i, row)
+        # ...and the card on the right of the dialog follows the row, AFTER
+        # the row has been written: it draws what the card will show, which
+        # is a question about the row and not about the boxes (PAD-187).
+        self._sync_image_preview()
         table = getattr(self, "_table", None)
         if table is not None:
             table.set_row(i, self._values(i, row))
@@ -8831,6 +9419,11 @@ class MultibootPanel:
         fields for either video.  (The Browse… buttons stay live: picking a
         file is picking the option.)"""
         kind = self._ed_media.get().strip()
+        dlg = getattr(self, "_image_dialog", None)
+        if dlg is not None:
+            # ...and the list box shows the choice however it was made -
+            # here, in the box itself, or by browsing to a file (PAD-187).
+            dlg.sync_kind()
         for name, w in getattr(self, "_media_entries", {}).items():
             try:
                 w.configure(state=tk.NORMAL if kind == name else tk.DISABLED)
@@ -8871,6 +9464,24 @@ class MultibootPanel:
         dlg = getattr(self, "_image_dialog", None)
         if dlg is not None:
             dlg.sync_confirm_note()
+
+    def _sync_image_preview(self):
+        """Edit image…'s preview card <- the row, while that dialog is up
+        (BEN, PAD-187).  Same shape as the confirm line above: the picture
+        lives in the dialog, the traces that feed it live here."""
+        dlg = getattr(self, "_image_dialog", None)
+        if dlg is not None:
+            dlg.sync_preview()
+
+    def menu_colors(self):
+        """The menu's colours as they stand - ``{role: rrggbb}``, the grid
+        the theme seeded or the owner typed, with the default theme's own
+        value for anything blank.  What the dialog's preview draws a card
+        in; the card itself is built from the same grid (:meth:`form`)."""
+        out = dict(theme_colors(DEFAULT_THEME) or {})
+        out.update(clean_colors({role: var.get()
+                                 for role, var in self._color_vars.items()}))
+        return out
 
     def add_image(self, path):
         """Append a card image (the public half of Add image…)."""

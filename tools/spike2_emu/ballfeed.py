@@ -218,8 +218,15 @@ def publish(fed=None):
 
 def say(msg):
     """One line, flushed. watch.sh folds this into the run log, and the
-    playfield window shows the newest few (publish)."""
-    sys.stdout.write("[ball] %s\n" % msg)
+    playfield window shows the newest few (publish).
+
+    STAMPED WITH THE WALL CLOCK on the log line (PAD-186): reading a multiball
+    that went wrong meant lining this log up against the shim's [sw] edges and
+    the app's own timestamps, and with no time on these lines the 14 auto
+    plunger pulses the feeder refused could not be placed anywhere in the
+    game. The window's copy stays bare - it shows three lines in a narrow box.
+    """
+    sys.stdout.write("[ball] %s %s\n" % (time.strftime("%H:%M:%S"), msg))
     sys.stdout.flush()
     _recent.append(msg)
     del _recent[:-STATUS_LINES]

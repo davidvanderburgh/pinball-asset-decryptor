@@ -527,7 +527,8 @@ class ImageRow:
 #: remembering the last choice? ... We should make it truly random instead i
 #: think. and make it an option ... to change it to a 'shuffle' type (like
 #: perceived random like ipod)").  ``(mode, label)`` in the order the dialog
-#: offers them.
+#: offers them.  THE DIALOG NO LONGER OFFERS THEM ONE FOR ONE: it asks two
+#: questions whose answers spell one of these words - see ROLL_DRAWS.
 ROLL_MODES = (
     ("any", "Truly random - it can give you the same one twice"),
     ("shuffle", "Shuffle - every game once before any repeats"),
@@ -542,6 +543,35 @@ ROLL_DEFAULT = "any"
 ROLL_FALLBACK = "not-last"
 ROLL_NAMES = tuple(m for m, _label in ROLL_MODES)
 
+#: ...AND THE TWO QUESTIONS THE DIALOG ASKS INSTEAD (BEN, Discord @ben01434,
+#: PAD-185: "Should the last option be a checkbox that would be applied to one
+#: of the two options above (Truly random and Shuffle). The last option by
+#: itself does not make sense to stand on its own").  He is right, and the
+#: three words above were never three peers: there are two ways of DRAWING -
+#: the dice, or a deck dealt out - and "never the one it booted last" is not a
+#: third one, it is a rule laid over whichever of them was chosen.  So the box
+#: is two radio buttons with a tick under them, and the pair spells one of the
+#: words a card carries:
+#:
+#:     any     + tick off  ->  "any"
+#:     any     + tick on   ->  "not-last"
+#:     shuffle             ->  "shuffle"
+#:
+#: A shuffle has no say in the tick because it answers it already: a deck
+#: never deals the same one twice running (codeselect roll_member, which had
+#: to be told that about a KEEPING group's members too).  So the tick is shown
+#: ON and greyed there rather than hidden - the rule still holds, and a box
+#: that vanished would say it did not.
+ROLL_DRAWS = (
+    ("any",
+     "Truly random - 100% random, so it can give you the same one twice"),
+    ("shuffle",
+     "Shuffle - cycle through every game before any of them repeats"),
+)
+ROLL_DRAW_NAMES = tuple(d for d, _label in ROLL_DRAWS)
+#: The tick under them, which is the third radio button's own words.
+ROLL_REPEAT_LABEL = "Never the one it booted last"
+
 
 def row_roll(row):
     """How a random card picks, as one of :data:`ROLL_NAMES`."""
@@ -554,6 +584,31 @@ def roll_label(mode):
         if m == mode:
             return label
     return mode
+
+
+def roll_draw(mode):
+    """Which of :data:`ROLL_DRAWS` *mode* draws by - the radio button it is."""
+    return "shuffle" if mode == "shuffle" else "any"
+
+
+def roll_no_repeat(mode):
+    """Whether *mode* rules out the build the machine booted last - the tick.
+    Only the dice can hand that one straight back."""
+    return mode != "any"
+
+
+def roll_repeat_locked(draw):
+    """Whether the tick is *draw*'s own answer rather than a question: a deck
+    dealt out never gives the same one twice running, so a shuffle cannot be
+    asked to."""
+    return draw == "shuffle"
+
+
+def roll_from_parts(draw, no_repeat):
+    """The word a card carries for a (radio button, tick) pair."""
+    if draw == "shuffle":
+        return "shuffle"
+    return "not-last" if no_repeat else "any"
 
 
 def is_group(row):
@@ -5319,6 +5374,13 @@ class ImageEditorDialog(_Modal):
                   "this card rolls between, so the card shows what it can "
                   "boot. The moving ones play while the card is highlighted.")
 
+    #: Under the two rules and the tick they share: what the machine keeps
+    #: between power-ups, and why a shuffle answers the tick for you.
+    ROLL_NOTE = ("The machine remembers across power-ups: a shuffle deals "
+                 "every game once before any of them comes round again, and "
+                 "picks up where it left off. It never gives you the one it "
+                 "just booted either, so the tick is greyed on for it.")
+
     #: What the two file rows browse for.
     FILETYPES = {"picture": [("Pictures", "*.png *.jpg *.jpeg")],
                  "video": [("Videos", "*.mp4 *.mov *.mkv *.avi *.webm *.flv *.gif")]}
@@ -5419,19 +5481,25 @@ class ImageEditorDialog(_Modal):
             # HOW IT PICKS.  Its own box, because it is not what the card
             # SHOWS - it is what the card DOES, and it is the only question a
             # random card has that an image does not (David, 2026-09-11).
+            # TWO WAYS OF DRAWING AND A RULE OVER THEM, not three peers (BEN,
+            # PAD-185) - see ROLL_DRAWS for why the third one was never one.
             rollbox = ttk.LabelFrame(b, text="How it picks")
             rollbox.pack(fill=tk.X, pady=(10, 0))
             rg = ttk.Frame(rollbox)
             rg.pack(fill=tk.X, padx=8, pady=6)
-            for r, (mode, label) in enumerate(ROLL_MODES):
-                ttk.Radiobutton(rg, text=label, value=mode,
+            for r, (draw, label) in enumerate(ROLL_DRAWS):
+                ttk.Radiobutton(rg, text=label, value=draw,
                                 variable=panel._ed_roll).grid(
                     row=r, column=0, sticky=tk.W, pady=3)
+            # ...and the rule, INDENTED UNDER THEM, because that is what it
+            # is: a tick on whichever of the two is chosen.  _sync_editor_
+            # states greys it on under a shuffle, which answers it itself.
+            panel._roll_repeat_box = ttk.Checkbutton(
+                rg, text=ROLL_REPEAT_LABEL, variable=panel._ed_roll_norepeat)
+            panel._roll_repeat_box.grid(row=len(ROLL_DRAWS), column=0,
+                                        sticky=tk.W, padx=(20, 0), pady=3)
             ttk.Label(rollbox, foreground=th["gray"], wraplength=500,
-                      justify=tk.LEFT,
-                      text="The machine remembers across power-ups: a shuffle "
-                           "deals every game once before any of them comes "
-                           "round again, and picks up where it left off.").pack(
+                      justify=tk.LEFT, text=self.ROLL_NOTE).pack(
                 anchor=tk.W, padx=8, pady=(0, 6))
 
         soundbox = ttk.LabelFrame(b, text="Sounds")
@@ -6180,6 +6248,7 @@ class MultibootPanel:
         #: dialog's picture / video entries by kind, and its clip fields.
         self._media_entries = {}
         self._clip_widgets = ()
+        self._roll_repeat_box = None
         self._default_spin = None
         self._theme_combo = None
         self._theme_tip = None
@@ -6271,7 +6340,17 @@ class MultibootPanel:
         #: keeps its own, so switching back and forth loses nothing), and
         #: the clip fields either video kind uses.
         self._ed_media = tk.StringVar(value="logo")
-        self._ed_roll = tk.StringVar(value=ROLL_DEFAULT)
+        #: HOW A RANDOM CARD PICKS, as the two controls that ask it: which
+        #: of ROLL_DRAWS, and the rule over it.  row.roll is the one word the
+        #: pair spells (roll_from_parts), so the card's vocabulary is
+        #: unchanged - this is only how it is asked.
+        self._ed_roll = tk.StringVar(value=roll_draw(ROLL_DEFAULT))
+        self._ed_roll_norepeat = tk.BooleanVar(
+            value=roll_no_repeat(ROLL_DEFAULT))
+        #: What the tick said while it was still a question, so coming back
+        #: off a shuffle is the round trip it looks like.  None = nothing to
+        #: put back.
+        self._roll_norepeat_free = None
         self._ed_picture = tk.StringVar()
         self._ed_video = tk.StringVar()
         self._ed_music = tk.StringVar(value="none")
@@ -6280,7 +6359,7 @@ class MultibootPanel:
         self._ed_media_vars = (self._ed_media, self._ed_picture,
                                self._ed_video, self._ed_anim_start)
         for var in (self._ed_title, self._ed_sub, self._ed_music,
-                    self._ed_confirm, self._ed_roll):
+                    self._ed_confirm, self._ed_roll, self._ed_roll_norepeat):
             var.trace_add("write", lambda *_a: self._editor_changed())
         # ...and a write to what the image SHOWS is the one time the row's
         # art and animation are derived again from the dialog's choice.
@@ -6476,7 +6555,8 @@ class MultibootPanel:
                                   lambda *_a: self._frame_changed(typed=True))
         # ...and everything that changes the picture asks for a re-render.
         for var in (self._ed_title, self._ed_sub, self._ed_music,
-                    self._ed_confirm, self._ed_roll) + self._ed_media_vars + (
+                    self._ed_confirm, self._ed_roll,
+                    self._ed_roll_norepeat) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._heading_var, self._default_var,
                     self._out_var, self._selector_var,
@@ -8522,7 +8602,9 @@ class MultibootPanel:
             self._ed_video.set(path if kind == "video" else "")
             self._ed_music.set(row.music)
             self._ed_confirm.set(row.confirm or "menu")
-            self._ed_roll.set(row_roll(row))
+            self._roll_norepeat_free = None
+            self._ed_roll.set(roll_draw(row_roll(row)))
+            self._ed_roll_norepeat.set(roll_no_repeat(row_roll(row)))
             # A still taken off a video with no clip yet (an older form)
             # keeps its second as the clip's start.
             self._ed_anim_start.set(row.anim_start or (
@@ -8554,8 +8636,11 @@ class MultibootPanel:
         row.title = self._ed_title.get()
         row.subtitle = self._ed_sub.get()
         if is_group(row):
-            v = self._ed_roll.get().strip()
-            row.roll = v if v in ROLL_NAMES else ROLL_DEFAULT
+            draw = self._ed_roll.get().strip()
+            if draw not in ROLL_DRAW_NAMES:
+                draw = roll_draw(ROLL_DEFAULT)
+            row.roll = roll_from_parts(
+                draw, bool(self._ed_roll_norepeat.get()))
         was = (row.music, row.confirm)
         row.music = self._ed_music.get()
         # "menu" is what the box says and "" is what the row keeps, so a row
@@ -8618,6 +8703,26 @@ class MultibootPanel:
                             else tk.DISABLED)
             except tk.TclError:
                 pass
+        # ...and the same for 'Never the one it booted last', which a shuffle
+        # answers itself: greyed ON rather than hidden, so the rule is still
+        # visible (PAD-185).  What it said while it was a question is put back
+        # when the dice are chosen again, so the round trip is a round trip.
+        box = getattr(self, "_roll_repeat_box", None)
+        if box is None:
+            return
+        locked = roll_repeat_locked(self._ed_roll.get().strip())
+        if locked:
+            if not self._ed_roll_norepeat.get():
+                self._roll_norepeat_free = False
+                self._ed_roll_norepeat.set(True)
+        elif self._roll_norepeat_free is not None:
+            free, self._roll_norepeat_free = self._roll_norepeat_free, None
+            if bool(self._ed_roll_norepeat.get()) != free:
+                self._ed_roll_norepeat.set(free)
+        try:
+            box.configure(state=tk.DISABLED if locked else tk.NORMAL)
+        except tk.TclError:
+            pass
 
     def add_image(self, path):
         """Append a card image (the public half of Add image…)."""
@@ -9348,6 +9453,8 @@ class MultibootPanel:
         self._image_dialog = None
         self._media_entries = {}
         self._clip_widgets = ()
+        self._roll_repeat_box = None
+        self._roll_norepeat_free = None
 
     def apply_theme(self, colors=None):
         """The app switched dark/light: re-colour the images table.

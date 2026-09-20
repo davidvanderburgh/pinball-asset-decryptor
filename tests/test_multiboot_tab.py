@@ -1289,6 +1289,16 @@ def _radios(widget):
     return out
 
 
+def _checks(widget):
+    """Every ttk.Checkbutton under *widget*, in creation order."""
+    out = []
+    for w in widget.winfo_children():
+        if w.winfo_class() == "TCheckbutton":
+            out.append(w)
+        out.extend(_checks(w))
+    return out
+
+
 def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
     """The Edit image… modal's Picture section is one flat radio list
     (logo / picture file / attract video / video file / nothing): each
@@ -9777,8 +9787,9 @@ def test_the_editor_offers_a_random_card_its_own_pictures(tmp_path):
         n = len(mb.GROUP_MEDIA_NAMES)
         assert values[:n] == list(mb.GROUP_MEDIA_NAMES), values
         # ...and HOW IT PICKS, which is the only other question a random card
-        # has that an image does not
-        assert values[n:] == list(mb.ROLL_NAMES), values
+        # has that an image does not - two ways of drawing, with the rule over
+        # them a tick rather than a third radio button (PAD-185)
+        assert values[n:] == list(mb.ROLL_DRAW_NAMES), values
         assert "logo" not in values and "attract" not in values
         assert "random card" in dlg.top.title().lower()
         # no video row: a random card's picture is drawn, not clipped
@@ -10085,7 +10096,10 @@ def test_the_dialog_changes_how_a_random_card_picks(tmp_path):
         root.update()
         dlg = panel.edit_image()
         root.update()
-        assert [w.cget("value") for w in _radios(dlg.body)][-len(mb.ROLL_NAMES):]             == list(mb.ROLL_NAMES), "the choices are on screen, not just in a var"
+        n = len(mb.ROLL_DRAW_NAMES)
+        assert [w.cget("value") for w in _radios(dlg.body)][-n:] \
+            == list(mb.ROLL_DRAW_NAMES), \
+            "the choices are on screen, not just in a var"
         assert panel._ed_roll.get() == "any"
         panel._ed_roll.set("shuffle")
         root.update()
@@ -10099,6 +10113,84 @@ def test_the_dialog_changes_how_a_random_card_picks(tmp_path):
         root.update()
         assert [w.cget("value") for w in _radios(dlg.body)] == \
             ["logo", "picture", "attract", "video", "none"]
+    finally:
+        root.destroy()
+
+
+def test_never_the_last_one_is_a_tick_over_the_two_ways_of_drawing(tmp_path):
+    """BEN (Discord @ben01434, PAD-185): "Should the last option be a checkbox
+    that would be applied to one of the two options above (Truly random and
+    Shuffle). The last option by itself does not make sense to stand on its
+    own."
+
+    It never was a third way of DRAWING - it is a rule over whichever of the
+    two was chosen - so the box is two radio buttons and a tick, and the pair
+    spells the one word the card carries.  The words on the card do not
+    change: what a built card already says still reads back into the same
+    pair."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        panel._table.select(1)
+        root.update()
+        dlg = panel.edit_image()
+        root.update()
+        assert [w.cget("value") for w in _radios(dlg.body)][-2:] == \
+            ["any", "shuffle"], "two ways of drawing, not three"
+        tick = _checks(dlg.body)[-1]
+        assert tick.cget("text") == mb.ROLL_REPEAT_LABEL
+
+        # A NEW CARD IS THE DICE, tick off - which is the word it always was
+        assert panel._ed_roll.get() == "any"
+        assert not panel._ed_roll_norepeat.get()
+        assert "disabled" not in tick.state()
+        assert panel.form().images[1].roll == "any"
+
+        # ...the tick alone is the old third choice
+        panel._ed_roll_norepeat.set(True)
+        root.update()
+        assert panel.form().images[1].roll == "not-last"
+
+        # ...and a shuffle answers the tick itself: shown, on, and greyed,
+        # because a deck never deals the same one twice running
+        panel._ed_roll_norepeat.set(False)
+        root.update()
+        assert panel.form().images[1].roll == "any"
+        panel._ed_roll.set("shuffle")
+        root.update()
+        assert panel.form().images[1].roll == "shuffle"
+        assert panel._ed_roll_norepeat.get()
+        assert "disabled" in tick.state()
+
+        # ...and coming back off it is the round trip it looks like: the tick
+        # says again what it said before the shuffle was chosen
+        panel._ed_roll.set("any")
+        root.update()
+        assert not panel._ed_roll_norepeat.get()
+        assert "disabled" not in tick.state()
+        assert panel.form().images[1].roll == "any"
+        dlg.ok()
+        root.update()
+
+        # A CARD ALREADY IN THE WORLD reads back into the same pair, whichever
+        # of the three words it carries - including the one no card says, which
+        # is what a card built before there was a choice does.
+        for word, draw, ticked in (("any", "any", False),
+                                   ("not-last", "any", True),
+                                   ("shuffle", "shuffle", True),
+                                   ("", "any", True)):
+            panel._rows[1].roll = word
+            panel._table.select(0)
+            root.update()
+            panel._table.select(1)
+            root.update()
+            got = (panel._ed_roll.get(),
+                   bool(panel._ed_roll_norepeat.get()))
+            assert got == (draw, ticked), word
+            assert mb.row_roll(panel._rows[1]) == (word or mb.ROLL_FALLBACK)
     finally:
         root.destroy()
 

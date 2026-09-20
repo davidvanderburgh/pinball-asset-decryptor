@@ -919,6 +919,38 @@ grep -q "is not any / not-last / shuffle" "$T/roll5.log" || {
 grep -q "rolled from JUKEBOX (not-last)" "$T/snap.out" || {
     echo "headless: FAIL the default did not stand in"; cat "$T/snap.out"; exit 1; }
 
+# 16i. A SHUFFLE NEVER HANDS BACK THE ONE IT JUST BOOTED EITHER, including one
+#      booted from the member's OWN card.  A KEEPING group's builds are
+#      reachable two ways, and one reached the other way is NOT in this
+#      group's bag, so the deck alone did not rule it out - which is what the
+#      dialog now promises for a shuffle, since `Never the one it booted last`
+#      is a tick greyed on under it rather than a rule of its own (BEN,
+#      PAD-185: "the last option by itself does not make sense to stand on its
+#      own").  A CONSUMING group cannot tell the difference: the only way to
+#      have booted a member is to have been dealt it, and that put it in the
+#      bag.
+cat > "$T/keep.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|the primary|art0.png||
+image=/dev/mmcblk0p3:img1|CUSTOM A|first custom build|art1.png||
+image=/dev/mmcblk0p3:img2|CUSTOM B|second custom build|art2.png||
+group=+shuffle:1-2|SURPRISE ME|rolls between the two above|art0.png||
+default=0
+timeout=1
+EOF
+for m in 1 2; do
+    rm -f "$T/choice" "$T/last"
+    printf '%s 0\n' "$m" > "$T/keep.state"
+    snap "$T/keep.ppm" "$T/keep.conf" --media "$T/media" --highlight-card 3 \
+         --loading-out "$T/keep.loading.ppm" --roll-state "$T/keep.state"
+    got=$(grep -oE 'boots image [0-9]+' "$T/snap.out" | head -1 | awk '{print $3}')
+    grep -q "rolled from SURPRISE ME (shuffle): 1 candidate" "$T/snap.out" || {
+        echo "headless: FAIL a shuffle still offered image $m, booted from its own card"
+        cat "$T/snap.out"; exit 1; }
+    [ "$got" != "$m" ] || {
+        echo "headless: FAIL a shuffle handed image $m straight back"
+        cat "$T/snap.out"; exit 1; }
+done
+
 # 17. THE CAROUSEL'S ARROWS and heading= (PAD-135).  Two chevrons in the
 # margins beside the cards, in the heading colour, and ONLY when the cards do
 # not all fit: a four-card menu reaches every card without scrolling, so an

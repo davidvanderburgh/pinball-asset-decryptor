@@ -1839,10 +1839,13 @@ HELP_CONTENT = {
          "it rolls between."),
         ("How a random card picks, and what it looks like",
          "Edit image\u2026 on a random row asks two questions an ordinary "
-         "image does not. HOW IT PICKS: truly random (it can give you the "
-         "same one twice), shuffle (every game once before any repeats, "
-         "remembered across power-ups the way a music player does it), or "
-         "never the one it booted last. AND WHAT IT SHOWS: the games\u2019 own "
+         "image does not. HOW IT PICKS: truly random (100% random, so it "
+         "can give you the same one twice) or shuffle (cycle through every "
+         "game before any of them repeats, remembered across power-ups the "
+         "way a music player does it), and under the two a tick for "
+         "\u201cnever the one it booted last\u201d \u2013 greyed on under a "
+         "shuffle, which never gives you the one it just booted "
+         "anyway. AND WHAT IT SHOWS: the games\u2019 own "
          "logos fanned out like a hand of cards, in a pile, as a grid, "
          "under a big \u2018?\u2019, the shuffle symbol, each logo in turn, a slot "
          "reel that spins and settles, a picture file of your own, or "

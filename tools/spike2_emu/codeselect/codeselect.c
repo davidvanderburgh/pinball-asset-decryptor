@@ -1045,8 +1045,8 @@ static int roll_member(const struct conf *c, int card, int last, int seed,
     /* EXCLUDED BY DEVICE, not merely by index.  A KEEPING group's members also
      * have cards of their own, so the same build can be reached two ways - and
      * a player who has just booted it from its own card would otherwise have
-     * the group hand it straight back, which is the one thing `not-last`
-     * promises not to do. */
+     * the group hand it straight back, which is the one thing `not-last` -
+     * and, since PAD-185, `shuffle` too - promises not to do. */
     {
         const char *lastdev = (last >= 0 && last < c->n) ? c->img[last].device : NULL;
         for (k = 0; k < n; k++) {
@@ -1056,6 +1056,19 @@ static int roll_member(const struct conf *c, int card, int last, int seed,
                  * Every member comes up once before any of them comes round
                  * again, which is what "shuffle" means on a music player. */
                 if (in_bag(bags, g, m)) { dealt++; continue; }
+                /* ...AND NOT THE ONE IT BOOTED LAST EITHER.  A deck gives
+                 * that for free inside itself and at the join (below), but
+                 * NOT when the last boot came from the member's own card: a
+                 * keeping group's builds are reachable both ways, and one
+                 * booted the other way is not in this group's bag.  The
+                 * dialog greys the `Never the one it booted last` tick on
+                 * under a shuffle (PAD-185, BEN: "the last option by itself
+                 * does not make sense to stand on its own"), so this is the
+                 * promise it makes.  For a consuming group it changes
+                 * nothing - the only way to have booted a member is to have
+                 * been dealt it, and that put it in the bag. */
+                if (m == last) continue;
+                if (lastdev && *lastdev && !strcmp(c->img[m].device, lastdev)) continue;
                 cand[nc++] = m;
                 continue;
             }

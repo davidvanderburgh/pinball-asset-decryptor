@@ -513,6 +513,9 @@ def _feeder(ballfeed, tr, lane=62):
     f.pending = []
     f.my_gen = None
     f.hands = 0
+    f.last_claim = None
+    f.human_at = None
+    f.holding = False
     return f
 
 
@@ -627,6 +630,60 @@ def test_two_launched_balls_both_come_home_rather_than_one_being_forgotten(
     mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
     assert tr.count(mrg) == 6
     assert tr.anomaly(mrg) is None
+
+
+def _player_then_a_launch(ballfeed, padsw, f, m):
+    """A player clicks, and the game then serves and plunges a ball itself.
+
+    The order is the whole of PAD-186: the click comes FIRST (it is what
+    drained the last ball), the launch the game answers it with is a launch
+    this feeder owns, and nothing moves after that because the player is
+    watching the mode intro. Returns the time of the click.
+    """
+    f._way_home(m, 0.0, f._claim(m))               # a poll, to seed the claim
+    _other_writer(padsw, m, 53, "f")               # their click on the artwork
+    _publish(padsw, m)
+    f._way_home(m, 1.0, f._claim(m))               # the poll that sees it
+    m[padsw.OFF_SCR_HELD + 66] = 0                 # the feeder's own eject...
+    m[padsw.OFF_MRG + 66] = 0                      # ...and its own launch
+    f.pending = [(2.0, f._claim(m))]
+    return 1.0
+
+
+def test_a_ball_launched_after_the_players_last_click_is_not_taken_back(
+        tmp_path, monkeypatch, tr):
+    """PAD-186's fault in one assertion. PAD-134 cancelled the way home for
+    the balls pending when somebody touched the machine; the ball the game
+    serves NEXT starts a fresh timer from the claim as it now stands, so five
+    seconds of watching a battle intro read as an empty room and the feeder
+    took the ball. The game hands it straight back (a battle's ball save is
+    16-45 s), the feeder owns that launch too, and the player's own Drain
+    click lands on a trough this already filled.
+    """
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _feeder(ballfeed, tr)
+    m = _block(padsw, 71, 70, 69, 68, 67, 66)      # a machine at rest
+    clicked = _player_then_a_launch(ballfeed, padsw, f, m)
+    assert f.human_at == clicked
+    f._way_home(m, 2.0 + ballfeed.HOME_S + 1.0, f._claim(m))
+    assert len(f.pending) == 1                     # still the player's ball
+    assert m[padsw.OFF_SCR_HELD + 66] == 0         # and it was NOT drained
+
+
+def test_a_room_that_really_did_empty_still_gets_its_ball_back(
+        tmp_path, monkeypatch, tr):
+    """The other half, and why this is a window and not a latch: the way home
+    is what a ball search is waiting to see, so a window somebody walked away
+    from has to go back to the old behaviour rather than hold their ball for
+    ever.
+    """
+    ballfeed, padsw = _sw(tmp_path, monkeypatch)
+    f = _feeder(ballfeed, tr)
+    m = _block(padsw, 71, 70, 69, 68, 67, 66)
+    clicked = _player_then_a_launch(ballfeed, padsw, f, m)
+    f._way_home(m, clicked + ballfeed.HUMAN_S + 1.0, f._claim(m))
+    assert f.pending == []
+    assert m[padsw.OFF_SCR_HELD + 66] == 1         # drained home
 
 
 def test_plunge_only_ever_launches_and_never_takes_a_ball_from_the_trough(

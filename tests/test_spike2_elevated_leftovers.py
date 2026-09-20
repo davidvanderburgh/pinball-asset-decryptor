@@ -365,14 +365,19 @@ def _can_write_case(paths, foreign_owner=None):
         # BSD stat, as macOS ships it: `-c` is not an option it has, so it
         # prints usage to stderr and exits non-zero, and `-f <fmt>` is how the
         # same question is spelled.  Everything else goes to the real binary, so
-        # the OWNER this reports is the true one.
+        # the OWNER this reports is the true one - and the delegation has to ask
+        # the real stat in WHICHEVER spelling this host understands, or the test
+        # only runs on GNU (v0.223.0 was yanked for exactly that: on the macOS
+        # runner the real stat is BSD, so a `-c` delegation failed too and the
+        # stub answered nothing).
         lines += [
             'stat() {',
             '  if [ "${1:-}" = -c ]; then',
             '    echo "stat: illegal option -- c" >&2; return 1',
             '  fi',
             '  if [ "${1:-}" = -f ] && [ "${2:-}" = "%Su" ]; then',
-            '    command stat -c %U "$3"; return',
+            '    command stat -c %U "$3" 2>/dev/null '
+            '|| command stat -f %Su "$3"; return',
             '  fi',
             '  command stat "$@"',
             '}']

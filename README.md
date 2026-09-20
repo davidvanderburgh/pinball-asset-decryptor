@@ -76,7 +76,7 @@ v0.204.0 a card in that menu can stand for SEVERAL games and boot one of them
 at random, so forty song-set variants of one title become one card that looks
 standard and plays a different set every power-up; and from v0.205.0 a compact
 card stores such a variant as only its changed songs, so those forty variants
-cost a few GB rather than forty copies of the sound library. From v0.209.0 the line across the top of the menu is yours to write, or to leave off altogether; every sound in the tab has a **Play** button that plays it here, on the spot; and a compact card that cannot be laid out names the SD card size the content wants instead of saying a check failed. From v0.210.0 every sound box in the tab also lists the sound files this menu already uses, so putting one clip on all of the images is a pick rather than a walk through the file dialog once per image. From v0.212.0, when the card you need is bigger than the games on it, the strip adds up the two numbers it already showed and says why - and the words and the bar carry the rest: what the smaller card really holds, that the free room is what lets an image be updated in place, and that **Compact build** is the tick that shrinks it; the two confirm-sound boxes also name each other now, so **Edit image** says what `menu` is at the moment and **Menu settings** names the images that carry a confirm sound of their own and will ignore the one in front of you.  From v0.223.0 every card in the menu draws its title and subtitle at ONE size, measured so the longest name on the card still fits and then used for all of them, so a single long title no longer shrinks only itself while the cards either side of it stay large; **Same text size on every card** in **Menu settings** is the tick, and clearing it puts every card back on a size of its own:
+cost a few GB rather than forty copies of the sound library. From v0.209.0 the line across the top of the menu is yours to write, or to leave off altogether; every sound in the tab has a **Play** button that plays it here, on the spot; and a compact card that cannot be laid out names the SD card size the content wants instead of saying a check failed. From v0.210.0 every sound box in the tab also lists the sound files this menu already uses, so putting one clip on all of the images is a pick rather than a walk through the file dialog once per image. From v0.212.0, when the card you need is bigger than the games on it, the strip adds up the two numbers it already showed and says why - and the words and the bar carry the rest: what the smaller card really holds, that the free room is what lets an image be updated in place, and that **Compact build** is the tick that shrinks it; the two confirm-sound boxes also name each other now, so **Menu settings** names the images that carry a confirm sound of their own and will ignore the one in front of you.  From v0.223.1 every card in the menu draws its title and subtitle at ONE size, measured so the longest name on the card still fits and then used for all of them, so a single long title no longer shrinks only itself while the cards either side of it stay large; **Same text size on every card** in **Menu settings** is the tick, and clearing it puts every card back on a size of its own; and the **Confirm sound** box in **Edit image** carries a line under it naming the sound that image will play - the menu's own, the image's own, or nothing at all - so the box and the list's **Confirm** column say one thing:
 
 ![The Multi-boot tab: two TMNT images on one card, the boot menu previewed with art and a countdown, and the SD card size the images need](docs/screenshots/multi-boot.png)
 
@@ -1800,7 +1800,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    builds - the hardware shim, both halves of the bridge, the GL
    renderer, every stamp it keeps - owned by root, and every later run
    as you then could not write them and stopped on a bare refusal with
-   no file named and no cause. From v0.223.0 a run that does have root
+   no file named and no cause. From v0.223.1 a run that does have root
    hands each of those back to the account that owns your emulator
    folder as it writes them, so an accidental elevated start no longer
    poisons the ones after it; the writes that could still fail say
@@ -1891,7 +1891,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    plainly that an image's confirm sound plays when you press START on
    it, not as you scroll past it — scrolling is the menu's move click,
    which is what made a set confirm sound look as though it had not
-   taken.
+   taken. From v0.223.1 the **Confirm sound** box in **Edit image**
+   carries its own line under it naming the sound that image will
+   play, rebuilt as you type: the menu's own sound, this image's own,
+   or nothing at all when neither has one. It is the sound's NAME,
+   which is what the list's **Confirm** column shows and what the box
+   itself cannot show (the box holds the whole path), so the two
+   panels now say the same thing, and a per-image `none` reads as the
+   menu's sound everywhere because that is what the card does with it.
    **Every sound box also lists the sounds this menu already uses.**
    From v0.210.0 the move sound, the confirm sound and an image's
    music each offer, under their own words, every sound file the menu

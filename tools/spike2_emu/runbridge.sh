@@ -10,7 +10,8 @@
 . "$(dirname "$0")/padpath.sh"
 . "$(dirname "$0")/ensurebuild.sh"
 set -u
-cd $HOME
+# $PAD_HOME, not $HOME - watch.sh's own `cd` carries the reason (PAD-182).
+cd "$PAD_HOME"
 
 # The measurement path gets the same guarantee as watch.sh: what runs is built,
 # and built from these sources. It used to get neither, so a rig whose renderer
@@ -30,7 +31,7 @@ export PAD_CARD_PRECOPY=${PAD_CARD_PRECOPY:-0}
 
 RING_HOST=$ROOT/dump/padgl
 RING_GUEST=/dump/padgl
-HOSTLOG=$HOME/padglhost.log
+HOSTLOG=$PAD_HOME/padglhost.log
 
 # 1360x768 is the game's own UI size, not a guess: its post-boot screens set a
 # scissor of exactly 0,312,1360,768 inside a 1920x1080 surface. At 1920x1080 the

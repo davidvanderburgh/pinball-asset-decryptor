@@ -36,15 +36,12 @@ R=$ROOT
 # root, and only when that user is not root; recursive, because the build
 # directory is a tree. Never fatal (set -e): a build that could not be given
 # back is still a build.
-give_back() {
-    [ "$(id -u)" = 0 ] || return 0
-    local o
-    o=$(stat -c %U "$HOME" 2>/dev/null)
-    if [ -n "$o" ] && [ "$o" != root ]; then
-        chown -R "$o" "$@" 2>/dev/null || true
-    fi
-    return 0
-}
+#
+# padpath.sh's pad_give_back is now the one definition of that, and asking it
+# is the fix rather than the tidy-up: this copy asked `stat -c %U "$HOME"`, and
+# under `sudo` $HOME is /root - which root owns, so it handed nothing back on
+# exactly the runs it exists for (PAD-182).
+give_back() { pad_give_back -R "$@"; }
 
 if [ ! -f "$RIG/codeselect/Makefile" ]; then
     echo "no $RIG/codeselect/Makefile - the boot selector's sources are not in this rig" >&2
@@ -72,8 +69,9 @@ fi
 # a source is staged, like the two questions above: `install -d` reports a
 # directory it may not create as a stat that found nothing, and that line was
 # the only word a user got about why his menu program was not built. Root is
-# never refused here - give_back() hands the tree to the owner of HOME - and
-# that is why the Multi-boot tab runs this as root.
+# never refused here - give_back() hands the tree to the owner of $PAD_HOME, the
+# home this rig belongs to rather than whichever one this process happens to
+# carry (PAD-182) - and that is why the Multi-boot tab runs this as root.
 if blocker=$(pad_select_blocker); then
     echo "cannot install the boot menu program at $R/usr/local/codeselect: $blocker belongs to $(stat -c %U "$blocker" 2>/dev/null || echo another account) and $(id -un 2>/dev/null || id -u) may not write into it (Permission denied)." >&2
     echo "An emulator run as root unpacks the guest filesystem as root; run this as root (sudo) and what it installs is handed back to you." >&2

@@ -127,6 +127,103 @@ pad_stage() {
     return 1
 }
 
+# ★ HAND BACK WHAT A ROOT STEP WROTE IN A HUMAN'S HOME. ONE DEFINITION, HERE.
+#
+# pad_stage() above is this rule applied to one directory; everything else a
+# root step writes under $PAD_HOME needs it too - the private fuse2fs prefix,
+# the card mountpoints, the image cache, the build stamps. A root-owned file in
+# a human's directory is a trap the NEXT ORDINARY RUN CANNOT GET OUT OF, and
+# none of the three refusals says a word about elevation:
+#
+#   `>` needs write permission on the FILE       -> build.sh's stamp
+#   `mkdir` needs it on the PARENT               -> the card mountpoint
+#   dpkg-deb -x over an existing tree needs both -> the fuse2fs prefix
+#
+# $PAD_HOME AND NOT $HOME, AND THAT IS THE FIX RATHER THAN THE TIDY-UP.
+# There were three copies of this function (cardmount.sh, buildselect.sh, and
+# an inlined one in cardmount's detached copier) and two of them asked
+# `stat -c %U "$HOME"`. Under `sudo` $HOME is /root, which ROOT OWNS - so those
+# copies returned without chowning anything on exactly the runs that needed
+# them, while $PAD_HOME resolved to the human's home correctly a few lines
+# above and root then wrote there anyway. The rule at the top of this file
+# ("ROOT IS ELEVATION, NOT OWNERSHIP") was already the answer; only the reads
+# had been converted to it.
+#
+# MEASURED FROM A USER'S UBUNTU 26.04 LOG (PAD-182). One elevated start left
+# ~/local, ~/card and ~/spike2root/lib/hwshim.srcs owned by root, and after it
+# every ordinary start died - first at "could not get fuse2fs", then, once he
+# had installed fuse2fs himself, at "mkdir: Permission denied" / "[card] cannot
+# create /home/ales/card/...", which is the end of the run. Nothing in any of
+# it named elevation, so nothing in it could be acted on.
+#
+# NEVER FATAL. Callers run under `set -e` and a file that could not be handed
+# back is still a file; the ordinary-run diagnostics (pad_can_write) are what
+# make the leftover recoverable when this could not prevent it.
+pad_give_back() {                 # [-R] <path>...
+    local r="" o
+    [ "${1:-}" = -R ] && { r=-R; shift; }
+    [ "$#" -gt 0 ] || return 0
+    [ "$(id -u)" = 0 ] || return 0
+    # `|| o=""` IS LOAD-BEARING, not defensive noise. A bare assignment from a
+    # command substitution carries that command's exit status, and every caller
+    # of this is `set -e` - so a $PAD_HOME this shell cannot stat would abort
+    # build.sh AFTER a successful compile, and _pad_build would report the build
+    # as FAILED. The hand-back is the last line of three build scripts; it must
+    # not be able to fail one.
+    o=$(stat -c %U "$PAD_HOME" 2>/dev/null) || o=""
+    # Only when the home belongs to a human, for pad_stage's reason: chowning
+    # root's own files to root is a no-op with a recursive walk attached.
+    if [ -n "$o" ] && [ "$o" != root ]; then
+        chown $r "$o" "$@" 2>/dev/null || true
+    fi
+    return 0
+}
+
+# ★ CAN THIS ACCOUNT WRITE THAT FILE, AND IF NOT, WHY - IN WORDS.
+#
+# The other half of pad_give_back: it stops the trap being set, and this one
+# gets a machine out of a trap that is already set. Every leftover from an
+# elevated run surfaces as a bare "Permission denied" from the shell, gcc or
+# mkdir, naming a path in the user's OWN HOME - which reads as a broken install
+# and is nothing of the kind. PAD-182's reporter had three of them and tried
+# the one thing that makes it worse: running the whole app under `sudo`.
+#
+# ROOT ALWAYS PASSES, and that is not a special case - root's `-w` is true on
+# any file, so an elevated run falls straight through to its own write.
+#
+# The path may not exist yet, in which case the question is about its PARENT:
+# `> newfile` and `mkdir newdir` both need the directory, not the file. AND
+# `mkdir -p` MAKES A CHAIN OF THEM, so the walk goes up to the first ancestor
+# that is actually there - ~/card/<title> under a ~/card that does not exist
+# either is a perfectly good `mkdir -p`, and reporting the missing parent as
+# unwritable would refuse the first run on every clean machine.
+pad_can_write() {                 # <path> [<log-tag>]
+    local p=$1 tag=${2:-rig} t o me
+    t=$p
+    while [ ! -e "$t" ] && [ "$t" != / ] && [ "$t" != . ]; do
+        t=$(dirname "$t")
+    done
+    [ -w "$t" ] && return 0
+    o=$(stat -c %U "$t" 2>/dev/null) || o=""
+    me=$(id -un 2>/dev/null || id -u)
+    # OURS AND STILL REFUSED IS A MODE, NOT AN OWNER, and the two need
+    # different cures. Measured while writing this: the elevation paragraph
+    # fired on a directory the running account owned, and "belongs to david and
+    # this run is david" followed by "an elevated run made it" is a sentence
+    # that sends the reader looking for a sudo they never typed.
+    if [ -n "$o" ] && [ "$o" = "$me" ]; then
+        echo "[$tag] cannot write $p: $t is yours, but its mode forbids it." >&2
+        echo "[$tag] Allow it with:  chmod u+w $t" >&2
+        return 1
+    fi
+    echo "[$tag] cannot write $p: $t belongs to ${o:-another account} and this run is $me." >&2
+    echo "[$tag] AN ELEVATED RUN MADE IT - either 'sudo' or one of the app's own" >&2
+    echo "[$tag] root steps - and an ordinary run cannot replace what root left." >&2
+    echo "[$tag] Hand it back, once:  sudo chown -R $me $t" >&2
+    echo "[$tag] Do NOT run the app itself with sudo; that is what put it here." >&2
+    return 1
+}
+
 # Which distro this is, so a Windows child can ask questions of the RIGHT one.
 # WSL sets WSL_DISTRO_NAME; if it is somehow unset the Windows side falls back
 # to the default distro, which is right far more often than it is wrong.
@@ -566,10 +663,26 @@ PAD_GLHOST_SRCS="padglhost.c padgl.h padvid.h padsw.h i420.h"
 PAD_GLGUEST_SRCS="glbridge.c eglshim.c padgl.h"
 export PAD_GLHOST_SRCS PAD_GLGUEST_SRCS
 
-#: The native renderer, and what it was built from - both in $HOME, which is
-#: where buildbridge.sh has always put the binary.
-PAD_GLHOST_BIN=$HOME/padglhost
-PAD_GLHOST_STAMP=$HOME/padglhost.srcs
+#: The native renderer, and what it was built from - both in $PAD_HOME, which
+#: is where buildbridge.sh has always put the binary on every run that worked.
+#:
+#: $HOME WAS WRONG IN THE ONE CASE THAT COSTS THE PICTURE (PAD-182), and it is
+#: the same trap as the hand-back above in the other direction. Under `sudo` on
+#: a Linux desktop $HOME is /root, so the renderer was BUILT into
+#: /root/padglhost - and then the helper drop below (watch.sh) correctly ran it
+#: as the DESKTOP USER, who cannot traverse a 0700 /root. The reporter's log:
+#:
+#:      [watch] the renderer died on startup:
+#:      env: '/root/padglhost': Permission denied
+#:      [watch] TRYING THE RENDERER AGAIN IN SOFTWARE...
+#:      [watch] the software renderer died too, so this is not the GPU
+#:
+#: - which is true, and still sends the reader to the wrong half of the machine.
+#: On every ordinary run, and on the app's own WSL launches (which carry the
+#: desktop user's HOME on purpose), $PAD_HOME and $HOME are the same directory,
+#: so this changes nothing anywhere else.
+PAD_GLHOST_BIN=$PAD_HOME/padglhost
+PAD_GLHOST_STAMP=$PAD_HOME/padglhost.srcs
 #: The guest half, stamped beside the libraries it produces.
 PAD_GLGUEST_STAMP=$ROOT/usr/lib/glbridge.srcs
 export PAD_GLHOST_BIN PAD_GLHOST_STAMP PAD_GLGUEST_STAMP

@@ -43,17 +43,18 @@ export LD_LIBRARY_PATH="$PREFIX/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 die() { echo "[card] $*" >&2; exit 1; }
 
 # HAND FILES BACK when this runs as root (a PAD_PIVOT session - item 13).
-# Everything here lives under the DESKTOP USER's home ($HOME is set to theirs
-# by the launcher), and a root-owned stamp/cache/log in their directory is the
-# same trap watch.sh already fixes for its logs: the next ordinary run cannot
-# overwrite it. No-op for a normal user run.
-give_back() {
-    [ "$(id -u)" = 0 ] || return 0
-    local o
-    o=$(stat -c %U "$HOME" 2>/dev/null)
-    [ -n "$o" ] && [ "$o" != root ] && chown "$o" "$@" 2>/dev/null
-    return 0
-}
+# Everything here lives under the DESKTOP USER's home, and a root-owned
+# stamp/cache/mountpoint in their directory is the same trap watch.sh already
+# fixes for its logs: the next ordinary run cannot overwrite it. No-op for a
+# normal user run.
+#
+# THIS WAS A LOCAL COPY THAT ASKED `stat -c %U "$HOME"`, and under `sudo` $HOME
+# is /root - which root owns, so the copy returned having chowned nothing on
+# exactly the runs that needed it (PAD-182). padpath.sh's pad_give_back is the
+# one definition and asks $PAD_HOME, which is the home this rig belongs to
+# however the script was reached. Kept as a name because five call sites read
+# better with the short one.
+give_back() { pad_give_back "$@"; }
 
 # LOCAL IMAGE CACHE - why card boots were slow, and why the SECOND one is not.
 #
@@ -301,8 +302,13 @@ cache_pick() {
                 # A root (PAD_PIVOT) run hands the finished copy back to the
                 # desktop user, same as give_back() - inlined because this
                 # runs detached, long after the parent script has exited.
+                # $PAD_HOME and not $HOME, for the reason pad_give_back gives:
+                # under sudo $HOME is /root and this chowned nothing (PAD-182).
+                # padpath.sh exports PAD_HOME, so this inner sh inherits it.
+                # (No apostrophes in here - this whole body is one
+                # single-quoted string, and one would end it.)
                 if [ "$(id -u)" = 0 ]; then
-                    o=$(stat -c %U "$HOME" 2>/dev/null)
+                    o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
                     [ -n "$o" ] && [ "$o" != root ] && \
                         chown "$o" "$copy" "$stamp" 2>/dev/null
                 fi
@@ -395,6 +401,14 @@ ensure_fuse2fs() {
     [ -e "$PREFIX/lib/x86_64-linux-gnu/libfuse.so.2" ] && _resolves "$FUSE2FS" \
         && return 0
     echo "[card] fetching fuse2fs into $PREFIX (once)"
+    # ...AND THIS ACCOUNT MAY WRITE THERE. Asked BEFORE the download, because
+    # what a root-owned prefix produces otherwise is twenty lines of tar
+    # ("Cannot open: File exists", "Cannot utime: Operation not permitted"),
+    # then `dpkg-deb: error: tar subprocess failed`, then "could not get
+    # fuse2fs" - and not one of them says the directory belongs to root
+    # (PAD-182). An elevated run that made this prefix now hands it back
+    # below, so this is only ever reached on a machine one already poisoned.
+    pad_can_write "$PREFIX" card || return 1
     mkdir -p "$PREFIX" /tmp/cardpkg || return 1
     ( cd /tmp/cardpkg && _apt_download_first $PAD_FUSE2FS_PKGS ) || {
         echo "[card] could not download fuse2fs (tried: $PAD_FUSE2FS_PKGS)" >&2
@@ -408,6 +422,10 @@ ensure_fuse2fs() {
         echo "[card] those packages unpacked, and none of them holds" \
              "$FUSE2FS" >&2
         return 1; }
+    # RECURSIVE, because this is a whole unpacked tree and not a stamp: a root
+    # fetch used to leave every file in it owned by root, and the next ordinary
+    # run could then neither re-fetch nor repair it (PAD-182).
+    pad_give_back -R "$PREFIX"
     return 0
 }
 
@@ -594,6 +612,14 @@ else
     OFF=$(games_offset "$SRC")
     [ -n "$OFF" ] || die "no third Linux partition in $(basename "$SRC")"
 fi
+# AND SAY WHY IT CANNOT BE CREATED. `mkdir: Permission denied` followed by
+# "[card] cannot create /home/ales/card/<title>" is where PAD-182's reporter's
+# run ENDED, twice, on a machine whose only fault was a root-owned ~/card left
+# by one elevated start - and between them those two lines name the path, the
+# syscall and nothing that could be acted on. pad_can_write names the owner and
+# the chown; the die below still ends the run, because an unmountable card is
+# the end of it.
+pad_can_write "$MNT" card || die "cannot create $MNT"
 mkdir -p "$MNT" || die "cannot create $MNT"
 
 echo "[card] mounting $(basename "$SRC") p${PART:-3} at offset $OFF (read only)"

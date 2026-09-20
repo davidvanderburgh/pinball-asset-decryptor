@@ -283,6 +283,39 @@ def test_the_gpu_attempt_is_still_the_default():
     assert '[ "$PAD_GL_MODE" = gpu ]' in text
 
 
+def test_d3d12_is_forced_on_wsl_and_only_on_wsl():
+    """PAD-182: naming WSLg's driver on a Linux desktop kills the renderer.
+
+    d3d12 needs libd3d12core.so out of /usr/lib/wsl/lib, which Windows injects
+    into the VM and which no real machine has - so on a Linux desktop the forced
+    driver meant the GPU attempt could not start, every run took the software
+    retry, and the log said "the renderer died on startup" about a box whose own
+    driver was the right answer and was never asked.  Mesa's own choice is that
+    answer off WSL, so the export is fenced by the rig's one WSL predicate.
+    """
+    text = src("watch.sh")
+    i = text.index("export GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12}")
+    fence = text[:i].rindex('if [ "$IS_WSL" = 1 ]; then')
+    # Nothing between the fence and the export but the export itself.
+    assert text[fence:i].count("\n") == 1, \
+        "the d3d12 export must be the body of the IS_WSL test, not near it"
+    # ...and the caller still wins on both platforms, which is what `:-` means.
+    assert "${GALLIUM_DRIVER:-d3d12}" in text
+
+
+def test_the_gpu_driver_is_recorded_rather_than_assumed():
+    """Because "put d3d12 back" is only right where d3d12 was ever set.
+
+    The software retry has to be undoable exactly, and on a Linux desktop the
+    thing to go back to is NO forced driver at all.  A PAD_ name so the cfg
+    block prints it without being told to - a log that does not say which driver
+    rendered the run cannot be compared with any other run.
+    """
+    text = src("watch.sh")
+    assert "export PAD_GL_DRIVER=${GALLIUM_DRIVER:-mesa-default}" in text
+    assert line_of(text, "export PAD_GL_DRIVER=") < line_of(text, "pad_gl_gpu() {")
+
+
 # --------------------------------------------------------------------------
 # PAD-127: THE RENDERER IS UP AND THERE IS NO WINDOW.
 # --------------------------------------------------------------------------
@@ -456,16 +489,25 @@ def test_a_software_renderer_that_dies_gives_the_gpu_one_back():
 
 def test_going_back_to_the_gpu_names_the_driver_it_restores():
     """The software switch exported two variables; putting one back and
-    leaving the other would run d3d12's name over llvmpipe's loader."""
+    leaving the other would run d3d12's name over llvmpipe's loader.
+
+    THE DRIVER IS RESTORED FROM WHAT WAS RECORDED, not from the name d3d12
+    (PAD-182): off WSL there is no forced driver to go back to, and exporting
+    d3d12 there would hand llvmpipe's replacement a driver that cannot load.
+    """
     text = src("watch.sh")
     body = text[text.index("pad_gl_gpu() {"):]
     body = body[:body.index("\n}\n")]
-    assert "GALLIUM_DRIVER=d3d12" in body
+    assert "export GALLIUM_DRIVER=$PAD_GL_DRIVER" in body
     assert "unset LIBGL_ALWAYS_SOFTWARE" in body
     assert "PAD_GL_MODE=gpu" in body
+    # ...and the no-forced-driver case really does unset it rather than leave
+    # llvmpipe in the environment, which would be a silent software run.
+    assert "unset GALLIUM_DRIVER" in body
     # The log has to say so too, for the reason the software switch does: a run
     # whose log names a driver it did not use cannot be compared with any other.
-    assert "cfg GALLIUM_DRIVER=d3d12" in body
+    assert "cfg GALLIUM_DRIVER=$PAD_GL_DRIVER (back on the GPU)" in body
+    assert "cfg GALLIUM_DRIVER=(unset" in body
 
 
 def test_the_headless_verdict_names_the_button_as_well_as_the_command():

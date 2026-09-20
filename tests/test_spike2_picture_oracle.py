@@ -37,6 +37,8 @@ import subprocess
 
 import pytest
 
+from tests._watch_event_filter import anchor_lines, event_filter
+
 RIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "tools", "spike2_emu")
 AWK = shutil.which("awk")
@@ -151,13 +153,26 @@ def test_the_black_screen_verdict_needs_no_timeout():
 # --------------------------------------------------------------------------
 
 def _event_filter():
-    """The real awk program out of watch.sh, so these are not tests of a copy."""
+    """The real awk program out of watch.sh, so these are not tests of a copy.
+
+    Shared with test_spike2_window_position.py through _watch_event_filter -
+    two copies of this scraper, both anchored on ``| awk '``, burned v0.225.1
+    the day watch.sh started saying ``| $AWK '`` (PAD-186)."""
+    return event_filter(_read("watch.sh"))
+
+
+def test_watch_sh_keeps_the_event_filter_anchor():
+    """THE CONTRACT, named: exactly one line of watch.sh opens the [event]
+    awk program, spelled one of the ways the scraper accepts, and a ``' &``
+    closes it. A rename now fails here, in one test, with a sentence - not in
+    three tests with a StopIteration traceback and a yanked release."""
     src = _read("watch.sh")
-    lines = src.split("\n")
-    start = next(i for i, ln in enumerate(lines) if ln.rstrip().endswith("| awk '"))
-    end = next(i for i in range(start + 1, len(lines))
-               if lines[i].strip() == "' &")
-    return "\n".join(lines[start + 1:end])
+    starts = anchor_lines(src)
+    assert len(starts) == 1, ("expected one [event] awk anchor in watch.sh, "
+                              "found %d at lines %s"
+                              % (len(starts), [i + 1 for i in starts]))
+    program = event_filter(src)
+    assert "[event]" in program and "fflush()" in program
 
 
 @pytest.mark.skipif(not AWK, reason="no awk")

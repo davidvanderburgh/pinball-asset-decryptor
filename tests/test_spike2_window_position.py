@@ -48,6 +48,8 @@ import subprocess
 
 import pytest
 
+from tests._watch_event_filter import event_filter
+
 RIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "tools", "spike2_emu")
 AWK = shutil.which("awk")
@@ -88,13 +90,12 @@ def _nocomments(src):
 
 
 def _event_filter():
-    """The real awk program out of watch.sh, so this is not a test of a copy."""
-    src = _read("watch.sh")
-    lines = src.split("\n")
-    start = next(i for i, ln in enumerate(lines) if ln.rstrip().endswith("| awk '"))
-    end = next(i for i in range(start + 1, len(lines))
-               if lines[i].strip() == "' &")
-    return "\n".join(lines[start + 1:end])
+    """The real awk program out of watch.sh, so this is not a test of a copy.
+
+    One scraper for both files now (_watch_event_filter): the copy that lived
+    here, anchored on ``| awk '``, burned v0.225.1 with its twin the day
+    watch.sh started saying ``| $AWK '`` (PAD-186)."""
+    return event_filter(_read("watch.sh"))
 
 
 # --------------------------------------------------------------------------

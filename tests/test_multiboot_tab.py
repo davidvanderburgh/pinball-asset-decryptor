@@ -1646,6 +1646,86 @@ def test_an_image_can_have_a_confirm_sound_of_its_own(tmp_path):
         panel._ed_confirm.set("menu")
         assert panel._rows[1].confirm == ""
         assert panel._table.cell(1, "sound") == "(none)"
+        # ...and so is 'none' TYPED into it: the format has no per-image
+        # silence (IMAGE_CONFIRM_CHOICES), so the cell must not promise one
+        panel._ed_confirm.set("none")
+        assert panel._table.cell(1, "sound") == "(none)"
+        panel._confirm_var.set("auto")
+        assert panel._table.cell(1, "sound") == "(auto)"
+        assert multiboot_tab.has_own_confirm(panel._rows[1]) is False
+        assert multiboot_tab.confirm_spec(panel._rows[1]) == "none"
+    finally:
+        root.destroy()
+
+
+def test_the_confirm_box_names_the_sound_it_will_play():
+    """BEN, PAD-184: "the properties page does not show the correct sound
+    but will play the correct sound with the play button".  The box holds
+    the SETTING and the list column holds the ANSWER, so the box carries
+    the answer too - in the column's own words."""
+    note = multiboot_tab.image_confirm_note
+    # inheriting: the menu's sound, NAMED, however the row spells inherit
+    for spell in ("", "menu", "MENU", "none"):
+        assert note(spell, r"D:\wav\ComeTogether.wav") == \
+            "Plays ComeTogether.wav, the menu's own."
+        assert note(spell, "auto") == "Plays auto, the menu's own."
+    # ...and when neither has one, nothing plays - which is worth saying
+    assert note("", "none") == ("Plays nothing: neither this image nor the "
+                                "menu has a confirm sound.")
+    assert note("menu", "") == ("Plays nothing: neither this image nor the "
+                                "menu has a confirm sound.")
+    # its own: the file's NAME, which is what the box could not show (it
+    # holds the whole path) and what the column has always shown
+    assert note(r"C:\Users\ben\My Sounds\Godzilla Roar.wav", "auto") == \
+        "Plays Godzilla Roar.wav, this image's own."
+    assert note('"C:\\x\\Roar.wav"', "auto") == \
+        "Plays Roar.wav, this image's own."
+    assert note("synth", "auto") == "Plays synth, this image's own."
+    # ...including a name a LOAD read off the card, with no source recorded
+    assert note("confirm2.wav", "auto") == \
+        "Plays confirm2.wav, this image's own."
+
+
+def test_the_confirm_line_says_what_the_list_says(tmp_path):
+    """The two panels, side by side, on one row: whatever the line under
+    the box says is the name the Confirm column carries for that row - and
+    it follows every keystroke in the box."""
+    root, panel = _panel()
+    try:
+        wav = tmp_path / "ComeTogether.wav"
+        roar = tmp_path / "Godzilla Roar.wav"
+        for p in (wav, roar):
+            p.write_bytes(bytes(4))
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._confirm_var.set(str(wav))
+
+        # a row with no confirm of its own: the column names the menu's
+        # sound in brackets, and the box says 'menu' - the whole report
+        dlg = panel.edit_image(1)
+        root.update()
+        assert panel._ed_confirm.get() == "menu"
+        assert panel._table.cell(1, "sound") == "(ComeTogether.wav)"
+        assert dlg._confirm_note.cget("text") == \
+            "Plays ComeTogether.wav, the menu's own."
+        # typing a file in is this image's own, on both panels, at once
+        panel._ed_confirm.set(str(roar))
+        root.update()
+        assert dlg._confirm_note.cget("text") == \
+            "Plays Godzilla Roar.wav, this image's own."
+        assert panel._table.cell(1, "sound") == "Godzilla Roar.wav"
+        # ...and back to the menu's
+        panel._ed_confirm.set("menu")
+        root.update()
+        assert dlg._confirm_note.cget("text") == \
+            "Plays ComeTogether.wav, the menu's own."
+        dlg.cancel()
+        root.update()
+        # the dialog is gone and the trace that fed it does not mind
+        panel._table.select(1)
+        panel._load_editor()
+        panel._ed_confirm.set("synth")
+        assert panel._table.cell(1, "sound") == "synth"
     finally:
         root.destroy()
 
@@ -7460,6 +7540,17 @@ def test_a_word_sound_row_plays_what_the_prepare_rendered_for_that_row(
         assert panel.play_sound_choice(
             "Confirm sound", tk.StringVar(value="auto"), image=0) is True
         assert played[-1] == confirm      # image 0 falls back to the menu's
+        # ...and so do the three spellings of "the menu's" on an image's own
+        # confirm row, INCLUDING a typed 'none': that row has no silence to
+        # offer, and the line under the box says the menu's sound (PAD-184)
+        for spell in ("menu", "none", ""):
+            assert panel.play_sound_choice(
+                "Confirm sound", tk.StringVar(value=spell), image=0) is True
+            assert played[-1] == confirm
+        # the MENU's own confirm row keeps its silence: that one is real
+        assert panel.play_sound_choice(
+            "Confirm sound", tk.StringVar(value="none")) is False
+        assert "set to none" in panel.log_lines()[-1]
     finally:
         root.destroy()
 
@@ -8692,8 +8783,11 @@ def test_both_sound_panels_carry_the_other_ones_answer(tmp_path):
         dlg = panel.edit_image(0)
         root.update()
         notes = " ".join(_label_texts(dlg.body))
-        assert "menu = whatever the whole menu uses, which is auto at the " \
-            "moment." in notes
+        assert "menu = whatever the whole menu uses." in notes
+        # ...and WHICH sound that is has its own live line under the box
+        # (PAD-184), so the paragraph no longer names it as well
+        assert "Plays auto, the menu's own." in notes
+        assert "at the moment" not in notes
         dlg.cancel()
         root.update()
         menu = panel.open_menu_settings()

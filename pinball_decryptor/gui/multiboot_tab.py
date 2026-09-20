@@ -1788,6 +1788,20 @@ class ClipFrames(object):
         self._frames = {}
 
 
+def inherits_confirm(value):
+    """Whether an :class:`ImageRow`'s ``confirm`` means "the menu's sound".
+
+    THREE SPELLINGS, ONE STATE: ``''`` is what the row keeps, ``menu`` is
+    what the dialog's box says, and ``none`` is what a hand types into that
+    box meaning silence - which this format cannot do (see
+    :data:`IMAGE_CONFIRM_CHOICES`), so the card plays the menu's sound for
+    it.  Every panel that says what an image will play asks THIS, so what
+    the list shows, what the dialog shows and what :func:`confirm_spec`
+    writes onto the card cannot drift apart."""
+    v = (value or "").strip().strip('"').lower()
+    return not v or v in ("menu", "none")
+
+
 def confirm_spec(row):
     """The ``--sound-confirm N=`` value for a row.
 
@@ -1798,7 +1812,7 @@ def confirm_spec(row):
     left out, so a row that used to have one and no longer does loses it."""
     v = (row.confirm or "").strip().strip('"')
     w = v.lower()
-    if not v or w in ("menu", "none"):
+    if inherits_confirm(v):
         return "none"
     if w in ("auto", "synth") or _AUTO_IDX_RE.match(w):
         return w
@@ -4625,7 +4639,10 @@ def _shorten(text, width=40):
 
 def _cell(value):
     """A media field as one word or one file name."""
-    v = (value or "").strip()
+    # A PATH MAY BE QUOTED (it is typed into a box, and a path with a space
+    # in it is pasted out of Explorer with its quotes on), and a basename
+    # taken through the closing quote is `ComeTogether.wav"`.
+    v = (value or "").strip().strip('"').strip()
     # ntpath, NOT os.path: the field is a RECORDED path, and a card built on
     # Windows names its WAVs with backslashes that os.path on a Mac or Linux
     # desktop would hand back whole.  ntpath splits on both separators.
@@ -5005,10 +5022,11 @@ def list_code(row):
 def has_own_confirm(row):
     """Whether this image carries a confirm sound OF ITS OWN - the one the
     machine plays instead of the menu's.  The same test the Confirm column
-    makes (see ``_confirm_cell``): '' and 'menu' both mean the menu's."""
+    makes (see ``_confirm_cell``): :func:`inherits_confirm` decides, so all
+    three spellings of "the menu's" count as not having one."""
     own = (getattr(row, "confirm", "") or "").strip()
-    return bool(getattr(row, "confirm_on_card", False)) or bool(
-        own and own.lower() != "menu")
+    return bool(getattr(row, "confirm_on_card", False)) or not \
+        inherits_confirm(own)
 
 
 def plain_title(row, index=0):
@@ -5056,6 +5074,36 @@ def own_confirm_note(rows):
                                "has" if one else "have",
                                "its" if one else "their", shown,
                                "does not" if one else "do not"))
+
+
+def image_confirm_note(value, menu_value):
+    """The line under Edit image…'s Confirm sound box: the sound that image
+    will actually play, NAMED - the same name the list's Confirm column
+    carries for the same row.
+
+    BEN, PAD-184: "the properties of an image on a multiboot game does not
+    align with the information on the general table of images with the
+    confirm sound.  The properties page does not show the correct sound but
+    will play the correct sound with the play button."  The two panels were
+    never out of step - they answer two different questions.  The box holds
+    the SETTING ('menu', or a whole path, or a name a load read off the
+    card); the column holds the ANSWER (the sound's name, bracketed when it
+    is the menu's).  A box that says ``menu`` beside a column that says
+    ``(ComeTogether.wav)`` reads as two settings that disagree, and ▶ -
+    which resolves the setting exactly as the card does - then plays a third
+    thing neither of them named.  So the box now carries the answer too, on
+    its own line, rebuilt on every keystroke.
+
+    *value* is the image's own setting and *menu_value* the menu-wide one.
+    """
+    own = (value or "").strip()
+    if not inherits_confirm(own):
+        return "Plays %s, this image's own." % _cell(own)
+    menu = menu_confirm_now(menu_value)
+    if menu == "none":
+        return ("Plays nothing: neither this image nor the menu has a "
+                "confirm sound.")
+    return "Plays %s, the menu's own." % menu
 
 
 def _one_line_text(text, width):
@@ -5502,6 +5550,17 @@ class ImageEditorDialog(_Modal):
                    label_w=15, used_fn=panel.used_sounds, on_play=hear,
                    theme_fn=panel._theme_fn)
         snd.columnconfigure(1, weight=1)
+        # WHICH SOUND THAT IS, UNDER THE BOX AND LIVE (BEN, PAD-184 - see
+        # image_confirm_note).  Under the BOX, not folded into the grey
+        # paragraph below: the question it answers is "what did I just set
+        # this to", which is asked of the row it is asked in, and the answer
+        # changes with every keystroke in it.  It is the list's own word for
+        # the same row, so the two panels now say one thing.
+        self._confirm_note = ttk.Label(snd, foreground=th["gray"],
+                                       wraplength=420, justify=tk.LEFT)
+        self._confirm_note.grid(row=2, column=1, columnspan=3, sticky=tk.W,
+                                pady=(0, 2))
+        self.sync_confirm_note()
         # WHAT EACH OF THEM IS FOR, AND WHEN IT PLAYS - inside the box it
         # describes, and wrapped to the box rather than to a number narrower
         # than the dialog (C FB, PAD-135 marked the empty band this note used
@@ -5513,25 +5572,41 @@ class ImageEditorDialog(_Modal):
         # sound to his own clip, walked the menu with the flippers, heard the
         # click each time and reported that the setting "didn't take".
         #
-        # AND 'menu' NAMES THE SOUND IT MEANS.  The same tester read the two
+        # AND 'menu' SAYS WHAT IT MEANS.  The same tester read the two
         # confirm boxes - this one and Menu settings' - as two settings that
         # were "not in synch" (C FB, PAD-137), because the list column behind
         # this dialog already showed the inherited value as '(auto)' while the
-        # box in front of him said 'menu'.  One of them had to say both words.
-        # Computed once, at build: this dialog is modal, so the menu's own
-        # sound cannot change while it is up.
+        # box in front of him said 'menu'.  WHICH sound that is belongs to the
+        # live line above rather than to this paragraph (BEN, PAD-184): a
+        # static sentence naming it here said the same name twice on two
+        # neighbouring lines, and stopped being true the moment the box
+        # changed.
         ttk.Label(snd, foreground=th["gray"], wraplength=560,
                   justify=tk.LEFT,
                   text="Music loops while this image is highlighted. The "
                        "confirm sound plays when you press START on it - not "
                        "as you scroll past, which is the menu's move click. "
-                       "menu = whatever the whole menu uses, which is %s at "
-                       "the moment. Under those words, each list offers every "
-                       "sound file this menu already uses. %s hears either "
-                       "one now, here."
-                       % (menu_confirm_now(panel._confirm_var.get()),
-                          PLAY_NAME)).grid(
-            row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
+                       "menu = whatever the whole menu uses. Under those "
+                       "words, each list offers every sound file this menu "
+                       "already uses. %s hears either one now, here."
+                       % PLAY_NAME).grid(
+            row=3, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
+
+    def sync_confirm_note(self):
+        """The 'Plays …' line under the Confirm sound box <- the box, on
+        every keystroke in it (the panel's editor trace calls this).
+
+        The menu-wide sound it may be naming cannot change while this dialog
+        is up - it is modal - so the only moving part is the box itself."""
+        lbl = getattr(self, "_confirm_note", None)
+        if lbl is None:                                 # pragma: no cover
+            return
+        panel = self._panel
+        try:
+            lbl.configure(text=image_confirm_note(
+                panel._ed_confirm.get(), panel._confirm_var.get()))
+        except tk.TclError:                             # pragma: no cover
+            pass
 
     def _browse(self, kind):
         """Browse… for a picture or a video.  Live whichever option is
@@ -8603,6 +8678,7 @@ class MultibootPanel:
         if self._loading:
             return
         self._sync_editor_states()
+        self._sync_confirm_note()
         i = self._selected()
         if i is None:
             return
@@ -8681,6 +8757,15 @@ class MultibootPanel:
                             else tk.DISABLED)
             except tk.TclError:
                 pass
+
+    def _sync_confirm_note(self):
+        """Edit image…'s 'Plays …' line <- the Confirm sound box, while that
+        dialog is up (BEN, PAD-184).  The line lives in the dialog and the
+        trace that feeds it lives here, so a closed dialog is simply nothing
+        to tell."""
+        dlg = getattr(self, "_image_dialog", None)
+        if dlg is not None:
+            dlg.sync_confirm_note()
 
     def add_image(self, path):
         """Append a card image (the public half of Add image…)."""
@@ -9617,9 +9702,14 @@ class MultibootPanel:
         without shows the menu's IN PARENTHESES - the column is worth
         nothing if it does not say what will be heard, and the brackets are
         what tells the two apart at a glance (a Treeview colours a row,
-        never one cell of it, so the mark has to be in the text)."""
+        never one cell of it, so the mark has to be in the text).
+
+        'none' TYPED INTO THE BOX IS THE MENU'S TOO (:func:`inherits_confirm`):
+        the format has no per-image silence, so a cell that said 'none' was
+        promising a quiet START that the card then answered with the menu's
+        sound."""
         own = (row.confirm or "").strip()
-        if own and own.lower() != "menu":
+        if not inherits_confirm(own):
             return _cell(own)
         if getattr(row, "confirm_on_card", False):      # pragma: no cover
             return _cell(own)
@@ -11402,6 +11492,14 @@ class MultibootPanel:
         """
         value = (var.get() or "").strip().strip('"')
         label = (what or "Sound").strip()
+        # AN IMAGE'S CONFIRM ROW HAS NO SILENCE TO PLAY: '', 'menu' and a
+        # typed 'none' all mean the menu's sound there (:func:`inherits_
+        # confirm`), which is what the line under the box says it will play
+        # and what the card does with it - so ▶ must not answer that row
+        # with "it is set to none" (BEN, PAD-184).
+        if image is not None and label == "Confirm sound" \
+                and inherits_confirm(value):
+            value = "menu"
         if not value or value.lower() == "none":
             self._write("%s: nothing to play - it is set to none." % label)
             return False

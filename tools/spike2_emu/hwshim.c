@@ -4011,6 +4011,9 @@ struct padsw_shm {
     unsigned mrg_gen; unsigned char mrg[256];
     unsigned kbd_src; unsigned scr_src; unsigned guest_t0_ms;
     unsigned spin_gen; unsigned char spin[256];
+    /* the boot menu's buttons by name (padsw.h): nothing here reads them, they
+     * are kept so the struct stays padsw.h's field for field */
+    unsigned char cab[8]; unsigned char scr_cab[8];
 };
 #define PADSW_MAGIC 0x53444150u
 

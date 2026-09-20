@@ -14,6 +14,11 @@ take-then-set discipline, same script region. The rig's one-writer-per-region
 rule holds: everything host-side still funnels through padsw's script array,
 and the guest merges by last edge wins exactly as before.
 
+A SECOND KIND OF LINE, "cab <name> <level>", holds one of the boot menu's
+buttons BY NAME (padsw.h's cab[], written to the scripts' half). A title's
+first run has no switch list yet, so the ids above do not exist for the menu's
+flippers or Action; the name always does. Same release-on-EOF discipline.
+
 EOF RELEASES EVERYTHING STILL HELD. The stuck-switch failure is the same one
 item 24 guards against: if the playfield dies mid-flipper, its exit closes
 this stdin, and the finally below opens whatever was left closed - the game
@@ -26,6 +31,25 @@ import padsw
 padsw.set_source('p')   # the playfield's keyboard; PAD_SW_SRC overrides
 
 
+def parse(line):
+    """One stdin line as ('sw', id, level) or ('cab', name, level); None for
+    anything that is not a well-formed edge (a helper must never die of a
+    malformed line: the playfield keeps writing after it)."""
+    p = line.split()
+    try:
+        if len(p) == 3 and p[0] == "cab":
+            if p[1] not in padsw.CAB_NAMES:
+                return None
+            return ("cab", p[1], int(p[2]))
+        if len(p) == 2:
+            sw, val = int(p[0]), int(p[1])
+            if 0 < sw < padsw.MAX_ID:
+                return ("sw", sw, val)
+    except ValueError:
+        pass
+    return None
+
+
 def main():
     m = padsw.open_block()
     if m is None:
@@ -36,24 +60,27 @@ def main():
     # silently eating every press.
     print("ready", flush=True)
     held = {}
+    cab_held = {}
     try:
         for line in sys.stdin:
-            p = line.split()
-            if len(p) != 2:
+            edge = parse(line)
+            if edge is None:
                 continue
-            try:
-                sw, val = int(p[0]), int(p[1])
-            except ValueError:
-                continue
-            if not 0 < sw < padsw.MAX_ID:
-                continue
-            padsw.take(m, (sw,))
-            padsw.set_held(m, sw, val)
-            held[sw] = val
+            kind, what, val = edge
+            if kind == "cab":
+                padsw.set_cab(m, what, val)
+                cab_held[what] = val
+            else:
+                padsw.take(m, (what,))
+                padsw.set_held(m, what, val)
+                held[what] = val
     finally:
         for sw, val in held.items():
             if val:
                 padsw.set_held(m, sw, 0)
+        for name, val in cab_held.items():
+            if val:
+                padsw.set_cab(m, name, 0)
         m.close()
     return 0
 

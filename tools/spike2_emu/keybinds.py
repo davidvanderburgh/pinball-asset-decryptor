@@ -73,6 +73,33 @@ _TK_KEYSYMS = {
 }
 
 
+#: THE BOOT MENU'S BUTTONS BY NAME, and the keys that stand for them - the
+#: playfield window's copy of padglhost.c's cab_keys[] (a test holds the two
+#: together; the C table is the one that decides what the GAME window does).
+#: Unlike every row above these do not come from a title's switch list, and
+#: that is the point: a title's FIRST run has no list, and the boot menu of a
+#: multi-image card runs before the game that would build one, so the menu's
+#: flippers and Action had no id to ride. The name is enough - padsw.h's cab[].
+#: The names are padsw.CAB_NAMES' (not imported: this module stays free of the
+#: rig's path plumbing, see the docstring), the order is the display name the
+#: exported rows use.
+CABINET_KEYS = (
+    ("Left", "left"), ("Right", "right"), ("1", "start"), ("Space", "action"),
+    ("Enter", "select"), ("KP Ent", "select"), ("=", "plus"), ("-", "minus"),
+    ("Bksp", "back"), ("Esc", "back"),
+)
+
+
+def cabinet_keysyms():
+    """{Tk keysym: button name} for CABINET_KEYS, through the same display
+    name -> keysym translation the exported rows use."""
+    out = {}
+    for key, button in CABINET_KEYS:
+        for sym in tk_keysyms(key):
+            out[sym] = button
+    return out
+
+
 def tk_keysyms(key):
     """The Tk keysym names one exported key label binds to.
 

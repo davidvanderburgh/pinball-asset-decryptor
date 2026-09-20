@@ -695,11 +695,28 @@ Enter/`=`/`-` (Service Select/Plus/Minus) arrive through padsw; ids come from
 `/dump/tables/$PAD_GAME/switch_list.txt` by wire - (1,2) for ACTION, with a
 whole-name fallback (`ACTION BUTTON` / `LOCKDOWN BUTTON`, case-insensitive,
 an `(OPTIONAL)` suffix tolerated) for a list that puts it elsewhere - or the
-platform ids (36 START / 25-28 service) before a title has a table (then the
-flippers are unknown - use `-`/`=`/`1`). A list that names no lockdown button
-at all (beatles is the one such list here) leaves ACTION unset rather than
-letting some other switch stand in for it; Space then does nothing, `1` still
-boots, and the footer says `START: boot`.
+platform ids (36 START / 25-28 service) before a title has a table. A list that
+names no lockdown button at all (beatles is the one such list here) leaves
+ACTION unset rather than letting some other switch stand in for it; Space then
+does nothing, `1` still boots, and the footer says `START: boot`.
+
+**All eight buttons are ALSO read by name**, with no id and no table
+(2026-09-19). The ids above come from a list that is built out of the game's
+own run, about a minute into a title's FIRST start - and this menu runs before
+that game, so on a first run it had no id for the flippers or ACTION, and
+padglhost (which will not publish a playfield key on another title's ids)
+had nothing to send for the arrows: not one `key:` line in 30 s, then the
+countdown booted the default image (beatles on a fresh runtime). `padsw.h`'s
+`cab[]` / `scr_cab[]` (offsets 1068 / 1076, one byte per button in `KEY_OF()`
+order: left right start action select plus minus back) hold them by name;
+padglhost writes `cab[]` from the keyboard, the virtual playfield's helper
+(`swkeys.py`, `cab <name> <0|1>` lines) writes `scr_cab[]`, and each byte is
+ORed into the sample of the key it names. They change what can FIRE and nothing
+about what the footer PROMISES (`input_has` still follows the list), and the
+game never reads them, so a key mapped here cannot press a switch on a title
+that owns that index. One honesty rule: a list that RESOLVED and has no
+lockdown row (beatles) still says this machine has no ACTION button, so Space
+does not confirm there either; with no list yet it may fire.
 
 **ACTION gets no platform id at all**, which is why 34 is missing from that
 list. Swept over the 31 cached lists on this disk, id 34 is the lockdown-bar
@@ -736,6 +753,8 @@ trade are not the same size:
   flippers are unresolved there by definition - leaving nothing to do but wait
   out the countdown.
 
+(That trade is from before the by-name bytes above: the keyboard's confirm no
+longer depends on 36, which stays for anything that drives the menu by id.)
 Disarming one title by half-breaking thirty is the worse machine, so 36 stays
 and the window is closed from the other end: with no table the list is
 re-checked every 250 ms rather than every 2 s, and every title David runs
@@ -837,6 +856,14 @@ down.
    `key:` at all, sit out its whole 4 s countdown and choose 0. The **positive
    control** is the same edge on id 36, START's platform id, which must still
    confirm - without it a run that simply ignored the padsw file would pass.
+
+   Then **the buttons by name**, every run with the ids region left at zero so
+   a pass cannot come from the id path: with NO table, RIGHT then ACTION
+   through `cab[]` choose image 1; LEFT then SELECT through `scr_cab[]` choose
+   image 1 (the wrap); START through `scr_cab[]` chooses 0. On a RESOLVED list
+   with no lockdown row, ACTION by name must NOT confirm (the countdown chooses
+   1 after RIGHT moved it - RIGHT is the control that the bytes reach that list)
+   and START by name still does; on a list WITH a lockdown row ACTION confirms.
 
    Then **the footer**: `--snapshot` against a list with a lockdown row, one
    without, no list at all, and `--input hw`, reading the footer the log line

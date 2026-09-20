@@ -20,6 +20,24 @@
  * substring would also hit the 'TOURNAMENT START BUTTON' that 26 of those
  * lists carry, so nothing here matches loosely.
  *
+ * THE SAME BUTTONS ARE ALSO READ BY NAME, and that is what makes the menu
+ * usable on a title's FIRST run. Everything above needs the title's switch
+ * list, which is built from the game's own run - and this menu runs BEFORE that
+ * game does, so on a first start it had no id for the flippers or for Action
+ * and padglhost had nothing to publish for them (2026-09-19, beatles on a fresh
+ * runtime: not one key in the menu's 30 s, the countdown booted the default).
+ * padsw.h's cab[] / scr_cab[] hold the menu's eight buttons in a fixed order
+ * with no id at all - padglhost writes the first from the keyboard, the
+ * virtual playfield's helper the second - and each is ORed into the sample of
+ * the key it names. They change what can FIRE and nothing about what the footer
+ * PROMISES (input_has still follows the list), and nothing in the game path
+ * reads them.
+ *
+ * ONE HONESTY RULE, for Action alone: a list that RESOLVED and has no lockdown
+ * row (beatles) says this machine has no Action button, so the Space key does
+ * not confirm there either - the same answer the hardware gives. With no list
+ * yet there is nothing to say otherwise, and it may fire.
+ *
  * The file is re-read every ~20 ms (a pread, so a re-created file is
  * harmless); it may not exist yet, so opening is retried every 500 ms. The
  * switch list is re-read whenever its mtime moves, for the reason padglhost
@@ -41,6 +59,11 @@
 #define OFF_GEN      4
 #define OFF_HELD     8
 #define OFF_SCR_HELD 280
+/* padsw.h's cab[] and scr_cab[], one byte per menu key in KEY_OF() order: after
+ * spin_gen (808) and spin[256] (812). padsw.py's OFF_CAB/OFF_SCR_CAB are the
+ * scripts' copy; a test holds all three to the header. */
+#define OFF_CAB      1068
+#define OFF_SCR_CAB  1076
 #define POLL_MS      20
 #define OPEN_MS      500
 #define TABLE_MS     2000        /* re-stat an already-parsed list this often */
@@ -260,10 +283,19 @@ static int table_moved(struct ps *p)
     return st.st_mtim.tv_sec != p->mtim.tv_sec || st.st_mtim.tv_nsec != p->mtim.tv_nsec;
 }
 
+_Static_assert(KEY_COUNT == 8, "padsw.h's cab[] holds one byte per menu key");
+
+/* May the by-name byte of key k fire? Every key yes - except Action once a
+ * list has RESOLVED and does not carry the button (see the header). */
+static int cab_may_fire(const struct ps *p, int k)
+{
+    return k != KEY_OF(EV_ACTION) || !p->have_table || p->id[k] >= 0;
+}
+
 static void ps_poll(struct input *in, long long now)
 {
     struct ps *p = (struct ps *)in;
-    int k;
+    int k, have_cab;
 
     if (now >= p->next_table) {
         p->next_table = now + (p->have_table ? TABLE_MS : TABLE_WAIT_MS);
@@ -311,11 +343,17 @@ static void ps_poll(struct input *in, long long now)
             return;
         }
         p->magic_logged = 0;
+        /* a block from before the by-name region simply has none */
+        have_cab = n >= OFF_SCR_CAB + KEY_COUNT;
     }
     for (k = 0; k < KEY_COUNT; k++) {
-        int id = p->id[k];
-        if (id < 0) continue;
-        input_sample(in, k, p->buf[OFF_HELD + id] || p->buf[OFF_SCR_HELD + id]);
+        int id = p->id[k], down = 0;
+        if (id >= 0) down = p->buf[OFF_HELD + id] || p->buf[OFF_SCR_HELD + id];
+        if (have_cab && cab_may_fire(p, k))
+            down = down || p->buf[OFF_CAB + k] || p->buf[OFF_SCR_CAB + k];
+        /* a key with neither an id nor a by-name byte has nothing to sample */
+        if (id < 0 && !(have_cab && cab_may_fire(p, k))) continue;
+        input_sample(in, k, down);
     }
 }
 

@@ -2317,10 +2317,20 @@ class SwitchPipe:
 
     def set(self, sw, val):
         """True when the edge went down the pipe; False = use the fallback."""
+        return self._send(b"%d %d\n" % (sw, val))
+
+    def set_cab(self, name, val):
+        """Hold or release one of the boot menu's buttons BY NAME (swkeys.py's
+        `cab` line; padsw.h's cab[]). There is no spawn fallback: a name has
+        no per-action helper, and the caller has nothing better to do with a
+        press the pipe could not carry than drop it."""
+        return self._send(b"cab %s %d\n" % (name.encode("ascii"), val))
+
+    def _send(self, line):
         if not self._ensure():
             return False
         try:
-            self._p.stdin.write(b"%d %d\n" % (sw, val))
+            self._p.stdin.write(line)
             self._p.stdin.flush()
             return True
         except Exception:                                   # noqa: BLE001
@@ -2370,6 +2380,22 @@ class KeyInput:
             for k in r["keys"]:
                 for sym in keybinds.tk_keysyms(k):
                     self.map[sym] = r
+        # ★ THE BOOT MENU'S BUTTONS RIDE ALONG BY NAME, whatever rows there
+        # are. A title's first run has no switch list, so the rows above are
+        # only the platform ones (no flippers, no Action) - or none at all, in
+        # the "WAITING for tables" state - and the boot menu of a multi-image
+        # card runs before the game that would build the list: David, 2026-09-19,
+        # "the first time loading a multi image won't let me use arrow keys (or
+        # select) since the virtual playfield isn't initialized yet". A key that
+        # already has a row keeps it (a COPY carries the button: rows are shared
+        # between the keysyms of one key); one that has none gets a row that
+        # presses no switch, only the button.
+        for sym, button in keybinds.cabinet_keysyms().items():
+            row = dict(self.map.get(sym) or dict(
+                keys=[sym], label=button, ids=[], na=False, toggle=False,
+                cabinet=True))
+            row["cab"] = button
+            self.map[sym] = row
         self.down = set()
         self._pending = {}             # keysym -> after id, releases in flight
         # Pre-warm the helper: spawned lazily, the FIRST press of a session
@@ -2409,7 +2435,10 @@ class KeyInput:
             for s in r["ids"]:
                 self._set(s, target)
         else:
-            self._set(r["ids"][0], 1)
+            if r["ids"]:
+                self._set(r["ids"][0], 1)
+            if r.get("cab"):
+                self.pipe.set_cab(r["cab"], 1)
 
     def _on_up(self, ev):
         r = self._row(ev)
@@ -2424,7 +2453,10 @@ class KeyInput:
     def _commit_up(self, keysym, r):
         self._pending.pop(keysym, None)
         self.down.discard(keysym)
-        self._set(r["ids"][0], 0)
+        if r["ids"]:
+            self._set(r["ids"][0], 0)
+        if r.get("cab"):
+            self.pipe.set_cab(r["cab"], 0)
 
     def _set(self, sw, val):
         if not self.pipe.set(sw, val):
@@ -2432,6 +2464,36 @@ class KeyInput:
 
     def close(self):
         self.pipe.close()
+
+    def detach(self):
+        """Stop listening altogether: the window's key bindings go, releases in
+        flight are cancelled, and closing the pipe is the EOF that lets the
+        helper release whatever is still held. For a KeyInput that is being
+        REPLACED (the "WAITING for tables" one, when the real view arrives);
+        the window closing needs only close()."""
+        for seq in ("<KeyPress>", "<KeyRelease>"):
+            try:
+                self.view.root.unbind(seq)
+            except Exception:                               # noqa: BLE001
+                pass
+        for after_id in self._pending.values():
+            try:
+                self.view.root.after_cancel(after_id)
+            except Exception:                               # noqa: BLE001
+                pass
+        self._pending.clear()
+        self.down.clear()
+        self.close()
+
+
+class _RootOnly:
+    """The one thing a KeyInput needs of a view that does not exist yet: the
+    window whose keys it takes. Every row-driven path (toggles, the spawn
+    fallback) reads other attributes, and a KeyInput built with no rows has no
+    such row to reach them."""
+
+    def __init__(self, root):
+        self.root = root
 
 
 def show_action_row(view, visible):
@@ -5634,6 +5696,7 @@ def main():
     # real answers; which one applies is a property of the game, not of this
     # window. See load_switch_list() for why most titles are the second case.
     view = None
+    waiting_keys = None         # the keyboard of the "WAITING for tables" state
     # ARTWORK IF THERE IS ARTWORK AND ANYTHING TO DRAW ON IT.
     #
     # THIS USED TO ALSO REQUIRE SWITCH POSITIONS, and that is a different
@@ -5666,9 +5729,22 @@ def main():
                       "The switch list only exists once the game has" '\n'
                       "published its table, a few seconds into a run, so" '\n'
                       "the first start of a title lands here first. This" '\n'
-                      "window now picks them up by itself when they arrive.")
+                      "window now picks them up by itself when they arrive." '\n\n'
+                      "A boot menu on this card already has the keyboard," '\n'
+                      "here or in the game window: arrows choose, 1 or" '\n'
+                      "Space boots.")
                 % (GAME, TDIR, gameinfo.game_dir(GAME)))
             waiting.pack()
+
+            # ★ THE BOOT MENU RUNS BEFORE THE GAME, so on a multi-image card's
+            # first run THIS is the window on screen while the menu is - and it
+            # had no keyboard at all: every key handler here hangs off a view,
+            # and a view needs the tables. David, 2026-09-19: "the first time
+            # loading a multi image won't let me use arrow keys (or select)
+            # since the virtual playfield isn't initialized yet". The menu's
+            # buttons go by NAME (padsw.h cab[]), which needs no table; the
+            # real view's own KeyInput replaces this one when the tables land.
+            waiting_keys = KeyInput(_RootOnly(root), [])
 
             # ★ THE TABLES LAND *DURING* THIS RUN, AND THIS WINDOW USED TO MISS
             # THEM FOR GOOD.
@@ -5690,7 +5766,12 @@ def main():
             # run, and the swap is the same two branches as the construction
             # above, so a title that has artwork still gets the artwork view.
             def _swap_in(fresh):
-                nonlocal view
+                nonlocal view, waiting_keys
+                # the placeholder's keyboard goes first: the view attaches its
+                # own KeyInput (with the title's rows AND the same buttons by
+                # name) as soon as padbinds has rows, and two would both act
+                waiting_keys.detach()
+                waiting_keys = None
                 waiting.destroy()
                 if layout_is_usable():
                     view = Field(root)
@@ -5717,6 +5798,8 @@ def main():
             view.drv.release_all()
             if getattr(view, "keys", None) is not None:
                 view.keys.close()
+        if waiting_keys is not None:
+            waiting_keys.close()
         save_state(root)
         root.destroy()
 

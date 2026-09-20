@@ -919,7 +919,7 @@ list of confident conclusions that turned out to be wrong — lives there.
 | EGL, either backend | `eglshim.c` |
 | Host decoders / players | `padvidhost.py` (video), `playaudio.sh` (audio) |
 | Virtual playfield (Windows) | `playfield.py`, `coilact.py`, `plunge.py`, `swpoke.py` |
-| Switch block layout | `padsw.h` (C), `padsw.py` (the scripts) — three regions, one writer each |
+| Switch block layout | `padsw.h` (C), `padsw.py` (the scripts) — three regions, one writer each, plus the boot menu's cabinet buttons by name (`cab[]`/`scr_cab[]`, no title table needed) |
 | Device maps and decoders | `devicexy.py`, `ledio.py`, `leddecode.py`, `coildecode.py`, `padled.h` |
 | Where anything is | `padpath.py` / `padpath.sh` (paths), `gameinfo.py` (titles), `parts.py` (partitions) |
 | Per-title tables | `mktables.py`, built from the card — see above |

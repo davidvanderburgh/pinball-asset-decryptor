@@ -64,7 +64,15 @@ OFF_SCR_SRC = OFF_KBD_SRC + 4        # 800  who WE are         (WE write)
 OFF_GUEST_T0 = OFF_SCR_SRC + 4       # 804  the guest's clock  (the shim writes)
 OFF_SPIN_GEN = OFF_GUEST_T0 + 4      # 808  rip generation     (swspin.py writes)
 OFF_SPIN = OFF_SPIN_GEN + 4          # 812  rip array          (swspin.py writes)
-SIZE = OFF_SPIN + MAX_ID             # 1068, in a 4096-byte block
+
+#: THE CABINET BUTTONS BY NAME, for the boot menu before a title has a switch
+#: list (padsw.h says why). Same order as padsw.h's PADSW_CAB_* and the menu's
+#: own key order; one byte each, no generation - the menu polls them.
+CAB_NAMES = ("left", "right", "start", "action", "select", "plus", "minus", "back")
+CAB_N = len(CAB_NAMES)
+OFF_CAB = OFF_SPIN + MAX_ID          # 1068 keyboard's cab[]   (padglhost writes)
+OFF_SCR_CAB = OFF_CAB + CAB_N        # 1076 scripts' scr_cab[] (WE write)
+SIZE = OFF_SCR_CAB + CAB_N           # 1084, in a 4096-byte block
 
 
 def open_block(path=PATH):
@@ -164,6 +172,16 @@ def take(m, ids):
 def spinning(m, sw):
     """Is `sw` being ripped right now (item 26)?"""
     return m[OFF_SPIN + sw]
+
+
+def set_cab(m, name, val):
+    """Hold or release one of the boot menu's buttons BY NAME (item: first-run
+    keys). Its own byte in the scripts' half of the cabinet region - no take(),
+    no generation: the only reader is the menu, which polls it, and nothing
+    merges it, so there is no edge to lose and no stuck level to inherit
+    except our own, which the callers release on EOF."""
+    m[OFF_SCR_CAB + CAB_NAMES.index(name)] = 1 if val else 0
+    m.flush()
 
 
 def set_spin(m, sw, val):

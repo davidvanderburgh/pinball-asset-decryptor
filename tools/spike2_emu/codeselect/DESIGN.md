@@ -293,6 +293,17 @@ full CLI, the log lines and the test list). What it is:
     unset rather than aiming an id at some other switch (on beatles, the one
     list with no lockdown row, id 34 IS the START button).
 
+    ALL EIGHT BUTTONS ARE ALSO READ BY NAME (2026-09-19), table-free: padsw.h's
+    `cab[]` (padglhost, from the keyboard) and `scr_cab[]` (swkeys.py, for the
+    virtual playfield's keyboard), offsets 1068 / 1076, one byte per button in
+    `KEY_OF()` order, ORed into each key's sample. The menu runs BEFORE the game
+    whose run builds the title's list, so on a first start it had no id for the
+    flippers or ACTION and padglhost held the arrows back (item 49); the log
+    said it - no `key:` in 30 s, then `countdown expired`. The bytes change
+    what can FIRE, never what the footer promises (`present[]` still follows
+    the list), and nothing in the game path reads them. Honesty rule, ACTION
+    only: a RESOLVED list without a lockdown row still means "no such button".
+
     ACTION has NO platform id, deliberately. Across the 31 cached lists id 34
     is `COIN DOOR INTERLOCK` (node 0 bit 23) on seven — aerosmith_le,
     avengers_infinity_le, foo_fighters_le, guardians_le, iron_maiden_le,

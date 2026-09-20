@@ -532,6 +532,106 @@ def main():
         raise SystemExit("padsw_test: FAIL (footer) the live table-less run drew %r" %
                          (re.search(r'footer "([^"]*)"', o + e),))
 
+    # --- THE BUTTONS BY NAME: a title's FIRST run has no switch list ---
+    # The menu of a multi-image card runs before the game whose run would build
+    # the list, so on a title's first start every button that needs an id was
+    # dead: the flippers and Action never had a platform id, and padglhost holds
+    # a playfield key back until the list resolves (2026-09-19, beatles on a
+    # fresh runtime: not one `key:` line in the menu's 30 s, the countdown
+    # booted the default image). padsw.h's cab[] / scr_cab[] hold the menu's
+    # eight buttons BY NAME - padglhost writes the first from the keyboard, the
+    # virtual playfield's helper the second - and the menu reads both.
+    #
+    # Each run below has NO switch list unless it says otherwise, and presses
+    # only through the by-name bytes: the ids region stays zero throughout, so a
+    # pass cannot come from the id path.
+    OFF_CAB, OFF_SCR_CAB = 1068, 1076
+    CAB_IDX = {"left": 0, "right": 1, "start": 2, "action": 3, "select": 4,
+               "plus": 5, "minus": 6, "back": 7}
+    no_list = os.path.join(t, "no_such_table_dir", "switch_list.txt")
+
+    def set_cab(path, button, value, off):
+        with open(path, "r+b") as f:
+            f.seek(off + CAB_IDX[button])
+            f.write(bytes([value]))
+
+    def cab_run(name, table, presses, timeout="4"):
+        for p in (choice, last):
+            if os.path.exists(p):
+                os.unlink(p)
+        sw = os.path.join(t, name + ".padsw")
+        with open(sw, "wb") as f:
+            f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
+        p = subprocess.Popen([qemu, "-L", root, binp, "--headless",
+                              os.path.join(t, name + ".ppm"), "--conf", conf,
+                              "--input", "padsw", "--padsw", sw, "--tables", table,
+                              "--timeout", timeout, "--out", choice, "--last", last,
+                              "--log", os.path.join(t, name + ".log"), "--font", font,
+                              "--no-invert", "--media", media, "--audio", "none",
+                              "--default", "0"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        t0 = time.monotonic()
+        time.sleep(1.2)                       # past the first settled samples
+        for button, off in presses:
+            set_cab(sw, button, 1, off)
+            time.sleep(0.15)
+            set_cab(sw, button, 0, off)
+            time.sleep(0.5)
+        try:
+            o, e = p.communicate(timeout=25)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            o, e = p.communicate()
+            raise SystemExit("padsw_test: FAIL (%s) codeselect did not exit\n%s\n%s" % (name, o, e))
+        return p.returncode, o, e, time.monotonic() - t0
+
+    def cab_expect(name, table, presses, keys, chose, expired=False, absent=()):
+        rc, o, e, dt = cab_run(name, table, presses)
+        if table == no_list and "no switch table" not in e:
+            raise SystemExit("padsw_test: FAIL (%s) the run found a table after all:\n%s" % (name, e))
+        for k in keys:
+            if "[select] key: %s" % k not in o:
+                raise SystemExit("padsw_test: FAIL (%s) no 'key: %s' - a by-name press did not "
+                                 "reach the menu:\n%s\n%s" % (name, k, o, e))
+        for k in absent:
+            if "[select] key: %s" % k in o:
+                raise SystemExit("padsw_test: FAIL (%s) 'key: %s' fired and must not have:\n%s"
+                                 % (name, k, o))
+        if rc != 0 or "[select] chose %d" % chose not in o:
+            raise SystemExit("padsw_test: FAIL (%s) exit %d, expected 'chose %d':\n%s\n%s"
+                             % (name, rc, chose, o, e))
+        if ("countdown expired" in e) != expired:
+            raise SystemExit("padsw_test: FAIL (%s) countdown %s, expected %s:\n%s"
+                             % (name, "expired" if not expired else "did not expire",
+                                "to expire" if expired else "NOT to (the keys should have chosen)", e))
+        return dt
+
+    dt = cab_expect("cab_kbd", no_list, [("right", OFF_CAB), ("action", OFF_CAB)],
+                    ["right", "action"], 1)
+    print("padsw_test: OK (no table: RIGHT then ACTION by name choose image 1, %.1f s)" % dt)
+    dt = cab_expect("cab_scr", no_list, [("left", OFF_SCR_CAB), ("select", OFF_SCR_CAB)],
+                    ["left", "select"], 1)
+    print("padsw_test: OK (no table: LEFT then SELECT through the SCRIPTS' region choose "
+          "image 1 - the wrap - %.1f s)" % dt)
+    dt = cab_expect("cab_start", no_list, [("start", OFF_SCR_CAB)], ["start"], 0)
+    print("padsw_test: OK (no table: START through the scripts' region chooses 0, %.1f s)" % dt)
+
+    # A list that RESOLVED and has no lockdown row says this machine has no
+    # Action button, so Space does not confirm there either (the hardware's own
+    # answer; beatles is that machine). The positive controls keep this from
+    # passing vacuously: RIGHT still moves on the same list, and START still
+    # confirms on it.
+    noaction = os.path.join(t, "noaction.txt")
+    dt = cab_expect("cab_noaction", noaction, [("right", OFF_CAB), ("action", OFF_CAB)],
+                    ["right"], 1, expired=True, absent=["action"])
+    print("padsw_test: OK (a resolved list with no lockdown row: ACTION by name does not "
+          "confirm, the countdown chose 1 after %.1f s)" % dt)
+    dt = cab_expect("cab_noaction_start", noaction, [("start", OFF_CAB)], ["start"], 0)
+    print("padsw_test: OK (control: START by name still confirms on that list, %.1f s)" % dt)
+    # ...and a list that DOES carry the button lets it fire
+    dt = cab_expect("cab_hasaction", tables, [("action", OFF_CAB)], ["action"], 0)
+    print("padsw_test: OK (a list with a lockdown row: ACTION by name confirms, %.1f s)" % dt)
+
     # --- a switch list that CHANGES on disk is re-read ---
     # The list used to be latched on the first successful parse and never looked
     # at again, which loses the race padglhost already handles: mktables repairs

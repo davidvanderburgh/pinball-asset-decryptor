@@ -46,6 +46,19 @@
 #define PADSW_MAX_ID  256
 #define PADSW_BYTES   4096
 
+/* The boot menu's buttons, by NAME - see cab[] at the end of the block. The
+ * order is the menu's own (codeselect's KEY_OF(EV_*)) and padsw.py's CAB_NAMES;
+ * a test pins all three. */
+#define PADSW_CAB_N        8
+#define PADSW_CAB_LEFT     0
+#define PADSW_CAB_RIGHT    1
+#define PADSW_CAB_START    2
+#define PADSW_CAB_ACTION   3
+#define PADSW_CAB_SELECT   4
+#define PADSW_CAB_PLUS     5
+#define PADSW_CAB_MINUS    6
+#define PADSW_CAB_BACK     7
+
 struct padsw_shm {
     unsigned magic;
     unsigned gen;                        /* KEYBOARD generation; padglhost only */
@@ -157,6 +170,33 @@ struct padsw_shm {
      * That is the stuck-switch property item 24 fought for, inherited free. */
     unsigned spin_gen;                   /* swspin.py bumps after every change */
     unsigned char spin[PADSW_MAX_ID];    /* 1 = rip this switch id             */
+
+    /* ---- THE CABINET BUTTONS BY NAME: what the boot menu reads BEFORE a title
+     * has a switch list.
+     *
+     * Everything above is indexed by the TITLE'S OWN switch ids, and a title's
+     * ids come from a list that is built from the game's own run - about a
+     * minute into the first start of a title. The boot menu of a multi-image
+     * card runs BEFORE that game does, so on a title's first run it had no id
+     * for the flippers or for Action, and padglhost (which refuses to publish a
+     * playfield key on another title's ids, item 49) had nothing to send: the
+     * arrow keys were dead until the menu had counted itself down and booted
+     * the default image (beatles, first run on a fresh runtime, 2026-09-19).
+     *
+     * The menu's eight buttons are the same eight WIRES on every title
+     * measured (node 8 bits 25/24 the flippers, node 1 bit 11 Start, bit 2
+     * Action, node 0 bits 8-11 the service cluster), so they need no id at
+     * all: they are held here BY NAME, in this fixed order, whatever the title
+     * or its table. Nothing in the game path reads them - the shim's merge and
+     * its [sw] log stay over held[]/scr_held[] only - so a key mapped here can
+     * never press a switch on the title that happens to own that index.
+     *
+     * TWO ARRAYS, ONE WRITER EACH, for the reason held[] and scr_held[] are
+     * two: padglhost rebuilds its own on every key event and would erase
+     * whatever the virtual playfield's keyboard had written beside it. The
+     * reader ORs them. */
+    unsigned char cab[PADSW_CAB_N];      /* KEYBOARD's; written only by padglhost */
+    unsigned char scr_cab[PADSW_CAB_N];  /* SCRIPTS' (the playfield's keyboard)   */
 };
 
 #endif

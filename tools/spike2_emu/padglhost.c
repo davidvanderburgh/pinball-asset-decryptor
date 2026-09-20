@@ -1735,6 +1735,72 @@ static void sw_publish(void)
     swshm->gen++;
 }
 
+/* ★ THE BOOT MENU'S BUTTONS, BY NAME - NOT THROUGH THE TITLE'S SWITCH LIST.
+ *
+ * A multi-image card runs its boot menu BEFORE the game, and on a title's
+ * first run the switch list does not exist yet: the list is built from the
+ * game's own run, about a minute in. Every key above goes through binds[], and
+ * binds[] publishes a playfield row only once the list resolves (item 49 - a
+ * flipper on Godzilla's compiled ids is a drop target on another title). So
+ * the flipper keys were held back exactly when the menu wanted them, and the
+ * menu, which had no id for them either, counted itself down and booted the
+ * default image (beatles on a fresh runtime, 2026-09-19: not one `key:` line in
+ * the menu's 30 s).
+ *
+ * These eight are the same wires on every title measured, so they need no id:
+ * each key sets a BYTE OF ITS OWN in padsw.h's cab[] and the menu reads that.
+ * Nothing in the game path reads cab[] (the shim's merge and its [sw] log run
+ * over held[] alone), so this cannot press a switch on any title, which is what
+ * lets it ignore the item-49 gate the playfield rows are under.
+ *
+ * INDEPENDENT OF binds[] ON PURPOSE: the same Left arrow is also a playfield
+ * row that the title's list rebuilds, and this must not care which state that
+ * row is in. The keys are the ones the compiled binds[] already gives the same
+ * buttons (Enter = Service Select, 1 = Start, Space = Action...) and
+ * keybinds.py's CABINET_KEYS is the playfield window's copy of this table - a
+ * test holds the two together. Two keys can be one button (Enter/KP Enter,
+ * Bksp/Esc), so the state is per KEY and the byte is the OR of its keys. */
+static const struct { unsigned long sym; int cab; } cab_keys[] = {
+    { 0xff51, PADSW_CAB_LEFT   },      /* Left arrow  */
+    { 0xff53, PADSW_CAB_RIGHT  },      /* Right arrow */
+    { 0x0031, PADSW_CAB_START  },      /* 1           */
+    { 0x0020, PADSW_CAB_ACTION },      /* Space       */
+    { 0xff0d, PADSW_CAB_SELECT },      /* Enter       */
+    { 0xff8d, PADSW_CAB_SELECT },      /* KP Enter    */
+    { 0x003d, PADSW_CAB_PLUS   },      /* =           */
+    { 0x002d, PADSW_CAB_MINUS  },      /* -           */
+    { 0xff08, PADSW_CAB_BACK   },      /* Backspace   */
+    { 0xff1b, PADSW_CAB_BACK   },      /* Esc         */
+};
+#define NCAB_KEYS ((int)(sizeof cab_keys / sizeof cab_keys[0]))
+static unsigned char cab_key_down[NCAB_KEYS];
+
+/* Recompute cab[] from the key state and publish it. Rebuilt rather than
+ * patched, for sw_publish()'s reason: two keys on one button cannot leave it
+ * stuck when only one is released. */
+static void cab_publish(void)
+{
+    unsigned char h[PADSW_CAB_N];
+    int i;
+    if (!swshm) return;
+    memset(h, 0, sizeof h);
+    for (i = 0; i < NCAB_KEYS; i++)
+        if (cab_key_down[i]) h[cab_keys[i].cab] = 1;
+    memcpy((void *)swshm->cab, h, sizeof h);
+}
+
+/* One key edge. Called for EVERY key event, before the binds[] lookup. */
+static void cab_key(unsigned long sym, int press)
+{
+    int i, changed = 0;
+    for (i = 0; i < NCAB_KEYS; i++)
+        if (cab_keys[i].sym == sym && cab_key_down[i] != (unsigned char)press) {
+            cab_key_down[i] = (unsigned char)press;
+            changed = 1;
+        }
+    if (changed) cab_publish();
+}
+
 /* [key] - THE FIRST OF THE THREE TIMESTAMPS AN INPUT EDGE HAS.
  *
  * REMAINING item 17 (a keystroke sometimes does not register) asked for three
@@ -1807,6 +1873,7 @@ static void sw_shm_open(void)
     if (swshm->magic != PADSW_MAGIC) memset(swshm, 0, PADSW_BYTES);
     else {
         memset((void *)swshm->held, 0, sizeof swshm->held);
+        memset((void *)swshm->cab, 0, sizeof swshm->cab);   /* ours, like held[] */
         swshm->tap_gen = swshm->tap_id = swshm->tap_reads = 0;
     }
     swshm->magic = PADSW_MAGIC;
@@ -2494,7 +2561,14 @@ static void win_pump(void)
                     break;
                 }
             }
-            b = bind_for(XLookupKeysym(&ev, 0));
+            {
+                unsigned long sym = XLookupKeysym(&ev, 0);
+                /* the boot menu's buttons first: they do not depend on the
+                 * title's table, and a key with no binds[] row must still
+                 * reach them (the `break` below) */
+                cab_key(sym, press);
+                b = bind_for(sym);
+            }
             if (b < 0) break;
             if (binds[b].toggle) {
                 if (press) { key_latch[b] = !key_latch[b]; sw_publish(); key_log(b, press, t); }

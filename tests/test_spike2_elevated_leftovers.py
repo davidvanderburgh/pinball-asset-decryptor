@@ -122,6 +122,7 @@ def _give_back_run(home_owner, home="/home/ales", pad_home=None, args=""):
         "  *) echo 'stat: no such file' >&2; return 1 ;;",
         "esac; }",
         'chown() { echo "CHOWN $*"; }',
+        _padpath_func("pad_owner"),
         _padpath_func("pad_give_back"),
         "pad_give_back %s" % args,
         'echo "RC $?"',
@@ -142,7 +143,8 @@ def _padpath_func(name):
     i = src.index("\n%s() {" % name) + 1
     end = src.index("\n}\n", i) + 3
     body = src[i:end]
-    assert "local" in body, "%s no longer looks like a function" % name
+    assert body.startswith("%s() {" % name) and body.rstrip().endswith("}"), \
+        "%s no longer looks like a function" % name
     return body
 
 
@@ -181,6 +183,7 @@ def test_an_ordinary_run_hands_nothing_back():
         "id() { echo 1000; }",
         'stat() { echo ales; }',
         'chown() { echo "CHOWN $*"; }',
+        _padpath_func("pad_owner"),
         _padpath_func("pad_give_back"),
         'pad_give_back "/home/ales/card"', 'echo "RC $?"',
     ])
@@ -208,6 +211,73 @@ def test_no_arguments_is_not_a_chown_of_nothing():
     out = _give_back_run("ales", home="/root", pad_home="/home/ales", args="")
     assert "CHOWN" not in out, out
     assert "RC 0" in out, out
+
+
+def test_the_ownership_questions_go_through_one_portable_helper():
+    """`stat -c` is GNU-only and it burned v0.222.1 on the macOS runner.
+
+    A lint rather than a run because it covers the case no host can test: the
+    functions must not REGROW a direct `stat -c`, and the machine that would
+    notice is the one CI platform this suite cannot make behave like the others.
+
+    SCOPED TO THESE THREE ON PURPOSE, and the boundary is where a BSD host can
+    actually reach the code.  The rig is a Linux program - `watch.sh` and
+    `cardmount.sh` ask `stat -c` too, and they are right to: macOS runs the
+    emulator only inside a Linux container (`docker/padbox.sh`), because
+    qemu-user translates *Linux* syscalls.  What the macOS runner reaches is the
+    handful of padpath.sh functions that tests lift and execute on the HOST, and
+    these are they.  Widening this lint would flag correct code and teach the
+    next reader to defang it.
+    """
+    src = _src("padpath.sh")
+    for name in ("pad_give_back", "pad_can_write", "pad_stage"):
+        body = _padpath_func(name)
+        # CODE ONLY.  These functions carry paragraphs about `stat -c` being the
+        # thing not to use, and a lint that reads its own warning as the fault
+        # is a lint nobody can satisfy.
+        code = "\n".join(ln for ln in body.splitlines()
+                         if not ln.lstrip().startswith("#"))
+        assert "stat -c" not in code, (
+            "%s asks GNU stat directly; use pad_owner / pad_owner_ids, which "
+            "fall back to BSD's spelling:\n%s" % (name, body))
+    # ...and the helper really does ask both, in that order: GNU first, because
+    # that is the host the rig actually runs on.
+    owner = _padpath_func("pad_owner")
+    assert "stat -c %U" in owner and "stat -f %Su" in owner, owner
+    assert owner.index("stat -c %U") < owner.index("stat -f %Su"), owner
+    ids = _padpath_func("pad_owner_ids")
+    assert "stat -c '%u:%g'" in ids and "stat -f '%u:%g'" in ids, ids
+    # It must FAIL rather than print an empty line when neither answers: the
+    # empty string reading as an answer is the whole of what went wrong.
+    assert "|| o=\"\"" not in owner, \
+        "pad_owner must not swallow its own failure; its callers decide"
+    assert src.count("pad_owner()") == 1
+
+
+@pytest.mark.skipif(not BASH, reason="no bash")
+def test_the_hand_back_survives_a_bsd_stat_too():
+    """pad_give_back compares the owner with the string "root", so a BSD stat
+    left it empty there as well - and an empty owner means it hands nothing
+    back, which is silently the pre-PAD-182 behaviour again."""
+    script = "\n".join([
+        "set -u", "HOME=/root", "PAD_HOME=/home/ales",
+        "id() { echo 0; }",
+        # BSD: no -c, and -f is the format flag.
+        'stat() {',
+        '  if [ "${1:-}" = -c ]; then echo "illegal option" >&2; return 1; fi',
+        '  if [ "${1:-}" = -f ]; then echo ales; return 0; fi',
+        '  return 1',
+        '}',
+        'chown() { echo "CHOWN $*"; }',
+        _padpath_func("pad_owner"),
+        _padpath_func("pad_give_back"),
+        'pad_give_back "/home/ales/card"',
+        'echo "RC $?"',
+    ])
+    rc, out = _sh(script)
+    assert rc == 0, out
+    assert "CHOWN ales /home/ales/card" in out, \
+        "a BSD stat must not silently disable the hand-back:\n" + out
 
 
 def test_one_definition_of_the_hand_back_not_four():
@@ -279,7 +349,9 @@ def _can_write_case(paths, foreign_owner=None):
     `foreign_owner` makes `stat` and `id -un` answer for an account that is not
     us, which is the only way an unprivileged test can reach the branch about a
     root-owned leftover: creating one needs the root this suite does not have.
-    The write bit stays REAL either way - that is the half a stub cannot fake,
+    `foreign_owner="bsd"` is the opposite trick - a stat that behaves like BSD's
+    and refuses `-c` - which is how the macOS failure is reproduced anywhere.
+    The write bit stays REAL in every case, which is the half a stub cannot fake
     and the half the whole function turns on.
     """
     lines = [
@@ -289,10 +361,30 @@ def _can_write_case(paths, foreign_owner=None):
         'chmod 400 "$B/home/locked/stamp"',
         'chmod 500 "$B/home/shut"',
     ]
-    if foreign_owner:
+    if foreign_owner == "bsd":
+        # BSD stat, as macOS ships it: `-c` is not an option it has, so it
+        # prints usage to stderr and exits non-zero, and `-f <fmt>` is how the
+        # same question is spelled.  Everything else goes to the real binary, so
+        # the OWNER this reports is the true one.
+        lines += [
+            'stat() {',
+            '  if [ "${1:-}" = -c ]; then',
+            '    echo "stat: illegal option -- c" >&2; return 1',
+            '  fi',
+            '  if [ "${1:-}" = -f ] && [ "${2:-}" = "%Su" ]; then',
+            '    command stat -c %U "$3"; return',
+            '  fi',
+            '  command stat "$@"',
+            '}']
+    elif foreign_owner == "none":
+        # Neither form answers - the honest "no data" case the old fallback
+        # silently turned into "somebody else".
+        lines += ['stat() { return 1; }']
+    elif foreign_owner:
         lines += ['stat() { echo %s; }' % foreign_owner,
                   'id() { echo ales; }']
-    lines += [_padpath_func("pad_can_write"), 'PAD_HOME=$B/home']
+    lines += [_padpath_func("pad_owner"),
+              _padpath_func("pad_can_write"), 'PAD_HOME=$B/home']
     for p in paths:
         lines.append('if pad_can_write "$B/home/%s" probe; then '
                      'echo "OK %s"; else echo "REFUSED %s"; fi' % (p, p, p))
@@ -329,6 +421,45 @@ def test_an_existing_root_owned_file_is_refused_not_just_its_parent():
     assert "REFUSED locked/stamp" in out, out
     assert "locked/stamp belongs to root" in out, \
         "the FILE is the thing to name, not the directory holding it"
+
+
+@needs_modes
+def test_a_bsd_stat_still_reads_the_owner():
+    """v0.222.1 WAS YANKED FOR THIS, ~6 minutes after it went live.
+
+    `stat -c %U` is GNU coreutils; macOS ships BSD stat, which rejects `-c` and
+    spells it `stat -f %Su`.  The `2>/dev/null` and the `|| o=""` underneath it
+    turned that into an EMPTY OWNER - and an empty owner is not "no answer", it
+    is a different one: it fell to the "belongs to another account" branch and
+    blamed a file the user owns on an elevated run, with a `sudo chown` cure.
+    The exact wrong message this ticket had already removed once.
+
+    Linux and Windows CI were green.  The macOS runner was the only thing
+    running these functions on a BSD host, and `needs_modes` does not skip it.
+
+    So the BSD stat is SIMULATED here rather than waited for: this test fails on
+    every platform against the old code and passes on all of them against the
+    new, which is what the release tripwire could not do.
+    """
+    out = _can_write_case(["locked/stamp"], foreign_owner="bsd")
+    assert "REFUSED locked/stamp" in out, out
+    assert "is yours, but its mode forbids it" in out, \
+        "a BSD stat must still identify the owner:\n" + out
+    assert "ELEVATED" not in out, \
+        "an unreadable owner must not be reported as somebody else:\n" + out
+
+
+@needs_modes
+def test_an_owner_no_stat_can_read_gives_both_cures_not_the_wrong_one():
+    """The fallback's remaining honest case.  When neither stat answers, the
+    function has NO DATA about ownership - so it says that and offers both
+    cures, rather than building a confident sentence on nothing, which is the
+    whole shape of the fault above."""
+    out = _can_write_case(["locked/stamp"], foreign_owner="none")
+    assert "REFUSED locked/stamp" in out, out
+    assert "cannot read who owns it" in out, out
+    assert "chmod u+w" in out and "sudo chown -R" in out, out
+    assert "ELEVATED RUN MADE IT" not in out, out
 
 
 @needs_modes

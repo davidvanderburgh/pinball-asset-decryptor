@@ -105,6 +105,41 @@ TABLES=$PAD_TABLES
 : "${PAD_STAGE:=$PAD_HOME/emusrc}"
 export PAD_STAGE
 
+# ★ WHO OWNS A PATH, ON EITHER stat. ONE DEFINITION, BECAUSE `-c` IS GNU-ONLY.
+#
+# `stat -c %U` is GNU coreutils. BSD stat - which is what macOS ships - rejects
+# `-c` outright and spells the same question `stat -f %Su`. Every ownership
+# question in this file asked the GNU form directly, with `2>/dev/null` over the
+# usage message and a `|| o=""` fallback underneath.
+#
+# THAT COST A RELEASE (v0.222.1, yanked 2026-09-19, ~6 minutes live). The
+# fallback is what made it dangerous rather than merely broken: an EMPTY owner
+# is not "no answer", it is a DIFFERENT ANSWER. pad_can_write compares the owner
+# with this account, so on macOS every path came back unowned, took the "belongs
+# to another account" branch, and blamed a file the user owns on an elevated run
+# with a `sudo chown` cure - the exact wrong message this ticket had already
+# removed once. Linux and Windows CI were green; the macOS runner was the only
+# thing that ran these functions on a BSD host.
+#
+# IN PRODUCTION macOS ONLY EVER RUNS THE RIG INSIDE A LINUX CONTAINER
+# (docker/padbox.sh - qemu-user translates Linux syscalls, so there is no native
+# port to have), and that is exactly why this went unnoticed: the shell
+# functions are reachable on the host even though the emulator is not. A silent
+# wrong owner is a bug on any host that can reach them.
+#
+# PRINTS NOTHING AND RETURNS NON-ZERO when neither stat can answer, so a caller
+# can tell "no such file" from a name - which is the distinction the empty
+# string destroyed.
+pad_owner() {                     # <path>  -> the owning account's NAME
+    stat -c %U "$1" 2>/dev/null || stat -f %Su "$1" 2>/dev/null
+}
+
+#: The same question as numbers, for `chown -R owner:group`. Kept beside its
+#: twin so a future edit cannot convert one spelling and miss the other.
+pad_owner_ids() {                 # <path>  -> uid:gid
+    stat -c '%u:%g' "$1" 2>/dev/null || stat -f '%u:%g' "$1" 2>/dev/null
+}
+
 #: Make the staging directory usable BY THE CALLER, and say so plainly when it
 #: cannot be. Returns 1 rather than exiting: a caller decides whether staging
 #: is fatal for it (buildselect.sh cannot compile without it; the app's
@@ -113,7 +148,7 @@ pad_stage() {
     local owner=
     mkdir -p "$PAD_STAGE" 2>/dev/null
     if [ "$(id -u)" = 0 ]; then
-        owner=$(stat -c '%u:%g' "$PAD_HOME" 2>/dev/null)
+        owner=$(pad_owner_ids "$PAD_HOME")
         # Only when the home belongs to a human: chowning /root to 0:0 is a
         # no-op with a confusing recursive walk attached.
         case "$owner" in
@@ -170,7 +205,7 @@ pad_give_back() {                 # [-R] <path>...
     # build.sh AFTER a successful compile, and _pad_build would report the build
     # as FAILED. The hand-back is the last line of three build scripts; it must
     # not be able to fail one.
-    o=$(stat -c %U "$PAD_HOME" 2>/dev/null) || o=""
+    o=$(pad_owner "$PAD_HOME") || o=""
     # Only when the home belongs to a human, for pad_stage's reason: chowning
     # root's own files to root is a no-op with a recursive walk attached.
     if [ -n "$o" ] && [ "$o" != root ]; then
@@ -204,19 +239,36 @@ pad_can_write() {                 # <path> [<log-tag>]
         t=$(dirname "$t")
     done
     [ -w "$t" ] && return 0
-    o=$(stat -c %U "$t" 2>/dev/null) || o=""
+    # pad_owner, NOT `stat -c` - BSD stat rejects `-c`, and the empty string the
+    # old fallback left behind is not "no answer", it is the WRONG answer: it
+    # falls to the elevation branch below and blames a file this account owns.
+    # That is what burned v0.222.1 on the macOS runner (see pad_owner).
+    o=$(pad_owner "$t") || o=""
     me=$(id -un 2>/dev/null || id -u)
     # OURS AND STILL REFUSED IS A MODE, NOT AN OWNER, and the two need
     # different cures. Measured while writing this: the elevation paragraph
     # fired on a directory the running account owned, and "belongs to david and
     # this run is david" followed by "an elevated run made it" is a sentence
     # that sends the reader looking for a sudo they never typed.
-    if [ -n "$o" ] && [ "$o" = "$me" ]; then
+    #
+    # AND AN OWNER THIS SHELL COULD NOT READ IS NOT SOMEBODY ELSE. When neither
+    # stat answers, say so and give BOTH cures rather than picking the wrong
+    # one - the whole fault above was a confident sentence built on no data.
+    if [ -z "$o" ]; then
+        echo "[$tag] cannot write $p: $t refuses this account ($me), and this" >&2
+        echo "[$tag] shell cannot read who owns it." >&2
+        echo "[$tag] If it is yours:      chmod u+w $t" >&2
+        echo "[$tag] If root made it:     sudo chown -R $me $t" >&2
+        return 1
+    fi
+    if [ "$o" = "$me" ]; then
         echo "[$tag] cannot write $p: $t is yours, but its mode forbids it." >&2
         echo "[$tag] Allow it with:  chmod u+w $t" >&2
         return 1
     fi
-    echo "[$tag] cannot write $p: $t belongs to ${o:-another account} and this run is $me." >&2
+    # `$o` plainly, not `${o:-another account}`: the empty case has its own
+    # branch above now, and a default here would hide the next one that appears.
+    echo "[$tag] cannot write $p: $t belongs to $o and this run is $me." >&2
     echo "[$tag] AN ELEVATED RUN MADE IT - either 'sudo' or one of the app's own" >&2
     echo "[$tag] root steps - and an ordinary run cannot replace what root left." >&2
     echo "[$tag] Hand it back, once:  sudo chown -R $me $t" >&2

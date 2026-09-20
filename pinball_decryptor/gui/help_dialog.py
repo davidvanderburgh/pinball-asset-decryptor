@@ -1981,10 +1981,11 @@ HELP_CONTENT = {
          "which is why a confirm sound you set can sound as though it "
          "never took. THE TWO CONFIRM BOXES NAME EACH OTHER: they are "
          "one setting, an image's falling back to the menu's, so Edit "
-         "image says what menu is at the moment instead of only the "
-         "word, and Menu settings names the images that carry a confirm "
-         "sound of their own and so will never play the one in front of "
-         "you."),
+         "image carries a line under the box naming the sound that image "
+         "will actually play - the same name the list's Confirm column "
+         "shows for that row, bracketed there when it is the menu's - "
+         "and Menu settings names the images that carry a confirm sound "
+         "of their own and so will never play the one in front of you."),
         ("Using one sound on every image",
          "Every sound row also LISTS the sound files this menu already "
          "uses, under its own words. Browse a WAV in once - for the "

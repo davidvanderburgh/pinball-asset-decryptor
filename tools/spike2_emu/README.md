@@ -1136,6 +1136,45 @@ the only way to exercise them from a Windows machine. It is how the Linux path
 was tested; what it cannot show is the playfield window itself, because the
 distro that needs the workaround is by definition the one with no Tk.
 
+**Two things were still WSL-only while pretending to be universal**, and both
+reached a user on Ubuntu 26.04 (PAD-182). `GALLIUM_DRIVER=d3d12` was exported on
+every run — that driver needs `libd3d12core.so` out of `/usr/lib/wsl/lib`, which
+no real machine has, so the GPU attempt could not start, every run took the
+software retry, and the log said *the renderer died on startup* about a box whose
+own driver was the right answer and was never asked. And the session-age line
+said `WSL session up 1h 50m` on a machine with no WSL in it, then prescribed
+`wsl --shutdown` for a WSLg audio hop that does not exist there. Both are fenced
+by `IS_WSL` now; off WSL, Mesa's own choice of driver **is** the answer.
+
+### Never run the app with `sudo`, and the rig now says so
+
+Nothing the emulator does needs root on a Linux desktop: the card mount is
+`fuse2fs`, the chroot is `unshare -r`, and `rootfs.sh` extracts with `debugfs`.
+What `sudo` does instead is break the run in four places at once, all of them
+measured from one reporter's log (PAD-182):
+
+| | |
+|---|---|
+| `$HOME` becomes `/root` | every log, and the renderer binary, land in a 0700 directory — and the **helpers are correctly dropped back to the desktop user**, who cannot read it: `env: '/root/padglhost': Permission denied` |
+| the AppImage mounts itself as root | squashfuse locks its own mount to the mounting account, so `$RIG` — the audio player, the video host, every helper script — is invisible to that same user |
+| root writes into the human's home | `~/local`, `~/card`, `~/cardcache` and the build stamps come out root-owned, and **every ordinary run after it fails**, which is the part that outlives the `sudo` |
+| the log blames the GPU | both renderer attempts die on a permission, so the run reports *the software renderer died too, so this is not the GPU* — true, and the wrong half of the machine |
+
+Three fixes, and the last one is the one that matters for a machine that has
+already been through it:
+
+- **`$PAD_HOME`, never `$HOME`**, for every path the run builds — the rule
+  `padpath.sh`'s header has carried since 2026-08-11, now applied to the writes
+  as well as the reads. `watch.sh` alone had twenty-two of them.
+- **`pad_give_back`** is the one definition of handing root's output back to the
+  human. There were three copies and two asked `stat -c %U "$HOME"`, which under
+  `sudo` is `/root` — so they chowned **nothing** on exactly the runs they exist
+  for.
+- **`pad_can_write`** gets a poisoned machine back. Every leftover used to
+  surface as a bare `Permission denied` from the shell, `gcc` or `mkdir`, naming
+  a path in the user's own home; it now names the owner, this account, and the
+  one `sudo chown -R` that repairs it.
+
 ### macOS: in a container, watched over VNC
 
 `qemu-user` translates *Linux* syscalls, and `unshare`, user namespaces and

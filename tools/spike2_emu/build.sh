@@ -8,6 +8,20 @@ R=$ROOT
 # other. Compiling from /mnt/c is what it avoids - drvfs is slow enough
 # to matter over a few thousand lines of C.
 pad_stage || exit 1
+# ...AND SOMEWHERE THIS ACCOUNT MAY PUT WHAT IT BUILDS, asked before a single
+# source is copied. The shim lands in the ROOTFS, which a root run builds and
+# which therefore ends up root-owned (PAD-119), and the stamp lands beside it -
+# so an ordinary run on a machine whose guest filesystem was unpacked as root
+# dies at the LAST line of this script with the shell's own four words:
+#
+#     build.sh: line 47: /home/ales/spike2root/lib/hwshim.srcs: Permission denied
+#
+# ensurebuild.sh then says "rebuild FAILED; running the shim already built" and
+# the run carries on with a stale shim for ever (PAD-182). Both halves are asked
+# because they are different directories with different owners, and a compile
+# that cannot record what it compiled is not a build.
+pad_can_write "$R/lib/hwshim.so" build || exit 1
+pad_can_write "$PAD_SHIM_STAMP" build || exit 1
 # Sync EVERY source this build compiles, and COMPILE THE SAME LIST. alsastub.c
 # used to be missing from the copy list while still being on the compile line,
 # so an edit to the Windows copy was silently never built - and the build still
@@ -45,4 +59,9 @@ arm-linux-gnueabihf-gcc -std=gnu17 -fno-stack-protector -shared -fPIC -O2 -nostd
 # digest of the bytes and not a comparison of file times. Written only after a
 # successful compile (set -e), so a failed build never claims to be current.
 pad_shim_hash "$RIG" > "$PAD_SHIM_STAMP"
+# HAND BOTH BACK when this ran as root, or the next ORDINARY run cannot replace
+# either and rebuilds for ever without succeeding - `>` needs write permission
+# on the file, and a root-owned 644 stamp in a human's rootfs refuses it. This
+# is how PAD-182's machine got its unwritable stamp in the first place.
+pad_give_back "$R/lib/hwshim.so" "$PAD_SHIM_STAMP"
 echo "built ok: $(ls -l "$R/lib/hwshim.so" | awk '{print $5}') bytes"

@@ -79,7 +79,10 @@
 . "$(dirname "$0")/padpath.sh"
 set -u
 
-LOG=${1:-$HOME/gzwatch.log}
+# $PAD_HOME, not $HOME: watch.sh always passes the log path, but by hand
+# under sudo this default named /root/gzwatch.log - a file the run does
+# not write and this account may not read (PAD-182).
+LOG=${1:-$PAD_HOME/gzwatch.log}
 S=$(dirname "$0")
 # shellcheck source=gamestate.sh
 . "$S/gamestate.sh"

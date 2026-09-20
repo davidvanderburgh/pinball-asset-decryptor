@@ -1025,7 +1025,8 @@ def test_autoattract_is_held_back_until_the_menu_has_chosen():
     Back; the menu ignores it and the presses would be spent before Tech
     Alerts. The plain launch line stays verbatim in the other branch."""
     code = _code(_read("watch.sh"))
-    plain = 'setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &'
+    plain = ('setsid_as_user bash "$S/autoattract.sh" "$LOG" > '
+             '"$PAD_HOME/padauto.log" 2>&1 &')
     assert plain in code
     block = code[code.index('if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then'):]
     block = block[:block.index("PAD_SW_EXERCISE")]

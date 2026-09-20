@@ -40,7 +40,24 @@ if [ -f "$PAD_ENV_FILE" ]; then
          "$(grep -v '^#' "$PAD_ENV_FILE" | grep . | tr '\n' ' ')"
 fi
 . "$(dirname "$0")/ensurebuild.sh"
-cd "$HOME"
+# ★ $PAD_HOME AND NOT $HOME, HERE AND FOR EVERY LOG PATH BELOW.
+#
+# padpath.sh's header states the rule and killgame.sh and alive.sh were both
+# converted to it; this script - the one that CREATES all of those files - still
+# had twenty-two uses of $HOME, and the two sides therefore disagreed about the
+# same file the moment the two differed. killgame.sh kills
+# `^tail -q -n 0 -F $PAD_HOME/padvid\.log` and this started one on
+# `$HOME/padvid.log`.
+#
+# THEY DIFFER UNDER ELEVATION, WHICH IS HOW THE APP RUNS (item 13) AND HOW A
+# LINUX DESKTOP REACHES THE SAME PLACE (`sudo`). Under sudo $HOME is /root, so
+# every log went to /root - a 0700 directory - and then the helper drop below
+# ran the readers of those logs as the DESKTOP USER, who cannot traverse it.
+# The `cd` is the worst of them: a dropped helper inherits a working directory
+# it cannot stat. Measured from a user's Ubuntu 26.04 log (PAD-182), where
+# /root/padglhost.log and /root/padglhost.log.gpu were named as the place to
+# look at a fault the reader had no way to read.
+cd "$PAD_HOME"
 
 # ---- WHAT RUNS IS BUILT, AND BUILT FROM THESE SOURCES ----------------------
 #
@@ -136,7 +153,7 @@ if [ "${PAD_SELECT:-}" = 1 ] && ! pad_ensure_select; then
 fi
 
 MINS=${1:-30}
-LOG=${LOG:-$HOME/gzwatch.log}
+LOG=${LOG:-$PAD_HOME/gzwatch.log}
 # FAIL NOW if it cannot be written, not at the game start 400 lines down. A bad
 # LOG used to surface as one bash "No such file or directory" over a run that
 # then looked normal forever: the start's `> "$LOG"` redirect failed, so the
@@ -144,13 +161,13 @@ LOG=${LOG:-$HOME/gzwatch.log}
 # into the container. `>>` on purpose - this is a writability probe, and the
 # truncation stays where it always was, at the game start itself.
 : >> "$LOG" || { echo "[watch] LOG=$LOG is not writable here - nothing would start. Fix or unset LOG." >&2; exit 1; }
-HOSTLOG=$HOME/padglhost.log
+HOSTLOG=$PAD_HOME/padglhost.log
 # The virtual playfield's own log, on the same rule as autoattract's and the
 # ball feeder's: a helper that is started in the background writes somewhere a
 # human can read afterwards. This one was the exception - both its streams went
 # to /dev/null - and that is why "the playfield window never appeared" has never
 # had an answer in any log on any machine (2026-08-11, james_bond_pro).
-PFLOG=$HOME/padplayfield.log
+PFLOG=$PAD_HOME/padplayfield.log
 RING_HOST=$ROOT/dump/padgl
 RING_GUEST=/dump/padgl
 # The keyboard channel. Same host-path/guest-path split as the GL ring: the
@@ -194,7 +211,33 @@ GL_WH_FROM_CALLER=0
 if [ -n "${PAD_GL_W:-}${PAD_GL_H:-}" ]; then GL_WH_FROM_CALLER=1; fi
 export PAD_GL_W=${PAD_GL_W:-1360}
 export PAD_GL_H=${PAD_GL_H:-768}
-export GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12}   # without this Mesa picks llvmpipe
+# ★ WHICH DRIVER RENDERS THE GPU PATH, AND ONLY WHERE THAT DRIVER EXISTS.
+#
+# d3d12 is WSLg's GPU and nothing else's: Mesa's d3d12 gallium driver on top of
+# libd3d12core.so out of /usr/lib/wsl/lib, which Windows injects into the VM.
+# Inside WSL it has to be forced, because without it Mesa picks llvmpipe with a
+# perfectly good GPU sitting there.
+#
+# NAMING IT ON A LINUX DESKTOP IS A GUARANTEED FAILURE (PAD-182). There is no
+# /usr/lib/wsl/lib on a real machine, so the renderer cannot start, the run
+# takes the software retry below, and every start costs ten seconds and two
+# alarming paragraphs - on a box whose own driver (iris, radeonsi, amdgpu, zink)
+# was the right answer and was never asked. Mesa's own choice IS the answer off
+# WSL, so the variable is left alone there.
+#
+# A CALLER WHO NAMED ONE STILL WINS, on both platforms - that is what the `:-`
+# has always meant, and it is how the GPU path can be asked for on a Linux
+# desktop that wants a particular driver.
+if [ "$IS_WSL" = 1 ]; then
+    export GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12}
+fi
+#: WHAT THE GPU PATH RENDERS ON, remembered so pad_gl_gpu() can put it back
+#: EXACTLY after a software retry - "d3d12 by name" was right while d3d12 was
+#: the only answer this script could give. `mesa-default` is not a driver, it is
+#: the absence of a forced one; a PAD_ name so the cfg block far below prints it
+#: without being told to, because a log that does not say which driver rendered
+#: the run cannot be compared with any other run.
+export PAD_GL_DRIVER=${GALLIUM_DRIVER:-mesa-default}
 
 # WHICH GPU, because this machine has two and Mesa picks the wrong one.
 #
@@ -856,7 +899,9 @@ if [ -z "$PAD_USER" ] && [ "$(id -u)" = 0 ]; then
     #
     # $PAD_HOME IS THE RIGHT QUESTION and the rest of the rig already asks it:
     # cardmount.sh, overrides.sh and buildselect.sh all hand their output back
-    # to `stat -c %U "$HOME"`. padpath.sh's header states the rule this follows
+    # to pad_give_back, which asks `stat -c %U "$PAD_HOME"` - $HOME until
+    # PAD-182, where under sudo it named /root and handed nothing back.
+    # padpath.sh's header states the rule this follows
     # - "ROOT IS ELEVATION, NOT OWNERSHIP: the rig belongs to a human's home" -
     # and PAD_HOME is that home, resolved there rather than guessed here. A
     # genuinely root-default distro still lands on /root, which root owns, so
@@ -1027,12 +1072,59 @@ if [ "$DROP" = 1 ]; then
     # `>` needs write permission on the FILE, and a root-owned 644 log in the
     # user's own home refuses it. That would break plain watch.sh runs after a
     # single PAD_PIVOT one, which is a nasty thing to leave behind.
-    for f in "$LOG" "$HOSTLOG" "$HOME/padvid.log" "$HOME/padauto.log" \
-             "$HOME/padball.log" "$HOME/padaudio.log" "$HOME/padtables.log" \
-             "$HOME/padswx.log" "$PFLOG"; do
+    for f in "$LOG" "$HOSTLOG" "$PAD_HOME/padvid.log" "$PAD_HOME/padauto.log" \
+             "$PAD_HOME/padball.log" "$PAD_HOME/padaudio.log" "$PAD_HOME/padtables.log" \
+             "$PAD_HOME/padswx.log" "$PFLOG"; do
         [ -e "$f" ] || : > "$f" 2>/dev/null
         chown "$PAD_USER" "$f" 2>/dev/null
     done
+    # ★ AND PROVE THE DROP REACHES WHAT THE HELPERS ACTUALLY RUN, before three
+    # of them die on "Permission denied" and the log blames the GPU.
+    #
+    # The self-heal ladder above already tests a CANDIDATE it had to guess
+    # ($ROOT/dump and the X socket - pad_user_can_render). A PAD_USER that
+    # arrived from $SUDO_USER or the caller was never tested at all, and the two
+    # things it needs beyond the ring are the RIG ITSELF (playaudio.sh,
+    # padvidhost.py and every other helper are files in it) and the renderer.
+    #
+    # PAD-182, AND THE RIG COULD NOT HAVE GUESSED IT. An AppImage started with
+    # `sudo` mounts itself at /tmp/.mount_XXXXXX with squashfuse AS ROOT, and
+    # FUSE denies every account but the mounting one - so $RIG is unreadable by
+    # precisely the desktop user these helpers are correctly dropped to. The
+    # reporter's log had the audio player, the video host and both renderer
+    # attempts each dying on Permission denied, and then
+    #
+    #     [watch] the software renderer died too, so this is not the
+    #     [watch]   GPU: see /root/padglhost.log...
+    #
+    # which is true, unreadable by him, and the wrong half of the machine.
+    #
+    # NOT FATAL, and deliberately so: the guest, the card and the switches are
+    # root's and all work. This names the fault and lets the run continue, the
+    # same trade as the black-window banner above.
+    for _p in "$RIG" "$PAD_GLHOST_BIN"; do
+        [ -e "$_p" ] || continue
+        runuser -u "$PAD_USER" -- test -r "$_p" 2>/dev/null && continue
+        echo "[watch] $PAD_USER CANNOT READ $_p, and the helpers dropped to it" >&2
+        echo "[watch]   must run what is in there - so expect the audio player," >&2
+        echo "[watch]   the video host and the renderer to die on 'Permission" >&2
+        echo "[watch]   denied' below. THAT IS NOT THE GPU and not the rig." >&2
+        case "$_p" in
+            /tmp/.mount_*)
+                echo "[watch]   THIS APP IS RUNNING UNDER sudo. An AppImage mounts" >&2
+                echo "[watch]   itself with FUSE as whoever started it, and FUSE" >&2
+                echo "[watch]   locks that mount to that account - so root's copy" >&2
+                echo "[watch]   of this rig is invisible to your own login." >&2
+                echo "[watch]   Start the app NORMALLY, with no sudo: nothing the" >&2
+                echo "[watch]   emulator does needs it." >&2
+                ;;
+            *)
+                echo "[watch]   Make it readable by $PAD_USER (a 0700 directory in" >&2
+                echo "[watch]   the way is the usual cause) and start again." >&2
+                ;;
+        esac
+    done
+    unset _p
 fi
 
 HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""; TBLPG=""
@@ -1097,7 +1189,7 @@ teardown() {
     # for a pipeline); the tail at its head is caught by name. Both matter: an
     # orphaned tail -F never exits by itself.
     [ -n "$EVTPG" ] && kill -9 "$EVTPG" 2>/dev/null
-    pkill -9 -f "tail -q -n 0 -F "$HOME/padvid"[.]log" 2>/dev/null
+    pkill -9 -f "tail -q -n 0 -F "$PAD_HOME/padvid"[.]log" 2>/dev/null
     # The background table builder, if this run started one. It sits in a poll
     # loop waiting for the guest to publish its switch table, so a run that
     # ends first leaves it with nothing to wait for. Added to alive.sh and
@@ -1327,7 +1419,7 @@ esac
 FREE_G=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
 if [ "${FREE_G:-999}" -lt 10 ]; then
     echo "[watch] WARNING: only ${FREE_G}G free on /. Run logs grow fast." >&2
-    echo "[watch]   du -sh "$HOME/gz"*.log   to see the worst offenders." >&2
+    echo "[watch]   du -sh "$PAD_HOME/gz"*.log   to see the worst offenders." >&2
 fi
 
 rm -f "$RING_HOST" "$SW_HOST"
@@ -1385,13 +1477,24 @@ fi
 # old enough to be a plausible suspect, so the next person who hears crackle
 # reaches for the 20-second answer (tonetest.sh) instead of the whole
 # afternoon. /proc/uptime is the VM's, shared by every distro.
+#
+# BOTH HALVES ARE ABOUT WSL, so both are said only there (PAD-182). On a Linux
+# desktop this printed "WSL session up 1h 50m" about a machine with no WSL in
+# it, and a long enough uptime then prescribed `wsl --shutdown` - a command that
+# does not exist on that machine, for a WSLg audio hop it does not have. The
+# uptime itself is still worth printing: it is the machine's, it costs nothing,
+# and it is what dated a fault to before or after an app update (PAD-150).
 if [ -r /proc/uptime ]; then
     UPS=$(cut -d. -f1 /proc/uptime)
-    printf '[watch] WSL session up %dh %dm\n' $((UPS / 3600)) $(((UPS % 3600) / 60))
-    if [ "$UPS" -gt 10800 ]; then
-        echo "[watch] NOTE: WSLg audio can degrade on a long session. If sound" \
-             "crackles, it is almost certainly NOT the emulator - run" \
-             "tonetest.sh (20 s) to confirm, then 'wsl --shutdown'."
+    if [ "$IS_WSL" = 1 ]; then
+        printf '[watch] WSL session up %dh %dm\n' $((UPS / 3600)) $(((UPS % 3600) / 60))
+        if [ "$UPS" -gt 10800 ]; then
+            echo "[watch] NOTE: WSLg audio can degrade on a long session. If sound" \
+                 "crackles, it is almost certainly NOT the emulator - run" \
+                 "tonetest.sh (20 s) to confirm, then 'wsl --shutdown'."
+        fi
+    else
+        printf '[watch] session up %dh %dm\n' $((UPS / 3600)) $(((UPS % 3600) / 60))
     fi
 fi
 
@@ -1432,7 +1535,7 @@ fi
 # started with its own session and killed in teardown like everything else.
 if [ "${PAD_AUDIO:-1}" != 0 ]; then
     setsid_as_user bash "$S/playaudio.sh" "$AUD_HOST" "$AUD_RATE" 2 "$AUD_FMT_HOST" \
-        > "$HOME/padaudio.log" 2>&1 &
+        > "$PAD_HOME/padaudio.log" 2>&1 &
     AUDPG=$!
     for i in $(seq 1 40); do [ -p "$AUD_HOST" ] && break; sleep 0.05; done
     if [ -p "$AUD_HOST" ]; then
@@ -1441,13 +1544,13 @@ if [ "${PAD_AUDIO:-1}" != 0 ]; then
         export PAD_AUDIO_FMT="$AUD_FMT_GUEST"
     else
         echo "[watch] audio: player did not come up, continuing silent" >&2
-        tail -3 "$HOME/padaudio.log" >&2
+        tail -3 "$PAD_HOME/padaudio.log" >&2
     fi
 fi
 
 if [ "${PAD_VID:-1}" != 0 ]; then
     rm -f "$VID_HOST"
-    setsid_as_user python3 "$S/padvidhost.py" "$VID_HOST" > "$HOME/padvid.log" 2>&1 &
+    setsid_as_user python3 "$S/padvidhost.py" "$VID_HOST" > "$PAD_HOME/padvid.log" 2>&1 &
     VIDPG=$!
     for i in $(seq 1 40); do [ -s "$VID_HOST" ] && break; sleep 0.05; done
     if [ -s "$VID_HOST" ]; then
@@ -1458,7 +1561,7 @@ if [ "${PAD_VID:-1}" != 0 ]; then
         VID_FOR_GL="$VID_HOST"
     else
         echo "[watch] video: host decoder did not come up, continuing without" >&2
-        tail -3 "$HOME/padvid.log" >&2
+        tail -3 "$PAD_HOME/padvid.log" >&2
         export PAD_VID=0
     fi
 fi
@@ -1512,15 +1615,22 @@ pad_gl_software() {
 # on a machine whose GPU renderer had already come up, so the best run still
 # available is the GPU one, picture or no picture.
 #
-# d3d12 BY NAME rather than by remembering what was replaced: the top of this
-# script exports ${GALLIUM_DRIVER:-d3d12}, so a caller who chose a driver of
-# their own chose it there, and a caller who wanted software asked for it with
-# PAD_GL_SOFTWARE and never reaches this function.
+# $PAD_GL_DRIVER rather than the name d3d12, and rather than remembering what
+# was replaced: the top of this script decides what the GPU path renders on -
+# d3d12 inside WSL, the caller's own choice if they made one, and Mesa's own
+# choice on a Linux desktop, where there is no d3d12 to go back TO (PAD-182).
+# A caller who wanted software asked for it with PAD_GL_SOFTWARE and never
+# reaches this function.
 pad_gl_gpu() {
     PAD_GL_MODE=gpu
-    export GALLIUM_DRIVER=d3d12
     unset LIBGL_ALWAYS_SOFTWARE
-    echo "[watch] cfg GALLIUM_DRIVER=d3d12 (back on the GPU)"
+    if [ "$PAD_GL_DRIVER" = mesa-default ]; then
+        unset GALLIUM_DRIVER
+        echo "[watch] cfg GALLIUM_DRIVER=(unset - back on Mesa's own choice)"
+    else
+        export GALLIUM_DRIVER=$PAD_GL_DRIVER
+        echo "[watch] cfg GALLIUM_DRIVER=$PAD_GL_DRIVER (back on the GPU)"
+    fi
 }
 
 # ★ STOP A RENDERER THAT IS STILL RUNNING, so another can take its place.
@@ -1953,12 +2063,12 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
                 sleep 1
             done
             exec python3 "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
-            "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" > "$HOME/padtables.log" 2>&1 &
+            "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" > "$PAD_HOME/padtables.log" 2>&1 &
         TBLPG=$!
     elif grep -q '^drawable=yes' "$TBL_OUT"; then
         echo "[watch]   opening now; the switch table follows in the background"
         setsid_as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
-            > "$HOME/padtables.log" 2>&1 &
+            > "$PAD_HOME/padtables.log" 2>&1 &
         TBLPG=$!
     else
         echo "[watch]   nothing to draw yet - waiting for the game's own switch list"
@@ -2275,12 +2385,12 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
                 sleep 1
             done
             exec bash "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
-            "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &
+            "$S/autoattract.sh" "$LOG" > "$PAD_HOME/padauto.log" 2>&1 &
         AUTOPG=$!
         echo "[watch] auto-advance on, held back until the boot selector has"
         echo "[watch] chosen; then it presses Service Back past Tech Alerts."
     else
-        setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &
+        setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$PAD_HOME/padauto.log" 2>&1 &
         AUTOPG=$!
         echo "[watch] auto-advance on: it will press Service Back until the game"
         echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
@@ -2297,7 +2407,7 @@ else
     # No helper this run, so no verdict from one: status.sh reads this file
     # for auto_result, and the LAST run's "mains lock" (PAD-173) or "past
     # Tech Alerts" would otherwise be reported about this one.
-    : > "$HOME/padauto.log" 2>/dev/null
+    : > "$PAD_HOME/padauto.log" 2>/dev/null
 fi
 
 # THE SWITCH EXERCISER (item 59). The `CHECK SWITCH #n` rows on Tech Alerts are
@@ -2324,7 +2434,7 @@ fi
 # brings the per-boot pass back; its edges carry source letter `x`, so
 # `grep -v 'ms [+-][0-9]*x'` removes them from a measurement.
 if [ "${PAD_SW_EXERCISE:-0}" = 1 ]; then
-    setsid_as_user bash "$S/swexercise.sh" "$LOG" > "$HOME/padswx.log" 2>&1 &
+    setsid_as_user bash "$S/swexercise.sh" "$LOG" > "$PAD_HOME/padswx.log" 2>&1 &
     echo "[watch] switch exerciser on: it clears the CHECK SWITCH tech alerts"
     echo "[watch] once the game's switch table is up (PAD_SW_EXERCISE=0 off)."
 fi
@@ -2343,7 +2453,7 @@ fi
 # alive.sh's output and eating a label off its first line, which is the same
 # class of thing. `[ball]` lines go to ~/padball.log and stay legible.
 if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
-    setsid_as_user python3 "$S/ballfeed.py" > "$HOME/padball.log" 2>&1 &
+    setsid_as_user python3 "$S/ballfeed.py" > "$PAD_HOME/padball.log" 2>&1 &
     BALLPG=$!
     echo "[watch] ball feed on: the game's own trough eject will be answered"
     echo "[watch] (PAD_BALL_FEED=0 to move balls by hand with plunge.py)."
@@ -2416,8 +2526,8 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
     # stdbuf -oL because tr into a pipe is block-buffered, and a "live" event
     # feed that arrives four kilobytes at a time is not live (same reasoning
     # as the fflush after every print below).
-    tail -q -n 0 -F "$HOME/padvid.log" "$HOME/padaudio.log" \
-                    "$HOME/padglhost.log" "$LOG" 2>/dev/null \
+    tail -q -n 0 -F "$PAD_HOME/padvid.log" "$PAD_HOME/padaudio.log" \
+                    "$PAD_HOME/padglhost.log" "$LOG" 2>/dev/null \
         | stdbuf -oL tr -d '\000' | awk '
         /Radium Error/ {
             if (++n[$0] == 1 || n[$0] % 500 == 0)

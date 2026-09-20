@@ -36,7 +36,7 @@
 # THE APP RUNS THIS AS ROOT (PAD-140), with the desktop user's HOME. On Windows
 # the guest filesystem is usually root's - the Emulate tab's Start unpacks it
 # as root - and a user cannot create /usr/local/codeselect inside it. What
-# buildselect.sh installs is handed back to the owner of HOME. Run as a user
+# buildselect.sh installs is handed back to the owner of $PAD_HOME. Run as a user
 # whose install is blocked, the refusal below names the directory and its
 # owner instead of the stat coreutils reports.
 . "$(dirname "$0")/padpath.sh"

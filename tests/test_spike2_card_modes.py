@@ -63,7 +63,7 @@ def test_watch_hands_both_variables_to_run_game_and_repeats_what_it_found():
     # once the guest is up
     repeat = src.index("grep -a '^\\[modes\\] ' \"$LOG\"")
     assert src.index('echo "[watch] the game never started.') < repeat
-    assert repeat < src.index('tail -q -n 0 -F "$HOME/padvid.log"')
+    assert repeat < src.index('tail -q -n 0 -F "$PAD_HOME/padvid.log"')
 
 
 def test_the_macos_box_lets_the_opt_out_cross():

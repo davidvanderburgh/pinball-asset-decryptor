@@ -66,6 +66,11 @@ if [ "$WHICH" != host ]; then
     # WHAT WAS COMPILED, recorded beside what came out of it, and only after a
     # successful compile (set -e) so a failed build never claims to be current.
     pad_glguest_hash "$S" > "$PAD_GLGUEST_STAMP"
+    # A root build hands its output back, for build.sh's reason: the libraries
+    # and the stamp all live in the rootfs, and root-owned ones are a rebuild
+    # the next ordinary run can start and never finish (PAD-182).
+    pad_give_back "$R/usr/lib/libGLESv2.so.2" "$R/usr/lib/libEGL.so.1" \
+                  "$PAD_GLGUEST_STAMP"
     echo "guest libGLESv2.so.2 : $(stat -c%s "$R/usr/lib/libGLESv2.so.2") bytes (bridge encoder)"
     echo "guest libEGL.so.1    : $(stat -c%s "$R/usr/lib/libEGL.so.1") bytes"
 fi
@@ -81,5 +86,11 @@ if [ "$WHICH" != guest ]; then
       "$PAD_STAGE/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 
     pad_glhost_hash "$S" > "$PAD_GLHOST_STAMP"
+    # THE RENDERER ESPECIALLY. It is the one binary a root run then hands to
+    # the DESKTOP USER to execute (watch.sh's helper drop), so root-owned and
+    # 0755 is fine but root-owned under a 0700 home is `env: Permission denied`
+    # and no picture - which is what PAD_GLHOST_BIN living in $HOME rather than
+    # $PAD_HOME produced under sudo (PAD-182, padpath.sh has the log).
+    pad_give_back "$PAD_GLHOST_BIN" "$PAD_GLHOST_STAMP"
     echo "host  padglhost      : $(stat -c%s "$PAD_GLHOST_BIN") bytes"
 fi

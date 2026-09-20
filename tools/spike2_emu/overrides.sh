@@ -65,13 +65,10 @@ SRC=${SRC%/}
 # HAND FILES BACK when this runs as root, exactly as cardmount.sh does: the
 # stage lives under the desktop user's home, and a root-owned tree there is one
 # the next ordinary run can neither overwrite nor delete.
-give_back() {
-    [ "$(id -u)" = 0 ] || return 0
-    local o
-    o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
-    [ -n "$o" ] && [ "$o" != root ] && chown -R "$o" "$@" 2>/dev/null
-    return 0
-}
+# padpath.sh's pad_give_back is the one definition; this was the copy that had
+# already been converted to $PAD_HOME, which is the answer the other two were
+# missing (PAD-182).
+give_back() { pad_give_back -R "$@"; }
 
 # The identity of a set: every file's path, size and mtime, taken from the
 # SOURCE and remembered in the stamp. NOT a content hash - the point of this

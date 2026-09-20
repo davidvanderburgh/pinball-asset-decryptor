@@ -28,6 +28,9 @@
 #   default=N    highlight when there is no usable /data/codeselect.last
 #                An index that is a group MEMBER highlights its group's card.
 #   timeout=S    seconds before the highlighted image boots by itself; 0 = wait
+#   text_size=W  how big a card's title and subtitle are drawn: uniform (the
+#                default) = one size for the whole menu, the largest every card's
+#                text fits at; per-card = each card fits its own
 #   font=PATH    optional TrueType font (default: /usr/local/codeselect/font.ttf,
 #                then the card's /usr/local/spike/VeraMono.ttf)
 #   media=DIR    where the media names live (default /usr/local/codeselect/media)

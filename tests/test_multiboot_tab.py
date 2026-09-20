@@ -541,7 +541,9 @@ def test_preview_conf_is_the_form_with_placeholder_devices(tmp_path):
         "image=p3|STERN 1.59.0|Original Stern code|art0.png||",
         "image=p7|turtles_pro-1_59_0|1987 cartoon upscale|art1.png|anim1.gif|",
         "image=p7:img2|IMG 2|||anim2.gif|",
-        "default=1", "timeout=20", "heading=SELECT GAME CODE", "volume=40",
+        "default=1", "timeout=20", "heading=SELECT GAME CODE",
+        # PAD-183: the preview draws the text the size the card will
+        "text_size=uniform", "volume=40",
         "font=/usr/local/codeselect/font.ttf", "theme=midnight"]
     assert text.endswith("\n") and "\r" not in text
     # PAD-135: an emptied heading reaches the preview as 'heading=', which is
@@ -4935,6 +4937,9 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                     # PAD-135: a state written before the field existed
                     # described a menu that said SELECT GAME CODE
                     "heading": "SELECT GAME CODE",
+                    # ...and PAD-183: one that said nothing about the text
+                    # size described a menu drawn at one size
+                    "same_text_size": True,
                     "theme": "midnight", "colors": {}}
     assert "bypass" not in menu_from_state(None)     # always on: not a setting
     assert menu_from_state({"volume": 900})["volume"] == 100
@@ -7626,6 +7631,91 @@ def test_the_machine_volume_tick_lives_in_the_menu_settings_and_the_state():
     finally:
         root.destroy()
 
+
+# ---- same text size on every card (BEN, Discord, PAD-183) ---------------------
+def test_the_text_size_tick_reaches_every_command_and_the_preview_conf(tmp_path):
+    """BEN: 'is there a way to make the font size consistent across all images
+    in a multiboot?'  The tick is ON by default - which is what the selector
+    does when no card says otherwise - and the word is written out either way,
+    so the card says what it does rather than leaning on that default."""
+    from pinball_decryptor.gui.multiboot_tab import (
+        inject_args, text_size_args, write_preview_conf, TEXT_SIZE_UNIFORM,
+        TEXT_SIZE_PER_CARD)
+    form = _form(tmp_path, 2)
+    assert form.same_text_size is True
+    assert text_size_args(form) == ["--text-size", TEXT_SIZE_UNIFORM]
+    build = _tool_words(dict(build_commands(form))["build"])
+    assert build[build.index("--text-size") + 1] == TEXT_SIZE_UNIFORM
+    words = inject_args(form, "D:/card.raw")
+    assert words[words.index("--text-size") + 1] == TEXT_SIZE_UNIFORM
+    assert "text_size=uniform" in write_preview_conf(form).splitlines()
+    form.same_text_size = False
+    assert text_size_args(form) == ["--text-size", TEXT_SIZE_PER_CARD]
+    assert _tool_words(dict(build_commands(form))["build"])[
+        build.index("--text-size") + 1] == TEXT_SIZE_PER_CARD
+    assert "text_size=per-card" in write_preview_conf(form).splitlines()
+    # the preview is keyed on the conf, so the tick cannot show a stale frame
+    assert preview_fingerprint(_form(tmp_path, 2)) != preview_fingerprint(form)
+
+
+def test_a_loaded_cards_text_size_is_read_back_and_changing_it_is_a_menu_change(tmp_path):
+    """A card that never set the key draws one size for every card, so the tick
+    comes up ON for it; only the card that asked for the old per-card fitting
+    comes up off.  Changing it is an inject, not a rebuild."""
+    from pinball_decryptor.gui.multiboot_tab import form_from_inspect
+    f1, _w = form_from_inspect({"images": []}, "D:/card.raw")
+    assert f1.same_text_size is True                       # no key on the card
+    f2, _w = form_from_inspect({"images": [], "text_size": "uniform"}, "D:/card.raw")
+    assert f2.same_text_size is True
+    f3, _w = form_from_inspect({"images": [], "text_size": "per-card"}, "D:/card.raw")
+    assert f3.same_text_size is False
+    root, panel, card, _media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        assert "no changes yet" in panel.check_detail("card")
+        panel._same_text_var.set(False)
+        assert "1 menu change (text size)" in panel.check_detail("card")
+        assert panel.apply_to_card() is True
+        inject = [c for c in calls[0] if c[0] == "inject"][0][1]
+        words = _tool_words(inject)
+        assert words[words.index("--text-size") + 1] == "per-card"
+    finally:
+        root.destroy()
+
+
+def test_the_text_size_tick_lives_in_the_menu_settings_and_the_state():
+    from pinball_decryptor.gui.multiboot_tab import menu_from_state
+    root, panel = _panel()
+    try:
+        assert panel.form().same_text_size is True
+        assert panel.state()["menu"]["same_text_size"] is True
+        menu = panel.open_menu_settings()
+        root.update()
+        panel._same_text_var.set(False)
+        menu.cancel()
+        root.update()
+        assert panel._same_text_var.get() is True          # Cancel restores it
+        menu = panel.open_menu_settings()
+        root.update()
+        panel._same_text_var.set(False)
+        menu.ok()
+        root.update()
+        assert panel.form().same_text_size is False
+        # the line beside the button says so only when it is NOT the usual one
+        assert "each card its own text size" in panel._menu_lbl.cget("text")
+        doc = panel.state()
+        assert doc["menu"]["same_text_size"] is False
+        panel._same_text_var.set(True)
+        assert "each card its own text size" not in panel._menu_lbl.cget("text")
+        panel.restore_state(doc)
+        root.update()
+        assert panel.form().same_text_size is False
+        # a state written before the tick existed describes a menu the selector
+        # drew at one size, which is what the tick means
+        assert menu_from_state({})["same_text_size"] is True
+        assert menu_from_state({"same_text_size": False})["same_text_size"] is False
+    finally:
+        root.destroy()
 
 # ---- the size strip, the work meter and the run's Cancel -----------------------------
 def test_the_size_strip_waits_rather_than_showing_a_stale_number(tmp_path):

@@ -283,7 +283,9 @@ if [ -n "${PAD_CARD:-}" ]; then
             # one place to try a card before flashing it showed a different
             # menu from the card. An empty heading= rides along too - it is a
             # card that asked for no line across the top at all.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|theme|color_[a-z_]+)[[:space:]]*=' || true
+            # ...and text_size= with them (PAD-183): the card says how big the
+            # titles on its cards are drawn, so the preview has to say it too.
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|theme|color_[a-z_]+)[[:space:]]*=' || true
         } > "$R/dump/codeselect.conf"
         echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after $SEL_TIMEOUT s"
         # THE MEDIA (item 90 v2): the card's /usr/local/codeselect/media,

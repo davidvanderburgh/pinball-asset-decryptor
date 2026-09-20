@@ -421,6 +421,10 @@ struct layout {
     int n, vis, carousel;     /* images; visible full cards; n > MAX_VISIBLE */
     int margin, gap, top, ch, cw, pad, inner;
     int art_h;                /* the art panel's height; 0 = no art anywhere (v1 picture) */
+    /* THE ONE TEXT SIZE every card's title and subtitle are drawn at
+     * (images.conf's text_size=uniform, the default), measured over every card
+     * by layout_text_px(); 0 = each card fits its own (text_size=per-card) */
+    float tpx, spx;
     struct theme th;          /* the colours, resolved from the conf (theme_resolve) */
     int th_known;             /* the conf's theme name was a theme (else the default is up) */
     int th_set;               /* how many roles the conf's color_ keys replaced */
@@ -824,6 +828,80 @@ static void draw_panel(struct gfx *g, const struct layout *L, const struct media
     if (pic) gfx_blit(g, px + (pw - pic->w) / 2, py + (ph - pic->h) / 2, pic->rgba, pic->w, pic->h);
 }
 
+/* WHAT ONE CARD'S TEXT MEASURES: the title's size and the line (or two) it
+ * breaks into, and the subtitle's size and its lines - in whichever layout is
+ * up (the art layout leaves the text less room than the v1 picture did, so its
+ * sizes are smaller).  ONE definition, because two callers ask the question
+ * now: draw_card(), and layout_text_px() measuring the whole menu.
+ *
+ * `fix_t` / `fix_s` > 0 PIN the sizes (text_size=uniform): the title is then
+ * wrapped at that size and never shrunk again, which is right because the size
+ * handed in was measured over every card and is no bigger than this card's own.
+ * 0 fits the card's own text, byte for byte what the menu always did. */
+struct card_text {
+    float tpx;                    /* the title's size... */
+    int tl;                       /* ...how many lines it takes (1 or 2)... */
+    char tlines[2][CONF_STR];     /* ...and what they say */
+    float spx;                    /* the subtitle's size... */
+    int nl;                       /* ...and its lines (up to 2 with art, 4 without) */
+    char lines[4][CONF_STR];
+};
+
+static void card_text_measure(struct gfx_font *f, const struct layout *L,
+                              const struct conf_image *im,
+                              float fix_t, float fix_s, struct card_text *t)
+{
+    float s = L->s;
+    float start_t = (L->art_h ? 48 : 62) * s, floor_t = (L->art_h ? 26 : 34) * s;
+    float floor_w = (L->art_h ? 20 : 22) * s;     /* a WRAPPED title's floor */
+    float start_s = (L->art_h ? 26 : 30) * s, floor_s = (L->art_h ? 20 : 22) * s;
+    int maxsub = L->art_h ? 2 : 4, k;
+
+    memset(t, 0, sizeof *t);
+    t->tpx = fix_t > 0 ? fix_t : gfx_fit_px(f, im->title, L->inner, start_t, floor_t);
+    if (gfx_text_width(f, t->tpx, im->title) <= L->inner) {
+        t->tl = 1;
+        snprintf(t->tlines[0], CONF_STR, "%s", im->title);
+    } else {
+        t->tl = gfx_wrap(f, t->tpx, im->title, L->inner, &t->tlines[0][0], CONF_STR, 2);
+        if (fix_t <= 0)
+            for (k = 0; k < t->tl; k++)
+                t->tpx = gfx_fit_px(f, t->tlines[k], L->inner, t->tpx, floor_w);
+    }
+    t->spx = fix_s > 0 ? fix_s : gfx_fit_px(f, im->subtitle, L->inner * 2, start_s, floor_s);
+    /* the subtitle is measured against two card widths and then wrapped to one:
+     * a version line that takes two lines keeps its size */
+    t->nl = gfx_wrap(f, t->spx, im->subtitle, L->inner, &t->lines[0][0], CONF_STR, maxsub);
+}
+
+/* THE MENU'S ONE TEXT SIZE (images.conf's text_size=uniform, the default).
+ *
+ * Every card fitting its own title made a card's text size a function of how
+ * long its name happens to be: on a three-build menu the short names came up at
+ * 48 px beside a long one shrunk to 36, which reads as a mistake rather than as
+ * a design (BEN, Discord, 2026-09-20: "is there a way to make the font size
+ * consistent across all images in a multiboot?").  So the two sizes are
+ * measured over EVERY card - the carousel's off-screen ones as well, or
+ * scrolling the row would change the size of the text - and the smallest any
+ * card needs is the size all of them draw at.  A card with no subtitle at all
+ * measures the starting size and so pulls nothing down.
+ *
+ * Nothing here can make text OVERFLOW a card: the size chosen is <= the size
+ * every card already fits at, and each line still goes through gfx_ellipsize()
+ * as it is drawn. */
+static void layout_text_px(struct layout *L, struct gfx_font *f, const struct conf *c)
+{
+    int k;
+    L->tpx = L->spx = 0;
+    if (!c->text_uniform) return;
+    for (k = 0; k < c->ncards; k++) {
+        struct card_text t;
+        card_text_measure(f, L, conf_card_face(c, k), 0, 0, &t);
+        if (!L->tpx || t.tpx < L->tpx) L->tpx = t.tpx;
+        if (!L->spx || t.spx < L->spx) L->spx = t.spx;
+    }
+}
+
 static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
                       const struct conf *c, const struct media *m,
                       int i, int slot, int on)
@@ -831,12 +909,12 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     const struct conf_image *im = conf_card_face(c, i);
     float s = L->s;
     int x = card_x(L, slot), top = L->top, cw = L->cw, ch = L->ch, inner = L->inner;
-    float tpx, spx;
-    int base, tl, sub_y, nl, k, line_h;
+    struct card_text t;
+    int base, sub_y, k, line_h;
     /* every line below is drawn through gfx_ellipsize() into cut[]: wrapping
      * splits on spaces, so ONE long word (or a title with none) is still wider
      * than the card, and gfx_fit_px() bottoms out before it shrinks that far */
-    char tlines[2][CONF_STR], lines[4][CONF_STR], cut[CONF_STR + 8];
+    char cut[CONF_STR + 8];
 
     /* NO 'IMAGE N' CAPTION on the card (David, 2026-09-03: "we don't need the
      * text 'Image 1', 'Image 2', etc. on each of the images. that is just
@@ -846,28 +924,21 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     gfx_round_frame(g, x, top, cw, ch, (int)(22 * s), (int)((on ? 8 : 3) * s),
                     on ? TH(L, FRAME_HL) : TH(L, FRAME), on ? TH(L, CARD_HL) : TH(L, CARD));
 
+    /* THE MENU'S SIZES when it draws at one size, this card's own otherwise */
+    card_text_measure(f, L, im, L->tpx, L->spx, &t);
+
     if (!L->art_h) {
         /* the v1 picture, byte for byte (bar the dropped caption) */
-        tpx = gfx_fit_px(f, im->title, inner, 62 * s, 34 * s);
-        if (gfx_text_width(f, tpx, im->title) <= inner) {
-            tl = 1;
-            snprintf(tlines[0], CONF_STR, "%s", im->title);
-        } else {
-            tl = gfx_wrap(f, tpx, im->title, inner, &tlines[0][0], CONF_STR, 2);
-            for (k = 0; k < tl; k++) tpx = gfx_fit_px(f, tlines[k], inner, tpx, 22 * s);
-        }
-        base = top + (int)((tl == 2 ? 0.36f : 0.42f) * ch);
-        for (k = 0; k < tl; k++) {
-            gfx_ellipsize(f, tpx, tlines[k], inner, cut, sizeof cut);
-            gfx_text_center(g, f, tpx, x + cw / 2, base + (int)(k * tpx * 1.15f), cut,
+        base = top + (int)((t.tl == 2 ? 0.36f : 0.42f) * ch);
+        for (k = 0; k < t.tl; k++) {
+            gfx_ellipsize(f, t.tpx, t.tlines[k], inner, cut, sizeof cut);
+            gfx_text_center(g, f, t.tpx, x + cw / 2, base + (int)(k * t.tpx * 1.15f), cut,
                             on ? TH(L, TITLE_HL) : TH(L, TITLE));
         }
-        sub_y = base + (int)((tl - 1) * tpx * 1.15f) + (int)(62 * s);
-        spx = gfx_fit_px(f, im->subtitle, inner * 2, 30 * s, 22 * s);
-        nl = gfx_wrap(f, spx, im->subtitle, inner, &lines[0][0], CONF_STR, 4);
-        for (k = 0; k < nl; k++) {
-            gfx_ellipsize(f, spx, lines[k], inner, cut, sizeof cut);
-            gfx_text_center(g, f, spx, x + cw / 2, sub_y + (int)(40 * k * s), cut,
+        sub_y = base + (int)((t.tl - 1) * t.tpx * 1.15f) + (int)(62 * s);
+        for (k = 0; k < t.nl; k++) {
+            gfx_ellipsize(f, t.spx, t.lines[k], inner, cut, sizeof cut);
+            gfx_text_center(g, f, t.spx, x + cw / 2, sub_y + (int)(40 * k * s), cut,
                             on ? TH(L, SUBTITLE_HL) : TH(L, SUBTITLE));
         }
         return;
@@ -884,33 +955,23 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
         int zone_top = top + L->pad + L->art_h;
         int zone_h = (top + ch - L->pad) - zone_top;
         int title_h, sub_h, block_h, y0, gap = (int)(14 * s);
-        tpx = gfx_fit_px(f, im->title, inner, 48 * s, 26 * s);
-        if (gfx_text_width(f, tpx, im->title) <= inner) {
-            tl = 1;
-            snprintf(tlines[0], CONF_STR, "%s", im->title);
-        } else {
-            tl = gfx_wrap(f, tpx, im->title, inner, &tlines[0][0], CONF_STR, 2);
-            for (k = 0; k < tl; k++) tpx = gfx_fit_px(f, tlines[k], inner, tpx, 20 * s);
-        }
-        spx = gfx_fit_px(f, im->subtitle, inner * 2, 26 * s, 20 * s);
         line_h = (int)(32 * s);
-        nl = *im->subtitle ? gfx_wrap(f, spx, im->subtitle, inner, &lines[0][0], CONF_STR, 2) : 0;
-        title_h = (int)(tl * tpx * 1.15f);
-        sub_h = nl ? gap + nl * line_h : 0;
+        title_h = (int)(t.tl * t.tpx * 1.15f);
+        sub_h = t.nl ? gap + t.nl * line_h : 0;
         block_h = title_h + sub_h;
         y0 = zone_top + (zone_h - block_h) / 2;
         if (y0 < zone_top) y0 = zone_top;
         /* baselines: a line's ascent is ~0.93 of its size in this face */
-        base = y0 + (int)(tpx * 0.93f);
-        for (k = 0; k < tl; k++) {
-            gfx_ellipsize(f, tpx, tlines[k], inner, cut, sizeof cut);
-            gfx_text_center(g, f, tpx, x + cw / 2, base + (int)(k * tpx * 1.15f), cut,
+        base = y0 + (int)(t.tpx * 0.93f);
+        for (k = 0; k < t.tl; k++) {
+            gfx_ellipsize(f, t.tpx, t.tlines[k], inner, cut, sizeof cut);
+            gfx_text_center(g, f, t.tpx, x + cw / 2, base + (int)(k * t.tpx * 1.15f), cut,
                             on ? TH(L, TITLE_HL) : TH(L, TITLE));
         }
-        sub_y = y0 + title_h + gap + (int)(spx * 0.93f);
-        for (k = 0; k < nl; k++) {
-            gfx_ellipsize(f, spx, lines[k], inner, cut, sizeof cut);
-            gfx_text_center(g, f, spx, x + cw / 2, sub_y + k * line_h, cut,
+        sub_y = y0 + title_h + gap + (int)(t.spx * 0.93f);
+        for (k = 0; k < t.nl; k++) {
+            gfx_ellipsize(f, t.spx, t.lines[k], inner, cut, sizeof cut);
+            gfx_text_center(g, f, t.spx, x + cw / 2, sub_y + k * line_h, cut,
                             on ? TH(L, SUBTITLE_HL) : TH(L, SUBTITLE));
         }
     }
@@ -1671,6 +1732,14 @@ int main(int argc, char **argv)
         return 2;
     }
     layout_compute(&L, &g, &c);
+    /* ...and then the text: the sizes need the FONT, which the layout knows
+     * nothing about, so they are a second pass over the cards here */
+    layout_text_px(&L, font, &c);
+    if (L.tpx > 0)
+        sel_log("text: one size for every card - title %d px, subtitle %d px",
+                (int)(L.tpx + 0.5f), (int)(L.spx + 0.5f));
+    else
+        sel_log("text: text_size=per-card - each card fits its own title");
     {
         char bad[64] = "";
         if (c.bad_colors)

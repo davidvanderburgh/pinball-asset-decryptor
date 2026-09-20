@@ -279,6 +279,10 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     c->mv_default = -1;
     c->mixer_volume = -1;
     c->volume_max = -1;
+    /* ONE TEXT SIZE FOR THE WHOLE MENU unless the file asks for the other
+     * thing: a card built before text_size= existed gets the consistent look
+     * too, which is the point of it (PAD-183) */
+    c->text_uniform = 1;
     {
         int k;
         for (k = 0; k < 5; k++) c->jjp_byte[k] = c->jjp_bit[k] = c->jjp_byte2[k] = c->jjp_bit2[k] = -1;
@@ -379,6 +383,16 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
              * artwork up there wants (PAD-135). */
             c->heading_set = 1;
             copy_field(c->heading, val);
+        } else if (!strcmp(key, "text_size")) {
+            /* A WORD, not a number: the sizes themselves are the layout's, and
+             * this says whether the menu measures them once for every card or
+             * per card.  An empty value is the default, and a word this build
+             * does not know is warned about and ignored - a typo here must
+             * never stop a pinball machine booting. */
+            if (!*val || !strcmp(val, "uniform")) c->text_uniform = 1;
+            else if (!strcmp(val, "per-card")) c->text_uniform = 0;
+            else conf_warn(c, "%s:%d: text_size=%s is not 'uniform' or 'per-card': "
+                           "one size for the whole menu is used", path, lineno, val);
         } else if (!strcmp(key, "font")) {
             copy_field(c->font, val);
         } else if (!strcmp(key, "media")) {

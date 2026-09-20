@@ -281,6 +281,13 @@ def test_the_machine_log_and_learn_are_off_by_default(mj):
     assert "learn=1\n" in carried and "log=" in carried
 
 
+def mkc_text_sizes():
+    """The two words images.conf's text_size= takes, from the shared module the JJP
+    builder imports them through (PAD-183)."""
+    import mkmulticard
+    return mkmulticard.TEXT_SIZES
+
+
 def test_conf_round_trip_with_jjp_devices_and_policy(mj):
     text = mj.render_images_conf(["rootA", "rootB"], ["GUNS N' ROSES 3.03", "CHAKA'S LOTLJ"], ["Stock", "Retheme"],
                                  default=1, timeout=20, font="/jjpe/gen1/padselect/font.ttf",
@@ -296,6 +303,21 @@ def test_conf_round_trip_with_jjp_devices_and_policy(mj):
     assert p["media_dir"] == mj.MEDIA_DIR and p["theme"] == "midnight" and p["colors"] == {"background": "102030"}
     assert p["jjp_update"] == "allow" and p["log"] == mj.JJP_CARD_LOG
     assert "image=rootB|CHAKA'S LOTLJ|Retheme|art1.png|anim1.gif||confirm1.wav" in text.splitlines()
+    # THE TEXT SIZE (PAD-183): the same key the Stern builder writes, and the same
+    # silence when nobody asked - the menu draws at one size either way
+    assert "text_size" not in text and p["text_size"] is None and "text_size" in mj.CONF_KEYS
+    for word in mkc_text_sizes():
+        again = mj.render_images_conf(["rootA", "rootB"], ["a", "b"], text_size=word)
+        assert "text_size=%s" % word in again.splitlines()
+        assert mj.parse_images_conf(again)["text_size"] == word
+    with pytest.raises(mj.Refused):
+        mj.render_images_conf(["rootA", "rootB"], ["a", "b"], text_size="enormous")
+    # ...and an install's own word rides through an inject that does not name one
+    old = mj.parse_images_conf(mj.render_images_conf(["rootA", "rootB"], ["a", "b"], text_size="per-card"))
+    a = argparse.Namespace(titles=None, subtitles=None, timeout=None, default=None, volume=None,
+                           heading=None, theme=None, color=None, conf=None, jjp_update=None,
+                           debug_log=False)
+    assert mj.parse_images_conf(mj.conf_for_args(mj.DEVICES, a, existing=old))["text_size"] == "per-card"
 
 
 def test_conf_is_as_narrow_as_it_needs_to_be(mj):

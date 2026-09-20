@@ -1004,7 +1004,7 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
                       "volume", "machine_volume", "mixer_volume", "sound_move", "sound_confirm",
-                      "heading", "theme", "colors", "groups"}
+                      "heading", "text_size", "theme", "colors", "groups"}
     # a card that never set one records null, not the selector's own line
     assert d["heading"] is None
     # a card with no media at all: the fields are null, not absent
@@ -1357,6 +1357,47 @@ def test_images_conf_carries_a_heading(mk):
     man = mk.build_manifest(None, mk.parse_images_conf(text), None)
     assert man["heading"] == "THE BEATLES JUKEBOX"
     assert mk.build_manifest(None, mk.parse_images_conf(bare), None)["heading"] == ""
+    # ...and the like-for-like compare keeps it, or `update` re-injects the menu of
+    # every card that carries a heading for no change at all
+    assert mk.render_images_conf_text(mk.parse_images_conf(text)) == text
+    assert mk.render_images_conf_text(mk.parse_images_conf(bare)) == bare
+
+
+def test_images_conf_carries_a_text_size(mk):
+    """PAD-183: text_size= says how big a card's title and subtitle are drawn - 'uniform',
+    one size measured over the whole menu, or 'per-card', each card fitting its own.  The
+    key is written only when somebody asks, because a card that says nothing already draws
+    uniform: an older card must not read as changed."""
+    devs = ["/dev/mmcblk0p3", "/dev/mmcblk0p7"]
+    plain = mk.render_images_conf(devs, ["A", "B"])
+    assert "text_size" not in plain and mk.parse_images_conf(plain)["text_size"] is None
+    assert mk.TEXT_SIZES == ("uniform", "per-card") and mk.TEXT_SIZE_DEFAULT == "uniform"
+    for word in mk.TEXT_SIZES:
+        text = mk.render_images_conf(devs, ["A", "B"], text_size=word)
+        assert "text_size=%s" % word in text.splitlines()
+        assert mk.parse_images_conf(text)["text_size"] == word
+        # the like-for-like compare `update` makes must survive it
+        assert mk.render_images_conf_text(mk.parse_images_conf(text)) == text
+        assert mk.build_manifest(None, mk.parse_images_conf(text), None)["text_size"] == word
+    # a typo on the command line is refused here; a word ON A CARD reads back as "the card
+    # said nothing", which is exactly what the selector makes of it
+    with pytest.raises(mk.Refused):
+        mk.render_images_conf(devs, ["A", "B"], text_size="enormous")
+    odd = mk.render_images_conf(devs, ["A", "B"], text_size="uniform").replace("uniform", "enormous")
+    assert mk.parse_images_conf(odd)["text_size"] is None
+
+
+def test_conf_for_plan_takes_the_text_size_from_the_flag_else_the_card(mk):
+    plan = _two_image_plan(mk)
+    ex = mk.parse_images_conf(_menu_conf(mk, plan, text_size="per-card"))
+    # no flag: the card's own word rides through
+    assert "text_size=per-card\n" in mk.conf_for_plan(plan, argparse.Namespace(), existing=ex)
+    # --text-size replaces it
+    assert "text_size=uniform\n" in mk.conf_for_plan(
+        plan, argparse.Namespace(text_size="uniform"), existing=ex)
+    # a card that never said still gets no key (and still draws uniform)
+    plainex = mk.parse_images_conf(_menu_conf(mk, plan))
+    assert "text_size" not in mk.conf_for_plan(plan, argparse.Namespace(), existing=plainex)
 
 
 def test_conf_for_plan_takes_the_heading_from_the_flag_else_the_card(mk):

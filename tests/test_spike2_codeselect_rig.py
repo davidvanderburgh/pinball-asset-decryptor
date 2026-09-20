@@ -707,7 +707,7 @@ def test_list_games_is_read_with_the_fifth_field_and_tokens_carry_the_subdir():
 def test_the_cards_sound_and_volume_keys_reach_the_emulator_conf_but_media_does_not():
     outer = _select_outer()
     assert ("grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|"
-            "machine_volume|mixer_volume|heading|theme|color_[a-z_]+)[[:space:]]*='") in outer
+            "machine_volume|mixer_volume|heading|text_size|theme|color_[a-z_]+)[[:space:]]*='") in outer
     assert "media=" not in outer.replace("image=", ""), "media= is the card's path; the rig passes --media"
 
 
@@ -722,6 +722,8 @@ def test_the_cards_heading_and_colours_reach_the_emulator_conf():
     line = next(ln for ln in outer.splitlines() if '"$SEL_CARDCONF" | grep -E' in ln)
     pat = re.search(r"grep -E '([^']+)'", line).group(1).replace("[[:space:]]", r"\s")
     carried = ["heading=PICK YOUR BEATLES", "heading=", "  theme = neon",
+               # PAD-183: how big the cards' text is drawn is the card's answer too
+               "text_size=per-card", "text_size=uniform",
                "color_card_hl=263041", "sound_move=move.wav", "volume=machine"]
     # paths on the card's own rootfs, and the lines the script writes itself
     kept_back = ["font=/usr/local/codeselect/font.ttf", "media=/usr/local/codeselect/media",

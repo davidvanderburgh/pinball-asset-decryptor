@@ -1795,7 +1795,18 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    repaired for you out of the card you are already running; the fourth
    is the one that needs root — on Windows the **Set up emulator…**
    button above has it, on Linux it is named instead, with the
-   command that fits this machine. It is a Linux program
+   command that fits this machine. Start the app as yourself and never
+   with `sudo`: one elevated start used to leave everything the rig
+   builds - the hardware shim, both halves of the bridge, the GL
+   renderer, every stamp it keeps - owned by root, and every later run
+   as you then could not write them and stopped on a bare refusal with
+   no file named and no cause. From v0.222.1 a run that does have root
+   hands each of those back to the account that owns your emulator
+   folder as it writes them, so an accidental elevated start no longer
+   poisons the ones after it; the writes that could still fail say
+   which file, who owns it and who you are before they stop; and a run
+   that meets root's leftovers names the cause it almost always is, an
+   AppImage started under sudo, and carries on. It is a Linux program
    throughout: the Windows-looking parts are workarounds for what WSL
    lacks (no Tk for the playfield window, a degraded audio hop), and the
    Linux path skips them. macOS runs it in a container, because

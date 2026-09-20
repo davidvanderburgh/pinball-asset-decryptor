@@ -366,9 +366,16 @@ class Feeder:
                 if not self.dry:
                     time.sleep(step[1])
                 continue
+            # THE GAME'S OWN ANSWER, not ours (PAD-186). take() and the write
+            # after it are `1 -> 0 -> 1` in scr_held and the shim only looks
+            # between passes, so the pair can collapse and the ball never
+            # moves - which on an EJECT is a game that waits for a ball it was
+            # never handed. set_confirmed re-asserts and says whether it took.
+            ok = True
             if not self.dry:
-                padsw.set_held(m, step[1], step[2])
-            say("%s%s" % ("would: " if self.dry else "", step[3]))
+                ok = padsw.set_confirmed(m, step[1], step[2]) is not False
+            say("%s%s%s" % ("would: " if self.dry else "", step[3],
+                            "" if ok else " - THE GAME DID NOT TAKE THAT"))
         # OUR OWN BUMP IS NOT A PAIR OF HANDS. take() and set_held() both move
         # the script generation, so _claim() would read the feeder answering an
         # eject as somebody playing and cancel the way home of every ball it

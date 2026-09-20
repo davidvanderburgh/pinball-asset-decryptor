@@ -27,6 +27,13 @@ padglhost latches the coin door and the six trough balls on at window open, so
 would be a no-op. `take()` first copies the merged value into scr_held (silent,
 because it agrees with what the game already sees) so that the write after it is
 a real edge. Use it before changing anything the keyboard might also hold.
+
+AND THEN CHECK THAT IT LANDED (`set_confirmed`, PAD-186). take() plus the write
+after it is `1 -> 0 -> 1` in scr_held, and the shim only looks between passes:
+if no pass lands in the middle the pair collapses and the switch never moves,
+with every instrument on this side still saying it did. A helper that means to
+change what the GAME sees should write through `set_confirmed` and say so when
+the merge did not take it - `set_held` alone is for the script's own bookkeeping.
 """
 import mmap
 import os
@@ -167,6 +174,89 @@ def take(m, ids):
             changed = True
     if changed:
         bump(m)
+
+
+#: HOW LONG A HELPER WAITS FOR THE GAME TO ACTUALLY BE TOLD, and how long one
+#: re-assert gives the shim to run a merge pass. See `set_confirmed`.
+CONFIRM_S = float(os.environ.get("PAD_SW_CONFIRM_MS") or 250) / 1000.0
+RETRY_S = float(os.environ.get("PAD_SW_RETRY_MS") or 12) / 1000.0
+
+
+def adopted(m, sw, val):
+    """Has the merge taken the level we asked for? The game's own answer."""
+    return bool(m[OFF_MRG + sw]) == bool(val)
+
+
+def merging(m):
+    """Is there a guest on the other side that could take a write at all?
+
+    `guest_ms()` is None until the shim has published its clock, which it does
+    on the first SPI transfer - so this is "a game is running", and it is the
+    difference between a write that was LOST and a write that has nobody to
+    read it yet (the window is open, the title has not booted). Only the first
+    is worth retrying or reporting.
+    """
+    return guest_ms(m) is not None
+
+
+def _wait_adopted(m, sw, want, budget):
+    end = time.monotonic() + budget
+    while True:
+        if adopted(m, sw, want):
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.001)
+
+
+def set_confirmed(m, sw, val, timeout_s=None):
+    """Drive one switch AND PROVE THE GAME WAS TOLD. True / False / None.
+
+    ★ PAD-186, DRAGONRR: "if I click Drain with no timer running it allows me
+    but the game doesn't end." A click the window ACCEPTS and the game never
+    sees looks exactly like that, and until this existed every helper here
+    printed its success line from the value it had written rather than from
+    the value the game was handed.
+
+    THE FAULT IS `take()` AND THE WRITE AFTER IT COLLAPSING INTO NOTHING.
+    The shim merges by LAST EDGE WINS: it diffs scr_held[] against the snapshot
+    it took on its own previous pass, so only a CHANGE moves the answer. take()
+    exists to make the write after it a change - it copies the merged value
+    into scr_held first. But the pair is `1 -> 0 -> 1`, and if no merge pass
+    lands in between, the shim compares 1 against a snapshot of 1, finds no
+    edge, and the drain is silently gone. padsw.h's own example is the state
+    that starts it: padglhost latches the six trough balls on at window open,
+    so mrg[] and scr_held[] disagree from the first frame, and a drain that
+    collapses leaves them disagreeing - so the NEXT click can collapse too.
+    That is the "it doesn't always take the drain click" half of his report.
+
+    THE ANSWER IS TO READ BACK THE MERGE, which is published for exactly this
+    kind of question, rather than to invent a handshake the block does not
+    have (mrg_gen deliberately does not move for a take). If the level has not
+    been adopted, re-assert it as a pair the shim cannot collapse - the
+    opposite level, a beat for one merge pass, then the level we meant - and
+    try again until the deadline. The opposite level is HARMLESS precisely
+    when this is needed: it is what the merge is already showing, so it moves
+    nothing the game can see.
+
+    Returns True when the game has it, False when it never took it (the caller
+    should say so rather than claim success), and None when there is no guest
+    to take it - a dry window, where "unconfirmed" is not a fault.
+    """
+    want = 1 if val else 0
+    set_held(m, sw, want)
+    if not merging(m):
+        return None
+    end = time.monotonic() + (CONFIRM_S if timeout_s is None else timeout_s)
+    while True:
+        left = end - time.monotonic()
+        if _wait_adopted(m, sw, want, max(0.0, min(RETRY_S, left))):
+            return True
+        if time.monotonic() >= end:
+            return False
+        set_held(m, sw, 1 - want)    # an edge the shim cannot have snapshotted
+        time.sleep(RETRY_S)          # one merge pass later...
+        set_held(m, sw, want)        # ...and the level we actually meant
 
 
 def spinning(m, sw):

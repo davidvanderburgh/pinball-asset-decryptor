@@ -746,6 +746,22 @@ balls. A WINDOW and not a latch, because the way home still has a job when the
 room really does empty — the balls a ball search is waiting to see — so an
 abandoned window goes back to the old behaviour a minute later instead of
 never. **`PAD_BALL_HUMAN_MS=0` restores the PAD-134 behaviour exactly.**
+**PAD-186 again, after v0.224.2 did not fix it: a ball move is now read back
+off the MERGE before anything says it happened.** "It allows me but the game
+doesn't end", and DragonRR's PAD-128 line — "I can force it in using the black
+and white icons but the game acts like nothing has happened" — are the same
+sentence, and nothing on this side was ever checking. `take()` plus the write
+it exists to enable is `1 → 0 → 1` in `scr_held[]`, and the shim merges by
+diffing against the snapshot it took on its own previous pass, so if no pass
+lands in the middle the pair collapses and the switch never moves. `padglhost`
+latching the six trough balls on at window open (and its `B` key, bound to the
+same ids) is enough to leave the two arrays disagreeing, which is the state
+that makes it possible — and a drain that collapses leaves them disagreeing,
+so the next click can collapse too. `padsw.set_confirmed` now re-asserts until
+the merge shows the level, and `plunge.py` says **"the game did not take
+that"** instead of printing its success line, so a drain that does not end the
+ball is either delivered or named. Knobs: `PAD_SW_CONFIRM_MS` (250) and
+`PAD_SW_RETRY_MS` (12).
 **The actual Start-refusal root cause was DATA, not code, and does not ship
 in this repo**: DnD LE's factory ball count is **8** — 6 in the trough plus
 **2 captive in the dragon** — and the game disarms its own Start/Tournament

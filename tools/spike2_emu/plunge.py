@@ -157,6 +157,24 @@ def _set(m, sw, val):
     padsw.set_held(m, sw, val)
 
 
+#: What a ball move is allowed to leave behind, PAD-186. Every verb here that
+#: means "a ball is somewhere else now" writes through this instead of `_set`,
+#: because the interesting failure is not a refusal - those print a reason -
+#: but a write the game never saw, which used to print the success line anyway.
+LOST = ("the game did not take that - the switch was written but the merge "
+        "still shows it the other way")
+
+
+def _move(m, sw, val, said):
+    """One ball-move write, with the game's own answer. True if it took."""
+    ok = padsw.set_confirmed(m, sw, val)
+    if ok is False:
+        print(LOST)
+        return False
+    print(said + ("" if ok else " (no game running to take it)"))
+    return True
+
+
 def _held(m, sw):
     """What the GAME sees for `sw` - the merge, not either input."""
     return padsw.merged(m, sw)
@@ -327,8 +345,8 @@ def do_take(m):
         print(plan.refused)
         return 1
     for step in plan.steps:
-        _set(m, step[1], step[2])
-        print(step[3])
+        if not _move(m, step[1], step[2], step[3]):
+            return 1
     return 0
 
 
@@ -346,6 +364,11 @@ def do_drain(m):
     NOT WHILE THE ONLY BALL OUT IS IN THE SHOOTER LANE (PAD-153): that ball
     has not been launched, and draining it home leaves the lane holding one
     more ball than the machine has. ballmodel.plan_drain has the story.
+
+    AND THE CLOSURE IS READ BACK OFF THE MERGE BEFORE THIS SAYS IT HAPPENED
+    (PAD-186): take() plus the write after it can collapse into nothing, and
+    this verb is the one place a player notices - the click is accepted, the
+    line prints, and the game goes on believing a ball is in play.
     """
     padsw.take(m, TROUGH)
     plan = ballmodel.plan_drain(_model(), _mrg(m), SHOOTER, _held(m, SHOOTER))
@@ -353,8 +376,8 @@ def do_drain(m):
         print(plan.refused)
         return 1
     for step in plan.steps:
-        _set(m, step[1], step[2])
-        print(step[3])
+        if not _move(m, step[1], step[2], step[3]):
+            return 1
     return 0
 
 

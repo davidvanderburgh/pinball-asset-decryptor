@@ -2518,6 +2518,23 @@ fi
 # repeats collapse to the first sighting plus a count every 500th. fflush()
 # after every print matters - awk into a pipe is block-buffered, and a "live"
 # event feed that arrives four kilobytes at a time is not live.
+#
+# ★ PAD-186 (David, 2026-09-20: "i don't think we are properly logging switch
+# edges in the logs at all"): THE fflush() IS NOT ENOUGH ON MAWK. Ubuntu's
+# default awk - and so PAD-Runtime's - is mawk, and mawk block-buffers its
+# INPUT from a pipe: it does not look at a line until ~8 KB have arrived, so
+# every [sw]/[vid] line below sat in that buffer for minutes and then landed
+# in the app's log pane in one burst, wall-clock-stamped minutes after the
+# fact (30 s of edges all at 14:55:56, three minutes of them at 14:59:31).
+# The shim had written every one of them into game.out instantly; the feed
+# was late, not the recording. `-W interactive` is mawk's line-at-a-time mode
+# for both reading and writing. gawk (David's older distro, which is why this
+# never showed before) has no such problem and swallows -W interactive with a
+# 0 exit, so the probe reads the VERSION line rather than trusting the flag.
+case "$(awk -W version 2>&1 | head -n 1)" in
+    mawk*) AWK="awk -W interactive" ;;
+    *)     AWK="awk" ;;
+esac
 if [ "${PAD_EVENTS:-1}" != 0 ]; then
     # tr -d NULs before awk: loading a save can truncate-EXTEND the guest log
     # (restorestate.sh grows it back to the size criu recorded), and the hole
@@ -2528,7 +2545,7 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
     # as the fflush after every print below).
     tail -q -n 0 -F "$PAD_HOME/padvid.log" "$PAD_HOME/padaudio.log" \
                     "$PAD_HOME/padglhost.log" "$LOG" 2>/dev/null \
-        | stdbuf -oL tr -d '\000' | awk '
+        | stdbuf -oL tr -d '\000' | $AWK '
         /Radium Error/ {
             if (++n[$0] == 1 || n[$0] % 500 == 0)
                 { printf "[event] %s (x%d)\n", $0, n[$0]; fflush() }

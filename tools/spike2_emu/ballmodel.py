@@ -42,6 +42,8 @@ drain, or a button - and not an event this module can predict. Saying so
 matters, because the honest reading of "3 in play" is "three balls the game
 believes are out there", which is exactly what the game believes too.
 """
+import os
+
 import trough
 
 #: How long a ball takes to get from the trough eject to the shooter lane.
@@ -50,6 +52,15 @@ import trough
 #: PAD_BALL_LANE_MS) because the only thing that can judge it is the game's own
 #: ball-search timeout, and that has not been measured.
 LANE_FLIGHT_S = 0.35
+
+#: How long a returning ball sits on each trough opto it rolls over on the way
+#: down to the stack, and the gap between one and the next (plan_drain). A
+#: ball rolling down a trough ramp covers an opto for a few tens of ms; long
+#: enough here for the game's debounce to see a closure, short enough that a
+#: three-position roll is over well inside a second. Knobs because the game's
+#: trough debounce is not published anywhere and only a live run can say.
+ROLL_S = float(os.environ.get("PAD_BALL_ROLL_MS") or 60) / 1000.0
+ROLL_GAP_S = float(os.environ.get("PAD_BALL_ROLL_GAP_MS") or 30) / 1000.0
 
 #: The shooter lane's name, which is the same words in every switch list on
 #: this disk. Held here rather than in the feeder so plunge.py and the feeder
@@ -233,5 +244,24 @@ def plan_drain(tr, mrg, lane_id=None, lane_made=False):
     if not in_play(tr, mrg, lane_id, lane_made):
         return Plan(refused="the ball is still in the shooter lane - "
                             "Plunge it first")
-    return Plan([("set", home, 1,
-                  "trough switch %d closed (ball drained home)" % home)])
+    # ★ THE BALL ROLLS DOWN THE RAMP FIRST (PAD-186, David's live Mechagodzilla
+    # Multiball, 2026-09-20). A returning ball enters the trough at the FAR end
+    # and rolls down over every open position until it meets the stack, so on
+    # a real machine the far-end switch - and each open one below it - closes
+    # and opens again on EVERY drain. With one ball out the settling position
+    # IS the far end, which is why single-ball drains have always worked; with
+    # three out, the rig closed position 4 with 5 and 6 never moving, a thing
+    # no ball can do, and the game credited one drain of three and searched
+    # for the rest for ever. Trough 6 first, then 5, then settle at 4.
+    flags = tr.flags(mrg)
+    k = next(i for i, f in enumerate(flags) if not f)
+    steps = []
+    for i in range(len(flags) - 1, k, -1):
+        sw = tr.positions[i]["id"]
+        steps.append(("set", sw, 1, "trough switch %d closed (ball passing)" % sw))
+        steps.append(("wait", ROLL_S, "rolling"))
+        steps.append(("set", sw, 0, "trough switch %d opened (ball rolled on)" % sw))
+        steps.append(("wait", ROLL_GAP_S, "rolling"))
+    steps.append(("set", home, 1,
+                  "trough switch %d closed (ball drained home)" % home))
+    return Plan(steps)

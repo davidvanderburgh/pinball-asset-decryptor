@@ -238,11 +238,47 @@ def test_launching_needs_a_ball_in_the_lane(ballmodel):
     assert not ballmodel.plan_launch(None, True)
 
 
+def _settles_at(plan):
+    """The write a drain ENDS on - the position the ball stays in."""
+    return plan.switches()[-1]
+
+
+def _rolls_over(plan):
+    """The positions the ball passed on its way down, far end first: each one
+    closed and opened again before the next (PAD-186)."""
+    writes = plan.switches()[:-1]
+    assert [v for _, v in writes] == [1, 0] * (len(writes) // 2)
+    return [sw for sw, v in writes if v == 1]
+
+
 def test_a_drain_closes_the_lowest_open_position(ballmodel, tr):
     plan = ballmodel.plan_drain(tr, mrg_with(71, 70, 69, 68, 67))
-    assert plan.switches() == [(66, 1)]
+    assert plan.switches() == [(66, 1)]          # far end IS the settling spot
     plan = ballmodel.plan_drain(tr, mrg_with(71, 70, 69))
-    assert plan.switches() == [(68, 1)]
+    assert _settles_at(plan) == (68, 1)
+
+
+def test_a_multiball_drain_rolls_down_the_ramp_before_it_settles(ballmodel, tr):
+    """PAD-186, David's live Mechagodzilla Multiball (2026-09-20): three balls
+    out, three Drain clicks, every one delivered - and the game credited one
+    of them and searched for the rest for ever. The rig had closed position 4
+    with 5 and 6 never moving, which no ball can do: a returning ball enters
+    at the FAR end and rolls over every open position down to the stack. With
+    one ball out the far end is the settling position, which is exactly why
+    single-ball drains never showed this.
+    """
+    plan = ballmodel.plan_drain(tr, mrg_with(71, 70, 69))       # 3 out
+    assert _rolls_over(plan) == [66, 67]                        # 6 then 5
+    assert _settles_at(plan) == (68, 1)                         # stays at 4
+    waits = [s for s in plan.steps if s[0] == "wait"]
+    assert len(waits) == 4 and all(0 < s[1] < 0.5 for s in waits)
+    # Two out: passes 6, settles at 5.
+    plan = ballmodel.plan_drain(tr, mrg_with(71, 70, 69, 68))
+    assert _rolls_over(plan) == [66]
+    assert _settles_at(plan) == (67, 1)
+    # One out: nothing to roll over.
+    plan = ballmodel.plan_drain(tr, mrg_with(71, 70, 69, 68, 67))
+    assert _rolls_over(plan) == []
 
 
 def test_a_full_trough_cannot_drain_because_nothing_is_in_play(ballmodel, tr):
@@ -270,8 +306,8 @@ def test_a_launched_ball_drains_and_a_multiball_drains_past_a_waiting_one(
     # Three home, one waiting in the lane, two out there: a drain is real.
     multi = mrg_with(71, 70, 69, 62)
     assert ballmodel.in_play(tr, multi, 62, True) == 2
-    assert ballmodel.plan_drain(tr, multi, lane_id=62,
-                                lane_made=True).switches() == [(68, 1)]
+    assert _settles_at(ballmodel.plan_drain(tr, multi, lane_id=62,
+                                            lane_made=True)) == (68, 1)
 
 
 def test_a_title_with_no_lane_switch_drains_on_the_trough_alone(ballmodel, tr):
@@ -299,8 +335,10 @@ def test_three_ejects_and_three_drains_come_back_to_where_they_started(
     assert tr.count(m) == 3
     for expect in (68, 67, 66):
         plan = ballmodel.plan_drain(tr, m)
-        assert plan.switches() == [(expect, 1)]
-        m[expect] = 1
+        assert _settles_at(plan) == (expect, 1)
+        for sw, val in plan.switches():         # the roll-down included
+            m[sw] = val
+        assert tr.anomaly(m) is None            # never a hole mid-roll
     assert tr.count(m) == 6
     assert tr.anomaly(m) is None
 

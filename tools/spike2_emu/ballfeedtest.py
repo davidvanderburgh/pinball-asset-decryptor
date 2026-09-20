@@ -16,11 +16,19 @@ the wrong ids and a helper that writes into a region nobody reads.
 
 THE MERGE IS THE PART THAT HAS TO BE FAKED, and getting it wrong would make
 this harness agree with a broken feeder. On a real run the guest shim computes
-mrg[] from the keyboard's array and the scripts' array by last-edge-wins;
-here there is no keyboard, so mrg[] is simply scr_held[] and a thread copies
-one to the other whenever the script generation moves. That is exactly what
-the shim would do with one writer, and it means the feeder's next decision
-sees its own last one - which is the property the whole thing turns on.
+mrg[] from the keyboard's array and the scripts' array by LAST EDGE WINS -
+each array diffed against the snapshot the shim took on its own previous pass.
+There is no keyboard here, so the thread below is the script half of that and
+nothing else, and it means the feeder's next decision sees its own last one,
+which is the property the whole thing turns on.
+
+IT USED TO BE A COPY (`mrg[] = scr_held[]`) AND THAT WAS THE ONE WAY IT COULD
+LIE, PAD-186. A copy and a diff agree for every single write and disagree for
+exactly one shape - two writes to one id with no pass in between, which is
+`take()` and the write take() exists to enable - so the harness could not see
+a switch collapsing on its way to the game, which is the fault DragonRR was
+reporting. tests/test_spike2_switch_delivery.py is the deterministic twin of
+this, stepped by hand; this one is here to keep the REAL feeder honest.
 
 IT TOUCHES NOTHING REAL. PAD_SW_FILE and PAD_LED_FILE point at scratch files
 under /var/tmp (never /tmp - tmpfs, wiped on a WSL restart), and PAD_TABLES
@@ -50,6 +58,11 @@ def make_blocks(trough_ids):
     led = os.path.join(SCRATCH, "padled")
     b = bytearray(4096)
     struct.pack_into("<I", b, padsw.OFF_MAGIC, padsw.MAGIC)
+    #: The shim's clock, which is how padsw.merging() tells "a game is running
+    #: and did not take that" from "nothing has booted yet" (PAD-186). Without
+    #: it the feeder's writes here would skip the confirm entirely and this
+    #: harness would be testing the wrong path.
+    struct.pack_into("<I", b, padsw.OFF_GUEST_T0, 1)
     for i in trough_ids:
         b[padsw.OFF_SCR_HELD + i] = 1
         b[padsw.OFF_MRG + i] = 1
@@ -73,12 +86,20 @@ class Shim(threading.Thread):
 
     def run(self):
         last = -1
+        #: sw_scr_prev, the snapshot the real shim diffs against. Primed from
+        #: the block, because its first pass finds a machine already at rest.
+        prev = bytearray(1 if self.m[padsw.OFF_SCR_HELD + i] else 0
+                         for i in range(padsw.MAX_ID))
         while not self.stop:
             gen = struct.unpack_from("<I", self.m, padsw.OFF_SCR_GEN)[0]
             if gen != last:
                 last = gen
                 for i in range(padsw.MAX_ID):
-                    self.m[padsw.OFF_MRG + i] = self.m[padsw.OFF_SCR_HELD + i]
+                    s = 1 if self.m[padsw.OFF_SCR_HELD + i] else 0
+                    if s == prev[i]:              # no edge, no news
+                        continue
+                    prev[i] = s
+                    self.m[padsw.OFF_MRG + i] = s
                 struct.pack_into("<I", self.m, padsw.OFF_MRG_GEN, gen)
             time.sleep(0.005)
 

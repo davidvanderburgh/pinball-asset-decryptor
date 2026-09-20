@@ -746,6 +746,45 @@ balls. A WINDOW and not a latch, because the way home still has a job when the
 room really does empty — the balls a ball search is waiting to see — so an
 abandoned window goes back to the old behaviour a minute later instead of
 never. **`PAD_BALL_HUMAN_MS=0` restores the PAD-134 behaviour exactly.**
+**PAD-186 again, after v0.224.2 did not fix it: a ball move is now read back
+off the MERGE before anything says it happened.** "It allows me but the game
+doesn't end", and DragonRR's PAD-128 line — "I can force it in using the black
+and white icons but the game acts like nothing has happened" — are the same
+sentence, and nothing on this side was ever checking. `take()` plus the write
+it exists to enable is `1 → 0 → 1` in `scr_held[]`, and the shim merges by
+diffing against the snapshot it took on its own previous pass, so if no pass
+lands in the middle the pair collapses and the switch never moves. `padglhost`
+latching the six trough balls on at window open (and its `B` key, bound to the
+same ids) is enough to leave the two arrays disagreeing, which is the state
+that makes it possible — and a drain that collapses leaves them disagreeing,
+so the next click can collapse too. `padsw.set_confirmed` now re-asserts until
+the merge shows the level, and `plunge.py` says **"the game did not take
+that"** instead of printing its success line, so a drain that does not end the
+ball is either delivered or named. Knobs: `PAD_SW_CONFIRM_MS` (250) and
+`PAD_SW_RETRY_MS` (12).
+**PAD-186, round 3 (2026-09-20, David live, Godzilla LE 1.16): MECHAGODZILLA
+MULTIBALL never ends, and it is NOT the feeder.** Measured on six multiballs
+(David's two by hand, four scripted with coil + edge recorders): the feeder
+answers every MB eject and auto-plunge within 10 ms; a drain inside the MB
+ball save is re-served by the game 550 ms later (eject + plunge, correct);
+after the save lapses, three delivered drains leave the trough at 6/6 and the
+game believing at least one ball is still out — ball search every ~30 s
+(scoop and VUK ×5 each, slings ×2, plunger/pop/bridge/Godzilla magnet ×1),
+"PINBALL MISSING / PLEASE WAIT" after an operator abort, and Start adds a
+player instead of restarting. Nothing after the fact recovers it (far-end
+blink, Mecha Exit optos, playfield hits, take+drain, service menu): only a
+run restart. **Drains now roll down the ramp** (`plan_drain`: the far end and
+every open position blink before the ball settles, `PAD_BALL_ROLL_MS` 60 /
+`PAD_BALL_ROLL_GAP_MS` 30) because that is what a real trough does and the
+old direct settle credited even less; with it the MB itself ended in one run
+and did not in another, so it is fidelity, not the fix. **Two facts for the
+next round:** the game fires the MECHAGODZILLA MAGNET by itself ~5 s after the
+MB feed with nobody touching anything, and pressing a device exit opto with
+no ball inside (Mecha Exit, VUK Exit, Building) makes the count WORSE — an
+exit without an entry is an extra ball to the game. Single-ball play is
+unaffected: a ball auto-plunged by a ball save and drained with no playfield
+hit at all ends normally. Recorders that worked live in `c:\tmp\pad186shot\`
+(`coiltail.py`, `start_recorders.sh`, `mb_drive3.sh`).
 **The actual Start-refusal root cause was DATA, not code, and does not ship
 in this repo**: DnD LE's factory ball count is **8** — 6 in the trough plus
 **2 captive in the dragon** — and the game disarms its own Start/Tournament

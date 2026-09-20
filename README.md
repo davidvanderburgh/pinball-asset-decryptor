@@ -1284,6 +1284,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    the trough five seconds after it launches, and it keeps a way home
    for every launched ball instead of one — which is what left a drained
    ball never ending, Start refusing and the game searching for balls.
+   From v0.224.2 that judgement is about the ROOM and not about one
+   ball: while anybody has moved anything in the last minute, no
+   launched ball is taken back at all, so watching a battle play itself
+   out without touching the controls no longer hands your ball back to
+   the game and leaves your own Drain with nothing to end.
    Plunge only launches the ball waiting in the shooter lane and never
    serves one from the trough. With the key panel up, the bottom button
    row is gone: Start Button and Left Coin are clickable rows in the key

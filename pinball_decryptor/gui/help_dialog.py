@@ -1938,12 +1938,17 @@ HELP_CONTENT = {
          "the same five commands. The line under the table names the .raw "
          "the selected image was copied from."),
         ("One image's text and media",
-         "✎ (or a double-click on the row) opens that image: title, "
-         "subtitle, Art (the picture on its card in the menu — auto = the "
-         "game's own logo, pulled off the image, or a frame of a video at "
-         "a second you choose), Animation (auto = the attract clip, or a "
-         "GIF or clip of your own, with its start, length and frame rate) "
-         "and Music, an optional WAV loop while it is highlighted."),
+         "✎ (or a double-click on the row) opens that image: its title and "
+         "subtitle, ONE list saying what its card shows — the game's own "
+         "logo, a picture file, the game's own attract video, a video "
+         "file, or nothing at all — and its own music and confirm sound. "
+         "A video is the still as well: the frame it starts on is what "
+         "shows while the card is not highlighted. Whatever the list is "
+         "on is drawn on the right of the dialog as the card the menu "
+         "will put on screen, in the menu's own colours and with the "
+         "title and subtitle under it, so a picture is a picture there "
+         "and not a path to one. A random card's list offers the ways it "
+         "can draw the games behind it instead."),
         ("Menu settings",
          "The button on the action bar opens everything that belongs to "
          "the MENU rather than to one image, and the line beside it "

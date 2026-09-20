@@ -1302,11 +1302,15 @@ def _checks(widget):
 
 
 def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
-    """The Edit image… modal's Picture section is one flat radio list
+    """The Edit image… modal's Picture section is one flat list
     (logo / picture file / attract video / video file / nothing): each
     option's fields live only while it is the choice, a video writes BOTH
     halves of the row (the clip, and the frame it starts on as the still),
-    the merged table cell says so, and a re-selected row loads it back."""
+    the merged table cell says so, and a re-selected row loads it back.
+
+    A LIST BOX, not a column of radio buttons (BEN, PAD-187): nine of them
+    on a random card was 250 px of a dialog that no longer fitted a
+    768-high desktop.  The choice did not change - only how it is asked."""
     root, panel = _panel()
     try:
         a, b = _images(tmp_path, 2)
@@ -1322,11 +1326,23 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
         root.update()
         assert dlg is panel._image_dialog
         assert panel._ed_media.get() == "logo"
-        assert [w.cget("value") for w in _radios(dlg.body)] == \
+        assert [k for k, _label in dlg.kinds] == \
             ["logo", "picture", "attract", "video", "none"]
+        assert list(dlg.kind_box.cget("values")) == \
+            [label for _k, label in dlg.kinds]
+        assert str(dlg.kind_box.cget("state")) == "readonly", \
+            "the list is picked from, never typed into"
+        assert not _radios(dlg.body), "no radio button column any more"
+        assert dlg.kind_var.get() == "The game's own logo"
         assert sorted(panel._media_entries) == ["picture", "video"]
         assert all(str(w.cget("state")) == "disabled"
                    for w in panel._media_entries.values())
+        # picking in the box IS picking the option
+        dlg.kind_var.set("Nothing - text only")
+        dlg._chose_kind()
+        assert panel._ed_media.get() == "none"
+        assert panel.form().images[1].art == "none"
+        panel._ed_media.set("logo")
         # NO clip Start / Length / FPS controls any more (David): the video
         # options carry only a stated note, and the render still reads the
         # start var (set below to prove the spec is built from it); a
@@ -1386,6 +1402,168 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
         assert panel._ed_media.get() == "video"
         assert panel._ed_anim_start.get() == "20"
         assert panel._ed_video.get() == str(clip)
+    finally:
+        root.destroy()
+
+
+def _prepared_media(tmp_path, sources, name="media"):
+    """A prepared media directory: one ``art<N>.png`` per source spec, and
+    the media.json that says which spec each was made from."""
+    from PIL import Image
+    media = tmp_path / name
+    media.mkdir(exist_ok=True)
+    rows = []
+    for i, spec in enumerate(sources):
+        art = "art%d.png" % i
+        Image.new("RGB", (338, 190), (20, 40 + i, 80)).save(str(media / art))
+        rows.append({"art": art, "anim": None, "music": None, "confirm": None,
+                     "art_source": spec})
+    (media / "media.json").write_text(json.dumps({"images": rows}),
+                                      encoding="utf-8")
+    return str(media)
+
+
+def test_still_for_row_says_where_the_preview_can_draw_from(tmp_path):
+    """BEN, PAD-187: "Add in a preview of what it will look like".  What it
+    can draw RIGHT NOW is one of four things, and which one is a question
+    about the row, the files on this machine and what the tools last made -
+    never about the dialog, which is why it is a function."""
+    mb = multiboot_tab
+    paths = _images(tmp_path, 2)
+    picture = tmp_path / "poster.png"
+    picture.write_bytes(bytes(4))
+    clip = tmp_path / "intro.mp4"
+    clip.write_bytes(bytes(4))
+    media = _prepared_media(tmp_path, ["auto", "auto"])
+    form = MultibootForm(images=[ImageRow(path=paths[0], title="A"),
+                                 ImageRow(path=paths[1], title="B")],
+                         out=str(tmp_path / "card.multi.raw"))
+    manifest = mb.read_manifest(media)
+
+    # the game's own logo, and the tools have made it from exactly that
+    assert mb.still_for_row(form, 0, media, manifest) == \
+        ("rendered", os.path.join(media, "art0.png"))
+    # ...but not once the row asks for something else: the file beside it is
+    # then a picture of the choice that was just left
+    mb.set_media(form.images[0], "picture", str(picture))
+    assert mb.still_for_row(form, 0, media, manifest) == ("file", str(picture))
+    # a video is the frame it starts on, whether or not it has been rendered
+    mb.set_media(form.images[1], "video", str(clip), start="20")
+    assert mb.still_for_row(form, 1, media, manifest) == \
+        ("video", (str(clip), "20"))
+    # a file that is not on this machine is nothing to draw
+    mb.set_media(form.images[1], "picture", str(tmp_path / "gone.png"))
+    assert mb.still_for_row(form, 1, media, manifest) == ("none", "")
+    # ...and neither is a media set that has not been prepared
+    mb.set_media(form.images[1], "logo")
+    assert mb.still_for_row(form, 1, "", {}) == ("none", "")
+    assert mb.still_for_row(form, 9, media, manifest) == ("none", "")
+
+    # A RANDOM CARD'S ART IS ITS OWN FILE, numbered by group and recorded in
+    # the manifest's own `groups` row - not images[1], which is some other
+    # game's (the same trap manifest_sounds had to be taught).
+    mb.set_media(form.images[0], "logo")
+    group = mb.set_group_media(
+        ImageRow(path="", title="RANDOM",
+                 members=[mb.MemberRow(path=p) for p in paths], keep=True),
+        "stack")
+    form.images.append(group)
+    from PIL import Image
+    gart = os.path.join(media, "gart0.png")
+    Image.new("RGB", (338, 190), (90, 90, 90)).save(gart)
+    doc = mb.read_manifest(media)
+    doc["groups"] = [{"art": "gart0.png", "art_source": "stack"}]
+    with open(os.path.join(media, "media.json"), "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+    manifest = mb.read_manifest(media)
+    assert mb.still_for_row(form, 2, media, manifest) == ("rendered", gart)
+    mb.set_group_media(group, "mosaic")
+    assert mb.still_for_row(form, 2, media, manifest) == ("none", "")
+
+
+def test_the_editor_draws_the_card_it_is_editing(tmp_path):
+    """The preview follows the dialog: the picture it names, the title and
+    the subtitle typed into it, and what it says when there is nothing to
+    draw yet."""
+    mb = multiboot_tab
+    root, panel = _panel()
+    try:
+        from PIL import Image
+        a, b = _images(tmp_path, 2)
+        picture = tmp_path / "poster.png"
+        Image.new("RGB", (640, 360), (200, 60, 40)).save(str(picture))
+        panel.add_image(a)
+        panel.add_image(b)
+        panel._table.select(1)
+        root.update()
+        dlg = panel.edit_image()
+        root.update()
+        # a logo row with nothing prepared: the card, and why it is empty
+        assert dlg.preview.note.cget("text") == mb.PREVIEW_NOTES["none"]
+        assert dlg.drawn == ("none", "")
+        # a picture file: the file itself, fitted into the card's panel
+        panel._ed_picture.set(str(picture))
+        panel._ed_media.set("picture")
+        root.update()
+        assert dlg.drawn == ("file", str(picture))
+        assert dlg.preview.note.cget("text") == mb.PREVIEW_NOTES["file"]
+        assert dlg.preview._photo is not None
+        assert dlg.preview._photo.width() <= mb.PREVIEW_ART_W
+        # the text on the card is the text in the boxes, as they are typed
+        panel._ed_title.set("BEATLES")
+        panel._ed_sub.set("Stock 1.29")
+        root.update()
+        drawn = [dlg.preview.canvas.itemcget(i, "text")
+                 for i in dlg.preview.canvas.find_all()
+                 if dlg.preview.canvas.type(i) == "text"]
+        assert drawn == ["BEATLES", "Stock 1.29"]
+        # text only says so, and draws no panel
+        panel._ed_media.set("none")
+        root.update()
+        assert dlg.preview.note.cget("text") == mb.PREVIEW_NOTES["text"]
+    finally:
+        root.destroy()
+
+
+def test_a_dialog_taller_than_the_screen_scrolls_and_keeps_its_buttons(
+        tmp_path, monkeypatch):
+    """BEN, PAD-187: "The properties window on a multiboot image properties
+    can go off the bottom of the screen hiding critical buttons."  On a
+    screen with no room for the whole body, the body scrolls and OK and
+    Cancel stay where they are - they are not in the scrolling part."""
+    root, panel = _panel()
+    try:
+        a, b = _images(tmp_path, 2)
+        panel.add_image(a)
+        panel.add_image(b)
+        panel._table.select(1)
+        root.update()
+        # a 400-high desktop, which nothing this dialog could ever be fits
+        monkeypatch.setattr(multiboot_tab, "monitor_workarea",
+                            lambda *_a: (0, 0, 1200, 400))
+        dlg = panel.edit_image()
+        root.update()
+        assert dlg.scrolls, "a body with no room for it has to scroll"
+        assert dlg.room() <= 400
+        assert int(dlg._canvas.cget("height")) == dlg.room()
+        assert dlg._bar.winfo_manager() == "pack", "with a bar to scroll it"
+        # THE BUTTONS ARE NOT IN THE SCROLLING PART: they are packed against
+        # the bottom of the window itself, before anything else asks for
+        # room, so nothing can push them off it.
+        assert dlg.ok_btn.master.master is dlg.top
+        assert dlg.ok_btn.master is dlg._button_row
+        dlg.cancel()
+        root.update()
+        # ...and a screen with room for it is drawn exactly as it was
+        monkeypatch.setattr(multiboot_tab, "monitor_workarea",
+                            lambda *_a: (0, 0, 1920, 1080))
+        dlg = panel.edit_image()
+        root.update()
+        assert not dlg.scrolls
+        assert dlg._bar.winfo_manager() == ""
+        assert int(dlg._canvas.cget("height")) == dlg.body.winfo_reqheight()
+        dlg.cancel()
+        root.update()
     finally:
         root.destroy()
 
@@ -1467,9 +1645,9 @@ def test_a_loaded_rows_own_files_are_an_option_of_their_own(tmp_path):
         dlg = panel.edit_image()
         root.update()
         assert panel._ed_media.get() == "card"
-        radios = _radios(dlg.body)
-        assert [w.cget("value") for w in radios][-1] == "card"
-        assert radios[-1].cget("text") == "Keep the card's own art0.png"
+        assert [k for k, _label in dlg.kinds][-1] == "card"
+        assert dlg.kinds[-1][1] == "Keep the card's own art0.png"
+        assert dlg.kind_var.get() == "Keep the card's own art0.png"
         panel._ed_media.set("logo")
         assert (row.art, row.art_on_card, row.anim) == ("auto", False, "none")
         assert panel._table.cell(0, "media") == "logo"
@@ -1485,7 +1663,7 @@ def test_a_loaded_rows_own_files_are_an_option_of_their_own(tmp_path):
         root.update()
         dlg = panel.edit_image()
         root.update()
-        assert [w.cget("value") for w in _radios(dlg.body)] == \
+        assert [k for k, _label in dlg.kinds] == \
             ["logo", "picture", "attract", "video", "none"]
         dlg.cancel()
         root.update()
@@ -1809,7 +1987,8 @@ def test_the_sound_boxes_offer_every_file_the_menu_uses(tmp_path):
         panel._load_editor()
         dlg = panel.edit_image()
         root.update()
-        music_cb, confirm_cb = _combos(dlg.body)
+        # [0] is the Picture list box (PAD-187); the sound boxes follow it
+        music_cb, confirm_cb = _combos(dlg.body)[-2:]
         assert list(confirm_cb.cget("values")) == [
             "menu", "auto", "synth", "ComeTogether.wav", "Medley.wav"]
         assert list(music_cb.cget("values")) == [
@@ -9967,13 +10146,15 @@ def test_the_editor_offers_a_random_card_its_own_pictures(tmp_path):
         root.update()
         dlg = panel.edit_image()
         root.update()
-        values = [w.cget("value") for w in _radios(dlg.body)]
-        n = len(mb.GROUP_MEDIA_NAMES)
-        assert values[:n] == list(mb.GROUP_MEDIA_NAMES), values
+        values = [k for k, _label in dlg.kinds]
+        assert values == list(mb.GROUP_MEDIA_NAMES), values
         # ...and HOW IT PICKS, which is the only other question a random card
         # has that an image does not - two ways of drawing, with the rule over
-        # them a tick rather than a third radio button (PAD-185)
-        assert values[n:] == list(mb.ROLL_DRAW_NAMES), values
+        # them a tick rather than a third radio button (PAD-185).  Those two
+        # are still radio buttons: a pair with a sentence each is not what
+        # made this dialog too tall (PAD-187).
+        assert [w.cget("value") for w in _radios(dlg.body)] == \
+            list(mb.ROLL_DRAW_NAMES)
         assert "logo" not in values and "attract" not in values
         assert "random card" in dlg.top.title().lower()
         # no video row: a random card's picture is drawn, not clipped
@@ -10295,7 +10476,8 @@ def test_the_dialog_changes_how_a_random_card_picks(tmp_path):
         root.update()
         dlg = panel.edit_image()
         root.update()
-        assert [w.cget("value") for w in _radios(dlg.body)] == \
+        assert not _radios(dlg.body), "no 'How it picks' on an image row"
+        assert [k for k, _label in dlg.kinds] == \
             ["logo", "picture", "attract", "video", "none"]
     finally:
         root.destroy()

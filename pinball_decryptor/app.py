@@ -2963,23 +2963,37 @@ class App:
         # pristine extract of the old card", which needs the card (PAD-176).
         # So offer both passes here instead: the baked mods first, then this
         # plan on top, which wins on any slot they share.
+        # Field 3 is the trigger, not a build record.  Recognising the source
+        # card by the record beside it was too brittle to rely on: rename the
+        # card, keep it on another drive, extract from the SD card itself or
+        # build it with an older version, and there is no record to find: the
+        # modder this was written for filled every field correctly and was
+        # never asked (PAD-176, his screenshots).  A stock extract of the OLD
+        # version has exactly one use, the baked-mod comparison, so a user who
+        # supplies one is asking for those mods; the card's name is a nicety
+        # on top of the question, not the reason to ask it.
         from .core.extract_source import built_card_source
         intro = None
         built = built_card_source(source_dir)
         stock_dir = getattr(self, "_transfer_old_stock", None)
-        if built and stock_dir and messagebox.askyesno(
+        came_off = ('"%s"' % built if built
+                    else "the card it was extracted from")
+        if stock_dir and messagebox.askyesno(
                 "Carry the baked-in mods too?",
-                "This folder was extracted from \"%s\", a card this app "
-                "built, so it carries that card's mods as its starting point "
-                "as well as the %d replacement(s) assigned since.\n\n"
-                "Yes: carry both. The baked-in mods are compared against the "
+                "This folder was extracted from %s, so anything already "
+                "modded on that card is its starting point rather than a "
+                "replacement, and only the %d replacement(s) assigned since "
+                "would transfer.\n\n"
+                "You gave a stock extract of the old version, which is what "
+                "makes those baked-in mods findable.\n\n"
+                "Yes: carry both. The baked-in mods are compared against that "
                 "stock extract first (that takes a while), then this folder's "
                 "own replacements go on top of them.\n\n"
-                "No: carry only this folder's %d replacement(s), as before."
-                % (built, totals["transfer"], totals["transfer"])):
+                "No: carry only this folder's %d replacement(s)."
+                % (came_off, totals["transfer"], totals["transfer"])):
             self.window.append_log(
                 "Carrying both: the mods baked into %s first, then this "
-                "folder's own replacements on top." % built, "info")
+                "folder's own replacements on top." % came_off, "info")
             self._transfer_baked_mods(
                 source_dir, target_dir,
                 then=lambda: self._confirm_apply_transfer(
@@ -2987,7 +3001,9 @@ class App:
                     intro=("Now this folder's own replacements, on top of the "
                            "baked-in mods just carried.")))
             return
-        if built:
+        if built and not stock_dir:
+            # Nothing to offer without field 3, so name it rather than leave
+            # the folder's baked mods to go missing in silence.
             intro = (
                 "Only this folder's own replacements transfer.\n\n"
                 "It was extracted from \"%s\", a card this app built, so the "

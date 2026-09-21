@@ -85,3 +85,44 @@ def test_export_mod_pack_survives_non_ascii_baseline_names(
     n, _ = jjp.export_mod_pack(str(tmp_path), str(tmp_path / "pack.zip"))
 
     assert n == 1
+
+
+# --------------------------------------------------------------------------
+# The app's own log is not one of the card's assets (PAD-192)
+#
+# core.session_log mirrors every line into <project>/logs/project.log while
+# the build runs.  JJP walks the project folder itself instead of going
+# through core.checksums, so it never applied NON_ASSET_DIRS: the log went
+# into the baseline, came back "Modified" on every later run (it is appended
+# to continuously), and the write stage then failed it with "not found in
+# fl.dat" -- a red [ERROR] and an inflated FAILED count on every single
+# build.  cooltoy's Sonic log shows "557/562 replaced and verified (5
+# FAILED)" where only four were his clips.
+# --------------------------------------------------------------------------
+
+PROJECT_LOG_REL = "logs/project.log"
+
+
+def test_the_apps_own_project_log_is_never_scanned_as_an_asset(tmp_path):
+    """Even when a baseline written by an older version still lists it."""
+    _seed_assets(str(tmp_path), [PLAIN_REL, PROJECT_LOG_REL])
+    _modify(str(tmp_path), PROJECT_LOG_REL)      # the app appends as we scan
+    _modify(str(tmp_path), PLAIN_REL)
+
+    changed = _run_scan(str(tmp_path))
+
+    assert [rel for rel, _ in changed] == [PLAIN_REL], \
+        "logs/ is the app's own folder inside the project, not the card's"
+
+
+def test_a_cards_own_nested_logs_folder_is_still_an_asset(tmp_path):
+    """Only the TOP-LEVEL logs/ is ours.  The card's tree really does carry
+    directories by that name further down, and pruning those would quietly
+    drop real assets from the build."""
+    nested = "system/var/logs/boot.cfg"
+    _seed_assets(str(tmp_path), [PLAIN_REL, nested])
+    _modify(str(tmp_path), nested)
+
+    changed = _run_scan(str(tmp_path))
+
+    assert [rel for rel, _ in changed] == [nested]

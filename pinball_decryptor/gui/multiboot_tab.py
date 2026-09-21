@@ -2501,6 +2501,35 @@ def wsl_command_root(args, cwd=None, exe="python3", home=None):
     return wsl_shell_root(shell_line(args, cwd, exe), home)
 
 
+#: What sudo prints when it has nowhere to ask for a password.
+_SUDO_NEEDS_PASSWORD = "a password is required"
+
+
+def sudo_password_note(text):
+    """One sentence for a root step that died for want of a password, or ""
+    when that is not what happened.
+
+    :func:`wsl_shell_root` asks with ``sudo -n`` on purpose — a GUI has no
+    terminal to type into, so failing fast beats hanging on a prompt nobody
+    can see.  On a Linux desktop that is usually the end of it.  On macOS
+    there is no passwordless-sudo convention at all, so EVERY root step of
+    the multi-boot tab stops here, and what the user sees is a bare
+    ``sudo: a password is required`` repeated once per redraw with nothing
+    saying which part of the app wanted root or why (PAD-192: "I can't for
+    the life of me ... set up anything for multi boot").
+
+    Naming it is not fixing it — the tab still cannot get root on macOS —
+    but a sentence that says what was refused is the difference between a
+    known limitation and an app that looks broken.
+    """
+    if sys.platform != "darwin" or _SUDO_NEEDS_PASSWORD not in (text or ""):
+        return ""
+    return ("This step needs administrator rights, and the multi-boot tab "
+            "has no way to ask for them on macOS yet — it runs `sudo -n`, "
+            "which never prompts. Steps that do not need root (the size "
+            "check, planning an ISO) are unaffected.")
+
+
 def root_command(args, cwd=None, exe="python3"):
     """The argv of a tool step that must run as root (build, update: they
     loop-mount the card's partitions - item 93) - as a CALLABLE the worker
@@ -14311,6 +14340,10 @@ class MultibootPanel:
                     for line in lines:                  # it failed: say why
                         self._append(line)
                 self._append("%s: exit %d" % (label, rc))
+                if rc != 0:
+                    note = sudo_password_note(texts[label])
+                    if note:
+                        self._append(note)
                 if on_step is not None:
                     self._ui(lambda l=label, r=rc, t=texts[label]:
                              on_step(l, r, t))

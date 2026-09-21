@@ -17,12 +17,28 @@ from .executor import (CommandError, create_executor, find_usbipd,
                        _decode_output as _exec_decode_output,
                        _CREATE_FLAGS as _exec_create_flags)
 from ...core import runtime
+from ...core.checksums import NON_ASSET_DIRS
 from ...core.ext4_grow import loop_unavailable_reason
 
 # Where the decrypt shim writes what it learns about the running game (inside
 # the chroot).  Deliberately not the asset output dir: a successful run's
 # output stays clean, and rescue_diagnostics() tars this out on failure.
 _DIAG_DIR = "/tmp/jjp_diag"
+
+
+def _is_non_asset_dir(root, dirpath, name):
+    """Whether *name* under *dirpath* is one of the app's own folders inside
+    the project rather than a folder of card assets.
+
+    Only TOP-LEVEL folders count, which is what makes this safe: the card's
+    own tree really does contain directories called ``logs`` and ``build``
+    (``system/.../logs``), and pruning those would silently drop real assets
+    from the baseline.  ``core.checksums.generate_checksums`` draws the line
+    in the same place for every other manufacturer; JJP walks the project
+    itself, so it has to ask the same question here.
+    """
+    rel = os.path.relpath(dirpath, root).replace(os.sep, "/")
+    return rel in (".", "") and name in NON_ASSET_DIRS
 
 
 # ---------------------------------------------------------------------------
@@ -1956,7 +1972,15 @@ class DecryptionPipeline:
         skip_names = {".checksums.md5", ".checksums.edata.md5",
                       "fl_decrypted.dat"}
         to_hash = []  # (rel, abspath)
-        for dirpath, _dn, filenames in os.walk(out_dir):
+        for dirpath, dirnames, filenames in os.walk(out_dir):
+            # The app's own state inside the project folder is not the card's
+            # (core.checksums.NON_ASSET_DIRS: build/, logs/, ...).  Baselining
+            # logs/project.log — which core.session_log appends to while this
+            # very scan runs — made every later build find it "Modified" and
+            # then fail it with "not found in fl.dat", an [ERROR] and a wrong
+            # FAILED count on every single write (PAD-192).
+            dirnames[:] = [d for d in dirnames
+                           if not _is_non_asset_dir(out_dir, dirpath, d)]
             for fn in filenames:
                 if fn.startswith(".") or fn in skip_names \
                         or fn.endswith(".img"):
@@ -4358,7 +4382,12 @@ class ModPipeline(DecryptionPipeline):
         all_files = []
         untracked_system = 0
         untracked_assets = []  # (rel_path, full_path) for non-system stragglers
-        for root, _dirs, files in os.walk(self.assets_folder):
+        for root, dirs, files in os.walk(self.assets_folder):
+            # Never the card's files (see _write_checksums_parallel): an older
+            # baseline can still carry logs/project.log, so prune the walk here
+            # too rather than trust the baseline it is compared against.
+            dirs[:] = [d for d in dirs
+                       if not _is_non_asset_dir(self.assets_folder, root, d)]
             for name in files:
                 if name.startswith('.') or name == 'fl_decrypted.dat' or name.endswith('.img'):
                     continue

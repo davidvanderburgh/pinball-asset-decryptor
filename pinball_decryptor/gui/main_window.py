@@ -18,7 +18,7 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from ..core.checksums import TRACKING_SIDECARS
+from ..core.checksums import NON_ASSET_DIRS, TRACKING_SIDECARS
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
 from ..core.extract_source import (dismiss_stale_source, stale_dismissed,
                                    stale_source_message)
@@ -20429,10 +20429,17 @@ class MainWindow:
                 # prunes the project's build output (a multi-GB image that
                 # would list as "modified") and the .hydrate parking lot
                 # (whose nested files don't start with "." themselves).
+                # ...and the rest of the app's own folders inside the
+                # project.  This list was a hand-written subset of
+                # checksums.NON_ASSET_DIRS and had gone stale: "logs" holds
+                # the log core.session_log mirrors into the project WHILE
+                # this scan runs, so the preview listed logs/project.log as
+                # a modified asset on every JJP project, and the Write then
+                # failed it with "not found in fl.dat" (PAD-192).
                 dirs[:] = [d for d in dirs
                            if d != ORIG_DIR
                            and not (root_dir == assets_path
-                                    and d in ("build", ".hydrate"))]
+                                    and d in NON_ASSET_DIRS)]
                 for name in files:
                     # Superseded (re-scan or Cancel) → stop hashing NOW.  The
                     # old check only ran when a changed file turned up, so a

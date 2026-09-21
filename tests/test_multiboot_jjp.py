@@ -365,3 +365,33 @@ def test_ensurejjpselect_prints_both_lines():
         mount = f.read()
     assert 'if [ "${1:-}" = "--root-only" ]' in mount
     assert '-o "$dest.part"' in mount and 'mv -f "$dest.part" "$dest"' in mount
+
+
+# --------------------------------------------------------------------------
+# macOS cannot get root for the rig's steps (PAD-192)
+# --------------------------------------------------------------------------
+
+def test_a_mac_root_step_says_what_it_was_refused(monkeypatch):
+    """A Sonic owner's log is twenty repetitions of
+
+        [multi-boot] sudo: a password is required
+        [multi-boot] selector: exit 1
+
+    with nothing naming what wanted root.  `sudo -n` is deliberate (a GUI
+    has no terminal to type into) but macOS has no passwordless-sudo
+    convention, so every root step ends here.
+    """
+    monkeypatch.setattr(mt.sys, "platform", "darwin")
+    note = mt.sudo_password_note("sudo: a password is required")
+    assert "administrator rights" in note
+    assert "size check" in note, "say what still works, not only what doesn't"
+
+
+def test_the_note_is_only_for_that_failure(monkeypatch):
+    """Any other failure keeps its own message and gains nothing."""
+    monkeypatch.setattr(mt.sys, "platform", "darwin")
+    assert mt.sudo_password_note("selector: no such file") == ""
+    assert mt.sudo_password_note("") == ""
+    # ...and Linux's `sudo -n` is a different situation with its own answer.
+    monkeypatch.setattr(mt.sys, "platform", "linux")
+    assert mt.sudo_password_note("sudo: a password is required") == ""

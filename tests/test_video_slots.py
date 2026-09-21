@@ -975,8 +975,9 @@ def test_a_byte_budget_sets_the_rate_from_the_length_being_produced(
     """
     ok, detail, cmds = _budget_cmd(monkeypatch, tmp_path, 1_000_000,
                                    src_dur=10.0, slot_dur=20.0)
-    assert ok and len(cmds) == 1
-    cmd = cmds[0]
+    # One attempt, which for libvpx is its analysis pass and then the encode.
+    assert ok and len(cmds) == 2
+    cmd = cmds[-1]
     rate = int(cmd[cmd.index("-b:v") + 1])
     assert rate == int(1_000_000 * 8 * 0.92 / 20.0)
     # capped, not just targeted — libvpx will drift over a bare -b:v
@@ -1008,10 +1009,64 @@ def test_a_clip_that_will_not_reach_the_budget_is_still_staged(monkeypatch,
     ok, detail, cmds = _budget_cmd(monkeypatch, tmp_path, 10,
                                    size=b"x" * 5000)
     assert ok, "an unreachable budget must not lose the replacement"
-    assert len(cmds) == 3, "it should try the whole headroom ladder first"
     assert "the build will re-encode it to fit" in detail
     rates = [int(c[c.index("-b:v") + 1]) for c in cmds]
     assert rates == sorted(rates, reverse=True), "each retry aims lower"
+
+
+def test_the_ladder_stops_once_the_encoder_stops_responding(monkeypatch,
+                                                            tmp_path):
+    """A fake that returns the same size however low the rate goes is a real
+    encoder at its quality floor (libvpx pinned at q=63 still emits what the
+    picture costs).  Re-asking is a whole wasted encode, so the ladder gives
+    up the moment an attempt comes back no smaller than the one before it."""
+    ok, detail, cmds = _budget_cmd(monkeypatch, tmp_path, 10,
+                                   size=b"x" * 5000)
+    assert ok
+    # Two attempts x (analysis pass + encode); the third rung is never run
+    # because attempt 2 proved the rate is not reaching the encoder.
+    assert len(cmds) == 4, "a third attempt could only land in the same place"
+
+
+def test_a_retry_is_corrected_by_what_the_encoder_actually_produced(
+        monkeypatch, tmp_path):
+    """THE PAD-192 FIX.  The old ladder re-asked for a smaller slice of the
+    budget and trusted the encoder to obey it; libvpx-vp9 overshoots ``-b:v``
+    by ~1.6x in single pass, so 0.92 -> 0.80 -> 0.62 could not close a gap
+    that needed 60% and all three attempts landed within a couple of per cent
+    of each other (cooltoy's 2.17 MB clip "shrunk" to 2.14 MB for a 1.67 MB
+    slot, three times running).
+
+    Scaling the next rate by the size actually muxed makes the correction
+    proportional to the encoder's real behaviour instead of a guess.
+    """
+    from pinball_decryptor.core import video as V
+
+    # cooltoy's RTR_RANK_C, measured: a 1,674,054-byte slot, 9.2s, and a first
+    # attempt that asked 1,339,243 bps and muxed 2,429,383 bytes.
+    budget, dur = 1_674_054, 9.2
+    first = int(budget * 8 * 0.92 / dur)
+    assert first == 1_339_243
+
+    blind = int(budget * 8 * 0.80 / dur)          # what the old ladder asked
+    corrected = V._corrected_bitrate(first, 2_429_383, budget, 0.80)
+
+    assert corrected < blind, "the retry must account for the overshoot"
+    # The old rung barely moved (1.34 -> 1.16 Mbps) against an encoder running
+    # 1.6x hot; the corrected rate aims where the measurement says 0.80 of the
+    # budget actually lies.
+    assert 700_000 < corrected < 780_000
+    assert blind > 1_100_000
+
+
+def test_x264_keeps_its_single_pass_encode(monkeypatch, tmp_path):
+    """Only libvpx needs the analysis pass.  x264's single-pass VBR already
+    tracks -b:v, so a budgeted H.264 slot must not pay a second encode."""
+    from pinball_decryptor.core import video as V
+
+    assert V._two_pass_wanted(["-c:v", "libvpx-vp9"]) is True
+    assert V._two_pass_wanted(["-c:v", "libvpx"]) is True
+    assert V._two_pass_wanted(["-c:v", "libx264"]) is False
 
 
 def _budget_seen(monkeypatch, tmp_path, **kw):

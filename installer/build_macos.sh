@@ -76,6 +76,15 @@ pyinstaller \
     `# namespaces - so tools/spike2_emu/docker runs it in a container and exports` \
     `# the display over VNC, which macOS Screen Sharing opens with no install.` \
     --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \
+    `# The JJP rig. The Multi-boot tab and "install an ISO onto a game SSD"` \
+    `# both run tools/jjp_emu/mkjjpmulti.py with python3 from beside the` \
+    `# package. PAD-162 added this line to the Windows installer and to the` \
+    `# Linux AppImage but not here, so on macOS every multi-boot step died on` \
+    `# "can't open file '.../Contents/Resources/tools/jjp_emu/mkjjpmulti.py'"` \
+    `# and the size check reported exit 2 with a blank status sentence - no` \
+    `# macOS build has ever been able to plan or build a multi-boot ISO` \
+    `# (PAD-192).` \
+    --add-data "$ROOT_DIR/tools/jjp_emu:tools/jjp_emu" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto_v3.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/filelist.py:pinball_decryptor/plugins/jjp" \

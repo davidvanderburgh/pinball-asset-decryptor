@@ -2076,7 +2076,7 @@ HELP_CONTENT = {
          "and the card is read back afterwards to say so - no rebuild, and "
          "no separate command."),
         ("Building one on a Mac",
-         "A Mac can build these cards from v0.228.0, and it needs "
+         "A Mac can build these cards from v0.229.0, and it needs "
          "Docker Desktop to do it. The tools this tab runs are Linux tools "
          "\u2014 they loop-mount the card's partitions and write ext4 \u2014 and "
          "macOS has neither, so the app runs them inside a Linux container "

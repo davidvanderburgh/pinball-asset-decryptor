@@ -137,6 +137,14 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.sidx_append" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx_deliver" \
     --hidden-import "pinball_decryptor.plugins.stern.film_cut" \
+    `# code_modes belongs to the modes family and every import of it is` \
+    `# function-local (engine.py, mode_assets, mode_tryit, the Modes tab),` \
+    `# so PyInstaller's tracer never sees it and the frozen bundle shipped` \
+    `# without it: the Modes tab, and a Write carrying a code mode, would` \
+    `# both die on "No module named ...stern.code_modes". Windows is` \
+    `# unaffected - its installer ships the source tree beside an embedded` \
+    `# Python, so nothing there is traced at all (PAD-192).` \
+    --hidden-import "pinball_decryptor.plugins.stern.code_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_assets" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_project" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_runtime" \

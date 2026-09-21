@@ -13,6 +13,7 @@ import sys
 
 import pytest
 
+from pinball_decryptor.gui import multiboot_docker as mac_docker
 from pinball_decryptor.gui import multiboot_tab as mt
 from pinball_decryptor.gui.multiboot_backend import JJP, STERN, backend_for
 from pinball_decryptor.gui.multiboot_tab import (ImageRow, MultibootForm, wsl)
@@ -29,6 +30,21 @@ def jjp_form(**kw):
                 volume=50, heading="SELECT GAME CODE")
     base.update(kw)
     return MultibootForm(**base)
+
+
+def root_head():
+    """What a root step's argv begins with on THIS platform.  THREE answers.
+
+    macOS is the third and it is not a sudo at all.  The host has no losetup,
+    no ext4 and no partclone, so PAD-192 gave the tab a Linux the way Windows
+    already had one, and that container's own user is root.  The container is
+    NAMED here on purpose: the JJP plugin runs a privileged container on a Mac
+    too (its Alpine ``jjp-decryptor-worker``, for Direct-SSD work), and these
+    steps must not drift into it - see the test below for why they cannot.
+    """
+    if sys.platform == "darwin":
+        return ["docker", "exec", mac_docker.CONTAINER]
+    return ["sudo", "-n"]
 
 
 # ---------------------------------------------------------------------------- the backend
@@ -168,12 +184,14 @@ def test_build_commands_run_the_writing_steps_as_root():
     argv = dict(cmds)
     # the JJP steps that mount things run as root: on Windows a callable
     # (resolved as root just before the step, root_command's shape), on a
-    # Linux desktop the rig's `sudo -n` argv; the plan runs as the user
+    # Linux desktop the rig's `sudo -n` argv, on a Mac the container whose
+    # own user is root already; the plan runs as the user
+    head = root_head()
     for label in ("selector", "prepare", "build", "verify"):
         if sys.platform == "win32":
             assert callable(argv[label]), label
         else:
-            assert not callable(argv[label]) and list(argv[label][:2]) == ["sudo", "-n"], label
+            assert not callable(argv[label]) and list(argv[label][:len(head)]) == head, label
     assert not callable(argv["plan"]) and argv["plan"][-1].startswith("cd /repo && python3 ")
     # the Stern run keeps MAIN's shape: the plan and verify as the user, the
     # build as root, and the selector as root on Windows (PAD-140, main's
@@ -184,8 +202,27 @@ def test_build_commands_run_the_writing_steps_as_root():
     assert not callable(scmds["plan"])
     assert callable(scmds["build"]) == (sys.platform == "win32")
     if sys.platform != "win32":
-        assert list(scmds["build"][:2]) == ["sudo", "-n"]
+        assert list(scmds["build"][:len(head)]) == head
     assert not callable(scmds["verify"])
+
+
+def test_a_mac_builds_the_card_in_the_tabs_own_linux_not_the_plugins():
+    """The two macOS containers are deliberately different containers.
+
+    The JJP plugin's is Alpine and serves Direct-SSD extracts.  This tab
+    cannot use it: ensurejjpselect.sh links the menu program with
+    ``-nostdlib`` against the card's own libraries and
+    ``-print-file-name=libc_nonshared.a``, which is a glibc artefact musl has
+    not got - so ``apk add gcc make`` would not have bought it - and a
+    writing run hard-fails when that compile fails.  Hence a Debian image of
+    its own, and hence a name of its own so the two can be up at once.
+    """
+    from pinball_decryptor.plugins.jjp import executor
+    assert mac_docker.CONTAINER != executor._DOCKER_CONTAINER
+    assert mac_docker.IMAGE.split(":")[0] != executor._DOCKER_IMAGE
+    assert "debian" in mac_docker.DOCKERFILE.lower()
+    for pkg in ("gcc", "libc6-dev", "make"):
+        assert pkg in mac_docker.DOCKERFILE, pkg
 
 
 def test_selector_step_is_ensurejjpselect():

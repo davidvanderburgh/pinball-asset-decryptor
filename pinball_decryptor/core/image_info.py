@@ -48,6 +48,27 @@ def _file_section(path):
     ])
 
 
+def _device_section(path):
+    """The File section's twin for a card read in its own reader.
+
+    There is no file to stat — the point of PAD-191 is that nothing was copied
+    to the hard disk — so the section names the device and its capacity.  A
+    card that won't open says so HERE rather than leaving a report of empty
+    sections: on Windows a raw disk read needs Administrator (root elsewhere),
+    and that is by far the likeliest reason.
+    """
+    rows = [("Card", path)]
+    try:
+        from .rawdevice import RawDeviceFile
+        with RawDeviceFile(path) as dev:
+            if dev.size:
+                rows.append(("Size", _size_cell(dev.size)))
+    except Exception as e:
+        rows.append(("Could not read the card", str(e)))
+    rows.append(("Read", "from the card itself — nothing is copied"))
+    return ("Card", rows)
+
+
 def _detection_section(mfr, game):
     rows = [("Manufacturer", mfr.display)]
     if game is None:
@@ -72,12 +93,21 @@ def collect(mfr, path, assets_dir=None):
     *assets_dir* is passed through to the plugin's ``image_info`` hook for
     the platforms whose metadata only exists in the extract output (BOF's
     update-version date); nothing here reads the folder itself.
+
+    *path* may also be a raw-device path — the card sitting in a reader
+    (PAD-191).  Everything below is the same probe; only the first section
+    differs, because a device has no file to stat.
     """
+    from .rawdevice import is_device_path
+
     sections = []
-    try:
-        sections.append(_file_section(path))
-    except OSError as e:
-        sections.append(("File", [("Error", str(e))]))
+    if is_device_path(path):
+        sections.append(_device_section(path))
+    else:
+        try:
+            sections.append(_file_section(path))
+        except OSError as e:
+            sections.append(("File", [("Error", str(e))]))
     if mfr is not None:
         try:
             game = mfr.detect(path)

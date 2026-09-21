@@ -827,7 +827,17 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
 3. **Extract tab** — pick an input file and an output folder; click
    *Extract*. The output folder gets the decrypted assets plus a
    `.checksums.md5` baseline used by the Write tab.
-   In **From SD card** mode (Stern Spike 2), **Save card as image…**
+   In **From SD card** mode (Stern Spike 2) the game on the card you
+   picked is named right under the dropdown — read off the card in
+   place, with nothing copied anywhere — so a stack of cards on the
+   bench can be sorted out by plugging each one in and reading the
+   line; a card carrying a boot menu says so and how many games are
+   on it. The ⓘ beside the dropdown opens the same details window
+   the image picker's does, on the card itself: firmware version,
+   edition, asset counts and partitions. Reading a card in place
+   needs Administrator on Windows, and the line says so when it
+   hasn't got it.
+   **Save card as image…**
    next to the card picker copies the card itself into a `.raw` file
    first — the exact reverse of the Write tab's flash, and the backup
    to take before you mod a stock card. It shows the card's size

@@ -20,6 +20,14 @@ Detection is deliberately cheap — it reads only the 512-byte MBR and (when a
 filename hint is absent) confirms the Spike partition *shape*.  Confirming the
 exact title requires reading inside an ext partition, which the extract
 pipeline does; ``detect`` stays lightweight so the picker is responsive.
+
+A *card in a reader* is detected too (PAD-191: "i have several SD Cards on my
+desk and like to simply check, what game it belongs to... without copying it
+extra to the harddisk").  The card itself is the same MBR + partition shape,
+so the only differences are that a block device must be read through
+:class:`..core.rawdevice.RawDeviceFile` (sector-aligned) and that it has no
+filename to take the extension gate, the title or the version from — so the
+title comes off the card's own game folder instead (:func:`title_from_card`).
 """
 
 import os
@@ -45,6 +53,36 @@ SPIKE2_GENERIC_KEY = "spike2"
 SPIKE1_GENERIC_KEY = "spike1"
 
 
+def open_card(path):
+    """A seekable, read-only byte stream over a card image — or the card ITSELF.
+
+    A block device refuses a read that is not a whole number of sectors, so a
+    device path goes through :class:`..core.rawdevice.RawDeviceFile` (which
+    aligns underneath); a file is opened normally.  The caller closes it (it is
+    a context manager either way).
+    """
+    from ...core.rawdevice import RawDeviceFile, is_device_path
+    if is_device_path(path):
+        return RawDeviceFile(path)
+    return open(_lp(path), "rb")
+
+
+def title_from_card(path):
+    """The game's title read off the CARD — its own game-folder name, e.g.
+    ``"Godzilla Pro"`` — or ``""`` when this isn't a Spike 2 games card.
+
+    A card in a reader has no filename to read a title out of, and the game
+    folder is the name every Spike 2 path on the card already starts with.
+    Costs a handful of directory reads (see :mod:`.multiimage`), no extract.
+    """
+    from .multiimage import images_for_path, pretty
+    try:
+        images = images_for_path(path)
+    except Exception:
+        return ""
+    return pretty(images[0]) if images else ""
+
+
 def _filename_hint(path, key, db=GAME_DB):
     name = os.path.basename(path).lower()
     return any(h in name for h in db[key]["filename_hints"])
@@ -52,16 +90,27 @@ def _filename_hint(path, key, db=GAME_DB):
 
 def display_for_key(key, path):
     """Human title for a detected key: the named-title display when ``key`` is
-    in GAME_DB, otherwise a title derived from the card's filename (the generic
-    Spike 2 case)."""
+    in GAME_DB, otherwise a title derived from the card itself (a card in a
+    reader) or from its filename (the generic Spike 2 case)."""
     info = GAME_DB.get(key)
-    return info["display"] if info else _title_from_filename(path)
+    return info["display"] if info else _title_for_path(path)
 
 
 def spike1_display_for_key(key, path):
     """Spike 1 twin of :func:`display_for_key`."""
     info = SPIKE1_GAME_DB.get(key)
-    return info["display"] if info else _title_from_filename(path, "Spike 1")
+    return info["display"] if info else _title_for_path(path, "Spike 1")
+
+
+def _title_for_path(path, era="Spike 2"):
+    r"""The generic title for *path* — off the card when it is a raw device
+    (``\\.\PHYSICALDRIVE2`` is not a name anyone wants to read), else off the
+    filename Stern shipped it under."""
+    from ...core.rawdevice import is_device_path
+    if not is_device_path(path):
+        return _title_from_filename(path, era)
+    title = title_from_card(path)
+    return "%s (%s)" % (title, era) if title else "Stern %s card" % era
 
 
 def _title_from_filename(path, era="Spike 2"):
@@ -101,12 +150,13 @@ def parse_mbr_partitions_bytes(mbr):
 def parse_mbr_partitions(path):
     """Return ``[(index, type, lba_start, sectors), ...]`` from the MBR.
 
-    Reads only the first 512 bytes; never touches the filesystem.
+    Reads only the first 512 bytes; never touches the filesystem.  *path* may
+    be a card image or the card itself (:func:`open_card`).
     """
     try:
-        with open(_lp(path), "rb") as f:
+        with open_card(path) as f:
             mbr = f.read(512)
-    except OSError:
+    except (OSError, ValueError):
         return []
     return parse_mbr_partitions_bytes(mbr)
 
@@ -156,9 +206,14 @@ def detect_game(path):
     hints at one, otherwise :data:`SPIKE2_GENERIC_KEY` (the engine decodes every
     Spike 2 title generically, so the card needn't be in GAME_DB).  Non-Spike
     images are declined so other manufacturers' cards aren't grabbed.
+
+    A raw device (the card in a reader) skips the extension gate — it has no
+    name to carry one — and is claimed on the partition signature alone.
     """
+    from ...core.rawdevice import is_device_path
     low = path.lower()
-    if not (low.endswith(".img") or low.endswith(".bin") or low.endswith(".raw")):
+    if not (is_device_path(path) or low.endswith(".img")
+            or low.endswith(".bin") or low.endswith(".raw")):
         return None
     if not _is_spike_card(path):
         return None
@@ -222,11 +277,11 @@ def parse_all_partitions_file(f, sector_size=512, max_logical=32):
 
 
 def parse_all_partitions(path, sector_size=512):
-    """:func:`parse_all_partitions_file` over a file path."""
+    """:func:`parse_all_partitions_file` over a card image or the card itself."""
     try:
-        with open(_lp(path), "rb") as f:
+        with open_card(path) as f:
             return parse_all_partitions_file(f, sector_size)
-    except OSError:
+    except (OSError, ValueError):
         return []
 
 
@@ -266,10 +321,13 @@ def detect_spike1_game(path):
     signature is claimed (Stern shipped Spike 1 updates as ``.iso`` files that
     are really raw MBR SD-card images, but a card dumped by other tools can
     carry any raw extension): a known title's key when the filename hints at
-    one, else :data:`SPIKE1_GENERIC_KEY`.
+    one, else :data:`SPIKE1_GENERIC_KEY`.  A raw device — the card in a reader
+    — skips the extension gate, as it does for Spike 2.
     """
+    from ...core.rawdevice import is_device_path
     low = path.lower()
-    if not low.endswith((".iso", ".img", ".bin", ".raw")):
+    if not (is_device_path(path) or low.endswith((".iso", ".img", ".bin",
+                                                  ".raw"))):
         return None
     if not _is_spike1_card(path):
         return None

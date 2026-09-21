@@ -278,6 +278,14 @@ class Capabilities:
     # agnostic (see core.pipeline_base.ReadCardPipeline); raw device reads need
     # Administrator/root, elevated per-run exactly like the flash.
     read_card_image: bool = False
+    # Identify-the-card path: the plugin can say WHICH GAME a directly-connected
+    # card is without copying it anywhere (PAD-191 — "i have several SD Cards on
+    # my desk and like to simply check, what game it belongs to").  Surfaces the
+    # game's name under the Extract tab's drive picker plus the ⓘ Image Info
+    # badge on that row, both reading the card in place.  Needs ``direct_ssd``
+    # (that is the row it lives on) and a plugin that implements
+    # :meth:`Manufacturer.identify_card`.
+    identify_card: bool = False
     # Mod-transfer path: surfaces a "Transfer Mods to New Version" section on the
     # (shared) Mod Pack tab that pulls a user's pending Replace edits from an OLD
     # extract folder onto the current new-version one, reconciling layout changes
@@ -568,6 +576,19 @@ class Manufacturer(ABC):
         this runs on the Tk thread on every path change).  Default: the
         game's display name."""
         return game.display
+
+    def identify_card(self, path):
+        r"""Which game the card at *path* is — a short caption like
+        ``"Godzilla Pro"``, or ``""`` when this plugin can't tell.
+
+        *path* is a raw-device path (``\\.\PHYSICALDRIVE2``, ``/dev/sdb``):
+        the card the user just plugged into a reader, which is the whole point
+        — the answer must come off the card in place, with nothing copied to
+        the hard disk.  Called on a worker thread; keep it to the metadata
+        reads that name the game, not a full probe.  Only consulted when
+        ``capabilities.identify_card`` is set.
+        """
+        return ""
 
     def image_info(self, path, assets_dir=None):
         """Platform-specific sections for the Image Info tab, as

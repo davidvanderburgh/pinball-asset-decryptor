@@ -30,6 +30,16 @@ HELP_CONTENT = {
          "with direct-media support also offer a \"From SD card / SSD\" mode "
          "that reads the physical media in a reader (needs Administrator on "
          "Windows)."),
+        ("Which game is this card?",
+         "In \"From SD card\" mode the game on the card you picked is named "
+         "under the dropdown, read straight off the card with nothing copied "
+         "anywhere — so a stack of cards can be sorted out by plugging each "
+         "one in and reading the line. A card carrying a boot menu says so "
+         "and how many games are on it. The ⓘ beside the dropdown opens the "
+         "same details window the image picker's does, on the card itself: "
+         "firmware version, edition, asset counts and partitions. Reading a "
+         "card in place needs Administrator on Windows, and the line says so "
+         "when it hasn't got it."),
         ("Save card as image",
          "In \"From SD card\" mode, \"Save card as image…\" copies the whole "
          "card, sector for sector, into one .raw file — the reverse of the "
@@ -2163,7 +2173,9 @@ _IMAGE_INFO_SECTIONS = [
      "Copy Report button puts a plain-text version on the clipboard, ready "
      "to paste into a bug report."),
     ("Where its details come from",
-     "Only from the image itself and its filename. A Stern card's version "
+     "Only from the image itself and its filename — or, for a card opened "
+     "from the Extract tab's card row, from the card in the reader (there is "
+     "no filename then, so the game is named by the card's own game folder). A Stern card's version "
      "is read from the card's own update index — the version is a fact "
      "about the image, so renaming the file cannot change it — and the "
      "filename is used only when that index cannot be read. If the name "

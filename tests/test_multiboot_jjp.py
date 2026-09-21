@@ -367,31 +367,96 @@ def test_ensurejjpselect_prints_both_lines():
     assert '-o "$dest.part"' in mount and 'mv -f "$dest.part" "$dest"' in mount
 
 
-# --------------------------------------------------------------------------
-# macOS cannot get root for the rig's steps (PAD-192)
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# macOS cannot build a multi-boot card at all (PAD-192)
+#
+# It LOOKS like a password problem - the reporter's log is twenty repetitions
+# of "sudo: a password is required" - and the first read of this ticket took
+# it for one.  It is not.  The steps that write a card restore ext4
+# partitions: mkjjpmulti.py's build asks need_tools() for losetup, mount,
+# umount, partclone.ext4/.restore and e2fsck, and the JJP selector step
+# loop-mounts a root to compile the menu program against its glibc.  macOS
+# has no losetup, no ext4 in the kernel and no partclone, so granting root
+# would only move the failure to "missing tool(s)".  `plan` is the exception
+# - xorriso, no mount, no root - so the size check really does work there.
+# ---------------------------------------------------------------------------
 
-def test_a_mac_root_step_says_what_it_was_refused(monkeypatch):
-    """A Sonic owner's log is twenty repetitions of
-
-        [multi-boot] sudo: a password is required
-        [multi-boot] selector: exit 1
-
-    with nothing naming what wanted root.  `sudo -n` is deliberate (a GUI
-    has no terminal to type into) but macOS has no passwordless-sudo
-    convention, so every root step ends here.
-    """
+@pytest.fixture
+def mac(monkeypatch):
     monkeypatch.setattr(mt.sys, "platform", "darwin")
+
+
+def test_a_writing_run_is_refused_before_anything_starts(mac):
+    cmds = mt.build_commands(jjp_form(), cwd="/repo", prepare=True)
+    note = mt.macos_root_refusal(cmds)
+    assert note == mt.MACOS_NO_ROOT_STEPS
+    assert "needs Linux" in note
+    # It must not read as a permissions problem the user can fix.
+    assert "administrator rights would not help" in note
+    # ...and it has to say what DOES work, or the tab looks pointless.
+    assert "size check works here" in note
+
+
+def test_the_size_check_is_not_refused(mac):
+    """measure_commands runs the plan as the USER - xorriso, no mount, no
+    root - which is the one thing a Mac can still do."""
+    cmds = mt.measure_commands(jjp_form(), ISO0, cwd="/repo")
+    assert cmds, "the size check should still have steps"
+    assert not any(mt.needs_root(argv) for _l, argv in cmds)
+    assert mt.macos_root_refusal(cmds) == ""
+
+
+def test_every_writing_step_is_the_reason(mac):
+    """All four of the JJP root steps, so the refusal cannot be dodged by a
+    run that happens to start with the plan."""
+    argv = dict(mt.build_commands(jjp_form(), cwd="/repo", prepare=True))
+    for label in ("selector", "prepare", "build", "verify"):
+        assert mt.needs_root(argv[label]), label
+    assert not mt.needs_root(argv["plan"])
+    assert mt.needs_root(["sudo", "-n", "bash", "-lc", "x"])
+    assert not mt.needs_root(["bash", "-lc", "x"])
+    assert not mt.needs_root([]) and not mt.needs_root(lambda _t: [])
+
+
+def test_windows_and_linux_are_not_gated(monkeypatch):
+    """Linux runs these steps for real, and on Windows the elevated argv is
+    a callable the worker resolves later - neither is macOS."""
+    for plat in ("linux", "win32"):
+        monkeypatch.setattr(mt.sys, "platform", plat)
+        cmds = mt.build_commands(jjp_form(), cwd="/repo", prepare=True)
+        assert mt.macos_root_refusal(cmds) == ""
+
+
+def test_the_preview_still_renders_and_says_why_once(mac):
+    """The preview is NOT gated: it is cheap and falls back to the menu
+    program already on the ISO, so taking the picture away would punish
+    somebody who can still use the size check."""
+    cmds = mt.ensure_selector_commands(jjp_form(), cwd="/repo", card=ISO0)
+    assert mt.needs_root(cmds[0][1])        # it does still ask for root...
+
+    panel = mt.MultibootPanel.__new__(mt.MultibootPanel)   # no Tk needed
+    said = []
+    panel._append = said.append
     note = mt.sudo_password_note("sudo: a password is required")
-    assert "administrator rights" in note
-    assert "size check" in note, "say what still works, not only what doesn't"
+    assert note == mt.MACOS_NO_ROOT_STEPS
+
+    assert panel._say_once(note) is True
+    for _ in range(20):                     # twenty redraws, as he had
+        assert panel._say_once(note) is False
+    assert said == [note], "the explanation must not become the new spam"
+
+    # A step that failed for some other reason adds nothing.
+    assert panel._say_once(mt.sudo_password_note("selector: no such file")) \
+        is False
+    assert said == [note]
 
 
-def test_the_note_is_only_for_that_failure(monkeypatch):
-    """Any other failure keeps its own message and gains nothing."""
-    monkeypatch.setattr(mt.sys, "platform", "darwin")
-    assert mt.sudo_password_note("selector: no such file") == ""
-    assert mt.sudo_password_note("") == ""
-    # ...and Linux's `sudo -n` is a different situation with its own answer.
+def test_linux_gets_the_answer_that_is_actually_its_own(monkeypatch):
+    """Passwordless sudo IS the fix on a Linux desktop, so say so there -
+    the old text claimed the tab simply could not ask, which was macOS's
+    problem pasted onto a platform where the tab works."""
     monkeypatch.setattr(mt.sys, "platform", "linux")
-    assert mt.sudo_password_note("sudo: a password is required") == ""
+    note = mt.sudo_password_note("sudo: a password is required")
+    assert "passwordless sudo" in note
+    assert note != mt.MACOS_NO_ROOT_STEPS
+    assert mt.sudo_password_note("selector: no such file") == ""

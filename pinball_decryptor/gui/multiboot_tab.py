@@ -2504,6 +2504,51 @@ def wsl_command_root(args, cwd=None, exe="python3", home=None):
 #: What sudo prints when it has nowhere to ask for a password.
 _SUDO_NEEDS_PASSWORD = "a password is required"
 
+#: Why a step that needs root is refused on macOS, and what does work.
+#:
+#: NOT a password problem, which is what it looks like and what the first
+#: read of PAD-192 took it for.  The steps that write a multi-boot card
+#: restore ext4 partitions - ``mkjjpmulti.py build`` asks need_tools() for
+#: losetup, mount, umount, partclone.ext4, partclone.restore, e2fsck; the
+#: JJP selector step loop-mounts a root to compile the menu program against
+#: its own glibc.  macOS has no losetup, no ext4 in the kernel and no
+#: partclone, so no amount of administrator rights makes any of it run:
+#: granting root would only move the failure from "sudo: a password is
+#: required" to "missing tool(s)".  Asking somebody for their admin password
+#: and THEN failing is worse than saying so first.
+#:
+#: ``plan`` is the exception and the reason the tab is still worth opening
+#: here: it reads the ISO through xorriso with no mount and no root
+#: (mkjjpmulti.py's own comment), so the size check really does work.
+MACOS_NO_ROOT_STEPS = (
+    "Building a multi-boot card needs Linux. The steps that write one "
+    "restore ext4 partitions with losetup, mount and partclone, and macOS "
+    "has none of those — administrator rights would not help. The size "
+    "check works here (it needs xorriso); to build the card, use the "
+    "Windows or Linux build of the app.")
+
+
+def needs_root(argv):
+    """Whether *argv* is one of the steps that must run as root.
+
+    Read off the argv rather than the step's label because that is what the
+    worker actually has: :func:`root_command` hands Windows a callable it
+    resolves later, but everywhere else the elevated argv is already built
+    by the time a run is assembled.
+    """
+    return (not callable(argv)) and bool(argv) and argv[0] == "sudo"
+
+
+def macos_root_refusal(cmds):
+    """:data:`MACOS_NO_ROOT_STEPS` when *cmds* contains a step macOS cannot
+    run, else "" — so a run is refused before anything starts rather than
+    part-way through."""
+    if sys.platform != "darwin":
+        return ""
+    if any(needs_root(argv) for _label, argv in cmds):
+        return MACOS_NO_ROOT_STEPS
+    return ""
+
 
 def sudo_password_note(text):
     """One sentence for a root step that died for want of a password, or ""
@@ -2511,23 +2556,24 @@ def sudo_password_note(text):
 
     :func:`wsl_shell_root` asks with ``sudo -n`` on purpose — a GUI has no
     terminal to type into, so failing fast beats hanging on a prompt nobody
-    can see.  On a Linux desktop that is usually the end of it.  On macOS
-    there is no passwordless-sudo convention at all, so EVERY root step of
-    the multi-boot tab stops here, and what the user sees is a bare
-    ``sudo: a password is required`` repeated once per redraw with nothing
-    saying which part of the app wanted root or why (PAD-192: "I can't for
-    the life of me ... set up anything for multi boot").
+    can see.  On a Linux desktop that is usually the end of it, and the
+    message names the real fix.
 
-    Naming it is not fixing it — the tab still cannot get root on macOS —
-    but a sentence that says what was refused is the difference between a
-    known limitation and an app that looks broken.
+    On macOS the password is not the problem (see
+    :data:`MACOS_NO_ROOT_STEPS`); a writing run is refused before it starts,
+    and what still reaches here is the background preview's selector step,
+    which runs on every redraw.  That one is left to fail exactly as it did
+    — it is cheap, it is not the user's doing, and the preview falls back to
+    whatever menu program is already there — but it says why, once.
     """
-    if sys.platform != "darwin" or _SUDO_NEEDS_PASSWORD not in (text or ""):
+    if _SUDO_NEEDS_PASSWORD not in (text or ""):
         return ""
-    return ("This step needs administrator rights, and the multi-boot tab "
-            "has no way to ask for them on macOS yet — it runs `sudo -n`, "
-            "which never prompts. Steps that do not need root (the size "
-            "check, planning an ISO) are unaffected.")
+    if sys.platform == "darwin":
+        return MACOS_NO_ROOT_STEPS
+    return ("This step needs administrator rights and could not get them: "
+            "the app asks with `sudo -n`, which never waits for a password. "
+            "Give this account passwordless sudo, or start the app from a "
+            "terminal where `sudo -v` has already been run.")
 
 
 def root_command(args, cwd=None, exe="python3"):
@@ -14242,6 +14288,18 @@ class MultibootPanel:
         size strip, for the compact plan's hashing), and without it they are
         ordinary output.
         """
+        # A WRITING RUN macOS CANNOT FINISH IS REFUSED BEFORE IT STARTS, not
+        # part-way through: its first root step would otherwise fail on sudo
+        # (or, with rights granted, on a losetup that is not there) after the
+        # user had committed to the run.  The preview is not gated - it is
+        # cheap, it falls back to the menu program already on the ISO, and
+        # gating it would take the picture away from somebody who can still
+        # use the size check.
+        if not preview:
+            refusal = macos_root_refusal(cmds)
+            if refusal:
+                self._error(refusal)
+                return False
         if preview:
             # A render never queues behind anything: it is cheap, and the
             # next keystroke asks for another one anyway.
@@ -14341,9 +14399,7 @@ class MultibootPanel:
                         self._append(line)
                 self._append("%s: exit %d" % (label, rc))
                 if rc != 0:
-                    note = sudo_password_note(texts[label])
-                    if note:
-                        self._append(note)
+                    self._say_once(sudo_password_note(texts[label]))
                 if on_step is not None:
                     self._ui(lambda l=label, r=rc, t=texts[label]:
                              on_step(l, r, t))
@@ -14404,6 +14460,28 @@ class MultibootPanel:
         """A tool line, from the worker.  Queued for the main loop, because
         that is where the app's Log lives."""
         self._ui(lambda: self._write(line))
+
+    def _say_once(self, note):
+        """Append *note* the first time it comes up, and never again.
+
+        For the sentences that EXPLAIN a refusal rather than report it
+        (:func:`sudo_password_note`).  The preview redraws on every
+        keystroke, so a note appended per failure would replace the
+        reporter's wall of "sudo: a password is required" with a wall of
+        three-sentence paragraphs - louder than the thing it explains
+        (PAD-192).  Empty notes say nothing, and a DIFFERENT refusal still
+        gets its own sentence.
+        """
+        if not note:
+            return False
+        said = getattr(self, "_notes_said", None)
+        if said is None:
+            said = self._notes_said = set()
+        if note in said:
+            return False
+        said.add(note)
+        self._append(note)
+        return True
 
     def _write(self, line):
         """One line into the app's Log at the foot of the window - THE one

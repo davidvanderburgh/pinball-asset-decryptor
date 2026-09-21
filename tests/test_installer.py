@@ -1261,6 +1261,26 @@ def test_the_appimage_ships_the_rigs_its_multiboot_tab_runs():
             "the AppImage does not carry tools/%s" % rig)
 
 
+def test_the_mac_app_ships_the_rigs_its_multiboot_tab_runs():
+    """The macOS twin of the AppImage check above, and it was missing.
+
+    PAD-162 added the rig to the Windows installer and to build_linux.sh and
+    left build_macos.sh alone, so no macOS build has ever carried
+    tools/jjp_emu.  A Sonic owner's log is full of
+
+      python3: can't open file '/Applications/Pinball Asset Decryptor.app/
+      Contents/Resources/tools/jjp_emu/mkjjpmulti.py': No such file
+      [multi-boot] plan: exit 2
+
+    on every plan and build he tried (PAD-192).  A checkout always has the
+    rig, so only the packaging list can show this.
+    """
+    mac_build = (INSTALLER / "build_macos.sh").read_text(encoding="utf-8")
+    for rig in ("spike2_emu", "jjp_emu"):
+        assert "tools/%s:tools/%s" % (rig, rig) in mac_build, (
+            "the macOS .app does not carry tools/%s" % rig)
+
+
 def test_the_jjp_rig_can_run_from_program_files():
     """Shipping it puts it at ``C:\\Program Files\\Pinball Asset Decryptor\\
     tools\\jjp_emu``: read-only for the user, and a SPACE in every path.

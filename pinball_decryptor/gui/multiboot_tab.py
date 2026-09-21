@@ -197,6 +197,7 @@ from tkinter import colorchooser, filedialog, font as tkfont, messagebox, ttk
 
 from ..core import config, runtime
 from . import _rig
+from . import multiboot_docker as _mac
 from .emulate_tab import rig_dir, wsl_account, wsl_home
 from . import preview_audio
 from .preview_audio import PreviewAudio
@@ -1104,7 +1105,16 @@ def suggest_title(path, platform="stern"):
 # ---------------------------------------------------------------------------
 
 def wsl(path):
-    """A form path as the tools see it (``D:\\x`` -> ``/mnt/d/x``)."""
+    """A form path as the tools see it (``D:\\x`` -> ``/mnt/d/x``).
+
+    On macOS the tools run in a container (:mod:`multiboot_docker`), so the
+    same question has a different answer: a bind mount at ``/host`` + the
+    path, or ``/tmp`` for the cache.  This is the ONE place the tab turns a
+    path into something a tool will read, which is why the container mapping
+    belongs here and not in each caller.
+    """
+    if _mac.enabled():
+        return _mac.container_path(path) if path else path
     return _rig.wsl_path(path)
 
 
@@ -1117,12 +1127,29 @@ def host_path(path):
         m = re.match(r"^/mnt/([a-zA-Z])(?=/|$)", p)
         if m:
             return m.group(1).upper() + ":" + p[len(m.group(0)):]
+    if _mac.enabled():
+        return _mac.host_from_container(p)
     return p
+
+
+def rig_repo_dir():
+    """The checkout (or .app bundle) this app is actually running from.
+
+    Distinct from :func:`repo_dir`, which on macOS answers with the staged
+    copy inside the container's view.  This one is what that copy is made
+    FROM, so it must stay the real thing on every platform.
+    """
+    return os.path.dirname(os.path.dirname(os.path.normpath(rig_dir())))
 
 
 def repo_dir():
     """The checkout the rig sits in: ``rig_dir()`` is <repo>/tools/spike2_emu,
     and the tools are run from <repo> so ``pinball_decryptor`` imports."""
+    if _mac.enabled():
+        # The container cannot see the .app bundle (Docker Desktop does not
+        # share /Applications), so the rig is staged into the cache and the
+        # tools are run from there instead.
+        return _mac.staged_repo()
     return os.path.dirname(os.path.dirname(os.path.normpath(rig_dir())))
 
 
@@ -2468,6 +2495,8 @@ def wsl_shell(line):
     wanted to reason about."""
     if sys.platform == "win32":
         return runtime.wsl_head() + ["-e", "bash", "-lc", line]
+    if _mac.enabled():
+        return _mac.exec_argv(line)
     return ["bash", "-lc", line]
 
 
@@ -2492,6 +2521,12 @@ def wsl_shell_root(line, home=None):
         if home:
             head += ["env", "HOME=" + home]
         return head + ["bash", "-lc", line]
+    if _mac.enabled():
+        # NO sudo at all: the container's own user is root.  This is what
+        # makes the macOS route worth having rather than teaching a GUI to
+        # ask for a password it could not have spent (PAD-192).  *home* is a
+        # WSL concern and means nothing here.
+        return _mac.exec_argv(line)
     return ["sudo", "-n", "bash", "-lc", line]
 
 
@@ -2499,6 +2534,30 @@ def wsl_command_root(args, cwd=None, exe="python3", home=None):
     if cwd is None:
         cwd = wsl(repo_dir())
     return wsl_shell_root(shell_line(args, cwd, exe), home)
+
+
+#: What sudo prints when it has nowhere to ask for a password.
+_SUDO_NEEDS_PASSWORD = "a password is required"
+
+def sudo_password_note(text):
+    """One sentence for a root step that died for want of a password, or ""
+    when that is not what happened.
+
+    :func:`wsl_shell_root` asks with ``sudo -n`` on purpose — a GUI has no
+    terminal to type into, so failing fast beats hanging on a prompt nobody
+    can see.  On a Linux desktop that is usually the end of it, and the
+    message names the real fix.
+
+    macOS never reaches here at all any more: its steps run in a container
+    whose own user is root (:mod:`multiboot_docker`), so nothing on that
+    platform shells out to sudo.
+    """
+    if _SUDO_NEEDS_PASSWORD not in (text or ""):
+        return ""
+    return ("This step needs administrator rights and could not get them: "
+            "the app asks with `sudo -n`, which never waits for a password. "
+            "Give this account passwordless sudo, or start the app from a "
+            "terminal where `sudo -v` has already been run.")
 
 
 def root_command(args, cwd=None, exe="python3"):
@@ -2606,7 +2665,10 @@ def cache_dir_args():
     the hashed manifests of the source cards - the Windows TEMP directory
     seen from WSL, so the same cache serves the user's plan and root's
     build, and nothing lands under either one's $HOME."""
-    d = os.path.join(tempfile.gettempdir(), "pinball_spike2_multiboot")
+    # macOS: under the container's /tmp mount, not the host's own temp
+    # (which is a /var/folders path Docker Desktop does not share).
+    base = _mac.cache_root() if _mac.enabled() else tempfile.gettempdir()
+    d = os.path.join(base, "pinball_spike2_multiboot")
     try:
         os.makedirs(d, exist_ok=True)
     except OSError:                                 # pragma: no cover
@@ -8970,6 +9032,11 @@ class MultibootPanel:
                 proc.kill()
             except Exception:                           # noqa: BLE001
                 pass            # it finished between the press and the kill
+            if _mac.enabled():
+                # killing `docker exec` kills the CLIENT; the tool goes on
+                # restoring partitions inside the container with nothing
+                # watching it.
+                _mac.kill_running()
         return True
 
     def run_cancelled(self):
@@ -14213,6 +14280,19 @@ class MultibootPanel:
         size strip, for the compact plan's hashing), and without it they are
         ordinary output.
         """
+        # macOS runs its steps in a container, so one has to be up and able
+        # to see this run's ISOs before the first step starts.  Only for a
+        # WRITING run: the preview redraws on every keystroke and must not
+        # build an image or start a container behind one: it either finds a
+        # container already up (a build earlier in the session) or its step
+        # fails and says so, once.
+        if not preview and _mac.enabled():
+            try:
+                _mac.ensure_container(self._run_paths(), rig_repo_dir(),
+                                      log=self._append)
+            except Exception as exc:                    # noqa: BLE001
+                self._error(str(exc))
+                return False
         if preview:
             # A render never queues behind anything: it is cheap, and the
             # next keystroke asks for another one anyway.
@@ -14311,6 +14391,8 @@ class MultibootPanel:
                     for line in lines:                  # it failed: say why
                         self._append(line)
                 self._append("%s: exit %d" % (label, rc))
+                if rc != 0:
+                    self._say_once(sudo_password_note(texts[label]))
                 if on_step is not None:
                     self._ui(lambda l=label, r=rc, t=texts[label]:
                              on_step(l, r, t))
@@ -14367,10 +14449,55 @@ class MultibootPanel:
             self._drain_job = None
         self._drain()
 
+    def _run_paths(self):
+        """Every host path a run reads or writes, for the container's bind
+        mounts.  Over-listing is cheap (a mount it never touches costs
+        nothing); under-listing is a tool that cannot see its own ISO."""
+        paths = []
+        try:
+            form = self.form()
+        except Exception:                               # noqa: BLE001
+            return paths
+        for row in (form.images or []):
+            if row.path:
+                paths.append(row.path.strip().strip('"'))
+        for p in (form.out, form.selector_dir):
+            if p:
+                paths.append(p.strip().strip('"'))
+        try:
+            md = self.media_dir()
+        except Exception:                               # noqa: BLE001
+            md = ""
+        if md:
+            paths.append(md)
+        return paths
+
     def _append(self, line):
         """A tool line, from the worker.  Queued for the main loop, because
         that is where the app's Log lives."""
         self._ui(lambda: self._write(line))
+
+    def _say_once(self, note):
+        """Append *note* the first time it comes up, and never again.
+
+        For the sentences that EXPLAIN a refusal rather than report it
+        (:func:`sudo_password_note`).  The preview redraws on every
+        keystroke, so a note appended per failure would replace the
+        reporter's wall of "sudo: a password is required" with a wall of
+        three-sentence paragraphs - louder than the thing it explains
+        (PAD-192).  Empty notes say nothing, and a DIFFERENT refusal still
+        gets its own sentence.
+        """
+        if not note:
+            return False
+        said = getattr(self, "_notes_said", None)
+        if said is None:
+            said = self._notes_said = set()
+        if note in said:
+            return False
+        said.add(note)
+        self._append(note)
+        return True
 
     def _write(self, line):
         """One line into the app's Log at the foot of the window - THE one

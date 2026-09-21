@@ -22,6 +22,7 @@ ffmpeg / ffprobe discovery (and the no-console-window flag) is shared with
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -1026,6 +1027,102 @@ def _stall_error():
             f"plays in a video player, then try again")
 
 
+#: Headrooms for the byte-budget ladder: how much of the budget an attempt
+#: aims at.  Only the FIRST is a guess — every later one is applied to a rate
+#: corrected by what the previous attempt actually produced
+#: (:func:`_corrected_bitrate`), so the ladder is a safety margin rather than
+#: the whole of the search.
+_BUDGET_HEADROOMS = (0.92, 0.80, 0.62)
+
+
+def _corrected_bitrate(vbps, size, budget, headroom):
+    """The ``-b:v`` for the next attempt after one asking *vbps* muxed to
+    *size* bytes against *budget*.
+
+    The old ladder just re-asked for a smaller slice of the budget and hoped
+    the encoder obeyed.  libvpx-vp9 does not: single-pass VBR at 1360x768
+    overshoots ``-b:v`` by about 1.6x on real material, so 0.92 → 0.80 → 0.62
+    (a 33% span) could not close a gap that needed 60%, and all three attempts
+    landed within a couple of per cent of each other — a 2.17 MB clip "shrunk"
+    to 2.14 MB against a 1.67 MB slot, three times over (PAD-192).
+
+    Scaling the rate by what the encoder DID rather than by what it was asked
+    makes the next attempt land near ``budget × headroom`` whatever the
+    encoder's ratio is, so the same ladder serves VP8, VP9 and x264.  It only
+    ever reduces: this is called only on an overshoot, where
+    ``budget × headroom < size``.
+    """
+    return max(40_000, int(vbps * (budget * headroom) / max(1, size)))
+
+
+def _encoder_is_stuck(size, prev_size):
+    """Whether an attempt got no smaller than the one before it, meaning the
+    encoder has hit its own quality floor and the budget is simply out of
+    reach for this clip at this resolution.
+
+    At the coarsest quantizer libvpx still emits what the picture costs — a
+    noisy 1360x768 source pinned at ``q=63`` holds ~1.35 Mbps no matter how
+    low ``-b:v`` goes.  Re-asking is then pure wall-clock (each attempt is a
+    full encode), and the honest answer is the one the caller already gives:
+    the clip has to be shorter or simpler.
+    """
+    return prev_size is not None and size >= prev_size * 0.98
+
+
+def _two_pass_wanted(vargs):
+    """Whether a byte-budgeted encode with *vargs* should run libvpx's
+    analysis pass first.
+
+    VP9's single-pass rate controller is advisory — it cannot know what the
+    rest of the clip costs, so it spends early and overshoots (measured at
+    1.58-1.66x across the whole ladder on 1360x768 material).  The stats file
+    from a first pass makes the second one land within ~4% of the target,
+    which is inside the ladder's own headroom, so the FIRST attempt fits and
+    nothing is re-encoded twice.  It is not slower in practice: the analysis
+    pass is cheap (~20% of an encode) and it replaces two further full
+    attempts that were going to fail anyway.
+
+    x264 needs none of this — its single-pass VBR already tracks ``-b:v``.
+    """
+    return _is_vpx(vargs)
+
+
+def _pass_args(two_pass, pass_no, passlog):
+    """``-pass``/``-passlogfile`` for one attempt, or nothing at all."""
+    if not two_pass:
+        return []
+    return ["-pass", str(pass_no), "-passlogfile", passlog]
+
+
+def _run_budgeted_attempt(build_cmd, two_pass, scratch, limit, cancel_cb):
+    """Run one attempt of a byte-budgeted encode.
+
+    *build_cmd(pass_no, out_path)* returns the argv; with *two_pass* it is
+    called twice, the analysis pass writing to *scratch* (a throwaway beside
+    the real output, so ffmpeg picks the muxer off the extension exactly as
+    it does for the real thing and no format has to be named twice).  Returns
+    the last run's ``(rc, stderr, abort)``.
+    """
+    if two_pass:
+        rc, stderr, abort = _run_ffmpeg_watched(build_cmd(1, scratch), limit,
+                                                cancel_cb)
+        if abort or rc != 0:
+            return rc, stderr, abort
+    return _run_ffmpeg_watched(build_cmd(2 if two_pass else 0, None), limit,
+                               cancel_cb)
+
+
+def _pass_workspace(two_pass, ext):
+    """``(work_dir, passlogfile, scratch_output)`` for a two-pass encode, or
+    three Nones when the encode needs none — a build replaces hundreds of
+    clips, and only the handful over their slot ever runs two passes."""
+    if not two_pass:
+        return None, None, None
+    work = tempfile.mkdtemp(prefix="pad_vidbudget_")
+    return (work, os.path.join(work, "pass"),
+            os.path.join(work, "analysis" + (ext or ".webm")))
+
+
 def _run_ffmpeg_watched(cmd, limit, cancel_cb=None):
     """Run an ffmpeg encode under a watchdog instead of one blocking wait.
 
@@ -1216,65 +1313,95 @@ def transcode_video_to(src_path, dst_path, original_info,
                                          * original_info.height * fps)
         vmatch = int(max(match_bitrate - abps, floor))
 
-    for hr in ([0.92, 0.80, 0.62] if budget else [None]):
-        cmd = [ffmpeg, "-y", "-i", src_path]
-        if vf:
-            cmd += ["-vf", ",".join(vf)]
-        if original_info and original_info.fps > 0:
-            cmd += ["-r", f"{original_info.fps:.4f}"]
-        cmd += vargs
-        if "libx264" in vargs:
-            cmd += _h264_profile_args(original_info, scaled_to_slot)
-        if budget:
-            vbps = max(40_000, int(budget * 8 * hr / enc_dur) - abps)
-            cmd += ["-b:v", str(vbps), "-maxrate", str(vbps),
-                    "-bufsize", str(vbps * 2)]
-        elif vmatch:
-            cmd += ["-b:v", str(vmatch), "-maxrate", str(vmatch),
-                    "-bufsize", str(vmatch * 2)]
-        elif _is_vpx(vargs):
-            # Pin constant-quality mode: with no explicit rate control the
-            # libvpx default varies by ffmpeg build (older ones target
-            # 256kbps — visibly blocky at slot resolutions).
-            cmd += ["-crf", "32", "-b:v", "0"]
-        if silent:
-            cmd += ["-an"]
-        else:
-            cmd += aargs
-            if budget:
-                cmd += ["-b:a", str(abps)]
-        if cap_to is not None:
-            cmd += ["-t", f"{cap_to:.3f}"]
-        cmd.append(dst_path)
+    # A budgeted libvpx encode gets its analysis pass, and each retry a rate
+    # corrected by what the last one actually produced — without both, a VP9
+    # slot's budget is missed on all three attempts and the build pays a
+    # second generation of loss re-encoding what this step was meant to fit
+    # (PAD-192; the same ladder runs in shrink_video_to_size).
+    two_pass = bool(budget) and _two_pass_wanted(vargs)
+    work, passlog, scratch = _pass_workspace(two_pass, ext)
+    headrooms = list(_BUDGET_HEADROOMS) if budget else [None]
+    vbps = None
+    prev_size = None
+    try:
+        for i, hr in enumerate(headrooms):
+            if budget and vbps is None:            # only the first is a guess
+                vbps = max(40_000, int(budget * 8 * hr / enc_dur) - abps)
 
-        try:
-            rc, stderr, abort = _run_ffmpeg_watched(cmd, limit, cancel_cb)
-        except OSError as e:
-            return False, str(e)
-        if abort == "cancelled":
-            return False, "cancelled"
-        if abort == "stall":
-            return False, _stall_error()
-        if abort == "timeout":
-            return False, _timeout_error(limit)
-        if rc != 0 or not os.path.isfile(dst_path) \
-                or os.path.getsize(dst_path) == 0:
-            err = stderr.decode("utf-8", "replace").strip().splitlines()
-            return False, (err[-1] if err else f"ffmpeg failed (code {rc})")
+            def build_cmd(pass_no, out, _vbps=vbps):
+                cmd = [ffmpeg, "-y", "-i", src_path]
+                if vf:
+                    cmd += ["-vf", ",".join(vf)]
+                if original_info and original_info.fps > 0:
+                    cmd += ["-r", f"{original_info.fps:.4f}"]
+                cmd += vargs
+                if "libx264" in vargs:
+                    cmd += _h264_profile_args(original_info, scaled_to_slot)
+                if budget:
+                    cmd += ["-b:v", str(_vbps)]
+                    if pass_no != 1:               # stats pass needs no cap
+                        cmd += ["-maxrate", str(_vbps),
+                                "-bufsize", str(_vbps * 2)]
+                elif vmatch:
+                    cmd += ["-b:v", str(vmatch), "-maxrate", str(vmatch),
+                            "-bufsize", str(vmatch * 2)]
+                elif _is_vpx(vargs):
+                    # Pin constant-quality mode: with no explicit rate control
+                    # the libvpx default varies by ffmpeg build (older ones
+                    # target 256kbps — visibly blocky at slot resolutions).
+                    cmd += ["-crf", "32", "-b:v", "0"]
+                if silent or pass_no == 1:
+                    cmd += ["-an"]
+                else:
+                    cmd += aargs
+                    if budget:
+                        cmd += ["-b:a", str(abps)]
+                if cap_to is not None:
+                    cmd += ["-t", f"{cap_to:.3f}"]
+                cmd += _pass_args(two_pass, pass_no, passlog)
+                cmd.append(out or dst_path)
+                return cmd
 
-        size = os.path.getsize(dst_path)
-        if not budget or size <= budget:
-            if budget:
-                actions.append(f"fitted to the slot's {budget} bytes")
-            elif vmatch and enc_dur:
-                # The number a user compares against their own export and the
-                # stock clip, so it is what came out, not what was asked for.
-                actions.append("encoded at %s (the clip it replaces is %s)"
-                               % (_rate_str(size * 8 / enc_dur),
-                                  _rate_str(match_bitrate)))
-            return True, ", ".join(a for a in actions if a)
-        over = (f"still {size} bytes against the slot's {budget} — "
-                f"the build will re-encode it to fit")
+            try:
+                rc, stderr, abort = _run_budgeted_attempt(
+                    build_cmd, two_pass, scratch, limit, cancel_cb)
+            except OSError as e:
+                return False, str(e)
+            if abort == "cancelled":
+                return False, "cancelled"
+            if abort == "stall":
+                return False, _stall_error()
+            if abort == "timeout":
+                return False, _timeout_error(limit)
+            if rc != 0 or not os.path.isfile(dst_path) \
+                    or os.path.getsize(dst_path) == 0:
+                err = stderr.decode("utf-8", "replace").strip().splitlines()
+                return False, (err[-1] if err
+                               else f"ffmpeg failed (code {rc})")
+
+            size = os.path.getsize(dst_path)
+            if not budget or size <= budget:
+                if budget:
+                    actions.append(f"fitted to the slot's {budget} bytes")
+                elif vmatch and enc_dur:
+                    # The number a user compares against their own export and
+                    # the stock clip, so it is what came out, not what was
+                    # asked for.
+                    actions.append("encoded at %s (the clip it replaces is %s)"
+                                   % (_rate_str(size * 8 / enc_dur),
+                                      _rate_str(match_bitrate)))
+                return True, ", ".join(a for a in actions if a)
+            over = (f"still {size} bytes against the slot's {budget} — "
+                    f"the build will re-encode it to fit")
+            if _encoder_is_stuck(size, prev_size):
+                break
+            prev_size = size
+            if i + 1 < len(headrooms):
+                vbps = _corrected_bitrate(vbps, size, budget,
+                                          headrooms[i + 1])
+    finally:
+        if work:
+            shutil.rmtree(work, ignore_errors=True)
 
     # Budget missed on every attempt.  The clip is staged anyway: the build's
     # own fit handles it exactly as it did before there was a budget here, and
@@ -1376,44 +1503,69 @@ def shrink_video_to_size(src_path, dst_path, max_bytes, original_info=None,
         vf.append(f"pad={info.width}:{info.height}:(ow-iw)/2:(oh-ih)/2"
                   + (":color=#00000000" if alpha else ""))
 
-    headrooms = [0.92, 0.80, 0.62][:max(1, attempts)]
+    headrooms = list(_BUDGET_HEADROOMS)[:max(1, attempts)]
+    two_pass = _two_pass_wanted(vargs)
+    work, passlog, scratch = _pass_workspace(two_pass, ext)
     last_err = ""
-    for hr in headrooms:
-        vbps = int(max_bytes * 8 * hr / dur) - abps
-        if vbps < 40_000:
-            vbps = 40_000
-        cmd = [ffmpeg, "-y", "-i", src_path]
-        if vf:
-            cmd += ["-vf", ",".join(vf)]
-        if info and info.fps > 0:
-            cmd += ["-r", f"{info.fps:.4f}"]
-        cmd += vargs
-        if "libx264" in vargs:
-            cmd += _h264_profile_args(info, scaled_to_slot=bool(vf))
-        cmd += ["-b:v", str(vbps), "-maxrate", str(vbps),
-                "-bufsize", str(vbps * 2)]
-        if abps:
-            cmd += aargs + ["-b:a", str(abps)]
-        else:
-            cmd += ["-an"]
-        cmd.append(dst_path)
-        limit = _encode_timeout(dur)
-        try:
-            rc, stderr, abort = _run_ffmpeg_watched(cmd, limit, cancel_cb)
-        except OSError as e:
-            return False, str(e)
-        if abort == "cancelled":
-            return False, "cancelled"
-        if abort == "stall":
-            return False, _stall_error()
-        if abort == "timeout":
-            return False, _timeout_error(limit)
-        if rc == 0 and os.path.isfile(dst_path):
-            sz = os.path.getsize(dst_path)
-            if 0 < sz <= max_bytes:
-                return True, str(sz)
-            last_err = f"re-encode landed at {sz} > {max_bytes} bytes"
-        else:
-            err = stderr.decode("utf-8", "replace").strip().splitlines()
-            last_err = err[-1] if err else f"ffmpeg failed (code {rc})"
+    vbps = None
+    prev_size = None
+    try:
+        for i, hr in enumerate(headrooms):
+            if vbps is None:                       # only the first is a guess
+                vbps = max(40_000, int(max_bytes * 8 * hr / dur) - abps)
+
+            def build_cmd(pass_no, out, _vbps=vbps):
+                cmd = [ffmpeg, "-y", "-i", src_path]
+                if vf:
+                    cmd += ["-vf", ",".join(vf)]
+                if info and info.fps > 0:
+                    cmd += ["-r", f"{info.fps:.4f}"]
+                cmd += vargs
+                if "libx264" in vargs:
+                    cmd += _h264_profile_args(info, scaled_to_slot=bool(vf))
+                cmd += ["-b:v", str(_vbps)]
+                # The analysis pass only collects statistics, so it is given
+                # neither the rate cap nor the audio track: both cost time and
+                # neither changes what the second pass is told.
+                if pass_no != 1:
+                    cmd += ["-maxrate", str(_vbps),
+                            "-bufsize", str(_vbps * 2)]
+                if abps and pass_no != 1:
+                    cmd += aargs + ["-b:a", str(abps)]
+                else:
+                    cmd += ["-an"]
+                cmd += _pass_args(two_pass, pass_no, passlog)
+                cmd.append(out or dst_path)
+                return cmd
+
+            limit = _encode_timeout(dur)
+            try:
+                rc, stderr, abort = _run_budgeted_attempt(
+                    build_cmd, two_pass, scratch, limit, cancel_cb)
+            except OSError as e:
+                return False, str(e)
+            if abort == "cancelled":
+                return False, "cancelled"
+            if abort == "stall":
+                return False, _stall_error()
+            if abort == "timeout":
+                return False, _timeout_error(limit)
+            if rc == 0 and os.path.isfile(dst_path):
+                sz = os.path.getsize(dst_path)
+                if 0 < sz <= max_bytes:
+                    return True, str(sz)
+                last_err = f"re-encode landed at {sz} > {max_bytes} bytes"
+                if _encoder_is_stuck(sz, prev_size):
+                    break
+                prev_size = sz
+                if i + 1 < len(headrooms):
+                    vbps = _corrected_bitrate(vbps, sz, max_bytes,
+                                              headrooms[i + 1])
+            else:
+                err = stderr.decode("utf-8", "replace").strip().splitlines()
+                last_err = err[-1] if err else f"ffmpeg failed (code {rc})"
+                break
+    finally:
+        if work:
+            shutil.rmtree(work, ignore_errors=True)
     return False, last_err or "could not shrink to fit"

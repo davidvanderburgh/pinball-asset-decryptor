@@ -365,3 +365,4 @@ def test_ensurejjpselect_prints_both_lines():
         mount = f.read()
     assert 'if [ "${1:-}" = "--root-only" ]' in mount
     assert '-o "$dest.part"' in mount and 'mv -f "$dest.part" "$dest"' in mount
+

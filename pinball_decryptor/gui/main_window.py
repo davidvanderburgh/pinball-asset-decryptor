@@ -1823,6 +1823,11 @@ class MainWindow:
         self._info_win = None
         self._info_path = ""
         self._info_seq = 0           # bump-counter: drops stale worker results
+        # "Which game is this card?" probe (PAD-191) — its own bump-counter,
+        # because a user checking a stack of cards swaps them faster than a
+        # probe of a 32 GB card finishes and the late answer must not land
+        # under the card that replaced it.
+        self._card_id_seq = 0
         self._info_sections = []     # last rendered sections (Copy Report)
         self._info_shown_key = None  # (path, assets) the tree currently shows
         # Compare tab state (capabilities.compare plugins): two card pickers
@@ -2786,9 +2791,18 @@ class MainWindow:
         self._extract_drive_combo.bind(
             "<<ComboboxSelected>>",
             lambda _e: self._on_drive_selected("extract"))
-        ttk.Button(self._extract_drive_row, text="Refresh",
-                   command=lambda: self._refresh_drives("extract")).pack(
-            side=tk.LEFT, padx=(8, 0))
+        self._extract_drive_refresh_btn = ttk.Button(
+            self._extract_drive_row, text="Refresh",
+            command=lambda: self._refresh_drives("extract"))
+        self._extract_drive_refresh_btn.pack(side=tk.LEFT, padx=(8, 0))
+        # ⓘ — the same Image Info window the file picker's badge opens, on the
+        # card ITSELF (PAD-191: several cards on a desk, "without copying it
+        # extra to the harddisk").  Packed by apply_manufacturer for plugins
+        # that can read a connected card (caps.identify_card).
+        self._extract_drive_info_badge = self._make_info_badge(
+            self._extract_drive_row, self.extract_drive_var,
+            tip="What game this card is, and everything else the app can "
+                "read off it — straight from the card, nothing copied")
         # "Save card as image…" — the inverse of the Write tab's flash: copy
         # the whole card into a .raw file (batch 33 — the app could put an
         # image on a card but never take one off, so backing a stock card up,
@@ -2813,6 +2827,16 @@ class MainWindow:
         # order, so the auto-pick handles every drive layout we've
         # seen.  If something exotic comes up we can re-expose the
         # override later.
+
+        # What game the picked card is — read off the card in place, nothing
+        # copied (PAD-191).  Lines up under the dropdown like the detect badge
+        # does under the path entries; built unpacked, and
+        # _on_input_source_change packs it with the drive row.
+        self._extract_card_row = ttk.Frame(f)
+        ttk.Label(self._extract_card_row, text="", width=14).pack(side=tk.LEFT)
+        self._extract_card_lbl = ttk.Label(
+            self._extract_card_row, text="", font=(_SANS_FONT, 9, "bold"))
+        self._extract_card_lbl.pack(side=tk.LEFT, anchor=tk.W)
 
         # Red warning shown only in SSD mode — mirrors the standalone
         # JJP decryptor's prompt.  Pulling an SSD that's still bolted
@@ -14750,12 +14774,13 @@ class MainWindow:
     _INFO_BADGE_FILL = "#2f80ed"     # the classic "info blue"
     _INFO_BADGE_HOVER = "#5296f2"
 
-    def _make_info_badge(self, parent, var):
+    def _make_info_badge(self, parent, var,
+                         tip="Technical details about this image"):
         """The small round ⓘ badge — blue circle, white ``i`` — that opens
-        the Image Info window for the path in *var*."""
+        the Image Info window for the path in *var*.  *tip* names what is
+        being reported on: the card row's badge reads a card, not a file."""
         return self._make_round_icon(
-            parent, "i", self._INFO_BADGE_FILL, self._INFO_BADGE_HOVER,
-            "Technical details about this image",
+            parent, "i", self._INFO_BADGE_FILL, self._INFO_BADGE_HOVER, tip,
             lambda: self._open_image_info(var), size=18,
             font=("Georgia", 10, "bold italic"))
 
@@ -14944,17 +14969,26 @@ class MainWindow:
 
         A window, not a tab: the notebook was getting wide (David).  One
         singleton Toplevel, launched from the small "Info" button next to
-        each image picker; an open window is re-pointed at the new path."""
+        each image picker; an open window is re-pointed at the new path.
+
+        *var* may hold a raw-device path instead: the badge on the Direct
+        card row reports on the card sitting in the reader (PAD-191), which
+        has no file to check for."""
+        from ..core.rawdevice import is_device_path
+
         path = (var.get() or "").strip()
         if not path:
             messagebox.showinfo(
                 "No image selected",
                 "Pick an image in the box next to the Info button first.")
             return
-        if not os.path.isfile(path):
+        if is_device_path(path):
+            self._info_path = path
+        elif not os.path.isfile(path):
             messagebox.showerror("File not found", "No file at:\n\n%s" % path)
             return
-        self._info_path = os.path.normpath(path)
+        else:
+            self._info_path = os.path.normpath(path)
         if self._info_win is not None and self._info_win.winfo_exists():
             self._info_win.deiconify()
             self._info_win.lift()
@@ -18521,6 +18555,16 @@ class MainWindow:
             self._read_card_btn.pack(side=tk.LEFT, padx=(6, 0))
         else:
             self._read_card_btn.pack_forget()
+        # ⓘ beside the dropdown — the Image Info window for the card ITSELF,
+        # for plugins that can read a connected card (caps.identify_card,
+        # PAD-191).  ``before`` keeps it where the file row's badge sits: right
+        # after the picker, ahead of the buttons.
+        if caps.direct_ssd and caps.identify_card:
+            self._extract_drive_info_badge.pack(
+                side=tk.LEFT, padx=(6, 0),
+                before=self._extract_drive_refresh_btn)
+        else:
+            self._extract_drive_info_badge.pack_forget()
 
         # "Check card…" on the Replace Video toolbar — plugins whose clips sit
         # in fixed-size slots a Write can squeeze them into
@@ -19339,6 +19383,7 @@ class MainWindow:
             source = self.extract_input_source_var.get()
             self._extract_input_row.pack_forget()
             self._extract_drive_row.pack_forget()
+            self._extract_card_row.pack_forget()
             self._extract_ssd_warn.pack_forget()
             self._extract_admin_frame.pack_forget()
             self._extract_macos_fda_frame.pack_forget()
@@ -19347,6 +19392,16 @@ class MainWindow:
                 self._extract_drive_row.pack(
                     fill=tk.X, padx=10, pady=4,
                     before=self._extract_output_row())
+                # …and, right under it, which game the card is (PAD-191).
+                # Blanked on the way in: the enumeration that follows re-probes
+                # whatever is in the reader NOW, and the previous card's name
+                # sitting there meanwhile is the one wrong answer this row
+                # must never give.
+                if self._identify_card_supported():
+                    self._extract_card_lbl.configure(text="")
+                    self._extract_card_row.pack(
+                        fill=tk.X, padx=10, pady=(0, 2),
+                        before=self._extract_output_row())
                 self._extract_ssd_warn.pack(
                     anchor=tk.W, padx=10, pady=(4, 2),
                     before=self._extract_output_row())
@@ -20143,6 +20198,74 @@ class MainWindow:
         label = display_var.get()
         match = next((d for d in cache if d.display == label), None)
         device_var.set(match.device_path if match else "")
+        if mode == "extract":
+            # A new card in the reader is a new answer to "what game is this?"
+            self._identify_card_async(device_var.get())
+
+    # ------------------------------------------------------------------
+    # "Which game is this card?" — identify a card in place (PAD-191)
+    # ------------------------------------------------------------------
+
+    def _identify_card_supported(self):
+        """True when the loaded plugin can name the game on a connected card
+        without copying it (``caps.identify_card``) — Stern Spike today."""
+        mfr = self._current_mfr
+        if mfr is None:
+            return False
+        caps = mfr.capabilities
+        return bool(caps.direct_ssd and caps.identify_card)
+
+    def _identify_card_async(self, device_path):
+        """Fill the Extract tab's card-identity row for *device_path*.
+
+        The whole point is that nothing is copied to the hard disk — the probe
+        reads the card's own directory metadata in place — but it still opens a
+        block device, which on a slow reader takes a moment and on Windows
+        takes Administrator.  So it runs on a worker and comes back through the
+        bump-counter, which is also what keeps the answer for the card the user
+        just took out from landing under the one he just put in.
+        """
+        if not self._identify_card_supported():
+            return
+        self._card_id_seq += 1
+        seq = self._card_id_seq
+        if not device_path:
+            self._extract_card_lbl.configure(text="")
+            return
+        mfr = self._current_mfr
+        self._extract_card_lbl.configure(text="Reading the card…")
+
+        def _worker():
+            try:
+                caption = mfr.identify_card(device_path) or ""
+            except Exception:
+                caption = ""
+            self._post_ui(self._apply_card_identity, seq, caption)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_card_identity(self, seq, caption):
+        """Main-thread continuation of :meth:`_identify_card_async`."""
+        if seq != self._card_id_seq:
+            return                        # a later card already answered
+        if not self._identify_card_supported():
+            return                        # the plugin changed under the probe
+        if caption:
+            self._extract_card_lbl.configure(text="Card: %s" % caption)
+            return
+        import sys
+        from ..core.admin import is_admin
+        if sys.platform == "win32" and not is_admin():
+            # Said here as well as in the red banner below: a blank row where
+            # the game's name goes reads as "the app can't tell", when the
+            # truth is that it was never allowed to look.
+            self._extract_card_lbl.configure(
+                text="Card: needs Administrator to read — see below")
+        else:
+            self._extract_card_lbl.configure(
+                text="Card: not recognised as a %s card"
+                     % self._current_mfr.display)
 
     # ------------------------------------------------------------------
     # Direct-SSD Modified Files Preview (JJP-only)

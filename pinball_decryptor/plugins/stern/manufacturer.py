@@ -263,6 +263,11 @@ class SternManufacturer(Manufacturer):
         # card can be diffed on the Compare tab (a tester wanted to see where
         # the machine stores a setting he changed on the machine itself).
         read_card_image=True,
+        # …and, on the same row, tell the user WHICH GAME the card he just
+        # plugged in is, without copying anything (PAD-191).  Spike 2 keeps
+        # every asset under a folder named for the model, so the card names
+        # itself — see identify_card below.
+        identify_card=True,
         # On-screen LCD text lives in the .radium scene files; Extract pulls the
         # editable display strings out to text/strings.tsv, the Replace Text tab
         # lets the user edit them, and Write patches every matching occurrence
@@ -547,16 +552,20 @@ class SternManufacturer(Manufacturer):
             return Game(key=key, display=info["display"],
                         manufacturer_key="stern", era="whitestar",
                         notes=f"Whitestar {info['year']}, {info['dmd']} DMD")
+        # "card image" is the file; a raw device IS the card (PAD-191), and
+        # the Image Info report reads better saying which it looked at.
+        from ...core.rawdevice import is_device_path
+        noun = "card" if is_device_path(path) else "card image"
         key = detect_game(path)
         if key is not None:
             return Game(key=key, display=display_for_key(key, path),
                         manufacturer_key="stern", era="spike2",
-                        notes="Spike 2 card image")
+                        notes="Spike 2 %s" % noun)
         key = detect_spike1_game(path)
         if key is not None:
             return Game(key=key, display=spike1_display_for_key(key, path),
                         manufacturer_key="stern", era="spike1",
-                        notes="Spike 1 card image")
+                        notes="Spike 1 %s" % noun)
         return None
 
     def title_caption(self, path, game):
@@ -613,6 +622,32 @@ class SternManufacturer(Manufacturer):
             return note_for_path(path)
         except Exception:
             return ""                     # never block a run on the probe
+
+    def identify_card(self, path):
+        """Which game the card in the reader is — "Godzilla Pro", or a
+        multi-boot card's first game and how many others it carries.
+
+        Reads the card's own game folder (:func:`multiimage.card_images`), a
+        handful of directory reads with nothing copied: the answer to "i have
+        several SD Cards on my desk and like to simply check, what game it
+        belongs to" (PAD-191).  A Spike 1 card has no such folder, so it is
+        named by its era alone rather than guessed at.
+        """
+        from .multiimage import card_images, pretty
+        try:
+            images = card_images(path)
+        except Exception:
+            images = []
+        if not images:
+            # Not a Spike 2 games card — say which era it IS if we can, so a
+            # Spike 1 card in the reader isn't reported as unreadable.
+            if detect_spike1_game(path) is not None:
+                return "Stern Spike 1 card"
+            return ""
+        name = pretty(images[0])
+        if len(images) > 1:
+            return "%s  (multi-boot card, %d games)" % (name, len(images))
+        return name
 
     def image_info(self, path, assets_dir=None):
         # Only the Spike 2 card probe — a Whitestar MAME zip or Spike 1 card

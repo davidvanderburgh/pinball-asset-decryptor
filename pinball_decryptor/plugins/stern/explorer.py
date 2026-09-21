@@ -36,6 +36,7 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
+from ...core import rawdevice
 from . import formats, sidx
 from .ext4 import S_IFDIR, S_IFMT, S_IFREG, Ext4Reader
 
@@ -106,8 +107,9 @@ class Entry:
 class CardImage:
     """Open a Spike 2 card image/device for read-only browsing.
 
-    *source* is a path to a ``.raw``/``.img`` file, or an already-open, seekable
-    binary object (e.g. a read-only ``RawDeviceFile`` over a physical card); an
+    *source* is a path to a ``.raw``/``.img`` file, a raw-device path (the card
+    itself in a reader — opened sector-aligned through ``RawDeviceFile``, see
+    :func:`formats.open_card`), or an already-open, seekable binary object; an
     object is not closed by :meth:`close`.  Use as a context manager.
     """
 
@@ -117,9 +119,13 @@ class CardImage:
             self._owns = False
             self._source_path = None       # replace_file needs a real path
         else:
-            self._f = open(source, "rb")
+            self._f = formats.open_card(source)
             self._owns = True
-            self._source_path = source
+            # A device is browsed read-only: replace_file grows a file inside
+            # an ext4 image, which is a file operation (and a card is patched
+            # in place by the Direct-SD engine, not through here).
+            self._source_path = (
+                None if rawdevice.is_device_path(source) else source)
         self._readers = {}                 # partition index -> Ext4Reader
         # Every read seeks the ONE shared handle, so two at once interleave
         # their seeks and the loser gets nonsense — a bogus FileNotFoundError

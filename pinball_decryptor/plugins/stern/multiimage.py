@@ -129,10 +129,7 @@ def _open_source(path):
     sectors, so the device goes through :class:`..core.rawdevice.RawDeviceFile`
     (which aligns underneath) exactly as the extract's own reads do.
     """
-    from ...core.rawdevice import RawDeviceFile, is_device_path
-    if is_device_path(path):
-        return RawDeviceFile(path)
-    return open(_lp(path), "rb")
+    return formats.open_card(path)
 
 
 def card_images(path):
@@ -264,18 +261,24 @@ _CACHE = {}
 
 
 def images_for_path(path):
-    """:func:`card_images`, cached on the file's identity (path, size, mtime).
+    r""":func:`card_images`, cached on the file's identity (path, size, mtime).
 
     The confirm, the run that follows it and the Image Info report ask the
     same question of the same file minutes apart, and a card on a slow USB
     drive is a couple of hundred directory reads away from the answer.
+
+    A raw DEVICE is never cached, even when the host lets us stat it: the same
+    ``\\.\PHYSICALDRIVE2`` is a different card a moment later, which is the
+    whole workflow PAD-191 exists for (swap the card, read the answer).
     """
+    from ...core.rawdevice import is_device_path
+    if is_device_path(path):
+        return card_images(path)
     try:
         st = os.stat(_lp(path))
         key = (os.path.abspath(path), st.st_size, st.st_mtime_ns)
     except OSError:
-        # A raw device has no identity to key on (and a path that isn't there
-        # has nothing to remember) — probe, don't cache.
+        # A path that isn't there has nothing to remember — probe, don't cache.
         return card_images(path)
     hit = _CACHE.get(key)
     if hit is None:

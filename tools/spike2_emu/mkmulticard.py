@@ -39,7 +39,8 @@ move/confirm sounds and the volume; only the referenced files are staged into
 /usr/local/codeselect/media on p2 (flat, names ^[A-Za-z0-9._-]+$, PNG <= 1360x768, GIF <= 10 MB /
 512x288 / 150 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the whole set <= 96 MB), and images.conf gets
 the image lines (image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>) and the
-sound_move= / sound_confirm= / volume= / mixer_volume= / media= / heading= / text_size= keys.  The line is written only as
+sound_move= / sound_confirm= / volume= / mixer_volume= / media= / heading= / text_size= / counter= /
+countdown_word= keys.  The line is written only as
 wide as it needs to be - 3 fields with no media at all, 6 when no image names a confirm of its own -
 and every narrower form stays valid.  An image's own confirm is the sound that plays when THAT image
 is chosen; an empty field falls back to the menu-wide sound_confirm=.
@@ -294,6 +295,10 @@ MAX_GROUPS = 8
 #: placeholder), never written into a conf: a card that never asked for a heading must not
 #: grow a key that pins this spelling.
 DEF_HEADING = "SELECT GAME CODE"
+#: The first word of the countdown line ("starting <title> in 9 s") when no card sets
+#: `countdown_word=` - codeselect.c's DEF_COUNTDOWN_WORD, on DEF_HEADING's rule: only
+#: ever shown, never written into a conf that did not ask for it.
+DEF_COUNTDOWN_WORD = "starting"
 #: conf.c reads a line into `line[1024]`, so a line longer than this is refused HERE
 #: rather than silently truncated on the machine.
 CONF_LINE_MAX = 1000
@@ -302,7 +307,8 @@ CONF_LINE_MAX = 1000
 #: so this is about the file, not about how much fits on the LCD).
 CONF_STR_MAX = 199
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
-CONF_KEYS = ("default", "timeout", "heading", "text_size", "font", "sound_move", "sound_confirm", "volume",
+CONF_KEYS = ("default", "timeout", "heading", "text_size", "counter", "countdown_word", "font",
+             "sound_move", "sound_confirm", "volume",
              "mixer_volume", "media", "theme", "machine_volume")
 
 #: HOW BIG A CARD'S TITLE AND SUBTITLE ARE DRAWN (images.conf text_size=; PAD-183).
@@ -312,6 +318,13 @@ CONF_KEYS = ("default", "timeout", "heading", "text_size", "font", "sound_move",
 #: choice. The selector's own default is `uniform`, and a card that never says gets it.
 TEXT_SIZES = ("uniform", "per-card")
 TEXT_SIZE_DEFAULT = "uniform"
+
+#: WHETHER THE "<  N / M  >" LINE UNDER THE CARDS IS DRAWN (images.conf counter=;
+#: BEN, PAD-190).  Only a carousel - five cards or more - has one at all, and `off`
+#: takes it off the glass for somebody whose cards are their own artwork.  The
+#: selector's own default is `on`, and a card that never says gets it.
+COUNTERS = ("on", "off")
+COUNTER_DEFAULT = "on"
 
 #: THE MACHINE'S OWN VOLUME (images.conf volume=machine + machine_volume=<store>|<key>|<default>):
 #: the selector plays at the MASTER VOLUME SETTING the owner set on the coin door, read off the
@@ -395,6 +408,18 @@ def check_text_size(text_size):
         return None
     if t not in TEXT_SIZES:
         raise Refused("text_size %r is not one of %s" % (text_size, ", ".join(TEXT_SIZES)))
+    return t
+
+
+def check_counter(counter):
+    """A ``counter=`` value for images.conf: 'on' or 'off', lower case; '' / None ->
+    None (no key written, and the selector's own drawn line).  Anything else is refused
+    here rather than warned about on the machine."""
+    t = (counter or "").strip().lower()
+    if not t:
+        return None
+    if t not in COUNTERS:
+        raise Refused("counter %r is not one of %s" % (counter, ", ".join(COUNTERS)))
     return t
 
 
@@ -1560,20 +1585,34 @@ def _media_name_ok(name, what):
     return name or ""
 
 
-def conf_heading(text):
-    """A ``heading=`` value for images.conf, validated: free text on ONE line, at most
-    CONF_STR_MAX bytes of it.  '' is allowed and means no heading at all.
+def _conf_text(key, text):
+    """One of the conf's FREE-TEXT values (``heading=``, ``countdown_word=``), validated:
+    text on ONE line, at most CONF_STR_MAX bytes of it.  '' is allowed and is a choice -
+    no heading at all, or a countdown with no word in front of the title.
 
-    A '|' is fine here - the key is not a pipe-separated line - but a newline would end
-    the key and turn the rest of somebody's title into an unknown key, which is exactly
+    A '|' is fine here - these keys are not pipe-separated lines - but a newline would end
+    the key and turn the rest of somebody's words into an unknown key, which is exactly
     the kind of thing this file is refused for rather than half-written."""
     s = "" if text is None else str(text)
     if "\n" in s or "\r" in s:
-        raise Refused("images.conf: heading=%r may not contain a newline" % s)
+        raise Refused("images.conf: %s=%r may not contain a newline" % (key, s))
     if len(s.encode("utf-8")) > CONF_STR_MAX:
-        raise Refused("images.conf: heading= is %d bytes; the selector reads at most %d"
-                      % (len(s.encode("utf-8")), CONF_STR_MAX))
+        raise Refused("images.conf: %s= is %d bytes; the selector reads at most %d"
+                      % (key, len(s.encode("utf-8")), CONF_STR_MAX))
     return s
+
+
+def conf_heading(text):
+    """A ``heading=`` value for images.conf - the line across the top of the menu, or ''
+    for no heading at all.  See :func:`_conf_text`."""
+    return _conf_text("heading", text)
+
+
+def conf_countdown_word(text):
+    """A ``countdown_word=`` value for images.conf - the first word of the countdown line
+    ("starting <title> in 9 s"), or '' for no word in front of the title (PAD-190).  Same
+    rules as the heading: see :func:`_conf_text`."""
+    return _conf_text("countdown_word", text)
 
 
 def _int_range(val, key, lo, hi):
@@ -1737,7 +1776,8 @@ def check_groups(groups, nimages):
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None,
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
-                       groups=None, default_card=None, heading=None, text_size=None):
+                       groups=None, default_card=None, heading=None, text_size=None,
+                       counter=None, countdown_word=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1746,6 +1786,9 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     the menu's colours (see THEMES_JSON); neither is written when not given.  `heading` is the line
     across the top of the menu (None = the selector's own SELECT GAME CODE, '' = no line at all).
     `text_size` is 'uniform' or 'per-card' (None = no key, which the selector reads as uniform).
+    `counter` is 'on' or 'off' - whether the "<  N / M  >" line under a carousel's cards is drawn
+    (None = no key, which the selector reads as on) - and `countdown_word` is the first word of the
+    countdown line (None = the selector's own 'starting', '' = no word in front of the title).
     `debug_log` writes `log=CARD_LOG` (the selector's diagnostics on the card - a development build
     only)."""
     devices = list(devices)
@@ -1852,6 +1895,13 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     # byte for byte what it was (and reads as 'uniform' on a selector that knows the key)
     if text_size is not None:
         out.append("text_size=%s" % check_text_size(text_size))
+    # THE COUNTER LINE and THE COUNTDOWN'S FIRST WORD, on the same two rules (PAD-190):
+    # no key when nobody asked, and 'countdown_word=' is a CHOICE - the countdown then
+    # names the game and the seconds and nothing else.
+    if counter is not None:
+        out.append("counter=%s" % check_counter(counter))
+    if countdown_word is not None:
+        out.append("countdown_word=%s" % conf_countdown_word(countdown_word))
     if font:
         out.append("font=%s" % font)
     if sound_move:
@@ -1894,6 +1944,9 @@ def parse_images_conf(text):
     'sound_confirm': str|None, 'volume': int|None, 'mixer_volume': int|None, 'media_dir': str|None,
     'heading': str|None (None = the key was absent, '' = the card asked for no heading),
     'text_size': str|None (None = the key was absent, which the selector reads as 'uniform'),
+    'counter': str|None ('on' / 'off'; None = the key was absent, which the selector draws as on),
+    'countdown_word': str|None (None = the key was absent and the selector's own 'starting' is
+    drawn, '' = the card asked for no word in front of the title),
     'theme': str|None, 'colors': {role: rrggbb}, 'debug_log': str|None (the log= path)}.
     3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
     '|' ':' or '/', more than MAX_IMAGES images, more than MAX_CARDS cards or more than MAX_GROUPS
@@ -1905,7 +1958,8 @@ def parse_images_conf(text):
     if isinstance(text, bytes):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "groups": [], "default": 0, "default_card": None,
-            "timeout": 15, "heading": None, "text_size": None, "font": None,
+            "timeout": 15, "heading": None, "text_size": None,
+            "counter": None, "countdown_word": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None}
     for raw in text.splitlines():
@@ -1963,6 +2017,16 @@ def parse_images_conf(text):
             conf["text_size"] = val.strip().lower() or None
             if conf["text_size"] not in TEXT_SIZES:
                 conf["text_size"] = None
+        elif key == "counter":
+            # ...and the same for a counter= word the selector does not know: it draws
+            # the line, so the card is not read back as saying anything else
+            conf["counter"] = val.strip().lower() or None
+            if conf["counter"] not in COUNTERS:
+                conf["counter"] = None
+        elif key == "countdown_word":
+            # NOT `or None`: 'countdown_word=' is a card that asked for no word in front
+            # of the title, which is a different answer from a card that never said
+            conf["countdown_word"] = val.strip()
         elif key == "font":
             conf["font"] = val.strip() or None
         elif key in ("sound_move", "sound_confirm"):
@@ -2982,6 +3046,7 @@ def conf_for_plan(plan, args, existing=None, media=None):
     ex = existing or {"images": [], "media": [], "groups": [], "default": None,
                       "default_card": None, "timeout": None,
                       "heading": None, "text_size": None,
+                      "counter": None, "countdown_word": None,
                       "font": None, "sound_move": None, "sound_confirm": None,
                       "volume": None, "mixer_volume": None, "theme": None, "colors": {}}
     n = len(plan.trees)
@@ -3075,11 +3140,21 @@ def conf_for_plan(plan, args, existing=None, media=None):
     text_size = check_text_size(getattr(args, "text_size", None))
     if text_size is None:
         text_size = ex.get("text_size")
+    # THE COUNTER LINE and THE COUNTDOWN'S FIRST WORD, on the same rule (PAD-190):
+    # the flag is the whole answer ('--countdown-word ""' is a real one - no word at
+    # all), and without it the card keeps whatever it already carries
+    counter = check_counter(getattr(args, "counter", None))
+    if counter is None:
+        counter = ex.get("counter")
+    countdown_word = getattr(args, "countdown_word", None)
+    if countdown_word is None:
+        countdown_word = ex.get("countdown_word")
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
                               groups=groups, default_card=default_card, heading=heading,
-                              text_size=text_size)
+                              text_size=text_size, counter=counter,
+                              countdown_word=countdown_word)
 
 
 # ============================================================================= the JSON sidecars
@@ -3141,6 +3216,8 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("sound_confirm", conf["sound_confirm"]),
         ("heading", conf.get("heading")),
         ("text_size", conf.get("text_size")),
+        ("counter", conf.get("counter")),
+        ("countdown_word", conf.get("countdown_word")),
         ("theme", conf.get("theme")),
         ("colors", dict(conf.get("colors") or {})),
         # ONE ENTRY PER GROUP CARD (item 106), with the media *_source keys the tab's
@@ -5128,7 +5205,8 @@ def render_images_conf_text(conf):
         default_card=conf.get("default_card"),
         # the card's own LOOK keys, or a card that carries one reads back as a card that
         # changed and every update re-injects its menu for nothing
-        heading=conf.get("heading"), text_size=conf.get("text_size"))
+        heading=conf.get("heading"), text_size=conf.get("text_size"),
+        counter=conf.get("counter"), countdown_word=conf.get("countdown_word"))
 
 
 # ============================================================================= reading a card back
@@ -6514,9 +6592,12 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
                                                             conf.get("debug_log") or "off"))
         print("    sound_move=%s sound_confirm=%s volume=%s mixer_volume=%s media=%s"
               % (conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"], conf["media_dir"]))
-        print("    heading=%s text_size=%s"
+        print("    heading=%s text_size=%s counter=%s countdown_word=%s"
               % ("(the selector's own)" if conf.get("heading") is None else repr(conf["heading"]),
-                 conf.get("text_size") or "(the selector's own: %s)" % TEXT_SIZE_DEFAULT))
+                 conf.get("text_size") or "(the selector's own: %s)" % TEXT_SIZE_DEFAULT,
+                 conf.get("counter") or "(the selector's own: %s)" % COUNTER_DEFAULT,
+                 "(the selector's own: %r)" % DEF_COUNTDOWN_WORD
+                 if conf.get("countdown_word") is None else repr(conf["countdown_word"])))
         if selector_dir:
             for name, (cardname, mode, required) in SELECTOR_FILES.items():
                 src = os.path.join(selector_dir, name)
@@ -6796,6 +6877,11 @@ def inspect_card(card, media_out=None):
         ("heading", conf.get("heading")),
         # null = the card never set one, which the selector draws as 'uniform'
         ("text_size", conf.get("text_size")),
+        # null = the card never set it either: the counter line is drawn, and the
+        # countdown starts with the selector's own word (PAD-190).  "" on the word is
+        # the card asking for no word in front of the title at all
+        ("counter", conf.get("counter")),
+        ("countdown_word", conf.get("countdown_word")),
         ("theme", conf.get("theme")), ("colors", dict(conf.get("colors") or {})),
         ("media", media), ("media_out", out),
         ("has_media_json", media_json is not None), ("has_build_json", build is not None),
@@ -6838,6 +6924,14 @@ def print_inspect(rep):
     print("text size  %s" % ("(the selector's default: one size for every card)" if ts is None
                              else "uniform - one size for every card" if ts == TEXT_SIZE_DEFAULT
                              else "per-card - each card fits its own title"))
+    cnt = rep.get("counter")
+    word = rep.get("countdown_word")
+    print("under the cards  counter %s, countdown %s"
+          % ("(the selector's default: drawn)" if cnt is None
+             else "drawn" if cnt == COUNTER_DEFAULT else "hidden",
+             "(the selector's own %r)" % DEF_COUNTDOWN_WORD if word is None
+             else "'<title> in N s' - no word in front of the title" if not word
+             else "%r + the title and the seconds" % word))
     # WHAT THE PLAYER ACTUALLY SCROLLS THROUGH (item 106), before the per-image detail:
     # a card that shows five images as three cards is not obvious from the image list,
     # and "which of these do I see" is the first question a group raises.
@@ -8273,6 +8367,15 @@ def _add_conf_flags(s):
                         "uniform (one size for the whole menu, the largest every card's text fits "
                         "at) or per-card (each card fits its own); an existing card's is kept when "
                         "absent, and a card that says neither draws uniform")
+    s.add_argument("--counter", choices=list(COUNTERS),
+                   help="images.conf counter= - whether the '<  N / M  >' line under the cards "
+                        "is drawn (only a carousel of five cards or more has one); an existing "
+                        "card's is kept when absent, and a card that says neither draws it")
+    s.add_argument("--countdown-word", metavar="TEXT",
+                   help="images.conf countdown_word=TEXT - the first word of the countdown line "
+                        "(the selector's own '%s <title> in 9 s' when no card ever set one; "
+                        "--countdown-word '' leaves the title and the seconds alone); an "
+                        "existing card's is kept when absent" % DEF_COUNTDOWN_WORD)
     s.add_argument("--default", type=int, help="images.conf default index (default 0)")
     s.add_argument("--volume", type=int, help="images.conf volume 0-100 (software mix gain; overrides media.json)")
     s.add_argument("--mixer-volume", type=int, help="images.conf mixer_volume 0-63 (the game's codec curve on selem PCM; only when set)")

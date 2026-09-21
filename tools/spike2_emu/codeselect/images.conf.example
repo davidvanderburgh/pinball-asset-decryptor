@@ -31,6 +31,11 @@
 #   text_size=W  how big a card's title and subtitle are drawn: uniform (the
 #                default) = one size for the whole menu, the largest every card's
 #                text fits at; per-card = each card fits its own
+#   counter=on|off  whether the "<  N / M  >" line under the cards is drawn
+#                (default on; only a carousel of five or more cards has one)
+#   countdown_word=TEXT  the first word of the countdown line - "starting
+#                <title> in 9 s" by default; countdown_word=Launching says
+#                that instead, and countdown_word= (empty) drops the word
 #   font=PATH    optional TrueType font (default: /usr/local/codeselect/font.ttf,
 #                then the card's /usr/local/spike/VeraMono.ttf)
 #   media=DIR    where the media names live (default /usr/local/codeselect/media)

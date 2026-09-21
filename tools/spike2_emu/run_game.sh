@@ -285,7 +285,10 @@ if [ -n "${PAD_CARD:-}" ]; then
             # card that asked for no line across the top at all.
             # ...and text_size= with them (PAD-183): the card says how big the
             # titles on its cards are drawn, so the preview has to say it too.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|theme|color_[a-z_]+)[[:space:]]*=' || true
+            # ...and counter= / countdown_word= (PAD-190), for the same reason:
+            # a card whose counter line is off and whose countdown says
+            # 'Launching' must preview as that card, not as the default menu.
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|theme|color_[a-z_]+)[[:space:]]*=' || true
         } > "$R/dump/codeselect.conf"
         echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after $SEL_TIMEOUT s"
         # THE MEDIA (item 90 v2): the card's /usr/local/codeselect/media,

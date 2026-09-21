@@ -119,6 +119,11 @@
  * reason it is a named constant here: the GUI offers it as the field's
  * placeholder rather than retyping it. */
 #define DEF_HEADING  "SELECT GAME CODE"
+/* ...and the FIRST WORD of the countdown line, which images.conf's
+ * countdown_word= replaces (BEN, Discord, PAD-190: "have the option to change
+ * this text in case you want something like 'Launching' or 'Booting'"). The
+ * GUI offers this spelling as that field's placeholder, same as the heading. */
+#define DEF_COUNTDOWN_WORD "starting"
 
 struct opts {
     const char *conf, *out, *input, *nodebus, *spi, *padsw, *tables, *last, *log,
@@ -1162,6 +1167,20 @@ static void draw_chevron(struct gfx *g, int ax, int cy, int len, int t,
     }
 }
 
+/* THE COUNTDOWN LINE, built: "<word> <title> in <secs> s", or the title and
+ * the seconds alone when the conf asked for no word at all (countdown_word=,
+ * PAD-190 - the same "an empty value is a choice" rule heading= follows).
+ * `secs` is a string so the caller can build the line's WIDEST form ("000")
+ * as well as the one it is about to draw. */
+static void countdown_text(char *out, int n, const char *word,
+                           const char *title, const char *secs)
+{
+    if (word && *word)
+        snprintf(out, n, "%s %s in %s s", word, title, secs);
+    else
+        snprintf(out, n, "%s in %s s", title, secs);
+}
+
 /* action = this title has a lockdown-bar ACTION button the menu can read; 0
  * means the footer must not promise one */
 static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
@@ -1170,7 +1189,7 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
 {
     float s = L->s;
     int W = g->w, slot;
-    char buf[300], widest[300], cut[300];
+    char buf[300], widest[300], cut[300], press[300];
 
     gfx_fill(g, TH(L, BACKGROUND));
     /* THE HEADING IS THE CONF'S when it set one (heading=), and it is then
@@ -1209,7 +1228,11 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         int i = slot_image(L, hl, slot);
         draw_card(g, f, L, c, m, i, slot, i == hl);
     }
-    if (L->carousel) {
+    /* WHICH CARD OF HOW MANY, under the row - and only when the conf wants it
+     * (counter=off, PAD-190: somebody whose menu is seven cards of their own
+     * artwork does not need the menu counting them).  A carousel is the only
+     * layout that has it: two to four cards are all on the glass at once. */
+    if (L->carousel && c->counter) {
         snprintf(buf, sizeof buf, "<   %d / %d   >", hl + 1, L->n);
         gfx_text_center(g, f, 26 * s, W / 2, (int)(626 * s), buf, TH(L, FOOTER));
     }
@@ -1220,9 +1243,12 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
      * is still about twice the panel wide at 24 px - so the line used to run
      * off both edges, which is exactly what gfx_text_center() does with
      * anything too wide. gfx_ellipsize() ends it "..." instead. The countdown
-     * line is SIZED from its longest form, the 'press ...' one, so the size
-     * does not wobble as the digits drop from 10 to 9 - but each form is cut
-     * on its own, since the shorter one may still fit whole.
+     * line is SIZED from the longest form it takes - whichever of the
+     * 'press ...' one and the countdown at three digits is wider - so the
+     * size does not wobble as the digits drop from 10 to 9, and somebody
+     * else's countdown_word= is measured rather than assumed shorter than
+     * ours; but each form is cut on its own, since the shorter one may still
+     * fit whole.
      *
      * The footer names the buttons that EXIST. With no Action button resolved
      * - beatles has no lockdown row at all, and a menu still waiting for its
@@ -1230,18 +1256,35 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
      * named a button nothing on this machine is wired to. */
     {
         const char *foot = action ? FOOT_ACTION : FOOT_START;
+        const char *title = conf_card_face(c, hl)->title;
+        /* "starting", not "booting" (PAD-141): the machine is already up, and
+         * what the countdown ends in is the game starting.  It is the DEFAULT
+         * rather than the only word since PAD-190 - countdown_word= replaces
+         * it, and an empty one drops it altogether. */
+        const char *word = c->countdown_word_set ? c->countdown_word
+                                                 : DEF_COUNTDOWN_WORD;
         const int wmax = W - (int)(80 * s);
         float fpx = gfx_fit_px(f, foot, wmax, 30 * s, 20 * s), cpx;
         gfx_ellipsize(f, fpx, foot, wmax, cut, sizeof cut);
         gfx_text_center(g, f, fpx, W / 2, (int)(662 * s), cut, TH(L, FOOTER));
-        snprintf(widest, sizeof widest, "%s%s", action ? PRESS_ACTION : PRESS_START,
-                 conf_card_face(c, hl)->title);
-        if (remain >= 0)
-            /* "starting", not "booting" (PAD-141): the machine is already
-             * up, and what the countdown ends in is the game starting */
-            snprintf(buf, sizeof buf, "starting %s in %d s", conf_card_face(c, hl)->title, remain);
-        else
-            snprintf(buf, sizeof buf, "%s", widest);
+        snprintf(press, sizeof press, "%s%s", action ? PRESS_ACTION : PRESS_START,
+                 title);
+        /* THE SIZE COMES FROM THE LONGEST FORM THIS LINE TAKES, which is the
+         * 'press ...' one for the menu's own word but can be the countdown
+         * for somebody else's ("Now launching" is longer than "press START to
+         * boot").  Measured at three digits - the most timeout= takes - so
+         * the size still does not wobble as they drop from 10 to 9.  Text
+         * widths are proportional to px, so comparing at one size orders the
+         * two at every size. */
+        countdown_text(widest, sizeof widest, word, title, "000");
+        if (gfx_text_width(f, 38 * s, press) > gfx_text_width(f, 38 * s, widest))
+            snprintf(widest, sizeof widest, "%s", press);
+        if (remain >= 0) {
+            char secs[16];
+            snprintf(secs, sizeof secs, "%d", remain);
+            countdown_text(buf, sizeof buf, word, title, secs);
+        } else
+            snprintf(buf, sizeof buf, "%s", press);
         cpx = gfx_fit_px(f, widest, wmax, 38 * s, 24 * s);
         gfx_ellipsize(f, cpx, buf, wmax, cut, sizeof cut);
         gfx_text_center(g, f, cpx, W / 2, (int)(718 * s), cut, TH(L, COUNTDOWN));
@@ -1904,6 +1947,14 @@ int main(int argc, char **argv)
                 audio_sink_name(au), media.dir, action ? FOOT_ACTION : FOOT_START);
     }
     if (L.carousel) sel_log("layout: carousel of %d (3 visible, %d px cards)", n, L.cw);
+    /* WHAT THE TWO LINES UNDER THE CARDS SAY (PAD-190).  A line of its own
+     * rather than another field on the 'menu:' line above, which several
+     * things outside this program already read: the counter can be turned off
+     * and the countdown's first word replaced, and "my menu stopped counting"
+     * is then answered by the log instead of by a photograph of the glass. */
+    sel_log("menu text: counter %s, countdown word \"%s\"",
+            c.counter ? "on" : "off",
+            c.countdown_word_set ? c.countdown_word : DEF_COUNTDOWN_WORD);
 
     start = sel_now_ms();
     last_key = start;

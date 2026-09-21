@@ -1954,7 +1954,8 @@ HELP_CONTENT = {
          "the MENU rather than to one image, and the line beside it "
          "already says what those are: the heading across the top of the "
          "menu, whether every card draws its text at the same size, "
-         "the move and confirm sounds (auto "
+         "whether the cards are counted under them, what the countdown "
+         "line says, the move and confirm sounds (auto "
          "pulls a click and a stinger from the primary image, synth "
          "generates tones), the volume, the countdown (0 = wait for "
          "START), which image is highlighted at power-up, and the WSL "
@@ -1973,6 +1974,19 @@ HELP_CONTENT = {
          "other line the menu draws, and the preview shows it the moment "
          "you stop typing. A card that never asked for a heading is "
          "written exactly as it always was."),
+        ("The two lines under the cards",
+         "A menu of five cards or more scrolls, and it counts the cards "
+         "under them - the \u201c<  3 / 7  >\u201d line. Count the cards "
+         "under them in Menu settings turns that line off for a menu whose "
+         "cards are artwork of their own. Under it, Countdown says is the "
+         "first word of the bottom line, the one the countdown runs on: "
+         "\u201cstarting The Beatles in 9 s\u201d by default, and typing "
+         "Launching or Booting over it says that instead. The example "
+         "beside the box is the line itself, with the highlighted image's "
+         "own name in it, so you can read what the machine will say before "
+         "you write the card. EMPTYING IT IS A REAL ANSWER too: the "
+         "countdown then names the game and the seconds and nothing else. "
+         "Neither is written onto a card that never asked for it."),
         ("Hearing a sound before the card is written",
          "Every sound row - the menu's move and confirm sounds in Menu "
          "settings, and an image's music and confirm in Edit image - has "

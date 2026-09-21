@@ -36,6 +36,18 @@
  *                            CODE"); free UTF-8 text, shrunk and then cut to
  *                            the glass, and a line of nothing but spaces
  *                            leaves the top of the menu empty
+ *   counter=<on|off>         whether the "<  N / M  >" line under the cards is
+ *                            drawn (default on; a carousel is the only layout
+ *                            that has one).  'off' takes it off the glass -
+ *                            somebody whose cards are their own artwork does
+ *                            not need the menu counting them (BEN, PAD-190).
+ *                            An unknown word is warned about and the line is
+ *                            drawn: a typo must never take something off the
+ *                            glass silently
+ *   countdown_word=<text>    the first word of the countdown line ("starting
+ *                            <title> in 9 s"); default "starting", free UTF-8
+ *                            text, and an empty one is a CHOICE - the line is
+ *                            then "<title> in 9 s" with no word at all
  *   text_size=<word>         how big a card's title and subtitle are drawn:
  *                            'uniform' (the default) = ONE size for the whole
  *                            menu, the largest every card's text fits at, so a
@@ -204,6 +216,12 @@ struct conf {
                                     * empty one can mean "no heading" (C FB, PAD-135) */
     int text_uniform;              /* text_size=: 1 = one text size for the whole menu
                                     * (the default), 0 = each card fits its own */
+    int counter;                   /* counter=: 1 = the "< N / M >" line under a
+                                    * carousel is drawn (the default), 0 = it is not */
+    char countdown_word[CONF_STR]; /* countdown_word= ("" = a countdown with no word
+                                    * in front of the title at all)... */
+    int countdown_word_set;        /* ...and whether the key was there at all, so an
+                                    * empty one can mean that (PAD-190, heading='s rule) */
     char font[CONF_STR];
     char media[CONF_STR];          /* media= ("" when absent) */
     char sound_move[CONF_STR];     /* "" when absent */

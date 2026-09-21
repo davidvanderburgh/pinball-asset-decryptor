@@ -283,6 +283,10 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
      * thing: a card built before text_size= existed gets the consistent look
      * too, which is the point of it (PAD-183) */
     c->text_uniform = 1;
+    /* ...and the counter line under a carousel is DRAWN unless the file asks
+     * for it gone (PAD-190), on the same rule: a card built before the key
+     * existed is the menu it always was */
+    c->counter = 1;
     {
         int k;
         for (k = 0; k < 5; k++) c->jjp_byte[k] = c->jjp_bit[k] = c->jjp_byte2[k] = c->jjp_bit2[k] = -1;
@@ -383,6 +387,21 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
              * artwork up there wants (PAD-135). */
             c->heading_set = 1;
             copy_field(c->heading, val);
+        } else if (!strcmp(key, "counter")) {
+            /* A WORD, like text_size, and read the same way: an empty value is
+             * the default, and a word this build does not know is warned about
+             * and ignored - a typo here must never take the line off a
+             * pinball machine's glass. */
+            if (!*val || !strcmp(val, "on")) c->counter = 1;
+            else if (!strcmp(val, "off")) c->counter = 0;
+            else conf_warn(c, "%s:%d: counter=%s is not 'on' or 'off': the "
+                           "card counter is drawn", path, lineno, val);
+        } else if (!strcmp(key, "countdown_word")) {
+            /* AN EMPTY VALUE IS A CHOICE, as with heading=: 'countdown_word='
+             * means the countdown names the game and the seconds and nothing
+             * else ("The Beatles in 9 s"). */
+            c->countdown_word_set = 1;
+            copy_field(c->countdown_word, val);
         } else if (!strcmp(key, "text_size")) {
             /* A WORD, not a number: the sizes themselves are the layout's, and
              * this says whether the menu measures them once for every card or

@@ -153,6 +153,7 @@ class _Root:
 
 class _App:
     _on_close = app_mod.App._on_close
+    _save_session_state = app_mod.App._save_session_state
     _launch_downloaded_installer = app_mod.App._launch_downloaded_installer
     _restart_wsl_for_update = app_mod.App._restart_wsl_for_update
 
@@ -173,14 +174,18 @@ class _Dialog:
 
 def test_installing_an_update_restarts_wsl_after_the_emulators(monkeypatch):
     """After, because the emulators stop through wsl.exe and a stop after the
-    shutdown would boot the VM straight back up.  Settings are saved before
-    it, because the installer may close this process while it waits."""
+    shutdown would boot the VM straight back up.
+
+    The two saves in front of it are PAD-188: one before the installer is
+    handed the exe at all, and the quit's own - which now leads rather than
+    waits behind the shutdown, because the installer force-closes this process
+    while that runs."""
     monkeypatch.setattr(app_mod, "launch_installer_windows", lambda p: True)
     monkeypatch.setattr(app_mod, "restart_wsl_for_update",
                         lambda: app.order.append("wsl") or "the WSL line")
     app = _App()
     app._launch_downloaded_installer(_Dialog(), "C:\\Temp\\setup.exe", "9.0.0")
-    assert app.order == ["emulators", "settings", "wsl", "destroy"]
+    assert app.order == ["settings", "settings", "emulators", "wsl", "destroy"]
     assert ("info", "the WSL line") in app.window.log
 
 
@@ -199,7 +204,9 @@ def test_an_installer_that_will_not_start_restarts_nothing(monkeypatch):
                         lambda: app.order.append("wsl"))
     app = _App()
     app._launch_downloaded_installer(_Dialog(), "C:\\Temp\\setup.exe", "9.0.0")
-    assert app.order == []
+    # The save in front of the launch stands whether or not the launch works
+    # (PAD-188); nothing else in the quit happened, which is the point here.
+    assert app.order == ["settings"]
     assert not getattr(app, "_restart_wsl_on_close", False)
 
 

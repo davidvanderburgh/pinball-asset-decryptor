@@ -42,6 +42,12 @@ class _App:
     def __init__(self):
         self.window = _Window()
         self.closed = False
+        self.saved = 0
+
+    def _save_session_state(self):
+        # PAD-188: the successor AppImage reads settings.json as it opens, so
+        # the state is written before it is started rather than behind it.
+        self.saved += 1
 
     def _on_close(self):
         self.closed = True
@@ -171,6 +177,7 @@ def test_accepting_starts_the_new_one_and_closes_this_one(monkeypatch,
     app._finish_appimage_update(_Dialog(), str(path), "9.0.0")
     assert launched == [[str(path)]]
     assert app.closed, "the old version stayed open next to the new one"
+    assert app.saved, "the new one would read a settings.json without it"
 
 
 def test_a_new_version_that_wont_start_says_so(monkeypatch, tmp_path):

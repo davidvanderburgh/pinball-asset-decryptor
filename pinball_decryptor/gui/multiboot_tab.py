@@ -8075,7 +8075,8 @@ class MultibootPanel:
         "image list changes, and for a loaded card it also works out what an "
         "update would write. With Compact build ticked each band is what "
         "that image brings on its own, and the hatched part of the free "
-        "room is what compact saved - stored once, so not on the card.")
+        "room is what compact saved - stored once, so not on the card. "
+        "Click the strip to measure it again.")
 
     COMPACT_TIP = (
         "Compact build: one copy of every file the images "
@@ -8423,7 +8424,34 @@ class MultibootPanel:
                                   self._theme_fn)
         self._size_need_tip = _Tooltip(self._size_need, self.SIZE_TIP,
                                        self._theme_fn)
+        # THE STRIP IS ITS OWN REFRESH BUTTON (BEN, PAD-189: "maybe add a
+        # refresh icon so it can be manually triggered?").  It asks by itself
+        # whenever the image list moves and that is nearly always the whole
+        # story - but two states carry no next question in them: a check that
+        # FAILED, and an image that was not on this machine when the list
+        # last moved and is now.  A click is the way out of both, and it
+        # costs the row no pixels, which a real icon would.
+        for w in (self._size_canvas, self._size_need, self._size_lbl):
+            w.bind("<Button-1>", self._remeasure)
+            try:
+                w.configure(cursor="hand2")
+            except tk.TclError:                         # pragma: no cover
+                pass
         self._size_view = None
+
+    def _remeasure(self, _event=None):
+        """Measure this image list again, now - what clicking the size strip
+        does.  True when a run was armed.
+
+        It forgets which list was last asked about, so :meth:`_maybe_plan`
+        sees the question as new and arms the debounce; the stale number
+        goes on the way in, exactly as it does when the list moves."""
+        if self._stopped or not self._auto_plan:
+            return False
+        self._plan_for = None
+        self._maybe_plan()
+        self._draw_size()
+        return self._plan_job is not None
 
     def size_view(self):
         """What the strip is showing - the seam the tests read."""
@@ -8558,9 +8586,12 @@ class MultibootPanel:
         # still arms the debounce (the check is _plan_now's, a second later),
         # so asking about the job first would say "Measuring..." for ever
         # about a card nothing is going to measure.
+        # ...and a row's images are its MEMBERS when it is a random card
+        # (PAD-189): the group row's own path is empty by design, so asking
+        # it for one said "not on this machine" about a list that was
+        # entirely there.
         missing = [r for r in self._rows
-                   if not (r.path or "").strip()
-                   or not os.path.isfile((r.path or "").strip().strip(chr(34)))]
+                   if not all(q and os.path.isfile(q) for q in row_paths(r))]
         if missing:
             return "missing", ("The images have to be on this machine to be measured."
                                if len(missing) < len(self._rows) else "")
@@ -10770,16 +10801,33 @@ class MultibootPanel:
     PLAN_DEBOUNCE_MS = 900
 
     def _plan_key(self):
-        """WHAT THE SIZE ANSWER DEPENDS ON, and nothing else: the image
-        list, in order.
+        """WHAT THE SIZE ANSWER DEPENDS ON, and nothing else: the GAMES the
+        card will carry, in order.
 
         :func:`plan_args` takes the images and the layout and no other
         field of the form, so a title, the countdown, the volume or the
         output path cannot change the answer - which is exactly what makes
-        it safe to ask this question on every keystroke."""
-        return (tuple((r.path or "").strip().strip('"') for r in self._rows),
+        it safe to ask this question on every keystroke.
+
+        THE GAMES, NOT THE ROWS (PAD-189).  A random card is ONE row with no
+        path of its own and several member games behind it, so a key built
+        out of ``row.path`` carried an empty string for it - and an empty
+        string is what :meth:`_plan_now` and :meth:`_size_state` both read as
+        "an image that is not on this machine", so adding a random set
+        blanked the size and nothing ever measured it again (BEN: "when a
+        random set is added, this value disappears... nothing seems to
+        trigger it to re-calc").  Its MEMBERS are what the plan reads, so
+        they are what this counts, and editing them asks again.
+
+        Whether a group KEEPS its members' own cards belongs here too: a
+        keeping one adds no games to the card (its members are games other
+        rows already put there) and a consuming one adds all of them, which
+        is the whole difference between two sizes off the same paths."""
+        return (tuple(q for r in self._rows for q in row_paths(r)),
                 self._loaded_card if self._loaded_trees else "",
-                bool(self._compact_var.get()))
+                bool(self._compact_var.get()),
+                tuple((i, bool(r.keep)) for i, r in enumerate(self._rows)
+                      if is_group(r)))
 
     def _maybe_plan(self):
         """Keep the size sentence TRUE, without anyone having to ask.
@@ -10846,7 +10894,9 @@ class MultibootPanel:
         # reads the images and nothing else, so a half-typed title or an
         # output path that is still being typed is no reason to leave the
         # size unknown - and a missing .raw is, because the tool would only
-        # print a refusal into the Log nobody asked it to.
+        # print a refusal into the Log nobody asked it to.  ``key[0]`` is
+        # every GAME the card will carry, a random card's members included
+        # (PAD-189), not one path per row.
         if len(key[0]) < 1 or not all(p and os.path.isfile(p) for p in key[0]):
             return False
         form = self.form()

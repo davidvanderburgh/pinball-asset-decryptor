@@ -543,7 +543,9 @@ def test_preview_conf_is_the_form_with_placeholder_devices(tmp_path):
         "image=p7:img2|IMG 2|||anim2.gif|",
         "default=1", "timeout=20", "heading=SELECT GAME CODE",
         # PAD-183: the preview draws the text the size the card will
-        "text_size=uniform", "volume=40",
+        "text_size=uniform",
+        # ...and PAD-190: with the card's own two lines under the cards
+        "counter=on", "countdown_word=starting", "volume=40",
         "font=/usr/local/codeselect/font.ttf", "theme=midnight"]
     assert text.endswith("\n") and "\r" not in text
     # PAD-135: an emptied heading reaches the preview as 'heading=', which is
@@ -5209,6 +5211,10 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                     # ...and PAD-183: one that said nothing about the text
                     # size described a menu drawn at one size
                     "same_text_size": True,
+                    # ...and PAD-190: one that said nothing about the two
+                    # lines under the cards described a menu that counted
+                    # them and said 'starting'
+                    "show_counter": True, "countdown_word": "starting",
                     "theme": "midnight", "colors": {}}
     assert "bypass" not in menu_from_state(None)     # always on: not a setting
     assert menu_from_state({"volume": 900})["volume"] == 100
@@ -6274,6 +6280,29 @@ def test_the_screenshot_footer_cannot_drift_from_the_selectors_own():
     assert "LEFT / RIGHT FLIPPER" not in shot, \
         "the shot script carries its own copy of the selector's footer again"
     assert "def selector_footer(" in shot and "FOOT_(START|ACTION)" in shot
+
+
+def test_the_countdowns_own_word_cannot_drift_from_the_selectors(tmp_path):
+    """Three copies of one word - codeselect.c's DEF_COUNTDOWN_WORD (what the
+    menu draws), mkmulticard.py's (what `inspect` says a card that never set
+    the key does) and this tab's DEFAULT for the field - so they are pinned to
+    each other by name here, exactly as the footer macros are (PAD-190)."""
+    import re as _re
+    import importlib.util
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "tools", "spike2_emu", "codeselect",
+                            "codeselect.c"), encoding="utf-8").read()
+    word = _re.search(r'^#define DEF_COUNTDOWN_WORD "(.*)"$', src,
+                      _re.M).group(1)
+    spec = importlib.util.spec_from_file_location(
+        "mkmulticard_for_word",
+        os.path.join(root, "tools", "spike2_emu", "mkmulticard.py"))
+    mkc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mkc)
+    assert word == mkc.DEF_COUNTDOWN_WORD == multiboot_tab.DEF_COUNTDOWN_WORD
+    # ...and the counter's two words are the tool's, not this tab's own pair
+    assert (multiboot_tab.COUNTER_ON, multiboot_tab.COUNTER_OFF) == mkc.COUNTERS
+    assert multiboot_tab.COUNTDOWN_WORD_MAX == mkc.CONF_STR_MAX
 
 
 def test_an_images_own_confirm_survives_a_card_round_trip(tmp_path):
@@ -8078,6 +8107,149 @@ def test_the_text_size_tick_lives_in_the_menu_settings_and_the_state():
         assert menu_from_state({"same_text_size": False})["same_text_size"] is False
     finally:
         root.destroy()
+
+# ---- the two lines under the cards (BEN, Discord, PAD-190) -------------------
+def test_the_counter_and_the_countdown_word_reach_every_command_and_the_preview(tmp_path):
+    """BEN: 'have an option to hide the "< x / y >" line' and 'have the option
+    to change this text in case you want something like "Launching"'.  Both are
+    written out either way, on the heading's rule: the form is the record of
+    what the menu says, so clearing one has to reach the card as the other
+    answer rather than as "the flag was absent, keep what is there"."""
+    from pinball_decryptor.gui.multiboot_tab import (
+        inject_args, menu_text_args, write_preview_conf, update_args,
+        COUNTER_ON, COUNTER_OFF, DEF_COUNTDOWN_WORD)
+    form = _form(tmp_path, 2)
+    assert form.show_counter is True
+    assert form.countdown_word == DEF_COUNTDOWN_WORD == "starting"
+    assert menu_text_args(form) == ["--counter", COUNTER_ON,
+                                    "--countdown-word", "starting"]
+    build = _tool_words(dict(build_commands(form))["build"])
+    assert build[build.index("--counter") + 1] == COUNTER_ON
+    assert build[build.index("--countdown-word") + 1] == "starting"
+    for words in (inject_args(form, "D:/card.raw"),
+                  update_args(form, "D:/card.raw")):
+        assert words[words.index("--counter") + 1] == COUNTER_ON
+        assert words[words.index("--countdown-word") + 1] == "starting"
+    lines = write_preview_conf(form).splitlines()
+    assert "counter=on" in lines and "countdown_word=starting" in lines
+    form.show_counter = False
+    form.countdown_word = "Launching"
+    assert menu_text_args(form) == ["--counter", COUNTER_OFF,
+                                    "--countdown-word", "Launching"]
+    words = _tool_words(dict(build_commands(form))["build"])
+    assert words[words.index("--counter") + 1] == COUNTER_OFF
+    assert words[words.index("--countdown-word") + 1] == "Launching"
+    lines = write_preview_conf(form).splitlines()
+    assert "counter=off" in lines and "countdown_word=Launching" in lines
+    # an empty word is a real answer - the countdown then names the game and
+    # the seconds and nothing else - and it reaches the card as one
+    form.countdown_word = ""
+    assert menu_text_args(form)[-1] == ""
+    assert "countdown_word=" in write_preview_conf(form).splitlines()
+    # the preview is keyed on the conf, so neither can show a stale frame
+    assert preview_fingerprint(_form(tmp_path, 2)) != preview_fingerprint(form)
+
+
+def test_a_loaded_cards_counter_and_word_are_read_back_and_are_menu_changes(tmp_path):
+    """A card that never set either key draws the counter and says 'starting',
+    so the form comes up that way for it; only a card that asked for something
+    else comes up different.  Changing either is an inject, not a rebuild."""
+    from pinball_decryptor.gui.multiboot_tab import form_from_inspect
+    f1, _w = form_from_inspect({"images": []}, "D:/card.raw")
+    assert f1.show_counter is True and f1.countdown_word == "starting"
+    f2, _w = form_from_inspect({"images": [], "counter": "on",
+                                "countdown_word": "Booting"}, "D:/card.raw")
+    assert f2.show_counter is True and f2.countdown_word == "Booting"
+    f3, _w = form_from_inspect({"images": [], "counter": "off",
+                                "countdown_word": ""}, "D:/card.raw")
+    assert f3.show_counter is False and f3.countdown_word == ""
+    root, panel, card, _media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        assert "no changes yet" in panel.check_detail("card")
+        panel._counter_var.set(False)
+        panel._countdown_word_var.set("Launching")
+        detail = panel.check_detail("card")
+        assert "2 menu changes" in detail
+        assert "card counter" in detail and "countdown word" in detail
+        assert panel.apply_to_card() is True
+        inject = [c for c in calls[0] if c[0] == "inject"][0][1]
+        words = _tool_words(inject)
+        assert words[words.index("--counter") + 1] == "off"
+        assert words[words.index("--countdown-word") + 1] == "Launching"
+    finally:
+        root.destroy()
+
+
+def test_the_counter_tick_and_the_countdown_word_live_in_the_menu_settings():
+    from pinball_decryptor.gui.multiboot_tab import (
+        menu_from_state, countdown_example)
+    root, panel = _panel()
+    try:
+        assert panel.form().show_counter is True
+        assert panel.state()["menu"]["countdown_word"] == "starting"
+        menu = panel.open_menu_settings()
+        root.update()
+        # the example beside the box is the very line the menu will draw
+        assert panel._countdown_word_lbl.cget("text") == countdown_example(
+            "starting", "the game", 15)
+        panel._counter_var.set(False)
+        panel._countdown_word_var.set("Launching")
+        root.update()
+        assert "Launching the game in 15 s" == panel._countdown_word_lbl.cget("text")
+        menu.cancel()
+        root.update()
+        assert panel._counter_var.get() is True            # Cancel restores both
+        assert panel._countdown_word_var.get() == "starting"
+        menu = panel.open_menu_settings()
+        root.update()
+        panel._counter_var.set(False)
+        panel._countdown_word_var.set("Launching")
+        menu.ok()
+        root.update()
+        form = panel.form()
+        assert form.show_counter is False and form.countdown_word == "Launching"
+        # the line beside the button says so only when they are not the usual ones
+        said = panel._menu_lbl.cget("text")
+        assert "no card counter" in said and 'countdown says "Launching"' in said
+        doc = panel.state()
+        assert doc["menu"]["show_counter"] is False
+        assert doc["menu"]["countdown_word"] == "Launching"
+        panel._counter_var.set(True)
+        panel._countdown_word_var.set("starting")
+        said = panel._menu_lbl.cget("text")
+        assert "no card counter" not in said and "countdown says" not in said
+        panel.restore_state(doc)
+        root.update()
+        assert panel.form().show_counter is False
+        assert panel.form().countdown_word == "Launching"
+        # a state written before either existed describes the menu the selector
+        # drew with both of its own answers
+        assert menu_from_state({})["show_counter"] is True
+        assert menu_from_state({})["countdown_word"] == "starting"
+        assert menu_from_state({"show_counter": False})["show_counter"] is False
+    finally:
+        root.destroy()
+
+
+def test_the_countdown_example_says_what_the_menu_will_say():
+    """The label beside the box is the line itself, so the box needs no note -
+    and a countdown of 0 is a menu that waits for START, where the word is
+    never seen at all."""
+    from pinball_decryptor.gui.multiboot_tab import countdown_example
+    assert countdown_example("starting", "The Beatles", 15) == \
+        "starting The Beatles in 15 s"
+    assert countdown_example("Launching", "The Beatles", 9) == \
+        "Launching The Beatles in 9 s"
+    # no word at all: the game and the seconds, which is what the menu draws
+    assert countdown_example("", "The Beatles", 9) == "The Beatles in 9 s"
+    assert countdown_example("  Booting  ", "The Beatles", 9) == \
+        "Booting The Beatles in 9 s"
+    assert "waits for START" in countdown_example("starting", "The Beatles", 0)
+    assert "waits for START" in countdown_example("starting", "The Beatles", "x")
+    # no image to name yet
+    assert countdown_example("starting", "", 15) == "starting the game in 15 s"
+
 
 # ---- the size strip, the work meter and the run's Cancel -----------------------------
 def test_the_size_strip_waits_rather_than_showing_a_stale_number(tmp_path):

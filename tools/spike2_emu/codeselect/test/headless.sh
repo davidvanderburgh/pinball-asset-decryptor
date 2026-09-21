@@ -987,6 +987,56 @@ nband "$T/snap_widehead.ppm" 0 60 20 100 E8ECF1       # nothing in the left marg
 nband "$T/snap_widehead.ppm" 1340 60 1359 100 E8ECF1  # ...nor the right
 band "$T/snap_widehead.ppm" 300 60 1060 100 E8ECF1    # but the line is drawn
 
+# 18. THE TWO LINES UNDER THE CARDS ARE THE OWNER'S (BEN, PAD-190: "have an
+# option to hide the '< x / y >' line" and "change this text in case you want
+# something like 'Launching' or 'Booting'").  The counter's own band is the
+# text's row (y 604-630, centred on the glass) and the FOOTER line under it
+# (y 636-664) is the control: counter=off must take the one and leave the
+# other.  A word this build does not know leaves the line drawn and says so -
+# a typo in a conf must never take something off a machine's glass in silence.
+snap "$T/snap_count.ppm" "$T/five.conf"
+band "$T/snap_count.ppm" 560 604 800 630 7D8794       # drawn when nothing says otherwise
+{ cat "$T/five.conf"; echo "counter=off"; } > "$T/nocount.conf"
+snap "$T/snap_nocount.ppm" "$T/nocount.conf"
+nband "$T/snap_nocount.ppm" 560 604 800 630 7D8794    # ...and gone when asked
+band "$T/snap_nocount.ppm" 300 636 1060 664 7D8794    # the footer line is untouched
+rm -f "$T/snap.log"
+{ cat "$T/five.conf"; echo "counter=maybe"; } > "$T/badcount.conf"
+snap "$T/snap_badcount.ppm" "$T/badcount.conf"
+band "$T/snap_badcount.ppm" 560 604 800 630 7D8794
+grep -q "counter=maybe is not 'on' or 'off'" "$T/snap.log" || {
+    echo "headless: FAIL a counter= this build does not know was not warned about"
+    grep counter "$T/snap.log"; exit 1; }
+# countdown_word=: the first word of the countdown line.  The LIVE menu says
+# what it drew ('menu text:'), which is the line a support question is
+# answered from, and the countdown band proves the line is still there.
+{ cat "$T/nine.conf"; echo "countdown_word=Launching"; } > "$T/word.conf"
+rm -f "$T/choice" "$T/last" "$T/word.log"
+run "$T/menu_word.ppm" "$T/word.conf" --no-invert --media "$T/media" --anim-frame 1 --log "$T/word.log"
+grep -q 'menu text: counter on, countdown word "Launching"' "$T/word.log" || {
+    echo "headless: FAIL countdown_word= is not what the menu drew"; grep "menu text" "$T/word.log"; exit 1; }
+band "$T/menu_word.ppm" 300 684 1060 722 FFC42D       # 'Launching HEISEI BUILD 4 in 1 s'
+# ...and an empty one is a CHOICE: the countdown names the game and the
+# seconds with no word in front of it, and the line is still drawn
+{ cat "$T/nine.conf"; echo "countdown_word="; echo "counter=off"; } > "$T/noword.conf"
+rm -f "$T/choice" "$T/last" "$T/noword.log"
+run "$T/menu_noword.ppm" "$T/noword.conf" --no-invert --media "$T/media" --anim-frame 1 --log "$T/noword.log"
+grep -q 'menu text: counter off, countdown word ""' "$T/noword.log" || {
+    echo "headless: FAIL 'countdown_word=' did not reach the menu as no word at all"
+    grep "menu text" "$T/noword.log"; exit 1; }
+band "$T/menu_noword.ppm" 300 684 1060 722 FFC42D
+nband "$T/menu_noword.ppm" 560 604 800 630 7D8794
+# A COUNTDOWN WORD LONGER THAN THE 'press START to boot' LINE is what the
+# size is measured from now, so it is shrunk and cut to the glass like any
+# other text that is not ours - never run off both edges of it.
+{ cat "$T/nine.conf"
+  echo "countdown_word=NOW LAUNCHING THE GAME YOU CHOSE WITH THE FLIPPER BUTTONS, PLEASE WAIT"; } > "$T/longword.conf"
+rm -f "$T/choice" "$T/last"
+run "$T/menu_longword.ppm" "$T/longword.conf" --no-invert --media "$T/media" --anim-frame 1
+band "$T/menu_longword.ppm" 300 684 1060 722 FFC42D
+nband "$T/menu_longword.ppm" 0 684 20 722 FFC42D      # nothing in the left margin
+nband "$T/menu_longword.ppm" 1340 684 1359 722 FFC42D # ...nor the right
+
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"
 python3 "$HERE/ppm2png.py" "$T/menu_invert.ppm" "$T/codeselect_menu_invert.png" --rot180-of "$T/menu.ppm"

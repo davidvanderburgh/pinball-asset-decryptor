@@ -1004,7 +1004,8 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
                       "volume", "machine_volume", "mixer_volume", "sound_move", "sound_confirm",
-                      "heading", "text_size", "theme", "colors", "groups"}
+                      "heading", "text_size", "counter", "countdown_word", "theme", "colors",
+                      "groups"}
     # a card that never set one records null, not the selector's own line
     assert d["heading"] is None
     # a card with no media at all: the fields are null, not absent
@@ -1411,6 +1412,64 @@ def test_conf_for_plan_takes_the_heading_from_the_flag_else_the_card(mk):
     # a card that never had one still gets no key
     plainex = mk.parse_images_conf(_menu_conf(mk, plan))
     assert "heading" not in mk.conf_for_plan(plan, argparse.Namespace(), existing=plainex)
+
+
+def test_images_conf_carries_the_two_lines_under_the_cards(mk):
+    """PAD-190: counter= says whether the "<  N / M  >" line under the cards is drawn and
+    countdown_word= is the first word of the countdown line.  Neither key is written unless
+    somebody asks - a card that says nothing already draws the line and says 'starting', and
+    an older card must not read back as changed."""
+    devs = ["/dev/mmcblk0p3", "/dev/mmcblk0p7"]
+    plain = mk.render_images_conf(devs, ["A", "B"])
+    parsed = mk.parse_images_conf(plain)
+    assert "counter" not in plain and "countdown_word" not in plain
+    assert parsed["counter"] is None and parsed["countdown_word"] is None
+    assert mk.COUNTERS == ("on", "off") and mk.COUNTER_DEFAULT == "on"
+    assert mk.DEF_COUNTDOWN_WORD == "starting"
+    for word in mk.COUNTERS:
+        text = mk.render_images_conf(devs, ["A", "B"], counter=word)
+        assert "counter=%s" % word in text.splitlines()
+        assert mk.parse_images_conf(text)["counter"] == word
+        assert mk.render_images_conf_text(mk.parse_images_conf(text)) == text
+        assert mk.build_manifest(None, mk.parse_images_conf(text), None)["counter"] == word
+    # the countdown word is free text, and '' is a real answer: the countdown then names
+    # the game and the seconds with no word in front of them
+    for word in ("Launching", "Booting up", ""):
+        text = mk.render_images_conf(devs, ["A", "B"], countdown_word=word)
+        assert "countdown_word=%s" % word in text.splitlines()
+        assert mk.parse_images_conf(text)["countdown_word"] == word
+        assert mk.render_images_conf_text(mk.parse_images_conf(text)) == text
+        assert mk.build_manifest(None, mk.parse_images_conf(text),
+                                 None)["countdown_word"] == word
+    # a typo on the command line is refused here; a word ON A CARD reads back as "the card
+    # said nothing", which is what the selector makes of it too
+    with pytest.raises(mk.Refused):
+        mk.render_images_conf(devs, ["A", "B"], counter="hidden")
+    odd = mk.render_images_conf(devs, ["A", "B"], counter="off").replace("off", "hidden")
+    assert mk.parse_images_conf(odd)["counter"] is None
+    # ...and a countdown word is refused for the two things that would break the file
+    with pytest.raises(mk.Refused):
+        mk.render_images_conf(devs, ["A", "B"], countdown_word="two\nlines")
+    with pytest.raises(mk.Refused):
+        mk.render_images_conf(devs, ["A", "B"], countdown_word="x" * (mk.CONF_STR_MAX + 1))
+
+
+def test_conf_for_plan_takes_the_counter_and_the_word_from_the_flags_else_the_card(mk):
+    plan = _two_image_plan(mk)
+    ex = mk.parse_images_conf(_menu_conf(mk, plan, counter="off", countdown_word="Booting"))
+    # no flags: the card's own answers ride through
+    text = mk.conf_for_plan(plan, argparse.Namespace(), existing=ex)
+    assert "counter=off\n" in text and "countdown_word=Booting\n" in text
+    # the flags replace them, and an empty word takes it away for good
+    text = mk.conf_for_plan(plan, argparse.Namespace(counter="on",
+                                                    countdown_word="Launching"), existing=ex)
+    assert "counter=on\n" in text and "countdown_word=Launching\n" in text
+    assert "countdown_word=\n" in mk.conf_for_plan(
+        plan, argparse.Namespace(countdown_word=""), existing=ex)
+    # a card that never said still gets neither key
+    plainex = mk.parse_images_conf(_menu_conf(mk, plan))
+    text = mk.conf_for_plan(plan, argparse.Namespace(), existing=plainex)
+    assert "counter" not in text and "countdown_word" not in text
 
 
 def test_conf_for_plan_takes_the_theme_from_the_flags_else_the_card(mk):

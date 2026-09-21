@@ -320,6 +320,38 @@ def test_conf_round_trip_with_jjp_devices_and_policy(mj):
     assert mj.parse_images_conf(mj.conf_for_args(mj.DEVICES, a, existing=old))["text_size"] == "per-card"
 
 
+def test_the_two_lines_under_the_cards_are_the_stern_builder_s_keys(mj):
+    """PAD-190: counter= and countdown_word= are the same keys the Stern builder
+    writes, validated by the same shared functions, and neither is written until
+    somebody asks - a JJP install that says nothing draws the counter line and says
+    'starting', exactly as a card does."""
+    import mkmulticard
+    bare = mj.render_images_conf(["rootA", "rootB"], ["a", "b"])
+    p = mj.parse_images_conf(bare)
+    assert "counter" not in bare and "countdown_word" not in bare
+    assert p["counter"] is None and p["countdown_word"] is None
+    assert "counter" in mj.CONF_KEYS and "countdown_word" in mj.CONF_KEYS
+    for word in mkmulticard.COUNTERS:
+        text = mj.render_images_conf(["rootA", "rootB"], ["a", "b"], counter=word)
+        assert "counter=%s" % word in text.splitlines()
+        assert mj.parse_images_conf(text)["counter"] == word
+    for word in ("Launching", ""):
+        text = mj.render_images_conf(["rootA", "rootB"], ["a", "b"],
+                                     countdown_word=word)
+        assert "countdown_word=%s" % word in text.splitlines()
+        assert mj.parse_images_conf(text)["countdown_word"] == word
+    with pytest.raises(mj.Refused):
+        mj.render_images_conf(["rootA", "rootB"], ["a", "b"], counter="hidden")
+    # ...and an install's own answers ride through an inject that names neither
+    old = mj.parse_images_conf(mj.render_images_conf(
+        ["rootA", "rootB"], ["a", "b"], counter="off", countdown_word="Booting"))
+    a = argparse.Namespace(titles=None, subtitles=None, timeout=None, default=None,
+                           volume=None, heading=None, theme=None, color=None,
+                           conf=None, jjp_update=None, debug_log=False)
+    back = mj.parse_images_conf(mj.conf_for_args(mj.DEVICES, a, existing=old))
+    assert back["counter"] == "off" and back["countdown_word"] == "Booting"
+
+
 def test_conf_is_as_narrow_as_it_needs_to_be(mj):
     bare = mj.render_images_conf(["rootA", "rootB"], ["a", "b"])
     keys = [ln.split("=", 1)[0] for ln in bare.splitlines() if ln and not ln.startswith("#")]

@@ -200,7 +200,8 @@ SELECTOR_FILES = collections.OrderedDict([
 JJP_CARD_LOG = "/jjpe/temp/jjpselect.log"
 DEVICES = ("rootA", "rootB")
 DEVICE_RE = re.compile(r"^root([AB])(?::([A-Za-z0-9._-]+))?$")
-CONF_KEYS = ("default", "timeout", "heading", "text_size", "font", "sound_move", "sound_confirm", "volume",
+CONF_KEYS = ("default", "timeout", "heading", "text_size", "counter", "countdown_word", "font",
+             "sound_move", "sound_confirm", "volume",
              "volume_max", "media", "theme", "jjp_update", "log", "learn")
 JJP_UPDATE_POLICIES = ("refuse", "allow")
 #: THE MENU'S VOLUME ON A JJP MACHINE (item 120).  JJP runs its amplifier chain at full
@@ -781,7 +782,8 @@ def check_jjp_update(policy):
 
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None, media=None,
                        sound_move=None, sound_confirm=None, volume=None, media_dir=None, theme=None,
-                       colors=None, heading=None, text_size=None, jjp_update="refuse", debug_log=False,
+                       colors=None, heading=None, text_size=None, counter=None, countdown_word=None,
+                       jjp_update="refuse", debug_log=False,
                        keys=None, learn=False):
     """images.conf for the JJP hook + selector: the same grammar the Stern builder writes (an
     image line as wide as it needs to be, the global keys after) with JJP's device tokens and
@@ -820,6 +822,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     theme = mkc.check_theme(theme)
     colors = mkc.check_colors(colors)
     text_size = mkc.check_text_size(text_size)
+    counter = mkc.check_counter(counter)
     jjp_update = check_jjp_update(jjp_update)
     any_media = any(any(r) for r in rows)
     width = 4 if any(r[3] for r in rows) else (3 if any_media else 0)
@@ -838,6 +841,12 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     # left out when nobody asked: the selector draws at one size either way (PAD-183)
     if text_size is not None:
         out.append("text_size=%s" % text_size)
+    # ...and the same for the two lines under the cards (PAD-190): no key when nobody
+    # asked, and 'countdown_word=' is a CHOICE - no word in front of the title
+    if counter is not None:
+        out.append("counter=%s" % counter)
+    if countdown_word is not None:
+        out.append("countdown_word=%s" % mkc.conf_countdown_word(countdown_word))
     if font:
         out.append("font=%s" % font)
     if sound_move:
@@ -881,7 +890,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
 def parse_images_conf(text):
     """-> {'images': [(device, title, subtitle)], 'media': [(art, anim, music, confirm)], the keys}."""
     out = {"images": [], "media": [], "default": None, "timeout": None, "heading": None,
-           "text_size": None, "font": None,
+           "text_size": None, "counter": None, "countdown_word": None, "font": None,
            "sound_move": None, "sound_confirm": None, "volume": None, "volume_max": None, "media_dir": None,
            "theme": None, "colors": {}, "jjp_update": None, "log": None, "learn": None, "keys": {}}
     for raw in (text or "").splitlines():
@@ -911,7 +920,10 @@ def parse_images_conf(text):
             out["colors"][key[6:]] = val.strip()
         elif key == "text_size":
             out["text_size"] = val.strip().lower() if val.strip().lower() in mkc.TEXT_SIZES else None
-        elif key in ("heading", "font", "sound_move", "sound_confirm", "theme", "jjp_update", "log", "learn"):
+        elif key == "counter":
+            out["counter"] = val.strip().lower() if val.strip().lower() in mkc.COUNTERS else None
+        elif key in ("heading", "countdown_word", "font", "sound_move", "sound_confirm", "theme",
+                     "jjp_update", "log", "learn"):
             out[key] = val
         elif key in KEY_NAMES:
             out["keys"][key] = check_key_pos(key, val.strip())
@@ -932,7 +944,7 @@ def conf_for_args(devices, args, existing=None, media=None, default_titles=None,
             raise Refused("--conf %s lists %r but the install holds %r" % (args.conf, devs, list(devices)))
         return text
     ex = existing or {"images": [], "media": [], "default": None, "timeout": None, "heading": None,
-                      "text_size": None,
+                      "text_size": None, "counter": None, "countdown_word": None,
                       "font": None, "sound_move": None, "sound_confirm": None, "volume": None,
                       "theme": None, "colors": {}, "jjp_update": None}
     n = len(devices)
@@ -971,6 +983,13 @@ def conf_for_args(devices, args, existing=None, media=None, default_titles=None,
     text_size = mkc.check_text_size(getattr(args, "text_size", None))
     if text_size is None:
         text_size = ex.get("text_size")
+    # the two lines under the cards, on the heading's rule (PAD-190)
+    counter = mkc.check_counter(getattr(args, "counter", None))
+    if counter is None:
+        counter = ex.get("counter")
+    countdown_word = getattr(args, "countdown_word", None)
+    if countdown_word is None:
+        countdown_word = ex.get("countdown_word")
     policy = getattr(args, "jjp_update", None) or ex.get("jjp_update") or "refuse"
     keys = dict(ex.get("keys") or {})
     for name in KEY_NAMES:
@@ -983,6 +1002,7 @@ def conf_for_args(devices, args, existing=None, media=None, default_titles=None,
     return render_images_conf(devices, titles, subtitles, default, timeout,
                               PADSELECT_DIR + "/font.ttf" if font else None, rows, move, confirm, volume,
                               theme=theme, colors=colors, heading=heading, text_size=text_size,
+                              counter=counter, countdown_word=countdown_word,
                               jjp_update=policy,
                               debug_log=bool(getattr(args, "debug_log", False)) or learn, keys=keys,
                               learn=learn)
@@ -1361,6 +1381,7 @@ def build_manifest(conf, sources, infos, idents, staged=None, split_size=None, i
         ("timeout", conf["timeout"]), ("default", conf["default"]), ("volume", conf["volume"]),
         ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
         ("heading", conf.get("heading")), ("text_size", conf.get("text_size")),
+        ("counter", conf.get("counter")), ("countdown_word", conf.get("countdown_word")),
         ("theme", conf.get("theme")), ("colors", dict(conf.get("colors") or {})),
         ("jjp_update", conf.get("jjp_update")),
         ("split_size", split_size if split_size is not None else (existing or {}).get("split_size")),
@@ -1706,6 +1727,7 @@ def inspect_iso(iso, media_out=None):
             ("images", images),
             ("timeout", conf["timeout"]), ("default", conf["default"]), ("heading", conf.get("heading")),
             ("text_size", conf.get("text_size")),
+            ("counter", conf.get("counter")), ("countdown_word", conf.get("countdown_word")),
             ("volume", conf["volume"]), ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
             ("theme", conf.get("theme")), ("colors", conf.get("colors") or {}), ("jjp_update", conf.get("jjp_update")),
             ("log", conf.get("log")), ("keys", dict(conf.get("keys") or {})), ("media_files", media_files),
@@ -3437,6 +3459,13 @@ def _add_conf_flags(s):
     s.add_argument("--subtitles", help="';'-separated subtitles, one per image")
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
     s.add_argument("--heading", metavar="TEXT", help="images.conf heading=TEXT (the selector's own '%s' when unset; '' = no line)" % mkc.DEF_HEADING)
+    s.add_argument("--counter", choices=list(mkc.COUNTERS),
+                   help="images.conf counter= - whether the '<  N / M  >' line under the cards is drawn "
+                        "(only a carousel of five cards or more has one); an existing install's is kept when unset")
+    s.add_argument("--countdown-word", metavar="TEXT",
+                   help="images.conf countdown_word=TEXT - the first word of the countdown line (the "
+                        "selector's own '%s' when unset; '' = the title and the seconds alone)"
+                        % mkc.DEF_COUNTDOWN_WORD)
     s.add_argument("--text-size", choices=list(mkc.TEXT_SIZES),
                    help="images.conf text_size= - uniform (one text size for the whole menu, the "
                         "largest every card fits at) or per-card (each card fits its own); an "

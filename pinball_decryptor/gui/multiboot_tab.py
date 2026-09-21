@@ -285,6 +285,20 @@ HEADING_MAX = 199
 TEXT_SIZE_UNIFORM = "uniform"
 TEXT_SIZE_PER_CARD = "per-card"
 
+#: WHETHER THE CARD COUNTER IS DRAWN - images.conf's ``counter=`` (PAD-190), the
+#: two words mkmulticard.py's COUNTERS holds.  The "<  3 / 7  >" line under the
+#: cards, which only a carousel (five cards or more) has at all.
+COUNTER_ON = "on"
+COUNTER_OFF = "off"
+
+#: THE FIRST WORD OF THE COUNTDOWN LINE - images.conf's ``countdown_word=``, and
+#: codeselect.c's DEF_COUNTDOWN_WORD.  This tab's DEFAULT rather than a fallback,
+#: on DEF_HEADING's rule: the field always names the word the card will say, and
+#: reads empty only when somebody meant the countdown to have no word at all.
+DEF_COUNTDOWN_WORD = "starting"
+#: ...and how much of it the selector's field holds (conf.h's CONF_STR - 1).
+COUNTDOWN_WORD_MAX = 199
+
 #: David's card library - never an output (mkmulticard.py refuses the same
 #: prefixes after resolving links; the repo's own images/ is a junction into
 #: it).  Both spellings, because the form holds Windows paths and the tool
@@ -847,6 +861,17 @@ class MultibootForm:
     #: this existed.  Written out either way (``text_size=``), so the card says
     #: what it does rather than leaning on the selector's default.
     same_text_size: bool = True
+    #: THE CARD COUNTER, the "<  3 / 7  >" line under the cards (BEN, Discord,
+    #: 2026-09-21: "have an option to hide the '< x / y >' line").  On - the
+    #: selector's own default - a carousel counts its cards under them; off
+    #: takes the line off the glass.  Four cards or fewer never have one.
+    show_counter: bool = True
+    #: THE FIRST WORD OF THE COUNTDOWN LINE (same report: "have the option to
+    #: change this text in case you want something like 'Launching' or
+    #: 'Booting'").  '' is a real answer - the countdown is then "<title> in
+    #: 9 s" with no word in front of it - so the field always names what the
+    #: card will say, exactly as the heading does.
+    countdown_word: str = DEF_COUNTDOWN_WORD
     default: int = 0
     # (No bypass field: the validator bypass is ALWAYS ON - build_args and
     # update_args pass it for every image.  David, after the TMNT booted
@@ -1012,6 +1037,16 @@ def text_size_args(form):
     absent, keep whatever is there"."""
     return ["--text-size", TEXT_SIZE_UNIFORM if form.same_text_size
             else TEXT_SIZE_PER_CARD]
+
+
+def menu_text_args(form):
+    """``--counter on|off`` and ``--countdown-word TEXT`` - the two lines under
+    the cards the owner can change (PAD-190).  Always passed, on heading_args'
+    rule: the form is the record of what the menu says, and a word cleared here
+    has to reach the card as ``countdown_word=`` rather than as "the flag was
+    absent, keep whatever is there"."""
+    return ["--counter", COUNTER_ON if form.show_counter else COUNTER_OFF,
+            "--countdown-word", (form.countdown_word or "").strip()]
 
 
 def theme_args(form):
@@ -2141,7 +2176,8 @@ def _jjp_build_args(form):
         "--timeout", str(int(form.timeout)),
         "--default", str(int(form.default)),
         "--volume", str(int(form.volume)),
-    ] + heading_args(form) + text_size_args(form) + theme_args(form)
+    ] + heading_args(form) + text_size_args(form) + menu_text_args(form) \
+        + theme_args(form)
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     if form.media_dir:
@@ -2186,7 +2222,8 @@ def build_args(form):
         # media.json (prepare) and into images.conf here, so a text-only card
         # with no prepared media still carries it.
         "--volume", str(int(form.volume)),
-    ] + heading_args(form) + text_size_args(form) + theme_args(form)
+    ] + heading_args(form) + text_size_args(form) + menu_text_args(form) \
+        + theme_args(form)
     # A KEEPING GROUP'S CARD CANNOT BE NAMED BY AN IMAGE: its games all keep
     # cards of their own, so no image index resolves to it.  A random card the
     # countdown cannot land on is useless for an unattended power-up, which is
@@ -2260,7 +2297,7 @@ def inject_args(form, card):
                 "--default", str(int(form.default)),
                 "--volume", str(int(form.volume))]
         args += (heading_args(form) + text_size_args(form)
-                 + theme_args(form))
+                 + menu_text_args(form) + theme_args(form))
         if form.media_dir:
             args += ["--media-dir", wsl(form.media_dir)]
         return args
@@ -2273,7 +2310,7 @@ def inject_args(form, card):
             "--default", str(int(form.default)),
             "--volume", str(int(form.volume))]
     args += (heading_args(form) + text_size_args(form)
-             + theme_args(form))
+             + menu_text_args(form) + theme_args(form))
     if form.machine_volume:
         args.append("--machine-volume")
     if form.media_dir:
@@ -2300,7 +2337,7 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
             "--default", str(int(form.default)),
             "--volume", str(int(form.volume))]
     args += (heading_args(form) + text_size_args(form)
-             + theme_args(form))
+             + menu_text_args(form) + theme_args(form))
     if form.machine_volume:
         args.append("--machine-volume")
     args.append("--bypass-validation")      # always (see build_args)
@@ -2934,6 +2971,12 @@ def write_preview_conf(form):
               # the tick is part of what a frame depends on (PAD-183)
               "text_size=%s" % (TEXT_SIZE_UNIFORM if form.same_text_size
                                 else TEXT_SIZE_PER_CARD),
+              # ...and the two lines under the cards the same way (PAD-190):
+              # a preview that still counted the cards, or still said
+              # 'starting', would not be a picture of this card
+              "counter=%s" % (COUNTER_ON if form.show_counter
+                              else COUNTER_OFF),
+              "countdown_word=%s" % (form.countdown_word or "").strip(),
               "volume=%d" % int(form.volume),
               "font=" + be.conf_font]
     lines += theme_conf_lines(form)
@@ -3681,6 +3724,13 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
         # selector draws as one size for every card, so the tick comes up ON
         # for it exactly as it does for a card that says so (PAD-183).
         same_text_size=(info.get("text_size") != TEXT_SIZE_PER_CARD),
+        # ...and the two lines under the cards.  null on either = the card never
+        # set the key, and what it draws is the selector's own answer - the
+        # counter line and the word 'starting' - so that is what the form shows
+        # (PAD-190).  "" on the word is a card that asked for no word at all.
+        show_counter=(info.get("counter") != COUNTER_OFF),
+        countdown_word=(DEF_COUNTDOWN_WORD if info.get("countdown_word") is None
+                        else str(info["countdown_word"])),
         default=_int_of("default", 0),
         theme=theme, colors=colors,
         media_dir=media_dir if (media_dir and os.path.isfile(
@@ -3697,7 +3747,8 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
 #: MultibootPanel._loaded_diff.)
 MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "move sound", "confirm sound", "volume", "countdown",
-                    "heading", "text size", "default", "bypass", "theme")
+                    "heading", "text size", "card counter", "countdown word",
+                    "default", "bypass", "theme")
 
 #: Of those, the ones the media has to be rendered again for.
 MEDIA_FIELDS = ("art", "animation", "music", "move sound", "confirm sound")
@@ -3750,6 +3801,11 @@ def _menu_fields(before, after):
         changed.add("heading")
     if bool(before.same_text_size) != bool(after.same_text_size):
         changed.add("text size")
+    if bool(before.show_counter) != bool(after.show_counter):
+        changed.add("card counter")
+    if ((before.countdown_word or "").strip()
+            != (after.countdown_word or "").strip()):
+        changed.add("countdown word")
     if theme_args(before) != theme_args(after):
         changed.add("theme")
     return changed
@@ -4348,6 +4404,11 @@ def menu_from_state(menu):
             # ...and a state from before the tick describes a menu the
             # selector drew at one size, which is what the tick means
             "same_text_size": bool(menu.get("same_text_size", True)),
+            # ...and a state from before these two describes the menu the
+            # selector drew with both of its own answers (PAD-190)
+            "show_counter": bool(menu.get("show_counter", True)),
+            "countdown_word": str(menu.get("countdown_word",
+                                           DEF_COUNTDOWN_WORD))[:COUNTDOWN_WORD_MAX],
             "default": max(0, _as_int("default", 0)),
             "theme": theme,
             "colors": clean_colors(menu.get("colors"))}
@@ -5162,6 +5223,26 @@ def image_confirm_note(value, menu_value):
     return "Plays %s, the menu's own." % menu
 
 
+def countdown_example(word, title, timeout):
+    """The countdown line the menu will draw, as the ``Countdown says`` field's
+    example: ``starting The Beatles in 15 s``.
+
+    An empty *word* is the line with no word in front of the game's name, and a
+    countdown of 0 is a menu that waits for START - the word is then never seen
+    at all, and saying so is more use beside the box than an example of a line
+    that will not be drawn (PAD-190)."""
+    word = (word or "").strip()
+    title = (title or "").strip() or "the game"
+    try:
+        secs = int(timeout or 0)
+    except (TypeError, ValueError):
+        secs = 0
+    if secs <= 0:
+        return "no countdown - the menu waits for START"
+    tail = "%s in %d s" % (title, secs)
+    return "%s %s" % (word, tail) if word else tail
+
+
 def _one_line_text(text, width):
     """*text* at most *width* characters, ended with an ellipsis when it had
     to be cut - what a summary line quotes a free-text field as."""
@@ -5176,6 +5257,7 @@ def menu_summary(form):
         v = (v or "").strip() or "none"
         return v if v.lower() in _WORDS else os.path.basename(v)
     head = (form.heading or "").strip()
+    word = (form.countdown_word or "").strip()
     # THE TEXT SIZE ONLY WHEN IT IS NOT THE USUAL ONE: this line is already
     # eight clauses long, and "every card the same" is what every menu does
     # unless somebody turned it off (PAD-183).
@@ -5190,7 +5272,17 @@ def menu_summary(form):
                 int(form.default),
                 (form.theme or "").strip().lower() or DEFAULT_THEME,
                 "no heading" if not head else '"%s"' % _one_line_text(head, 28),
-                "" if form.same_text_size else "  ·  each card its own text size"))
+                ("" if form.same_text_size
+                 else "  ·  each card its own text size")
+                # THE OTHER TWO ONLY WHEN THEY ARE NOT THE USUAL ONES, on the
+                # text size's rule: this line is long enough already, and both
+                # of these are what every menu says unless somebody changed
+                # them (PAD-190)
+                + ("" if form.show_counter else "  ·  no card counter")
+                + ("" if word == DEF_COUNTDOWN_WORD else
+                   "  ·  countdown says %s" % (
+                       "just the game and the seconds" if not word
+                       else '"%s"' % _one_line_text(word, 16)))))
 
 
 # ---------------------------------------------------------------------------
@@ -6367,13 +6459,23 @@ class MenuSettingsDialog(_Modal):
                         text="Same text size on every card (a long name is "
                              "not shrunk on its own)").grid(
             row=2, column=0, columnspan=2, sticky=tk.W, pady=(0, 2))
-        ttk.Label(g1, text="Theme:", width=15).grid(row=3, column=0,
+        # ...and THE CARD COUNTER with it (BEN, Discord, PAD-190: "have an
+        # option to hide the '< x / y >' line").  One line again, with what
+        # it is in the words rather than in a note of its own: the menu only
+        # has the line at five cards or more, and saying so here is cheaper
+        # than a second note.
+        ttk.Checkbutton(g1, variable=panel._counter_var,
+                        text="Count the cards under them (the "
+                             "“<  3 / 7  >” line; five cards or "
+                             "more)").grid(
+            row=3, column=0, columnspan=2, sticky=tk.W, pady=(0, 2))
+        ttk.Label(g1, text="Theme:", width=15).grid(row=4, column=0,
                                                     sticky=tk.W, pady=3)
         names = theme_names() + [CUSTOM_THEME]
         panel._theme_combo = ttk.Combobox(
             g1, textvariable=panel._theme_pick, state="readonly",
             values=[theme_title(n) for n in names], width=18)
-        panel._theme_combo.grid(row=3, column=1, sticky=tk.W, pady=3)
+        panel._theme_combo.grid(row=4, column=1, sticky=tk.W, pady=3)
         panel._theme_combo.bind("<<ComboboxSelected>>",
                                 lambda _e: panel._theme_picked())
         panel._theme_tip = _Tooltip(panel._theme_combo, "", panel._theme_fn)
@@ -6384,7 +6486,7 @@ class MenuSettingsDialog(_Modal):
         # dialog than the desktop.
         roles = theme_roles()
         grid = ttk.Frame(g1)
-        grid.grid(row=4, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
+        grid.grid(row=5, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
         rows = max(1, (len(roles) + 2) // 3)
         for i, role in enumerate(roles):
             r, c = i % rows, (i // rows) * 3
@@ -6409,7 +6511,7 @@ class MenuSettingsDialog(_Modal):
                     "keeps its default colours." % THEMES_JSON)
         ttk.Label(g1, foreground=th["gray"], wraplength=560,
                   justify=tk.LEFT, text=note).grid(
-            row=5, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
+            row=6, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
         g1.columnconfigure(1, weight=1)
         panel._sync_theme_states()
 
@@ -6425,10 +6527,25 @@ class MenuSettingsDialog(_Modal):
                     textvariable=panel._timeout_var).pack(side=tk.LEFT)
         ttk.Label(cd, text="0 = wait for START",
                   foreground=th["gray"]).pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Label(g2, text="Default image:", width=15).grid(
+        # THE COUNTDOWN'S FIRST WORD, under the seconds it counts (BEN,
+        # Discord, PAD-190: "have the option to change this text in case you
+        # want something like 'Launching' or 'Booting'").  The example beside
+        # the box is the line itself, so what the box does needs no note.
+        ttk.Label(g2, text="Countdown says:", width=15).grid(
             row=1, column=0, sticky=tk.W, pady=3)
+        cw = ttk.Frame(g2)
+        cw.grid(row=1, column=1, sticky=tk.W, pady=3)
+        panel._countdown_word_entry = ttk.Entry(
+            cw, textvariable=panel._countdown_word_var, width=16)
+        panel._countdown_word_entry.pack(side=tk.LEFT)
+        panel._countdown_word_lbl = ttk.Label(cw, foreground=th["gray"],
+                                              text="")
+        panel._countdown_word_lbl.pack(side=tk.LEFT, padx=(6, 0))
+        panel._say_countdown_word()
+        ttk.Label(g2, text="Default image:", width=15).grid(
+            row=2, column=0, sticky=tk.W, pady=3)
         di = ttk.Frame(g2)
-        di.grid(row=1, column=1, sticky=tk.W, pady=3)
+        di.grid(row=2, column=1, sticky=tk.W, pady=3)
         panel._default_spin = ttk.Spinbox(
             di, from_=0, to=max(0, images - 1), width=5,
             textvariable=panel._default_var)
@@ -6971,6 +7088,9 @@ class MultibootPanel:
         self._default_spin = None
         self._theme_combo = None
         self._theme_tip = None
+        #: ...and the Countdown says box with the example line beside it
+        self._countdown_word_entry = None
+        self._countdown_word_lbl = None
         self._color_entries = {}
         self._color_swatches = {}
         #: Every line the tools print, in the order they printed it.  The
@@ -7031,6 +7151,10 @@ class MultibootPanel:
         #: Same text size on every card (PAD-183): ON, which is what the
         #: selector does when nothing says otherwise.
         self._same_text_var = tk.BooleanVar(value=True)
+        #: The card counter under the cards, and the countdown's first word
+        #: (PAD-190): both start as what the selector itself draws.
+        self._counter_var = tk.BooleanVar(value=True)
+        self._countdown_word_var = tk.StringVar(value=DEF_COUNTDOWN_WORD)
         self._default_var = tk.StringVar(value="0")
         #: The compact layout (item 95): OFF by default, and it stays off
         #: until the user ticks it - never set from a card that is merely
@@ -7092,7 +7216,8 @@ class MultibootPanel:
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var,
-                    self._heading_var, self._same_text_var, self._default_var):
+                    self._heading_var, self._same_text_var, self._counter_var,
+                    self._countdown_word_var, self._default_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
         # Item 100: the compact tick beside the size strip.  Not a menu field
         # (an inject never changes a card's layout: diff_forms puts it in the
@@ -7281,6 +7406,7 @@ class MultibootPanel:
                     self._ed_roll_norepeat) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._heading_var, self._same_text_var,
+                    self._counter_var, self._countdown_word_var,
                     self._default_var, self._out_var, self._selector_var,
                     self._theme_var) + tuple(self._color_vars.values()):
             var.trace_add("write", lambda *_a: self.schedule_preview())
@@ -9828,6 +9954,8 @@ class MultibootPanel:
             self._timeout_var.set("15")
             self._heading_var.set(DEF_HEADING)
             self._same_text_var.set(True)
+            self._counter_var.set(True)
+            self._countdown_word_var.set(DEF_COUNTDOWN_WORD)
             self._default_var.set("0")
             self._theme_var.set(DEFAULT_THEME)
             self._seed_colors(theme_colors(DEFAULT_THEME) or {})
@@ -10275,6 +10403,8 @@ class MultibootPanel:
                              self._timeout_var.get(),
                              self._heading_var.get(),
                              self._same_text_var.get(),
+                             self._counter_var.get(),
+                             self._countdown_word_var.get(),
                              self._default_var.get(),
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
@@ -10291,7 +10421,8 @@ class MultibootPanel:
         self._forget_menu_dialog()
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, heading, same_text,
-             default, selector, theme, colors) = self._menu_backup
+             counter, word, default, selector, theme,
+             colors) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
             self._confirm_var.set(confirm)
@@ -10300,6 +10431,8 @@ class MultibootPanel:
             self._timeout_var.set(timeout)
             self._heading_var.set(heading)
             self._same_text_var.set(same_text)
+            self._counter_var.set(counter)
+            self._countdown_word_var.set(word)
             self._default_var.set(default)
             self._selector_var.set(selector)
             # the theme and the grid together, or the theme's trace would
@@ -10318,6 +10451,8 @@ class MultibootPanel:
         self._menu_dialog = None
         self._default_spin = None
         self._theme_combo = None
+        self._countdown_word_entry = None
+        self._countdown_word_lbl = None
         self._theme_tip = None
         self._color_entries = {}
         self._color_swatches = {}
@@ -10426,10 +10561,28 @@ class MultibootPanel:
     def _menu_changed(self):
         self._update_edit_status()
         self._update_menu_summary()
+        self._say_countdown_word()
         self._refresh_sound_cells()
         self._push_volume()
         if self._pv_fp is not None:
             self._sound_follow()        # a changed menu sound, heard now
+
+    def _say_countdown_word(self):
+        """The example beside Menu settings' ``Countdown says`` box, rebuilt on
+        every keystroke: the very line the menu will draw, with the highlighted
+        image's own name in it.  A no-op when the dialog is not up."""
+        lbl = getattr(self, "_countdown_word_lbl", None)
+        if lbl is None:
+            return
+        i = _int(self._default_var, 0)
+        row = self._rows[i] if 0 <= i < len(self._rows) else None
+        try:
+            lbl.configure(text=countdown_example(
+                self._countdown_word_var.get(),
+                plain_title(row, i) if row is not None else "",
+                _int(self._timeout_var, 15)))
+        except tk.TclError:
+            pass
 
     def _update_menu_summary(self):
         """What Menu settings… holds, beside its button.  Clipped to the
@@ -10512,6 +10665,11 @@ class MultibootPanel:
             # which is a thing somebody can ask for (PAD-135)
             heading=self._heading_var.get().strip(),
             same_text_size=bool(self._same_text_var.get()),
+            show_counter=bool(self._counter_var.get()),
+            # NOT `or DEF_COUNTDOWN_WORD`: an empty box is a countdown with no
+            # word in front of the game's name, which is a thing somebody can
+            # ask for (PAD-190, the heading's rule)
+            countdown_word=self._countdown_word_var.get().strip(),
             default=_int(self._default_var, 0),
             media_dir=media if (media and os.path.isfile(
                 os.path.join(media, "media.json"))) else "",
@@ -10572,6 +10730,9 @@ class MultibootPanel:
                      "timeout": _int(self._timeout_var, 15),
                      "heading": self._heading_var.get().strip(),
                      "same_text_size": bool(self._same_text_var.get()),
+                     "show_counter": bool(self._counter_var.get()),
+                     "countdown_word":
+                         self._countdown_word_var.get().strip(),
                      "default": _int(self._default_var, 0),
                      "theme": self._theme_var.get().strip().lower()
                      or DEFAULT_THEME,
@@ -10692,6 +10853,11 @@ class MultibootPanel:
             # a document written before the tick existed is a menu the
             # selector drew at one size anyway, so it comes back ticked
             self._same_text_var.set(bool(menu.get("same_text_size", True)))
+            # ...and so is a document from before the counter tick and the
+            # countdown word existed: both come back as the selector's own
+            self._counter_var.set(bool(menu.get("show_counter", True)))
+            self._countdown_word_var.set(menu.get("countdown_word",
+                                                  DEF_COUNTDOWN_WORD))
             self._default_var.set(str(menu["default"]))
             self._theme_var.set(menu["theme"])
             # a built-in comes back as the file spells it today; a custom
@@ -11277,6 +11443,8 @@ class MultibootPanel:
             self._timeout_var.set(str(int(form.timeout)))
             self._heading_var.set(form.heading)
             self._same_text_var.set(bool(form.same_text_size))
+            self._counter_var.set(bool(form.show_counter))
+            self._countdown_word_var.set(form.countdown_word)
             self._default_var.set(str(int(form.default)))
             self._theme_var.set(form.theme)
             self._seed_colors(form.colors if form.theme == CUSTOM_THEME

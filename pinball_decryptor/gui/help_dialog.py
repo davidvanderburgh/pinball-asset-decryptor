@@ -2075,6 +2075,20 @@ HELP_CONTENT = {
          "repaired by Apply / Update: any image still unpatched is patched, "
          "and the card is read back afterwards to say so - no rebuild, and "
          "no separate command."),
+        ("Building one on a Mac",
+         "A Mac can build these cards from v0.228.0, and it needs "
+         "Docker Desktop to do it. The tools this tab runs are Linux tools "
+         "\u2014 they loop-mount the card's partitions and write ext4 \u2014 and "
+         "macOS has neither, so the app runs them inside a Linux container "
+         "instead: it builds that container's image the first time you "
+         "write a card (a minute or two, once) and reuses it after that. "
+         "You are never asked for a password, because the container's own "
+         "user is root. If Docker Desktop is not installed, or is "
+         "installed but not running, the log says which and nothing is "
+         "written; reading a card, the preview and the size strip need "
+         "none of it. This path has not yet been run on a real Mac \u2014 if "
+         "a step fails, the log carries the container's own output, which "
+         "is what to send on."),
         ("Build / flash card…, and what it decides",
          "One green button, and a dialog that says what it is about to "
          "do. With a new path in the box it builds a fresh card: every "

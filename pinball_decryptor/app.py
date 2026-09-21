@@ -489,27 +489,20 @@ class App:
     def run(self):
         self.root.mainloop()
 
-    def _on_close(self):
-        # Stop any preview that's still playing -- an ffplay child is a
-        # separate OS process and keeps playing the sound after the window
-        # is gone unless we kill it first.
-        try:
-            self.window.stop_all_preview_playback()
-        except Exception:
-            pass
-        # Quitting PAD takes the emulator down WITH it: the game window and
-        # the virtual playfield must not survive as orphans behind a vanished
-        # control surface (the guest alone burns ~140% CPU forever).
-        # Blocking, bounded, best-effort.
-        try:
-            self.window.emulate_shutdown()
-        except Exception:
-            pass
-        # The Emulate tab's card path is project state; a quit is the one
-        # save-point that always happens, so a changed path lands in the open
-        # project's anchor even when nothing else was extracted or staged.
-        # The Multi-boot tab's whole form rides the same moment, for the same
-        # reason: it is set up over an evening and nothing else writes it.
+    def _save_session_state(self):
+        """Everything this session would otherwise lose: the open project's
+        anchor, and the global settings.
+
+        THE QUIT IS THE ONLY SAVE-POINT SOME OF THIS HAS.  The Emulate tab's
+        card path is project state, and the Multi-boot tab's WHOLE FORM - the
+        card path, the image list with every field of every row, the menu - is
+        set up over an evening with nothing else writing it.  So this is not
+        "tidy up on the way out"; it is the one moment that form becomes real,
+        and it must not sit behind anything that can be interrupted.
+
+        Best-effort and idempotent: safe to call twice, and a failure here may
+        never stop the close (or the update) that asked for it.
+        """
         try:
             from .core import project_file
             folder = self._project_path
@@ -535,7 +528,44 @@ class App:
                                                multiboot=multi)
         except Exception:
             pass
-        self._save_settings()
+        try:
+            self._save_settings()
+        except Exception:
+            pass
+
+    def _on_close(self):
+        # THE SESSION'S STATE IS WRITTEN FIRST, BEFORE ANYTHING THAT BLOCKS.
+        # It used to be written after the emulator shutdown below, and that
+        # shutdown runs through wsl.exe and is bounded in TENS of seconds - so
+        # on the one quit that is racing another process, the race was lost.
+        # An in-app update is exactly that quit: its installer is already
+        # running with /FORCECLOSEAPPLICATIONS and ends this process as soon as
+        # the copy starts, and on Linux the successor AppImage is already up
+        # and reading settings.json.  Whatever it killed or overtook was an
+        # evening of Multi-boot work, because the quit is the only save-point
+        # that form has (BEN, Discord @ben01434, PAD-188: "I add a random image
+        # as one of my images in a multiboot collection ... I use the built in
+        # updater ... the original single images are still there but the random
+        # one is gone" - the singles were the last clean quit's; everything
+        # from the session that updated was never written).
+        #
+        # Nothing below changes anything this writes, so first costs nothing.
+        self._save_session_state()
+        # Stop any preview that's still playing -- an ffplay child is a
+        # separate OS process and keeps playing the sound after the window
+        # is gone unless we kill it first.
+        try:
+            self.window.stop_all_preview_playback()
+        except Exception:
+            pass
+        # Quitting PAD takes the emulator down WITH it: the game window and
+        # the virtual playfield must not survive as orphans behind a vanished
+        # control surface (the guest alone burns ~140% CPU forever).
+        # Blocking, bounded, best-effort.
+        try:
+            self.window.emulate_shutdown()
+        except Exception:
+            pass
         # Closing for an in-app update also shuts WSL down (PAD-150).  Last,
         # because the emulators stop through wsl.exe above and would boot the
         # VM again, and after the settings, because the installer may close
@@ -4614,6 +4644,10 @@ class App:
                 "AppImage whenever you're happy with the new one.",
                 default="yes"):
             return
+        # BEFORE THE SUCCESSOR IS STARTED, not on the way out behind it: the
+        # new AppImage reads settings.json the moment it opens, and this
+        # process is still taking the emulators down at that point (PAD-188).
+        self._save_session_state()
         ok, err = desktop.run_detached([path])
         if not ok:
             self.window.append_log(
@@ -4700,8 +4734,16 @@ class App:
         immediately — the installer overwrites {app}\\python while we're
         running from it (its /FORCECLOSEAPPLICATIONS makes any straggler
         harmless, but exiting cleanly here saves settings first).
+
+        "SAVES SETTINGS FIRST" IS WRITTEN DOWN HERE NOW RATHER THAN HOPED FOR
+        (PAD-188).  The straggler being harmless is about the app's FILES; the
+        session's state is a different question, and it was answered by a race
+        - _on_close saved after a bounded-but-slow emulator shutdown, and the
+        installer force-closes this process as soon as the copy starts.  The
+        save happens before the installer exists at all.
         """
         dialog.close()
+        self._save_session_state()
         try:
             ok = launch_installer_windows(path)
         except Exception:

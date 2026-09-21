@@ -5448,6 +5448,88 @@ def test_the_size_check_will_not_run_on_a_list_it_cannot_plan(tmp_path):
         root.destroy()
 
 
+def test_a_random_set_is_still_measured(tmp_path):
+    """PAD-189.  A random card is one row with no path of its own, and the
+    size check read one path PER ROW - so the empty one read as an image
+    that is not on this machine, the strip blanked, and nothing ever asked
+    again (BEN: "when a random set is added, this value disappears ...
+    nothing seems to trigger it to re-calc").  Its members are the games,
+    and the games are what the plan reads."""
+    root, panel = _panel(plan=True)
+    calls = _recorder(panel)
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        assert panel._plan_now() is True
+        del calls[:]
+        panel.add_group(paths[1:], title="JUKEBOX")
+        # NOT 'missing': every one of those files is right here.
+        assert panel._size_state()[0] != "missing"
+        assert panel._plan_job is not None       # ...and a run is armed
+        assert panel._plan_now() is True
+        line = " ".join(calls[-1][0][1])
+        assert "--group " in line and line.count("--member ") == 3
+        panel._plan_step("plan", 0, "image: 1 sectors = 2 bytes\n"
+                                    "  fits Stern 16G image size 3: YES "
+                                    "(spare 4)\n")
+        assert panel.size_view()["need"] == "16 GB"
+        assert panel._size_need.cget("text") == "16 GB"
+    finally:
+        root.destroy()
+
+
+def test_editing_a_random_set_asks_the_size_question_again(tmp_path):
+    """The members ARE the input, so dropping one is a different card - and
+    a keeping group is a different card again off the same paths, because
+    it puts no new game on the card at all."""
+    root, panel = _panel(plan=True)
+    try:
+        paths = _images(tmp_path, 4)
+        panel.add_image(paths[0])
+        panel.add_group(paths[1:], title="JUKEBOX")
+        key = panel._plan_key()
+        panel._rows[1].members.pop()
+        assert panel._plan_key() != key, "a member less is a different card"
+        key = panel._plan_key()
+        panel._rows[1].keep = True
+        assert panel._plan_key() != key, "keeping its members adds no games"
+        # ...and a member that is not on this machine is still no plan.
+        panel._rows[1].keep = False
+        panel._rows[1].members[0].path = str(tmp_path / "gone.raw")
+        assert panel._size_state()[0] == "missing"
+        assert panel._plan_now() is False
+    finally:
+        root.destroy()
+
+
+def test_the_size_strip_measures_again_when_it_is_clicked(tmp_path):
+    """BEN asked for a refresh icon; the strip itself is the button.  It is
+    the way out of the two states that carry no next question in them - a
+    check that failed, and an image that has since arrived on this machine.
+    """
+    root, panel = _panel(plan=True)
+    calls = _recorder(panel)
+    try:
+        a, b = _images(tmp_path, 2)
+        panel.add_image(a)
+        panel.add_image(b)
+        assert panel._plan_now() is True
+        panel._plan_step("plan", 0, "image: 1 sectors = 2 bytes\n"
+                                    "  fits Stern 16G image size 3: YES "
+                                    "(spare 4)\n")
+        assert panel._size_need.cget("text") == "16 GB"
+        del calls[:]
+        # The list has NOT moved, so nothing would ask by itself.
+        assert panel._remeasure() is True
+        assert panel.size_view() is None, "the stale number goes on the way in"
+        assert panel._plan_now() is True and len(calls) == 1
+        # ...and the off switch still holds: a photograph starts no tools.
+        panel._auto_plan = False
+        assert panel._remeasure() is False
+    finally:
+        root.destroy()
+
+
 def test_ticking_sound_renders_the_menus_sounds(tmp_path, monkeypatch):
     """Ticking Sound used to tell you to go and find 'Prepare media' in a
     menu and press it, because the preview prepares pictures and music only.

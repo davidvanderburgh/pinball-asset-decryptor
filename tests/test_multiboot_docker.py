@@ -276,6 +276,29 @@ def test_a_container_on_the_old_image_is_replaced(mac, monkeypatch):
     assert not any(c[0] == "run" for c in good.calls)
 
 
+def test_a_step_before_the_container_is_up_gets_a_sentence(mac):
+    """The preview never starts a container - it redraws on every keystroke
+    and must not build an image behind the user - so on a Mac every preview
+    step before the session's first build fails on Docker's own "No such
+    container: pad-multiboot-worker".  Six of those in a row, with nothing
+    else said, is what the reporter's log shows."""
+    raw = ("Error response from daemon: No such container: %s" % D.CONTAINER)
+    note = mt.container_note(raw)
+    assert "not up yet" in note and "Build / flash card" in note
+    assert D.CONTAINER not in note, "the sentence is for a person"
+    # Anything else a step says is not this.
+    assert mt.container_note("partclone.restore failed") == ""
+    assert mt.container_note("") == ""
+
+
+def test_only_a_mac_gets_that_sentence(monkeypatch):
+    """Windows and Linux have no container, so the words would be a lie -
+    and 'No such container' can only come from somewhere else there."""
+    monkeypatch.setattr(mt.sys, "platform", "linux")
+    monkeypatch.setattr(D.sys, "platform", "linux")
+    assert mt.container_note("No such container: x") == ""
+
+
 # ---------------------------------------------------------------- guard rails
 
 def test_no_docker_is_a_sentence_not_a_traceback(mac, monkeypatch):

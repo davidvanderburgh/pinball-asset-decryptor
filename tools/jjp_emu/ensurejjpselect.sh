@@ -66,6 +66,18 @@ LIB=usr/lib/x86_64-linux-gnu
 MNT=""
 
 say() { echo "[selector] $*"; }
+# THE COPY ITSELF, in POSIX spelling only, in ONE place.  This was `install -D
+# -m 644 ... 2>/dev/null`, and -D (make the leading directories) is a GNU
+# extension that BSD install has not got: on a macOS HOST the copy failed, the
+# redirect hid the usage error and the caller's `return 0` hid the status, so
+# no font was ever written and nothing said so.  That burned v0.229.3, and it
+# is the third release lost to a GNU-only coreutils flag in a script macOS
+# runs.  mkdir -p, cp and chmod are POSIX and spell the same thing on both.
+# Errors are NOT swallowed any more - the silence is what made this cost a
+# release rather than a minute.
+put_font() {
+    mkdir -p "$(dirname "$FONT")" && cp "$1" "$FONT" && chmod 644 "$FONT"
+}
 # font.ttf BESIDE AN INSTALLED MENU PROGRAM, when there is not one already
 # (PAD-194).  A build on a host with no DejaVu installs none - `make install`
 # skips it - and then mkjjpmulti.py build refuses and the preview's conf names
@@ -78,7 +90,7 @@ install_font() {
     if [ -f "$DEJAVU" ]; then src=$DEJAVU
     elif [ -s "$SYSROOT/font.ttf" ]; then src=$SYSROOT/font.ttf
     fi
-    [ -n "$src" ] && install -D -m 644 "$src" "$FONT" 2>/dev/null
+    [ -n "$src" ] && put_font "$src"
     return 0
 }
 ok() {
@@ -260,7 +272,7 @@ preview_without_a_build() {
                 [ -s "$d/font.ttf" ] && src=$d/font.ttf
                 [ -n "$src" ] || { [ -f "$DEJAVU" ] && src=$DEJAVU; }
                 [ -n "$src" ] || { [ -s "$SYSROOT/font.ttf" ] && src=$SYSROOT/font.ttf; }
-                [ -n "$src" ] && install -D -m 644 "$src" "$FONT" 2>/dev/null
+                [ -n "$src" ] && put_font "$src"
             fi
             say "the preview draws with the menu program $(basename "$iso") carries: no JJP root is on this PC to build a current one against, and a load restores nothing (a build does, once)"
             echo "[preview] selector: $d/jjpselect"

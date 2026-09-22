@@ -452,25 +452,67 @@ def test_the_menus_font_survives_a_linux_that_has_no_fonts():
     # ...and laid down on the way out even when nothing was rebuilt, so a host
     # that grew a font since the last build does not need a rebuild to use it
     assert "install_font" in text.split("ok() {", 1)[1].split("}", 1)[0]
+    # THE COPY IS POSIX, AND IN ONE PLACE.  `install -D` is GNU-only - BSD
+    # install rejects the option - and it cost v0.229.3: on a macOS host the
+    # copy failed, 2>/dev/null hid it and no font was written.  Both callers
+    # go through put_font now, which is mkdir -p + cp + chmod.
+    code = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+    assert not any("install -D" in ln for ln in code), \
+        "GNU-only: macOS install has no -D"
+    assert 'mkdir -p "$(dirname "$FONT")" && cp "$1" "$FONT" && chmod 644 "$FONT"' in text
+    assert text.count("put_font() {") == 1 and text.count("put_font \"$src\"") == 2
+
+
+def _shell_func(text, name):
+    """One shell function's source, lifted out of the script on disk."""
+    fn = text[text.index(name + "() {"):]
+    return fn[:fn.index("\n}\n") + 3]
+
+
+#: A BSD/macOS `install`, for the PATH the driver below runs with.  There is
+#: no -D there (make the leading directories) and the option is rejected
+#: outright, which is the whole of what went wrong.
+_BSD_INSTALL = """#!/bin/sh
+for a in "$@"; do
+  case "$a" in -*D*) echo "install: illegal option -- D" >&2; exit 64 ;; esac
+done
+exec /usr/bin/install "$@"
+"""
 
 
 @pytest.mark.skipif(not shutil.which("bash"), reason="no bash")
 def test_the_font_is_the_hosts_first_then_the_cards(tmp_path):
     """install_font, run for real: host's DejaVu wins, the card's copy is the
     fallback, an existing font.ttf is never overwritten, and a host with
-    neither is left exactly as it was (the Makefile's own message then)."""
+    neither is left exactly as it was (the Makefile's own message then).
+
+    AND WITH A BSD `install` IN FRONT ON THE PATH, on every platform.  The
+    first cut of this copied the font with `install -D`, which is a GNU
+    extension macOS has not got, under `2>/dev/null` and above a `return 0`:
+    the copy failed, the redirect hid the usage error, the return hid the
+    status, and a Mac silently ended up with no font at all.  ubuntu-latest
+    was green throughout and v0.229.3 was tagged and released before macOS
+    said otherwise.  The stub rejects -D the way BSD does, so a relapse goes
+    red on every runner instead of on the one nobody watches.
+    """
     text = _ensurejjpselect()
-    fn = text[text.index("install_font() {"):]
-    fn = fn[:fn.index("\n}\n") + 3]
-    # EVERYTHING RELATIVE and the driver on disk: on Windows `bash` is as
-    # likely to be WSL's launcher as Git's, and that one cannot see C:\...
-    driver = "#!/bin/bash\nset -u\n" + fn + """
+    bsd = tmp_path / "bin"
+    bsd.mkdir()
+    (bsd / "install").write_text(_BSD_INSTALL, encoding="utf-8", newline="\n")
+    (bsd / "install").chmod(0o755)
+    # EVERYTHING RELATIVE and the driver on disk, PATH included: on Windows
+    # `bash` is as likely to be WSL's launcher as Git's, and that one cannot
+    # see C:\... - nor does this process's environment cross into it, so the
+    # stub has to go on the PATH from a line of the script.
+    driver = ("#!/bin/bash\nset -u\nPATH=$PWD/bin:$PATH\nexport PATH\n"
+              + _shell_func(text, "put_font")
+              + _shell_func(text, "install_font") + """
 FONT=sel/jjpe/gen1/padselect/font.ttf
 DEJAVU=host/DejaVuSans-Bold.ttf
 SYSROOT=sysroot
 install_font
 if [ -f "$FONT" ]; then cat "$FONT"; else echo NONE; fi
-"""
+""")
     (tmp_path / "drive.sh").write_text(driver, encoding="utf-8", newline="\n")
 
     def run(host=None, card=None, already=None):

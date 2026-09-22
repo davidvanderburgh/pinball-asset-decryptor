@@ -234,6 +234,25 @@ preview_without_a_build() {
     fail "there is no menu program to draw the preview with yet: this ISO carries none, none is installed, and no JJP root is on this PC to build one against without restoring an image. Build makes one (it restores the first ISO's root partition, once)."
 }
 
+# THIS LINUX MUST BE X86-64, and that is worth one sentence rather than a
+# page of `ld: skipping incompatible` (PAD-193).  The Makefile's PLATFORM=jjp
+# row hardcodes CC = gcc and links against the card's OWN
+# usr/lib/x86_64-linux-gnu, and the preview then runs the result with no
+# emulator in front of it - so an aarch64 Linux (a Mac's container that took
+# the host's architecture) can neither build the menu program nor start it.
+# Checked BEFORE the sysroot work: the restore below costs minutes, and every
+# one of them would be spent on a link that cannot come out.
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64 | amd64) ;;
+    *)
+        why="this Linux is $ARCH, and the menu program is a native x86-64 program built against the card's own libraries: it can only be built, and only runs, on an x86-64 Linux (on a Mac the tools' container must be started for linux/amd64)"
+        [ "$PREVIEW" = "1" ] || fail "$why"
+        say "$why"
+        preview_without_a_build
+        ;;
+esac
+
 sysroot_ok || sysroot_from_disk
 if ! sysroot_ok && [ "$PREVIEW" = "0" ]; then
     [ -n "$ISO" ] || fail "no install ISO given, and no JJP root is on this PC: the menu program is built against the ISO's own libraries"

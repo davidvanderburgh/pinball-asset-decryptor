@@ -27,6 +27,23 @@ This image is therefore Debian, carrying the JJP row of
 That makes the container the same kind of Linux the Windows path gets from
 WSL Ubuntu, which is the whole idea.
 
+AND IT IS AN X86-64 LINUX, ALWAYS (PAD-193).  A Mac with Apple silicon
+builds and runs an image for its OWN architecture unless it is told
+otherwise, and an arm64 Debian is the one Linux this tab cannot use:
+
+  * the menu program is a NATIVE x86-64 link (the Makefile's ``PLATFORM=jjp``
+    row hardcodes ``CC = gcc``) against the CARD's own
+    ``usr/lib/x86_64-linux-gnu``, so an aarch64 gcc fails the link with a
+    page of ``ld: skipping incompatible ... libc.so.6``;
+  * the preview then RUNS that binary - ``preview_native`` for JJP puts no
+    qemu in front of it - so even a cross-compiler would leave the redraw
+    with an executable this Linux cannot start.
+
+Hence :data:`PLATFORM` on every ``docker build`` and ``docker run`` here.
+On an Apple-silicon Mac that is emulated (Rosetta, or Docker Desktop's
+QEMU), which costs time and buys the only architecture that works; on an
+Intel Mac it is native and changes nothing.
+
 NOT TESTED ON A MAC.  There is no Mac on the machine this was written on, so
 the toolchain reasoning above is read off the Makefile and the package list
 rather than observed, and Docker Desktop's own behaviour (its file sharing
@@ -48,6 +65,17 @@ import sys
 #: had already built one.
 IMAGE = "pad-multiboot:1"
 CONTAINER = "pad-multiboot-worker"
+
+#: The architecture the image and the container are built and run for - see
+#: the module docstring.  Named on the command line rather than left to the
+#: host, because the host is the one thing that must NOT decide it.
+PLATFORM = "linux/amd64"
+
+#: ...as ``docker inspect`` spells the same thing back.  A machine that
+#: built the image before this was added has an arm64 one under the right
+#: tag, which ``docker image inspect`` reports as present and healthy, so
+#: the tag alone cannot be the cache key here: the ARCHITECTURE is.
+ARCH = "amd64"
 
 #: The JJP row of installer/install_prerequisites_linux.sh, plus what the
 #: rig's own scripts shell out to.  ``gcc`` and ``libc6-dev`` are named as a
@@ -226,33 +254,59 @@ def unavailable_reason():
     return ""
 
 
+def _image_field(field):
+    """One ``docker image inspect`` field of :data:`IMAGE`, or "" when the
+    image is not on this machine."""
+    r = _docker(["image", "inspect", "-f", "{{%s}}" % field, IMAGE],
+                timeout=20)
+    if r.returncode != 0:
+        return ""
+    return (r.stdout or "").strip()
+
+
 def ensure_image(log=None):
-    """Build :data:`IMAGE` if this machine has not got it yet."""
-    if _docker(["image", "inspect", IMAGE], timeout=20).returncode == 0:
+    """Build :data:`IMAGE` if this machine has not got a usable one yet.
+
+    "Usable" is architecture AND tag: an image left over from before
+    :data:`PLATFORM` was named is an arm64 Debian under the right tag, and
+    inspecting it succeeds.  Building over it re-points the tag, so nothing
+    is left behind but dangling layers.
+    """
+    if _image_field(".Architecture") == ARCH:
         return
     if log:
-        log("[multi-boot] building the Linux toolbox image (once, a minute "
-            "or two)...")
+        log("[multi-boot] building the Linux toolbox image (once, a few "
+            "minutes)...")
     ctx = os.path.join(cache_root(), "image")
     os.makedirs(ctx, exist_ok=True)
     with open(os.path.join(ctx, "Dockerfile"), "w",
               encoding="utf-8", newline="\n") as fh:
         fh.write(DOCKERFILE)
-    r = _docker(["build", "-t", IMAGE, ctx], timeout=900)
+    # Long: on Apple silicon every apt-get in here runs emulated.
+    r = _docker(["build", "--platform", PLATFORM, "-t", IMAGE, ctx],
+                timeout=1800)
     if r.returncode != 0:
         raise RuntimeError("could not build the Linux toolbox image:\n"
                            + (r.stderr or r.stdout or "").strip()[-2000:])
 
 
-def _running_mounts():
-    """The host directories the running container was started with, or None
-    when there is no container."""
+def _running_state():
+    """``(image id, {host directories})`` of the running container, or None
+    when there is no container.
+
+    The IMAGE ID and not the tag: a container started before this app
+    version is still up, still named right and still mounted right, and is
+    running the wrong-architecture image the tag used to point at.
+    """
     r = _docker(["inspect", "-f",
-                 "{{range .Mounts}}{{.Source}}\n{{end}}", CONTAINER],
-                timeout=20)
+                 "{{.Image}}{{range .Mounts}}\n{{.Source}}{{end}}",
+                 CONTAINER], timeout=20)
     if r.returncode != 0:
         return None
-    return set(x for x in (r.stdout or "").split("\n") if x.strip())
+    lines = (r.stdout or "").split("\n")
+    if not lines or not lines[0].strip():
+        return None
+    return lines[0].strip(), set(x for x in lines[1:] if x.strip())
 
 
 def ensure_container(paths, repo_src, log=None):
@@ -260,7 +314,8 @@ def ensure_container(paths, repo_src, log=None):
 
     Restarted when the mount set changes: a bind mount is fixed at ``docker
     run``, so a second run against an ISO on another volume would otherwise
-    find nothing there.
+    find nothing there.  And when the IMAGE changes, which is how a machine
+    that already had an arm64 one stops using it (PAD-193).
     """
     reason = unavailable_reason()
     if reason:
@@ -268,11 +323,13 @@ def ensure_container(paths, repo_src, log=None):
     ensure_image(log)
     stage_rig(repo_src)
     want = mount_points(paths)
-    have = _running_mounts()
-    if have is not None and set(want) | {cache_root()} == have:
+    have = _running_state()
+    if (have is not None and have[0] == _image_field(".Id")
+            and set(want) | {cache_root()} == have[1]):
         return                                          # already right
     _docker(["rm", "-f", CONTAINER], timeout=30)
     args = ["run", "-d", "--name", CONTAINER, "--privileged",
+            "--platform", PLATFORM,
             "-v", "%s:/tmp" % cache_root()]
     for d in want:
         args += ["-v", "%s:/host%s" % (d, d)]

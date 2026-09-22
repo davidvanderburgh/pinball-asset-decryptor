@@ -181,6 +181,10 @@ def s_replay():
         # steps from printing six paragraphs.
         if line.endswith(": exit 1"):
             panel._say_once(note_for(FAILED_STEP_TEXT))
+    # _say_once queues for the Tk loop (it is called from the worker
+    # thread), and the panel only drains while a run is up.  There is no run
+    # here, so drain it by hand - the same call the panel's own timer makes.
+    panel._drain()
     log("note said: %r" % (note_for(FAILED_STEP_TEXT),))
 
 

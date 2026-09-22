@@ -1026,6 +1026,21 @@ grep -q 'menu text: counter off, countdown word ""' "$T/noword.log" || {
     grep "menu text" "$T/noword.log"; exit 1; }
 band "$T/menu_noword.ppm" 300 684 1060 722 FFC42D
 nband "$T/menu_noword.ppm" 560 604 800 630 7D8794
+# THE LOADING FRAME SAYS THE OWNER'S WORD TOO (BEN, PAD-195: "Loading
+# Beatlemania in 30 s" became "LOADING Beatlemania..." once it was picked).
+# A word of their own opens that frame; our "starting" and no word at all
+# keep the capitals, byte for byte what a card that never changed it drew.
+{ cat "$T/nine.conf"; echo "countdown_word=starting"; } > "$T/stockword.conf"
+rm -f "$T/choice" "$T/last"
+run "$T/menu_stockword.ppm" "$T/stockword.conf" --no-invert --media "$T/media" --anim-frame 1
+rm -f "$T/choice" "$T/last"
+run "$T/menu_plain.ppm" "$T/nine.conf" --no-invert --media "$T/media" --anim-frame 1
+cmp -s "$T/menu_plain.ppm.loading.ppm" "$T/menu_stockword.ppm.loading.ppm" || {
+    echo "headless: FAIL countdown_word=starting changed the LOADING frame"; exit 1; }
+cmp -s "$T/menu_plain.ppm.loading.ppm" "$T/menu_noword.ppm.loading.ppm" || {
+    echo "headless: FAIL 'countdown_word=' changed the LOADING frame"; exit 1; }
+cmp -s "$T/menu_plain.ppm.loading.ppm" "$T/menu_word.ppm.loading.ppm" && {
+    echo "headless: FAIL countdown_word=Launching is not on the LOADING frame"; exit 1; }
 # A COUNTDOWN WORD LONGER THAN THE 'press START to boot' LINE is what the
 # size is measured from now, so it is shrunk and cut to the glass like any
 # other text that is not ours - never run off both edges of it.

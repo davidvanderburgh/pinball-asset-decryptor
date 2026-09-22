@@ -48,6 +48,9 @@
  *                            <title> in 9 s"); default "starting", free UTF-8
  *                            text, and an empty one is a CHOICE - the line is
  *                            then "<title> in 9 s" with no word at all
+ *                            (PAD-195: a word of the owner's own also opens
+ *                            the LOADING frame - "Loading <title>..." - where
+ *                            "starting" and no word keep "LOADING <title>...")
  *   text_size=<word>         how big a card's title and subtitle are drawn:
  *                            'uniform' (the default) = ONE size for the whole
  *                            menu, the largest every card's text fits at, so a

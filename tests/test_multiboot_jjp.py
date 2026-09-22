@@ -396,6 +396,13 @@ def test_ensurejjpselect_prints_both_lines():
     # a load or a redraw restores nothing, and a writing run restores the root
     # partition alone, into a file renamed only when whole (2026-09-15)
     assert 'if [ "${1:-}" = "--preview" ]' in text and "jjpselect_sysroot" in text
+    # An aarch64 Linux gets a sentence, not a page of "ld: skipping
+    # incompatible" after minutes of restoring - and the check comes BEFORE
+    # the restore, which is the expensive half (PAD-193).
+    assert "uname -m" in text and "x86_64 | amd64" in text
+    arch_at = text.index("ARCH=$(uname -m)")
+    assert arch_at < text.index("sysroot_ok || sysroot_from_disk"), \
+        "the architecture check must come before the root restore"
     calls = [ln for ln in text.splitlines() if "mount.sh" in ln and not ln.lstrip().startswith("#")]
     assert calls and all("--root-only" in ln for ln in calls), calls
     with open(os.path.join(os.path.dirname(here), "mount.sh"), encoding="utf-8") as f:

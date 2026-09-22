@@ -2560,6 +2560,30 @@ def sudo_password_note(text):
             "terminal where `sudo -v` has already been run.")
 
 
+#: What Docker prints when a step is run and no container of ours is up.
+_NO_CONTAINER = "No such container"
+
+
+def container_note(text):
+    """One sentence for a macOS step that ran before the container was up,
+    or "" when that is not what happened.
+
+    A run that WRITES starts the container itself; the preview deliberately
+    does not (it redraws on every keystroke and must not build an image
+    behind the user), so on a Mac every preview step before the session's
+    first build dies on Docker's own "No such container:
+    pad-multiboot-worker".  That line reads like a broken app rather than a
+    step waiting for one - :meth:`MultibootPanel._run_commands` always meant
+    it to "say so, once", and this is what it says.
+    """
+    if not _mac.enabled() or _NO_CONTAINER not in (text or ""):
+        return ""
+    return ("The Linux container this Mac runs the tools in is not up yet. "
+            "Build / flash card... starts it (and builds its image the "
+            "first time); the preview and the size check never start one "
+            "behind you, so they stay blank until it is up.")
+
+
 def root_command(args, cwd=None, exe="python3"):
     """The argv of a tool step that must run as root (build, update: they
     loop-mount the card's partitions - item 93) - as a CALLABLE the worker
@@ -14393,6 +14417,7 @@ class MultibootPanel:
                 self._append("%s: exit %d" % (label, rc))
                 if rc != 0:
                     self._say_once(sudo_password_note(texts[label]))
+                    self._say_once(container_note(texts[label]))
                 if on_step is not None:
                     self._ui(lambda l=label, r=rc, t=texts[label]:
                              on_step(l, r, t))

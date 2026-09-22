@@ -171,6 +171,134 @@ def test_the_image_tag_is_versioned():
     assert ":" in D.IMAGE and D.IMAGE.rsplit(":", 1)[1]
 
 
+# ------------------------------------------------------------- architecture
+
+class _Fake:
+    """A stand-in for :func:`multiboot_docker._docker` that records every
+    call and answers ``image inspect`` / ``inspect`` from *state*."""
+
+    def __init__(self, arch="", image_id="sha256:new", container=None):
+        self.arch = arch                # "" = no image on this machine
+        self.image_id = image_id
+        self.container = container      # (image id, {mounts}) or None
+        self.calls = []
+
+    def __call__(self, args, timeout=30):
+        args = list(args)
+        self.calls.append(args)
+        out, rc = "", 0
+        if args[:2] == ["image", "inspect"]:
+            if not self.arch:
+                rc = 1
+            elif "{{.Architecture}}" in args:
+                out = self.arch
+            elif "{{.Id}}" in args:
+                out = self.image_id
+        elif args[0] == "inspect":
+            if self.container is None:
+                rc = 1
+            else:
+                out = "\n".join([self.container[0]] + sorted(self.container[1]))
+        elif args[0] == "build":
+            self.arch = D.ARCH
+
+        class R:
+            returncode = rc
+            stdout = out
+            stderr = ""
+        return R()
+
+
+def test_the_image_is_built_for_x86_64_on_every_mac(mac, monkeypatch):
+    """THE BUG (PAD-193).  An Apple-silicon Mac builds an arm64 Debian
+    unless it is told otherwise, and jjpselect is a native x86-64 link
+    against the card's own usr/lib/x86_64-linux-gnu: the reporter's log is
+    a page of "ld: skipping incompatible ... libc.so.6" and then "make:
+    *** [jjpselect] Error 1".  The preview RUNS that binary afterwards, so
+    a cross-compiler would not have been enough either."""
+    fake = _Fake(arch="")               # nothing built yet
+    monkeypatch.setattr(D, "_docker", fake)
+    D.ensure_image()
+    build = [c for c in fake.calls if c and c[0] == "build"]
+    assert build, fake.calls
+    assert "--platform" in build[0] and D.PLATFORM in build[0]
+    assert D.PLATFORM == "linux/amd64"
+
+
+def test_an_arm64_image_left_over_is_rebuilt_not_reused(mac, monkeypatch):
+    """The tag alone cannot be the cache key here: a machine that wrote a
+    card before this fix has an arm64 image under the right name, and
+    `docker image inspect` reports it as present and healthy."""
+    fake = _Fake(arch="arm64")
+    monkeypatch.setattr(D, "_docker", fake)
+    D.ensure_image()
+    assert any(c[0] == "build" for c in fake.calls), \
+        "an arm64 image was accepted as the toolbox"
+
+    fake = _Fake(arch=D.ARCH)           # ...and the right one is kept
+    monkeypatch.setattr(D, "_docker", fake)
+    D.ensure_image()
+    assert not any(c[0] == "build" for c in fake.calls)
+
+
+def test_the_container_is_run_for_x86_64_too(mac, monkeypatch):
+    """--platform on the build settles the image; the container that runs
+    it needs it as well, or docker picks the host's again."""
+    fake = _Fake(arch=D.ARCH)
+    monkeypatch.setattr(D, "_docker", fake)
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    monkeypatch.setattr(D, "stage_rig", lambda src: D.staged_repo())
+    D.ensure_container([ISO0], "/repo")
+    run = [c for c in fake.calls if c and c[0] == "run"]
+    assert run, fake.calls
+    assert "--platform" in run[0] and D.PLATFORM in run[0]
+
+
+def test_a_container_on_the_old_image_is_replaced(mac, monkeypatch):
+    """Same mounts, same name, wrong architecture: the mount set alone said
+    "already right" and left the arm64 container up."""
+    mounts = {D.cache_root(), "/Volumes/Mac SSD/Sonichedge"}
+    stale = _Fake(arch=D.ARCH, image_id="sha256:new",
+                  container=("sha256:old-arm64", mounts))
+    monkeypatch.setattr(D, "_docker", stale)
+    monkeypatch.setattr(D, "unavailable_reason", lambda: "")
+    monkeypatch.setattr(D, "stage_rig", lambda src: D.staged_repo())
+    D.ensure_container([ISO0], "/repo")
+    assert any(c[0] == "run" for c in stale.calls), \
+        "the container from the old image was kept"
+
+    # ...and one already on the current image, with the same mounts, is not
+    # torn down and rebuilt on every single run.
+    good = _Fake(arch=D.ARCH, image_id="sha256:new",
+                 container=("sha256:new", mounts))
+    monkeypatch.setattr(D, "_docker", good)
+    D.ensure_container([ISO0], "/repo")
+    assert not any(c[0] == "run" for c in good.calls)
+
+
+def test_a_step_before_the_container_is_up_gets_a_sentence(mac):
+    """The preview never starts a container - it redraws on every keystroke
+    and must not build an image behind the user - so on a Mac every preview
+    step before the session's first build fails on Docker's own "No such
+    container: pad-multiboot-worker".  Six of those in a row, with nothing
+    else said, is what the reporter's log shows."""
+    raw = ("Error response from daemon: No such container: %s" % D.CONTAINER)
+    note = mt.container_note(raw)
+    assert "not up yet" in note and "Build / flash card" in note
+    assert D.CONTAINER not in note, "the sentence is for a person"
+    # Anything else a step says is not this.
+    assert mt.container_note("partclone.restore failed") == ""
+    assert mt.container_note("") == ""
+
+
+def test_only_a_mac_gets_that_sentence(monkeypatch):
+    """Windows and Linux have no container, so the words would be a lie -
+    and 'No such container' can only come from somewhere else there."""
+    monkeypatch.setattr(mt.sys, "platform", "linux")
+    monkeypatch.setattr(D.sys, "platform", "linux")
+    assert mt.container_note("No such container: x") == ""
+
+
 # ---------------------------------------------------------------- guard rails
 
 def test_no_docker_is_a_sentence_not_a_traceback(mac, monkeypatch):

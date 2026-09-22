@@ -1376,10 +1376,24 @@ static const struct art_image *loading_picture(const struct conf *c,
     return card_picture(m, card);
 }
 
+/* THE LOADING FRAME'S FIRST WORD: the owner's countdown_word= when they
+ * wrote one of their own, so the countdown and the frame after it read alike
+ * (BEN, Discord, PAD-195: "Loading Beatlemania in 30 s" became "LOADING
+ * Beatlemania..." the moment the game was picked).  Our own "starting" and
+ * no word at all keep the capitals this frame always had - a card that never
+ * changed the word draws exactly what it did. */
+static const char *loading_word(const struct conf *c)
+{
+    if (c->countdown_word_set && c->countdown_word[0]
+        && strcmp(c->countdown_word, DEF_COUNTDOWN_WORD) != 0)
+        return c->countdown_word;
+    return "LOADING";
+}
+
 /* the LOADING frame: the chosen card's picture (when it has one) above the
  * line; this frame stays on the LCD until the game's first frame */
 static void draw_loading(struct gfx *g, struct gfx_font *f, const struct theme *th,
-                         const char *title, const char *subtitle,
+                         const char *word, const char *title, const char *subtitle,
                          const struct art_image *pic)
 {
     float s = (float)g->h / 768.0f;
@@ -1391,7 +1405,7 @@ static void draw_loading(struct gfx *g, struct gfx_font *f, const struct theme *
         gfx_blit(g, (g->w - pic->w) / 2, (int)(200 * s), pic->rgba, pic->w, pic->h);
         y = (int)(200 * s) + pic->h + (int)(90 * s);
     }
-    snprintf(buf, sizeof buf, "LOADING %s...", title);
+    snprintf(buf, sizeof buf, "%s %s...", word, title);
     px = gfx_fit_px(f, buf, wmax, 64 * s, 30 * s);
     gfx_ellipsize(f, px, buf, wmax, cut, sizeof cut);
     gfx_text_center(g, f, px, g->w / 2, y, cut, th->rgb[TH_TITLE_HL]);
@@ -1559,7 +1573,8 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
         if (o->roll_state && *o->roll_state
             && conf_write_last(o->roll_state, boot, hl, &bags) < 0)
             sel_log("cannot write %s: %s", o->roll_state, strerror(errno));
-        draw_loading(g, font, &L->th, c->img[boot].title, c->img[boot].subtitle,
+        draw_loading(g, font, &L->th, loading_word(c),
+                     c->img[boot].title, c->img[boot].subtitle,
                      loading_picture(c, &media, hl, boot));
         if (gfx_write_ppm(g, o->loading, invert) < 0)
             sel_log("cannot write %s: %s", o->loading, strerror(errno));
@@ -2204,7 +2219,8 @@ int main(int argc, char **argv)
         /* the LOADING frame names the MEMBER under the GROUP's picture: the
          * card said "a different song set every power-up", so this is the one
          * moment the player is told which set they got */
-        draw_loading(&g, font, &L.th, c.img[boot].title, c.img[boot].subtitle,
+        draw_loading(&g, font, &L.th, loading_word(&c),
+                     c.img[boot].title, c.img[boot].subtitle,
                      loading_picture(&c, &media, chosen, boot));
         if (headless) {
             char lp[400];

@@ -35,7 +35,8 @@
 # layout, which mkjjpmulti.py accepts as a --selector-dir:
 #
 #     <dir>/jjpe/gen1/padselect/jjpselect     the menu program
-#     <dir>/jjpe/gen1/padselect/font.ttf      DejaVuSans-Bold (the card's own)
+#     <dir>/jjpe/gen1/padselect/font.ttf      DejaVuSans-Bold: this host's, or
+#                                             the card's own when it has none
 #     <dir>/jjpe/gen1/scripts/padselect.sh    the hook rungame.sh runs
 #
 # Prints, on success, the two lines the Multi-boot tab reads:
@@ -58,11 +59,30 @@ BIN=$SEL/jjpe/gen1/padselect/jjpselect
 HOOK=$SEL/jjpe/gen1/scripts/padselect.sh
 FONT=$SEL/jjpe/gen1/padselect/font.ttf
 DEJAVU=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+#: the same file INSIDE a JJP root (relative, for in_root) - the font the menu
+#: falls back to on the machine, and the one taken when this host has none
+CARD_FONT=usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
 LIB=usr/lib/x86_64-linux-gnu
 MNT=""
 
 say() { echo "[selector] $*"; }
+# font.ttf BESIDE AN INSTALLED MENU PROGRAM, when there is not one already
+# (PAD-194).  A build on a host with no DejaVu installs none - `make install`
+# skips it - and then mkjjpmulti.py build refuses and the preview's conf names
+# a file that is not there.  Every later run passes through here, so the font
+# arrives the moment either source turns up, without a rebuild nobody asked
+# for: the host's, else the copy seed_sysroot took out of the card's own root.
+install_font() {
+    local src=""
+    [ -f "$FONT" ] && return 0
+    if [ -f "$DEJAVU" ]; then src=$DEJAVU
+    elif [ -s "$SYSROOT/font.ttf" ]; then src=$SYSROOT/font.ttf
+    fi
+    [ -n "$src" ] && install -D -m 644 "$src" "$FONT" 2>/dev/null
+    return 0
+}
 ok() {
+    install_font
     echo "[selector] menu program: $SEL"
     echo "[preview] selector: $BIN"
     exit 0
@@ -147,6 +167,14 @@ seed_sysroot() {
         cp "$f" "$dst" || { rm -rf "$tmp"; return 1; }
         queue="$queue $(readelf -d "$f" 2>/dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')"
     done
+    # AND THE CARD'S OWN DejaVuSans-Bold, while this root is open (PAD-194).
+    # `make install` copies font.ttf from THIS HOST and silently installs none
+    # when the host has not got the font; mkjjpmulti.py build then refuses,
+    # and the preview's conf names a font.ttf that is not there.  A Debian
+    # slim container carries no fonts at all, which is how a Mac met it - but
+    # any Linux without fonts-dejavu-core is the same wall, and the font the
+    # menu is going to render with on the machine is right here.
+    f=$(in_root "$root" "$CARD_FONT") && cp "$f" "$tmp/font.ttf"
     echo "$from" > "$tmp/.complete"
     rm -rf "$SYSROOT" && mv "$tmp" "$SYSROOT" || return 1
     say "sysroot: $(find "$SYSROOT/$LIB" -type f -name '*.so*' | wc -l) libraries copied once from $from into $SYSROOT"
@@ -183,9 +211,17 @@ sysroot_from_disk() {
 }
 
 build() {
+    local dejavu=$DEJAVU
     mkdir -p "$BUILD" "$SEL" || return 1
+    # WHICH DejaVuSans-Bold `make install` LAYS DOWN AS font.ttf: this host's
+    # when it has one, else the copy seed_sysroot took out of the card's own
+    # root.  The Makefile's DEJAVU is a ?= default, so naming it here is the
+    # whole override, and a host with neither gets exactly today's line
+    # ("no <path>: the card's DejaVuSans-Bold.ttf will be used").
+    [ -f "$dejavu" ] || [ ! -s "$SYSROOT/font.ttf" ] || dejavu=$SYSROOT/font.ttf
     if ! make -C "$SRC" PLATFORM=jjp BUILD="$BUILD" JJPROOT="$SYSROOT" all >"$BUILD/make.log" 2>&1 \
-        || ! make -C "$SRC" PLATFORM=jjp BUILD="$BUILD" JJPROOT="$SYSROOT" DESTDIR="$SEL" install >>"$BUILD/make.log" 2>&1; then
+        || ! make -C "$SRC" PLATFORM=jjp BUILD="$BUILD" JJPROOT="$SYSROOT" DESTDIR="$SEL" \
+                DEJAVU="$dejavu" install >>"$BUILD/make.log" 2>&1; then
         tail -n 12 "$BUILD/make.log"
         return 1
     fi
@@ -215,11 +251,16 @@ preview_without_a_build() {
             fi
         fi
         if [ -x "$d/jjpselect" ]; then
-            # the conf the tab writes names the installed font
+            # the conf the tab writes names the installed font: the ISO's own
+            # first, then this host's, then the card's (PAD-194 - a Debian
+            # slim container has no fonts, and a preview with none draws
+            # nothing at all)
             if [ ! -f "$FONT" ]; then
-                src=$DEJAVU
+                src=""
                 [ -s "$d/font.ttf" ] && src=$d/font.ttf
-                install -D -m 644 "$src" "$FONT" 2>/dev/null
+                [ -n "$src" ] || { [ -f "$DEJAVU" ] && src=$DEJAVU; }
+                [ -n "$src" ] || { [ -s "$SYSROOT/font.ttf" ] && src=$SYSROOT/font.ttf; }
+                [ -n "$src" ] && install -D -m 644 "$src" "$FONT" 2>/dev/null
             fi
             say "the preview draws with the menu program $(basename "$iso") carries: no JJP root is on this PC to build a current one against, and a load restores nothing (a build does, once)"
             echo "[preview] selector: $d/jjpselect"

@@ -9,6 +9,8 @@ seen to leave the old argv alone.
 """
 import json
 import os
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -410,3 +412,86 @@ def test_ensurejjpselect_prints_both_lines():
     assert 'if [ "${1:-}" = "--root-only" ]' in mount
     assert '-o "$dest.part"' in mount and 'mv -f "$dest.part" "$dest"' in mount
 
+
+
+# ------------------------------------------------------------- the menu's font
+def _ensurejjpselect():
+    here = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "tools", "jjp_emu", "ensurejjpselect.sh")
+    if not os.path.isfile(here):
+        pytest.skip("ensurejjpselect.sh not present")
+    with open(here, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_the_menus_font_survives_a_linux_that_has_no_fonts():
+    """PAD-194: a Mac built the menu program and then could not build a card.
+
+    ``make install PLATFORM=jjp`` copies the HOST's DejaVuSans-Bold.ttf beside
+    jjpselect and skips it without a word when the host has none; a Debian
+    slim container (which is what a Mac's multi-boot Linux is) carries no
+    fonts at all.  So the build refused - "--selector-dir /var/tmp/jjpselect
+    has no font.ttf and /usr/share/fonts/... is not on this host" - after
+    seven minutes of restoring a root, and the preview's conf named a
+    font.ttf that was never written either.
+
+    The card's own root HAS that font, and this script already mounts one to
+    copy libraries out of, so it takes the font in the same pass and names it
+    to make.
+    """
+    text = _ensurejjpselect()
+    # taken while the root is open, beside the libraries
+    assert "CARD_FONT=usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" in text
+    assert 'f=$(in_root "$root" "$CARD_FONT") && cp "$f" "$tmp/font.ttf"' in text
+    # ...and named to `make install`, whose DEJAVU is a ?= default (the
+    # invocation wraps, so it is the joined logical line that is read)
+    joined = text.replace("\\" + "\n", " ")
+    install_line = [ln for ln in joined.splitlines()
+                    if "make -C" in ln and "DESTDIR=" in ln and " install" in ln]
+    assert install_line and all("DEJAVU=" in ln for ln in install_line), install_line
+    # ...and laid down on the way out even when nothing was rebuilt, so a host
+    # that grew a font since the last build does not need a rebuild to use it
+    assert "install_font" in text.split("ok() {", 1)[1].split("}", 1)[0]
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="no bash")
+def test_the_font_is_the_hosts_first_then_the_cards(tmp_path):
+    """install_font, run for real: host's DejaVu wins, the card's copy is the
+    fallback, an existing font.ttf is never overwritten, and a host with
+    neither is left exactly as it was (the Makefile's own message then)."""
+    text = _ensurejjpselect()
+    fn = text[text.index("install_font() {"):]
+    fn = fn[:fn.index("\n}\n") + 3]
+    # EVERYTHING RELATIVE and the driver on disk: on Windows `bash` is as
+    # likely to be WSL's launcher as Git's, and that one cannot see C:\...
+    driver = "#!/bin/bash\nset -u\n" + fn + """
+FONT=sel/jjpe/gen1/padselect/font.ttf
+DEJAVU=host/DejaVuSans-Bold.ttf
+SYSROOT=sysroot
+install_font
+if [ -f "$FONT" ]; then cat "$FONT"; else echo NONE; fi
+"""
+    (tmp_path / "drive.sh").write_text(driver, encoding="utf-8", newline="\n")
+
+    def run(host=None, card=None, already=None):
+        for d in ("sel", "host", "sysroot"):
+            shutil.rmtree(str(tmp_path / d), ignore_errors=True)
+            (tmp_path / d).mkdir()
+        if host is not None:
+            (tmp_path / "host" / "DejaVuSans-Bold.ttf").write_text(host)
+        if card is not None:
+            (tmp_path / "sysroot" / "font.ttf").write_text(card)
+        if already is not None:
+            d = tmp_path / "sel" / "jjpe" / "gen1" / "padselect"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "font.ttf").write_text(already)
+        r = subprocess.run([shutil.which("bash"), "drive.sh"], cwd=str(tmp_path),
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        return r.stdout.strip()
+
+    assert run(host="HOST", card="CARD") == "HOST"
+    assert run(card="CARD") == "CARD"          # the container's case
+    assert run() == "NONE"                     # neither: today's behaviour
+    assert run(host="HOST", already="MINE") == "MINE"
+    assert run(card="") == "NONE"              # a torn copy is not a font

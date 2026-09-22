@@ -63,7 +63,7 @@ import sys
 #: image inspect`` succeeds on a stale image built from an older Dockerfile,
 #: so a new package list that kept the old tag would never reach anybody who
 #: had already built one.
-IMAGE = "pad-multiboot:1"
+IMAGE = "pad-multiboot:2"
 CONTAINER = "pad-multiboot-worker"
 
 #: The architecture the image and the container are built and run for - see
@@ -82,11 +82,23 @@ ARCH = "amd64"
 #: pair on purpose - that file's comment says why ("gcc pulls libc6-dev only
 #: as a *recommended* package") and the menu program's link needs the crt
 #: files and libc_nonshared.a that come with it.
+#:
+#: ``fonts-dejavu-core`` IS A BUILD TOOL HERE (PAD-194).  A Debian slim image
+#: carries no fonts at all, and two separate things then have none:
+#: ``make install PLATFORM=jjp`` copies the host's DejaVuSans-Bold.ttf beside
+#: the menu program as ``font.ttf`` and simply skips it when the host has
+#: none, and ``mkjjpmulti.py build`` then refuses outright ("--selector-dir
+#: ... has no font.ttf and /usr/share/fonts/... is not on this host: the
+#: selector needs a font").  The preview wants the same file - the conf it
+#: writes names ``/var/tmp/jjpselect/jjpe/gen1/padselect/font.ttf`` - so
+#: without this package a Mac gets no menu picture either.  --no-install-
+#: recommends is what keeps fontconfig and the rest of a desktop out; this
+#: is the ~1.5 MB of .ttf on its own.
 DOCKERFILE = """\
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \\
         partclone e2fsprogs xorriso pigz gzip coreutils util-linux \\
-        python3 bash make gcc libc6-dev \\
+        python3 bash make gcc libc6-dev fonts-dejavu-core \\
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp
 CMD ["bash"]

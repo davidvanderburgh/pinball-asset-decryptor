@@ -12,6 +12,7 @@ the image - the parts that can be checked without a Mac.  The parts that
 cannot (Docker Desktop's file sharing, loop devices in its VM, the menu
 program's compile) are called out in multiboot_docker's own docstring.
 """
+import hashlib
 import os
 import sys
 
@@ -162,6 +163,37 @@ def test_the_image_carries_what_mkjjpmulti_asks_need_tools_for():
     for pkg in ("partclone", "e2fsprogs", "xorriso", "util-linux",
                 "coreutils", "gzip", "python3"):
         assert pkg in D.DOCKERFILE, pkg
+
+
+def test_the_image_carries_a_font_because_a_slim_debian_has_none():
+    """PAD-194.  ``make install PLATFORM=jjp`` lays DejaVuSans-Bold.ttf down
+    beside the menu program as font.ttf and SKIPS IT SILENTLY when the host
+    has not got the font; ``mkjjpmulti.py build`` then refuses outright, and
+    the preview's conf names a font.ttf nobody wrote.  debian:bookworm-slim
+    ships no fonts at all, so this package is as much a build tool here as
+    gcc is - and --no-install-recommends is what keeps the rest of a desktop
+    out of the image."""
+    assert "fonts-dejavu-core" in D.DOCKERFILE
+    assert "--no-install-recommends" in D.DOCKERFILE
+
+
+#: (tag, sha256 of DOCKERFILE) as they were last agreed.  A machine that has
+#: already built an image is offered the tag, not the file: ``ensure_image``
+#: asks ``docker image inspect`` about IMAGE and returns happily, so a changed
+#: package list under an unchanged tag reaches nobody who needs it - which is
+#: the mistake PAD-194's fix would have made.  Change one, change both.
+_IMAGE_AS_AGREED = (
+    "pad-multiboot:2",
+    "09b3382bc7d740a33fee602230cdde859825b824afa1a60e33058a471f1bac3f",
+)
+
+
+def test_a_new_package_list_reaches_a_machine_that_already_built_one():
+    """The tag is the cache key, so a changed Dockerfile has to change it."""
+    digest = hashlib.sha256(D.DOCKERFILE.encode("utf-8")).hexdigest()
+    assert (D.IMAGE, digest) == _IMAGE_AS_AGREED, (
+        "DOCKERFILE changed: bump IMAGE's tag and put both here (%r, %r)"
+        % (D.IMAGE, digest))
 
 
 def test_the_image_tag_is_versioned():

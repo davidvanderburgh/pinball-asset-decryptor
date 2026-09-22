@@ -1996,6 +1996,8 @@ HELP_CONTENT = {
          "own name in it, so you can read what the machine will say before "
          "you write the card. EMPTYING IT IS A REAL ANSWER too: the "
          "countdown then names the game and the seconds and nothing else. "
+         "A word of your own also replaces LOADING on the screen the "
+         "machine shows while the chosen image starts. "
          "Neither is written onto a card that never asked for it."),
         ("Hearing a sound before the card is written",
          "Every sound row - the menu's move and confirm sounds in Menu "

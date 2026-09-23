@@ -36,7 +36,11 @@ def _require_engine():
             "(pip install unicorn capstone numpy) and try again.")
 
 
-_CARD_CLASS = re.compile(r"\b(8|16|32)G\b")
+#: a card class code standing as a word of a sentence: never one inside a
+#: file name or path ("...Release.16G.sdcard-modified.raw", ".../16G/...",
+#: "gz 16G-modified.raw"), which must stay the name of a file that exists.
+#: A sentence's own full stop after it ("for 16G.") still ends a word.
+_CARD_CLASS = re.compile(r"(?<![\w.\\/-])(8|16|32)G(?![\w\\/-]|\.\w)")
 
 
 def card_class_words(text):
@@ -45,7 +49,10 @@ def card_class_words(text):
     tab's SD card size control and the card packaging use ("16 GB").  Applied
     where those sentences reach the user (the control's note, the Build
     refusal, the overwrite prompt, a failed build), so a control reading
-    "16 GB card" never sits over a "16G SD card"."""
+    "16 GB card" never sits over a "16G SD card".  A code inside a file name
+    or path quoted in the sentence is left as it is: a grown build's default
+    name carries its class (".16G.sdcard"), and a failure naming that file
+    must name the file that is there."""
     return _CARD_CLASS.sub(r"\1 GB", text or "")
 
 

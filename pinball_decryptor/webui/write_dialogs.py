@@ -115,8 +115,13 @@ class FlashDialog:
                  initial_choices=None, on_choices=None, handed_in="",
                  fresh_image=False, flashed_fn=None, image_titles=None,
                  publish=None, ask_open=None, ask_save=None,
-                 build_size=None, build_size_hint=""):
+                 build_size=None, build_size_hint="", build_refusal=None):
         self._host = host                  # the UI loop (post)
+        # () -> (title, message) refusing the build, or None: asked FIRST
+        # when Start builds, before any question here (Stern Spike 2: an SD
+        # card size the original or this computer can't build), so a refused
+        # build never follows an "Erase the SD card" confirmation
+        self._build_refusal = build_refusal
         # The size of the image a build makes, when the Write tab knows it
         # (Stern Spike 2: the SD card size chosen there changes it).  With
         # Build ticked, the fit is checked against THIS rather than whatever
@@ -581,6 +586,14 @@ class FlashDialog:
         noun = self.words["noun"]
         if not (building or writing):
             return False
+        if building and self._build_refusal is not None:
+            try:
+                refused = self._build_refusal()
+            except Exception:                           # noqa: BLE001
+                refused = None      # the build's own checks still run
+            if refused:
+                mb.showerror(*refused)
+                return False
         build_path = (self.build_path or "").strip() if building else None
         if building and not build_path:
             mb.showwarning(

@@ -66,6 +66,10 @@ CARD_SIZE_TIP = (
     "it was. The built image is that size, so it only fits an SD card at "
     "least that big.")
 CARD_SIZE_SAME = "Same as the original"
+#: the way back, said under every refusal of an SD card size (the Build /
+#: flash dialog's and app._start_write's)
+CARD_SIZE_WAY_BACK = ("To build it at its own size, choose \"Same as the "
+                      "original\" under SD card size on the Write tab.")
 #: the classes a build can be grown to, smallest first (card_size.CARD_SIZES
 #: holds the 8 GB class too, which no card grows to)
 CARD_SIZE_CHOICES = ("16G", "32G")
@@ -221,6 +225,66 @@ def _probe_card_size(path):
     except OSError:
         return None
     return {"own": own, "size": size, "why": why}
+
+
+# Whether THIS computer can grow a card: card_size._E2fs asks the Linux this
+# app uses (WSL on Windows) for e2fsprogs and a loop device, the machine half
+# of card_size.preflight.  Asking starts that Linux, so it is never asked on
+# the UI loop: a worker asks once a bigger size is chosen, well before the
+# Build / flash dialog's Start, and the answer is kept.  A yes holds for the
+# session; a no (or no answer) is asked again after a minute, because the
+# prerequisites strip can mend it, and holds until the new answer is in.
+_GROW_HERE = {"why": None, "at": None, "busy": False}
+_GROW_HERE_LOCK = threading.Lock()
+_GROW_HERE_RECHECK = 60.0
+
+
+def _grow_here():
+    """"" when this computer can grow a card, the reason it can't, or None
+    when that isn't known yet."""
+    with _GROW_HERE_LOCK:
+        return _GROW_HERE["why"]
+
+
+def _ask_grow_here(then=None):
+    """Ask whether this computer can grow a card, on a worker thread, unless
+    it can, is being asked, or was asked less than a minute ago.  *then()*
+    runs on that thread once the answer is in.  True when it asks."""
+    with _GROW_HERE_LOCK:
+        st = _GROW_HERE
+        if st["busy"] or st["why"] == "" or (
+                st["at"] is not None
+                and time.monotonic() - st["at"] < _GROW_HERE_RECHECK):
+            return False
+        st["busy"] = True
+
+    def _worker():
+        from ...plugins.stern import card_size as cs
+        why = None
+        try:
+            cs._E2fs()
+            why = ""
+        except cs.CardSizeError as e:
+            why = (str(e).strip()
+                   or "the games partition can't be grown here")
+        except Exception:                               # noqa: BLE001
+            # no answer: the build's own check says, and this asks again
+            # in a minute rather than straight away
+            log.exception("can this computer grow a card")
+        with _GROW_HERE_LOCK:
+            if why is not None:
+                _GROW_HERE["why"] = why
+            _GROW_HERE["at"] = time.monotonic()
+            _GROW_HERE["busy"] = False
+        if then is not None:
+            try:
+                then()
+            except Exception:                           # noqa: BLE001
+                log.exception("card size: after asking this computer")
+
+    threading.Thread(target=_worker, daemon=True,
+                     name="card-size-here").start()
+    return True
 
 
 class WriteTab(TabService):
@@ -1084,12 +1148,16 @@ class WriteTab(TabService):
     def card_size_problem(self):
         """Why the next image build can't be made at the SD card size asked
         for: the sentence the control shows in red, or "" (it can, or the
-        original's own size is asked for).  app._start_write asks this
-        before its prompts and before anything is staged, so a size the
-        original can't take is refused in a second rather than after every
-        assigned video has been re-encoded.  It reads the original's tables
-        itself (a few sectors; the multi-boot answer is cached by the probe)
-        rather than trust a probe that may still be running."""
+        original's own size is asked for).  The Build / flash dialog asks
+        this first when its Start builds (``_build_refusal``), and
+        app._start_write before its prompts, so a size the original can't
+        take is refused in a second, before any other question, rather than
+        after every assigned video has been re-encoded.  It reads the
+        original's tables itself (a few sectors; the multi-boot answer is
+        cached by the probe) rather than trust a probe that may still be
+        running.  Whether this computer can grow a card is the answer a
+        worker already has (``_grow_here_problem``); while there is none, the
+        build's own check (Manufacturer.write_preflight) still refuses."""
         choice = self.card_size_choice()
         if (not choice or not self._card_size_applies()
                 or self._is_direct()):
@@ -1100,12 +1168,50 @@ class WriteTab(TabService):
         from ...plugins.stern import card_size as cs
         from ...plugins.stern.pipeline import card_class_words
         try:
-            cs.target_for(path, choice)
+            grows_to = cs.target_for(path, choice)
         except cs.CardSizeError as e:
             return card_class_words(str(e))
         except OSError:
             return ""                   # the build's own checks say why
-        return ""
+        return self._grow_here_problem(grows_to) if grows_to else ""
+
+    def _grow_here_problem(self, cls):
+        """The sentence refusing a build grown to *cls* on this computer
+        (card_size.preflight's own words), or "" when it can grow one or
+        that isn't known yet.  An answer that is missing, or a no a minute
+        old, is asked for again here, off the UI loop, and the control is
+        re-published when it comes in."""
+        self._ask_grow_here()
+        why = _grow_here()
+        if not why:
+            return ""
+        from ...plugins.stern import card_size as cs
+        from ...plugins.stern.pipeline import card_class_words
+        return card_class_words(
+            "This card can't be built for a %s SD card on this computer: "
+            "%s." % (cs.words(cls), why.rstrip(".")))
+
+    def _ask_grow_here(self):
+        loop = self.ctx.loop
+
+        def _then():
+            try:
+                loop.post(self._publish_card_size)
+            except Exception:                           # noqa: BLE001
+                pass                    # the window has gone
+        return _ask_grow_here(_then)
+
+    def _build_refusal(self):
+        """The Build / flash dialog's first check when its Start builds:
+        ``(title, message)`` when the SD card size asked for can't be built
+        from this original or on this computer, else None.  Asked before the
+        dialog's own questions, so a build that is going to be refused never
+        follows an "Erase the SD card" confirmation, and the dialog stays
+        open (Flash on its own still works)."""
+        problem = self.card_size_problem()
+        if not problem:
+            return None
+        return CARD_SIZE_LABEL, "%s\n\n%s" % (problem, CARD_SIZE_WAY_BACK)
 
     def _refresh_card_size(self):
         """Re-read what the original is (its partition tables, off the
@@ -1191,6 +1297,10 @@ class WriteTab(TabService):
                    if own and CARD_SIZES[c] > CARD_SIZES[own]
                    and not why.get(c, none)[1]]
         builds_at, err, out = why.get(choice, none) if choice else none
+        if probe is not None and builds_at and not err:
+            # the original can grow to it: can THIS computer grow a card?
+            # (asked off the loop; this runs again when the answer is in)
+            err = self._grow_here_problem(builds_at)
         if probe is None or (not offered and not err):
             # not a Stern-shaped card, one of the biggest class already, or
             # one that can't grow at all: nothing to choose
@@ -1204,10 +1314,12 @@ class WriteTab(TabService):
                     for c in offered]
         shown = choice if choice in offered else ""
         if err:
-            # the size asked for, which this original can't be built at: kept
-            # in the list so the control shows what a build would be refused
-            options.append({"value": choice,
-                            "label": "%s card" % _class_words(choice)})
+            # the size asked for, which this original (or this computer)
+            # can't build: kept in the list so the control shows what a build
+            # would be refused
+            if choice not in offered:
+                options.append({"value": choice,
+                                "label": "%s card" % _class_words(choice)})
             shown = choice
             note, kind = card_class_words(err), "err"
         else:
@@ -1658,6 +1770,16 @@ class WriteTab(TabService):
         # SD card size chosen here changes it, so the file a LAST build left
         # at the build path says nothing about the next one
         grown, build_size, _err = self._card_build()
+        # "pick a smaller size" only when one builds a smaller image: an
+        # original FILE longer than its card class (a dump of a whole bigger
+        # SD card) builds at the file's length whatever size is picked
+        probe = self._current_card_probe() or {}
+        smaller = bool(grown and build_size
+                       and build_size > int(probe.get("size") or 0))
+        if grown:
+            # a stale answer to "can this computer grow a card?" is renewed
+            # while the SD card is being picked, before the dialog's Start
+            self._ask_grow_here()
         self._flash = FlashDialog(
             self.ctx.loop, mfr, on_flash,
             initial_image=initial,
@@ -1666,8 +1788,9 @@ class WriteTab(TabService):
             cannot_build_reason=reason,
             build_size=build_size,
             build_size_hint=(
-                "or pick a smaller SD card size on the Write tab" if grown
+                "or pick a smaller SD card size on the Write tab" if smaller
                 else ""),
+            build_refusal=self._build_refusal,
             has_pending_changes=self._has_pending_write_changes(),
             initial_choices=choices,
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(

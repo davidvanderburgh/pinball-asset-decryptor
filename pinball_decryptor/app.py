@@ -1958,16 +1958,18 @@ class App:
             return
 
         # The Write tab's SD card size (Stern Spike 2, card_size.py): a size
-        # this original can't be built at (a multi-boot or hand-edited card)
-        # is refused NOW, in the words the tab shows under the control -
-        # not by the overwrite prompt below as its "can't be updated" reason,
-        # and not by the engine after every replacement has been staged.
+        # this original can't be built at (a multi-boot or hand-edited card),
+        # or this computer can't grow a card to, is refused NOW, in the words
+        # the tab shows under the control - not by the overwrite prompt below
+        # as its "can't be updated" reason, and not by the engine after every
+        # replacement has been staged.  The Build / flash dialog asks the
+        # same before its own questions (WriteTab._build_refusal); this is
+        # the check for every other way a build starts.
         problem = self.window.card_size_problem()
         if problem:
-            messagebox.showerror(
-                "SD card size",
-                f"{problem}\n\nTo build it at its own size, choose \"Same as "
-                "the original\" under SD card size on the Write tab.")
+            from .webui.tabs.write import CARD_SIZE_WAY_BACK
+            messagebox.showerror("SD card size",
+                                 f"{problem}\n\n{CARD_SIZE_WAY_BACK}")
             return
 
         # Make the destination folder NOW, before any of the work.  A Build
@@ -3626,7 +3628,12 @@ class App:
 
         With *original*, the plugin's ``write_preflight`` runs first: a build
         that could never finish (Stern: an SD card size this original or this
-        computer can't build) is refused before anything is staged."""
+        computer can't build) is refused before anything is staged.  For the
+        SD card size that is the backstop: the Write tab asks the computer
+        off the UI loop as soon as a bigger size is chosen, and the Build /
+        flash dialog refuses on that answer before its Erase confirmation
+        (WriteTab.card_size_problem); this catches a build started before the
+        answer was in."""
         if original:
             why = None
             try:

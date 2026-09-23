@@ -5,10 +5,13 @@ original laid out the way Stern lays a Spike 2 card out, with the sizes bigger
 than that card's own and a note saying what the original is and what the
 choice costs.  The size the control knows is used wherever a build's size
 matters: the default build name, the Build / flash dialog's fit check, the
-Build button (a size the original can't take is refused before anything is
+Build / flash dialog's Start (a size the original, or this computer, can't
+build is refused before any of its questions and before anything is
 staged), and Port + build (other cards build at their own size).  The
 originals here are SPARSE synthetic cards: the real MBR and EBR entries at
-their real places, nothing else written."""
+their real places, nothing else written.  Every test runs as on a computer
+that offers the option (the CI's macOS leg included) and can grow a card,
+unless it says otherwise."""
 
 import json
 import os
@@ -25,6 +28,8 @@ from tests.conftest import sparse_image
 from tests.webui_harness import web_app
 
 ENV = cs.ENV
+#: the real platform rule, before the autouse fixture pins it
+_REAL_SUPPORTED = write_mod.card_size_supported
 
 # (p3 sector count, p4 start LBA) as Stern ships each class
 TABLES = {
@@ -38,6 +43,22 @@ P4_COUNT = 1239038
 @pytest.fixture(autouse=True)
 def _no_card_size_env(monkeypatch):
     monkeypatch.delenv(ENV, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _a_computer_that_can_grow_a_card(monkeypatch):
+    """Every test runs as on a computer the option is offered on, whatever
+    runs it: the CI's macOS leg too (card_size_supported is False on darwin,
+    which hides the control; test_not_offered_on_macos is that case).  And
+    "can this computer grow a card?" answers yes without starting any Linux
+    (card_size._E2fs runs WSL or sudo); each test starts with no answer."""
+    monkeypatch.setattr(write_mod, "card_size_supported",
+                        lambda platform=None: _REAL_SUPPORTED(
+                            platform or "linux"))
+    monkeypatch.setattr(cs, "supported", lambda: True)
+    monkeypatch.setattr(cs, "_E2fs", lambda: None)
+    monkeypatch.setattr(write_mod, "_GROW_HERE",
+                        {"why": None, "at": None, "busy": False})
 
 
 def _entry(ptype, start, count):
@@ -334,6 +355,10 @@ def test_help_has_the_tip():
     assert "games partition" in body
     assert "macOS" in body
     assert "Pinball Browser" not in body
+    # a name with no card size in it is the same at every size
+    # (_name_for_class), so Help never promises the builds land side by side
+    assert "Any other name stays the same at every size" in body
+    assert "doesn't replace a build made at the original's size" not in body
 
 
 def test_card_class_words():
@@ -344,23 +369,47 @@ def test_card_class_words():
           "original's)")
     assert card_class_words("128G, 16GB and x16G stay") == \
         "128G, 16GB and x16G stay"
+    assert card_class_words("this build is for 32G.") == \
+        "this build is for 32 GB."
     assert card_class_words(None) == ""
+
+
+@pytest.mark.parametrize("path", [
+    # a grown build's default name, as losetup and an OSError quote it
+    "/mnt/c/b/Godzilla_Pro-1_16_0-Release.16G.sdcard-modified.raw",
+    r"'\\?\D:\builds\Godzilla_Pro-1_16_0-Release.16G.sdcard-modified.raw'",
+    # the class as a folder, and a name the swap left before "-modified"
+    r"D:\builds\16G\gz.raw", "/builds/16G/gz.raw", "/b/gz 16G-modified.raw",
+    "/b/gz 16G.raw",
+])
+def test_card_class_words_leaves_a_file_name_alone(path):
+    """A failed grow quotes the build's own path, and a grown build's default
+    name carries its class: the message must name the file that is there."""
+    from pinball_decryptor.plugins.stern.pipeline import card_class_words
+    text = ("This card can't be built for a 16G SD card: losetup: %s: failed "
+            "to set up loop device" % path)
+    assert card_class_words(text) == (
+        "This card can't be built for a 16 GB SD card: losetup: %s: failed "
+        "to set up loop device" % path)
 
 
 # ------------------------------------------------- where it can't be done
 def test_only_macos_cant_grow_a_card():
-    assert write_mod.card_size_supported("darwin") is False
-    assert write_mod.card_size_supported("win32") is True
-    assert write_mod.card_size_supported("linux") is True
+    assert _REAL_SUPPORTED("darwin") is False
+    assert _REAL_SUPPORTED("win32") is True
+    assert _REAL_SUPPORTED("linux") is True
 
 
-def test_not_offered_where_a_card_cant_grow(tmp_path, monkeypatch):
+def test_not_offered_on_macos(tmp_path, monkeypatch):
     """macOS: card_size can't grow a card there (no loop devices), so the
     control is not offered, and a saved size builds the original's (the
-    app's own normaliser asks the same function)."""
+    app's own normaliser asks the same function).  The platform is darwin's
+    here whatever runs the test."""
     card = make_card(tmp_path / "gz.raw", "8G")
     monkeypatch.setattr(write_mod, "card_size_supported",
-                        lambda platform=None: False)
+                        lambda platform=None: _REAL_SUPPORTED(
+                            platform or "darwin"))
+    monkeypatch.setattr(cs, "supported", lambda: False)
     with web_app(tmp_path, mfr="stern", settings={"card_size": "16G"}) as w:
         assert w.window.card_size_choice() == ""
         assert ENV not in os.environ
@@ -371,6 +420,10 @@ def test_not_offered_where_a_card_cant_grow(tmp_path, monkeypatch):
         w.call("ui.set", "write", "card_size", "32G")
         assert w.window.card_size_choice() == ""
         assert ENV not in os.environ
+        # and nothing asked whether this computer can grow a card
+        w.drain()
+        assert write_mod._GROW_HERE == {"why": None, "at": None,
+                                        "busy": False}
 
 
 # ------------------------------------------------ what the build really is
@@ -509,33 +562,220 @@ def test_the_tab_hands_the_dialog_the_build_size(tmp_path, monkeypatch):
             w.run(svc._flash.close)
 
 
+def test_a_longer_original_is_not_told_to_pick_a_smaller_size(tmp_path,
+                                                              monkeypatch):
+    """An 8 GB card in a 31.91 GB file builds at the file's length whatever
+    size is picked, so the dialog's "won't fit" never suggests a smaller SD
+    card size: it would build the same image."""
+    from pinball_decryptor.webui.write_dialogs import FlashDialog
+    monkeypatch.setattr(FlashDialog, "refresh_drives", lambda self: None)
+    dump = 31914983424
+    card = make_card(tmp_path / "dump.raw", "8G", size=dump)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    with web_app(tmp_path, mfr="stern") as w:
+        point_at(w, card)
+        w.call("ui.set", "write", "assets", str(proj))
+        assert wait_for(w, lambda: w.state("write")["card_size_cap"])
+        svc = w.window.service("write")
+        for choice in ("", "16G", "32G"):
+            w.call("ui.set", "write", "card_size", choice)
+            assert w.run(svc._open_flash_dialog) is True
+            dlg = svc._flash
+            assert dlg._build_size == dump
+            assert dlg._build_size_hint == ""
+            w.run(dlg.set, "build", True)
+            w.run(dlg.set, "write", True)
+            dlg.selected = SimpleNamespace(size_bytes=15931539456,
+                                           display="16 GB SD card")
+            text, kind = dlg.readout()
+            assert kind == "err" and "smaller" not in text, text
+            w.run(dlg.close)
+
+
 # --------------------------------------------- refused before the encode
-def test_build_refuses_a_size_the_original_cant_take_first(tmp_path,
-                                                          monkeypatch):
-    """The Build button asks the tab before any prompt or staging: the
-    control's own sentence, and the way back, in one dialog."""
-    card = make_card(tmp_path / "multi.raw")
-    _multi_boot(monkeypatch)
+def _to_the_build_button(w, tmp_path, monkeypatch):
+    """The Write tab set up to build (original, project, build location),
+    with the pipeline caught: the list a build that started lands in."""
+    from pinball_decryptor.webui.write_dialogs import FlashDialog
+    monkeypatch.setattr(FlashDialog, "refresh_drives", lambda self: None)
     proj = tmp_path / "proj"
     proj.mkdir()
     out = tmp_path / "out"
     out.mkdir()
+    w.call("ui.set", "write", "assets", str(proj))
+    w.call("ui.set", "write", "output", str(out))
+    w.drain()
+    started = []
+    monkeypatch.setattr(w.app, "_run_pipeline_with_audio",
+                        lambda *a, **k: started.append(a))
+    return started
+
+
+def _press_build(w, build, flash):
+    """What the user does: the Write tab's Build / flash button, the ticks,
+    an SD card picked, Start, and Yes to every question asked."""
+    svc = w.window.service("write")
+    w.asked.clear()
+    assert w.call("write.primary") is True
+    dlg = svc._flash
+    assert dlg is not None and not dlg.closed
+    w.run(dlg.set, "build", build)
+    w.run(dlg.set, "write", flash)
+    assert dlg.building and bool(dlg.write) is flash
+    dlg.selected = SimpleNamespace(size_bytes=64 * 10 ** 9,
+                                   display="64 GB SD card",
+                                   device_path=r"\\.\PhysicalDrive9")
+    w.answers[:] = ["yes"] * 4
+    closed = w.run(dlg.start)
+    w.drain()
+    msgs = [a for a in w.asked if a.get("kind") == "message"]
+    return dlg, closed, msgs
+
+
+@pytest.mark.parametrize("flash", [False, True], ids=["build", "build+flash"])
+def test_build_refuses_a_size_the_original_cant_take_first(tmp_path,
+                                                          monkeypatch, flash):
+    """The Build / flash button, then Start: a size this original can't take
+    is refused before any of the dialog's questions ("Nothing modified", the
+    Erase confirmation), in the control's own sentence with the way back,
+    and the dialog stays open."""
+    card = make_card(tmp_path / "multi.raw")
+    _multi_boot(monkeypatch)
     with web_app(tmp_path, mfr="stern", settings={"card_size": "16G"}) as w:
         point_at(w, card)
-        w.call("ui.set", "write", "assets", str(proj))
-        w.call("ui.set", "write", "output", str(out))
-        w.drain()
-        started = []
-        monkeypatch.setattr(w.app, "_run_pipeline_with_audio",
-                            lambda *a, **k: started.append(a))
-        w.asked.clear()
-        w.run(w.app._start_write)
-        msgs = [a for a in w.asked if a.get("kind") == "message"]
+        started = _to_the_build_button(w, tmp_path, monkeypatch)
+        dlg, closed, msgs = _press_build(w, build=True, flash=flash)
         assert [m["title"] for m in msgs] == ["SD card size"]
         assert "multi-boot card" in msgs[0]["message"]
         assert "16 GB SD card" in msgs[0]["message"]
         assert "Same as the original" in msgs[0]["message"]
+        assert closed is False and not dlg.closed
         assert not started
+        assert getattr(w.app, "_chain_flash_after_build", None) is None
+        # Flash on its own is not a build: the size is not what stops it
+        # (here, that no image is picked yet)
+        w.run(dlg.set, "build", False)
+        w.run(dlg.set, "write", True)
+        w.asked.clear()
+        assert w.run(dlg.start) is False
+        assert [a["title"] for a in w.asked
+                if a.get("kind") == "message"] == ["No image"]
+        w.run(dlg.close)
+
+
+def test_start_write_refuses_a_size_the_original_cant_take(tmp_path,
+                                                           monkeypatch):
+    """Every other way a build starts (app._start_write) asks the same, in
+    the same words, before its own prompts."""
+    card = make_card(tmp_path / "multi.raw")
+    _multi_boot(monkeypatch)
+    with web_app(tmp_path, mfr="stern", settings={"card_size": "16G"}) as w:
+        point_at(w, card)
+        started = _to_the_build_button(w, tmp_path, monkeypatch)
+        w.asked.clear()
+        w.run(w.app._start_write)
+        msgs = [a for a in w.asked if a.get("kind") == "message"]
+        assert [m["title"] for m in msgs] == ["SD card size"]
+        assert msgs[0]["message"] == "%s\n\n%s" % (
+            w.run(w.window.card_size_problem), write_mod.CARD_SIZE_WAY_BACK)
+        assert not started
+
+
+def _cant_grow(monkeypatch, calls=None):
+    why = "the Linux this app uses can't attach the card image as a disk"
+
+    def _no_e2fs():
+        if calls is not None:
+            calls.append(1)
+        raise cs.CardSizeError(why)
+    monkeypatch.setattr(cs, "_E2fs", _no_e2fs)
+    return why
+
+
+@pytest.mark.parametrize("flash", [False, True], ids=["build", "build+flash"])
+def test_a_computer_that_cant_grow_a_card_is_refused_first(tmp_path,
+                                                           monkeypatch,
+                                                           flash):
+    """A stock card the tables say can grow, on a computer that can't grow
+    one: the control's note turns red as soon as the answer is in (asked
+    off the UI loop), and Start is refused on it before the Erase
+    confirmation, in write_preflight's own words."""
+    from pinball_decryptor.core.registry import get_manufacturer
+    card = make_card(tmp_path / "gz.raw")
+    _cant_grow(monkeypatch)
+    with web_app(tmp_path, mfr="stern", settings={"card_size": "16G"}) as w:
+        point_at(w, card)
+        assert wait_for(w, lambda: w.state("write")["card_size_note_kind"]
+                        == "err")
+        s = w.state("write")
+        want = ("This card can't be built for a 16 GB SD card on this "
+                "computer: the Linux this app uses can't attach the card "
+                "image as a disk.")
+        assert s["card_size_note"] == want
+        # the other bigger size stays on offer, the one asked for once
+        assert values(s) == ["", "16G", "32G"]
+        assert s["card_size_shown"] == "16G"
+        assert w.run(w.window.card_size_problem) == want
+        # the build's own check (the worker's backstop) says the same
+        mfr = get_manufacturer("stern")
+        assert mfr.write_preflight(str(card)) == want
+        started = _to_the_build_button(w, tmp_path, monkeypatch)
+        dlg, closed, msgs = _press_build(w, build=True, flash=flash)
+        assert [m["title"] for m in msgs] == ["SD card size"]
+        assert msgs[0]["message"] == "%s\n\n%s" % (
+            want, write_mod.CARD_SIZE_WAY_BACK)
+        assert closed is False and not dlg.closed
+        assert not started
+        # the original's own size needs nothing grown: no refusal
+        w.run(dlg.close)
+        w.call("ui.set", "write", "card_size", "")
+        assert w.run(w.window.card_size_problem) == ""
+        assert w.state("write")["card_size_note_kind"] == ""
+
+
+def test_this_computer_is_asked_once_and_a_no_again_later(monkeypatch):
+    calls = []
+    _cant_grow(monkeypatch, calls)
+    done = []
+    assert write_mod._ask_grow_here(lambda: done.append(1)) is True
+    assert wait_until(lambda: done)
+    assert write_mod._grow_here().startswith("the Linux this app uses")
+    # a no holds for a minute: not asked again straight away
+    assert write_mod._ask_grow_here() is False
+    assert calls == [1]
+    # ... and is asked again after it
+    monkeypatch.setattr(write_mod, "_GROW_HERE_RECHECK", 0.0)
+    monkeypatch.setattr(cs, "_E2fs", lambda: calls.append(2))
+    done.clear()
+    assert write_mod._ask_grow_here(lambda: done.append(1)) is True
+    assert wait_until(lambda: done)
+    assert write_mod._grow_here() == ""
+    # a yes holds for the session
+    assert write_mod._ask_grow_here() is False
+    assert calls == [1, 2]
+
+
+def test_no_answer_is_not_a_no(monkeypatch):
+    """An unexpected failure asking (not card_size's refusal) is no answer:
+    nothing is refused on it, and it is not asked again straight away."""
+    def _boom():
+        raise OSError("wsl.exe went away")
+    monkeypatch.setattr(cs, "_E2fs", _boom)
+    done = []
+    assert write_mod._ask_grow_here(lambda: done.append(1)) is True
+    assert wait_until(lambda: done)
+    assert write_mod._grow_here() is None
+    assert write_mod._ask_grow_here() is False
+
+
+def wait_until(pred, timeout=10.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        if pred():
+            return True
+        time.sleep(0.02)
+    return pred()
 
 
 def _bare_app():

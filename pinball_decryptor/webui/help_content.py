@@ -871,10 +871,16 @@ HELP_CONTENT = {
          "sized on the Multi-boot tab instead), and the option isn't "
          "available on macOS yet. The size applies to building an image: a "
          "direct write keeps the card's own partitions, and Port + build "
-         "makes every other card at its own size. The build checks the card "
-         "can grow before anything is converted, and the file is named for "
-         "the size it is built for (16G in place of the original's 8G), so it "
-         "doesn't replace a build made at the original's size."),
+         "makes every other card at its own size. The card, and whether this "
+         "computer can grow one, are checked before anything is converted; "
+         "if either can't, the note under SD card size says why, and a build "
+         "is refused with that reason before any other question. When the "
+         "original's file name carries its card size, as Stern's own names "
+         "do (\"…Release.8G.sdcard.raw\"), the build is named for the size it "
+         "is built for instead, so it lands beside a build made at the "
+         "original's size. Any other name stays the same at every size, so "
+         "the bigger build replaces the other one: give it a name of its own "
+         "with Change… to keep both."),
         ("Output name",
          "The Build Image line shows the exact file the build will "
          "produce. Builds land in the project's own build\\ folder — one "

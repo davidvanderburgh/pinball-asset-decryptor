@@ -711,7 +711,7 @@ pad_guest_missing() {
 # a missing arm-linux-gnueabihf-gcc must not be able to withhold the renderer.
 # padgl.h is on BOTH lists, so a change to the protocol makes both stale
 # together, which is the only way the two are ever allowed to move.
-PAD_GLHOST_SRCS="padglhost.c padgl.h padvid.h padsw.h i420.h"
+PAD_GLHOST_SRCS="padglhost.c padgl.h padvid.h padsw.h i420.h padicon.h"
 PAD_GLGUEST_SRCS="glbridge.c eglshim.c padgl.h"
 export PAD_GLHOST_SRCS PAD_GLGUEST_SRCS
 

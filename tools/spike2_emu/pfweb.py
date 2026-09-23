@@ -461,6 +461,7 @@ class WebviewBackend(_Base):
     def run(self, main, on_close, ready=None):
         import webview
         self._on_close = on_close
+        _own_taskbar_button()
         win = self._create(main)
         self.wins["main"] = win
 
@@ -476,7 +477,8 @@ class WebviewBackend(_Base):
                     except Exception:                   # noqa: BLE001
                         pass
         win.events.closed += _main_closed
-        # the rig's own icon when the app's is beside it
+        # the playfield's own icon (icons/), so its taskbar button is not a
+        # second copy of the app's
         icon = _find_icon()
         kw = {"icon": icon} if icon else {}
         if ready is not None:
@@ -574,6 +576,12 @@ class GtkBackend(_Base):
             w.move(int(spec["x"]), int(spec["y"]))
         if spec.get("fixed"):
             w.set_resizable(False)
+        icon = _find_icon()
+        if icon:
+            try:
+                w.set_icon_from_file(icon)
+            except Exception:                           # noqa: BLE001
+                pass
         view = WebKit2.WebView()
         view.load_uri(self.host.url(spec.get("page", "main")))
         w.add(view)
@@ -791,8 +799,42 @@ BACKENDS = {"webview": WebviewBackend, "gtk": GtkBackend, "app": AppBackend,
 
 
 def _find_icon(png=False):
+    """The playfield's own icon (icons/, beside this file), else the app's.
+
+    It used to be the app's alone, so the taskbar showed two PAD buttons and
+    nothing said which was the playfield; installer/make_rig_icons.py draws
+    this one. png=True is the page's favicon, which may be either format;
+    otherwise it is the window's, and WinForms' Icon() reads only an .ico
+    while GTK wants a picture."""
     here = os.path.dirname(os.path.abspath(__file__))
-    base = os.path.dirname(os.path.dirname(here))
-    name = "icon.ico" if sys.platform == "win32" and not png else "icon.png"
-    p = os.path.join(base, "pinball_decryptor", name)
-    return p if os.path.isfile(p) else None
+    app = os.path.join(os.path.dirname(os.path.dirname(here)),
+                       "pinball_decryptor")
+    if png:
+        exts = ("png", "ico")
+    elif sys.platform == "win32":
+        exts = ("ico",)
+    else:
+        exts = ("png",)
+    for d, stem in ((os.path.join(here, "icons"), "playfield"), (app, "icon")):
+        for ext in exts:
+            p = os.path.join(d, stem + "." + ext)
+            if os.path.isfile(p):
+                return p
+    return None
+
+
+def _own_taskbar_button():
+    """Windows: give this process a taskbar button of its own.
+
+    The playfield normally runs on PAD's bundled pythonw.exe, the interpreter
+    the app's own window runs on, and Windows groups taskbar buttons by
+    program unless a process names itself - so the playfield could be folded
+    under the app's button, icon and all. Must run before the first window."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "PinballAssetDecryptor.Playfield")
+    except Exception:                                   # noqa: BLE001
+        pass

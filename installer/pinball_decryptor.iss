@@ -87,6 +87,10 @@ Source: "{#ProjectDir}\pinball_decryptor\*"; DestDir: "{app}\pinball_decryptor";
 Source: "{#ProjectDir}\tools\spike2_emu\*"; DestDir: "{app}\tools\spike2_emu"; \
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo,games\*,shots\*,*.log,*.dis,*.png,*.raw"
+; The rig windows' own icons (installer/make_rig_icons.py), which the *.png
+; exclusion above would otherwise drop: the playfield's favicon is a .png.
+Source: "{#ProjectDir}\tools\spike2_emu\icons\*"; DestDir: "{app}\tools\spike2_emu\icons"; \
+    Flags: ignoreversion
 ; The Spike 1 rig (tools/spike1_emu) drives the Emulate tab for the DMD era.
 ; Just sources — the patched qemu and the extracted game are built/cached under
 ; the user's WSL home at run time (see tools/spike1_emu/start.sh), never here.

@@ -126,6 +126,19 @@ def test_blobs_files_and_the_favicon(host):
     assert _get(host, "/favicon.ico", token=False)[0] in (200, 204)
 
 
+def test_the_playfield_wears_its_own_icon_not_the_apps():
+    """The taskbar showed two identical PAD buttons, the app's and the
+    playfield's.  The playfield's window (an .ico on Windows, a picture on
+    GTK) and its page's favicon are the rig's own icons/playfield.*."""
+    import pfweb
+    fav = pfweb._find_icon(png=True)
+    assert fav and os.path.basename(fav) == "playfield.png"
+    assert os.path.dirname(fav) == os.path.join(RIG, "icons")
+    win = pfweb._find_icon()
+    assert os.path.basename(win) == ("playfield.ico" if sys.platform == "win32"
+                                     else "playfield.png")
+
+
 def test_the_fonts_are_the_apps_own(host):
     if not host.fonts_dir:
         pytest.skip("no app fonts beside this rig")

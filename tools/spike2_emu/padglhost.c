@@ -806,6 +806,42 @@ static int win_w, win_h;                 /* current drawable size            */
 static int win_reported_panel;
 static int win_flip;                     /* 0 = correct here; see win_present() */
 static int win_every = 1;                /* present every Nth frame          */
+
+/* THE GAME'S OWN TASKBAR BUTTON. Under WSLg every X window is drawn by
+ * msrdc.exe, and one with no WM_CLASS gets no app id, so Windows files it in
+ * WSLg's own group and shows that group's icon - the Linux penguin - whatever
+ * icon the window carries. Measured 2026-09-23: _NET_WM_ICON alone reached
+ * the window and not its taskbar button; with a class too, the game's windows
+ * get a button of their own wearing that icon. padicon.h is the backbox
+ * picture installer/make_rig_icons.py draws (icons/gamewin.png); the small
+ * penguin WSLg badges it with is WSLg's own. _NET_WM_ICON is CARDINAL/32, and
+ * Xlib takes format-32 data as an array of C longs - 8 bytes each here - not
+ * of 32-bit words, hence the widening copy. The game, the second display and
+ * the legend all get both: one button for the game. */
+#include "padicon.h"
+extern int XChangeProperty(XDisplay *, unsigned long, unsigned long,
+                           unsigned long, int, int, const unsigned char *, int);
+
+static void win_brand(unsigned long w)
+{
+    enum { N = sizeof padicon_game / sizeof padicon_game[0] };
+    static const char cls[] = "padglhost\0PAD-Spike2";  /* name\0class\0 */
+    static unsigned long *icon;
+    int i;
+    if (!xdpy || !w) return;
+    XChangeProperty(xdpy, w, XInternAtom(xdpy, "WM_CLASS", 0),
+                    31 /* XA_STRING */, 8, 0 /* PropModeReplace */,
+                    (const unsigned char *)cls, (int)sizeof cls);
+    if (!icon) {
+        icon = malloc(N * sizeof *icon);
+        if (!icon) return;
+        for (i = 0; i < N; i++) icon[i] = padicon_game[i];
+    }
+    XChangeProperty(xdpy, w, XInternAtom(xdpy, "_NET_WM_ICON", 0),
+                    6 /* XA_CARDINAL */, 32, 0 /* PropModeReplace */,
+                    (const unsigned char *)icon, N);
+}
+
 static unsigned blit_prog, blit_vao;
 static int blit_tex_loc = -1;
 
@@ -1934,6 +1970,7 @@ static void legend_open(int scr)
                                      XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
     win_place(legend_win, lx, ly);
     XStoreName(xdpy, legend_win, "Controls - Spike 2 emulator");
+    win_brand(legend_win);
     /* KeyPress | KeyRelease | Exposure | StructureNotify. Keys are selected on
      * this window too, so whichever of the two has focus can drive the game. */
     XSelectInput(xdpy, legend_win, 1L | 2L | (1L << 15) | (1L << 17));
@@ -2120,6 +2157,7 @@ static int win_open(void)
                  (g && *g) ? g : "Spike 2");
         XStoreName(xdpy, xwin, title);
     }
+    win_brand(xwin);
     /* StructureNotifyMask (1<<17) gives ConfigureNotify for resizes;
      * KeyPressMask (1) and KeyReleaseMask (2) are what make the keyboard work. */
     XSelectInput(xdpy, xwin, (1L << 17) | 1L | 2L);
@@ -2820,6 +2858,7 @@ static void win2_open(int disp)
                  "emulator", (g && *g) ? g : "Spike 2", disp);
         XStoreName(xdpy, xwin2, title);
     }
+    win_brand(xwin2);
     /* Keys selected here too, legend-style: whichever window has focus can
      * drive the game. StructureNotify for resize. */
     XSelectInput(xdpy, xwin2, (1L << 17) | 1L | 2L);

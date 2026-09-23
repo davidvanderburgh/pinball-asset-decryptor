@@ -13,6 +13,9 @@
 # artwork into $PAD_TABLES (under the rootfs, see padpath.py) - so the rule is
 # now true rather than merely unnoticed.
 *.png
+# ...except the rig windows' own icons, which ARE source (drawn by
+# installer/make_rig_icons.py and read by pfweb.py at run time).
+!icons/*.png
 
 # Derived per-title tables, if anyone points PAD_TABLES back in here.
 games/

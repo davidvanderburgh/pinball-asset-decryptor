@@ -95,6 +95,16 @@ def test_the_protocol_header_is_on_both_bridge_lists():
     assert "padgl.h" in _srcs("PAD_GLGUEST_SRCS")
 
 
+def test_every_header_the_renderer_includes_is_staged():
+    """buildbridge.sh compiles padglhost.c from a COPY of its list in
+    $PAD_STAGE, so a local header missing from the list is a "No such file"
+    on the user's first start - and a header edit that never makes the
+    renderer stale.  padicon.h (the game window's icon) is the latest."""
+    have = set(_srcs("PAD_GLHOST_SRCS"))
+    for inc in re.findall(r'^#include "([^"]+)"', _read("padglhost.c"), re.M):
+        assert inc in have, "padglhost.c includes %s; not on PAD_GLHOST_SRCS" % inc
+
+
 def test_each_half_of_the_bridge_can_be_built_alone():
     """A box with a native gcc and no cross compiler must still get its
     renderer.  Building both under ``set -e``, ARM first, is what left

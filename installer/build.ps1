@@ -29,7 +29,7 @@ Write-Host "Detecting local Python installation..." -ForegroundColor Cyan
 try {
     $pyInfo = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Python not found" }
-    $pyLines = $pyInfo -split "`n" | ForEach-Object { $_.Trim() }
+    $pyLines = @($pyInfo -split "`n" | ForEach-Object { $_.Trim() })
     $PythonVersion = $pyLines[0]
 } catch {
     Write-Error "Python is required to build the installer. Install Python 3.10+ from python.org."

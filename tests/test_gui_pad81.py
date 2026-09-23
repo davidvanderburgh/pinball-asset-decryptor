@@ -348,7 +348,10 @@ def _run_bulk(w, sb, out):
     try:
         w.answers.append(str(out))
         assert w.call("text_scenes.save_all") is True
-        assert w.state("text_scenes")["bulk"] is True, \
+        # started: still running, or (a fast runner) already done
+        assert (w.state("text_scenes")["bulk"] is True
+                or sb._bulk is not None or "r" in captured
+                or _wait(w, lambda: "r" in captured)), \
             "the button did not start a batch"
         assert _wait(w, lambda: "r" in captured and sb._bulk is None)
     finally:

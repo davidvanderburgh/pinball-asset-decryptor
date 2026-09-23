@@ -248,6 +248,11 @@ def test_trim_toggle_and_preview_limit(tmp_path):
     rep = str(tmp_path / "long.wav")
     _wav(rep, seconds=2.0)
     rel = "audio/idx0001 - Jackpot.wav"
+    from pinball_decryptor.core import audio as _audio
+    if not (_audio.probe_duration(rep) or 0) > 0:
+        # the limit is drawn from the probed length (ffprobe), which a CI
+        # runner with only the Python requirements does not have
+        pytest.skip("no audio duration probe on this machine")
     with web_app(tmp_path, mfr="ap") as w:
         _open(w, folder)
         w.call("audio.set_trim", True)

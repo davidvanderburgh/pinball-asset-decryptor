@@ -137,9 +137,12 @@ def test_new_mode_edit_autosave_and_validation(tmp_path, preview_on):
         assert w.state("modes")["save_state"] == "editing"
         path = proj / "modes" / "new_mode" / "mode.json"
         assert _wait(w, lambda: json.loads(path.read_text("utf-8"))["name"] == "ATOMIC TEST")
+        # the list catches up on the loop after the save (a fast runner
+        # reads the state between the two)
+        assert _wait(w, lambda: w.state("modes")["rows"][0]["name"]
+                     == "ATOMIC TEST")
         st = w.state("modes")
         assert st["save_state"] == "saved"
-        assert st["rows"][0]["name"] == "ATOMIC TEST"
 
         # untick both shots: the status says what to fix
         w.call("ui.set", "modes", "shot:Left ramp", False)

@@ -296,8 +296,10 @@ def test_the_launch_streams_moves_the_ladder_and_catches_the_key_verdict(rig,
         w.window.jjp_emulate_iso_var.set(r"D:\games\gnr.iso")
         w.call(NS + ".toggle")
         s = w.state(NS)
-        # Start's own work: its spinner (a WSL restart only greys it)
-        assert s["go_label"] == "Starting…" and s["go_busy"]
+        # Start's own work: its spinner (a WSL restart only greys it) - while
+        # it is still running; a fast runner may already be past it
+        if svc._busy:
+            assert s["go_label"] == "Starting…" and s["go_busy"]
         assert _wait(lambda: not svc._busy)
         w.drain()
         assert not w.state(NS)["go_busy"]

@@ -168,8 +168,14 @@ def run_native(ctx, server, host):
     width, height, x, y, maximized = geo or (1280, 860, None, None, False)
     width = max(MIN_SIZE[0], width)
     height = max(MIN_SIZE[1], height)
+    # the App composed its title (version, the dev branch badge) before this
+    # window existed, so its set_title found no window: open with it
+    try:
+        title = ctx.loop.call(ctx.app.root.title) or APP_TITLE
+    except Exception:                                   # noqa: BLE001
+        title = APP_TITLE
     win = webview.create_window(
-        APP_TITLE, url_for(ctx, server), width=width, height=height,
+        title, url_for(ctx, server), width=width, height=height,
         x=x, y=y, min_size=MIN_SIZE, background_color="#15171A",
         text_select=True, maximized=bool(maximized))
     host.window = win

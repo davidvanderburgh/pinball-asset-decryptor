@@ -688,9 +688,17 @@ class AppBackend(_Base):
         exe = _chromium()
         prof = tempfile.mkdtemp(prefix="padpf-")
         self.dirs.append(prof)
+        # msImplicitSignin: Edge signs every NEW profile in to the Windows
+        # account and says so in a "We are now syncing your browsing data"
+        # pop-up - and this profile is new on every run, so every playfield
+        # opened with one.  Measured on a fresh profile: the account lands in
+        # its Preferences with no flag, with --disable-sync, --guest and
+        # --inprivate alike; this feature switch alone keeps it signed out.
+        # Chrome and Brave ignore a feature name they don't know.
         args = [exe, "--app=" + self.host.url(spec.get("page", "main")),
                 "--user-data-dir=" + prof, "--no-first-run",
                 "--no-default-browser-check", "--disable-extensions",
+                "--disable-features=msImplicitSignin",
                 "--window-size=%d,%d" % (int(spec.get("width") or 900),
                                          int(spec.get("height") or 700))]
         if spec.get("x") is not None and spec.get("y") is not None:

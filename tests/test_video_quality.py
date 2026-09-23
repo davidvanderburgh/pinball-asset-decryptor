@@ -229,6 +229,22 @@ def test_an_unsqueezed_blocky_clip_is_not_blamed_on_the_users_export():
     assert "keeps the bitrate you exported it at" in text
 
 
+def test_rebuild_advice_says_whole_clips_need_room():
+    """PAD-176: following "build again" for hundreds of clips at once (whole,
+    or converted at the stock clip's bitrate) is what ran an 8 GB card's
+    games partition out of room.  Both pieces of rebuild advice say so and
+    point at SD card size; the Check card help says the same."""
+    from pinball_decryptor.webui.help_content import HELP_CONTENT
+    squeezed = " ".join(vq.summary_lines([_clip("a.mp4", True, padded=True)]))
+    small = " ".join(vq.summary_lines([_clip("a.mp4", True)]))
+    fine = " ".join(vq.summary_lines([_clip("a.mp4", False)]))
+    help_ = dict(HELP_CONTENT["Replace Video"])[
+        "Checking a card you already built"]
+    for text in (squeezed, small, help_):
+        assert "games partition" in text and "SD card size" in text, text
+    assert "games partition" not in fine    # nothing to rebuild, no advice
+
+
 def test_summary_says_so_when_everything_is_fine():
     text = " ".join(vq.summary_lines([_clip("a.mp4", False)]))
     assert "at or above the quality bar" in text

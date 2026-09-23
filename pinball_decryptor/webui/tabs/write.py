@@ -58,13 +58,17 @@ TEXT_GROW_TIP = (
 #: the engine's no-space failure points at this control by its label).
 CARD_SIZE_LABEL = "SD card size"
 CARD_SIZE_TIP = (
-    "Every replaced video and grown sound goes onto the card's games "
+    "Every replaced video and longer sound goes onto the card's games "
     "partition, which is only as big as Stern made it for the original's "
-    "card size (a stock 8 GB card can have a few hundred MB free). If the SD "
-    "card in your machine is bigger, build for it: the games partition grows "
-    "to fill that card size and everything else on the card stays exactly as "
-    "it was. The built image is that size, so it only fits an SD card at "
-    "least that big.")
+    "card size; the note under this control says how much of it is free at "
+    "each size. If the SD card in your machine is bigger, build for it: the "
+    "games partition grows to fill that card size and everything else on the "
+    "card stays exactly as it was. The built image is that size, so it only "
+    "fits an SD card at least that big. A bigger card adds room and nothing "
+    "else: the game's own limit of about 2 GB on its sound bank stays the "
+    "same, and a replacement that has to fit its original's space (a sound "
+    "that isn't made longer, a video written straight to the card) still "
+    "has to.")
 CARD_SIZE_SAME = "Same as the original"
 #: the way back, said under every refusal of an SD card size (the Build /
 #: flash dialog's and app._start_write's)
@@ -193,10 +197,11 @@ def _probe_card_size(path):
     the multi-boot reader; OFF the UI loop).  ``None`` when it is not a file
     this app can read; else ``{"own": "8G" | None, "size": the file's size,
     "why": {choice: (class it builds at or None, error sentence, the built
-    image's size or None)}}`` with ``own`` None when the tables are not laid
-    out the way Stern lays a Spike 2 card out.  The built size is
-    card_size.plan's: the class size, or the original FILE's size when that
-    is longer (a dump of a whole bigger SD card keeps its length)."""
+    image's size or None)}, "room": {class: usable bytes}}`` with ``own``
+    None when the tables are not laid out the way Stern lays a Spike 2 card
+    out.  The built size is card_size.plan's: the class size, or the original
+    FILE's size when that is longer (a dump of a whole bigger SD card keeps
+    its length).  ``room`` is :func:`_probe_room`'s."""
     from ...core.longpath import ext as _lp
     from ...plugins.stern import card_size as cs
     try:
@@ -224,7 +229,58 @@ def _probe_card_size(path):
             why[choice] = (builds_at, "", out)
     except OSError:
         return None
-    return {"own": own, "size": size, "why": why}
+    room = _probe_room(path, layout, own, why)
+    return {"own": own, "size": size, "why": why, "room": room}
+
+
+def _probe_room(path, layout, own, why):
+    """``{class: bytes}``: the room the files a build puts on whole
+    (replaced videos, a grown sound bank) have on the games partition of the
+    original at *path*, at its own size and at each bigger size it can be
+    built for (card_size.room_by_class, the figures the engine's pre-flight
+    measures a build against).  Read from the partition's superblock and
+    group descriptors, a few KB, OFF the UI loop.  Counted as the kernel's
+    driver copies (card_size.ROUTE_MOUNT), which keeps a small reserve back:
+    never more room than every route has.  A size whose room can't be worked
+    out is left out; ``{}`` when the partition can't be read."""
+    if layout is None or not own:
+        return {}
+    from ...plugins.stern import card_size as cs
+    try:
+        space = cs.read_space(path)
+    except Exception:  # noqa: BLE001 - not a filesystem this reads: no figure
+        log.debug("card size probe: games partition not read", exc_info=True)
+        return {}
+    classes = [own] + [c for c in CARD_SIZE_CHOICES
+                       if (why.get(c) or (None, "", None))[0]
+                       and not why[c][1]]
+    room = {}
+    for c in classes:
+        try:
+            room.update(cs.room_by_class(layout, space, [c], cs.ROUTE_MOUNT))
+        except Exception:  # noqa: BLE001 - a layout the estimate can't grow
+            log.debug("card size probe: no room figure at %s", c,
+                      exc_info=True)
+    return room
+
+
+def _room_words(room, own, offered):
+    """The SD card size note's sentence on the room a build has for the files
+    it puts on whole, from the probe's *room* (:func:`_probe_room`): at the
+    original's own size *own*, then at each of the *offered* bigger sizes, or
+    "" when the original's own figure isn't known.  Starts with a space, to
+    follow the note's first sentence."""
+    from ...plugins.stern.card_size import size_words
+    if own not in room:
+        return ""
+    text = (" Its games partition, where replaced videos and longer sounds "
+            "go, has %s free" % size_words(room[own]))
+    bigger = [c for c in offered if c in room]
+    for i, c in enumerate(bigger):
+        text += ("; built for a %s card it has %s" if not i
+                 else ", for a %s card %s") % (_class_words(c),
+                                               size_words(room[c]))
+    return text + "."
 
 
 # Whether THIS computer can grow a card: card_size._E2fs asks the Linux this
@@ -1282,7 +1338,10 @@ class WriteTab(TabService):
         card class it can be built at exists for it, or when the size asked
         for can't be built from this original (so the reason, and the way
         back to the original's size, are on screen before a build is
-        refused).  The Build Image line's default name follows the class."""
+        refused).  The note says what the original is, how much room its
+        games partition has at each size (the probe read it off the loop:
+        :func:`_probe_room`), and what the size asked for costs.  The Build
+        Image line's default name follows the class."""
         from ...plugins.stern.card_size import CARD_SIZES
         from ...plugins.stern.pipeline import card_class_words
         from ..write_dialogs import _fmt_size
@@ -1328,7 +1387,7 @@ class WriteTab(TabService):
                     % ("an" if own == "8G" else "a", _class_words(own)))
             if size > CARD_SIZES[own]:
                 note += " in a %s file" % _fmt_size(size)
-            note += "."
+            note += "." + _room_words(probe.get("room") or {}, own, offered)
             if builds_at:
                 out = out or CARD_SIZES[builds_at]
                 if out > CARD_SIZES[builds_at]:

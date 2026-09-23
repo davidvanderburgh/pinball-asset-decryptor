@@ -109,6 +109,42 @@ def test_the_off_reason_names_the_option_the_dialog_really_has(monkeypatch):
     assert 'title="Advanced Audio Options"' in src
 
 
+def test_longer_sound_texts_name_both_limits():
+    """PAD-176: every text about longer sounds quoted only the game's 2 GB
+    sound-bank limit ("roughly 45 minutes per build").  On a stock 8 GB
+    Godzilla card the games partition has 368 MB free, less than the bank's
+    headroom, and overrunning it fails the whole build instead of trimming.
+    So each text names the games partition, points at SD card size, and says
+    that size does not lift the 2 GB limit; 45 minutes is one title's figure
+    (Godzilla 1.16), so it is never promised without the title."""
+    import pinball_decryptor.webui as webui_pkg
+    from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
+    from pinball_decryptor.webui.help_content import HELP_CONTENT
+
+    js = os.path.join(os.path.dirname(webui_pkg.__file__),
+                      "static", "js", "tabs", "audio.js")
+    with open(js, encoding="utf-8") as f:
+        src = f.read()
+    start = src.index('label="Allow replacements longer than the original')
+    advanced = src[start:src.index("</p>", start)]
+    help_ = dict(HELP_CONTENT["Replace Audio"])[
+        "Longer replacements (Advanced Audio Options)"]
+    note = SternManufacturer().audio_length_note()
+    for text in (advanced, help_, note):
+        assert "games partition" in text, text
+        assert "SD card size" in text, text
+        assert "not raise the 2 GB limit" in text, text
+        assert "roughly 45 minutes" not in text, text
+        if "45 minutes" in text:
+            assert "Godzilla 1.16" in text, text
+    # and the SD card size tip says what a bigger card does NOT lift, so
+    # 32 GB never reads as "unlimited songs", and that a build too big for
+    # the games partition is refused before its encode
+    tip = dict(HELP_CONTENT["Write"])["SD card size (Stern Spike 2)"]
+    assert "sound bank over about 2 GB" in tip
+    assert "Before anything is encoded" in tip and "refused" in tip
+
+
 def test_the_trim_notice_names_every_clip_biggest_cut_first():
     """A count alone told nobody WHICH replacement lost its tail."""
     grows = {7: (44100, 44100 + 4410),               # a callout 0.1 s long

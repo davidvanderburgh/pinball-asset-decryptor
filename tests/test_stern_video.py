@@ -353,3 +353,23 @@ def test_stern_enables_replace_video_with_a_size_note():
     assert mfr.capabilities.replace_video is True
     note = mfr.video_length_note()
     assert note and "fit" in note.lower()
+
+
+def test_video_size_texts_name_the_games_partition_not_a_byte_budget():
+    """PAD-176: the Trim / pad tooltip and the Replace Video help said every
+    Spike 2 replacement was fit to its slot's byte size.  An image build puts
+    an assigned clip on whole, and the one limit is the games partition's
+    free room, which SD card size adds to.  Squeezing is only the fallback
+    (a direct SD write, or no way to write whole files)."""
+    from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
+    from pinball_decryptor.webui.help_content import HELP_CONTENT
+    note = SternManufacturer().video_length_note()
+    size = dict(HELP_CONTENT["Replace Video"])["Size limits"]
+    build = dict(HELP_CONTENT["Write"])["What a build does"]
+    for text in (note, size):
+        assert "full size" in text, text
+        assert "games partition" in text and "SD card size" in text, text
+        assert "direct SD write" in text, text
+        assert "automatically re-encoded down to fit" not in text, text
+    assert "Barrels of Fun" in size         # the other manufacturer's rule
+    assert "Stern Spike 2" in build and "games partition" in build

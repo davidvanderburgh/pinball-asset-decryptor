@@ -133,13 +133,19 @@ _WHITESTAR_PREREQS = (
 )
 
 _EXT4_GROW_REASON = (
-    "Full-size video replacement, the opt-in blip-free callouts, and "
-    "different-size file swaps in the Partition Explorer: resizes files "
-    "inside the card's ext4 partition through the platform's Linux "
-    "filesystem path. Without it an oversized replacement clip is crushed "
-    "into its stock byte slot instead of going on at full quality, and a "
-    "Partition Explorer replacement has to match the original's size "
+    "Full-size video replacement, longer sounds, the opt-in blip-free "
+    "callouts, and different-size file swaps in the Partition Explorer: "
+    "resizes files inside the card's ext4 partition through the platform's "
+    "Linux filesystem path. Without it an oversized replacement clip is "
+    "crushed into its stock byte slot instead of going on at full quality, "
+    "and a Partition Explorer replacement has to match the original's size "
     "exactly.")
+#: Windows only: SD card size (card_size.py) grows the games partition through
+#: the same WSL2 loop device (card_size.check_tools), and it is not offered on
+#: macOS at all, so only the WSL2 row says so.
+_EXT4_GROW_REASON_WIN = _EXT4_GROW_REASON + (
+    " SD card size on the Write tab needs it too: without it a build can't "
+    "be made for a bigger SD card.")
 
 
 def _ext4_grow_prereqs(platform):
@@ -169,7 +175,7 @@ def _ext4_grow_prereqs(platform):
     if platform == "win32":
         return (
             Prerequisite(name="WSL2", where="wsl", probe=LOOP_PROBE,
-                         reason=_EXT4_GROW_REASON,
+                         reason=_EXT4_GROW_REASON_WIN,
                          install_hint=(
                              "wsl --install -d Ubuntu  "
                              "(admin PowerShell, then reboot)\n"
@@ -511,6 +517,10 @@ class SternManufacturer(Manufacturer):
         return True
 
     def audio_length_note(self):
+        # The Audio tab shows this only in the Trim / pad checkbox's tooltip,
+        # and hides that checkbox wherever audio_forces_length_match() is
+        # True, which it always is here.  Kept correct anyway: it is the
+        # plugin's own summary of the rule (docs/architecture/stern.md).
         if self._era == "spike1":
             return ("Replacements are patched in place as raw PCM: each "
                     "sound is fit to its original slot length (longer is "
@@ -520,16 +530,29 @@ class SternManufacturer(Manufacturer):
                 "its original slot length (longer is trimmed, shorter padded "
                 "with silence) and amplitude-limited into the codec's range. "
                 "Advanced audio options can let a longer replacement grow the "
-                "sound bank instead of being trimmed — image builds only, up "
-                "to about 45 minutes of lengthened stereo sound per build.")
+                "sound bank instead of being trimmed, on image builds only. "
+                "The game can't open a sound bank bigger than about 2 GB, and "
+                "each lengthened sound also needs room for its whole length "
+                "on the card's games partition, shared with full-size "
+                "videos. SD card size on the Write tab adds that room but "
+                "does not raise the 2 GB limit.")
 
     def video_length_note(self):
-        return ("Video is patched into the SD-card image in place, so each "
-                "replacement is fit to its original clip's byte size: a small "
-                "enough clip drops straight in, a larger one is automatically "
-                "re-encoded down to fit, and one that still won't fit is "
-                "skipped (left unchanged) — use a shorter / lower-resolution "
-                "clip. Tick “Trim / pad” to also match the original length.")
+        # Spike 2 only (the Replace Video tab is hidden for Spike 1 and
+        # Whitestar).  engine._prepare_video_patches: a clip with a live
+        # assignment goes on whole through the ext4 driver; only a direct-SD
+        # write, a computer that can't grow a file, or an in-folder edit with
+        # no assignment is fitted to its slot.
+        return ("An image build puts each clip assigned here on the card at "
+                "full size. The limit is the free room on the card's games "
+                "partition, which every full-size clip and lengthened sound "
+                "share (a stock 8 GB card can have only a few hundred MB "
+                "free), and SD card size on the Write tab adds room. A clip "
+                "is squeezed to fit its original's byte size only on a direct "
+                "SD write, or when this computer can't write whole files to "
+                "the card (on Windows that needs WSL2); one that still won't "
+                "fit is skipped. Tick “Trim / pad” to also match the "
+                "original length.")
 
     def image_note(self):
         # No inline note — the auto-fit / per-store fitting rules live in the

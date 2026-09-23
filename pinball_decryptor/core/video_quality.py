@@ -386,6 +386,17 @@ def summarize(clips):
             len([c for c in clips if c.error]))
 
 
+#: Said after both pieces of rebuild advice below.  Every clip a rebuild puts
+#: on whole (or converts at the stock clip's bitrate) takes room on the card's
+#: games partition, and on an 8 GB card that room is a few hundred MB:
+#: following the advice for hundreds of clips at once is what ran PAD-176's
+#: build out of space.  SD card size (plugins/stern/card_size.py) gives the
+#: room.
+_ROOM = ("Clips at full size need room on the card's games partition, and a "
+         "stock 8 GB card can have only a few hundred MB free, so for many "
+         "clips build for a bigger SD card (SD card size on the Write tab).")
+
+
 def summary_lines(clips):
     """The two or three sentences that go above the list.
 
@@ -411,7 +422,7 @@ def summary_lines(clips):
         out.append("%d clip(s) were squeezed into the slot they replaced by a "
                    "Write; %d of those are below the bar. Building an image "
                    "file (not a direct-SD write) with WSL working puts them on "
-                   "at full quality instead." % (squeezed, both))
+                   "at full quality instead. %s" % (squeezed, both, _ROOM))
     elif blocky:
         # This used to say they were the user's own files at their own size
         # and to re-export them.  On the card that reported it (PAD-171) all
@@ -425,8 +436,8 @@ def summary_lines(clips):
                    "on as a converted copy, and older versions converted at "
                    "far below Stern's bitrate; build again from your original "
                    "replacement files to convert them at the bitrate of the "
-                   "clip they replace. A clip that went on as your own file "
-                   "keeps the bitrate you exported it at.")
+                   "clip they replace. %s A clip that went on as your own "
+                   "file keeps the bitrate you exported it at." % _ROOM)
     if bad:
         out.append("%d clip(s) could not be read." % bad)
     return out

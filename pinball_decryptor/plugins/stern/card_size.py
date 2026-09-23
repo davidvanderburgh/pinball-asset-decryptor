@@ -300,6 +300,311 @@ def output_parts(original_path, parts, target):
 
 
 # ---------------------------------------------------------------------------
+# Room on the games partition, measured before a build spends any time
+# ---------------------------------------------------------------------------
+# PAD-176 failed after twenty minutes of encoding because nothing compared
+# what the build would copy on whole with the games partition's free space
+# until the copy itself.  Everything needed to compare them up front is on
+# the card: the free block counts, and the layout resize2fs gives a partition
+# grown to a bigger class, which is fixed arithmetic.  The engine's pre-flight
+# (engine._SpaceCheck) adds up the build's side.
+
+#: How a build's whole-file copies reach the card, which decides how much of
+#: the free space they may use.  The kernel's ext4 driver (a loop mount,
+#: ext4_grow.grow_files; what df reports) holds a reserve back from every
+#: writer.  e2fsprogs' debugfs (ext4_grow.grow_files_pinned, a build carrying
+#: modes, and every copy on macOS) does not.
+ROUTE_MOUNT = "mount"
+ROUTE_PINNED = "pinned"
+
+#: The kernel's reserved clusters (fs/ext4/super.c,
+#: ext4_calculate_resv_clusters): 2% of the blocks, at most this many, kept
+#: back from every writer, root included.  It is why df on a stock Godzilla
+#: Pro 1.16 games partition says 352 MB where the superblock counts 368 MB.
+_KERNEL_RESERVE_MAX = 4096
+
+_INCOMPAT_META_BG = 0x10
+_RO_COMPAT_SPARSE_SUPER = 0x1
+
+P3Space = collections.namedtuple(
+    "P3Space", "block_size blocks free r_blocks blocks_per_group "
+               "inodes_per_group inode_size reserved_gdt first_data_block "
+               "desc_size sparse_super meta_bg")
+# block_size        bytes per filesystem block (4096 on every Stern card)
+# blocks            the filesystem's length in blocks
+# free              free blocks: the group descriptors' counts added up
+# r_blocks          blocks reserved for root (0 on every stock card)
+# reserved_gdt      blocks set aside for the group descriptor table to grow
+# the rest          what resize2fs lays out each new block group from
+
+
+def p3_space(reader):
+    """The :class:`P3Space` of the filesystem an :class:`.ext4.Ext4Reader` is
+    open on (the games partition of a card).
+
+    FREE is the group descriptors' free counts added up, which is what the
+    kernel counts when it mounts the partition, rather than the superblock's
+    own total: that one is only brought up to date at a clean unmount, and a
+    card whose journal was never replayed can carry a stale one.  The
+    superblock's total stands in when the descriptors can't be read."""
+    sb = reader._sb
+    wide = bool(reader.is_64bit)
+
+    def u32(off, hi=None):
+        v = struct.unpack_from("<I", sb, off)[0]
+        if wide and hi is not None:
+            v |= struct.unpack_from("<I", sb, hi)[0] << 32
+        return v
+
+    bs = int(reader.block_size)
+    blocks = u32(0x04, 0x150)
+    r_blocks = u32(0x08, 0x154)
+    sb_free = u32(0x0C, 0x158)
+    bpg = int(reader.blocks_per_group)
+    fdb = int(reader.first_data_block)
+    ds = int(reader.desc_size)
+    groups = -(-(blocks - fdb) // bpg) if bpg else 0
+    free = None
+    if groups:
+        raw = reader._read(reader.gdt_block * bs, groups * ds)
+        if len(raw) == groups * ds:
+            free = 0
+            for g in range(groups):
+                n = struct.unpack_from("<H", raw, g * ds + 0x0C)[0]
+                if ds >= 0x30:
+                    n |= struct.unpack_from("<H", raw, g * ds + 0x2C)[0] << 16
+                free += n
+            if free > blocks:
+                free = None             # not descriptors after all
+    if free is None:
+        free = sb_free
+    return P3Space(
+        block_size=bs, blocks=blocks, free=free, r_blocks=r_blocks,
+        blocks_per_group=bpg, inodes_per_group=int(reader.inodes_per_group),
+        inode_size=int(reader.inode_size),
+        reserved_gdt=struct.unpack_from("<H", sb, 0xCE)[0],
+        first_data_block=fdb, desc_size=ds,
+        sparse_super=bool(struct.unpack_from("<I", sb, 0x64)[0]
+                          & _RO_COMPAT_SPARSE_SUPER),
+        meta_bg=bool(struct.unpack_from("<I", sb, 0x60)[0]
+                     & _INCOMPAT_META_BG))
+
+
+def read_space(path, offset=P3_START * SECTOR):
+    """:func:`p3_space` of the games partition at *offset* of the card image
+    at *path*."""
+    from .ext4 import Ext4Reader
+    with open(_lp(path), "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        return p3_space(Ext4Reader(f, offset, size - offset))
+
+
+def _has_super(g, sparse):
+    """Whether block group *g* carries a backup superblock and descriptor
+    table: group 0 and 1 and the powers of 3, 5 and 7 under sparse_super."""
+    if g <= 1 or not sparse:
+        return True
+    for b in (3, 5, 7):
+        n = g
+        while n % b == 0:
+            n //= b
+        if n == 1:
+            return True
+    return False
+
+
+def grown(space, new_blocks):
+    """``(blocks, free, r_blocks)`` of the filesystem *space* once resize2fs
+    has grown it to *new_blocks* (the grown partition's length in blocks);
+    the filesystem as it is when that is no longer than it already is.
+
+    What resize2fs 1.47 does (resize/resize2fs.c, adjust_fs_info): every new
+    block group costs its two bitmaps and its inode table, and a group that
+    carries a backup superblock (see :func:`_has_super`) also that block, the
+    descriptor table and the blocks reserved for it to grow, which shrink by
+    as many as the table itself grows.  A last group too short to hold its
+    own bookkeeping and 50 blocks more is left off.  The root reserve keeps
+    its percentage.  Checked against three real grows, exact to the block:
+    godzilla_pro 1.16 8G to 16G (1,924,909 free) and to 32G (5,497,389), and
+    jaws_le 1.02 16G to 32G (5,114,786)."""
+    s = space
+    new_blocks = int(new_blocks or 0)
+    if new_blocks <= s.blocks:
+        return s.blocks, s.free, s.r_blocks
+    if s.meta_bg:
+        raise CardSizeError("its games partition uses a layout (meta_bg) the "
+                            "free-space estimate doesn't know")
+    bs, bpg, fdb = s.block_size, s.blocks_per_group, s.first_data_block
+    per_block = bs // s.desc_size
+    itable = -(-s.inodes_per_group * s.inode_size // bs)
+    groups_old = -(-(s.blocks - fdb) // bpg)
+    gdt_old = -(-groups_old // per_block)
+    blocks = new_blocks
+    while True:
+        groups = -(-(blocks - fdb) // bpg)
+        gdt = -(-groups // per_block)
+        resv = min(max(s.reserved_gdt - (gdt - gdt_old), 0), bs // 4)
+
+        def overhead(g):
+            return 2 + itable + (1 + gdt + resv
+                                 if _has_super(g, s.sparse_super) else 0)
+        rem = (blocks - fdb) % bpg
+        if groups > 1 and rem and rem < overhead(groups - 1) + 50:
+            blocks -= rem
+            continue
+        break
+    if blocks <= s.blocks:
+        return s.blocks, s.free, s.r_blocks
+    free = (s.free + (blocks - s.blocks)
+            - sum(overhead(g) for g in range(groups_old, groups)))
+    r_blocks = (int(s.r_blocks * 100.0 / s.blocks * blocks / 100.0)
+                if s.r_blocks else 0)
+    return blocks, free, r_blocks
+
+
+def kernel_reserve(blocks):
+    """The kernel's reserved clusters for a filesystem of *blocks* blocks."""
+    return min(int(blocks) // 50, _KERNEL_RESERVE_MAX)
+
+
+def usable_blocks(space, new_blocks=None, route=ROUTE_MOUNT):
+    """Blocks the whole-file copies of a build may use on the games partition
+    *space*, grown to *new_blocks* first when that is given:
+    ``free - kernel reserve - root reserve``.  *route* (:data:`ROUTE_MOUNT`
+    or :data:`ROUTE_PINNED`) is how the copies reach the card; only the
+    kernel's driver holds its reserve back.  The root reserve is taken off
+    on both, though a copy by debugfs could use it: never promise room that
+    one route has and the other hasn't."""
+    blocks, free, r_blocks = grown(space, new_blocks)
+    k = kernel_reserve(blocks) if route == ROUTE_MOUNT else 0
+    return max(0, free - k - r_blocks)
+
+
+def p3_blocks_at(layout, target, block_size):
+    """The games partition's length in filesystem blocks once *layout* is
+    grown to the *target* class; ``None`` when that isn't bigger than the
+    card already is."""
+    if not target or target not in CARD_SIZES:
+        return None
+    delta, new = plan(layout, target)
+    if delta <= 0:
+        return None
+    return new.p3_count * SECTOR // int(block_size)
+
+
+def room_by_class(layout, space, classes, route=ROUTE_MOUNT):
+    """``{class: usable bytes}`` on the games partition *space* of a card
+    laid out as *layout*, at each of *classes* (as it is for its own class or
+    a smaller one), smallest class first."""
+    out = collections.OrderedDict()
+    for c in sorted({c for c in classes if c in CARD_SIZES},
+                    key=CARD_SIZES.get):
+        nb = p3_blocks_at(layout, c, space.block_size)
+        out[c] = usable_blocks(space, nb, route) * space.block_size
+    return out
+
+
+def smallest_fit(need, room, above=None):
+    """The smallest class of *room* (:func:`room_by_class`) whose usable
+    bytes hold *need* bytes, or ``None``.  With *above*, only classes bigger
+    than that one are considered."""
+    floor = CARD_SIZES.get(above, 0) if above else 0
+    for c, have in room.items():
+        if CARD_SIZES[c] > floor and need <= have:
+            return c
+    return None
+
+
+def candidates(original_path):
+    """The classes a build of *original_path* can come out at, smallest
+    first: its own, then the bigger ones this computer can grow it to
+    (:func:`offered`)."""
+    with open(_lp(original_path), "rb") as f:
+        own = class_of(read_layout(f).laid_out)
+    return [c for c in CARD_SIZES if c == own or c in offered(original_path)]
+
+
+def room_gained(path, target, route=ROUTE_MOUNT):
+    """Usable bytes the games partition of the card image at *path* gains
+    when the card is grown to *target* (0 when it is that big already)."""
+    from .ext4 import Ext4Reader
+    with open(_lp(path), "rb") as f:
+        layout = read_layout(f)
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        space = p3_space(Ext4Reader(f, P3_START * SECTOR,
+                                    size - P3_START * SECTOR))
+    nb = p3_blocks_at(layout, target, space.block_size)
+    if not nb:
+        return 0
+    return ((usable_blocks(space, nb, route) - usable_blocks(space, None, route))
+            * space.block_size)
+
+
+def size_words(n):
+    """A byte count the way a user reads one: ``7.87 GB``, ``352 MB``,
+    ``4.2 MB``, ``12 KB``."""
+    n = max(0, int(n))
+    if n >= 10 ** 9:
+        return "%.2f GB" % (n / 1e9)
+    if n >= 10 ** 7:
+        return "%d MB" % round(n / 1e6)
+    if n >= 10 ** 6:
+        return "%.1f MB" % (n / 1e6)
+    return "%d KB" % max(1 if n else 0, round(n / 1e3))
+
+
+class WontFit(CardSizeError):
+    """What a build copies on whole doesn't fit the games partition, found
+    before anything was encoded or written.  ``str()`` is the refusal a user
+    reads.
+
+    *need* and *avail* are bytes: what the build adds to the partition and
+    what the partition has for it.  *items* are ``(bytes, card_path)`` for
+    the files that grow the most.  *fits* is the smallest SD card size the
+    build does fit at (with *fits_room*, its usable bytes there), or
+    ``None``; *largest* / *largest_room* the biggest size that was
+    considered, said when even that is too small.  *at* is the size this
+    build is for, when it grows the card."""
+
+    def __init__(self, need, avail, items=(), fits=None, fits_room=None,
+                 largest=None, largest_room=None, at=None):
+        self.need = int(need)
+        self.avail = int(avail)
+        self.items = sorted(items, reverse=True)
+        self.fits = fits
+        self.fits_room = fits_room
+        self.largest = largest
+        self.largest_room = largest_room
+        self.at = at
+        super().__init__(self._sentence())
+
+    def _sentence(self):
+        msg = ("This build needs %s more on the card's games partition and it "
+               "has %s free%s, so the build was stopped before anything was "
+               "encoded or written."
+               % (size_words(self.need), size_words(self.avail),
+                  " on a %s SD card" % words(self.at) if self.at else ""))
+        out = ("fewer or smaller replacements, or fewer longer sounds")
+        if self.fits:
+            msg += (" Build it for a %s SD card (SD card size on the Write "
+                    "tab: %s free there), or take something out (%s)."
+                    % (words(self.fits), size_words(self.fits_room), out))
+        elif self.largest and self.largest_room is not None:
+            msg += (" Even a %s SD card has only %s free there, so something "
+                    "has to come out (%s)."
+                    % (words(self.largest), size_words(self.largest_room), out))
+        else:
+            msg += " Something has to come out (%s)." % out
+        big = [(n, rel) for n, rel in self.items if n > 0][:5]
+        if big:
+            msg += "  Biggest: %s." % ", ".join(
+                "%s (+%s)" % (rel, size_words(n)) for n, rel in big)
+        return msg
+
+
+# ---------------------------------------------------------------------------
 # e2fsprogs, wherever this platform keeps it
 # ---------------------------------------------------------------------------
 

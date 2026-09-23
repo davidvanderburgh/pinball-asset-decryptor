@@ -222,8 +222,9 @@ function Destination({ s }) {
 
 // Stern Spike 2: the SD card class the build is for (the games partition
 // grows to fill it).  An image build only: a direct write keeps the card's
-// own partitions.  The note says what the original is and what the choice
-// costs, or, in red, why this original can't be built at that size.
+// own partitions.  The note says what the original is, the room its games
+// partition has at each size, and what the choice costs, or, in red, why
+// this original can't be built at that size.
 function CardSize({ s }) {
   return html`<div class="stack wr-build">
     <label class="lbl" for="wr-cardsize" ...${tip(s.card_size_tip)}>${s.card_size_label}</label>

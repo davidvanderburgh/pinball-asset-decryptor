@@ -25,7 +25,9 @@ import os
 import pickle
 import re
 import struct
+import sys
 import tempfile
+import threading
 import time
 import wave
 from collections import namedtuple
@@ -4880,6 +4882,346 @@ class NothingToWrite(FileNotFoundError):
 _NothingToWrite = NothingToWrite
 
 
+# --------------------------------------------------------------------------
+# PAD-176: does what a build copies on whole fit the card's games partition?
+# --------------------------------------------------------------------------
+# A build whose full-size videos, grown sound bank and rebuilt files overran
+# the games partition used to find out only at the copy, after a twenty-minute
+# encode, leaving a card whose validation records described files that never
+# landed.  Every number the comparison needs is known before the encode: the
+# partition's free blocks (card_size.p3_space, grown to the build's SD card
+# size by card_size.grown), the size of every file a replacement video can go
+# on as, and the grown bank's exact length (_grown_bank_bytes).
+
+#: What the pre-flight adds for the whole-file copies it can't size before the
+#: encode: the game program grown for longer text or the blip-free cave, a
+#: scene re-serialised around longer text or a resized image, a mode's own
+#: files and the manifest that indexes them.  Each is staged after the audio
+#: encode; on a stock card each is kilobytes to a few MB.  The copy-time check
+#: (core/ext4_grow.py) still stops a build that outgrows this.
+_SPACE_MARGIN = 8 << 20
+
+#: Blocks one whole-file copy may take beyond its data: the leaf of its extent
+#: tree when the free space it lands in is scattered (an 8 GB card's is).
+_SPACE_SLACK_BLOCKS = 1
+
+#: EXT4_HUGE_FILE_FL: the inode counts its i_blocks in filesystem blocks
+#: instead of 512-byte sectors.
+_HUGE_FILE_FL = 0x40000
+
+#: What :func:`write_image` measures a build against.  *reference* is the card
+#: the copies land on (the original for a whole build, the build already at
+#: the output for an update), *grow_to* the class a whole build grows it to
+#: first, *sizes* the classes the Write tab offers for the original
+#: (card_size.offered).
+_SpaceBudget = namedtuple("_SpaceBudget", "reference grow_to updating sizes")
+
+#: The room :func:`_grows_within_bank_limit` may give the grown sound bank on
+#: the games partition: *limit* the largest ``image.bin`` it can take beside
+#: everything else the build copies whole (*others* bytes of the partition's
+#: *free*), and *suggest(bank_bytes)* the smallest SD card size with room for
+#: a bank that long, or None.
+_BankRoom = namedtuple("_BankRoom", "limit free others suggest")
+
+#: The budget of the build running on THIS thread, set by :func:`write_image`
+#: around its :func:`_compute_patches` call (:class:`_SpaceScope`).  Handed
+#: over this way rather than as an argument because _compute_patches'
+#: signature is pinned (tests/test_stern_write_compute_patches.py) and a dozen
+#: stand-ins for it take exactly that signature; a headless caller that wants
+#: the check opens the scope itself.  :func:`write_device` and the emulator's
+#: override sets set none and are never measured: a direct write copies
+#: nothing whole, and the rig binds its files with no partition to fill.
+_BUILD_SPACE = threading.local()
+
+
+class _SpaceScope:
+    """``with _SpaceScope(budget):`` - *budget* is the build's for the
+    :func:`_compute_patches` run inside it, on this thread."""
+
+    def __init__(self, budget):
+        self.budget = budget
+        self.prev = None
+
+    def __enter__(self):
+        self.prev = getattr(_BUILD_SPACE, "budget", None)
+        _BUILD_SPACE.budget = self.budget
+        return self
+
+    def __exit__(self, *exc):
+        _BUILD_SPACE.budget = self.prev
+        return False
+
+
+def _grown_bank_size(img_path, byidx, grows):
+    """The exact length ``image.bin`` comes to once :func:`_stage_grown_image`
+    has appended every sound in *grows*, read off the bank's header before
+    anything is staged."""
+    from .spike2 import masterdir as MD
+    with open(_lp(img_path), "rb") as f:
+        md_off, count = MD.header_geometry(f.read(0x100))
+    return _grown_bank_bytes(md_off, count,
+                             [_grown_body_bytes(byidx[i], grows[i][1])
+                              for i in sorted(grows)])
+
+
+class _SpaceCheck:
+    """PAD-176's pre-flight: whether the files this build copies onto the card
+    whole fit its games partition, answered before anything is staged,
+    encoded or written.  A build that doesn't fit is refused with
+    :class:`.card_size.WontFit`, which names the smallest SD card size it
+    fits.
+
+    Everything is counted in filesystem blocks, as the copies will change
+    them: a file that grows adds ``ceil(new / block) - blocks it holds now``,
+    one that shrinks adds nothing (the copy-time check counts the same way).
+    The partition's free space is the REFERENCE card's (the original, or the
+    build already at the output for an update, whose files are counted as
+    they are there now), grown to the build's SD card size first when the
+    build grows it.  *route* (card_size.ROUTE_MOUNT / ROUTE_PINNED) is how the
+    copies reach the card, which decides whether the kernel's reserve comes
+    off.
+
+    A replacement video goes on as the user's own file or as the app's
+    converted copy, and which is only settled once each is probed
+    (:func:`_intact_copy_source`, an ffprobe or two a clip).  So each clip
+    counts between the smaller and the bigger of the two: the build is
+    refused only when even the smaller ones don't fit, and warned when only
+    the bigger ones don't.  A clip fitted into its slot in place (no assigned
+    original) adds nothing."""
+
+    def __init__(self, budget, disk_f, parts, route, unsized, log):
+        from . import card_size as _cs
+        from .ext4 import Ext4Reader
+        self.cs = _cs
+        self.log = log
+        self.route = route
+        self.unsized = bool(unsized)
+        self.updating = bool(budget.updating)
+        self.done = False
+        self.videos = []           # (card_rel, lo_blocks, hi_blocks)
+        self._can_copy = None
+        self._img_rel = None
+        orig, _fw, self._img_node = _locate(disk_f, parts)
+        self._orig = orig
+        off = orig.base
+        if self.updating:
+            with open(_lp(budget.reference), "rb") as f:
+                f.seek(0, os.SEEK_END)
+                self._scan(Ext4Reader(f, off, f.tell() - off))
+        else:
+            self._scan(orig)
+        self.bs = self.space.block_size
+        try:
+            with open(_lp(budget.reference), "rb") as f:
+                layout = _cs.read_layout(f)
+        except (_cs.CardSizeError, OSError):
+            layout = None            # not Stern-shaped: measured as it is
+        grow_to = None if self.updating else budget.grow_to
+        self.at = grow_to if layout is not None else None
+        nb = (_cs.p3_blocks_at(layout, grow_to, self.bs)
+              if layout is not None else None)
+        self.avail = _cs.usable_blocks(self.space, nb, route)
+        self.room, self.current = {}, None
+        if layout is not None:
+            own = _cs.class_of(layout.laid_out)
+            self.current = grow_to or own
+            self.room = _cs.room_by_class(
+                layout, self.space, [own] + list(budget.sizes or ()), route)
+        self.margin = -(-_SPACE_MARGIN // self.bs) if self.unsized else 0
+
+    def _scan(self, reader):
+        self.space = self.cs.p3_space(reader)
+        self.files, self._by_block = {}, {}
+        for p, _ino, node in reader.iter_regular_files(min_size=0,
+                                                       max_depth=20):
+            rel = p.lstrip("/")
+            self.files[rel] = node
+            self._by_block[bytes(node["i_block"])] = rel
+
+    def _held(self, node):
+        """Blocks *node* holds on the partition now (its extent tree too)."""
+        if node is None:
+            return 0
+        blocks = node.get("blocks_lo")
+        if blocks is None:
+            return -(-int(node.get("size") or 0) // self.bs)
+        if int(node.get("flags") or 0) & _HUGE_FILE_FL:
+            return int(blocks)
+        return int(blocks) * 512 // self.bs
+
+    def _growth(self, node, new_bytes):
+        return max(0, -(-int(new_bytes) // self.bs) - self._held(node))
+
+    def add_videos(self, video_edits, originals):
+        """Count each changed video that goes on whole: the ones with an
+        assigned replacement (*originals*, the staged_changes "video" map)
+        whose file is still there, exactly as _prepare_video_patches picks
+        them."""
+        for fname, card_path, staged in video_edits:
+            src = (originals or {}).get("video/" + fname)
+            if not (src and os.path.isfile(src)):
+                continue                # fitted into its slot in place
+            rel = card_path.lstrip("/")
+            node = self.files.get(rel)
+            if node is None:
+                continue                # not on the card: the build skips it
+            sizes = [n for n in (_size(src), _size(staged)) if n] or [0]
+            self.videos.append((rel, self._growth(node, min(sizes)),
+                                self._growth(node, max(sizes))))
+
+    def img_rel(self):
+        """The sound bank's path on the reference card."""
+        if self._img_rel is None and self._img_node is not None:
+            if self.updating:
+                self._img_rel = _card_rel_path(self._orig, self._img_node)
+            else:
+                self._img_rel = self._by_block.get(
+                    bytes(self._img_node["i_block"]))
+        return self._img_rel
+
+    def _bank_growth(self, bank_bytes):
+        rel = self.img_rel()
+        node = self.files.get(rel) if rel else None
+        if node is None or bank_bytes is None:
+            return 0
+        return self._growth(node, bank_bytes)
+
+    def _suggest(self, need_blocks):
+        return self.cs.smallest_fit(need_blocks * self.bs, self.room,
+                                    above=self.current)
+
+    def bank_room(self):
+        """The :data:`_BankRoom` a grown bank has beside the videos (counted
+        at their BIGGER size, so the room the budget hands out never runs the
+        copy out of space), or None when the bank isn't on the card."""
+        rel = self.img_rel()
+        node = self.files.get(rel) if rel else None
+        if node is None:
+            return None
+        others = (sum(v[2] for v in self.videos)
+                  + (len(self.videos) + 1) * _SPACE_SLACK_BLOCKS + self.margin)
+        limit = (self._held(node) + self.avail - others) * self.bs
+
+        def suggest(bank_bytes):
+            return self._suggest(others + self._growth(node, bank_bytes))
+        return _BankRoom(limit=limit, free=self.avail * self.bs,
+                         others=others * self.bs, suggest=suggest)
+
+    def _copies_whole(self):
+        """Whether this computer copies files onto the card whole at all.
+        Without the ext4 driver every video is fitted into its slot and
+        nothing grows, so there is nothing to refuse.  Asked only before a
+        refusal: it starts WSL."""
+        if self._can_copy is None:
+            from ...core import ext4_grow
+            try:
+                self._can_copy = bool(ext4_grow.available()[0])
+            except Exception:  # noqa: BLE001 - unknown: let the copy decide
+                self._can_copy = False
+        return self._can_copy
+
+    def check_grown(self, img_path, byidx, grows):
+        """:meth:`check` with the sound bank at the length the grows in
+        *grows* (idx -> ``(room, wanted)``) give it, or none grown."""
+        bank = None
+        if grows:
+            try:
+                bank = _grown_bank_size(img_path, byidx, grows)
+            except Exception as e:  # noqa: BLE001 - the stage says it better
+                self.log("The grown sound bank's length could not be worked "
+                         "out ahead (%s); the copy at the end still checks "
+                         "the room for it." % e, "info")
+        self.check(bank_bytes=bank)
+
+    def check(self, bank_bytes=None, final=True):
+        """Refuse the build (:class:`.card_size.WontFit`) when what it copies
+        on whole can't fit, counting the grown bank at *bank_bytes* when it
+        grows one.  With *final* the budget is logged and the check is done;
+        without, only the refusal can happen (the videos, before the audio is
+        read)."""
+        if self.done:
+            return
+        cs, bs = self.cs, self.bs
+        bank = self._bank_growth(bank_bytes)
+        jobs = len(self.videos) + (1 if bank_bytes is not None else 0)
+        extra = jobs * _SPACE_SLACK_BLOCKS + self.margin
+        lo = sum(v[1] for v in self.videos) + bank
+        hi = sum(v[2] for v in self.videos) + bank
+        need_lo, need_hi = lo + extra, hi + extra
+        at = " on a %s SD card" % cs.words(self.at) if self.at else ""
+        if lo and need_lo > self.avail:
+            if not self._copies_whole():
+                # every clip is fitted into its slot and nothing grows: no
+                # whole-file copy to measure (the video step says why)
+                self.done = True
+                return
+            items = [(v[1] * bs, v[0]) for v in self.videos if v[1]]
+            if bank:
+                items.append((bank * bs, self.img_rel()))
+            fits = self._suggest(need_hi)
+            bigger = [c for c in self.room if self.current is None
+                      or cs.CARD_SIZES[c] > cs.CARD_SIZES[self.current]]
+            largest = bigger[-1] if bigger and not fits else None
+            self.done = True
+            raise cs.WontFit(
+                need_lo * bs, self.avail * bs, items, fits=fits,
+                fits_room=self.room.get(fits) if fits else None,
+                largest=largest,
+                largest_room=self.room.get(largest) if largest else None,
+                at=self.at)
+        if not final:
+            return
+        self.done = True
+        if not lo:
+            self.log("The games partition has %s free%s."
+                     % (cs.size_words(self.avail * bs), at), "info")
+            return
+        self.log("The games partition has %s free%s and this build needs %s "
+                 "of it." % (cs.size_words(self.avail * bs), at,
+                             "about " + cs.size_words(need_lo * bs)
+                             if need_hi == need_lo else
+                             "between %s and %s"
+                             % (cs.size_words(need_lo * bs),
+                                cs.size_words(need_hi * bs))), "info")
+        if need_hi > self.avail and self._copies_whole():
+            fits = self._suggest(need_hi)
+            self.log("This build may need up to %s of the games partition's "
+                     "%s: each replacement video goes on as your own file or "
+                     "as the app's converted copy, whichever the machine can "
+                     "play, and that is settled only when the videos are "
+                     "checked. If the bigger ones go on, the copy at the end "
+                     "will fail.%s"
+                     % (cs.size_words(need_hi * bs),
+                        cs.size_words(self.avail * bs),
+                        " Building for a %s SD card (SD card size on the "
+                        "Write tab) leaves room either way."
+                        % cs.words(fits) if fits else ""), "warning")
+
+
+def _space_check(space, disk_f, parts, assets_dir, video_edits, modes,
+                 unsized, log):
+    """The build's :class:`_SpaceCheck`, with its videos counted, or None
+    when the build isn't measured (*space* is None) or can't be: a card the
+    reader can't size is left to the copy-time check, and the log says so."""
+    if space is None:
+        return None
+    from . import card_size as _cs
+    pinned = sys.platform == "darwin" or (modes and not space.updating)
+    try:
+        chk = _SpaceCheck(space, disk_f, parts,
+                          _cs.ROUTE_PINNED if pinned else _cs.ROUTE_MOUNT,
+                          unsized, log)
+        if video_edits:
+            from ...core import staged_changes as _sc
+            chk.add_videos(video_edits,
+                           _sc.load(assets_dir).get("video") or {})
+    except Exception as e:  # noqa: BLE001 - never fail a build on a measure
+        log("The games partition's free space could not be measured before "
+            "the build (%s); the copy at the end still checks it." % e, "info")
+        return None
+    return chk
+
+
 def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                      phase=None, label=None, dest_is_device=False,
                      boot_screen=True, sound_ok=None):
@@ -4897,7 +5239,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     leaves a replaced boot screen out (an override set: the emulator starts
     the game without it).  ``sound_ok=False`` closes the modes' own-sound
     gate for this build alone (they are left out with the reason); ``None``
-    consults the environment gate exactly as before.
+    consults the environment gate exactly as before.  Inside a
+    :class:`_SpaceScope` (which :func:`write_image` opens around this call)
+    what the build copies on whole is measured against the games partition
+    before anything is encoded, and :class:`.card_size.WontFit` is raised when
+    it can't fit (:class:`_SpaceCheck`); outside one nothing is measured.
 
     Returns ``(writes, counts, grow_plan, audio_mode, valpatch_mode)`` where
     ``counts`` is
@@ -5179,6 +5525,24 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             % (sum(len(v) for v in layout_edits.values()),
                len(layout_edits)), "info")
 
+    # PAD-176: what this build copies on whole, against the room on the games
+    # partition, before the firmware and the sound bank are read out of the
+    # card or anything is encoded.  The videos are counted now, and a build
+    # whose videos alone can't fit stops here; the grown sound bank is
+    # counted once its exact length is known (after the play-table filter and
+    # the 2 GB trim), still before it is staged.
+    space = getattr(_BUILD_SPACE, "budget", None)
+    space_chk = None
+    if space is not None and not dest_is_device:
+        _modes_on = bool(mode_list or code_list)
+        space_chk = _space_check(
+            space, disk_f, parts, assets_dir, video_edits, _modes_on,
+            # whole-file copies sized only after the encode (_SPACE_MARGIN)
+            bool(text_edits or radimg_edits or _modes_on
+                 or (audio_edits and _pathA_enabled())), log)
+        if space_chk is not None:
+            space_chk.check(final=False)
+
     def _read_prog(c, t):
         if progress:
             progress(int(c * 10 / max(t, 1)), 100, "Reading image.bin")
@@ -5310,9 +5674,16 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         grows = _grows_named_by_a_descriptor(
                             grows, {p["idx"]: p for p in params}, desc_sites,
                             log)
+                        # The bank's growth is paid out of the games
+                        # partition too, beside the full-size videos: with a
+                        # budget the room left there caps it as well, so the
+                        # keep-whole order trims the least wanted songs
+                        # rather than the copy failing after the encode.
                         grows = _grows_within_bank_limit(
                             grows, {p["idx"]: p for p in params}, img_path,
-                            log, priority=_grow_priority_idxs(assets_dir))
+                            log, priority=_grow_priority_idxs(assets_dir),
+                            room=(space_chk.bank_room()
+                                  if space_chk is not None else None))
                         _stage_done(log, "reading the game's play tables", t0)
                     if mode_sound:
                         # Item 149: a mode's own end sound is a FORCED grow of
@@ -5350,6 +5721,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, params, desc_sites, audio_edits,
                             grows, mode_own, os.path.join(grow_work, "own_sounds"),
                             log)
+                    # PAD-176: every grow is settled (the modes' own sounds
+                    # included), so the bank's exact length is known: the
+                    # whole budget is checked HERE, before the bank is staged,
+                    # derived or anything is encoded.
+                    if space_chk is not None:
+                        space_chk.check_grown(
+                            img_path, {p["idx"]: p for p in params}, grows)
                     # The records that loop (the modes' music beds): the
                     # chain encode's loops, and part of the grown bank's key.
                     _loop_idx = {int(u["idx"]) for u in (mode_own_used or ())
@@ -5729,6 +6107,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 # Per-song music banks (image-scNN.bin) — re-encode each edited
                 # song back into its bank (own fresh CatEmu per bank).
                 if music_edits:
+                    # a build with no cat-0 sounds is measured before this
+                    # encode (in place, but it takes minutes)
+                    if space_chk is not None:
+                        space_chk.check()
                     if progress:
                         progress(80, 100, "Re-encoding music bank(s)...")
                     t0 = time.monotonic()
@@ -5739,6 +6121,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         return None, None, None, None
                     _stage_done(log, "re-encoding %d music-bank song(s)"
                                 % len(music_edits), t0)
+
+        # A build with no sound to encode is measured here, before its videos
+        # and text are prepared (a no-op when the audio step measured it).
+        if space_chk is not None:
+            space_chk.check()
 
         # A video / image / text-only write (or one whose audio turned out
         # unsupported) still needs a reader to resolve the loose-file inodes.
@@ -6795,7 +7182,7 @@ def _apply_update(disk_f, index, output_path, plan, writes, log, label=None):
             t0 = time.monotonic()
             n_ok = _grow_whole(output_path, off,
                                [(rel, src) for _k, rel, src, *_ in jobs], log,
-                               hint_sizes=plan.get("hint_sizes"))
+                               hint_sizes=plan.get("hint_sizes"), report=plan)
             _stage_done(log, "copying %d file(s) whole onto the card"
                         % len(jobs), t0)
             for i, (key, rel, src, kind, digest, size) in enumerate(jobs):
@@ -6923,10 +7310,39 @@ def _install_modes(output_path, modes, landed, planned, log):
     return rec, True
 
 
-def _report_failed_copies(failed, counts, audio_mode, log):
+def _rebuilt_not_written(no_space=False, rels=(), switches=True):
+    """The error after a rebuilt game file (the game program, a scene, the
+    grown sound bank) did not land, naming *rels* when given.  When the games
+    partition ran out of room (*no_space*) it points at making room - the
+    no-space line above it names the SD card size that fits - rather than
+    at the environment switches that build the card without the longer sounds
+    and text, which a user can't set from the app and which throw away what
+    the build was for.  Otherwise it says to re-run the Write, and with
+    *switches* names those switches as the size-neutral way out."""
+    msg = ("A rebuilt game file (the game program with longer text or the "
+           "blip-free cave, a re-serialised scene, or a sound bank grown to "
+           "hold a longer callout) could NOT be written to the card%s%s. Its "
+           "SD-validation record was already updated to match, so this card "
+           "will fail validation"
+           % (" because its games partition ran out of room" if no_space
+              else "", ": " + ", ".join(rels) if rels else ""))
+    if no_space:
+        return msg + (". Make room and Write again: build for a bigger SD card "
+                      "(SD card size on the Write tab) when the line above "
+                      "says one fits, or take something out.")
+    if not switches:
+        return msg + " — re-run the Write."
+    return msg + (" — re-run the Write, or build with PAD_STERN_TEXT_GROW=0 "
+                  "(and PAD_STERN_SKIP_KEYPATCH=1 for the cave, "
+                  "PAD_STERN_AUDIO_GROW=0 for the bank) for a standard "
+                  "(size-neutral) build.")
+
+
+def _report_failed_copies(failed, counts, audio_mode, log, no_space=False):
     """Say which whole-file copies of an update did not land, and take them
     out of the completion counts so the summary never claims a file the card
-    doesn't have — the full build's accounting, per kind."""
+    doesn't have — the full build's accounting, per kind.  *no_space*: the
+    copies stopped because the games partition ran out of room."""
     n_audio, n_video, n_image, n_text = counts
     vids = [rel for _k, rel, kind in failed if kind == "video"]
     boots = [rel for _k, rel, kind in failed if kind == "boot"]
@@ -6944,12 +7360,8 @@ def _report_failed_copies(failed, counts, audio_mode, log):
             "it still shows what the last build put there. Fix the issue "
             "above and run the Write again.", "error")
     if others:
-        log("A rebuilt game file (the game program with longer text or the "
-            "blip-free cave, a re-serialised scene, or a sound bank grown to "
-            "hold a longer callout) could NOT be written to the card: %s. Its "
-            "SD-validation record was already updated to match, so this card "
-            "will fail validation — re-run the Write."
-            % ", ".join(rel for rel, _k in others), "error")
+        log(_rebuilt_not_written(no_space, [rel for rel, _k in others],
+                                 switches=False), "error")
         if any(kind == "bank" for _r, kind in others):
             log("The grown sound bank was one of them, so NONE of the "
                 "re-encoded sounds are on this card.", "error")
@@ -7107,12 +7519,20 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     parts = _linux_partitions(original_path)
     disk_f = open(_lp(original_path), "rb")
     grow_plan = None
+    # PAD-176: the card the whole-file copies will land on, measured before
+    # the encode (_SpaceCheck): the original grown to this build's SD card
+    # size, or for an update the build already at the output.
+    budget = _SpaceBudget(reference=output_path if updating else original_path,
+                          grow_to=None if updating else grow_to,
+                          updating=updating, sizes=hint_sizes)
     try:
         try:
-            writes, counts, grow_plan, audio_mode, valpatch_mode = \
-                _compute_patches_or_restore(restore_ok, log,
-                                            disk_f, parts, assets_dir, log,
-                                            progress, cancel, label=label)
+            with _SpaceScope(budget):
+                writes, counts, grow_plan, audio_mode, valpatch_mode = \
+                    _compute_patches_or_restore(restore_ok, log,
+                                                disk_f, parts, assets_dir,
+                                                log, progress, cancel,
+                                                label=label)
         except NothingToWrite:
             # Item 149: every mode taken out of a project with nothing else to
             # write.  The card at the output still carries the last build's
@@ -7226,7 +7646,8 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
             if failed:
                 complete = False
                 counts, audio_mode = _report_failed_copies(
-                    failed, counts, audio_mode, log)
+                    failed, counts, audio_mode, log,
+                    no_space=bool(plan.get("no_space")))
             n_audio, n_video, n_image, n_text = counts
         else:
             # the copy is already on disk; patch the changed bytes in place
@@ -7265,15 +7686,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                     # Serious: the .sidx record already describes the rebuilt firmware
                     # (or re-serialised scene), so the card now claims a file it
                     # doesn't have.
-                    log("A rebuilt game file (the game program with longer text or "
-                        "the blip-free cave, a re-serialised scene, or a sound bank "
-                        "grown to hold a longer callout) could NOT be "
-                        "written to the card. Its SD-validation record was already "
-                        "updated to match, so this card will fail validation — re-run "
-                        "the Write, or build with PAD_STERN_TEXT_GROW=0 (and "
-                        "PAD_STERN_SKIP_KEYPATCH=1 for the cave, "
-                        "PAD_STERN_AUDIO_GROW=0 for the bank) for a standard "
-                        "(size-neutral) build.", "error")
+                    log(_rebuilt_not_written(grow_plan.get("no_space")), "error")
                     aj = grow_plan.get("audio_job")
                     if aj is not None and n_grown <= aj:
                         log("The grown sound bank was one of them, so NONE of the "
@@ -8370,11 +8783,12 @@ def _grow_video_slots(image_or_device, grow_plan, log):
         return 0
     return _grow_whole(image_or_device, grow_plan["offset"],
                        grow_plan["jobs"], log, epoch=grow_plan.get("epoch"),
-                       hint_sizes=grow_plan.get("hint_sizes"))
+                       hint_sizes=grow_plan.get("hint_sizes"),
+                       report=grow_plan)
 
 
 def _grow_whole(image_or_device, part_offset, jobs, log, epoch=None,
-                hint_sizes=None):
+                hint_sizes=None, report=None):
     """Copy ``[(card_rel, source), ...]`` whole onto the partition at
     *part_offset* through the ext4 driver and return how many landed (they
     land in order, so it is the first N).  Failures are logged, never
@@ -8382,7 +8796,9 @@ def _grow_whole(image_or_device, part_offset, jobs, log, epoch=None,
 
     With *epoch* (a build carrying modes, item 149) the copies go through
     :func:`.ext4_grow.grow_files_pinned` with the clock fixed, so the same
-    project and original give a byte-identical card."""
+    project and original give a byte-identical card.  *report*, a dict,
+    gets ``no_space`` set when the copies stopped because the partition ran
+    out of room, so what the caller says next points at making room."""
     from ...core import ext4_grow
     # The default 1800 s is generous for a handful of videos and thin for a
     # 1-2 GB sound bank on a slow disk (macOS writes it through debugfs).
@@ -8405,6 +8821,8 @@ def _grow_whole(image_or_device, part_offset, jobs, log, epoch=None,
         log("Could not write the full-size file(s): %s" % e, "warning")
         return 0
     except ext4_grow.Ext4GrowError as e:
+        if report is not None and isinstance(e, ext4_grow.Ext4GrowNoSpace):
+            report["no_space"] = True
         log("Writing the full-size file(s) failed: %s%s"
             % (e, _bigger_card_hint(e, image_or_device, part_offset,
                                     hint_sizes)),
@@ -8420,7 +8838,11 @@ def _bigger_card_hint(err, image, part_offset, sizes=None):
     Stern's that is smaller than the biggest class, on a computer that can
     grow one.  *sizes*, when the build knows them, are the classes the Write
     tab offers for its ORIGINAL (card_size.offered): an original it refuses
-    (a pending journal, a multi-boot card) is never pointed at the option."""
+    (a pending journal, a multi-boot card) is never pointed at the option.
+
+    When the failure carries its numbers (``need`` / ``avail``), the ONE
+    smallest size whose room holds the build is named, or the biggest is
+    said to be too small too; without them every bigger size is listed."""
     from ...core import ext4_grow
     from . import card_size as _cs
     if not isinstance(err, ext4_grow.Ext4GrowNoSpace) or not _cs.supported():
@@ -8436,6 +8858,29 @@ def _bigger_card_hint(err, image, part_offset, sizes=None):
               if _cs.CARD_SIZES[c] > _cs.CARD_SIZES.get(cls, 1 << 62)]
     if not bigger:
         return ""
+    bigger.sort(key=_cs.CARD_SIZES.get)
+    need = getattr(err, "need", None)
+    avail = getattr(err, "avail", None)
+    if need is not None and avail is not None:
+        # the room each size adds to what the copy measured, on this card
+        try:
+            room = [(c, int(avail) + _cs.room_gained(image, c)) for c in bigger]
+        except Exception:  # noqa: BLE001 - unreadable: list them instead
+            room = None
+        if room:
+            for c, have in room:
+                if int(need) <= have:
+                    return ("  Or, if the SD card in the machine is %s or "
+                            "bigger, build it for a %s SD card: SD card size "
+                            "on the Write tab grows the games partition, which "
+                            "then has %s free."
+                            % (_cs.words(c), _cs.words(c),
+                               _cs.size_words(have)))
+            c, have = room[-1]
+            return ("  Even built for a %s SD card (SD card size on the Write "
+                    "tab) the games partition would have only %s free, so "
+                    "something has to come out." % (_cs.words(c),
+                                                     _cs.size_words(have)))
     return ("  Or, if the SD card in the machine is bigger than this image, "
             "build for a bigger card: SD card size on the Write tab (%s) "
             "grows the games partition to fill it."
@@ -12192,19 +12637,37 @@ def _grown_bank_bytes(md_off, count, bodies):
 _STEREO_BYTES_PER_MIN = 4 * 44100 * 60
 
 
-def _grow_budget_minutes(md_off, count, bodies):
+def _grow_budget_minutes(md_off, count, bodies, limit=None):
     """Stereo minutes of lengthened sound the bank can still hold once the
-    appended *bodies* (byte sizes) are placed, against
-    :data:`~.spike2.emulator.MAX_IMAGE_BYTES`.  Conservative: it leaves room
+    appended *bodies* (byte sizes) are placed, against *limit* (default
+    :data:`~.spike2.emulator.MAX_IMAGE_BYTES`).  Conservative: it leaves room
     for one more body's own header overhead, so a clip of that length really
     fits."""
     from .spike2.emulator import MAX_IMAGE_BYTES
-    spare = max(0, MAX_IMAGE_BYTES - _grown_bank_bytes(
-        md_off, count, list(bodies) + [_grown_body_bytes({}, 0)]))
+    spare = max(0, (MAX_IMAGE_BYTES if limit is None else limit)
+                - _grown_bank_bytes(md_off, count,
+                                    list(bodies) + [_grown_body_bytes({}, 0)]))
     return spare / float(_STEREO_BYTES_PER_MIN)
 
 
-def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None):
+def _fit_grows(order, grows, byidx, md_off, count, limit):
+    """``(kept, cut, bodies)``: the grows of *order* whose bodies fit a bank
+    of at most *limit* bytes, fitted in that order.  A sound that doesn't fit
+    is skipped rather than ending the pass, so a shorter one after it can
+    still use what is left."""
+    kept, cut, bodies = {}, {}, []
+    for idx in order:
+        b = _grown_body_bytes(byidx[idx], grows[idx][1])
+        if _grown_bank_bytes(md_off, count, bodies + [b]) <= limit:
+            kept[idx] = grows[idx]
+            bodies.append(b)
+        else:
+            cut[idx] = grows[idx]
+    return kept, cut, bodies
+
+
+def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None,
+                             room=None):
     """*grows* less every sound whose longer copy would take the sound bank
     past :data:`~.spike2.emulator.MAX_IMAGE_BYTES`, the largest file the game
     can open; those are trimmed to fit and named in one log line.  A budget
@@ -12218,14 +12681,22 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None):
     failed outright, with the derive blaming an unrecognised game update
     (PAD-175, PAD-176).
 
+    The bank's growth also has to fit on the card's games partition, beside
+    the full-size videos.  On a stock 8 GB Godzilla that partition has 352 MB
+    for all of it, less than the 2 GB limit leaves, so it binds first.  With
+    *room* (a :data:`_BankRoom`, from the build's :class:`_SpaceCheck`) the
+    bank is also held to what the partition can take, so the order below
+    trims the least wanted songs instead of the whole build failing at the
+    copy, and the trim names the SD card size that keeps them.
+
     *priority* is an optional sequence of idxs the user chose to keep whole
     (item PAD-181): they are fitted FIRST, in the given order, so when the
     bank can't hold everything the songs the user cares about win rather than
     whichever happen to have the lowest slot numbers.  Everything else follows
-    in slot order.  A sound that doesn't fit is skipped rather than ending the
-    pass, so a shorter one after it can still use what is left."""
+    in slot order."""
     if not grows:
         return grows
+    from . import card_size as _cs
     from .spike2 import masterdir as MD
     from .spike2.emulator import MAX_IMAGE_BYTES
     with open(_lp(img_path), "rb") as f:
@@ -12238,30 +12709,64 @@ def _grows_within_bank_limit(grows, byidx, img_path, log, priority=None):
             order.append(idx)
             seen.add(idx)
     order += [idx for idx in sorted(grows) if idx not in seen]
-    kept, cut, bodies = {}, {}, []
-    for idx in order:
-        b = _grown_body_bytes(byidx[idx], grows[idx][1])
-        if _grown_bank_bytes(md_off, count, bodies + [b]) <= MAX_IMAGE_BYTES:
-            kept[idx] = grows[idx]
-            bodies.append(b)
-        else:
-            cut[idx] = grows[idx]
+    limit = MAX_IMAGE_BYTES
+    card_binds = room is not None and room.limit < MAX_IMAGE_BYTES
+    if card_binds:
+        limit = room.limit
+    kept, cut, bodies = _fit_grows(order, grows, byidx, md_off, count, limit)
     now = _grown_bank_bytes(md_off, count, bodies)
-    left_min = _grow_budget_minutes(md_off, count, bodies)
-    log("Longer sounds: %d kept whole, the sound bank comes to %d MB of the "
-        "%d MB the game can open, room for about %.1f more minute(s) of "
-        "stereo sound (or twice that in mono)."
-        % (len(kept), now // 10**6, MAX_IMAGE_BYTES // 10**6, left_min),
-        "info")
+    left_min = _grow_budget_minutes(md_off, count, bodies, limit)
+    # The 2 GB limit is the game's (its 32-bit open of the bank), not the
+    # card's, so a bigger SD card doesn't lift it; the card's room does.
+    card_mb = max(limit, _grown_bank_bytes(md_off, count, [])) // 10**6
+    there = ""
+    if room is not None:
+        there = "%s free there" % _cs.size_words(room.free)
+        if room.others >= 10**6:
+            there += (", about %s of it for the other files this build copies "
+                      "whole" % _cs.size_words(room.others))
+    msg = ("Longer sounds: %d kept whole, the sound bank comes to %d MB of the "
+           "%d MB the game can open (the game's own limit, which a bigger SD "
+           "card doesn't raise)"
+           % (len(kept), now // 10**6, MAX_IMAGE_BYTES // 10**6))
+    if card_binds:
+        msg += (", but the card's games partition has room for it to come to "
+                "only %d MB (%s), which leaves room for about %.1f more "
+                "minute(s) of stereo sound (or twice that in mono)."
+                % (card_mb, there, left_min))
+    else:
+        msg += (", room for about %.1f more minute(s) of stereo sound (or "
+                "twice that in mono). Its growth also takes room on the card's "
+                "games partition, which it shares with full-size replacement "
+                "videos%s." % (left_min, " (%s)" % there if there else ""))
+    log(msg, "info")
     if cut:
-        log(*_trimmed_notice(cut, (
-            "the game can't open a sound bank bigger than %d MB, and keeping "
-            "them whole as well would pass that (the bank comes to %d MB%s, "
-            "which leaves room for about %.1f more minute(s) of stereo sound "
-            "or twice that in mono)"
-            % (MAX_IMAGE_BYTES // 10**6, now // 10**6,
-               " with the %d other longer sound(s) kept whole" % len(kept)
-               if kept else "", left_min))))
+        if card_binds:
+            # what the bank would come to at the game's limit alone: the
+            # size a bigger card has to have room for
+            _k, _c, whole = _fit_grows(order, grows, byidx, md_off, count,
+                                       MAX_IMAGE_BYTES)
+            bigger = room.suggest(_grown_bank_bytes(md_off, count, whole))
+            why = ("the card's games partition has room for the sound bank to "
+                   "come to only %d MB (%s)%s, which leaves room for about "
+                   "%.1f more minute(s) of stereo sound or twice that in "
+                   "mono%s"
+                   % (card_mb, there,
+                      ", and the bank comes to %d MB with the %d other longer "
+                      "sound(s) kept whole" % (now // 10**6, len(kept))
+                      if kept else "", left_min,
+                      "; building for a %s SD card (SD card size on the Write "
+                      "tab) gives it the room" % _cs.words(bigger)
+                      if bigger else ""))
+        else:
+            why = ("the game can't open a sound bank bigger than %d MB, and "
+                   "keeping them whole as well would pass that (the bank comes "
+                   "to %d MB%s, which leaves room for about %.1f more "
+                   "minute(s) of stereo sound or twice that in mono)"
+                   % (MAX_IMAGE_BYTES // 10**6, now // 10**6,
+                      " with the %d other longer sound(s) kept whole"
+                      % len(kept) if kept else "", left_min))
+        log(*_trimmed_notice(cut, why))
     return kept
 
 

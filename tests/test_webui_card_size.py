@@ -2,8 +2,10 @@
 the setting persists and is mirrored into PAD_STERN_CARD_SIZE the way the
 grow-for-longer-text option is, and the control is offered only for an
 original laid out the way Stern lays a Spike 2 card out, with the sizes bigger
-than that card's own and a note saying what the original is and what the
-choice costs.  The size the control knows is used wherever a build's size
+than that card's own and a note saying what the original is, how much room
+its games partition has at each size, and what the choice costs.  A build the
+engine's pre-flight refuses for space is one clean dialog.  The size the
+control knows is used wherever a build's size
 matters: the default build name, the Build / flash dialog's fit check, the
 Build / flash dialog's Start (a size the original, or this computer, can't
 build is refused before any of its questions and before anything is
@@ -870,6 +872,210 @@ def test_the_overwrite_prompt_reason_uses_gb(monkeypatch):
         assert mfr.build_update_reason("o", "a", "b") == reason[0]
     finally:
         mfr.set_era(era)
+
+
+# ------------------------------------ the room on the games partition
+# The games partitions of two stock cards as the superblock and descriptors
+# give them (read off the real images, 2026-09-23; the figures the engine's
+# pre-flight measures a build against: tests/test_stern_space_preflight.py).
+GZ_PRO_116 = dict(blocks=1675263, free=89975, ipg=8064, resv_gdt=408)
+JAWS_LE_102 = dict(blocks=3538943, free=1543649, ipg=8192, resv_gdt=863)
+
+
+def _p3(g):
+    return cs.P3Space(block_size=4096, blocks=g["blocks"], free=g["free"],
+                      r_blocks=0, blocks_per_group=32768,
+                      inodes_per_group=g["ipg"], inode_size=256,
+                      reserved_gdt=g["resv_gdt"], first_data_block=0,
+                      desc_size=32, sparse_super=True, meta_bg=False)
+
+
+def _stock_partition(monkeypatch, geometry, harness=None):
+    """card_size.read_space answers with a stock card's games partition.
+    Returns the list of its calls, each True when it was asked on the UI
+    loop of *harness* (a one-item list, filled once the app is up)."""
+    asked = []
+
+    def _read_space(path, offset=cs.P3_START * cs.SECTOR):
+        loop = harness[0].ctx.loop if harness else None
+        asked.append(bool(loop is not None and loop.in_loop()))
+        return _p3(geometry)
+    monkeypatch.setattr(cs, "read_space", _read_space)
+    return asked
+
+
+GZ_ROOM = ("The original is an 8 GB card. Its games partition, where replaced "
+           "videos and longer sounds go, has 352 MB free; built for a 16 GB "
+           "card it has 7.87 GB, for a 32 GB card 22.50 GB.")
+
+
+def test_the_note_gives_the_real_room_at_each_size(tmp_path, monkeypatch):
+    """The note says how much room the games partition has at the
+    original's own size and at each bigger size (usable: the kernel's
+    reserve off), read on the probe's worker thread, never on the UI loop."""
+    card = make_card(tmp_path / "gz.raw", "8G")
+    holder = []
+    asked = _stock_partition(monkeypatch, GZ_PRO_116, holder)
+    with web_app(tmp_path, mfr="stern") as w:
+        holder.append(w)
+        point_at(w, card)
+        assert wait_for(w, lambda: w.state("write")["card_size_cap"])
+        s = w.state("write")
+        assert s["card_size_note"] == GZ_ROOM
+        assert s["card_size_note_kind"] == ""
+        assert asked and not any(asked), "read on the UI loop"
+        probe = w.window.service("write")._card_probe
+        assert probe["room"] == {"8G": (89975 - 4096) * 4096,
+                                 "16G": (1924909 - 4096) * 4096,
+                                 "32G": (5497389 - 4096) * 4096}
+        n = len(asked)
+        w.call("ui.set", "write", "card_size", "16G")
+        assert w.state("write")["card_size_note"] == (
+            GZ_ROOM + " The built image is 15.49 GB and needs an SD card of "
+            "at least 16 GB; flashing it takes longer.")
+        # choosing a size re-reads nothing: the probe has every size's room
+        assert len(asked) == n
+
+
+def test_a_refused_size_says_only_why(tmp_path, monkeypatch):
+    """A size this original can't take: the red note is the reason alone,
+    and no room is worked out at a size it can't be built for."""
+    card = make_card(tmp_path / "multi.raw", "8G")
+    _multi_boot(monkeypatch)
+    _stock_partition(monkeypatch, GZ_PRO_116)
+    with web_app(tmp_path, mfr="stern", settings={"card_size": "32G"}) as w:
+        point_at(w, card)
+        assert wait_for(w, lambda: w.state("write")["card_size_cap"])
+        s = w.state("write")
+        assert s["card_size_note_kind"] == "err"
+        assert "multi-boot card" in s["card_size_note"]
+        assert "free" not in s["card_size_note"]
+        assert list(w.window.service("write")._card_probe["room"]) == ["8G"]
+
+
+def test_a_16g_original_gives_its_own_room_and_32(tmp_path, monkeypatch):
+    card = make_card(tmp_path / "jaws.raw", "16G")
+    _stock_partition(monkeypatch, JAWS_LE_102)
+    with web_app(tmp_path, mfr="stern") as w:
+        point_at(w, card)
+        assert wait_for(w, lambda: w.state("write")["card_size_cap"])
+        assert w.state("write")["card_size_note"] == (
+            "The original is a 16 GB card. Its games partition, where "
+            "replaced videos and longer sounds go, has 6.31 GB free; built "
+            "for a 32 GB card it has 20.93 GB.")
+
+
+def test_the_room_is_read_off_the_real_partition(tmp_path):
+    """No stand-in: a real (tiny) filesystem where a Spike 2 card keeps its
+    games partition, its descriptors counting 200 free 1 KB blocks, of which
+    the kernel keeps 2% back."""
+    from tests import synthetic
+    card = make_card(tmp_path / "gz.raw", "8G")
+    fs = bytearray(synthetic.make_ext2_fs({"game/readme": b"x" * 100}))
+    struct.pack_into("<I", fs, 1024 + 0x0C, 200)        # superblock total
+    struct.pack_into("<H", fs, 2 * 1024 + 0x0C, 200)    # group 0's count
+    with open(card, "r+b") as f:
+        f.seek(cs.P3_START * cs.SECTOR)
+        f.write(bytes(fs))
+    probe = write_mod._probe_card_size(str(card))
+    assert probe["room"]["8G"] == (200 - 512 // 50) * 1024
+    with open(card, "rb") as f:
+        layout = cs.read_layout(f)
+    want = cs.room_by_class(layout, cs.read_space(str(card)),
+                            ["16G", "32G"], cs.ROUTE_MOUNT)
+    assert {c: probe["room"][c] for c in want} == dict(want)
+    assert want["16G"] > 7 * 10 ** 9 and want["32G"] > want["16G"]
+    assert write_mod._room_words(probe["room"], "8G", ["16G", "32G"]) \
+        .startswith(" Its games partition, where replaced videos and longer "
+                    "sounds go, has 195 KB free; built for a 16 GB card it "
+                    "has ")
+
+
+def test_no_room_figure_when_the_partition_cant_be_read(tmp_path):
+    """The synthetic cards above have nothing at the games partition: the
+    note keeps to what the tables say."""
+    card = make_card(tmp_path / "gz.raw", "8G")
+    probe = write_mod._probe_card_size(str(card))
+    assert probe["own"] == "8G" and probe["room"] == {}
+    assert write_mod._room_words({}, "8G", ["16G"]) == ""
+    # a size whose figure is missing is left out, the rest still said
+    assert write_mod._room_words({"8G": 351760384}, "8G", ["16G"]) == (
+        " Its games partition, where replaced videos and longer sounds go, "
+        "has 352 MB free.")
+
+
+def test_the_tip_says_what_a_bigger_card_does_not_lift():
+    tip = write_mod.CARD_SIZE_TIP
+    assert "games partition" in tip
+    assert "about 2 GB on its sound bank" in tip
+    assert "original's space" in tip
+    # the note carries the real figure now
+    assert "few hundred MB" not in tip
+    assert "16G" not in tip and "32G" not in tip
+
+
+# ------------------------------------------ refused by the pre-flight
+def test_a_build_that_wont_fit_is_one_clean_dialog(tmp_path, monkeypatch):
+    """The engine's pre-flight refuses a build that can't fit the games
+    partition (card_size.WontFit, a CardSizeError) before anything is
+    encoded.  The Stern pipeline turns it into a PipelineError, so the user
+    gets ONE "Write Failed" dialog in its own words: no "Unexpected error",
+    no traceback in the log, and a flash chained after the build never
+    starts."""
+    from pinball_decryptor.plugins.stern import pipeline as sp
+    refusal = cs.WontFit(1_990_000_000, 351_760_384,
+                         [(81_000_000, "godzilla_pro/assets/a.asset"),
+                          (20_000_000, "godzilla_pro/assets/b.asset")],
+                         fits="16G", fits_room=7_867_650_048)
+    calls = []
+
+    def _write_image(*a, **k):
+        calls.append(k.get("update"))
+        raise refusal
+    monkeypatch.setattr(sp, "detect_game", lambda p: "godzilla_pro")
+    monkeypatch.setattr(sp, "display_for_key", lambda *a, **k: "Godzilla")
+    monkeypatch.setattr(sp, "engine", SimpleNamespace(
+        AVAILABLE=True, write_image=_write_image,
+        read_build_manifest=lambda p: {}))
+    with web_app(tmp_path, mfr="stern") as w:
+        app = w.app
+        flashed = []
+        monkeypatch.setattr(app, "_start_flash_image",
+                            lambda *a, **k: flashed.append(a))
+        log_cb, phase_cb, progress_cb, done_cb = app._make_callbacks()
+        pipe = sp.SternWritePipeline(
+            str(tmp_path / "orig.raw"), str(tmp_path), str(tmp_path / "o.raw"),
+            log_cb, phase_cb, progress_cb, done_cb)
+
+        def _building():
+            # the run state app._start_write sets, a flash chained after
+            app._active_mode = "write"
+            app._cancel_requested = False
+            app._chain_flash_after_build = (r"\\.\PhysicalDrive9",
+                                            str(tmp_path / "o.raw"))
+            w.window.set_running(True, mode="write")
+        w.run(_building)
+        w.asked.clear()
+        pipe.run()                      # what the build's worker thread does
+        assert calls == [None]
+
+        def _msgs():
+            return [a for a in w.asked if a.get("kind") == "message"]
+        assert wait_for(w, _msgs)
+        w.drain()
+        msgs = _msgs()
+        assert [m["title"] for m in msgs] == ["Write Failed"]
+        text = msgs[0]["message"]
+        assert text == str(refusal)
+        assert text.startswith("This build needs 1.99 GB more on the card's "
+                               "games partition and it has 352 MB free")
+        assert "Build it for a 16 GB SD card" in text
+        assert "16G" not in text and "Unexpected error" not in text
+        lines = [e["text"] for e in w.window._log.get("stern", [])]
+        assert not any("Unexpected error" in t or "Traceback" in t
+                       for t in lines), lines
+        assert app._chain_flash_after_build is None and not flashed
+        assert w.state("shell").get("running") is False
 
 
 # ------------------------------------------------------- Port + build

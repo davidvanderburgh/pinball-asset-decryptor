@@ -381,11 +381,18 @@ class SternWritePipeline(BasePipeline):
             had_modes = (before.get("modes") or {}).get("names") or []
         except Exception:
             had_modes = []
-        counts, audio_mode, valpatch_mode = engine.write_image(
-            self.original_path, self.assets_dir, self.output_path,
-            log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
-            label=display_for_key(key, self.original_path),
-            update=self.update)
+        from .card_size import CardSizeError
+        try:
+            counts, audio_mode, valpatch_mode = engine.write_image(
+                self.original_path, self.assets_dir, self.output_path,
+                log=self._log, progress=self._progress,
+                cancel=lambda: self._cancelled,
+                label=display_for_key(key, self.original_path),
+                update=self.update)
+        except CardSizeError as e:
+            # the SD card size option's refusal is an answer, not a crash:
+            # its sentence, without the traceback an unexpected error gets
+            raise PipelineError("Re-encode", str(e)) from e
         self._set_phase(3)  # Patch image
         # Item 149: the modes this build put on the card, from its record.
         try:

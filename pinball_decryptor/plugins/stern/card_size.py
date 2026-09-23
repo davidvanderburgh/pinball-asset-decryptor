@@ -29,10 +29,10 @@ the bigger class in place: the file grows (sparse where the filesystem allows),
 the extended partition (the two EBRs, /data and /dump) is copied verbatim to
 its new place at the end, read back and compared, the two MBR fields are
 rewritten (the commit point), and ``resize2fs`` grows p3's ext4 to fill the
-partition, followed by a read-only ``e2fsck``.  The partition table that comes
-out is Stern's own for that class.  Nothing before p3's end moves: p1, p2 and
-p3's start are where they were, so every offset the build computed from the
-original is still right.
+partition through a loop device bounded to it, followed by a read-only
+``e2fsck``.  The partition table that comes out is Stern's own for that
+class.  Nothing before p3's end moves: p1, p2 and p3's start are where they
+were, so every offset the build computed from the original is still right.
 
 THE RULES THAT KEEP IT SAFE.
   * Only a card laid out exactly like Stern's (the table above, a stock class
@@ -45,14 +45,19 @@ THE RULES THAT KEEP IT SAFE.
     every regular file's extent map on p3 against the original card after the
     resize: the build's in-place patches were resolved through the ORIGINAL's
     extents, and the next build's update relies on them too.
-  * The card that comes out must pass ``e2fsck -fn`` (read-only) on p3.
+  * resize2fs never sees the image FILE: handed a regular file it truncates
+    it to the filesystem's length at the end, offset or not (see
+    :class:`_E2fs`).  It works on a loop device limited to p3.
+  * The card that comes out must pass ``e2fsck -fn`` (read-only) on p3, keep
+    its size to the byte, and read back as the planned partition table.  A
+    clean e2fsck alone proves little: it passed on a card resize2fs had
+    truncated, because it never reads a new group's uninitialised blocks.
 """
 
 import collections
 import os
 import shlex
 import struct
-import subprocess
 import sys
 import time
 
@@ -250,80 +255,112 @@ def output_parts(original_path, parts, target):
 # e2fsprogs, wherever this platform keeps it
 # ---------------------------------------------------------------------------
 
-def _mac_tools():
-    dirs = ("/opt/homebrew/opt/e2fsprogs/sbin",
-            "/usr/local/opt/e2fsprogs/sbin",
-            "/opt/local/sbin")
-    import shutil
-    tools = {}
-    for name in ("resize2fs", "e2fsck"):
-        for d in dirs:
-            p = os.path.join(d, name)
-            if os.path.isfile(p):
-                tools[name] = p
-                break
-        else:
-            p = shutil.which(name)
-            if not p:
-                return None
-            tools[name] = p
-    return tools
-
-
 class _E2fs:
-    """Runs ``e2fsck`` / ``resize2fs`` against a partition of an image file
-    (``IMG?offset=N`` - no loop device, no root) and hands back the exit
-    code with the output, since e2fsck's exit code is its answer."""
+    """Checks and grows the games partition's filesystem through a LOOP
+    DEVICE bounded to exactly that partition (``losetup -o OFF --sizelimit
+    SIZE``), as root in the Linux this app uses (WSL on Windows).
+
+    NEVER through ``IMG?offset=N``.  e2fsck reads that form fine, but
+    resize2fs 1.47.0, handed a regular file, finishes by truncating it to
+    the new filesystem's length - ``ftruncate(fd, blocks * blocksize)``
+    (resize/main.c:683), with no idea the filesystem starts at an offset.
+    On a real Godzilla card that cut the image off 365 MB into the grown
+    games partition, taking the moved /data and /dump with it, and the
+    e2fsck -fn that followed still passed because it never reads a new
+    group's uninitialised blocks.  A block device is never truncated, and
+    the loop's size limit is the partition's own end.
+
+    macOS has no loop devices, so the option is not offered there yet."""
 
     def __init__(self):
-        self.mac = sys.platform == "darwin"
-        if self.mac:
-            self.tools = _mac_tools()
-            if self.tools is None:
-                raise CardSizeError(
-                    "e2fsprogs isn't installed (brew install e2fsprogs)")
-            self.ex = None
-        else:
-            from ...core.executor import create_executor
-            self.ex = create_executor()
-            ok, msg = self.ex.check_available()
-            if not ok:
-                raise CardSizeError(msg)
-            rc, out = self._shell("command -v resize2fs && command -v e2fsck",
-                                  60)
-            if rc != 0:
-                raise CardSizeError(
-                    "resize2fs isn't installed in the Linux this app uses")
-
-    def dev(self, image_path, offset):
-        p = image_path if self.mac else self.ex.to_exec_path(image_path)
-        return "%s?offset=%d" % (p, int(offset))
-
-    def _shell(self, cmd, timeout):
+        if sys.platform == "darwin":
+            raise CardSizeError("growing the games partition isn't "
+                                "available on macOS yet")
+        from ...core.executor import create_executor
+        from ...core.ext4_grow import LOOP_PROBE
+        self.ex = create_executor()
+        ok, msg = self.ex.check_available()
+        if not ok:
+            raise CardSizeError(msg)
         try:
-            out = self.ex.run("%s; echo PAD_RC=$?" % cmd, timeout=timeout)
+            out = self.ex.run("command -v resize2fs >/dev/null && "
+                              "command -v e2fsck >/dev/null && "
+                              "command -v losetup >/dev/null && echo tools; "
+                              + LOOP_PROBE, timeout=120)
         except Exception as e:  # noqa: BLE001 - CommandError / timeout
-            return -1, str(e)
-        rc = -1
-        for line in out.splitlines():
-            if line.startswith("PAD_RC="):
-                try:
-                    rc = int(line[7:])
-                except ValueError:
-                    pass
-        return rc, out
+            out = str(e)
+        if "tools" not in out:
+            raise CardSizeError("resize2fs isn't installed in the Linux this "
+                                "app uses")
+        if not out.rstrip().endswith("ok"):
+            raise CardSizeError("the Linux this app uses can't attach the "
+                                "card image as a disk (no loop devices)")
 
-    def run(self, tool, args, timeout):
-        if self.mac:
-            try:
-                r = subprocess.run([self.tools[tool]] + list(args),
-                                   capture_output=True, text=True,
-                                   timeout=timeout)
-            except (OSError, subprocess.SubprocessError) as e:
-                return -1, str(e)
-            return r.returncode, (r.stdout or "") + (r.stderr or "")
-        cmd = " ".join([tool] + [shlex.quote(a) for a in args]) + " 2>&1"
-        return self._shell(cmd, timeout)
+    def grow(self, image_path, offset, size, blocks, timeout=5400):
+        """Check, grow to *blocks* and re-check the ext4 at *offset* (the
+        partition being *size* bytes).  Returns ``{step: (rc, output)}`` for
+        the steps that ran: ``loop``, ``fsck`` (-fp), ``resize``, ``check``
+        (-fn).  A step runs only when the one before it succeeded."""
+        img = self.ex.to_exec_path(image_path)
+        script = "\n".join([
+            "IMG=%s" % shlex.quote(img),
+            'L=$(losetup -f --show -o %d --sizelimit %d "$IMG" 2>&1) || '
+            '{ echo "PAD_E2 loop 1 $L"; exit 0; }' % (int(offset), int(size)),
+            'trap \'losetup -d "$L" 2>/dev/null\' EXIT',
+            'echo "PAD_E2 loop 0"',
+            # resize2fs will not grow a filesystem mounted since its last full
+            # check (every stock p3 has been); -p fixes only what is safe to
+            # fix unattended, and 1 means it did
+            'e2fsck -fp "$L" > /tmp/pad_e2.$$ 2>&1; r=$?',
+            'sed "s/^/PAD_OUT fsck /" /tmp/pad_e2.$$; echo "PAD_E2 fsck $r"',
+            '[ $r -le 1 ] || exit 0',
+            'resize2fs "$L" %d > /tmp/pad_e2.$$ 2>&1; r=$?' % int(blocks),
+            'sed "s/^/PAD_OUT resize /" /tmp/pad_e2.$$; echo "PAD_E2 resize $r"',
+            '[ $r -eq 0 ] || exit 0',
+            'e2fsck -fn "$L" > /tmp/pad_e2.$$ 2>&1; r=$?',
+            'sed "s/^/PAD_OUT check /" /tmp/pad_e2.$$; echo "PAD_E2 check $r"',
+            'rm -f /tmp/pad_e2.$$',
+        ])
+        out = _run_script(self.ex, script, timeout)
+        res, text = {}, {}
+        for line in out.splitlines():
+            if line.startswith("PAD_OUT "):
+                _t, step, rest = (line.split(" ", 2) + [""])[:3]
+                text.setdefault(step, []).append(rest)
+            elif line.startswith("PAD_E2 "):
+                bits = line.split(" ", 3)
+                try:
+                    rc = int(bits[2])
+                except (IndexError, ValueError):
+                    rc = -1
+                res[bits[1]] = (rc, "\n".join(text.get(bits[1], []))
+                                or (bits[3] if len(bits) > 3 else ""))
+        if not res:
+            res["loop"] = (-1, out[-2000:])
+        return res
+
+
+def _run_script(ex, script, timeout):
+    """Run *script* under bash in the executor's Linux, shipped as a base64
+    temp FILE the way ext4_grow ships its own (wsl.exe mangles quoting on a
+    command line).  Returns its output; an executor failure comes back as
+    the error's text, which carries no ``PAD_E2`` marker."""
+    import base64
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=".b64", prefix="pad_card_size_")
+    try:
+        os.write(fd, base64.b64encode(script.encode("utf-8")))
+        os.close(fd)
+        try:
+            return ex.run("base64 -d < %s | bash" % shlex.quote(
+                ex.to_exec_path(tmp)), timeout=timeout)
+        except Exception as e:  # noqa: BLE001 - CommandError / timeout
+            return str(e)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -453,22 +490,31 @@ def expand_image(path, target, log=None, cancel=None):
         if check != new:
             raise CardSizeError("the rewritten partition table does not read "
                                 "back as planned")
-    p3 = e2.dev(path, P3_START * SECTOR)
-    # resize2fs will not grow a filesystem mounted since its last full check
-    # (every stock p3 has been); -p fixes only what is safe to fix unattended.
-    rc, out = e2.run("e2fsck", ["-fp", p3], 1800)
-    if rc not in (0, 1):
-        raise CardSizeError("the games partition failed its check before "
-                            "growing (e2fsck exit %d):\n%s" % (rc, out[-2000:]))
     blocks = new.p3_count * SECTOR // BLOCK
-    rc, out = e2.run("resize2fs", [p3, str(blocks)], 3600)
-    if rc != 0:
-        raise CardSizeError("resize2fs could not grow the games partition "
-                            "(exit %d):\n%s" % (rc, out[-2000:]))
-    rc, out = e2.run("e2fsck", ["-fn", p3], 1800)
-    if rc != 0:
-        raise CardSizeError("the grown games partition did not check clean "
-                            "(e2fsck exit %d):\n%s" % (rc, out[-2000:]))
+    res = e2.grow(path, P3_START * SECTOR, new.p3_count * SECTOR, blocks)
+    for step, what, ok in (
+            ("loop", "the card image could not be attached as a disk",
+             lambda rc: rc == 0),
+            ("fsck", "the games partition failed its check before growing",
+             lambda rc: rc in (0, 1)),
+            ("resize", "resize2fs could not grow the games partition",
+             lambda rc: rc == 0),
+            ("check", "the grown games partition did not check clean",
+             lambda rc: rc == 0)):
+        rc, out = res.get(step, (None, ""))
+        if rc is None or not ok(rc):
+            raise CardSizeError("%s (%s):\n%s" % (
+                what, "did not run" if rc is None else "exit %d" % rc,
+                (out or "")[-2000:]))
+    # Defence in depth: nothing past the games partition may have moved.
+    if os.path.getsize(_lp(path)) != new.size:
+        raise CardSizeError("the card image changed size while its games "
+                            "partition grew (%d bytes, expected %d)"
+                            % (os.path.getsize(_lp(path)), new.size))
+    with open(_lp(path), "rb") as f:
+        if read_layout(f) != new:
+            raise CardSizeError("the partition table does not read back as "
+                                "planned after the games partition grew")
     log("The card is a %s card now (%s)." % (target, _fmt(time.monotonic() - t0)),
         "success")
     return True

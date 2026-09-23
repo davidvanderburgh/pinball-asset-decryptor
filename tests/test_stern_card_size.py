@@ -163,17 +163,23 @@ def test_requested_reads_the_build_option(monkeypatch):
 
 
 class _FakeE2fs:
+    """Stands in for the loop-device runner: records the grow it was asked
+    for and answers every step with *rcs* (default: all clean)."""
     calls = []
+    rcs = {}
 
     def __init__(self):
         pass
 
-    def dev(self, image_path, offset):
-        return "%s?offset=%d" % (image_path, offset)
-
-    def run(self, tool, args, timeout):
-        _FakeE2fs.calls.append((tool, list(args)))
-        return 0, ""
+    def grow(self, image_path, offset, size, blocks, timeout=0):
+        _FakeE2fs.calls.append((image_path, offset, size, blocks))
+        res = {}
+        for step in ("loop", "fsck", "resize", "check"):
+            rc = self.rcs.get(step, 0)
+            res[step] = (rc, "%s said %d" % (step, rc))
+            if rc not in ((0, 1) if step == "fsck" else (0,)):
+                break
+        return res
 
 
 def _read(path, off, n):
@@ -215,14 +221,9 @@ def test_expand_moves_the_data_partitions_and_rewrites_two_fields(
     assert _read(path, new.p4_start * 512, len(region_head)) == region_head
     assert _read(path, new.logicals[1][1] * 512, 512) == p6_head
     assert _read(path, new.laid_out - 1024, 1024) == tail
-    # e2fsck -fp, resize2fs to the class's block count, e2fsck -fn - on p3
-    tools = [c[0] for c in _FakeE2fs.calls]
-    assert tools == ["e2fsck", "resize2fs", "e2fsck"]
-    assert _FakeE2fs.calls[0][1][0] == "-fp"
-    assert _FakeE2fs.calls[1][1][1] == str(28311550 * 512 // 4096)
-    assert _FakeE2fs.calls[2][1][0] == "-fn"
-    assert all(c[1][-2 if c[0] == "resize2fs" else -1].endswith(
-        "?offset=%d" % (712704 * 512)) for c in _FakeE2fs.calls)
+    # one grow of p3, bounded to the new partition, to the class's blocks
+    assert _FakeE2fs.calls == [(str(path), 712704 * 512, 28311550 * 512,
+                                28311550 * 512 // 4096)]
 
 
 def test_expand_is_a_no_op_at_the_same_size(tmp_path, monkeypatch):
@@ -236,9 +237,7 @@ def test_expand_is_a_no_op_at_the_same_size(tmp_path, monkeypatch):
 
 def test_a_failed_resize_is_reported_not_swallowed(tmp_path, monkeypatch):
     class Failing(_FakeE2fs):
-        def run(self, tool, args, timeout):
-            return (1, "resize2fs: No space left on device") \
-                if tool == "resize2fs" else (0, "")
+        rcs = {"resize": 1}
     monkeypatch.setattr(cs, "_E2fs", Failing)
     path = make_card(tmp_path / "c.raw", marks=False)
     with pytest.raises(cs.CardSizeError, match="resize2fs could not grow"):
@@ -247,18 +246,58 @@ def test_a_failed_resize_is_reported_not_swallowed(tmp_path, monkeypatch):
 
 def test_a_dirty_games_partition_stops_it_before_the_resize(tmp_path,
                                                             monkeypatch):
-    seen = []
-
     class Dirty(_FakeE2fs):
-        def run(self, tool, args, timeout):
-            seen.append(tool)
-            return (4, "UNEXPECTED INCONSISTENCY") if tool == "e2fsck" \
-                else (0, "")
+        rcs = {"fsck": 4}
     monkeypatch.setattr(cs, "_E2fs", Dirty)
     path = make_card(tmp_path / "c.raw", marks=False)
     with pytest.raises(cs.CardSizeError, match="failed its check"):
         cs.expand_image(str(path), "16G")
-    assert seen == ["e2fsck"]
+
+
+def test_a_truncating_resize_is_caught(tmp_path, monkeypatch):
+    """What resize2fs does to a REGULAR FILE (resize/main.c:683): it ends by
+    truncating it to the filesystem's length, offset or not.  The runner never
+    hands it a file, and if the image changes size anyway the grow fails."""
+    class Truncating(_FakeE2fs):
+        def grow(self, image_path, offset, size, blocks, timeout=0):
+            with open(image_path, "r+b") as f:
+                f.truncate(blocks * 4096)
+            return super().grow(image_path, offset, size, blocks, timeout)
+    monkeypatch.setattr(cs, "_E2fs", Truncating)
+    path = make_card(tmp_path / "c.raw", marks=False)
+    with pytest.raises(cs.CardSizeError, match="changed size"):
+        cs.expand_image(str(path), "16G")
+
+
+def test_the_runner_script_uses_a_bounded_loop_device():
+    """The script the runner ships: a loop device limited to the partition,
+    and resize2fs/e2fsck pointed at it, never at the image file."""
+    shipped = []
+
+    class Ex:
+        def to_exec_path(self, p):
+            return p
+
+        def run(self, cmd, timeout=0):
+            import base64
+            import shlex
+            tmp = shlex.split(cmd.split("<", 1)[1].split("|", 1)[0])[0]
+            with open(tmp, "rb") as fh:
+                shipped.append(base64.b64decode(fh.read()).decode())
+            return ("PAD_E2 loop 0\nPAD_E2 fsck 0\nPAD_E2 resize 0\n"
+                    "PAD_E2 check 0\n")
+    e2 = cs._E2fs.__new__(cs._E2fs)
+    e2.ex = Ex()
+    res = e2.grow("C:/x/card.raw", 364904448, 14495514624, 3538943)
+    assert res == {"loop": (0, ""), "fsck": (0, ""), "resize": (0, ""),
+                   "check": (0, "")}
+    script = shipped[0]
+    assert ("losetup -f --show -o 364904448 --sizelimit 14495514624"
+            in script)
+    assert 'resize2fs "$L" 3538943' in script
+    assert 'e2fsck -fp "$L"' in script and 'e2fsck -fn "$L"' in script
+    assert "?offset" not in script
+    assert 'losetup -d "$L"' in script
 
 
 def test_target_for_and_output_parts(tmp_path, monkeypatch):

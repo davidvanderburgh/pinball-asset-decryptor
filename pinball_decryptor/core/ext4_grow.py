@@ -25,11 +25,58 @@ wrapper around both.
 
 import base64
 import os
+import re
 import shlex
 import subprocess
 import sys
 
 from .executor import create_executor
+
+
+def _mb(n):
+    return "%.0f MB" % (float(n) / 10 ** 6)
+
+
+def no_space_message(need=None, avail=None, items=(), what="file(s)"):
+    """The "it doesn't fit" message, with the numbers a user can act on.
+
+    The scripts have always computed the shortfall and then thrown it away, so
+    a modder whose 542 replaced videos and grown sound bank overran the card
+    was told only that there was "not enough free space" — after twenty-odd
+    minutes of encoding, with nothing to say how far over he was or what was
+    taking the room (PAD-176).  The card's data partition is a fixed size, so
+    the answer is always "take something out"; the only question is what.
+
+    *items* are ``(growth_in_bytes, card_path)`` pairs.  The biggest few are
+    named because a mod's space is rarely spread evenly across its files.
+    """
+    msg = ("Not enough free space on the card's data partition to write the "
+           "larger %s. They keep their stock content on the card." % what)
+    if need is None or avail is None:
+        return msg
+    msg += (" This build is %s over: it grows files by %s and the partition "
+            "has %s free, so something has to come out (fewer or smaller "
+            "replacements, or fewer longer sounds)."
+            % (_mb(max(need - avail, 0)), _mb(need), _mb(avail)))
+    big = sorted(items, reverse=True)[:5]
+    if big:
+        msg += ("  Biggest: %s."
+                % ", ".join("%s (+%s)" % (rel, _mb(d)) for d, rel in big))
+    return msg
+
+
+def parse_space_report(text):
+    """``(need, avail, [(growth, card_path), ...])`` from a script's output.
+
+    ``(None, None, [])`` when the markers aren't there, which is what an
+    older script or a failure before the accounting ran looks like."""
+    need = avail = None
+    m = re.search(r"PAD_GROW_ENOSPC need=(\d+) avail=(\d+)", text or "")
+    if m:
+        need, avail = int(m.group(1)), int(m.group(2))
+    items = [(int(d), rel) for d, rel in
+             re.findall(r"PAD_GROW_ITEM (\d+) (\S+)", text or "")]
+    return need, avail, items
 
 
 class Ext4GrowError(Exception):
@@ -199,7 +246,9 @@ def _bash_script(loop_off, jobs_exec, image_exec):
         lines.append(
             'cur=$( [ -f %s ] && stat -c%%s %s || echo 0 ); '
             'new=$(stat -c%%s %s); d=$((new-cur)); '
-            '[ "$d" -gt 0 ] && need=$((need+d)) || true' % (tgt, tgt, s))
+            '[ "$d" -gt 0 ] && { need=$((need+d)); '
+            'echo "PAD_GROW_ITEM $d %s"; } || true'
+            % (tgt, tgt, s, shlex.quote(card_rel)))
     lines += [
         "avail=$(df -B1 --output=avail \"$MP\" | tail -1 | tr -d ' ')",
         'if [ "$need" -gt "$avail" ]; then '
@@ -296,9 +345,8 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
         n_ok = text.count("PAD_GROW_OK ")
         if "PAD_GROW_ENOSPC" in text:
             raise Ext4GrowNoSpace(
-                "Not enough free space on the card's data partition to write "
-                "the larger file(s). They keep their stock content on the "
-                "card.", grown=n_ok) from e
+                no_space_message(*parse_space_report(text)),
+                grown=n_ok) from e
         raise Ext4GrowError(
             "Couldn't grow files:\n%s" % text, grown=n_ok) from e
     finally:
@@ -407,14 +455,15 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
             "modified by this step):\n%s" % head.strip())
     avail = int(mf.group(1)) * int(mb.group(1))
     need = 0
+    items = []
     for card_rel, src in jobs:
         cur = _debugfs_file_size(tools, dev, card_rel, 60) or 0
-        need += max(os.path.getsize(src) - cur, 0)
+        d = max(os.path.getsize(src) - cur, 0)
+        need += d
+        if d:
+            items.append((d, card_rel))
     if need > avail:
-        raise Ext4GrowNoSpace(
-            "Not enough free space on the card's data partition to write the "
-            "larger file(s) (need %d B more, %d B free). They keep their "
-            "stock content on the card." % (need, avail))
+        raise Ext4GrowNoSpace(no_space_message(need, avail, items))
 
     grown, touched = 0, False
     try:
@@ -530,7 +579,9 @@ need=0
 '''
 
 _PINNED_NEED = r'''cur=$(fst @TGT@ | cut -d" " -f1); new=$(stat -c%s @SRC@)
-d=$((new - ${cur:-0})); [ "$d" -gt 0 ] && need=$((need + d)) || true
+d=$((new - ${cur:-0}))
+if [ "$d" -gt 0 ]; then need=$((need + d))
+echo "PAD_GROW_ITEM $d @REL@"; fi
 '''
 
 _PINNED_SPACE = r'''avail=$((fb * bs))
@@ -581,7 +632,7 @@ def _pinned_script(part_offset, jobs_exec, image_exec, epoch):
         "@DEV@", q("%s?offset=%d" % (image_exec, int(part_offset))))]
     for rel, src in jobs_exec:
         out.append(_PINNED_NEED.replace("@TGT@", q("/" + rel))
-                   .replace("@SRC@", q(src)))
+                   .replace("@SRC@", q(src)).replace("@REL@", q(rel)))
     out.append(_PINNED_SPACE)
     for i, (rel, src) in enumerate(jobs_exec):
         tgt = "/" + rel
@@ -656,9 +707,8 @@ def grow_files_pinned(image_path, part_offset, jobs, epoch, log=None,
         n_ok = text.count("PAD_GROW_OK ")
         if "PAD_GROW_ENOSPC" in text:
             raise Ext4GrowNoSpace(
-                "Not enough free space on the card's data partition to write "
-                "the larger file(s). They keep their stock content on the "
-                "card.", grown=n_ok) from e
+                no_space_message(*parse_space_report(text)),
+                grown=n_ok) from e
         raise Ext4GrowError("Couldn't write files:\n%s" % text,
                             grown=n_ok) from e
     finally:

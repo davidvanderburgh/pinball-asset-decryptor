@@ -519,6 +519,14 @@ class Manufacturer(ABC):
         with the project's current edits, else one sentence saying why not."""
         return "this game's builds always start from the original"
 
+    # A Build's first step, on its worker thread and BEFORE the Replace tabs'
+    # assignments are staged (re-encoding every assigned video can take an
+    # hour): ``None``, or the sentence that refuses the build because it
+    # could never finish (Stern Spike 2: an SD card size the original or this
+    # computer can't build).  Every other plugin has nothing to check.
+    def write_preflight(self, original_path):
+        return None
+
     def force_write_ext(self, name):
         """Return *name* guaranteed to end with :meth:`write_output_ext`.
 

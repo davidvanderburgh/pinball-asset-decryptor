@@ -12,6 +12,7 @@ derive every sound's keystream, then decode/re-encode.
 """
 
 import os
+import re
 
 from ...core.checksums import generate_checksums
 from ...core.pipeline_base import BasePipeline, PipelineError
@@ -33,6 +34,19 @@ def _require_engine():
             "Engine",
             "Spike 2 audio engine unavailable. Install its prerequisites "
             "(pip install unicorn capstone numpy) and try again.")
+
+
+_CARD_CLASS = re.compile(r"\b(8|16|32)G\b")
+
+
+def card_class_words(text):
+    """*text*, a card_size.py or engine sentence about the SD card size a
+    build is for, with each card class code ("16G") in the words the Write
+    tab's SD card size control and the card packaging use ("16 GB").  Applied
+    where those sentences reach the user (the control's note, the Build
+    refusal, the overwrite prompt, a failed build), so a control reading
+    "16 GB card" never sits over a "16G SD card"."""
+    return _CARD_CLASS.sub(r"\1 GB", text or "")
 
 
 def _log_multi_image(path, log):
@@ -392,7 +406,7 @@ class SternWritePipeline(BasePipeline):
         except CardSizeError as e:
             # the SD card size option's refusal is an answer, not a crash:
             # its sentence, without the traceback an unexpected error gets
-            raise PipelineError("Re-encode", str(e)) from e
+            raise PipelineError("Re-encode", card_class_words(str(e))) from e
         self._set_phase(3)  # Patch image
         # Item 149: the modes this build put on the card, from its record.
         try:

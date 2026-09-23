@@ -748,9 +748,34 @@ class SternManufacturer(Manufacturer):
         from . import pipeline as _pipeline
         if _pipeline.engine is None:
             return "the Spike 2 engine is unavailable"
-        return _pipeline.engine.build_update_reason(
+        why = _pipeline.engine.build_update_reason(
             _pipeline.engine.read_build_manifest(output_path),
             original_path, output_path, assets_dir)
+        # the SD card size reasons, in the words the Write tab's control uses
+        return (_pipeline.card_class_words(why)
+                if why and "SD card" in why else why)
+
+    def write_preflight(self, original_path):
+        """The SD card size the build is asked for (card_size.py,
+        PAD_STERN_CARD_SIZE): an original that can't grow to it (a multi-boot
+        or hand-edited card), or a computer that can't grow one (no resize2fs
+        or loop devices in its Linux, macOS), refuses the build here, before
+        a replacement is staged.  engine.write_image checks it again; this is
+        the check made in time.  The original's own size checks nothing."""
+        if self._era != "spike2":
+            return None
+        from . import card_size as _cs
+        from .pipeline import card_class_words
+        want = _cs.requested()
+        if not want:
+            return None
+        try:
+            _cs.preflight(original_path, want)
+        except _cs.CardSizeError as e:
+            return card_class_words(str(e))
+        except OSError:
+            return None     # an unreadable original: the build says so itself
+        return None
 
     def make_direct_ssd_extract_pipeline(
             self, device_path, output_dir,

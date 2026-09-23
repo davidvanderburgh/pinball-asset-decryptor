@@ -857,6 +857,24 @@ HELP_CONTENT = {
          "it onto the card from the Multi-boot tab (load the card, point that "
          "game's row at your build, update in place) — only the parts that "
          "changed are written."),
+        ("SD card size (Stern Spike 2)",
+         "Every replaced video and grown sound goes onto the card's games "
+         "partition, which only has the room Stern left on it for the "
+         "original's card size: a stock 8 GB card can have a few hundred MB "
+         "free, and a big retheme can run out of it. If the SD card in your "
+         "machine is bigger, pick its size under SD card size, below the "
+         "Build Image line: the games partition grows to fill that card size "
+         "and everything else on the card stays exactly as it was. The built "
+         "image is then that size, so it only fits an SD card at least that "
+         "big, and flashing it takes longer. Only sizes bigger than the "
+         "original that it can be built at are offered (a multi-boot card is "
+         "sized on the Multi-boot tab instead), and the option isn't "
+         "available on macOS yet. The size applies to building an image: a "
+         "direct write keeps the card's own partitions, and Port + build "
+         "makes every other card at its own size. The build checks the card "
+         "can grow before anything is converted, and the file is named for "
+         "the size it is built for (16G in place of the original's 8G), so it "
+         "doesn't replace a build made at the original's size."),
         ("Output name",
          "The Build Image line shows the exact file the build will "
          "produce. Builds land in the project's own build\\ folder — one "

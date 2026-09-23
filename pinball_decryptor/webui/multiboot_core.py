@@ -3661,16 +3661,38 @@ VERSION_ALARMS = (
 )
 
 
-def version_alarm(info):
+def is_menu_image(path):
+    """True for an image that holds only the boot MENU read off an SD card
+    (:func:`menu_card_image_path`, item 99).  Its games partitions are holes
+    by design, so no tree on it can be read - which says nothing about the
+    card's game code (PAD-197)."""
+    return os.path.basename((path or "").strip().strip('"')).lower() \
+        .endswith(".menu.raw")
+
+
+#: What the Log says instead of the strip when the only finding is one a
+#: menu-only image cannot help making.
+MENU_ONLY_VERSIONS = ("Only the boot menu was read off the SD card, so the "
+                      "game code version of each image is not checked here. "
+                      "Nothing is wrong with the card.")
+
+
+def version_alarm(info, menu_only=False):
     """``(headline, full text)`` for the loudest thing the version gate found
     on this card, or ``None`` when its images agree.
 
     The headline is the one line the strip can hold; the full text is every
     finding the report carries, in the same order, for the Log and the
     tooltip.  Nothing here is derived: an image's version is read off the
-    image, and these sentences are written by the tool that read it."""
+    image, and these sentences are written by the tool that read it.
+
+    *menu_only*: the card is a menu read off an SD card (:func:`is_menu_image`).
+    Every tree on it is unreadable by construction, so 'could not be read'
+    is not a finding about the card and is left out (PAD-197: a red strip
+    about a card nobody had changed)."""
     found = [(head, str(info.get(key)).strip())
-             for key, head in VERSION_ALARMS if info.get(key)]
+             for key, head in VERSION_ALARMS if info.get(key)
+             and not (menu_only and key == "unknown_version")]
     if not found:
         return None
     return found[0][0], "\n\n".join(t for _h, t in found)
@@ -3837,6 +3859,10 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
     be = backend_for(platform)
     rows, warnings = rows_from_inspect(info)
     warnings = list(info.get("warnings") or []) + warnings
+    if is_menu_image(card):
+        # a menu read off an SD card has no games trees to read, by design;
+        # one line in the Log says so instead of one per image (PAD-197)
+        warnings = [w for w in warnings if "games tree" not in w]
     if any(on_card_fields(r) for r in rows):
         # One line however many fields: the tree marks each of them '(on the
         # card)', and the point is the same for all - kept and drawn as they
@@ -6640,14 +6666,27 @@ class MultibootPanel:
     #: is the builder's, and it happens before a byte is written.
     ALARM_PREFIX = "\u26a0 "
 
+    def _version_alarm(self, info):
+        """:func:`version_alarm` for the card this tab has loaded - which
+        knows whether that card is only a menu read off an SD card."""
+        if not info:
+            return None
+        return version_alarm(info, menu_only=bool(
+            getattr(self, "_card_device", None)
+            or is_menu_image(getattr(self, "_loaded_card", ""))))
+
     def _show_alarm(self, info):
         """Put the version gate's finding on the tab, or take it away.
 
         Called with the report a load read; ``None`` clears it (a new card,
         or one whose images agree).  The whole finding goes to the Log -
         the strip is one line by construction and the reasons run long."""
-        found = version_alarm(info or {}) if info else None
+        found = self._version_alarm(info)
         head, full = found if found else ("", "")
+        if info and info.get("unknown_version") \
+                and str(info["unknown_version"]).strip() not in full:
+            # the finding a menu-only card cannot help making, said calmly
+            self._write("[version] " + MENU_ONLY_VERSIONS)
         if full and full != getattr(self, "_alarm_text", ""):
             for line in full.splitlines():
                 if line.strip():

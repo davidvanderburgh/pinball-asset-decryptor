@@ -1992,6 +1992,24 @@ def test_the_version_gate_findings_come_back_worst_first():
     assert worst == "These images are not the same game."
 
 
+def test_a_menu_read_off_an_sd_card_is_not_an_unreadable_version():
+    """PAD-197.  A menu read off an SD card (item 99) holds the menu
+    partition only, so every games tree on it is unreadable by design - and
+    the tab put up a red 'could not be read' strip about a card nobody had
+    touched.  That one finding is dropped for such a card; the rest stay."""
+    unread = {"unknown_version": "6 image(s) did not say what game code they run."}
+    assert multiboot_core.is_menu_image(r"C:\Temp\cards\SanDisk-32G.menu.raw")
+    assert multiboot_core.is_menu_image('"/tmp/cards/X.MENU.RAW"')
+    assert not multiboot_core.is_menu_image(r"D:\cards\beatles.multi.raw")
+    assert not multiboot_core.is_menu_image("")
+    assert multiboot_core.version_alarm(unread)[0] ==         "The game code version of an image could not be read."
+    assert multiboot_core.version_alarm(unread, menu_only=True) is None
+    head, full = multiboot_core.version_alarm(
+        dict(unread, version_mismatch="1.29.0 and 1.27.0."), menu_only=True)
+    assert head == "These images are not the same game code version."
+    assert "did not say" not in full
+
+
 # --------------------------------------------------------------------------
 # the tab comes back as it was left
 # --------------------------------------------------------------------------

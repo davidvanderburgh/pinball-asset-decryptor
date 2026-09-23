@@ -1208,7 +1208,7 @@ class WebMultibootPanel(_Base):
 
     def _show_alarm(self, info):
         super()._show_alarm(info)
-        found = mt.version_alarm(info or {}) if info else None
+        found = self._version_alarm(info)
         self._web_alarm = ({"head": self.ALARM_PREFIX + found[0],
                             "full": found[1]} if found else None)
         self._dirty("alarm")

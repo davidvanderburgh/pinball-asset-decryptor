@@ -1004,8 +1004,8 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
                       "volume", "machine_volume", "mixer_volume", "sound_move", "sound_confirm",
-                      "heading", "text_size", "counter", "countdown_word", "theme", "colors",
-                      "groups"}
+                      "heading", "text_size", "counter", "countdown_word", "footer",
+                      "theme", "colors", "groups"}
     # a card that never set one records null, not the selector's own line
     assert d["heading"] is None
     # a card with no media at all: the fields are null, not absent
@@ -1452,6 +1452,58 @@ def test_images_conf_carries_the_two_lines_under_the_cards(mk):
         mk.render_images_conf(devs, ["A", "B"], countdown_word="two\nlines")
     with pytest.raises(mk.Refused):
         mk.render_images_conf(devs, ["A", "B"], countdown_word="x" * (mk.CONF_STR_MAX + 1))
+
+
+def test_images_conf_carries_its_own_instructions_line(mk):
+    """PAD-190 round 2: footer= is the line under the cards that names the buttons.
+    THREE answers, not two: no key = the selector's own wording (which is the only
+    form that can follow the buttons a machine has), text = those words, and '' = no
+    such line at all."""
+    devs = ["/dev/mmcblk0p3", "/dev/mmcblk0p7"]
+    plain = mk.render_images_conf(devs, ["A", "B"])
+    assert "footer" not in plain and mk.parse_images_conf(plain)["footer"] is None
+    for text in ("FLIPPERS pick a game    START plays it", ""):
+        conf = mk.render_images_conf(devs, ["A", "B"], footer=text)
+        assert "footer=%s" % text in conf.splitlines()
+        assert mk.parse_images_conf(conf)["footer"] == text
+        # the like-for-like compare `update` makes must survive it
+        assert mk.render_images_conf_text(mk.parse_images_conf(conf)) == conf
+        assert mk.build_manifest(None, mk.parse_images_conf(conf), None)["footer"] == text
+    # the two things that would break the file are refused here, not on the machine
+    with pytest.raises(mk.Refused):
+        mk.render_images_conf(devs, ["A", "B"], footer="two" + chr(10) + "lines")
+    with pytest.raises(mk.Refused):
+        mk.render_images_conf(devs, ["A", "B"], footer="x" * (mk.CONF_STR_MAX + 1))
+    # the spaces INSIDE the line are the owner's; only the ends are trimmed
+    wide = mk.render_images_conf(devs, ["A", "B"], footer="LEFT      RIGHT")
+    assert mk.parse_images_conf(wide)["footer"] == "LEFT      RIGHT"
+
+
+def test_conf_for_plan_takes_the_instructions_from_the_flags_else_the_card(mk):
+    """--footer is the whole answer, --footer-own takes the key off again (the
+    third answer --footer cannot spell), and neither flag keeps what the card
+    has."""
+    plan = _two_image_plan(mk)
+    ex = mk.parse_images_conf(_menu_conf(mk, plan, footer="FLIPPERS choose"))
+    # no flag: the card's own line rides through
+    assert "footer=FLIPPERS choose" + chr(10) in mk.conf_for_plan(
+        plan, argparse.Namespace(), existing=ex)
+    # --footer replaces it, and --footer '' takes the line away for good
+    assert "footer=START boots" + chr(10) in mk.conf_for_plan(
+        plan, argparse.Namespace(footer="START boots"), existing=ex)
+    assert "footer=" + chr(10) in mk.conf_for_plan(
+        plan, argparse.Namespace(footer=""), existing=ex)
+    # --footer-own hands the line back to the selector: no key at all
+    assert "footer" not in mk.conf_for_plan(
+        plan, argparse.Namespace(footer_own=True), existing=ex)
+    # ...and it wins over a --footer given with it, because "the selector's
+    # own" is the answer that cannot be spelled as text
+    assert "footer" not in mk.conf_for_plan(
+        plan, argparse.Namespace(footer="ignored", footer_own=True), existing=ex)
+    # a card that never had one still gets no key
+    plainex = mk.parse_images_conf(_menu_conf(mk, plan))
+    assert "footer" not in mk.conf_for_plan(plan, argparse.Namespace(),
+                                            existing=plainex)
 
 
 def test_conf_for_plan_takes_the_counter_and_the_word_from_the_flags_else_the_card(mk):

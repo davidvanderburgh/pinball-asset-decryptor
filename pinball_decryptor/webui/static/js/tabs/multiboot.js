@@ -510,6 +510,12 @@ function MenuDialog({ s, w }) {
       </div>
       <${Check} ns=${NS} k="same_text" checked=${s.same_text} wrap label="Same text size on every card (a long name is not shrunk on its own)" />
       <${Check} ns=${NS} k="counter" checked=${s.counter} wrap label="Count the cards under them (the “<  3 / 7  >” line; five cards or more)" />
+      <${Check} ns=${NS} k="footer_on" checked=${s.footer_on} wrap label="Show the instructions under the cards (the line naming the buttons)" />
+      <div class="kv mb-kv2">
+        <label class="k" for=${fid("footer")}>Instructions:</label>
+        <${Field} id=${fid("footer")} ns=${NS} k="footer" value=${s.footer} disabled=${!s.footer_on} placeholder="the menu's own words" />
+        <span></span><span class="small muted">${md.footer_example}</span>
+      </div>
       <div class="kv mb-kv2">
         <span class="k">Theme:</span>
         <${Select} value=${md.theme} options=${md.themes} width=${220} title=${md.about} onChange=${(v) => call("multiboot.pick_theme", v)} />

@@ -99,6 +99,7 @@ class MultibootTab(TabService):
         ("timeout", "_timeout_var"), ("heading", "_heading_var"),
         ("same_text", "_same_text_var"), ("counter", "_counter_var"),
         ("countdown_word", "_countdown_word_var"),
+        ("footer_on", "_footer_var"), ("footer", "_footer_text_var"),
         ("default", "_default_var"), ("theme", "_theme_var"),
     )
 

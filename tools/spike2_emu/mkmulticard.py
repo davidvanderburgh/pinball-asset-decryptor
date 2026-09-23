@@ -40,7 +40,7 @@ move/confirm sounds and the volume; only the referenced files are staged into
 512x288 / 150 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the whole set <= 96 MB), and images.conf gets
 the image lines (image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>) and the
 sound_move= / sound_confirm= / volume= / mixer_volume= / media= / heading= / text_size= / counter= /
-countdown_word= keys.  The line is written only as
+countdown_word= / footer= keys.  The line is written only as
 wide as it needs to be - 3 fields with no media at all, 6 when no image names a confirm of its own -
 and every narrower form stays valid.  An image's own confirm is the sound that plays when THAT image
 is chosen; an empty field falls back to the menu-wide sound_confirm=.
@@ -307,7 +307,7 @@ CONF_LINE_MAX = 1000
 #: so this is about the file, not about how much fits on the LCD).
 CONF_STR_MAX = 199
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
-CONF_KEYS = ("default", "timeout", "heading", "text_size", "counter", "countdown_word", "font",
+CONF_KEYS = ("default", "timeout", "heading", "text_size", "counter", "countdown_word", "footer", "font",
              "sound_move", "sound_confirm", "volume",
              "mixer_volume", "media", "theme", "machine_volume")
 
@@ -1608,6 +1608,18 @@ def conf_heading(text):
     return _conf_text("heading", text)
 
 
+def conf_footer(text):
+    """A ``footer=`` value for images.conf - the INSTRUCTIONS line under the cards,
+    the one naming the buttons, or '' for no such line at all (PAD-190 round 2).
+    Same rules as the heading: see :func:`_conf_text`.
+
+    NOTE the three answers this key has, which is why the caller passes None as well
+    as text: no key at all = the selector's own wording, which is the ONLY form that
+    follows the buttons a machine actually has (a lockdown-bar Action button is named
+    only where one is wired); text = that text on every machine; '' = no line."""
+    return _conf_text("footer", text)
+
+
 def conf_countdown_word(text):
     """A ``countdown_word=`` value for images.conf - the first word of the countdown line
     ("starting <title> in 9 s"), or '' for no word in front of the title (PAD-190).  Same
@@ -1777,7 +1789,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
                        groups=None, default_card=None, heading=None, text_size=None,
-                       counter=None, countdown_word=None):
+                       counter=None, countdown_word=None, footer=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1789,6 +1801,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     `counter` is 'on' or 'off' - whether the "<  N / M  >" line under a carousel's cards is drawn
     (None = no key, which the selector reads as on) - and `countdown_word` is the first word of the
     countdown line (None = the selector's own 'starting', '' = no word in front of the title).
+    `footer` is the INSTRUCTIONS line under the cards, the one naming the buttons (None = the
+    selector's own wording, which follows the buttons the machine has; '' = no such line at all).
     `debug_log` writes `log=CARD_LOG` (the selector's diagnostics on the card - a development build
     only)."""
     devices = list(devices)
@@ -1902,6 +1916,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append("counter=%s" % check_counter(counter))
     if countdown_word is not None:
         out.append("countdown_word=%s" % conf_countdown_word(countdown_word))
+    if footer is not None:
+        out.append("footer=%s" % conf_footer(footer))
     if font:
         out.append("font=%s" % font)
     if sound_move:
@@ -1947,6 +1963,8 @@ def parse_images_conf(text):
     'counter': str|None ('on' / 'off'; None = the key was absent, which the selector draws as on),
     'countdown_word': str|None (None = the key was absent and the selector's own 'starting' is
     drawn, '' = the card asked for no word in front of the title),
+    'footer': str|None (None = the key was absent and the selector's own instructions line is drawn,
+    '' = the card asked for no instructions line at all),
     'theme': str|None, 'colors': {role: rrggbb}, 'debug_log': str|None (the log= path)}.
     3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
     '|' ':' or '/', more than MAX_IMAGES images, more than MAX_CARDS cards or more than MAX_GROUPS
@@ -1959,7 +1977,7 @@ def parse_images_conf(text):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "groups": [], "default": 0, "default_card": None,
             "timeout": 15, "heading": None, "text_size": None,
-            "counter": None, "countdown_word": None, "font": None,
+            "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None}
     for raw in text.splitlines():
@@ -2027,6 +2045,11 @@ def parse_images_conf(text):
             # NOT `or None`: 'countdown_word=' is a card that asked for no word in front
             # of the title, which is a different answer from a card that never said
             conf["countdown_word"] = val.strip()
+        elif key == "footer":
+            # ...and the same for the instructions line: '' is "no line", absent is
+            # "the selector's own wording", and only the absent one can follow the
+            # buttons the machine has
+            conf["footer"] = val.strip()
         elif key == "font":
             conf["font"] = val.strip() or None
         elif key in ("sound_move", "sound_confirm"):
@@ -3046,7 +3069,7 @@ def conf_for_plan(plan, args, existing=None, media=None):
     ex = existing or {"images": [], "media": [], "groups": [], "default": None,
                       "default_card": None, "timeout": None,
                       "heading": None, "text_size": None,
-                      "counter": None, "countdown_word": None,
+                      "counter": None, "countdown_word": None, "footer": None,
                       "font": None, "sound_move": None, "sound_confirm": None,
                       "volume": None, "mixer_volume": None, "theme": None, "colors": {}}
     n = len(plan.trees)
@@ -3149,12 +3172,20 @@ def conf_for_plan(plan, args, existing=None, media=None):
     countdown_word = getattr(args, "countdown_word", None)
     if countdown_word is None:
         countdown_word = ex.get("countdown_word")
+    # THE INSTRUCTIONS LINE has THREE answers, so it has two flags: --footer TEXT is
+    # the text ('' = no line at all), --footer-own takes the key off the card again
+    # and hands the line back to the selector, and neither keeps what the card says.
+    footer = getattr(args, "footer", None)
+    if getattr(args, "footer_own", False):
+        footer = None
+    elif footer is None:
+        footer = ex.get("footer")
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
                               groups=groups, default_card=default_card, heading=heading,
                               text_size=text_size, counter=counter,
-                              countdown_word=countdown_word)
+                              countdown_word=countdown_word, footer=footer)
 
 
 # ============================================================================= the JSON sidecars
@@ -3218,6 +3249,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("text_size", conf.get("text_size")),
         ("counter", conf.get("counter")),
         ("countdown_word", conf.get("countdown_word")),
+        ("footer", conf.get("footer")),
         ("theme", conf.get("theme")),
         ("colors", dict(conf.get("colors") or {})),
         # ONE ENTRY PER GROUP CARD (item 106), with the media *_source keys the tab's
@@ -5206,7 +5238,8 @@ def render_images_conf_text(conf):
         # the card's own LOOK keys, or a card that carries one reads back as a card that
         # changed and every update re-injects its menu for nothing
         heading=conf.get("heading"), text_size=conf.get("text_size"),
-        counter=conf.get("counter"), countdown_word=conf.get("countdown_word"))
+        counter=conf.get("counter"), countdown_word=conf.get("countdown_word"),
+        footer=conf.get("footer"))
 
 
 # ============================================================================= reading a card back
@@ -6598,6 +6631,9 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
                  conf.get("counter") or "(the selector's own: %s)" % COUNTER_DEFAULT,
                  "(the selector's own: %r)" % DEF_COUNTDOWN_WORD
                  if conf.get("countdown_word") is None else repr(conf["countdown_word"])))
+        print("    footer=%s"
+              % ("(the selector's own)" if conf.get("footer") is None
+                 else repr(conf["footer"])))
         if selector_dir:
             for name, (cardname, mode, required) in SELECTOR_FILES.items():
                 src = os.path.join(selector_dir, name)
@@ -6882,6 +6918,9 @@ def inspect_card(card, media_out=None):
         # the card asking for no word in front of the title at all
         ("counter", conf.get("counter")),
         ("countdown_word", conf.get("countdown_word")),
+        # null = the card never set one, and the selector draws its own instructions
+        # line (the one that follows the buttons); "" = the card asked for no line
+        ("footer", conf.get("footer")),
         ("theme", conf.get("theme")), ("colors", dict(conf.get("colors") or {})),
         ("media", media), ("media_out", out),
         ("has_media_json", media_json is not None), ("has_build_json", build is not None),
@@ -6926,6 +6965,10 @@ def print_inspect(rep):
                              else "per-card - each card fits its own title"))
     cnt = rep.get("counter")
     word = rep.get("countdown_word")
+    foot = rep.get("footer")
+    print("instructions  %s"
+          % ("(the selector's own, following the buttons the machine has)" if foot is None
+             else "(none - no line naming the buttons)" if not foot else repr(foot)))
     print("under the cards  counter %s, countdown %s"
           % ("(the selector's default: drawn)" if cnt is None
              else "drawn" if cnt == COUNTER_DEFAULT else "hidden",
@@ -8376,6 +8419,14 @@ def _add_conf_flags(s):
                         "(the selector's own '%s <title> in 9 s' when no card ever set one; "
                         "--countdown-word '' leaves the title and the seconds alone); an "
                         "existing card's is kept when absent" % DEF_COUNTDOWN_WORD)
+    s.add_argument("--footer", metavar="TEXT",
+                   help="images.conf footer=TEXT - the instructions line under the cards, the one "
+                        "naming the buttons (the selector's own wording when no card ever set one, "
+                        "which is the only form that follows a machine's Action button; --footer '' "
+                        "leaves the line off); an existing card's is kept when absent")
+    s.add_argument("--footer-own", action="store_true",
+                   help="images.conf: take footer= off the card again, so the selector's own "
+                        "instructions line is drawn (the third answer --footer cannot spell)")
     s.add_argument("--default", type=int, help="images.conf default index (default 0)")
     s.add_argument("--volume", type=int, help="images.conf volume 0-100 (software mix gain; overrides media.json)")
     s.add_argument("--mixer-volume", type=int, help="images.conf mixer_volume 0-63 (the game's codec curve on selem PCM; only when set)")

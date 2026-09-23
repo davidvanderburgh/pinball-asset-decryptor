@@ -352,6 +352,33 @@ def test_the_two_lines_under_the_cards_are_the_stern_builder_s_keys(mj):
     assert back["counter"] == "off" and back["countdown_word"] == "Booting"
 
 
+def test_the_instructions_line_is_the_stern_builder_s_key(mj):
+    """PAD-190 round 2: footer= is the same key, validated by the same shared
+    function, with the same three answers - and a JJP install that says nothing
+    still draws the selector's own line."""
+    bare = mj.render_images_conf(["rootA", "rootB"], ["a", "b"])
+    assert "footer" not in bare
+    assert mj.parse_images_conf(bare)["footer"] is None
+    assert "footer" in mj.CONF_KEYS
+    for text in ("FLIPPERS choose    START boots", ""):
+        conf = mj.render_images_conf(["rootA", "rootB"], ["a", "b"], footer=text)
+        assert "footer=%s" % text in conf.splitlines()
+        assert mj.parse_images_conf(conf)["footer"] == text
+    with pytest.raises(mj.Refused):
+        mj.render_images_conf(["rootA", "rootB"], ["a", "b"],
+                              footer="two" + chr(10) + "lines")
+    old = mj.parse_images_conf(mj.render_images_conf(
+        ["rootA", "rootB"], ["a", "b"], footer="FLIPPERS choose"))
+    a = argparse.Namespace(titles=None, subtitles=None, timeout=None, default=None,
+                           volume=None, heading=None, theme=None, color=None,
+                           conf=None, jjp_update=None, debug_log=False)
+    assert mj.parse_images_conf(mj.conf_for_args(
+        mj.DEVICES, a, existing=old))["footer"] == "FLIPPERS choose"
+    own = argparse.Namespace(**dict(vars(a), footer_own=True))
+    assert mj.parse_images_conf(mj.conf_for_args(
+        mj.DEVICES, own, existing=old))["footer"] is None
+
+
 def test_conf_is_as_narrow_as_it_needs_to_be(mj):
     bare = mj.render_images_conf(["rootA", "rootB"], ["a", "b"])
     keys = [ln.split("=", 1)[0] for ln in bare.splitlines() if ln and not ln.startswith("#")]

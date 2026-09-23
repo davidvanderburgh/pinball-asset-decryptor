@@ -1974,7 +1974,7 @@ HELP_CONTENT = {
          "other line the menu draws, and the preview shows it the moment "
          "you stop typing. A card that never asked for a heading is "
          "written exactly as it always was."),
-        ("The two lines under the cards",
+        ("The three lines under the cards",
          "A menu of five cards or more scrolls, and it counts the cards "
          "under them - the \u201c<  3 / 7  >\u201d line. Count the cards "
          "under them in Menu settings turns that line off for a menu whose "
@@ -1989,6 +1989,18 @@ HELP_CONTENT = {
          "A word of your own also replaces LOADING on the screen the "
          "machine shows while the chosen image starts. "
          "Neither is written onto a card that never asked for it."),
+        ("The instructions line, and turning it off",
+         "Between those two sits the line naming the buttons - \u201cLEFT / "
+         "RIGHT FLIPPER: choose      START: boot\u201d. Show the "
+         "instructions under the cards in Menu settings takes it off the "
+         "glass, and the Instructions box under that puts your own words "
+         "there instead. LEAVE THE BOX EMPTY AND THE MENU KEEPS ITS OWN "
+         "LINE, which is not the same thing as typing that line out: only "
+         "the menu's own wording follows the buttons the machine actually "
+         "has, so a cabinet with an ACTION button on the lockdown bar is "
+         "told about it and one without it is not. The line beside the box "
+         "says which of the three you will get. A card that never asked for "
+         "words of its own is written exactly as it always was."),
         ("Hearing a sound before the card is written",
          "Every sound row - the menu's move and confirm sounds in Menu "
          "settings, and an image's music and confirm in Edit image - has "

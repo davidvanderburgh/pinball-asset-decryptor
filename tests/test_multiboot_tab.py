@@ -1882,6 +1882,10 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                     # lines under the cards described a menu that counted
                     # them and said 'starting'
                     "show_counter": True, "countdown_word": "starting",
+                    # ...and PAD-190 round 2: one that said nothing about the
+                    # instructions line described a menu drawing the
+                    # selector's own (the tick on, the box empty)
+                    "show_footer": True, "footer": "",
                     "theme": "midnight", "colors": {}}
     assert "bypass" not in menu_from_state(None)     # always on: not a setting
     assert menu_from_state({"volume": 900})["volume"] == 100
@@ -2448,8 +2452,11 @@ def test_the_counter_and_the_countdown_word_reach_every_command_and_the_preview(
     form = _form(tmp_path, 2)
     assert form.show_counter is True
     assert form.countdown_word == DEF_COUNTDOWN_WORD == "starting"
+    # ...and the instructions line rides in the same bundle (round 2): an
+    # empty box with the tick on is --footer-own, the selector's own line
     assert menu_text_args(form) == ["--counter", COUNTER_ON,
-                                    "--countdown-word", "starting"]
+                                    "--countdown-word", "starting",
+                                    "--footer-own"]
     build = _tool_words(dict(build_commands(form))["build"])
     assert build[build.index("--counter") + 1] == COUNTER_ON
     assert build[build.index("--countdown-word") + 1] == "starting"
@@ -2462,7 +2469,8 @@ def test_the_counter_and_the_countdown_word_reach_every_command_and_the_preview(
     form.show_counter = False
     form.countdown_word = "Launching"
     assert menu_text_args(form) == ["--counter", COUNTER_OFF,
-                                    "--countdown-word", "Launching"]
+                                    "--countdown-word", "Launching",
+                                    "--footer-own"]
     words = _tool_words(dict(build_commands(form))["build"])
     assert words[words.index("--counter") + 1] == COUNTER_OFF
     assert words[words.index("--countdown-word") + 1] == "Launching"
@@ -2471,10 +2479,77 @@ def test_the_counter_and_the_countdown_word_reach_every_command_and_the_preview(
     # an empty word is a real answer - the countdown then names the game and
     # the seconds and nothing else - and it reaches the card as one
     form.countdown_word = ""
-    assert menu_text_args(form)[-1] == ""
+    assert menu_text_args(form)[3] == ""
     assert "countdown_word=" in write_preview_conf(form).splitlines()
     # the preview is keyed on the conf, so neither can show a stale frame
     assert preview_fingerprint(_form(tmp_path, 2)) != preview_fingerprint(form)
+
+
+def test_the_instructions_line_reaches_every_command_and_the_preview(tmp_path):
+    """BEN, round 2: "can you extend this to make the instructions also
+    customizable and/or visible?"  THREE answers, and the empty box is the one
+    the tools cannot spell as text: the menu's own line, which is the only form
+    that follows the buttons the machine has."""
+    from pinball_decryptor.webui.multiboot_core import (
+        footer_args, inject_args, update_args, write_preview_conf)
+    form = _form(tmp_path, 2)
+    # as it comes: the tick on, the box empty - the menu's own line
+    assert form.show_footer is True and form.footer == ""
+    assert footer_args(form) == ["--footer-own"]
+    build = _tool_words(dict(build_commands(form))["build"])
+    assert "--footer-own" in build and "--footer" not in build
+    assert "footer=" not in write_preview_conf(form)
+    # somebody's own words
+    form.footer = "FLIPPERS pick a game    START plays it"
+    assert footer_args(form) == ["--footer", "FLIPPERS pick a game    START plays it"]
+    for words in (_tool_words(dict(build_commands(form))["build"]),
+                  inject_args(form, "D:/card.raw"),
+                  update_args(form, "D:/card.raw")):
+        assert words[words.index("--footer") + 1] == \
+            "FLIPPERS pick a game    START plays it"
+        assert "--footer-own" not in words
+    assert "footer=FLIPPERS pick a game    START plays it" in \
+        write_preview_conf(form).splitlines()
+    # ...and the tick off: no line at all, whatever is in the box
+    form.show_footer = False
+    assert footer_args(form) == ["--footer", ""]
+    assert "footer=" in write_preview_conf(form).splitlines()
+    # the preview is keyed on the conf, so none of the three shows another's frame
+    fps = set()
+    for on, text in ((True, ""), (True, "OWN WORDS"), (False, "OWN WORDS")):
+        form.show_footer, form.footer = on, text
+        fps.add(preview_fingerprint(form))
+    assert len(fps) == 3
+
+
+def test_a_loaded_cards_instructions_line_is_read_back(tmp_path):
+    """null on the card = the selector's own line (the tick on, the box empty);
+    "" = the card asked for no line (the tick off); anything else is the card's
+    own words."""
+    from pinball_decryptor.webui.multiboot_core import form_from_inspect
+    f1, _w = form_from_inspect({"images": []}, "D:/card.raw")
+    assert f1.show_footer is True and f1.footer == ""
+    f2, _w = form_from_inspect({"images": [], "footer": "FLIPPERS choose"},
+                               "D:/card.raw")
+    assert f2.show_footer is True and f2.footer == "FLIPPERS choose"
+    f3, _w = form_from_inspect({"images": [], "footer": ""}, "D:/card.raw")
+    assert f3.show_footer is False and f3.footer == ""
+    # ...and changing it is a MENU field: an inject writes it, not a rebuild
+    from pinball_decryptor.webui.multiboot_core import diff_forms
+    menu, rebuild = diff_forms(f1, f2)
+    assert menu == ["instructions"] and rebuild == []
+
+
+def test_the_instructions_example_says_which_of_the_three_lines_is_drawn():
+    """The words in the box, or - for the two answers an empty box can be - a
+    sentence.  The menu's own wording is never quoted here: it names the
+    buttons the MACHINE has, which this app cannot know."""
+    from pinball_decryptor.webui.multiboot_core import footer_example
+    assert footer_example(True, "FLIPPERS choose") == "FLIPPERS choose"
+    assert footer_example(True, "  padded  ") == "padded"
+    assert "the menu's own" in footer_example(True, "")
+    assert "no line" in footer_example(False, "")
+    assert "no line" in footer_example(False, "FLIPPERS choose")
 
 
 def test_the_countdown_example_says_what_the_menu_will_say():

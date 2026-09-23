@@ -31,6 +31,9 @@
 #   text_size=W  how big a card's title and subtitle are drawn: uniform (the
 #                default) = one size for the whole menu, the largest every card's
 #                text fits at; per-card = each card fits its own
+#   footer=TEXT  the instructions line under the cards, the one naming the
+#                buttons. Absent = this program's own wording, which names the
+#                buttons the machine HAS; footer= (empty) leaves the line off
 #   counter=on|off  whether the "<  N / M  >" line under the cards is drawn
 #                (default on; only a carousel of five or more cards has one)
 #   countdown_word=TEXT  the first word of the countdown line - "starting

@@ -387,6 +387,14 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
              * artwork up there wants (PAD-135). */
             c->heading_set = 1;
             copy_field(c->heading, val);
+        } else if (!strcmp(key, "footer")) {
+            /* THE INSTRUCTIONS LINE, and an empty value is a choice here too:
+             * 'footer=' means no line naming the buttons at all.  An absent
+             * key is NOT the same thing - it keeps this program's own
+             * wording, which is the only form that can follow the buttons a
+             * machine actually has (PAD-190). */
+            c->footer_set = 1;
+            copy_field(c->footer, val);
         } else if (!strcmp(key, "counter")) {
             /* A WORD, like text_size, and read the same way: an empty value is
              * the default, and a word this build does not know is warned about

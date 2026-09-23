@@ -36,6 +36,16 @@
  *                            CODE"); free UTF-8 text, shrunk and then cut to
  *                            the glass, and a line of nothing but spaces
  *                            leaves the top of the menu empty
+ *   footer=<text>            the INSTRUCTIONS line under the cards, the one
+ *                            that names the buttons ("LEFT / RIGHT FLIPPER:
+ *                            choose      START: boot").  Absent = this
+ *                            program's own wording, which names the buttons
+ *                            this machine HAS (an Action button on the
+ *                            lockdown bar is named only where one is wired);
+ *                            free UTF-8 text replaces it for every machine,
+ *                            and an empty one leaves the line off the glass
+ *                            altogether (BEN, PAD-190: "make the instructions
+ *                            also customizable and/or visible")
  *   counter=<on|off>         whether the "<  N / M  >" line under the cards is
  *                            drawn (default on; a carousel is the only layout
  *                            that has one).  'off' takes it off the glass -
@@ -221,6 +231,10 @@ struct conf {
                                     * (the default), 0 = each card fits its own */
     int counter;                   /* counter=: 1 = the "< N / M >" line under a
                                     * carousel is drawn (the default), 0 = it is not */
+    char footer[CONF_STR];         /* footer= ("" = no instructions line at all)... */
+    int footer_set;                /* ...and whether the key was there at all, so an
+                                    * absent one keeps THIS program's wording, which
+                                    * follows the buttons the machine has (PAD-190) */
     char countdown_word[CONF_STR]; /* countdown_word= ("" = a countdown with no word
                                     * in front of the title at all)... */
     int countdown_word_set;        /* ...and whether the key was there at all, so an

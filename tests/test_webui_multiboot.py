@@ -553,6 +553,45 @@ def test_a_late_menu_edit_after_cancel_is_dropped(tmp_path):
         assert doc["theme"] == "midnight"
 
 
+def test_the_instructions_line_is_set_in_menu_settings(tmp_path):
+    """BEN, PAD-190 round 2: "make the instructions also customizable and/or
+    visible".  The tick draws the line at all and the box holds the words; an
+    EMPTY box with the tick on is the menu's own line, which is the answer the
+    machine has to fill in (only it knows whether an ACTION button is wired)."""
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, a)
+        w.call("multiboot.menu_settings")
+        s = _st(w)
+        assert s["footer_on"] is True and s["footer"] == ""
+        assert "the menu's own" in s["md"]["footer_example"]
+        assert "instructions" not in s["summary"]
+        w.call("ui.set", "multiboot", "footer", "FLIPPERS choose    START boots")
+        s = _st(w)
+        assert s["md"]["footer_example"] == "FLIPPERS choose    START boots"
+        assert "instructions" in s["summary"]
+        # the tick off is the third answer: no line under the cards at all
+        w.call("ui.set", "multiboot", "footer_on", False)
+        s = _st(w)
+        assert "no line" in s["md"]["footer_example"]
+        assert "no instructions" in s["summary"]
+        # ...and the sketch the page draws until the selector has rendered
+        # loses the line with it
+        assert _st(w)["preview"]["sketch"]["footer"] == ""
+        w.call("multiboot.menu_ok")
+        doc = _panel(w).state()["menu"]
+        assert doc["show_footer"] is False
+        assert doc["footer"] == "FLIPPERS choose    START boots"
+        # ...and Cancel puts both back, as it does every other menu field
+        w.call("multiboot.menu_settings")
+        w.call("ui.set", "multiboot", "footer_on", True)
+        w.call("ui.set", "multiboot", "footer", "LATE")
+        w.call("multiboot.menu_cancel")
+        s = _st(w)
+        assert s["footer_on"] is False
+        assert s["footer"] == "FLIPPERS choose    START boots"
+
+
 def test_menu_settings_number_bounds_are_published(tmp_path):
     a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
     b = _raw(tmp_path, "b_pro-1_59_0.Other.8G.sdcard.raw")

@@ -329,6 +329,16 @@ DEF_COUNTDOWN_WORD = "starting"
 #: ...and how much of it the selector's field holds (conf.h's CONF_STR - 1).
 COUNTDOWN_WORD_MAX = 199
 
+#: THE INSTRUCTIONS LINE UNDER THE CARDS - images.conf's ``footer=`` (BEN,
+#: Discord, PAD-190 round 2: "can you extend this to make the instructions also
+#: customizable and/or visible?").  THREE answers, which is why the form needs
+#: two fields for it: no key at all = the selector's own wording, and only that
+#: one follows the buttons a machine HAS (a lockdown-bar Action button is named
+#: only where one is wired); text = those words on every machine; '' = no line.
+#: The field is EMPTY for the selector's own - unlike the heading, this tab
+#: cannot show what the card will say, because that depends on the machine.
+FOOTER_MAX = 199
+
 #: David's card library - never an output (mkmulticard.py refuses the same
 #: prefixes after resolving links; the repo's own images/ is a junction into
 #: it).  Both spellings, because the form holds Windows paths and the tool
@@ -902,6 +912,12 @@ class MultibootForm:
     #: 9 s" with no word in front of it - so the field always names what the
     #: card will say, exactly as the heading does.
     countdown_word: str = DEF_COUNTDOWN_WORD
+    #: THE INSTRUCTIONS LINE, as its two fields (see :data:`FOOTER_MAX`): the
+    #: tick is whether the line is drawn at all, and the box is the words.  An
+    #: EMPTY box with the tick on is "the menu's own wording", which is what
+    #: every card has always had and what the tool writes no key for.
+    show_footer: bool = True
+    footer: str = ""
     default: int = 0
     # (No bypass field: the validator bypass is ALWAYS ON - build_args and
     # update_args pass it for every image.  David, after the TMNT booted
@@ -1070,13 +1086,31 @@ def text_size_args(form):
 
 
 def menu_text_args(form):
-    """``--counter on|off`` and ``--countdown-word TEXT`` - the two lines under
-    the cards the owner can change (PAD-190).  Always passed, on heading_args'
-    rule: the form is the record of what the menu says, and a word cleared here
-    has to reach the card as ``countdown_word=`` rather than as "the flag was
-    absent, keep whatever is there"."""
-    return ["--counter", COUNTER_ON if form.show_counter else COUNTER_OFF,
-            "--countdown-word", (form.countdown_word or "").strip()]
+    """``--counter on|off``, ``--countdown-word TEXT`` and the instructions
+    line's own flag (:func:`footer_args`) - the three lines under the cards the
+    owner can change (PAD-190).  Always passed, on heading_args' rule: the form
+    is the record of what the menu says, and a word cleared here has to reach
+    the card as ``countdown_word=`` rather than as "the flag was absent, keep
+    whatever is there"."""
+    return (["--counter", COUNTER_ON if form.show_counter else COUNTER_OFF,
+             "--countdown-word", (form.countdown_word or "").strip()]
+            + footer_args(form))
+
+
+def footer_args(form):
+    """``--footer TEXT`` or ``--footer-own`` - the instructions line's THREE
+    answers in the two flags the tools spell them with (PAD-190 round 2).
+
+    The tick off is ``--footer ''`` (no line at all); the tick on with words in
+    the box is those words; the tick on with an EMPTY box is ``--footer-own``,
+    which takes the key off the card again so the selector draws its own line -
+    the only form that can follow the machine's own buttons.  One of the three
+    is always passed, on heading_args' rule: the form is the record of what the
+    menu says."""
+    if not form.show_footer:
+        return ["--footer", ""]
+    text = (form.footer or "").strip()
+    return ["--footer", text] if text else ["--footer-own"]
 
 
 def theme_args(form):
@@ -3094,6 +3128,13 @@ def write_preview_conf(form):
               "countdown_word=%s" % (form.countdown_word or "").strip(),
               "volume=%d" % int(form.volume),
               "font=" + be.conf_font]
+    # ...and the instructions line, EXCEPT when it is the selector's own: no
+    # key is what a card carries for that, and it is what the preview must
+    # carry too, or a frame would name buttons the machine may not have
+    if not form.show_footer:
+        lines.append("footer=")
+    elif (form.footer or "").strip():
+        lines.append("footer=%s" % (form.footer or "").strip())
     lines += theme_conf_lines(form)
     return "\n".join(lines) + "\n"
 
@@ -3910,6 +3951,13 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
         show_counter=(info.get("counter") != COUNTER_OFF),
         countdown_word=(DEF_COUNTDOWN_WORD if info.get("countdown_word") is None
                         else str(info["countdown_word"])),
+        # THE INSTRUCTIONS LINE'S THREE ANSWERS, read back as the two fields
+        # that ask them: null = the card never set the key and the selector
+        # draws its own line (tick on, box empty); "" = the card asked for no
+        # line at all (tick off); anything else is the card's own words.
+        show_footer=(info.get("footer") != ""),
+        footer=("" if info.get("footer") is None
+                else str(info["footer"])),
         default=_int_of("default", 0),
         theme=theme, colors=colors,
         media_dir=media_dir if (media_dir and os.path.isfile(
@@ -3927,7 +3975,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
 MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "move sound", "confirm sound", "volume", "countdown",
                     "heading", "text size", "card counter", "countdown word",
-                    "default", "bypass", "theme")
+                    "instructions", "default", "bypass", "theme")
 
 #: Of those, the ones the media has to be rendered again for.
 MEDIA_FIELDS = ("art", "animation", "music", "move sound", "confirm sound")
@@ -3985,6 +4033,8 @@ def _menu_fields(before, after):
     if ((before.countdown_word or "").strip()
             != (after.countdown_word or "").strip()):
         changed.add("countdown word")
+    if footer_args(before) != footer_args(after):
+        changed.add("instructions")
     if theme_args(before) != theme_args(after):
         changed.add("theme")
     return changed
@@ -4588,6 +4638,10 @@ def menu_from_state(menu):
             "show_counter": bool(menu.get("show_counter", True)),
             "countdown_word": str(menu.get("countdown_word",
                                            DEF_COUNTDOWN_WORD))[:COUNTDOWN_WORD_MAX],
+            # ...and a state from before the instructions field describes a
+            # menu drawing the selector's own line: the tick on, the box empty
+            "show_footer": bool(menu.get("show_footer", True)),
+            "footer": str(menu.get("footer", ""))[:FOOTER_MAX],
             "default": max(0, _as_int("default", 0)),
             "theme": theme,
             "colors": clean_colors(menu.get("colors"))}
@@ -5422,6 +5476,23 @@ def countdown_example(word, title, timeout):
     return "%s %s" % (word, tail) if word else tail
 
 
+def footer_example(show, text):
+    """What the instructions line under the cards will say, as the field's own
+    example: the words typed in it, or a plain sentence for the two answers an
+    empty box can be (PAD-190 round 2).
+
+    The selector's own wording cannot be quoted here: it names the buttons the
+    MACHINE has, and only the machine knows whether a lockdown-bar Action
+    button is wired - so an empty box says which line will be drawn rather than
+    pretending to know its words."""
+    text = (text or "").strip()
+    if not show:
+        return "no line under the cards naming the buttons"
+    if not text:
+        return "the menu's own: the flipper and START buttons this machine has"
+    return text
+
+
 def _one_line_text(text, width):
     """*text* at most *width* characters, ended with an ellipsis when it had
     to be cut - what a summary line quotes a free-text field as."""
@@ -5437,6 +5508,7 @@ def menu_summary(form):
         return v if v.lower() in _WORDS else os.path.basename(v)
     head = (form.heading or "").strip()
     word = (form.countdown_word or "").strip()
+    foot = (form.footer or "").strip()
     # THE TEXT SIZE ONLY WHEN IT IS NOT THE USUAL ONE: this line is already
     # eight clauses long, and "every card the same" is what every menu does
     # unless somebody turned it off (PAD-183).
@@ -5461,7 +5533,11 @@ def menu_summary(form):
                 + ("" if word == DEF_COUNTDOWN_WORD else
                    "  ·  countdown says %s" % (
                        "just the game and the seconds" if not word
-                       else '"%s"' % _one_line_text(word, 16)))))
+                       else '"%s"' % _one_line_text(word, 16)))
+                + ("" if form.show_footer and not foot else
+                   "  ·  no instructions" if not form.show_footer
+                   else "  ·  instructions \u201c%s\u201d"
+                        % _one_line_text(foot, 20))))
 
 
 # ---------------------------------------------------------------------------
@@ -6170,6 +6246,11 @@ class MultibootPanel:
         #: (PAD-190): both start as what the selector itself draws.
         self._counter_var = tk.BooleanVar(value=True)
         self._countdown_word_var = tk.StringVar(value=DEF_COUNTDOWN_WORD)
+        #: ...and the instructions line as its two fields: drawn at all, and
+        #: the words (empty = the selector's own, which is what every card
+        #: written before this existed carries).
+        self._footer_var = tk.BooleanVar(value=True)
+        self._footer_text_var = tk.StringVar(value="")
         self._default_var = tk.StringVar(value="0")
         #: The compact layout (item 95): OFF by default, and it stays off
         #: until the user ticks it - never set from a card that is merely
@@ -6232,7 +6313,8 @@ class MultibootPanel:
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var,
                     self._heading_var, self._same_text_var, self._counter_var,
-                    self._countdown_word_var, self._default_var):
+                    self._countdown_word_var, self._footer_var,
+                    self._footer_text_var, self._default_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
         # Item 100: the compact tick beside the size strip.  Not a menu field
         # (an inject never changes a card's layout: diff_forms puts it in the
@@ -6422,6 +6504,7 @@ class MultibootPanel:
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._heading_var, self._same_text_var,
                     self._counter_var, self._countdown_word_var,
+                    self._footer_var, self._footer_text_var,
                     self._default_var, self._out_var, self._selector_var,
                     self._theme_var) + tuple(self._color_vars.values()):
             var.trace_add("write", lambda *_a: self.schedule_preview())
@@ -7987,6 +8070,8 @@ class MultibootPanel:
             self._same_text_var.set(True)
             self._counter_var.set(True)
             self._countdown_word_var.set(DEF_COUNTDOWN_WORD)
+            self._footer_var.set(True)
+            self._footer_text_var.set("")
             self._default_var.set("0")
             self._theme_var.set(DEFAULT_THEME)
             self._seed_colors(theme_colors(DEFAULT_THEME) or {})
@@ -8430,6 +8515,8 @@ class MultibootPanel:
                              self._same_text_var.get(),
                              self._counter_var.get(),
                              self._countdown_word_var.get(),
+                             self._footer_var.get(),
+                             self._footer_text_var.get(),
                              self._default_var.get(),
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
@@ -8446,7 +8533,7 @@ class MultibootPanel:
         self._forget_menu_dialog()
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, heading, same_text,
-             counter, word, default, selector, theme,
+             counter, word, foot_on, foot_text, default, selector, theme,
              colors) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
@@ -8458,6 +8545,8 @@ class MultibootPanel:
             self._same_text_var.set(same_text)
             self._counter_var.set(counter)
             self._countdown_word_var.set(word)
+            self._footer_var.set(foot_on)
+            self._footer_text_var.set(foot_text)
             self._default_var.set(default)
             self._selector_var.set(selector)
             # the theme and the grid together, or the theme's trace would
@@ -8627,6 +8716,10 @@ class MultibootPanel:
             heading=self._heading_var.get().strip(),
             same_text_size=bool(self._same_text_var.get()),
             show_counter=bool(self._counter_var.get()),
+            show_footer=bool(self._footer_var.get()),
+            # NOT `or` anything: an empty box with the tick on is the
+            # selector's own instructions line, which is a real answer
+            footer=self._footer_text_var.get().strip(),
             # NOT `or DEF_COUNTDOWN_WORD`: an empty box is a countdown with no
             # word in front of the game's name, which is a thing somebody can
             # ask for (PAD-190, the heading's rule)
@@ -8692,6 +8785,8 @@ class MultibootPanel:
                      "heading": self._heading_var.get().strip(),
                      "same_text_size": bool(self._same_text_var.get()),
                      "show_counter": bool(self._counter_var.get()),
+                     "show_footer": bool(self._footer_var.get()),
+                     "footer": self._footer_text_var.get().strip(),
                      "countdown_word":
                          self._countdown_word_var.get().strip(),
                      "default": _int(self._default_var, 0),
@@ -8819,6 +8914,8 @@ class MultibootPanel:
             self._counter_var.set(bool(menu.get("show_counter", True)))
             self._countdown_word_var.set(menu.get("countdown_word",
                                                   DEF_COUNTDOWN_WORD))
+            self._footer_var.set(bool(menu.get("show_footer", True)))
+            self._footer_text_var.set(menu.get("footer", ""))
             self._default_var.set(str(menu["default"]))
             self._theme_var.set(menu["theme"])
             # a built-in comes back as the file spells it today; a custom
@@ -9427,6 +9524,8 @@ class MultibootPanel:
             self._same_text_var.set(bool(form.same_text_size))
             self._counter_var.set(bool(form.show_counter))
             self._countdown_word_var.set(form.countdown_word)
+            self._footer_var.set(bool(form.show_footer))
+            self._footer_text_var.set(form.footer)
             self._default_var.set(str(int(form.default)))
             self._theme_var.set(form.theme)
             self._seed_colors(form.colors if form.theme == CUSTOM_THEME
@@ -9577,6 +9676,8 @@ class MultibootPanel:
             self._same_text_var.set(bool(menu.get("same_text_size", True)))
             self._counter_var.set(bool(menu.get("show_counter", True)))
             self._countdown_word_var.set(menu["countdown_word"])
+            self._footer_var.set(bool(menu.get("show_footer", True)))
+            self._footer_text_var.set(menu.get("footer", ""))
             self._default_var.set(str(menu["default"]))
             self._theme_var.set(menu["theme"])
             self._seed_colors(theme_colors(menu["theme"]) or dict(

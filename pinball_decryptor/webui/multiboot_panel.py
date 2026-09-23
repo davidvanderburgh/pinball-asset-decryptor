@@ -977,10 +977,20 @@ class WebMultibootPanel(_Base):
                 counter = "<  %d / %d  >" % (min(hl, n - 1) + 1, n)
         d = mt._int(self._default_var, 0)
         row = self._rows[d] if 0 <= d < n else None
+        # THE INSTRUCTIONS LINE as this card will carry it (PAD-190 round 2):
+        # the owner's own words, nothing at all, or - an empty box - the
+        # menu's own, which the SELECTOR words per machine.  The sketch has to
+        # show something for that one, so it shows the form a machine with no
+        # Action button gets, which is what a Stern card without a lockdown
+        # row draws.
+        foot = ""
+        if self._footer_var.get():
+            foot = (self._footer_text_var.get().strip()
+                    or "LEFT / RIGHT FLIPPER: choose    START: boot")
         return {
             "heading": self._heading_var.get().strip(),
             "cards": cards, "counter": counter,
-            "footer": "LEFT / RIGHT FLIPPER: choose    START: boot",
+            "footer": foot,
             "countdown": mt.countdown_example(
                 self._countdown_word_var.get(),
                 mt.plain_title(row, d) if row is not None else "",
@@ -1113,6 +1123,8 @@ class WebMultibootPanel(_Base):
                 self._countdown_word_var.get(),
                 mt.plain_title(row, d) if row is not None else "",
                 mt._int(self._timeout_var, 15)),
+            "footer_example": mt.footer_example(
+                self._footer_var.get(), self._footer_text_var.get()),
             "own_note": own,
             "sounds_note": (
                 "auto = a click and a stinger pulled from the primary "

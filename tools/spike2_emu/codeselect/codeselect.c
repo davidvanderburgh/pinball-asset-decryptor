@@ -1167,6 +1167,19 @@ static void draw_chevron(struct gfx *g, int ax, int cy, int len, int t,
     }
 }
 
+/* THE INSTRUCTIONS LINE this menu draws: the conf's own words when it set
+ * footer= (BEN, PAD-190: "make the instructions also customizable and/or
+ * visible"), else this program's own wording for the buttons the machine HAS.
+ * An empty footer= is a CHOICE, as an empty heading= is - the line is left off
+ * the glass - so "" and "the key was absent" are different answers and only
+ * the absent one can still follow the Action button. */
+static const char *menu_footer(const struct conf *c, int action)
+{
+    if (c->footer_set)
+        return c->footer;
+    return action ? FOOT_ACTION : FOOT_START;
+}
+
 /* THE COUNTDOWN LINE, built: "<word> <title> in <secs> s", or the title and
  * the seconds alone when the conf asked for no word at all (countdown_word=,
  * PAD-190 - the same "an empty value is a choice" rule heading= follows).
@@ -1255,7 +1268,7 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
      * switch table has not resolved one either - promising "START or ACTION"
      * named a button nothing on this machine is wired to. */
     {
-        const char *foot = action ? FOOT_ACTION : FOOT_START;
+        const char *foot = menu_footer(c, action);
         const char *title = conf_card_face(c, hl)->title;
         /* "starting", not "booting" (PAD-141): the machine is already up, and
          * what the countdown ends in is the game starting.  It is the DEFAULT
@@ -1264,9 +1277,12 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         const char *word = c->countdown_word_set ? c->countdown_word
                                                  : DEF_COUNTDOWN_WORD;
         const int wmax = W - (int)(80 * s);
-        float fpx = gfx_fit_px(f, foot, wmax, 30 * s, 20 * s), cpx;
-        gfx_ellipsize(f, fpx, foot, wmax, cut, sizeof cut);
-        gfx_text_center(g, f, fpx, W / 2, (int)(662 * s), cut, TH(L, FOOTER));
+        float cpx;
+        if (*foot) {
+            float fpx = gfx_fit_px(f, foot, wmax, 30 * s, 20 * s);
+            gfx_ellipsize(f, fpx, foot, wmax, cut, sizeof cut);
+            gfx_text_center(g, f, fpx, W / 2, (int)(662 * s), cut, TH(L, FOOTER));
+        }
         snprintf(press, sizeof press, "%s%s", action ? PRESS_ACTION : PRESS_START,
                  title);
         /* THE SIZE COMES FROM THE LONGEST FORM THIS LINE TAKES, which is the
@@ -1542,7 +1558,7 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
         sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s%s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\", pictures %s",
                 path, g->w, g->h, hlimg, conf_card_face(c, hl)->title, how, cardinfo,
                 frame, frames, timeout, invert,
-                fontpath, media.dir, action ? FOOT_ACTION : FOOT_START, wn ? where : "none");
+                fontpath, media.dir, menu_footer(c, action), wn ? where : "none");
     }
     /* THE LOADING FRAME, when it is asked for: what the machine draws the
      * moment the card is confirmed.  A RANDOM card ROLLS for it, because that
@@ -1959,17 +1975,19 @@ int main(int argc, char **argv)
         sel_say("menu: %d image%s, highlight %d (%s) from %s%s, timeout %d s, input %s, invert %d, %dx%d, font %s, audio %s, media %s, footer \"%s\"",
                 nimg, nimg == 1 ? "" : "s", hlimg, conf_card_face(&c, hl)->title, how, cardinfo,
                 timeout, o.input, invert, w, h, fontpath,
-                audio_sink_name(au), media.dir, action ? FOOT_ACTION : FOOT_START);
+                audio_sink_name(au), media.dir, menu_footer(&c, action));
     }
     if (L.carousel) sel_log("layout: carousel of %d (3 visible, %d px cards)", n, L.cw);
-    /* WHAT THE TWO LINES UNDER THE CARDS SAY (PAD-190).  A line of its own
+    /* WHAT THE THREE LINES UNDER THE CARDS SAY (PAD-190).  A line of its own
      * rather than another field on the 'menu:' line above, which several
      * things outside this program already read: the counter can be turned off
      * and the countdown's first word replaced, and "my menu stopped counting"
      * is then answered by the log instead of by a photograph of the glass. */
-    sel_log("menu text: counter %s, countdown word \"%s\"",
+    sel_log("menu text: counter %s, countdown word \"%s\", instructions %s",
             c.counter ? "on" : "off",
-            c.countdown_word_set ? c.countdown_word : DEF_COUNTDOWN_WORD);
+            c.countdown_word_set ? c.countdown_word : DEF_COUNTDOWN_WORD,
+            !c.footer_set ? "the menu's own"
+            : *c.footer ? "the conf's own" : "off");
 
     start = sel_now_ms();
     last_key = start;
@@ -2112,7 +2130,8 @@ int main(int argc, char **argv)
          * the first frame: repaint the footer when it does */
         if (input_has(in, EV_ACTION) != action) {
             action = !action;
-            sel_log("footer: ACTION button %s", action ? "resolved" : "no longer resolved");
+            sel_log("footer: ACTION button %s%s", action ? "resolved" : "no longer resolved",
+                    c.footer_set ? " (the conf's own footer= is drawn either way)" : "");
             dirty = 1;
         }
 

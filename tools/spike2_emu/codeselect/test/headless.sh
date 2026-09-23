@@ -1052,6 +1052,55 @@ band "$T/menu_longword.ppm" 300 684 1060 722 FFC42D
 nband "$T/menu_longword.ppm" 0 684 20 722 FFC42D      # nothing in the left margin
 nband "$T/menu_longword.ppm" 1340 684 1359 722 FFC42D # ...nor the right
 
+# 18a. THE INSTRUCTIONS LINE IS THE OWNER'S TOO (BEN, PAD-190 round 2: "can
+# you extend this to make the instructions also customizable and/or
+# visible?").  Its band is the footer's own row (y 636-664, FOOTER colour);
+# the counter above it (y 604-630) and the countdown below (y 684-722, in the
+# COUNTDOWN colour) are the controls - footer= must move neither.
+snap "$T/snap_foot.ppm" "$T/five.conf"
+band "$T/snap_foot.ppm" 300 636 1060 664 7D8794       # our own wording, drawn
+{ cat "$T/five.conf"; echo "footer=FLIPPERS pick a game    START plays it"; } > "$T/ownfoot.conf"
+snap "$T/snap_ownfoot.ppm" "$T/ownfoot.conf"
+band "$T/snap_ownfoot.ppm" 300 636 1060 664 7D8794    # ...and somebody else's
+cmp -s "$T/snap_foot.ppm" "$T/snap_ownfoot.ppm" && {
+    echo "headless: FAIL footer= did not change the instructions line"; exit 1; }
+band "$T/snap_ownfoot.ppm" 560 604 800 630 7D8794     # the counter is untouched
+band "$T/snap_ownfoot.ppm" 300 684 1060 722 FFC42D    # ...and so is the countdown
+# ...and an EMPTY one is a choice, exactly as an empty heading= is: no line
+{ cat "$T/five.conf"; echo "footer="; } > "$T/nofoot.conf"
+snap "$T/snap_nofoot.ppm" "$T/nofoot.conf"
+nband "$T/snap_nofoot.ppm" 300 636 1060 664 7D8794
+band "$T/snap_nofoot.ppm" 560 604 800 630 7D8794      # the counter stays
+band "$T/snap_nofoot.ppm" 300 684 1060 722 FFC42D     # ...and the countdown
+# a card that never set the key draws exactly what it always drew
+{ cat "$T/five.conf"; echo "heading=SELECT GAME CODE"; } > "$T/samefoot.conf"
+snap "$T/snap_samefoot.ppm" "$T/samefoot.conf"
+cmp -s "$T/snap_foot.ppm" "$T/snap_samefoot.ppm" || {
+    echo "headless: FAIL an unrelated key moved the instructions line"; exit 1; }
+# instructions far too wide for the glass are shrunk and cut, never spilled
+{ cat "$T/five.conf"
+  echo "footer=PRESS THE LEFT OR RIGHT FLIPPER BUTTON ON THE SIDE OF THE CABINET TO CHOOSE A GAME AND THEN PRESS THE START BUTTON ON THE FRONT TO BOOT IT"; } > "$T/widefoot.conf"
+snap "$T/snap_widefoot.ppm" "$T/widefoot.conf"
+band "$T/snap_widefoot.ppm" 300 636 1060 664 7D8794
+nband "$T/snap_widefoot.ppm" 0 636 20 664 7D8794      # nothing in the left margin
+nband "$T/snap_widefoot.ppm" 1340 636 1359 664 7D8794 # ...nor the right
+# the LIVE menu says which of the three it drew, on the line the other two
+# lines under the cards already report themselves on
+{ cat "$T/nine.conf"; echo "footer=FLIPPERS choose    START boots"; } > "$T/footlog.conf"
+rm -f "$T/choice" "$T/last" "$T/foot.log"
+run "$T/menu_ownfoot.ppm" "$T/footlog.conf" --no-invert --media "$T/media" --anim-frame 1 --log "$T/foot.log"
+grep -q "instructions the conf's own" "$T/foot.log" || {
+    echo "headless: FAIL footer= is not on the menu text line"; grep "menu text" "$T/foot.log"; exit 1; }
+rm -f "$T/choice" "$T/last" "$T/nofoot.log"
+{ cat "$T/nine.conf"; echo "footer="; } > "$T/nofootlog.conf"
+run "$T/menu_nofoot.ppm" "$T/nofootlog.conf" --no-invert --media "$T/media" --anim-frame 1 --log "$T/nofoot.log"
+grep -q "instructions off" "$T/nofoot.log" || {
+    echo "headless: FAIL 'footer=' is not on the menu text line"; grep "menu text" "$T/nofoot.log"; exit 1; }
+rm -f "$T/choice" "$T/last" "$T/ourfoot.log"
+run "$T/menu_ourfoot.ppm" "$T/nine.conf" --no-invert --media "$T/media" --anim-frame 1 --log "$T/ourfoot.log"
+grep -q "instructions the menu's own" "$T/ourfoot.log" || {
+    echo "headless: FAIL a card with no footer= is not reported as ours"; grep "menu text" "$T/ourfoot.log"; exit 1; }
+
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"
 python3 "$HERE/ppm2png.py" "$T/menu_invert.ppm" "$T/codeselect_menu_invert.png" --rot180-of "$T/menu.ppm"

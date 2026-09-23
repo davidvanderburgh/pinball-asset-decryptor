@@ -6393,6 +6393,17 @@ def build_update_reason(prev, original_path, output_path, assets_dir):
     if prev.get("modes"):
         return ("the last build here carried modes" if _mode_family_on()
                 else "the last build here carried preview content")
+    # The SD card size the build is for (card_size.py): a build grown to 16 GB
+    # is not the one a build for 32 GB (or the original's size) would update.
+    try:
+        from . import card_size as _cs
+        want = _cs.target_for(original_path)
+    except Exception as e:  # noqa: BLE001 - CardSizeError or an unreadable file
+        return str(e).rstrip(".")
+    if (prev.get("card_size") or None) != want:
+        return ("it was built for a different SD card size (%s, and this build "
+                "is for %s)" % (prev.get("card_size") or "the original's",
+                                want or "the original's"))
     try:
         from . import mode_write as _MW
         if _mode_family_on() and _MW.enabled() and (
@@ -6602,7 +6613,7 @@ def _whole_digests(whole, assets_dir, scratch):
 
 
 def _build_record(original_path, output_path, assets_dir, parts, by_file,
-                  whole_record, complete, modes=None):
+                  whole_record, complete, modes=None, card_size=None):
     """The record :func:`write_image` leaves beside its output.  Taken LAST,
     after every byte is on the card, because the output's stamp is what the
     next build checks before trusting any of it.  *modes* (item 149) is what
@@ -6624,10 +6635,15 @@ def _build_record(original_path, output_path, assets_dir, parts, by_file,
     }
     if modes:
         rec["modes"] = modes
+    if card_size:
+        # the class the output was grown to (card_size.py); *partitions*
+        # stays the ORIGINAL's, which every in-place range was resolved in
+        rec["card_size"] = card_size
     return rec
 
 
-def _update_plan(index, parts, output_path, prev, writes, whole, digests):
+def _update_plan(index, parts, output_path, prev, writes, whole, digests,
+                 out_parts=None):
     """How the build at *output_path* (recorded in *prev*) becomes this one.
 
     Returns ``{"by_file", "restore", "copy", "keep", "back"}``: this build's
@@ -6645,8 +6661,13 @@ def _update_plan(index, parts, output_path, prev, writes, whole, digests):
     the filesystem driver; patching "its" stock blocks now would write into
     whatever lives there today.
     """
+    # *out_parts*: the partitions the output should have - the original's,
+    # or the original's grown to a bigger card class (card_size.py), whose
+    # games partition starts where the original's does, so every key and
+    # every in-place range below means the same thing on both.
+    expect = [(int(o), int(s)) for o, s in (out_parts or parts)]
     prev_parts = [(int(o), int(s)) for o, s in _linux_partitions(output_path)]
-    if prev_parts != [(int(o), int(s)) for o, s in parts]:
+    if prev_parts != expect:
         raise _CannotUpdate("its partition table differs from the original's")
     by_file, unmapped = index.map_writes(writes)
     if unmapped:
@@ -6669,7 +6690,7 @@ def _update_plan(index, parts, output_path, prev, writes, whole, digests):
                 "place by this one" % _key_path(key))
     check = set(by_file) | {k for k in prev_inplace if k not in now_whole}
     with open(_lp(output_path), "rb") as prev_f:
-        prev_index = _CardIndex(prev_f, parts)
+        prev_index = _CardIndex(prev_f, expect)
         for key in sorted(check):
             stock = index.lookup(key)
             if stock is None:
@@ -6991,6 +7012,18 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     if dest_err:
         raise OSError(dest_err)
 
+    # A BIGGER CARD (card_size.py): the games partition grown to Stern's 16 GB
+    # or 32 GB class so the files this build copies on whole have room.
+    # Settled before anything is copied or encoded, so an original that can't
+    # grow, or a computer without resize2fs, is refused in seconds rather
+    # than after the encode.
+    from . import card_size as _cs
+    grow_to = _cs.preflight(original_path, _cs.requested())
+    if grow_to:
+        log("This build is for a %s SD card: the games partition is grown to "
+            "fill it, so the card needs an SD card of at least that size."
+            % grow_to, "info")
+
     # UPDATE THE LAST BUILD, OR BUILD WHOLE?  Settled before the copy starts,
     # because the copy is the first thing an update saves.
     prev, updating = {}, False
@@ -7124,7 +7157,9 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         if updating:
             try:
                 plan = _update_plan(index, parts, output_path, prev, wlist,
-                                    whole, digests)
+                                    whole, digests,
+                                    out_parts=_cs.output_parts(
+                                        original_path, parts, grow_to))
                 if not _mark_building(output_path):
                     raise _CannotUpdate("the build record beside the output "
                                         "can't be written")
@@ -7170,6 +7205,9 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 out.flush()
                 os.fsync(out.fileno())
             _stage_done(log, "writing the patched bytes into the image", t0)
+            if grow_to:
+                _expand_card(original_path, output_path, parts, grow_to, log,
+                             cancel)
             # Grow the files that outgrew their slots (oversized videos kept at
             # full quality, and the rebuilt firmware when a blip-free build is
             # on) by copying them in through the ext4 driver — done AFTER the
@@ -7266,7 +7304,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 output_path,
                 _build_record(original_path, output_path, assets_dir, parts,
                               by_file, whole_record, complete,
-                              modes=mode_rec))
+                              modes=mode_rec, card_size=grow_to))
         except OSError as e:
             log("The build's record could not be written beside it (%s), so "
                 "the next build starts from the original." % e, "info")
@@ -8238,6 +8276,32 @@ def _rmtree_grow_plan(grow_plan):
         _rmtree(d)
 
 
+def _expand_card(original_path, output_path, parts, target, log, cancel):
+    """Grow the build at *output_path* to the *target* card class
+    (card_size.py) once the in-place patches are in and before any file is
+    copied on whole, then prove the resize moved nothing the build or its
+    next update relies on.  Any failure discards the output: a card the user
+    asked to be bigger is never handed back at the original's size."""
+    from . import card_size as _cs
+    t0 = time.monotonic()
+    try:
+        _cs.expand_image(output_path, target, log=log, cancel=cancel)
+        moved = _cs.check_blocks_unmoved(original_path, output_path, parts,
+                                         log=log)
+        if moved:
+            raise _cs.CardSizeError(
+                "growing the games partition moved %s, and the build's "
+                "patches were placed by where it was" % moved)
+    except BaseException as e:
+        _discard_output(output_path)
+        if isinstance(e, _cs.CardSizeError):
+            raise _cs.CardSizeError(
+                "The card could not be made a %s card, so nothing was built: "
+                "%s" % (target, e)) from e
+        raise
+    _stage_done(log, "making the card a %s card" % target, t0)
+
+
 def _grow_video_slots(image_or_device, grow_plan, log):
     """Copy every file this write replaces WHOLE onto the card through the ext4
     driver — full-size videos, a re-serialised scene, the rebuilt game program,
@@ -8282,8 +8346,23 @@ def _grow_whole(image_or_device, part_offset, jobs, log, epoch=None):
         log("Could not write the full-size file(s): %s" % e, "warning")
         return 0
     except ext4_grow.Ext4GrowError as e:
-        log("Writing the full-size file(s) failed: %s" % e, "error")
+        log("Writing the full-size file(s) failed: %s%s"
+            % (e, _bigger_card_hint(e)), "error")
         return getattr(e, "grown", 0)
+
+
+def _bigger_card_hint(err):
+    """The other way out of a full games partition (card_size.py): when the
+    SD card in the machine is bigger than the image, build for it.  Said only
+    for a no-space failure, and not once the build is already for the biggest
+    class."""
+    from ...core import ext4_grow
+    from . import card_size as _cs
+    if not isinstance(err, ext4_grow.Ext4GrowNoSpace) or _cs.requested() == "32G":
+        return ""
+    return ("  Or, if the SD card in the machine is bigger than this image, "
+            "build for a bigger card: SD card size on the Write tab (16 GB or "
+            "32 GB) grows the games partition to fill it.")
 
 
 def _grow_boot_screen(image_or_device, grow_plan, log):

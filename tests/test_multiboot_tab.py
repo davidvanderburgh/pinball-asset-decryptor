@@ -7417,6 +7417,125 @@ def test_a_restored_card_is_read_when_the_tab_is_opened(
         root.destroy()
 
 
+def _restored_session(tmp_path, doc, report, card, media):
+    """A fresh panel with *doc* restored and the tab opened - the second half
+    of a restart, with the read that follows it standing in for the tool."""
+    root, panel = _panel()
+    panel.load_card = (
+        lambda p, **kw: panel.load_inspect(report, p, media) or True)
+    panel.restore_state(doc)
+    panel.on_shown()
+    return root, panel
+
+
+def test_the_restores_read_keeps_the_edits_the_form_came_back_with(
+        tmp_path, monkeypatch):
+    """PAD-188.  The restore's read is the one read nobody asked for, and it
+    replaces every field - so a form left mid-edit on a card that was never
+    rebuilt was thrown away on the next launch, silently, with a "Loaded x: N
+    images" line as the only trace.  A RANDOM CARD over a built card's games
+    is exactly that edit, and is what was reported (BEN, Discord @ben01434:
+    "I updated and went to the multiboot screen. The random group I had is
+    gone.")."""
+    monkeypatch.setattr(multiboot_tab.messagebox, "askyesno",
+                        lambda *a, **kw: pytest.fail(
+                            "a restored form is not a question to ask"))
+    report = _rich_report(tmp_path, armed=False)
+    card = _card_file(tmp_path)
+    media = loaded_media_dir(card)
+    os.makedirs(media, exist_ok=True)
+    # last night: the card was loaded, and a random card added over its games
+    root, panel = _panel()
+    try:
+        panel.load_inspect(report, card, media)
+        panel.add_random_over_existing(title="SURPRISE ME")
+        assert [multiboot_tab.is_group(r) for r in panel._rows] == \
+            [False, False, True]
+        doc = panel.state()
+    finally:
+        root.destroy()
+    # this morning: a new app, the form restored, the tab opened
+    root, panel = _restored_session(tmp_path, doc, report, card, media)
+    try:
+        assert panel._loaded_card == card, "the read still earns editing mode"
+        assert [r.title for r in panel._rows] == \
+            ["STERN 1.59.0", "TMNT 1987", "SURPRISE ME"]
+        assert multiboot_tab.is_group(panel._rows[2])
+        assert [m.path for m in panel._rows[2].members] == \
+            [r.path for r in panel._rows[:2]]
+        # ...and it is what it always was: unsaved changes to that card
+        assert multiboot_tab.diff_forms(panel._loaded_form, panel.form()) == (
+            [], ["2 images -> 3", "compact layout on"])
+        assert "unsaved change" in panel.message()
+        assert panel._carry_edits is None
+    finally:
+        root.destroy()
+
+
+def test_a_restored_form_that_matches_the_card_is_left_alone(tmp_path):
+    """The card's own rows carry facts a saved form cannot - the code version
+    read off each image, which media is the card's own - so an identical form
+    is never re-applied over them.  Which is every restart of everyone who did
+    not edit anything, i.e. nearly all of them."""
+    report = _rich_report(tmp_path, armed=False)
+    card = _card_file(tmp_path)
+    media = loaded_media_dir(card)
+    os.makedirs(media, exist_ok=True)
+    root, panel = _panel()
+    try:
+        panel.load_inspect(report, card, media)
+        doc = panel.state()
+    finally:
+        root.destroy()
+    root, panel = _restored_session(tmp_path, doc, report, card, media)
+    try:
+        assert [r.title for r in panel._rows] == ["STERN 1.59.0", "TMNT 1987"]
+        assert panel._unsaved_changes() == 0
+        assert "unsaved change" not in panel.message()
+        assert panel._carry_edits is None
+    finally:
+        root.destroy()
+
+
+def test_a_read_that_never_starts_does_not_carry_a_form_into_the_next_one(
+        tmp_path):
+    """The form is handed to the restore's read before it starts; a read that
+    refuses to start must not leave it lying there for whatever is loaded
+    next."""
+    root, panel = _panel()
+    try:
+        card = _card_file(tmp_path)
+        panel.load_card = lambda p, **kw: False         # the tool refused
+        panel.restore_state({"v": 1, "card": card,
+                             "images": [{"path": card, "title": "MINE"}],
+                             "menu": {}})
+        assert panel.on_shown() is False
+        assert panel._carry_edits is None
+    finally:
+        root.destroy()
+
+
+def test_a_form_saved_against_another_card_is_not_carried(tmp_path):
+    """The path box can be retyped while the read is on the worker.  A form
+    that was saved against a different card is not an edit of this one, and
+    putting it on top of this one would be the same loss the other way
+    round."""
+    report = _rich_report(tmp_path, armed=False)
+    card = _card_file(tmp_path)
+    media = loaded_media_dir(card)
+    os.makedirs(media, exist_ok=True)
+    root, panel = _panel()
+    try:
+        panel._carry_edits = {"v": 1, "card": str(tmp_path / "other.raw"),
+                              "images": [{"path": "x.raw", "title": "MINE"}],
+                              "menu": {}}
+        panel.load_inspect(report, card, media)
+        assert [r.title for r in panel._rows] == ["STERN 1.59.0", "TMNT 1987"]
+        assert panel._carry_edits is None
+    finally:
+        root.destroy()
+
+
 def test_a_restored_card_that_is_gone_is_not_read(tmp_path, monkeypatch):
     """A .raw that has moved, or a drive that is not mounted, must not turn
     the first visit to the tab into a failed tool run."""

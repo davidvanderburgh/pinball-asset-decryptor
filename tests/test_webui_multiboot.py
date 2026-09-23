@@ -821,6 +821,34 @@ def test_version_alarm(tmp_path):
         assert _st(w)["alarm"] is None
 
 
+def test_a_menu_card_raises_no_version_alarm(tmp_path):
+    """PAD-197: loading a menu read off an SD card - every tree unreadable
+    by design - leaves the strip down and says why in the Log, once, instead
+    of one 'no such games tree' line per image.  The same report for a
+    whole card still raises the alarm."""
+    from tests.test_multiboot_tab import _rich_report
+    from pinball_decryptor.webui.multiboot_core import (
+        MENU_ONLY_VERSIONS, loaded_media_dir)
+    report = _rich_report(tmp_path, armed=False)
+    note = "images.conf names /dev/mmcblk0p7 but the card carries no such games tree"
+    report["warnings"] = ["image 1 (/dev/mmcblk0p7): " + note]
+    report["unknown_version"] = "1 image(s) did not say what game code they run: image 1 (%s)." % note
+    for name, alarmed in (("SanDisk-32G.menu.raw", False), ("card.multi.raw", True)):
+        card = tmp_path / name
+        card.write_bytes(bytes(16))
+        media = loaded_media_dir(str(card))
+        os.makedirs(media, exist_ok=True)
+        with web_app(tmp_path / name.split(".")[0], mfr="stern") as w:
+            panel = _panel(w)
+            lines = []
+            orig = panel._write
+            panel._write = lambda t, *a, **k: (lines.append(t), orig(t, *a, **k))
+            warns = w.run(panel.load_inspect, report, str(card), media)
+            assert (_st(w)["alarm"] is not None) == alarmed, name
+            assert any("games tree" in x for x in warns) == alarmed, name
+            assert any(MENU_ONLY_VERSIONS in x for x in lines) != alarmed, name
+
+
 def test_size_strip_from_a_plan(tmp_path):
     a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
     with web_app(tmp_path, mfr="stern") as w:

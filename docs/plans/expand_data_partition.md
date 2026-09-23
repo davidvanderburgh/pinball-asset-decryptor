@@ -157,12 +157,19 @@ card of that class).
       The partition used exactly the predicted 77,522 blocks plus 1 block of
       slack. The bank on the card is exactly the predicted 1,967,189,954 bytes.
       e2fsck is clean.
-    - With 20 clips (+1.61 GB) at 8G, a whole build over an existing build is
-      refused in 3.9 s (it was 49 s) and leaves that build byte-identical. An
-      update onto it is refused in 0.8 s with the whole build's numbers
-      (352 MB here, 7.87 GB at 16 GB).
-  - **Still owed, blocked by a wedged WSL on the dev PC:** the Stage D 16G build
-    (four songs + 20 clips) with prediction vs actual, and its update in place.
+    - With 20 clips (+1.61 GB) at 8G, the final code refuses a whole build over
+      an existing build in 0.9 s (it was 49 s). The copy never starts, and that
+      build stays byte-identical (sha256, mtime, record). An update onto it is
+      refused in 0.5 s with the whole build's numbers (352 MB here, 7.87 GB at
+      16 GB). The refusal is logged, and it names the clips by their project
+      file names.
+    - At 16G with four songs and 20 clips, the pre-flight kept all four songs
+      whole (bank 2,073 MB of the game's 2,147 MB) and measured 2.03 GB needed
+      of 7.87 GB. The build encoded everything, then the grow step failed
+      because WSL on the dev PC wedged (19:42, the second time that evening).
+      The build discarded the output and said why.
+  - **Still owed:** that 16G build run to the end (prediction vs actual use),
+    and its update in place (`e2e_stageD_build.py d16 dupd`), once WSL is back.
 - Follow-up (not this branch): a grown build used as a multi-boot primary
   (mkmulticard's store sizing and the Multi-boot tab's size strip), filed as
   a separate task.
